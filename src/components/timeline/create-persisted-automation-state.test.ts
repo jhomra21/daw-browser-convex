@@ -387,6 +387,20 @@ describe('useTimelineAutomationController', () => {
     expect(controller.overrideCount()).toBe(1)
   })
 
+  test('a refused re-enable does not restore a lane a later accepted re-enable released', async () => {
+    const { controller, targetA, replies } = mountReEnable()
+    controller.overrideTarget(targetA)
+    const first = controller.reEnable()
+    controller.overrideTarget(targetA)
+    const second = controller.reEnable()
+    replies[1]?.({ accepted: true, sequence: 2 })
+    await second
+    replies[0]?.({ accepted: false, reason: 'bridge-error' })
+    await first
+
+    expect(controller.overrideCount()).toBe(0)
+  })
+
   test('reloading unchanged effect data keeps the lanes workspace', () => {
     const previousLocalStorage = globalThis.localStorage
     Reflect.set(globalThis, 'localStorage', { getItem: () => null, setItem: () => {} })

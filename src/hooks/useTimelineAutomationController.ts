@@ -263,6 +263,9 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
   const [effectDataReady, setEffectDataReady] = createSignal(false);
   const [automationDataReady, setAutomationDataReady] = createSignal(false);
   const [overriddenAutomationTargetKeys, setOverriddenAutomationTargetKeys] = createSignal<Set<string>>(new Set());
+  // The newest re-enable of a lane owns its outcome, so an older request answered later cannot undo it.
+  const reEnableOwners = new Map<string, number>();
+  let lastReEnable = 0;
   const seededAutomationTargetKeys = new Set<string>();
   let seededProjectId: string | undefined;
   const visibleAutomationTracks = useProjectPersistedState<Record<string, boolean>>({
@@ -441,6 +444,8 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     if (current.size === 0) return;
     options.acceptance?.ui("ui-automation-reenable", () => [...current].join(","));
     const reEnabledTargetKeys = new Set(current);
+    const operation = ++lastReEnable;
+    for (const targetKey of reEnabledTargetKeys) reEnableOwners.set(targetKey, operation);
     const envelopes = automationEnvelopes().filter((envelope) => reEnabledTargetKeys.has(envelope.targetKey));
     const byProcessor = new Map<string, { instanceId: string; parameterIds: string[] }>();
     for (const envelope of envelopes) {
@@ -460,9 +465,11 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
           reenableProcessorAutomation(processor.instanceId, processor.parameterIds)
         )),
       );
+      const owned = [...reEnabledTargetKeys].filter((targetKey) => reEnableOwners.get(targetKey) === operation);
+      for (const targetKey of owned) reEnableOwners.delete(targetKey);
       const playbackControlAttempted = results.some((result) => result.accepted || result.reason !== "unavailable");
       if (playbackControlAttempted && results.some((result) => !result.accepted)) {
-        setOverriddenAutomationTargetKeys((latest) => new Set([...latest, ...reEnabledTargetKeys]));
+        setOverriddenAutomationTargetKeys((latest) => new Set([...latest, ...owned]));
         return;
       }
     }

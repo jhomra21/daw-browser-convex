@@ -165,7 +165,7 @@ window.deletionFixture = {
     await run('eval', 'deletionFixture.prepare()')
     expect(JSON.parse(JSON.parse(await run('eval', 'deletionFixture.abortDeletion().then(JSON.stringify)')))).toMatchObject({
       aborted: true,
-      queueReleased: true,
+      queueReleased: false,
       queuedRow: { value: { name: 'Queued track' } },
     })
     expect(await read()).toEqual({ listed: true, bytes: 'fixture audio bytes', jobs: 0 })

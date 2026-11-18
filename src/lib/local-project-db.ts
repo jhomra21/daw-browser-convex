@@ -24,8 +24,8 @@ import { z } from 'zod'
 
 export const LOCAL_PROJECT_SCHEMA_VERSION = 2
 export const LOCAL_CONTROL_PROJECT_METADATA_KEY = 'control-project-metadata'
-// Set once by local-write-queue, which depends on this module: deletion flushes and drops the project's queue so the
-// queue registry never outlives its project.
+// Set once by local-write-queue, which depends on this module. Deletion flushes and drops the project's queue once the
+// catalog no longer lists the project; an aborted deletion leaves the live project its queue.
 let releaseLocalEntityWriteQueue: ((projectId: string) => Promise<void>) | undefined
 export const registerLocalEntityWriteQueueRelease = (
   release: (projectId: string) => Promise<void>,
@@ -701,9 +701,9 @@ export const exportLocalProjectRows = async (projectId: string) => {
 }
 
 export const deleteLocalProjectUnlocked = async (projectId: string): Promise<void> => {
-  await releaseLocalEntityWriteQueue?.(projectId)
   const db = await openGlobalProjectsDb()
   if (await db.get('projectDeletions', projectId) && !await db.get('projects', projectId)) {
+    await releaseLocalEntityWriteQueue?.(projectId)
     await finishLocalProjectDeletion(projectDeletionDependencies(db), projectId)
     return
   }
@@ -725,6 +725,7 @@ export const deleteLocalProjectUnlocked = async (projectId: string): Promise<voi
       tx.done,
     ])
   })
+  await releaseLocalEntityWriteQueue?.(projectId)
   await finishLocalProjectDeletion(projectDeletionDependencies(db), projectId)
 }
 

@@ -4141,6 +4141,52 @@ test('preserves the latest instrument override across an active structural rebui
   }
 })
 
+// A lifecycle rebuild carries the transport its caller read. When Play lands before the rebuild runs, the session is
+// playing, so the rebuild restarts it and resumes it rather than leaving the Play without a graph. Only a host without
+// revision staging reaches this: with it, a playing native session adopts the request in place.
+test('a lifecycle rebuild whose intent was captured paused resumes a native session that is playing when it runs', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: async (transport) => nativeRequiredSnapshot(transport),
+        })
+        await playback.handlePlay([track])
+        expect(playback.isPlaying()).toBeTrue()
+        fixture.calls.length = 0
+        fixture.transportStates.length = 0
+
+        await playback.restartTimelineSchedule([track], {
+          rebuildBackend: true,
+          resumePlayback: false,
+          playheadSec: 0,
+          owner: "native",
+          projectId: "project",
+        })
+
+        expect(fixture.calls.filter((call) => call === "teardown")).toHaveLength(1)
+        expect(fixture.calls.filter((call) => call === "start")).toHaveLength(1)
+        expect(fixture.transportStates.filter((running) => running)).toHaveLength(1)
+        expect(playback.isPlaying()).toBeTrue()
+        expect(playback.isNativePlayback()).toBeTrue()
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
 test('does not restart after pause wins an active native rebuild', async () => {
   const previousWindow = globalThis.window
   const beginGate = Promise.withResolvers<NativeTransactionReply>()

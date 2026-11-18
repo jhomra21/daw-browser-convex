@@ -7,8 +7,8 @@ import { blackhole, playToneIntoBlackhole } from "./ae-08-phase-9-devices"
 import { armRecordTarget, finishRecording, startRecording, toneSeconds } from "./ae-08-phase-9-record"
 
 // The saved native output device changed in Audio settings while the transport plays, is paused, or records. Every step goes through the
-// product's own Audio settings select and marks the host's lifecycle lines it saw (`device-switch-observed`); the row has no judge, the
-// evidence is read per step: a changed device rebuilds the session in the same host, an unchanged one does not, and a take keeps its devices.
+// product's own Audio settings select and marks the host's lifecycle lines it saw (`device-switch-observed`); the row's judge
+// (compareOutputDevice) reads them per step: a changed device rebuilds the session in the same host, an unchanged one does not, and a take keeps its devices.
 // While the transport plays, a step also captures BlackHole's input for captureSeconds (ffmpeg's own -t, no timer here) and marks its levels:
 // signal there means the session sounds on BlackHole, and silence that it does not.
 const lifecycleEvents = ["device-session", "device-stop", "device-configure", "device-start-request", "structural-rebuild", "host-spawn", "host-exit",

@@ -234,6 +234,107 @@ export const compareCancelledStart = (input: { events: readonly HostEvent[]; obs
   return cold.length ? `${name} stopped, tore down, began or configured the session: ${named(cold)}` : undefined
 }
 
+// The output-device rows: a device change is a rebuild of the session, not an edit, so there is no audio to compare. Each step of the row
+// (ae-08-phase-9-output-device.ts) marks the host's lifecycle line counts before and after it, the transport, the saved output and what
+// BlackHole heard while playing, and the judge reads what the step must have caused from those marks.
+const lifecycleCounts = z.string().transform((text) => z.record(z.string(), z.number()).parse(JSON.parse(text)))
+export const deviceObservation = z.object({ event: z.literal("device-switch-observed"), wallMs: z.number(), step: z.string(), before: lifecycleCounts, after: lifecycleCounts,
+  state: z.string(), playheadSec: z.number(), saved: z.string(), blackhole: z.string(), consoleErrors: z.string(), stateReadRefusals: z.string(),
+  deviceId: z.string().optional(), moved: z.boolean().optional(), stopped: z.boolean().optional(), refused: z.boolean().optional(), noticeShown: z.boolean().optional(),
+  takeKeptBlackholeInput: z.boolean().optional(), secondTake: z.string().optional() })
+export type DeviceObservation = z.infer<typeof deviceObservation>
+// BlackHole's input while the transport plays: signal there means the session sounds on it, and the silence of an empty input is far lower.
+const BLACKHOLE_AUDIBLE_DB = -60
+const BLACKHOLE_SILENT_DB = -80
+const blackholeLevels = z.object({ blackholeMeanDb: z.string(), blackholeMaxDb: z.string() })
+// A second Start recording over a playing transport is declined by the host with this line; it changes nothing.
+const declinedSecondPlay = /^\[native-vst3\] native play skipped: Playback was already marked active/
+
+export const compareOutputDevice = (input: { observations: readonly DeviceObservation[]; editName: (index: number) => string; editWallMs: (index: number) => number
+  instruments: boolean }): Compare => (window) => {
+  const name = input.editName(window.index), from = input.editWallMs(window.index)
+  // The previous step settles in the millisecond this one starts, so its observation is not this step's.
+  const marks = input.observations.filter((mark) => mark.wallMs > from && mark.wallMs <= window.fromWallMs)
+  const previous = input.observations.findLast((mark) => mark.wallMs <= from)
+  const delta = (mark: DeviceObservation, event: string) => (mark.after[event] ?? NaN) - (mark.before[event] ?? NaN)
+  const sessions = (mark: DeviceObservation) => delta(mark, "device-session"), rebuilds = (mark: DeviceObservation) => delta(mark, "structural-rebuild")
+  const untouched = (mark: DeviceObservation) => Object.keys(mark.after).every((event) => delta(mark, event) === 0)
+  for (const mark of marks) {
+    if (mark.stateReadRefusals !== "[]") return `${mark.step}: a plug-in state read was refused ${mark.stateReadRefusals}`
+    const errors = z.array(z.string()).parse(JSON.parse(mark.consoleErrors)).filter((error) => !declinedSecondPlay.test(error))
+    if (errors.length) return `${mark.step}: the app reported ${errors[0]}`
+    if (delta(mark, "host-exit") !== 0) return `${mark.step}: the audio host exited`
+    if (delta(mark, "host-spawn") > (window.index === 1 ? 1 : 0)) return `${mark.step}: another audio host was spawned`
+    // The saved output is where the session sounds: a playing transport is heard on BlackHole exactly when BlackHole is the saved output.
+    if (mark.state === "playing" && mark.saved !== "") {
+      const levels = blackholeLevels.safeParse(mark.blackhole.startsWith("{") ? JSON.parse(mark.blackhole) : {})
+      const mean = levels.success ? Number(levels.data.blackholeMeanDb) : NaN, max = levels.success ? Number(levels.data.blackholeMaxDb) : NaN
+      if (!(mean <= 0)) return `${mark.step}: BlackHole's level was not measured while playing`
+      if (mark.saved.includes("BlackHole") && !(mean > BLACKHOLE_AUDIBLE_DB)) return `${mark.step}: playing on BlackHole but it hears ${mean} dB`
+      if (!mark.saved.includes("BlackHole") && !(max < BLACKHOLE_SILENT_DB)) return `${mark.step}: playing on ${mark.saved} but BlackHole still hears ${max} dB`
+    }
+    // A rebuilt session brings its plug-in worker (spawned and ready) and the sampler's assets back. The row's first Play also starts the editor
+    // window's host and worker, which may still be starting when the step is observed, so only its ready worker is required there.
+    const workersBack = delta(mark, "worker-ready") >= 1 && (window.index === 1 || delta(mark, "worker-ready") === delta(mark, "worker-spawn"))
+    if (input.instruments && rebuilds(mark) >= 1 && !(workersBack && delta(mark, "worker-spawn") >= 1 && delta(mark, "asset-install") >= 1))
+      return `${mark.step}: the rebuilt session has no plug-in worker ready (${delta(mark, "worker-spawn")} spawned, ${delta(mark, "worker-ready")} ready) or no sampler assets (${delta(mark, "asset-install")} installed)`
+  }
+  const [mark] = marks
+  if (!mark) return `${name} observed no device state`
+  const positionTolerance = 0.001
+  const resumed = previous === undefined || mark.playheadSec > previous.playheadSec + 0.1
+  const heldPosition = previous === undefined || Math.abs(mark.playheadSec - previous.playheadSec) <= positionTolerance
+  const movedTo = mark.moved === true && mark.saved === mark.deviceId
+  if (/^out-play(-|$)/.test(name) && name !== "out-play-with-missing") {
+    if (mark.state !== "playing") return `the transport is ${mark.state} after Play`
+    if (previous && (mark.playheadSec < previous.playheadSec - positionTolerance || mark.playheadSec > previous.playheadSec + 1)) return `Play moved the playhead from ${previous.playheadSec} s to ${mark.playheadSec} s`
+    // The row's first Play builds the session (and starts the host); a later Play rebuilds it at most once.
+    return previous === undefined || (sessions(mark) <= 1 && rebuilds(mark) <= 1) ? undefined : `Play rebuilt the session ${sessions(mark)} times`
+  }
+  if (name.startsWith("out-pause")) {
+    if (mark.state !== "paused") return `the transport is ${mark.state} after Pause`
+    return sessions(mark) === 0 && rebuilds(mark) === 0 ? undefined : "Pause rebuilt the session"
+  }
+  if (name === "out-to-blackhole-playing" || name === "out-to-speakers-playing") {
+    if (!movedTo) return `the saved output ${mark.saved} is not the chosen ${mark.deviceId} or the host never moved`
+    if (mark.state !== "playing") return `the transport is ${mark.state} after the output changed while playing`
+    if (!resumed) return `playback did not resume on the new device (playhead ${mark.playheadSec} s after ${previous?.playheadSec} s)`
+    return sessions(mark) === 1 && rebuilds(mark) === 1 && delta(mark, "device-start-request") === 1 ? undefined
+      : `the switch rebuilt ${sessions(mark)} sessions and ${rebuilds(mark)} graphs, and started ${delta(mark, "device-start-request")} devices, not one each`
+  }
+  if (name === "out-reselect-speakers-playing") {
+    if (mark.state !== "playing" || !resumed) return "the unchanged output interrupted playback"
+    return untouched(mark) ? undefined : "choosing the output already in use rebuilt the session"
+  }
+  if (name === "out-to-blackhole-paused" || name === "out-to-speakers-paused") {
+    if (!movedTo) return `the saved output ${mark.saved} is not the chosen ${mark.deviceId} or the host never moved`
+    if (mark.state !== "paused" || !heldPosition) return `the output change while paused left the transport ${mark.state} at ${mark.playheadSec} s`
+    return sessions(mark) <= 1 && rebuilds(mark) <= 1 ? undefined : "the output change while paused rebuilt the session more than once"
+  }
+  if (name === "out-to-missing-playing") {
+    if (mark.stopped !== true || mark.noticeShown !== true) return "the missing output stopped no playback or reported no notice"
+    return mark.state !== "playing" && sessions(mark) === 0 && delta(mark, "device-start-request") === 0 ? undefined : "the missing output left the transport playing or started a device"
+  }
+  if (name === "out-play-with-missing") {
+    if (mark.refused !== true || mark.noticeShown !== true) return "Play over the missing output was not refused with a notice"
+    return mark.state !== "playing" && sessions(mark) === 0 && delta(mark, "device-start-request") === 0 ? undefined : "Play over the missing output started a device"
+  }
+  if (name === "out-restore-speakers") {
+    if (!movedTo || mark.state === "playing") return "restoring the output moved nothing or started the transport"
+    return sessions(mark) === 0 ? undefined : "restoring the output while stopped rebuilt the session"
+  }
+  if (name === "out-recording-keeps-devices") {
+    const stepNamed = (step: string) => marks.find((entry) => entry.step === step)
+    const during = stepNamed("change-devices-during-take"), finished = stepNamed("recording-finished"), next = stepNamed("next-take")
+    if (!during || !finished || !next) return "the take's three observations are not all there"
+    if (!untouched(during) || during.noticeShown !== true) return "the take's devices changed, or no notice said they apply after it"
+    if (finished.takeKeptBlackholeInput !== true) return "the take did not keep BlackHole's tone as its input"
+    if (finished.moved !== true || sessions(finished) !== 1) return `the output did not move once after the take (${sessions(finished)} sessions)`
+    return next.secondTake?.startsWith("tone heard: true") ? "the next take still heard BlackHole's tone, not the new saved input" : undefined
+  }
+  return `no expectation for ${name}`
+}
+
 // An edit of a plug-in row never restarts the playing host: nothing stops, tears down, begins or configures on it, and the only worker it
 // starts is an insert's own (a removal or a parameter change starts none). The editor window's host is another process (another pid).
 export const compareNoRestart = (input: { events: readonly HostEvent[]; hostPid: number; editWallMs: (index: number) => number; workerSpawns: (index: number) => number }): Compare => (window) => {
@@ -328,12 +429,19 @@ export const judgeRowCapture = async (input: { launchOut: string; directory: str
   const steps = [...Map.groupBy(edits, (edit) => edit.index)].map(([index, group]) => ({ index, name: group[0]?.name ?? "", editWallMs: Math.min(...group.map((edit) => edit.wallMs)),
     settledWallMs: group[0]?.settledWallMs, publicationFrame: group[0]?.publicationFrame ?? 0, startSec: group.find((edit) => edit.startSec !== undefined)?.startSec }))
   if (row.judge === "take") return judgeBurst(steps, input.captureEndWallMs, compareTake(takeResult.parse(JSON.parse(await readFile(path.join(directory, takeFile), "utf8")))))
+  const marksOf = async <Mark>(schema: z.ZodType<Mark>) => (await readFile(path.join(launchOut, "actions.jsonl"), "utf8")).split("\n").filter(Boolean)
+    .flatMap((line) => { const observed = schema.safeParse(JSON.parse(line)); return observed.success ? [observed.data] : [] })
+  const stepNamed = (index: number) => steps.find((step) => step.index === index)
+  if (row.judge === "output-device") {
+    const compare = compareOutputDevice({ observations: await marksOf(deviceObservation), editName: (index) => stepNamed(index)?.name ?? "", editWallMs: (index) => stepNamed(index)?.editWallMs ?? 0,
+      instruments: row.prepare?.includes("vst-insert") === true })
+    return judgeBurst(steps, input.captureEndWallMs, compare, 0)
+  }
   if (row.judge === "host-loss" || row.judge === "cancelled-start") {
     const events = (await Promise.all(["host.jsonl", ...input.natives].map((name) => readFile(path.join(launchOut, name), "utf8")))).flatMap(parseHostLines)
-    const observations = (await readFile(path.join(launchOut, "actions.jsonl"), "utf8")).split("\n").filter(Boolean)
-      .flatMap((line) => { const observed = transportObservation.safeParse(JSON.parse(line)); return observed.success ? [observed.data] : [] })
+    const observations = await marksOf(transportObservation)
     const compare = row.judge === "host-loss" ? compareHostLoss(events, observations)
-      : compareCancelledStart({ events, observations, editName: (index) => steps.find((step) => step.index === index)?.name ?? "", editWallMs: (index) => steps.find((step) => step.index === index)?.editWallMs ?? 0 })
+      : compareCancelledStart({ events, observations, editName: (index) => stepNamed(index)?.name ?? "", editWallMs: (index) => stepNamed(index)?.editWallMs ?? 0 })
     return judgeBurst(steps, input.captureEndWallMs, compare, 0)
   }
   const texts = await Promise.all(input.natives.map((name) => readFile(path.join(launchOut, name), "utf8")))
@@ -648,6 +756,118 @@ export const selfTest = () => {
   check(cancelled(lines({ event: "structural-rebuild", wallMs: 5250 })).editIndex === 5, "a rebuild after a Stop's cancel fails although the Stop reads stopped at 0")
   check(cancelled(lines(), replaced(2, { state: "paused" })).editIndex === 3, "a Play that does not play fails")
   check(cancelled(lines(), honestSeen.filter((_, position) => position !== 1)).editIndex === 2, "a step with no observation fails")
+  // The output-device rows. Each edit k is entered at k * 10 s and its observations land 3 s in; the counts are those of the packaged evidence.
+  const keys = ["device-session", "device-stop", "device-configure", "device-start-request", "structural-rebuild", "host-spawn", "host-exit", "worker-spawn", "worker-ready", "asset-install"]
+  const zero = Object.fromEntries(keys.map((key) => [key, 0]))
+  const blackholeId = "coreaudio:BlackHole2ch_UID", speakersId = "coreaudio:BuiltInSpeakerDevice", missingId = "coreaudio:ae08-missing-output"
+  const heard = { silent: { blackholeMeanDb: "-91.0", blackholeMaxDb: "-91.0" }, tone: { blackholeMeanDb: "-23.6", blackholeMaxDb: "-20.4" } }
+  type Seen = Partial<Omit<DeviceObservation, "before" | "after" | "blackhole">> & { step: string; delta?: Record<string, number>; levels?: keyof typeof heard }
+  const seen = (edit: number, entry: Seen): DeviceObservation => {
+    const { delta = {}, levels, ...fields } = entry
+    return deviceObservation.parse({ event: "device-switch-observed", wallMs: edit * 10_000 + 3000, state: "paused", playheadSec: 0, saved: speakersId, consoleErrors: "[]", stateReadRefusals: "[]",
+      ...fields, before: JSON.stringify(zero), after: JSON.stringify({ ...zero, ...delta }), blackhole: levels ? JSON.stringify(heard[levels]) : "not captured" })
+  }
+  const rebuild = { "device-session": 1, "device-stop": 3, "device-configure": 1, "device-start-request": 1, "structural-rebuild": 1, "asset-install": 2 }
+  const switchOf = (edit: number, to: "blackhole" | "speakers", state: "playing" | "paused", playheadSec: number, extra: Partial<Seen> = {}) => seen(edit, { step: "switch-to-" + to, state, playheadSec,
+    saved: to === "blackhole" ? blackholeId : speakersId, deviceId: to === "blackhole" ? blackholeId : speakersId, moved: true, delta: rebuild,
+    levels: state === "playing" ? to === "blackhole" ? "tone" : "silent" : undefined, ...extra })
+  const play = (edit: number, playheadSec: number, saved: string, extra: Partial<Seen> = {}) => seen(edit, { step: "play", state: "playing", playheadSec, saved, levels: saved === blackholeId ? "tone" : "silent", ...extra })
+  const pause = (edit: number, playheadSec: number, saved: string) => seen(edit, { step: "pause", state: "paused", playheadSec, saved })
+  const outputNames = ["out-play", "out-to-blackhole-playing", "out-to-speakers-playing", "out-reselect-speakers-playing", "out-pause", "out-to-blackhole-paused", "out-play-after-paused-switch",
+    "out-pause-again", "out-to-speakers-paused", "out-play-back-on-speakers", "out-to-missing-playing", "out-play-with-missing", "out-restore-speakers", "out-play-after-restore", "out-recording-keeps-devices"]
+  const takeMarks = (during: Partial<Seen> = {}, finished: Partial<Seen> = {}, next: Partial<Seen> = {}) => [
+    seen(15, { step: "change-devices-during-take", state: "playing", playheadSec: 0.18, saved: blackholeId, levels: "tone", noticeShown: true, ...during }),
+    seen(15, { step: "recording-finished", state: "playing", playheadSec: 6.1, saved: blackholeId, levels: "tone", moved: true, takeKeptBlackholeInput: true, delta: { "device-session": 1, "structural-rebuild": 1 }, ...finished }),
+    seen(15, { step: "next-take", state: "playing", playheadSec: 13.3, saved: blackholeId, levels: "tone", secondTake: "tone heard: false", ...next })]
+  const cleanMarks = {
+      "out-play": [play(1, 0.04, "", { delta: { "device-session": 1, "device-stop": 1, "device-start-request": 1 } })],
+      "out-to-blackhole-playing": [switchOf(2, "blackhole", "playing", 2.8)],
+      "out-to-speakers-playing": [switchOf(3, "speakers", "playing", 5.1)],
+      "out-reselect-speakers-playing": [seen(4, { step: "switch-to-speakers", state: "playing", playheadSec: 7.5, deviceId: speakersId, moved: true, levels: "silent" })],
+      "out-pause": [pause(5, 9.8, speakersId)],
+      "out-to-blackhole-paused": [switchOf(6, "blackhole", "paused", 9.8)],
+      "out-play-after-paused-switch": [play(7, 9.85, blackholeId)],
+      "out-pause-again": [pause(8, 12.1, blackholeId)],
+      "out-to-speakers-paused": [switchOf(9, "speakers", "paused", 12.1)],
+      "out-play-back-on-speakers": [play(10, 12.18, speakersId)],
+      "out-to-missing-playing": [seen(11, { step: "switch-to-missing", playheadSec: 14.4, saved: missingId, stopped: true, noticeShown: true, delta: { "device-stop": 4 } })],
+      "out-play-with-missing": [seen(12, { step: "play-with-missing-output", playheadSec: 14.4, saved: missingId, refused: true, noticeShown: true })],
+      "out-restore-speakers": [seen(13, { step: "switch-to-speakers", playheadSec: 14.4, deviceId: speakersId, moved: true })],
+      "out-play-after-restore": [play(14, 14.49, speakersId, { delta: rebuild })],
+      "out-recording-keeps-devices": takeMarks(),
+  } satisfies Record<string, DeviceObservation[]>
+  const outputMarks = (override: Record<string, DeviceObservation[]> = {}) => ({ ...cleanMarks, ...override })
+  const outputSteps = outputNames.map((name, position) => ({ index: position + 1, name, editWallMs: (position + 1) * 10_000, settledWallMs: (position + 1) * 10_000 + 9000 }))
+  const device = (marks: Record<string, DeviceObservation[]>, instruments = false, names = outputNames) => judgeBurst(outputSteps.filter((step) => names.includes(step.name)), 200_000,
+    compareOutputDevice({ observations: Object.values(marks).flat(), editName: (index) => outputNames[index - 1] ?? "", editWallMs: (index) => index * 10_000, instruments }), 0)
+  const defective = (name: keyof typeof cleanMarks, mutate: (mark: DeviceObservation) => DeviceObservation, why: string) => {
+    const verdict = device(outputMarks({ [name]: cleanMarks[name].map(mutate) }))
+    check(verdict.outcome === "fail" && verdict.editIndex === outputNames.indexOf(name) + 1, `${why} fails at ${name}: ${JSON.stringify(verdict)}`)
+  }
+  const grown = (mark: DeviceObservation, add: Record<string, number>): DeviceObservation => ({ ...mark, after: Object.fromEntries(Object.entries(mark.after).map(([key, value]) => [key, value + (add[key] ?? 0)])) })
+  check(device(outputMarks()).outcome === "pass", `a switch row that rebuilds once per change, resumes and sounds on the chosen device passes: ${JSON.stringify(device(outputMarks()))}`)
+  defective("out-to-blackhole-playing", (mark) => grown(mark, { "host-spawn": 1 }), "a switch that spawns another host")
+  defective("out-to-blackhole-playing", (mark) => grown(mark, { "host-exit": 1 }), "a switch that makes the host exit")
+  defective("out-to-blackhole-playing", (mark) => ({ ...mark, state: "paused" }), "a switch that leaves the transport paused (no resume)")
+  defective("out-to-blackhole-playing", (mark) => ({ ...mark, playheadSec: 0.04 }), "a switch that rewinds the playhead")
+  defective("out-to-blackhole-playing", (mark) => ({ ...mark, blackhole: JSON.stringify(heard.silent) }), "a switch that stays silent on BlackHole")
+  defective("out-to-speakers-playing", (mark) => ({ ...mark, blackhole: JSON.stringify(heard.tone) }), "a switch that still sounds on BlackHole")
+  defective("out-to-speakers-playing", (mark) => ({ ...mark, saved: blackholeId }), "a switch that saved another device")
+  defective("out-to-speakers-playing", (mark) => ({ ...mark, moved: false }), "a switch the host never saw")
+  defective("out-to-speakers-playing", (mark) => grown(mark, { "device-session": 1, "structural-rebuild": 1 }), "a switch that rebuilds twice")
+  defective("out-to-speakers-playing", (mark) => grown(mark, { "device-start-request": 1 }), "a switch that starts the device twice")
+  defective("out-reselect-speakers-playing", (mark) => grown(mark, { "structural-rebuild": 1 }), "reselecting the output in use that rebuilds")
+  defective("out-reselect-speakers-playing", (mark) => ({ ...mark, state: "paused" }), "reselecting the output in use that pauses")
+  defective("out-pause", (mark) => ({ ...mark, state: "playing" }), "a Pause that leaves the transport playing")
+  defective("out-pause", (mark) => grown(mark, { "device-session": 1 }), "a Pause that rebuilds")
+  defective("out-to-blackhole-paused", (mark) => ({ ...mark, state: "playing" }), "a paused switch that starts the transport")
+  defective("out-to-blackhole-paused", (mark) => ({ ...mark, playheadSec: 9.9 }), "a paused switch that moves the position")
+  defective("out-to-blackhole-paused", (mark) => grown(mark, { "device-session": 1 }), "a paused switch that rebuilds twice")
+  defective("out-play-after-paused-switch", (mark) => ({ ...mark, state: "paused" }), "a Play after the paused switch that does not play")
+  defective("out-play-after-paused-switch", (mark) => ({ ...mark, blackhole: JSON.stringify(heard.silent) }), "a Play after the paused switch that does not sound on the new device")
+  defective("out-play-after-paused-switch", (mark) => ({ ...mark, playheadSec: 0 }), "a Play that restarts from zero")
+  defective("out-play-back-on-speakers", (mark) => ({ ...mark, blackhole: JSON.stringify(heard.tone) }), "a Play that sounds on the device that was left")
+  defective("out-to-missing-playing", (mark) => ({ ...mark, noticeShown: false }), "a missing output that reports nothing")
+  defective("out-to-missing-playing", (mark) => ({ ...mark, state: "playing" }), "a missing output that leaves the transport playing")
+  defective("out-to-missing-playing", (mark) => grown(mark, { "host-exit": 1 }), "a missing output that crashes the host")
+  defective("out-play-with-missing", (mark) => ({ ...mark, refused: false }), "a Play over the missing output that is not refused")
+  defective("out-play-with-missing", (mark) => grown(mark, { "device-start-request": 1 }), "a Play over the missing output that starts a device")
+  defective("out-restore-speakers", (mark) => ({ ...mark, moved: false }), "a restore the host never saw")
+  defective("out-play-after-restore", (mark) => ({ ...mark, state: "paused" }), "a Play after the restore that does not play")
+  defective("out-play-after-restore", (mark) => ({ ...mark, consoleErrors: JSON.stringify(["[native-playback] moving the session to the saved output device failed Error: x"]) }), "a rebuild the app reports as failed")
+  defective("out-play-after-restore", (mark) => ({ ...mark, stateReadRefusals: JSON.stringify(["unsupported"]) }), "a plug-in state read that was refused")
+  const takeCase = (during?: Partial<Seen>, finished?: Partial<Seen>, next?: Partial<Seen>) => device(outputMarks({ "out-recording-keeps-devices": takeMarks(during, finished, next) }))
+  check(takeCase({}, {}, { consoleErrors: JSON.stringify(["[native-vst3] native play skipped: Playback was already marked active before the native graph start."]) }).outcome === "pass", "the host declining a second Play is not a failure")
+  check(takeCase({ delta: { "device-session": 1 } }).outcome === "fail", "a take whose devices changed fails")
+  check(takeCase({ noticeShown: false }).outcome === "fail", "a take with no notice fails")
+  check(takeCase({}, { takeKeptBlackholeInput: false }).outcome === "fail", "a take that lost BlackHole's input fails")
+  check(takeCase({}, { delta: {} }).outcome === "fail", "an output that never moves after the take fails")
+  check(takeCase({}, {}, { secondTake: "tone heard: true" }).outcome === "fail", "a next take that still hears the old input fails")
+  check(device(outputMarks({ "out-recording-keeps-devices": takeMarks().slice(0, 2) })).outcome === "fail", "a take with a missing observation fails")
+  check(device(outputMarks({ "out-pause": [] })).editIndex === 5, "a step with no observation fails")
+  check(device(outputMarks(), false, ["out-pause"]).outcome === "pass", "each step is judged on its own observations")
+  // A step settles in the millisecond the next one starts: its observation is its own, not the next step's.
+  const adjacentSteps = [{ index: 1, name: "out-play", editWallMs: 1000, settledWallMs: 2000 }, { index: 2, name: "out-pause", editWallMs: 2000, settledWallMs: 5000 }]
+  const adjacent = judgeBurst(adjacentSteps, 9000,
+    compareOutputDevice({ observations: [{ ...play(1, 0.04, "", { delta: { "host-spawn": 1 } }), wallMs: 2000 }, { ...pause(2, 0.5, ""), wallMs: 3000 }], editName: (index) => ["out-play", "out-pause"][index - 1] ?? "",
+      editWallMs: (index) => index * 1000, instruments: false }), 0)
+  check(adjacent.outcome === "pass", `an observation made in the millisecond the next step starts is the earlier step's: ${JSON.stringify(adjacent)}`)
+  // The instruments row: the rebuilt session needs its plug-in worker (spawned and ready) and the sampler's assets back.
+  const instrumentNames = ["out-play", "out-pause", "out-to-blackhole-paused", "out-play-after-paused-switch", "out-to-speakers-playing"]
+  const workers = { "worker-spawn": 1, "worker-ready": 1, "asset-install": 1 }
+  const instrumentMarks = (change: (marks: DeviceObservation[]) => DeviceObservation[] = (marks) => marks) => change([
+    play(1, 0.04, "", { delta: { "device-session": 2, "device-stop": 4, "device-start-request": 2, "structural-rebuild": 2, "host-spawn": 1, "worker-spawn": 2, "worker-ready": 2, "asset-install": 3 } }),
+    pause(2, 2.4, ""), switchOf(3, "blackhole", "paused", 2.4, { delta: { ...rebuild, ...workers } }), play(4, 2.43, blackholeId),
+    switchOf(5, "speakers", "playing", 4.7, { delta: { ...rebuild, ...workers } })])
+  const instruments = (marks: DeviceObservation[]) => judgeBurst(instrumentNames.map((name, position) => ({ index: position + 1, name, editWallMs: (position + 1) * 10_000, settledWallMs: (position + 1) * 10_000 + 9000 })), 200_000,
+    compareOutputDevice({ observations: marks, editName: (index) => instrumentNames[index - 1] ?? "", editWallMs: (index) => index * 10_000, instruments: true }), 0)
+  check(instruments(instrumentMarks()).outcome === "pass", `the instruments row with its worker and sampler back after each rebuild passes: ${JSON.stringify(instruments(instrumentMarks()))}`)
+  check(instruments(instrumentMarks((marks) => marks.map((mark) => mark.step === "play" && mark.saved === "" ? grown(mark, { "worker-spawn": 1 }) : mark))).outcome === "pass", "the first Play's editor worker still starting is not a missing worker")
+  check(instruments(instrumentMarks((marks) => marks.map((mark) => mark.step === "play" && mark.saved === "" ? grown(mark, { "worker-ready": -2 }) : mark))).editIndex === 1, "a first Play with no worker ready fails")
+  check(instruments(instrumentMarks((marks) => marks.map((mark) => mark.step === "switch-to-blackhole" ? grown(mark, { "worker-spawn": -1, "worker-ready": -1 }) : mark))).editIndex === 3, "a rebuilt session with no plug-in worker fails")
+  check(instruments(instrumentMarks((marks) => marks.map((mark) => mark.step === "switch-to-speakers" ? grown(mark, { "worker-ready": -1 }) : mark))).editIndex === 5, "a plug-in worker that is spawned but never ready fails")
+  check(instruments(instrumentMarks((marks) => marks.map((mark) => mark.step === "switch-to-speakers" ? grown(mark, { "asset-install": -1 }) : mark))).editIndex === 5, "a rebuilt session with no sampler assets fails")
+  check(instruments(instrumentMarks((marks) => marks.map((mark) => mark.step === "play" && mark.saved === blackholeId ? { ...mark, blackhole: JSON.stringify(heard.silent) } : mark))).editIndex === 4, "a sampler that is silent on the new device fails")
   // A plug-in row's edits start no worker beyond an insert's own and never touch the playing host (the editor window's host is another pid).
   const hostLine = (event: string, wallMs: number, pid = 7) => ({ event, wallMs, pid })
   const noRestart = (events: ReturnType<typeof lines>, edit: string) => one(compareNoRestart({ events, hostPid: 7, editWallMs: editedAt, workerSpawns: () => edit === "vst-insert" ? 1 : 0 }))

@@ -22,9 +22,9 @@ export type Step = { edits: string[]; state: string; entry?: "ghost" | "cut"; se
 // "held" judges the rows that edit under a note that holds on the edited channel (the held-instrument fixtures): the note never drops out and
 // never jumps (a retrigger, a gap's edge or a gain step), and has no reference.
 // "editor", "fault" and "trust" judge the VST rows on host evidence (no restart, the editor stays open) and the capture.
-// "host-loss" and "cancelled-start" judge the rows whose edits drive the transport (PackagedRun.transport) on host evidence and the
-// transport state each edit observed; they have no capture to compare.
-export type Judge = "states" | "sustained" | "delete" | "latency" | "lane" | "take" | "held" | "editor" | "fault" | "trust" | "host-loss" | "cancelled-start"
+// "host-loss", "cancelled-start" and "output-device" judge the rows whose edits drive the transport (PackagedRun.transport) on host evidence and
+// the transport state each edit observed; they have no capture to compare.
+export type Judge = "states" | "sustained" | "delete" | "latency" | "lane" | "take" | "held" | "editor" | "fault" | "trust" | "host-loss" | "cancelled-start" | "output-device"
 export type PackagedRun = {
   // burst: the preset's (or --repetitions) edits. vst-burst: the preset's (or --vst-repetitions) edits. single: one pass of the cycle.
   // launch: one edit per launch, repeated the preset's (or --repetitions) times.
@@ -171,17 +171,17 @@ export const burstRows: BurstRow[] = [
     judge: "cancelled-start", transport: "driven", settle: "returned",
     cycle: [{ edits: ["session-pause"], state: "paused" }, { edits: ["play-then-pause"], state: "paused" }, { edits: ["play-resume"], state: "playing" },
       { edits: ["session-pause"], state: "paused" }, { edits: ["play-then-stop"], state: "stopped" }, { edits: ["play-resume"], state: "playing" }] } },
-  // The saved native output changes in Audio settings while playing, while paused, and during a take (BlackHole is the other output). It has no
-  // judge: the steps mark the host's lifecycle lines they saw (ae-08-phase-9-output-device.ts) and the evidence is read per step.
+  // The saved native output changes in Audio settings while playing, while paused, and during a take (BlackHole is the other output). The steps
+  // mark the host's lifecycle lines they saw (ae-08-phase-9-output-device.ts) and the judge reads what each step must have caused from them.
   { name: "output-device-switch", latencyClass: "plain", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "stopped", device: "blackhole",
-    prepare: ["record-select-input"], transport: "driven", settle: "returned",
+    prepare: ["record-select-input"], transport: "driven", settle: "returned", judge: "output-device",
     cycle: ["out-play", "out-to-blackhole-playing", "out-to-speakers-playing", "out-reselect-speakers-playing", "out-pause", "out-to-blackhole-paused",
       "out-play-after-paused-switch", "out-pause-again", "out-to-speakers-paused", "out-play-back-on-speakers", "out-to-missing-playing", "out-play-with-missing",
       "out-restore-speakers", "out-play-after-restore", "out-recording-keeps-devices"].map((edit) => ({ edits: [edit], state: "stopped" })) } },
   // The same switch with the test plug-in inserted and a sampler holding a note (the held-sampler fixture mutes Changed right, so the sampler is the
   // only source): the rebuild must bring both back.
   { name: "output-device-switch-instruments", latencyClass: "plain", packaged: { repeat: "single", periodSec: null, fixture: "phase5:held-sampler", start: "stopped", device: "blackhole",
-    prepare: insertedTestPlugin, transport: "driven", settle: "returned",
+    prepare: insertedTestPlugin, transport: "driven", settle: "returned", judge: "output-device",
     cycle: ["out-play", "out-pause", "out-to-blackhole-paused", "out-play-after-paused-switch", "out-to-speakers-playing"].map((edit) => ({ edits: [edit], state: "stopped" })) } },
   // Portable-only rows: the portable engine has no packaged counterpart for them.
   { name: "mixer-gain", latencyClass: "plain", portable: { from: "base", to: "gain", latency: false } },

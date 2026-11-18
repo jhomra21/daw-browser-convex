@@ -1,19 +1,20 @@
-import { createMemo, type Accessor } from 'solid-js'
+import { createMemo, onCleanup, type Accessor } from 'solid-js'
 import { isLocalId } from '@daw-browser/shared'
 import { getProjectSaveStatus, type ProjectSaveStatusInput } from '~/lib/project-save-status'
-import { getLocalEntityWriteStatusAccessor } from '~/lib/local-write-queue'
+import { acquireLocalEntityWriteQueue } from '~/lib/local-write-queue'
 
 export const useProjectSaveStatus = (input: Accessor<ProjectSaveStatusInput>) => {
-  const localWriteStatus = createMemo(() => {
-    const projectId = input().projectId
-    return isLocalId('project', projectId)
-      ? getLocalEntityWriteStatusAccessor(projectId)()
-      : undefined
+  const projectId = createMemo(() => input().projectId)
+  const localWriteQueue = createMemo(() => {
+    if (!isLocalId('project', projectId())) return undefined
+    const { queue, release } = acquireLocalEntityWriteQueue(projectId())
+    onCleanup(release)
+    return queue
   })
 
   const status = createMemo(() => getProjectSaveStatus({
     ...input(),
-    localTimelineWriteStatus: localWriteStatus(),
+    localTimelineWriteStatus: localWriteQueue()?.getStatusAccessor()(),
   }))
   return status
 }

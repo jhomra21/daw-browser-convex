@@ -358,10 +358,6 @@ const requireValidReorderAndGroupUpdates = (
   }
 }
 
-const getEntityWriteQueue = (projectId: string) => {
-  return getLocalEntityWriteQueue(projectId)
-}
-
 const flushEntityWriteQueues = async (projectId?: string) => {
   const queue = projectId ? getLocalEntityWriteQueueIfCreated(projectId) : undefined
   const queues = projectId ? (queue ? [queue] : []) : getAllLocalEntityWriteQueues()
@@ -373,8 +369,7 @@ const readEntityRow = async (
   kind: string,
   id: string,
 ): Promise<LocalProjectEntityRow | undefined> => {
-  const queue = getEntityWriteQueue(projectId)
-  const pending = queue.getPending(kind, id)
+  const pending = getLocalEntityWriteQueueIfCreated(projectId)?.getPending(kind, id)
   if (pending !== undefined) return pending ?? undefined
   const db = await openLocalProjectDb(projectId)
   return db.get('entities', [kind, id])
@@ -383,7 +378,7 @@ const readEntityRow = async (
 const readEntityRowsByKind = async (projectId: string, kind: string): Promise<LocalProjectEntityRow[]> => {
   const db = await openLocalProjectDb(projectId)
   const rows = await db.getAllFromIndex('entities', 'by-kind', kind)
-  return getEntityWriteQueue(projectId).applyPendingRows(kind, rows)
+  return getLocalEntityWriteQueueIfCreated(projectId)?.applyPendingRows(kind, rows) ?? rows
 }
 
 const attachLifecycleFlush = () => {
@@ -455,7 +450,6 @@ const trackRepositoryWrite = <T>(projectId: string, write: () => Promise<T>): Pr
 export const createLocalTimelineRepository = (projectId: string): TimelineRepository => {
   attachLifecycleFlush()
   const markChanged = () => notifyLocalProjectChanged(projectId)
-  const entityQueue = getEntityWriteQueue(projectId)
 
   const loadSnapshot = async (): Promise<TimelineSnapshot> => {
     await flushLocalTimelineWrites(projectId)
@@ -617,8 +611,8 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     }
     if (trackPersistenceFieldsEqual(row.value, track)) return row.value
     markChanged()
-    entityQueue.schedulePut(toEntityRow(TRACK_KIND, track.id, track, timestamp))
-    await entityQueue.flush()
+    getLocalEntityWriteQueue(projectId).schedulePut(toEntityRow(TRACK_KIND, track.id, track, timestamp))
+    await flushEntityWriteQueues(projectId)
     return track
   }
 
@@ -702,20 +696,16 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
 
   const deleteClips = async (clipIds: TimelineClipId[]): Promise<void> => {
     if (clipIds.length === 0) return
-    for (const clipId of clipIds) entityQueue.scheduleDelete(CLIP_KIND, clipId)
+    const queue = getLocalEntityWriteQueue(projectId)
+    for (const clipId of clipIds) queue.scheduleDelete(CLIP_KIND, clipId)
     markChanged()
-    await entityQueue.flush()
+    await flushEntityWriteQueues(projectId)
   }
 
   const moveClips = async (moves: MoveClipInput[]): Promise<void> => {
     if (moves.length === 0) return
     const timestamp = now()
-    const db = await openLocalProjectDb(projectId)
-    const allRows = getEntityWriteQueue(projectId).applyPendingRows(
-      TRACK_KIND,
-      await db.getAllFromIndex('entities', 'by-kind', TRACK_KIND),
-    )
-    const tracks = trackValues(allRows)
+    const tracks = trackValues(await readEntityRowsByKind(projectId, TRACK_KIND))
     requireTrackIds(moves.map((move) => move.trackId), tracks)
     const rows = await Promise.all(moves.map((move) => readEntityRow(projectId, CLIP_KIND, move.clipId)))
     const updates = rows.flatMap((row, index) => {
@@ -734,8 +724,8 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     })
     if (updates.length === 0) return
     markChanged()
-    for (const clip of updates) entityQueue.schedulePut(toEntityRow(CLIP_KIND, clip.id, clip, timestamp))
-    await entityQueue.flush()
+    for (const clip of updates) getLocalEntityWriteQueue(projectId).schedulePut(toEntityRow(CLIP_KIND, clip.id, clip, timestamp))
+    await flushEntityWriteQueues(projectId)
   }
 
   const updateClip = async (input: UpdateClipInput): Promise<TimelineClipRow | null> => {
@@ -793,8 +783,8 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     }
     if (clipPersistenceFieldsEqual(current, clip)) return current
     markChanged()
-    entityQueue.schedulePut(toEntityRow(CLIP_KIND, clip.id, clip, timestamp))
-    await entityQueue.flush()
+    getLocalEntityWriteQueue(projectId).schedulePut(toEntityRow(CLIP_KIND, clip.id, clip, timestamp))
+    await flushEntityWriteQueues(projectId)
     return clip
   }
 

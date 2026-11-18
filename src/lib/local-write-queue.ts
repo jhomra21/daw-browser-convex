@@ -52,6 +52,7 @@ export class LocalEntityWriteQueue {
   private scheduledFlush: ScheduledIdleFlush | null = null
   private flushPromise: Promise<void> | null = null
   private retryDelayMs = 0
+  private holders = 0
   private readonly statusState = createWriteStatus()
   private readonly listeners = new Set<(status: LocalEntityWriteStatus) => void>()
 
@@ -59,6 +60,17 @@ export class LocalEntityWriteQueue {
 
   public getStatus(): LocalEntityWriteStatus {
     return this.statusState.status()
+  }
+
+  public hold(): () => void {
+    this.holders += 1
+    let held = true
+    return () => {
+      if (!held) return
+      held = false
+      this.holders -= 1
+      this.unregisterIfIdle()
+    }
   }
 
   public hasPendingWrites(): boolean {
@@ -118,8 +130,16 @@ export class LocalEntityWriteQueue {
     this.flushPromise = this.flushBatches().finally(() => {
       this.flushPromise = null
       if (this.puts.size > 0 || this.deletes.size > 0) this.scheduleFlush()
+      else this.unregisterIfIdle()
     })
     return this.flushPromise
+  }
+
+  // A queue with pending or failed writes stays registered, so a reopen shares it instead of racing its retry.
+  private unregisterIfIdle() {
+    if (this.holders === 0 && !this.hasPendingWrites() && queuesByProject.get(this.projectId) === this) {
+      queuesByProject.delete(this.projectId)
+    }
   }
 
   private scheduleFlush() {
@@ -186,6 +206,11 @@ export const getLocalEntityWriteQueue = (projectId: string) => {
   return queue
 }
 
+export const acquireLocalEntityWriteQueue = (projectId: string) => {
+  const queue = getLocalEntityWriteQueue(projectId)
+  return { queue, release: queue.hold() }
+}
+
 export const getAllLocalEntityWriteQueues = () => Array.from(queuesByProject.values())
 export const getLocalEntityWriteQueueIfCreated = (projectId: string) => queuesByProject.get(projectId)
 
@@ -196,7 +221,3 @@ export const releaseLocalEntityWriteQueue = async (projectId: string): Promise<v
   if (!queue.hasPendingWrites() && queuesByProject.get(projectId) === queue) queuesByProject.delete(projectId)
 }
 registerLocalEntityWriteQueueRelease(releaseLocalEntityWriteQueue)
-
-export const getLocalEntityWriteStatusAccessor = (projectId: string): Accessor<LocalEntityWriteStatus> => (
-  getLocalEntityWriteQueue(projectId).getStatusAccessor()
-)

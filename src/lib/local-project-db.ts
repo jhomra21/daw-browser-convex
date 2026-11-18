@@ -19,6 +19,7 @@ import {
 } from '~/lib/local-project-deletion'
 import { buildTimelineTrackRow } from '~/lib/timeline-repository/track-row-builder'
 import { normalizeMixedEffectEntityRows } from '~/lib/mixed-effect-order'
+import { releaseLocalEntityWriteQueue } from '~/lib/local-write-queue'
 import type { GlobalProjectsDB, ProjectDB } from '~/lib/local-project-db-schema'
 import { z } from 'zod'
 
@@ -695,6 +696,7 @@ export const exportLocalProjectRows = async (projectId: string) => {
 }
 
 export const deleteLocalProjectUnlocked = async (projectId: string): Promise<void> => {
+  await releaseLocalEntityWriteQueue(projectId)
   const db = await openGlobalProjectsDb()
   if (await db.get('projectDeletions', projectId) && !await db.get('projects', projectId)) {
     await finishLocalProjectDeletion(projectDeletionDependencies(db), projectId)

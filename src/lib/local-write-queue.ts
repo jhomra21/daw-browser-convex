@@ -58,6 +58,10 @@ export class LocalEntityWriteQueue {
     return this.statusState.status()
   }
 
+  public hasPendingWrites(): boolean {
+    return this.puts.size > 0 || this.deletes.size > 0 || this.flushPromise !== null
+  }
+
   public getStatusAccessor(): Accessor<LocalEntityWriteStatus> {
     return this.statusState.status
   }
@@ -181,6 +185,13 @@ export const getLocalEntityWriteQueue = (projectId: string) => {
 
 export const getAllLocalEntityWriteQueues = () => Array.from(queuesByProject.values())
 export const getLocalEntityWriteQueueIfCreated = (projectId: string) => queuesByProject.get(projectId)
+
+export const releaseLocalEntityWriteQueue = async (projectId: string): Promise<void> => {
+  const queue = queuesByProject.get(projectId)
+  if (!queue) return
+  await queue.flush()
+  if (!queue.hasPendingWrites() && queuesByProject.get(projectId) === queue) queuesByProject.delete(projectId)
+}
 
 export const getLocalEntityWriteStatusAccessor = (projectId: string): Accessor<LocalEntityWriteStatus> => (
   getLocalEntityWriteQueue(projectId).getStatusAccessor()

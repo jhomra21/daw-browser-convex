@@ -14,6 +14,8 @@ import {
   getProjectOpfsRoot,
 } from '~/lib/local-project-db'
 import { setLocalProjectAssetDirectory } from '~/lib/local-assets'
+import { createLocalProjectEntityRow } from '~/lib/local-project-db'
+import { getLocalEntityWriteQueue, getLocalEntityWriteQueueIfCreated } from '~/lib/local-write-queue'
 let project
 let catalog
 let directory
@@ -36,6 +38,8 @@ window.deletionFixture = {
     catalog = await openDB('daw-browser-projects')
   },
   abortDeletion: async () => {
+    const queue = getLocalEntityWriteQueue(project.id)
+    queue.schedulePut(createLocalProjectEntityRow('track', 'queued-track', { name: 'Queued track' }))
     const originalDelete = IDBObjectStore.prototype.delete
     IDBObjectStore.prototype.delete = function(key) {
       const request = originalDelete.call(this, key)
@@ -44,8 +48,15 @@ window.deletionFixture = {
     }
     try {
       await deleteLocalProject(project.id)
-      return false
-    } catch { return true }
+      return { aborted: false, queueReleased: getLocalEntityWriteQueueIfCreated(project.id) === undefined }
+    } catch {
+      const db = await openLocalProjectDb(project.id)
+      return {
+        aborted: true,
+        queueReleased: getLocalEntityWriteQueueIfCreated(project.id) === undefined,
+        queuedRow: await db.get('entities', ['track', 'queued-track']),
+      }
+    }
     finally { IDBObjectStore.prototype.delete = originalDelete }
   },
   state: async () => {
@@ -152,7 +163,11 @@ window.deletionFixture = {
   await run('open', server.url.href)
   try {
     await run('eval', 'deletionFixture.prepare()')
-    expect(await run('eval', 'deletionFixture.abortDeletion()')).toBe('true')
+    expect(JSON.parse(JSON.parse(await run('eval', 'deletionFixture.abortDeletion().then(JSON.stringify)')))).toMatchObject({
+      aborted: true,
+      queueReleased: true,
+      queuedRow: { value: { name: 'Queued track' } },
+    })
     expect(await read()).toEqual({ listed: true, bytes: 'fixture audio bytes', jobs: 0 })
     await run('eval', 'deletionFixture.failCleanup()')
     await run('eval', 'deletionFixture.delete()')

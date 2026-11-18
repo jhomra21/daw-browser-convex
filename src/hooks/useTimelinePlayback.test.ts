@@ -4124,6 +4124,7 @@ test('does not restart after pause wins an active native rebuild', async () => {
 
 test('does not resume a structural rebuild after stop wins', async () => {
   const previousWindow = globalThis.window
+  const device = createDeviceMove()
   const beginGate = Promise.withResolvers<NativeTransactionReply>()
   const fixture = createNativeHookBridge()
   Object.defineProperty(globalThis, "window", {
@@ -4137,6 +4138,7 @@ test('does not resume a structural rebuild after stop wins', async () => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           requiresNativeAudio: true,
           enabled: () => true,
+          outputDeviceId: device.outputDeviceId,
           projectId: () => "project",
           compileSnapshot: nativeRequiredSnapshot,
         })
@@ -4146,12 +4148,7 @@ test('does not resume a structural rebuild after stop wins', async () => {
         fixture.transportStates.length = 0
         fixture.setBeginGate(beginGate.promise)
 
-        const rebuild = playback.restartTimelineSchedule([track], {
-          rebuildBackend: true,
-          resumePlayback: true,
-          playheadSec: 2,
-          projectId: "project",
-        })
+        const rebuild = device.move()
         await flushMicrotasks()
         await playback.handleStop()
         beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })

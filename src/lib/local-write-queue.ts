@@ -1,6 +1,9 @@
 import { createSignal, type Accessor } from 'solid-js'
-import type { LocalProjectEntityRow } from '~/lib/local-project-db'
-import { openLocalProjectDb } from '~/lib/local-project-db'
+import {
+  openLocalProjectDb,
+  registerLocalEntityWriteQueueRelease,
+  type LocalProjectEntityRow,
+} from '~/lib/local-project-db'
 
 type QueuedEntityWrite = {
   kind: string
@@ -192,6 +195,7 @@ export const releaseLocalEntityWriteQueue = async (projectId: string): Promise<v
   await queue.flush()
   if (!queue.hasPendingWrites() && queuesByProject.get(projectId) === queue) queuesByProject.delete(projectId)
 }
+registerLocalEntityWriteQueueRelease(releaseLocalEntityWriteQueue)
 
 export const getLocalEntityWriteStatusAccessor = (projectId: string): Accessor<LocalEntityWriteStatus> => (
   getLocalEntityWriteQueue(projectId).getStatusAccessor()

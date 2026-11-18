@@ -9,6 +9,7 @@ import { createNativePlaybackController, nativePlaybackFaultText, type NativePla
 import { classifyNativeVst3PlaybackFault, nativeVst3LaunchAuthorizationRequiredMessage } from "~/lib/external-plugin-ui"
 import { createNativeProcessorStateOwner } from "./native-processor-state-owner"
 import { createNativeRetirement } from "./native-retirement"
+import type { ScheduleRevisionCandidate } from "./native-schedule-publication"
 import { nativeTimelinePageStagingBytes } from "./native-timeline-page-manager"
 import { clearInstanceLimits, instanceLimit, vstInstanceFailed } from "./vst-instance-failures"
 import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
@@ -4560,7 +4561,9 @@ describe("DV01 instrument truth", () => {
   test("a no-revision release failure is reported as an incident", async () => {
     const fixture = createBridge()
     const notices: string[] = []
-    const processorState = createNativeProcessorStateOwner({ reportIncident: category => { notices.push(category) } })
+    const processorState = createNativeProcessorStateOwner<ScheduleRevisionCandidate>({
+      reportIncident: category => { notices.push(category) },
+    })
     const retirement = createNativeRetirement({
       processorState,
       revisions: undefined,
@@ -4573,7 +4576,9 @@ describe("DV01 instrument truth", () => {
         latestScheduleProgress: undefined,
       }),
     })
-    retirement.hold(fixture.revisionReply("prepared"), "project", async () => {
+    const proof = fixture.revisionReply("prepared")
+    if (!proof.ok) throw new Error("Expected a prepared revision proof")
+    retirement.hold(proof, "project", async () => {
       throw new Error("release failed")
     })
     await turns()

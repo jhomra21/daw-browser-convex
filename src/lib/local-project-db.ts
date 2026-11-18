@@ -19,12 +19,15 @@ import {
 } from '~/lib/local-project-deletion'
 import { buildTimelineTrackRow } from '~/lib/timeline-repository/track-row-builder'
 import { normalizeMixedEffectEntityRows } from '~/lib/mixed-effect-order'
-import { releaseLocalEntityWriteQueue } from '~/lib/local-write-queue'
 import type { GlobalProjectsDB, ProjectDB } from '~/lib/local-project-db-schema'
 import { z } from 'zod'
 
 export const LOCAL_PROJECT_SCHEMA_VERSION = 2
 export const LOCAL_CONTROL_PROJECT_METADATA_KEY = 'control-project-metadata'
+let releaseLocalEntityWriteQueue: ((projectId: string) => Promise<void>) | undefined
+export const registerLocalEntityWriteQueueRelease = (
+  release: (projectId: string) => Promise<void>,
+): void => { releaseLocalEntityWriteQueue = release }
 
 const GLOBAL_DB_NAME = 'daw-browser-projects'
 const GLOBAL_DB_VERSION = 2
@@ -696,7 +699,7 @@ export const exportLocalProjectRows = async (projectId: string) => {
 }
 
 export const deleteLocalProjectUnlocked = async (projectId: string): Promise<void> => {
-  await releaseLocalEntityWriteQueue(projectId)
+  await releaseLocalEntityWriteQueue?.(projectId)
   const db = await openGlobalProjectsDb()
   if (await db.get('projectDeletions', projectId) && !await db.get('projects', projectId)) {
     await finishLocalProjectDeletion(projectDeletionDependencies(db), projectId)

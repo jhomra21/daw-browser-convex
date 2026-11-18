@@ -234,6 +234,19 @@ export const compareCancelledStart = (input: { events: readonly HostEvent[]; obs
   return cold.length ? `${name} stopped, tore down, began or configured the session: ${named(cold)}` : undefined
 }
 
+// An edit of a plug-in row never restarts the playing host: nothing stops, tears down, begins or configures on it, and the only worker it
+// starts is an insert's own (a removal or a parameter change starts none). The editor window's host is another process (another pid).
+export const compareNoRestart = (input: { events: readonly HostEvent[]; hostPid: number; editWallMs: (index: number) => number; workerSpawns: (index: number) => number }): Compare => (window) => {
+  const from = input.editWallMs(window.index)
+  const mine = input.events.filter((event) => event.pid === input.hostPid)
+  const cold = lifecycleBetween(mine, from, window.toWallMs)
+  if (cold.length) return `the edit stopped, tore down or rebuilt the playing host: ${named(cold)}`
+  const spawned = mine.filter((event) => /^(worker-spawn|host-restart-request)$/.test(event.event) && event.wallMs >= from && event.wallMs <= window.toWallMs)
+  const expected = input.workerSpawns(window.index)
+  return spawned.length === expected && spawned.every((event) => event.event === "worker-spawn") ? undefined
+    : `the edit started ${spawned.length} workers or restarts (${named(spawned) || "none"}), expected ${expected} worker`
+}
+
 // An edit made while the editor is open publishes in place: after any step the editor is never reported closed and nothing restarts.
 export const compareEditor = (events: readonly HostEvent[], playingPid: number, editWallMs: (index: number) => number): Compare => (window) => {
   const from = editWallMs(window.index)
@@ -270,6 +283,23 @@ export const compareLane = (events: readonly HostEvent[], editWallMs: (index: nu
   return laneEvents > 0 ? undefined : "the re-enabled lane's schedule windows carry no lane event"
 }
 
+// The live output holds every path back by the pinned latency budget, which only rises while playing: a state's offline export (no
+// budget) is compared delayed by it.
+export const delayedBy = (pcm: Pcm, frames: number): Pcm => frames === 0 ? pcm
+  : { ...pcm, samples: Float32Array.from({ length: pcm.samples.length }, (_, index) => index < frames * pcm.channels ? 0 : pcm.samples[index - frames * pcm.channels] ?? NaN) }
+// A plug-in row's edited (right) channel is swapped between the plug-in's output and the path that replaces it for one transport block (the
+// pinned budget) plus the 10 ms compensation crossfade after the publication. Those frames are not compared; the retained channel always is.
+// A frame the capture never covered stays NaN and still fails.
+export const withoutSwap = (output: Pcm, states: readonly Pcm[], seams: readonly number[], swapFrames: number): Pcm => {
+  const samples = Float32Array.from(output.samples)
+  seams.forEach((seam, edit) => {
+    for (let frame = seam; frame < seam + swapFrames; frame++) {
+      const index = frame * output.channels + 1
+      if (Number.isFinite(samples[index])) samples[index] = states[edit + 1]?.samples[index] ?? NaN
+    }
+  })
+  return { ...output, samples }
+}
 // An import lands at the playhead, which differs per cycle, while the reference export imports at 0 (the launch asserts it). The clip's
 // sound is the same shifted in time, so the state an import enters is the reference with the edited (right) channel moved to the start
 // the live clip actually took; the frames before it are the state that was left (the clip's absence).
@@ -285,8 +315,8 @@ export const placedAt = (present: Pcm, absent: Pcm, startSec: number): Pcm => {
 
 const logged = z.object({ edits: z.array(z.object({ index: z.number(), name: z.string(), wallMs: z.number(), settledWallMs: z.number().optional(), publicationFrame: z.number(),
   fromLatencyFrames: z.number(), toLatencyFrames: z.number(), startSec: z.number().optional() })) })
-const publicationLine = z.object({ event: z.literal("graph-publish"), cause: z.literal("block-boundary"), pid: z.number(), wallMs: z.number(), transportEpoch: z.number(),
-  publicationFrame: z.number().positive(), graphLatencyFrames: z.number(), pinnedLatencyFrames: z.number() })
+const publicationLine = z.object({ event: z.literal("graph-publish"), cause: z.string(), pid: z.number(), wallMs: z.number(), transportEpoch: z.number(),
+  publicationFrame: z.number(), graphLatencyFrames: z.number(), pinnedLatencyFrames: z.number() })
 const nativeLines = (text: string) => text.slice(0, text.lastIndexOf("\n") + 1).split("\n").filter(Boolean).map((line) => JSON.parse(line))
 
 // Judges one stored row of a launch: steps and seams from its phase9-edits.json, the capture from the launch folder.
@@ -319,16 +349,31 @@ export const judgeRowCapture = async (input: { launchOut: string; directory: str
   const capture = await readWav(path.join(launchOut, `output-${owner.pid}-${owner.captureId}.wav`))
   const seams = steps.map((step) => step.publicationFrame)
   const captured = Math.max(...mine.map((block) => block.transportFrame + block.frames))
+  const firstEditWallMs = steps[0]?.editWallMs ?? 0
+  const hostPublications = texts.flatMap(nativeLines).flatMap((entry) => {
+    const line = publicationLine.safeParse(entry)
+    return line.success && line.data.pid === owner.pid ? [line.data] : []
+  })
+  const launchPublications = hostPublications.filter((line) => line.cause === "block-boundary" && line.transportEpoch === owner.transportEpoch && line.publicationFrame > 0).sort((a, b) => a.publicationFrame - b.publicationFrame)
+  // The budget the host pinned before the burst (in whatever epoch): every path is held back by it.
+  const pinnedBefore = hostPublications.sort((a, b) => a.wallMs - b.wallMs).findLast((line) => line.wallMs < firstEditWallMs)?.pinnedLatencyFrames
+  const stepEdits = (index: number) => row.cycle[(index - 1) % row.cycle.length]?.edits ?? []
+  const restartFree = row.repeat === "vst-burst"
+    ? compareNoRestart({ events: hostEvents, hostPid: owner.pid, editWallMs, workerSpawns: (index) => stepEdits(index).filter((edit) => edit === "vst-insert").length })
+    : () => undefined
+  const guarded = (compare: Compare): Compare => (window) => restartFree(window) ?? compare(window)
   if (row.judge === "states") {
     const [initial, ...entered] = await Promise.all([row.start, ...steps.map((step) => row.cycle[(step.index - 1) % row.cycle.length]?.state ?? "")]
-      .map((state) => readWav(input.stateFile(state))))
+      .map((state) => readWav(input.stateFile(row.reference ?? state))))
     const states = initial ? [initial, ...entered.map((state, position) => {
       const startSec = steps[position]?.startSec
       return startSec === undefined ? state : placedAt(state, initial, startSec)
-    })] : []
+    })].map((state) => delayedBy(state, row.reference === undefined ? 0 : pinnedBefore ?? 0)) : []
     const endFrame = Math.min(captured, ...states.map((state) => state.samples.length / state.channels))
     const entries = steps.map((step) => row.cycle[(step.index - 1) % row.cycle.length]?.entry)
-    return judgeBurst(steps, input.captureEndWallMs, compareStates({ output: transportIndexed(capture, mine, endFrame), states, seams, entries, endFrame }))
+    const live = transportIndexed(capture, mine, endFrame)
+    const output = row.reference === undefined ? live : withoutSwap(live, states, seams, (pinnedBefore ?? 0) + Math.round(live.sampleRate * 0.01))
+    return judgeBurst(steps, input.captureEndWallMs, guarded(compareStates({ output, states, seams, entries, endFrame })))
   }
   const output = transportIndexed(capture, mine, captured)
   if (row.judge === "lane") {
@@ -337,15 +382,10 @@ export const judgeRowCapture = async (input: { launchOut: string; directory: str
     return judgeBurst(steps, input.captureEndWallMs, compareLane(events, editWallMs))
   }
   if (row.judge === "latency") {
-    const firstEditWallMs = steps[0]?.editWallMs ?? 0
-    const launchPublications = texts.flatMap(nativeLines).flatMap((entry) => {
-      const line = publicationLine.safeParse(entry)
-      return line.success && line.data.pid === owner.pid && line.data.transportEpoch === owner.transportEpoch ? [line.data] : []
-    }).sort((a, b) => a.publicationFrame - b.publicationFrame)
     const publications = launchPublications.filter((line) => line.wallMs >= firstEditWallMs && line.wallMs <= input.captureEndWallMs)
     const startingPinned = launchPublications.findLast((line) => line.wallMs < firstEditWallMs)?.pinnedLatencyFrames ?? edits[0]?.fromLatencyFrames ?? 0
     const rowEnd = Math.max(...mine.filter((block) => block.wallMs <= input.captureEndWallMs).map((block) => block.transportFrame + block.frames))
-    return judgeBurst(steps, input.captureEndWallMs, compareLatencyMoves({ output, edits, publications, startingPinned, endFrame: Math.min(captured, rowEnd) }))
+    return judgeBurst(steps, input.captureEndWallMs, guarded(compareLatencyMoves({ output, edits, publications, startingPinned, endFrame: Math.min(captured, rowEnd) })))
   }
   if (row.judge === "held") return judgeBurst(steps, input.captureEndWallMs, compareHeld({ output, seams, endFrame: captured }))
   if (row.judge === "sustained") return judgeBurst(steps, input.captureEndWallMs, compareSustained({ output, seams, endFrame: captured }))
@@ -608,6 +648,28 @@ export const selfTest = () => {
   check(cancelled(lines({ event: "structural-rebuild", wallMs: 5250 })).editIndex === 5, "a rebuild after a Stop's cancel fails although the Stop reads stopped at 0")
   check(cancelled(lines(), replaced(2, { state: "paused" })).editIndex === 3, "a Play that does not play fails")
   check(cancelled(lines(), honestSeen.filter((_, position) => position !== 1)).editIndex === 2, "a step with no observation fails")
+  // A plug-in row's edits start no worker beyond an insert's own and never touch the playing host (the editor window's host is another pid).
+  const hostLine = (event: string, wallMs: number, pid = 7) => ({ event, wallMs, pid })
+  const noRestart = (events: ReturnType<typeof lines>, edit: string) => one(compareNoRestart({ events, hostPid: 7, editWallMs: editedAt, workerSpawns: () => edit === "vst-insert" ? 1 : 0 }))
+  check(noRestart(lines(hostLine("worker-spawn", 1200)), "vst-insert").outcome === "pass", "an insert's own worker passes")
+  check(noRestart(lines(), "vst-remove").outcome === "pass", "a removal that starts nothing passes")
+  check(noRestart(lines(hostLine("device-stop", 1200, 8), hostLine("worker-spawn", 1300, 8), hostLine("host-spawn", 1100, 8)), "vst-remove").outcome === "pass", "the editor host's own lifecycle is not the playing host's")
+  check(noRestart(lines(hostLine("worker-spawn", 1200)), "vst-remove").outcome === "fail", "a removal that starts a worker fails")
+  check(noRestart(lines(hostLine("worker-spawn", 1200), hostLine("worker-spawn", 1300)), "vst-insert").outcome === "fail", "an insert that starts a second worker fails")
+  check(noRestart(lines(), "vst-insert").outcome === "fail", "an insert that starts no worker fails")
+  check(noRestart(lines(hostLine("device-stop", 1200)), "vst-remove").outcome === "fail", "an edit that stops the playing host's device fails")
+  check(noRestart(lines(hostLine("structural-rebuild", 1200)), "vst-insert").outcome === "fail", "an edit that rebuilds the playing host fails")
+  check(noRestart(lines(hostLine("host-exit", 1200)), "vst-remove").outcome === "fail", "an edit that makes the playing host exit fails")
+  // The plug-in's channel is not compared while it is swapped for the path that replaces it, the retained channel always is.
+  const swapStates = [states[0], states[1]].map((entry) => entry ?? render())
+  const swapped = (defect: (output: Pcm) => void) => { const output = render(); defect(output); return withoutSwap(output, swapStates, [seams[0] ?? 0], 992) }
+  const swapSeam = seams[0] ?? 0
+  const maskedRight = swapped((output) => { for (let frame = swapSeam; frame < swapSeam + 992; frame++) output.samples[frame * channels + 1] = 0.5 })
+  check((maskedRight.samples[(swapSeam + 10) * channels + 1] ?? NaN) === (swapStates[1]?.samples[(swapSeam + 10) * channels + 1] ?? 0), "the swapped frames of the edited channel take the reference")
+  check(swapped((output) => { output.samples[(swapSeam + 10) * channels] = 0.5 }).samples[(swapSeam + 10) * channels] === 0.5, "the retained channel is never masked")
+  check(swapped((output) => { output.samples[(swapSeam + 992) * channels + 1] = 0.5 }).samples[(swapSeam + 992) * channels + 1] === 0.5, "the edited channel after the swap is never masked")
+  check(Number.isNaN(swapped((output) => { output.samples[(swapSeam + 10) * channels + 1] = NaN }).samples[(swapSeam + 10) * channels + 1]), "a frame the capture never covered stays uncovered")
+  check(delayedBy({ sampleRate, channels: 1, samples: Float32Array.of(1, 2, 3, 4) }, 2).samples.join() === "0,0,1,2", "a state is delayed by the pinned budget and keeps its length")
   console.log("ae-08 phase 9 compare self-test: pass")
 }
 

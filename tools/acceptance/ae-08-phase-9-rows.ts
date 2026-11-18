@@ -40,6 +40,9 @@ export type PackagedRun = {
   // A hardware device the row needs. A launch checks that it is present before the app starts.
   device?: "iac-midi" | "blackhole"
   judge?: Judge
+  // The state whose offline export stands for every state of a "states" row: an export that includes a plug-in delays the retained path by
+  // its own compensation, not the live pinned budget, so only the export without it is a reference (the compare delays it by that budget).
+  reference?: string
   // What every step of the row settles on, unless the step names its own.
   settle?: Settle
   // What a launch of this row needs that no current fixture provides.
@@ -115,10 +118,11 @@ export const burstRows: BurstRow[] = [
   { name: "vst-insert", latencyClass: "vst-insert", packaged: { repeat: "vst-burst", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-absent", prepare: testPlugin, tier: "extended",
     cycle: [{ edits: ["vst-insert"], state: "vst-present" }, { edits: ["vst-remove"], state: "vst-absent" }] } },
   // Removing an external plug-in is not an undo history entry (EffectsPanel removeExternalProcessor), so the plug-in comes back by a new insert.
+  // The test plug-in is a pass-through at its default Latency, so both states sound as the state without it (the reference).
   // 40 steps give the 20 inserts the frozen vst-insert limit was sampled on.
-  { name: "vst-remove-undo", latencyClass: "plain", packaged: { repeat: "vst-burst", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-present", prepare: insertedTestPlugin,
+  { name: "vst-remove-undo", latencyClass: "plain", packaged: { repeat: "vst-burst", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-present", prepare: insertedTestPlugin, judge: "states", reference: "vst-absent",
     repetitions: { cert: 40 }, cycle: [{ edits: ["vst-remove"], state: "vst-absent" }, { edits: ["vst-insert"], state: "vst-present" }] } },
-  { name: "vst-latency-switch", latencyClass: "raise", packaged: { repeat: "vst-burst", periodSec: null, fixture: "phase5:raw-tempo", start: "latency-low", prepare: insertedTestPlugin,
+  { name: "vst-latency-switch", latencyClass: "raise", packaged: { repeat: "vst-burst", periodSec: null, fixture: "phase5:raw-tempo", start: "latency-low", prepare: insertedTestPlugin, judge: "latency",
     cycle: [{ edits: ["latency-high"], state: "latency-high" }, { edits: ["latency-low"], state: "latency-low" }] } },
   // Opening the editor publishes no graph: it settles on the host's vst-editor-state line. The edit after it must publish in place with the editor still open.
   { name: "open-editor", latencyClass: "vst-insert", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-present", prepare: insertedTestPlugin, judge: "editor",

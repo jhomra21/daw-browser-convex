@@ -26,6 +26,9 @@ const move = (fromLatencyFrames: number, toLatencyFrames: number) => ({ fromLate
 const unmoved = move(0, 0)
 const spectralFrames = (fftSize: 512 | 4096) => getSpectralLatencyFrames(fftSize, createDefaultSpectralParams().overlap)
 const silentTrack = "Silent publication target"
+// An out-of-process plug-in adds one transport block of latency to what it declares (audio-host.cpp: transport_latency_frames equals
+// the attachment's transport.maximum_frames); the packaged runs use the 512-frame device block.
+const vstTransportFrames = 512
 // Native progress frames are lower bounds on what has been heard, so a window is closed this long after its second.
 const windowMarginMs = 250
 export type Phase9Launch = { rows: Row[]; requested: Requested; directory: string; contentSeconds: number }
@@ -81,7 +84,8 @@ export const createPerformer = ({ context, runtime, playThenPause, transportStat
     await changedClip(false)
     return committed
   }
-  // The test plug-in's Latency parameter (id 1, four steps) in normalized units: 0 is 0 frames, 1 is 4096 (run-ae08-test-plugin.ts).
+  // The test plug-in's Latency parameter (id 1, four steps) in normalized units: 0 is 0 frames, 1 is 4096 (run-ae08-test-plugin.ts). The
+  // host reports the plug-in's declared latency plus one transport block (vstTransportFrames), so the moves are declared with it.
   const testPluginLatency = (normalizedValue: number, from: number, to: number) => async () => {
     const { wallMs } = await commit([{ kind: "external-plugin.parameters.set", target,
       processor: ref(required((await observe()).externalEffectId, "Test plug-in processor")), changes: [{ parameterId: 1, normalizedValue }] }])
@@ -249,8 +253,8 @@ export const createPerformer = ({ context, runtime, playThenPause, transportStat
       return { ...unmoved, wallMs }
     }],
     ["untrusted-insert", async () => { await refuseUntrustedPlugin(context); return unmoved }],
-    ["latency-high", testPluginLatency(1, 0, 4096)],
-    ["latency-low", testPluginLatency(0, 4096, 0)],
+    ["latency-high", testPluginLatency(1, vstTransportFrames, vstTransportFrames + 4096)],
+    ["latency-low", testPluginLatency(0, vstTransportFrames + 4096, vstTransportFrames)],
     ["silent-track-create", () => commit([{ kind: "track.create", name: silentTrack, trackKind: "audio" }])],
     ["silent-track-delete", async () => {
       return commit([{ kind: "track.delete", track: ref(required((await observe()).trackId(silentTrack), silentTrack)) }])
@@ -385,8 +389,9 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
   // One offline export per state of each compared row, with the project in that state: the references of judgeBurst. Each row's burst
   // ended on its start state, and one pass over its cycle returns it there.
   for (const row of launch.rows.filter((entry) => entry.judge === "states")) {
+    const wanted = (state: string) => row.reference === undefined || row.reference === state
     const exported = new Set([row.start])
-    await exportReference(context, stateName(row.name, row.start), launch.contentSeconds)
+    if (wanted(row.start)) await exportReference(context, stateName(row.name, row.start), launch.contentSeconds)
     // The transport is stopped: put the playhead at 0 so an import places its clip at 0, the start placedAt shifts from.
     await runtime(["seek", "0"])
     for (const step of row.cycle) {
@@ -394,7 +399,7 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
         const { startSec } = await perform(edit)
         if (startSec !== undefined && startSec !== 0) throw new Error(`The reference ${edit} placed its clip at ${startSec} s, not 0`)
       }
-      if (!exported.has(step.state)) await exportReference(context, stateName(row.name, step.state), launch.contentSeconds)
+      if (wanted(step.state) && !exported.has(step.state)) await exportReference(context, stateName(row.name, step.state), launch.contentSeconds)
       exported.add(step.state)
     }
   }
@@ -516,8 +521,8 @@ export const selfTest = async () => {
   check(take.calls[0]?.includes("'Delete'") === true && take.calls.every((call) => !call.startsWith("interact")), "vst-remove clicks the device card's Delete button")
   const high = await run("latency-high"), low = await run("latency-low")
   const latencyAction = (normalizedValue: number) => `mutate ${JSON.stringify([{ kind: "external-plugin.parameters.set", target: { kind: "track", track: ref("track-1") }, processor: ref("external-1"), changes: [{ parameterId: 1, normalizedValue }] }])}`
-  check(high.calls[0] === latencyAction(1) && high.moved.fromLatencyFrames === 0 && high.moved.toLatencyFrames === 4096, `latency-high sets the Latency parameter to its top step: ${high.calls[0]}`)
-  check(low.calls[0] === latencyAction(0) && low.moved.fromLatencyFrames === 4096 && low.moved.toLatencyFrames === 0, "latency-low sets it back")
+  check(high.calls[0] === latencyAction(1) && high.moved.fromLatencyFrames === 512 && high.moved.toLatencyFrames === 4608, `latency-high sets the Latency parameter to its top step: ${high.calls[0]}`)
+  check(low.calls[0] === latencyAction(0) && low.moved.fromLatencyFrames === 4608 && low.moved.toLatencyFrames === 512, "latency-low sets it back")
   // The editor opens through the card's Open UI button and is awaited as Close UI; the fault sets the Fault parameter's crash step and
   // waits for the card to report it; the untrusted insert opens the dashboard, finds the trust prompt and no plug-in entry, and clicks nothing.
   // The inserted plug-in's editor is already open: the step closes it through Close UI, waits for the state capture, then clicks Open UI.

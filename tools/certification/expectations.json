@@ -16,68 +16,68 @@
   "path": "tools/certification/manifest-7a.json",
   "sha256": "efc72e432e6bf4716ac10f6971096347ca62ffbd219721544b5d03a6ab300376",
   "entries": {
-   "src/lib/desktop/native-playback-controller.ts": "a05de9362a9fc9cb23dc0afebe27db9f62058c0af76190f8f455e536fc7b7199",
-   "src/lib/desktop/native-processor-state-owner.ts": "af33462c069274afb7203d48ef4c73d89a03fb94df61b15e70fc02aeb4d54679",
-   "src/hooks/useTimelinePlayback.ts": "4e1e1bdae209a4cb6cc41ad8040322871e0364af7e7a6bd4c9504ab55f7d33dd",
-   "src/lib/desktop/native-playback-controller.test.ts": "f1dea2733f60d5f25bdf390d71d317ee2eb173252ba9e2b31e70f60138c2bc57",
-   "src/hooks/useTimelinePlayback.test.ts": "797d132d9a8896bbcb7e7df25c2f972d708da757af92efb7a7abfb82f4ac222f",
+   "src/lib/desktop/native-playback-controller.ts": "b5e1fc2049df5d6c48a23da1698fa4f2436a9c27d5f24c7b5272b6e0fc72b414",
+   "src/lib/desktop/native-processor-state-owner.ts": "53750681a61f1fada917534a649b3bb299699c9e0c775656f421a9defaaabf48",
+   "src/hooks/useTimelinePlayback.ts": "21e5b471cc645c2a0243d8751b80f2574570773d3c0b6220505d349e53083690",
+   "src/lib/desktop/native-playback-controller.test.ts": "464429cdce5cd22a90ff9889314bc3d46ceca6e94c5b25b6e6bfbb5e8d55d7c6",
+   "src/hooks/useTimelinePlayback.test.ts": "d1168e77cf8f87c89cff3ca837f13ad78de78952690ba866e818402528ecbbe2",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts": "e0b1a2dd2a1b90280f727e4be02ce695222226001e6068254dc3999a37ecf892",
-   "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "d142311c67f051ff62243d144309162bc35aab8ee217f4c38fdbf836edb33cfa",
+   "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "6dd9c727cec1d33ae59f9ea84ee9dcb9e58b4d50a6f439e7c8a80eed854cdaf9",
    "src/components/timeline/create-timeline-effect-commit.ts": "c62ae6f5ec087a8abe5a0d1038d71b1172ae060a0c294bcef848c553b278a9c2",
-   "src/components/Timeline.tsx": "d1f5fe20eb22e965a673d4cd48842a8a40b22099e31b140f74c7a04193c312f5",
-   "src/components/Timeline.test.ts": "433c7416061d61d5a3c80426d4030d970993320ddaa439dfe27fe4dc9f0a5b13",
-   "src/lib/desktop/native-playback-lifecycle.browser.test.ts": "af37dd7afc52c9612ede1c1f53833caf9126f4a2e69f85cb8b5634ae821df805",
-   "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "7f45e3103c2bdf98467bcb6de030a6971cbd6182729f77bf974907c9a1024ef0",
+   "src/components/Timeline.tsx": "9ebab6feb470600f0642766d0b2a36427b4186444515aa41f268595f4f6b6664",
+   "src/components/Timeline.test.ts": "205f93a63b10432da31c2245e9916686734b2e3ed96c32c42ca6398efa0a7feb",
+   "src/lib/desktop/native-playback-lifecycle.browser.test.ts": "6346028eb5c5c93ef7cac32ddb6ac55f0831138a0d4caa82751c415429a36186",
+   "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "cc425e8e63ca4a699494120e580dc059652519d97aad660215f92fdacf3b21ee",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-classes.ts": "3d46c8e6cd6ec9e7dee21ab8e47261a8e1a5b2eebe6e887a44878b2140604c48",
    "tools/acceptance/ae-08-processor-state-fuzz-classes.ts": "9e5ad044ef9fa3326fb6ac8494285593662d2cf8c2c15f5ccab8706c342441b6",
-   "tools/acceptance/ae-08-processor-state-fuzz.ts": "1b5d13a6b5c74d82c4df31c6365ae600e6a935dab4cbfacdb0467292e696ca16",
-   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "b735161b21b836e516a20f296252fa413af63296167ccfc26af58485eb15810a",
-   "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "7b28afccdbc4c77e1b34262d7e3d521e67461a448954deb205b1acfbbd4c0079",
+   "tools/acceptance/ae-08-processor-state-fuzz.ts": "c524fa77cf555056ba1b4d2f935930916dea19bd2b773e8d9d3696cc702f3f65",
+   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "88fdbcaeb4873a76e9d267bf907388fd970e1064bcd994176df6c196f1d839dd",
+   "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "45812b888a956f3e705848a27de914bedcb956ec728e5bd2f6ec86a07cd3acd0",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-commit.ts": null,
-   "tools/acceptance/device-control-cost.browser.test.ts": "c6e19c1db802f5b0eca7573cf1b5f4eb584f9bf15b210a9001f5b1b6b8f2c13c",
-   "src/lib/instrument-buffer-sync.test.ts": "b1ba7ddea4b6f995ef22104e7552fea7b8de86a1176d43e2b35d0d5172bc05b1",
-   "src/components/timeline/parameter-gesture-owner.ts": "72733156f94affd25ba19e11dbe6ebe074c758a52e392f55d25af260422fc9d9",
-   "src/components/timeline/create-persisted-effect-state.ts": "bc910f28f18592cdfed542608750b1e71f4325eeedcd05fd2aa0d415b6ff1d89",
-   "src/components/timeline/create-effects-panel-state.ts": "7957d4fa526d62171e472de0b0e307bb154cc654bb8a9acf037ee5dfc9687a9d",
-   "src/components/timeline/create-effects-panel-controller.ts": "0950cb6702bd2acbb29493902881d0e83d7444493e7214b0acc45477dbacaf0f",
-   "src/lib/portable-browser-playback-controller.ts": "bc3220c5bc5f82d7d77a52378eb30c96011b018f3d197257eedacc43d70df90b",
+   "tools/acceptance/device-control-cost.browser.test.ts": "6a9acd3f2f391531e58e0981a6424ab67152de8aa8d8fa32da46031317919f40",
+   "src/lib/instrument-buffer-sync.test.ts": "46e2fcb58ae61834f0f58ea1f57044f5733a04849f678e44ac68a85fea28477a",
+   "src/components/timeline/parameter-gesture-owner.ts": "4dd194ddb7ff0a988b19c15715f55876cc2ea65a661dbdb03308100ab4e64fc9",
+   "src/components/timeline/create-persisted-effect-state.ts": "8a94bf7fd598d47b33cd28c509ea1e9100d6bfe622342f791c25bc9c01a48686",
+   "src/components/timeline/create-effects-panel-state.ts": "b279d747ebf6aef10f1eb77e2fce2bf8a1e17808d078c4b09d31a7aea79df200",
+   "src/components/timeline/create-effects-panel-controller.ts": "bce1fe2c11516522b05f92b968e6fc06486cb3c256946117f93ba4ec117790b8",
+   "src/lib/portable-browser-playback-controller.ts": "f02a0d0f80490c1f9883b91348c40a568b474281f349a8f1d60a0ce6bcd2a83c",
    "src/components/effects/Sampler.tsx": "65164a653cf2fdad60d96fd33ae7b29d6b7239801b102b37e208e8ac9e58b19b",
    "src/components/effects/Granular.tsx": "bd70f972b350d2888527f7ba28e107c2b4af681b3f6aca8022a406c8e873dd91",
    "src/lib/when-number.ts": "b52ff4e7bb3ea935af21ef607c0458d658c79cd892c4a27339a8c3e195e517d9",
-   "tools/acceptance/device-control-cost.browser-runtime.tsx": "d083d15afca9269323ebdba5c886b2707e3f9e7bec53f5305c2b38e89edb7f07",
+   "tools/acceptance/device-control-cost.browser-runtime.tsx": "00b35b36c9932e396b05304ddea7c4dd8d75ec2c768088680cc34848b38983fb",
    "tools/acceptance/device-control-cost.ts": "cbfc01c361f83eba5061512fc866b6de1686b06a81f5a6ad4bf6adc1fc4ef3fe",
-   "src/hooks/useEffectsPanelAudioSync.test.ts": "12f028b72e38b8badf8233a60363ae1f03a57119d7c01e2e3ecde0cfd38d8beb",
-   "src/lib/portable-browser-playback-controller.test.ts": "941bf0e8416b88522a10cd0a96c377bb2b5a207d82cd900a5edad00f944d0dc4",
-   "src/components/timeline/create-persisted-effect-state.test.ts": "5d3ae312c861ac660a4a81b47d18d223397a7b473dca0ac73168f1cce0086fa7",
-   "src/components/timeline/create-effects-panel-audio-effects-state.test.ts": "267562137157e2c20b0e807286ed3cea5f8b9c61130933f9b32c2bb416470a6e",
-   "src/components/timeline/create-effects-panel-audio-effects-state.ts": "3cf85e14cbf254b3cd1abb193bf660bf1a42ca978ae51a19f6b076ed0f73a6c9",
-   "src/hooks/pointer-gesture-ownership.browser.test.ts": "3366804e569ebe038988bf2c57ca39b1e9fd6fabb52d7e79cd337d3a6d50422b",
-   "native/audio-core/src/audio_core.cpp": "72afdd0eb686a5ba617b797e82d98267f07e74d28db7602b800c8e06befaa8dc",
+   "src/hooks/useEffectsPanelAudioSync.test.ts": "8e1b3461865537cc810225d15d4055fb14c3166c14e99ad1f850f5a1922aa1f1",
+   "src/lib/portable-browser-playback-controller.test.ts": "722f3a2dfb4f9fad9a1b4430a0159cbbed57aeef9f37307a8a629f0c5113c8a5",
+   "src/components/timeline/create-persisted-effect-state.test.ts": "f9b2e8202f8969d6b76d81e4d3e9f7dc54db7e056ca96dc4893bde7798a5b81d",
+   "src/components/timeline/create-effects-panel-audio-effects-state.test.ts": "41a9a2627451f3007fd7c1d03e794218282bb7e97e172a02a9e341ef31b9f52f",
+   "src/components/timeline/create-effects-panel-audio-effects-state.ts": "056f15fdfc8dff5bbe77be3be25a84e705c070bf5104ab316e32f1b794bdeceb",
+   "src/hooks/pointer-gesture-ownership.browser.test.ts": "97de152a03d38f7a859db24def1097eede4735d1d606667175197a3d2163b6dc",
+   "native/audio-core/src/audio_core.cpp": "8c900edcf84080378ee37b07bd844fd5f05e7f7b07a88f2f9fbf2fd78c92c213",
    "native/audio-core/include/daw/audio_core.h": "f25494ac366d889ddf296bd763740e62b256aecffa37a2d47771182d2294a130",
-   "native/audio-core/tests/audio_core_test.cpp": "1141a3e82d799cb434386347c28608262876b481e3fbe77c55b1fe661acd52e1",
-   "native/audio-host-macos/tests/audio_host_test.cpp": "107b27ec3d2fa63e4c6ef78f14284cc01ad13721a076852aa0a55381806d52e7",
-   "native/audio-host-macos/tests/realtime_callback_guard.test.ts": "90b37f15da3ae94908b6d7ed0abadeb4f22e6d75851d5a4be2a9f25b54834a6c",
-   "public/audio-core/daw-audio-core.wasm": "5b5b058089e2c3b3f6defc6d6b9a1c78576e17814ddc1d667121356b7fe37aec",
-   "public/audio-core/daw-audio-core.manifest.json": "a6983c49764bff7391aeca9ebafa97ea16c15df4f5501ceeb9cfbd03baa9345f",
+   "native/audio-core/tests/audio_core_test.cpp": "542c599298ee998a9326ff6cfc9fe38873bfc3d93bf0b0a289569e66320b41dc",
+   "native/audio-host-macos/tests/audio_host_test.cpp": "3106d995958b0fa5ee3d7190c262590a07a1de4087098fa02a1bd97b388b0a6d",
+   "native/audio-host-macos/tests/realtime_callback_guard.test.ts": "f6e9fe362ce3e10d1d1b7dbf8aa7164a613ff08248ed57af98bdce824f2e0a89",
+   "public/audio-core/daw-audio-core.wasm": "860d5056e615a5433a8a2fcea7882a7f6a74fe70b554a61f6580729e1b55a0bc",
+   "public/audio-core/daw-audio-core.manifest.json": "b4cd51eedabe5ae048a2bdda489b10edd03b4a74d1161a23861f904eb9f100ca",
    "public/audio-worklets/daw-portable-graph-envelope-v3.js": "21f7a750448152905143ac481a8c6cff75fdbc43b0508c1e1cd671173927c6ef",
    "public/audio-worklets/daw-portable-audio-core-host-v2.js": "40cfc893967ce25980ba31e0a89a4023b805d506a45c7f707326998a58c5974b",
    "public/audio-worklets/daw-portable-audio-core-processor-v2.js": "d9fcd6ba60a590b54670e02d4124fc9a823759efbdbb463f2c9027ea505f6635",
    "packages/audio-engine/src/portable-wasm-protocol.ts": "563927524f38dde3c814386befb13aacea025893737f2e51c53e0cf4107fce0b",
    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.ts": "798a1e4300df48d667795e2d4813c5f0992895ec97adb1adf90ae8b424e7ff9e",
-   "packages/audio-engine/src/native-host-wire.ts": "51f4a8812d9ce87af3a55114fa2a0650c0b06135f01baf8960c431d39bb58434",
-   "packages/audio-engine/src/native-host-wire.test.ts": "586d06916c7caa630003d88940403d5b356aa57f39965f624693fe34078917d1",
+   "packages/audio-engine/src/native-host-wire.ts": "db562f34edfd51dca19b52fadeba8ab5bf15ec1b0f65f36eb5438da2651c694f",
+   "packages/audio-engine/src/native-host-wire.test.ts": "66687e823918211b1551e160d0442caba5196c923ba26c1fabad209a7d6a5cbb",
    "packages/audio-engine/src/portable-wasm-host.test.ts": "037b45a5f732b9691b81f6698040f201fb289496cf9d02bf6031c4ab33903fd8",
    "packages/audio-engine/src/portable-wasm-protocol.test.ts": "b94c0451d92b92c43d1bc633bdc007eb11b81ba7ff7c2a1a4e464b0e7ec0db0b",
-   "packages/audio-engine/src/portable-wasm-worklet.test.ts": "a9f7c704ad8fb2ccc7cad73a2524a346d278178388ba0b5380716722da207e6b",
+   "packages/audio-engine/src/portable-wasm-worklet.test.ts": "6ea584caa447e9408125e0a0171edf305443e656f1b42b2c85545a444ee6e14f",
    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts": "a612840aafa9f76f8d560cabee5e91d86a421ffb5982810ade09a8c4733e9796",
-   "tools/acceptance/analyze-ae-08-continuity.ts": "3fea84e6f23fedaa711b6a04c113ee0ca7467634b4265780464c697427442a2f",
-   "tools/acceptance/ae-08-phase-5-fixture.ts": "064907792ae215db35287942d46a38131b199b7523b2fb863240ca10b1dd450b",
-   "tools/acceptance/ae-08-live-graph.ts": "2cb7a9cb3e13e9deb246827fc693fd57813d15536722df07079e2a5080cae35b",
+   "tools/acceptance/analyze-ae-08-continuity.ts": "c142ac7336932fe4833eb82bb334063587da9e8245737d72566d9f28228831b0",
+   "tools/acceptance/ae-08-phase-5-fixture.ts": "ec1afc30ce457e8d4db4be2a5324583dd1c7db3e1349f0723359f664d8a1ec98",
+   "tools/acceptance/ae-08-live-graph.ts": "b9cf38d7d364a108ba24ebe58453d3ce32db071d77cdeeb96118de78dca50ab1",
    "tools/performance/30-track/native-spool-wav.test.ts": "26540502e79939621b1932de1d2469746ea8deebb749323ae78e1501b70bd602",
    "src/lib/timeline-audio-import.ts": "7f9fb7978bffee79814e7eaf99d27abb521c64e0beadfce39e078cee0136950b",
    "src/lib/timeline-audio-import-metadata-only.test.ts": "90ed907b59b969d0328295eef29d0b29920a1de8bef4687fbf9a3adbff4e417c",
    "src/hooks/useTimelineProjectionState.test.ts": "6e2bcef9dae22eff8ef12885c964b50d338176d0059e704ca615d05e27216ead",
-   "tools/acceptance/b5c-playback-witness-support.ts": "0908bca8135182b7a66032cf8da00ff1e434aa1b1277128d2fc7ec88892b8c02"
+   "tools/acceptance/b5c-playback-witness-support.ts": "150d326d412a89e9bf2ee6a61a799de287db8683507361e161022b45bf443137"
   }
  },
  "rebase": {
@@ -126,78 +126,78 @@
  },
  "fuzzSources": {
   "controller": {
-   "src/lib/desktop/native-playback-controller.ts": "a05de9362a9fc9cb23dc0afebe27db9f62058c0af76190f8f455e536fc7b7199",
-   "src/lib/desktop/native-schedule-coordinator.ts": "6e841788b5b320bfa8019406466392c07c7717666c565f4ec10e5f98dd835f4d",
-   "src/lib/desktop/native-processor-state-owner.ts": "af33462c069274afb7203d48ef4c73d89a03fb94df61b15e70fc02aeb4d54679",
-   "src/lib/desktop/native-built-in-parameter-mapper.ts": "21aadde284da527746d3c1463caaa0f92cec9674d70289e0b5e352e0dc850e43",
-   "src/lib/live-processor-control.ts": "841375ec42695eaf9f5fe1669fb1011e109f95b3ea5bf857bc2192dd0978dc0d",
-   "src/components/timeline/create-processor-edit-registry.ts": "9df2fbd896a2e99d1fafac0bce8cb4a1c936af04126c7afe086fdfa30bf3733b",
-   "src/lib/live-playback-snapshot.ts": "486f6524d05e9a7e7d500d0f60b395e41e9ec2961b67b4eca2e9003f6db01d95",
-   "packages/audio-engine/src/native-host-wire.ts": "51f4a8812d9ce87af3a55114fa2a0650c0b06135f01baf8960c431d39bb58434",
-   "apps/desktop/audio-host.ts": "37804a699b89703780cf853731cfd0732d5ebedbecd78e8a091b4b406b4e184f",
-   "native/audio-host-macos/src/audio-host.cpp": "dd90c36e616010d0abe5932d518da2071840a5ffce98c29a8bd25bc22de4adb1",
-   "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "d142311c67f051ff62243d144309162bc35aab8ee217f4c38fdbf836edb33cfa",
+   "src/lib/desktop/native-playback-controller.ts": "b5e1fc2049df5d6c48a23da1698fa4f2436a9c27d5f24c7b5272b6e0fc72b414",
+   "src/lib/desktop/native-schedule-coordinator.ts": "aa2875b872dbb75c3f0504889d8d95b582c5b5bebcd8df32655382073fbb3978",
+   "src/lib/desktop/native-processor-state-owner.ts": "53750681a61f1fada917534a649b3bb299699c9e0c775656f421a9defaaabf48",
+   "src/lib/desktop/native-built-in-parameter-mapper.ts": "dff45138f0e19ddbe4d77a90a06dab3343013bdda6d6d804b1c502aadd6e423b",
+   "src/lib/live-processor-control.ts": "690e6414550836e6b20fe001095a01e4bb25f5c531e836a506e8a1c9c910bdcb",
+   "src/components/timeline/create-processor-edit-registry.ts": "5fe45c0d8f68639a7d6a7517cb11b87964531f9f08fb2c0a2bbbf98ea4e7dfb1",
+   "src/lib/live-playback-snapshot.ts": "a91045f04e9c1cf5cc2569ec9e1acef0300c86b2e8983adcbad963f95d20874d",
+   "packages/audio-engine/src/native-host-wire.ts": "db562f34edfd51dca19b52fadeba8ab5bf15ec1b0f65f36eb5438da2651c694f",
+   "apps/desktop/audio-host.ts": "d2ed3b877d8a50e0edb7ca064fd8c1109483d594a3438fbd65c6c04751b2a4e4",
+   "native/audio-host-macos/src/audio-host.cpp": "e980c760e06847a08f370085f2ae1a3f7f35544ca9296a9f750dc603bb53789e",
+   "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "6dd9c727cec1d33ae59f9ea84ee9dcb9e58b4d50a6f439e7c8a80eed854cdaf9",
    "tools/acceptance/ae-08-processor-state-fuzz-oracle.ts": "6012c31220beacef2e8a2221335d9ce35af8754b98d3e5190d2e07282198addb",
-   "tools/acceptance/ae-08-processor-state-fuzz.ts": "1b5d13a6b5c74d82c4df31c6365ae600e6a935dab4cbfacdb0467292e696ca16",
-   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "b735161b21b836e516a20f296252fa413af63296167ccfc26af58485eb15810a",
+   "tools/acceptance/ae-08-processor-state-fuzz.ts": "c524fa77cf555056ba1b4d2f935930916dea19bd2b773e8d9d3696cc702f3f65",
+   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "88fdbcaeb4873a76e9d267bf907388fd970e1064bcd994176df6c196f1d839dd",
    "tools/acceptance/ae-08-processor-state-fuzz-trace.ts": "3746a8cfcc27bfb2c092dcc5ff01a8e31e771c09776150490a05c9a44794916a",
    "tools/acceptance/ae-08-processor-state-fuzz-classes.ts": "9e5ad044ef9fa3326fb6ac8494285593662d2cf8c2c15f5ccab8706c342441b6",
-   "tools/acceptance/ae-08-processor-state-fuzz-edit.ts": "781b5bff0fc34645b34144be0b7fe1d5287c50d323e3741ef9f57583c4f04452",
-   "src/lib/desktop/native-publication-transaction.ts": "8db74b542bfbe8377fdfadcedebc2e17c54552fcf6236e4f58a64840361733f2",
-   "src/lib/desktop/native-schedule-publication.ts": "dd2d49f630ff87ecee803d47f374b22be6a5cfd2cfb44bb47715d290f2c068ee",
-   "src/lib/desktop/native-observation.ts": "c597fbf0ad9eb5fec2c6620f30b31220cb78a8c4f9fc487ae0d5f314d7b602a1",
-   "src/lib/desktop/native-recording-session.ts": "524b6b0177fc0d7fac634134ac24c49ee8c3f49958354fa70c6564ffcac97adf",
-   "src/lib/desktop/native-live-midi.ts": "2cb2e3211c16f0446acabed09917afeaad6a572641c827f8c455ee2575b4595b",
-   "src/lib/desktop/native-state-patches.ts": "0c29a514246416c6332788f6bb01910f4e6de33df337a0336ced5c165cae3afd",
-   "src/lib/desktop/native-graph-targets.ts": "032dea1cfca1da5b69b0e3367d5179d66158213280e061cfe919141d156bc8a5",
+   "tools/acceptance/ae-08-processor-state-fuzz-edit.ts": "447452df6e1d848f00de7c9bfb1b25a5b4182607d2011fe25f6a8f80e932e7e7",
+   "src/lib/desktop/native-publication-transaction.ts": "8a2cdf786ddf3e4afe276d39a23bf20ea87cdc020953eaf5b881780b42b1e5bf",
+   "src/lib/desktop/native-schedule-publication.ts": "b64c14ace9ea4f823ceec5ace6a6620d199556ad8b23b441fe7ef4d60bbae87e",
+   "src/lib/desktop/native-observation.ts": "24c6fa76d3592cb1c1b5e5bcdcf748606e12344ab23147c4c75d46b8e8570505",
+   "src/lib/desktop/native-recording-session.ts": "e4b827bd74b74f02a20f33ca3858f7e46b387189bd668d6574958710c6155180",
+   "src/lib/desktop/native-live-midi.ts": "41b4119ea3cd2bbdeb4ff5f9e50e0d17985a90aeeaaf5a25a9b9ec97a7c602f2",
+   "src/lib/desktop/native-state-patches.ts": "22f05e3f3215f1844d3703ef869612d1e471f1b1338adf38a5696c790cdca1ba",
+   "src/lib/desktop/native-graph-targets.ts": "f239fc94953b808a8b8500bb09a5f18aab48d51f5ec11ee6eef546b50fe4ca45",
    "src/lib/desktop/native-snapshot-support.ts": "3380d9389286f0e06ae58d7749e0dd7d329093a479bcbbf14054295d88a46b6a",
    "src/lib/desktop/native-host-connection-loss.ts": "50e0feaea25c8237c9527180fcfd1245a712d9d66ae0ec48ec7921f5145a7026",
-   "src/lib/desktop/native-retirement.ts": "ebc0078b313567ffd7d8b48234825dcfe1ccff8dede80dbb32249e31ba1cdf3d",
-   "src/lib/desktop/native-parameter-events.ts": "6e968a429b26e266be323a513c24a9efbf98908bd43c80f92730c786d27736e5"
+   "src/lib/desktop/native-retirement.ts": "cf0d6b0b4d8f72ee715475185405c6eb5e93ea65bdf5b3092c2e9c4386fef953",
+   "src/lib/desktop/native-parameter-events.ts": "ecda290f936f834041c565fa3ad1657395a9a0aad3d51e11ad9856c1fd4d6aac"
   },
   "hook": {
-   "src/hooks/useTimelinePlayback.ts": "4e1e1bdae209a4cb6cc41ad8040322871e0364af7e7a6bd4c9504ab55f7d33dd",
-   "src/components/timeline/create-effects-panel-audio-effects-state.ts": "3cf85e14cbf254b3cd1abb193bf660bf1a42ca978ae51a19f6b076ed0f73a6c9",
-   "src/lib/desktop/native-playback-controller.ts": "a05de9362a9fc9cb23dc0afebe27db9f62058c0af76190f8f455e536fc7b7199",
+   "src/hooks/useTimelinePlayback.ts": "21e5b471cc645c2a0243d8751b80f2574570773d3c0b6220505d349e53083690",
+   "src/components/timeline/create-effects-panel-audio-effects-state.ts": "056f15fdfc8dff5bbe77be3be25a84e705c070bf5104ab316e32f1b794bdeceb",
+   "src/lib/desktop/native-playback-controller.ts": "b5e1fc2049df5d6c48a23da1698fa4f2436a9c27d5f24c7b5272b6e0fc72b414",
    "src/lib/local-effects.ts": "4bf53a70c2d602cf459013e453b2e0ce44c1605006480421bc3637529c2add81",
-   "src/lib/desktop/native-processor-state-owner.ts": "af33462c069274afb7203d48ef4c73d89a03fb94df61b15e70fc02aeb4d54679",
-   "src/lib/desktop/native-built-in-parameter-mapper.ts": "21aadde284da527746d3c1463caaa0f92cec9674d70289e0b5e352e0dc850e43",
-   "src/lib/live-processor-control.ts": "841375ec42695eaf9f5fe1669fb1011e109f95b3ea5bf857bc2192dd0978dc0d",
-   "src/components/timeline/create-processor-edit-registry.ts": "9df2fbd896a2e99d1fafac0bce8cb4a1c936af04126c7afe086fdfa30bf3733b",
+   "src/lib/desktop/native-processor-state-owner.ts": "53750681a61f1fada917534a649b3bb299699c9e0c775656f421a9defaaabf48",
+   "src/lib/desktop/native-built-in-parameter-mapper.ts": "dff45138f0e19ddbe4d77a90a06dab3343013bdda6d6d804b1c502aadd6e423b",
+   "src/lib/live-processor-control.ts": "690e6414550836e6b20fe001095a01e4bb25f5c531e836a506e8a1c9c910bdcb",
+   "src/components/timeline/create-processor-edit-registry.ts": "5fe45c0d8f68639a7d6a7517cb11b87964531f9f08fb2c0a2bbbf98ea4e7dfb1",
    "src/components/timeline/create-timeline-effect-commit.ts": "c62ae6f5ec087a8abe5a0d1038d71b1172ae060a0c294bcef848c553b278a9c2",
-   "tools/acceptance/ae-08-processor-state-fuzz.ts": "1b5d13a6b5c74d82c4df31c6365ae600e6a935dab4cbfacdb0467292e696ca16",
-   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "b735161b21b836e516a20f296252fa413af63296167ccfc26af58485eb15810a",
-   "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "d142311c67f051ff62243d144309162bc35aab8ee217f4c38fdbf836edb33cfa",
+   "tools/acceptance/ae-08-processor-state-fuzz.ts": "c524fa77cf555056ba1b4d2f935930916dea19bd2b773e8d9d3696cc702f3f65",
+   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "88fdbcaeb4873a76e9d267bf907388fd970e1064bcd994176df6c196f1d839dd",
+   "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "6dd9c727cec1d33ae59f9ea84ee9dcb9e58b4d50a6f439e7c8a80eed854cdaf9",
    "tools/acceptance/ae-08-processor-state-fuzz-oracle.ts": "6012c31220beacef2e8a2221335d9ce35af8754b98d3e5190d2e07282198addb",
-   "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "7b28afccdbc4c77e1b34262d7e3d521e67461a448954deb205b1acfbbd4c0079",
-   "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "7f45e3103c2bdf98467bcb6de030a6971cbd6182729f77bf974907c9a1024ef0",
+   "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "45812b888a956f3e705848a27de914bedcb956ec728e5bd2f6ec86a07cd3acd0",
+   "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "cc425e8e63ca4a699494120e580dc059652519d97aad660215f92fdacf3b21ee",
    "tools/acceptance/ae-08-processor-state-fuzz-virtual-time.ts": "e64ef10c2079d01c2cd83883d701d9e8e5404bff98561c30b170b4267db8da4e",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-classes.ts": "3d46c8e6cd6ec9e7dee21ab8e47261a8e1a5b2eebe6e887a44878b2140604c48",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-scenarios.ts": "590afa5e2d0e2e6b28035e3312bbfac3c51574d12458dddb29ab94d8a109b975",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-scenarios-a2c.ts": "96219765eaf82064231fa6bc3c63b7120716577cdb2b9ef4b681cc9f81a89bc0",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-minimize.ts": "6111a6ee3e7415fa05dab67cbcad7248e1f19490a6b5903869cf1faeb63537da",
    "tools/acceptance/ae-08-processor-state-fuzz-classes.ts": "9e5ad044ef9fa3326fb6ac8494285593662d2cf8c2c15f5ccab8706c342441b6",
-   "tools/acceptance/ae-08-processor-state-fuzz-hook-history.ts": "f52737fb50b8f6dacba094ce44553943841c5838b3ad2fb70358228daa718b31",
+   "tools/acceptance/ae-08-processor-state-fuzz-hook-history.ts": "0b4ad5c66deafc6b84653d2d609e70a64be89ad3541cc1fb0f2ff7ac564e49a3",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-checks.ts": "dd36484be52905e92fdc8362299bdee308091cb89a0d4020f06028e550fc0395",
    "tools/acceptance/ae-08-processor-state-fuzz-trace.ts": "3746a8cfcc27bfb2c092dcc5ff01a8e31e771c09776150490a05c9a44794916a",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-bridge.ts": "5ee8044dc7b0ede1a2ca34b866b4f08d71ccf33d15fce5f9dc3abc087e8c2874",
-   "tools/acceptance/ae-08-processor-state-fuzz-hook-edits.ts": "54c7bad602710c3ff799e36e58ea435e30b13019e69ef2ddb12bcd51fb96d1df",
+   "tools/acceptance/ae-08-processor-state-fuzz-hook-edits.ts": "55f149daade8923d30ff69ef02b8980c3299cb5d46c486e944abbce78f450f1f",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts": "e0b1a2dd2a1b90280f727e4be02ce695222226001e6068254dc3999a37ecf892",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-bank-checks.ts": "737bc4c9789b828e56a603334fcb232d8d9ffe633b86890badce4d470da871f8",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-buffer.ts": "4269810567eb6b579ef0ebdcc1295a677aea1cfbb4e30ea1fda57a8865c2dc4a",
-   "tools/acceptance/ae-08-processor-state-fuzz-edit.ts": "781b5bff0fc34645b34144be0b7fe1d5287c50d323e3741ef9f57583c4f04452",
+   "tools/acceptance/ae-08-processor-state-fuzz-edit.ts": "447452df6e1d848f00de7c9bfb1b25a5b4182607d2011fe25f6a8f80e932e7e7",
    "tools/acceptance/ae-08-processor-state-fuzz-witness.ts": "569424058f9ebfa0d98b7b2ec9ab1e12c533ba606dde44d170359d8a18c1658b",
-   "src/lib/desktop/native-publication-transaction.ts": "8db74b542bfbe8377fdfadcedebc2e17c54552fcf6236e4f58a64840361733f2",
-   "src/lib/desktop/native-schedule-publication.ts": "dd2d49f630ff87ecee803d47f374b22be6a5cfd2cfb44bb47715d290f2c068ee",
-   "src/lib/desktop/native-observation.ts": "c597fbf0ad9eb5fec2c6620f30b31220cb78a8c4f9fc487ae0d5f314d7b602a1",
-   "src/lib/desktop/native-recording-session.ts": "524b6b0177fc0d7fac634134ac24c49ee8c3f49958354fa70c6564ffcac97adf",
-   "src/lib/desktop/native-live-midi.ts": "2cb2e3211c16f0446acabed09917afeaad6a572641c827f8c455ee2575b4595b",
-   "src/lib/desktop/native-state-patches.ts": "0c29a514246416c6332788f6bb01910f4e6de33df337a0336ced5c165cae3afd",
-   "src/lib/desktop/native-graph-targets.ts": "032dea1cfca1da5b69b0e3367d5179d66158213280e061cfe919141d156bc8a5",
+   "src/lib/desktop/native-publication-transaction.ts": "8a2cdf786ddf3e4afe276d39a23bf20ea87cdc020953eaf5b881780b42b1e5bf",
+   "src/lib/desktop/native-schedule-publication.ts": "b64c14ace9ea4f823ceec5ace6a6620d199556ad8b23b441fe7ef4d60bbae87e",
+   "src/lib/desktop/native-observation.ts": "24c6fa76d3592cb1c1b5e5bcdcf748606e12344ab23147c4c75d46b8e8570505",
+   "src/lib/desktop/native-recording-session.ts": "e4b827bd74b74f02a20f33ca3858f7e46b387189bd668d6574958710c6155180",
+   "src/lib/desktop/native-live-midi.ts": "41b4119ea3cd2bbdeb4ff5f9e50e0d17985a90aeeaaf5a25a9b9ec97a7c602f2",
+   "src/lib/desktop/native-state-patches.ts": "22f05e3f3215f1844d3703ef869612d1e471f1b1338adf38a5696c790cdca1ba",
+   "src/lib/desktop/native-graph-targets.ts": "f239fc94953b808a8b8500bb09a5f18aab48d51f5ec11ee6eef546b50fe4ca45",
    "src/lib/desktop/native-snapshot-support.ts": "3380d9389286f0e06ae58d7749e0dd7d329093a479bcbbf14054295d88a46b6a",
    "src/lib/desktop/native-host-connection-loss.ts": "50e0feaea25c8237c9527180fcfd1245a712d9d66ae0ec48ec7921f5145a7026",
-   "src/lib/desktop/native-retirement.ts": "ebc0078b313567ffd7d8b48234825dcfe1ccff8dede80dbb32249e31ba1cdf3d",
-   "src/lib/desktop/native-parameter-events.ts": "6e968a429b26e266be323a513c24a9efbf98908bd43c80f92730c786d27736e5"
+   "src/lib/desktop/native-retirement.ts": "cf0d6b0b4d8f72ee715475185405c6eb5e93ea65bdf5b3092c2e9c4386fef953",
+   "src/lib/desktop/native-parameter-events.ts": "ecda290f936f834041c565fa3ad1657395a9a0aad3d51e11ad9856c1fd4d6aac"
   }
  },
  "gitStatus": [
@@ -1534,7 +1534,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 20,
+     "pass": 21,
      "skip": 0,
      "fail": 0
     },
@@ -1705,7 +1705,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 263,
+     "pass": 280,
      "skip": 1,
      "fail": 0
     },
@@ -1736,7 +1736,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 688,
+     "pass": 715,
      "skip": 1,
      "fail": 0
     },
@@ -1902,7 +1902,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 31,
+     "pass": 34,
      "skip": 0,
      "fail": 0
     },
@@ -2100,7 +2100,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 326,
+     "pass": 328,
      "skip": 0,
      "fail": 0
     },
@@ -2131,7 +2131,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 44,
+     "pass": 45,
      "skip": 0,
      "fail": 0
     },
@@ -2162,7 +2162,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 157,
+     "pass": 158,
      "skip": 0,
      "fail": 0
     },
@@ -2536,7 +2536,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/native-host-wire.test.ts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -2551,7 +2551,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/media-pages.test.ts": {
-      "pass": 9,
+      "pass": 10,
       "skip": 0,
       "fail": 0
      },
@@ -2576,12 +2576,12 @@
       "fail": 0
      },
      "packages/audio-engine/src/master-fx-runtime.test.ts": {
-      "pass": 57,
+      "pass": 60,
       "skip": 0,
       "fail": 0
      },
      "packages/audio-engine/src/live-mixer-runtime.test.ts": {
-      "pass": 67,
+      "pass": 70,
       "skip": 0,
       "fail": 0
      },
@@ -2711,7 +2711,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/mixer/apply-live-routing.test.ts": {
-      "pass": 2,
+      "pass": 4,
       "skip": 0,
       "fail": 0
      },
@@ -2813,7 +2813,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 704,
+     "pass": 731,
      "skip": 1,
      "fail": 0
     },
@@ -2847,7 +2847,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 112,
+     "pass": 116,
      "skip": 1,
      "fail": 0
     },
@@ -2878,7 +2878,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 263,
+     "pass": 280,
      "skip": 1,
      "fail": 0
     },
@@ -2910,7 +2910,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 141,
+     "pass": 145,
      "skip": 3,
      "fail": 0
     },
@@ -2941,7 +2941,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 326,
+     "pass": 328,
      "skip": 0,
      "fail": 0
     },
@@ -2983,7 +2983,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 396,
+     "pass": 402,
      "skip": 3,
      "fail": 0
     },
@@ -3047,7 +3047,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 430,
+     "pass": 449,
      "skip": 1,
      "fail": 0
     },
@@ -3425,7 +3425,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/native-host-wire.test.ts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -3440,7 +3440,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/media-pages.test.ts": {
-      "pass": 9,
+      "pass": 10,
       "skip": 0,
       "fail": 0
      },
@@ -3465,12 +3465,12 @@
       "fail": 0
      },
      "packages/audio-engine/src/master-fx-runtime.test.ts": {
-      "pass": 57,
+      "pass": 60,
       "skip": 0,
       "fail": 0
      },
      "packages/audio-engine/src/live-mixer-runtime.test.ts": {
-      "pass": 67,
+      "pass": 70,
       "skip": 0,
       "fail": 0
      },
@@ -3600,7 +3600,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/mixer/apply-live-routing.test.ts": {
-      "pass": 2,
+      "pass": 4,
       "skip": 0,
       "fail": 0
      },
@@ -4132,7 +4132,7 @@
     "exit": 0,
     "logSha256": "eff779776f2997facfc7f4baa1fde2f510b59e9a69e22167618cd99907d3bd8c",
     "gateSha256": "983318db3c1ecf9ef14e90bdb367dfc770c09542eb9d4d97a22aaacb8bc4c800",
-    "summarySha256": "1a8bb302fb199750340c1e6ee058554f82c861c95ab4abb7ad7fb63402077a0b"
+    "summarySha256": "6e5c85c591758db0c5d605aeb2e2aca861520739d74ea0b09d183d22f949c57d"
    }
   },
   {
@@ -4172,7 +4172,7 @@
     "exit": 0,
     "logSha256": "eff779776f2997facfc7f4baa1fde2f510b59e9a69e22167618cd99907d3bd8c",
     "gateSha256": "983318db3c1ecf9ef14e90bdb367dfc770c09542eb9d4d97a22aaacb8bc4c800",
-    "summarySha256": "1a8bb302fb199750340c1e6ee058554f82c861c95ab4abb7ad7fb63402077a0b"
+    "summarySha256": "6e5c85c591758db0c5d605aeb2e2aca861520739d74ea0b09d183d22f949c57d"
    }
   },
   {
@@ -4210,9 +4210,9 @@
    "judge": {
     "kind": "campaign",
     "exit": 0,
-    "logSha256": "7adfca8cf6e4d235b4e84472bf32717bf2048ce310a4d3a8b904efb1989ed411",
+    "logSha256": "01eb80205d16beb604c7f3d1f04f7a9a6ab3d96df6e884bde8c714cbfc64e417",
     "gateSha256": "c83cf025f591a6b2fb031e626a64ba0ca3433b201b0a3e1a78a6bb64d501d2cb",
-    "summarySha256": "2e9186ea14c3ee2fb3fd170eb3b13a8518efbfa4f74cf417e26d3cdac8a7c407"
+    "summarySha256": "ba5146c2289dfaab9aab6099651b183c79b243c7926699b6a59d0eff26146fc6"
    }
   },
   {
@@ -4250,21 +4250,21 @@
    "judge": {
     "kind": "campaign",
     "exit": 0,
-    "logSha256": "7adfca8cf6e4d235b4e84472bf32717bf2048ce310a4d3a8b904efb1989ed411",
+    "logSha256": "01eb80205d16beb604c7f3d1f04f7a9a6ab3d96df6e884bde8c714cbfc64e417",
     "gateSha256": "c83cf025f591a6b2fb031e626a64ba0ca3433b201b0a3e1a78a6bb64d501d2cb",
-    "summarySha256": "2e9186ea14c3ee2fb3fd170eb3b13a8518efbfa4f74cf417e26d3cdac8a7c407"
+    "summarySha256": "ba5146c2289dfaab9aab6099651b183c79b243c7926699b6a59d0eff26146fc6"
    }
   }
  ],
  "traces": {
   "controller": {
-   "treeSha256": "cf624e55538c74184677efd991badb26422ec5bb297a59a55297ecee19112ba2",
+   "treeSha256": "ebb432bb9c6bbcdc6d560972df40da9b06fcade7131af99a44ffb2029f6a92a9",
    "files": 701,
    "a": "trace-controller-a",
    "b": "trace-controller-b"
   },
   "hook": {
-   "treeSha256": "b746f0805f98acf624d2e7e5f89cf764cea3d939e5b5e19f161a188a2c7cbbf1",
+   "treeSha256": "b1f8b7945d1fd7783d20475f4a035ed55dc7f2e7a9fa28ed4ab2851781ccfc47",
    "files": 4459,
    "a": "trace-hook-a",
    "b": "trace-hook-b"
@@ -4277,9 +4277,9 @@
   "hook206": {
    "seed": 206,
    "ids": [
-    205,
-    209,
-    214
+    200,
+    204,
+    209
    ]
   },
   "controller": {
@@ -5830,12 +5830,13 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 2,
+      "pass": 1,
       "skip": 0,
-      "fail": 6
+      "fail": 7
      },
      "fails": [
       "W51 latency exact shared budget survives changed-desired",
+      "W51 latency exact shared budget survives negative-status",
       "W51 latency exact shared budget survives own-rollback",
       "W51 latency exact shared budget survives prepared",
       "W51 latency resubmit budget counts initial plus eight, opportunities=12",
@@ -16444,7 +16445,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 713,
+      "pass": 715,
       "skip": 1,
       "fail": 0
      },
@@ -16505,7 +16506,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 712,
+      "pass": 714,
       "skip": 1,
       "fail": 1
      },
@@ -17091,7 +17092,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 796,
+      "pass": 799,
       "skip": 1,
       "fail": 0
      },
@@ -17158,7 +17159,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 795,
+      "pass": 798,
       "skip": 1,
       "fail": 1
      },
@@ -17221,7 +17222,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 796,
+      "pass": 799,
       "skip": 1,
       "fail": 0
      },
@@ -17288,7 +17289,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 795,
+      "pass": 798,
       "skip": 1,
       "fail": 1
      },
@@ -17768,7 +17769,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 796,
+      "pass": 799,
       "skip": 1,
       "fail": 0
      },
@@ -17835,7 +17836,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 794,
+      "pass": 797,
       "skip": 1,
       "fail": 2
      },
@@ -18174,7 +18175,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 796,
+      "pass": 799,
       "skip": 1,
       "fail": 0
      },
@@ -18241,7 +18242,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 795,
+      "pass": 798,
       "skip": 1,
       "fail": 1
      },
@@ -18579,7 +18580,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 796,
+      "pass": 799,
       "skip": 1,
       "fail": 0
      },
@@ -18646,7 +18647,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 795,
+      "pass": 798,
       "skip": 1,
       "fail": 1
      },
@@ -18969,7 +18970,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 796,
+      "pass": 799,
       "skip": 1,
       "fail": 0
      },
@@ -19036,7 +19037,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 795,
+      "pass": 798,
       "skip": 1,
       "fail": 1
      },
@@ -22434,7 +22435,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -22495,9 +22496,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 263,
+      "pass": 267,
       "skip": 1,
-      "fail": 12
+      "fail": 13
      },
      "fails": [
       "B6d3 a paused structural replacement prepares at the playhead a Stop published while it waited",
@@ -22511,6 +22512,7 @@
       "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
       "B6f5 renaming a track while paused on native does not recompile the paused preview; a volume edit does",
       "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
+      "fingerprints all playback-relevant audio clip compiler fields for paused preview",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
      "fuzz": null,
@@ -22691,7 +22693,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 796,
+      "pass": 799,
       "skip": 1,
       "fail": 0
      },
@@ -22758,7 +22760,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 795,
+      "pass": 798,
       "skip": 1,
       "fail": 1
      },
@@ -22938,7 +22940,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -22999,7 +23001,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -23187,7 +23189,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -23254,7 +23256,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -23432,7 +23434,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -23493,7 +23495,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -24039,7 +24041,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -24100,7 +24102,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 275,
       "skip": 1,
       "fail": 5
      },
@@ -24289,7 +24291,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 796,
+      "pass": 799,
       "skip": 1,
       "fail": 0
      },
@@ -24356,7 +24358,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 795,
+      "pass": 798,
       "skip": 1,
       "fail": 1
      },
@@ -24541,7 +24543,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 796,
+      "pass": 799,
       "skip": 1,
       "fail": 0
      },
@@ -24608,7 +24610,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 795,
+      "pass": 798,
       "skip": 1,
       "fail": 1
      },
@@ -24788,7 +24790,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -24849,7 +24851,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 272,
+      "pass": 277,
       "skip": 1,
       "fail": 3
      },
@@ -25030,7 +25032,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -25091,7 +25093,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -25274,7 +25276,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -25335,7 +25337,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 275,
       "skip": 1,
       "fail": 5
      },
@@ -25668,7 +25670,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -25741,7 +25743,7 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 271,
+      "pass": 276,
       "skip": 1,
       "fail": 4
      },
@@ -25939,7 +25941,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -26012,7 +26014,7 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 267,
+      "pass": 272,
       "skip": 1,
       "fail": 8
      },
@@ -26198,7 +26200,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -26259,7 +26261,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -27292,7 +27294,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 796,
+      "pass": 799,
       "skip": 1,
       "fail": 0
      },
@@ -27359,7 +27361,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 795,
+      "pass": 798,
       "skip": 1,
       "fail": 1
      },
@@ -27539,7 +27541,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -27600,7 +27602,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -27904,7 +27906,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -27965,7 +27967,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 257,
+      "pass": 262,
       "skip": 1,
       "fail": 18
      },
@@ -28159,7 +28161,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -28220,7 +28222,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 272,
+      "pass": 277,
       "skip": 1,
       "fail": 3
      },
@@ -28399,7 +28401,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -28460,7 +28462,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -28999,7 +29001,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -29060,7 +29062,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -29239,7 +29241,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -29300,7 +29302,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -29603,7 +29605,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -29664,7 +29666,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -29966,7 +29968,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -30027,7 +30029,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -30448,7 +30450,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -30509,7 +30511,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -30674,7 +30676,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -30861,7 +30863,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 273,
       "skip": 1,
       "fail": 7
      },
@@ -31032,7 +31034,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -31216,7 +31218,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -32706,7 +32708,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -32891,7 +32893,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -33058,7 +33060,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -33243,7 +33245,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -33410,7 +33412,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -33600,7 +33602,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 265,
       "skip": 1,
       "fail": 15
      },
@@ -33781,7 +33783,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -33967,7 +33969,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -34135,7 +34137,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -34320,7 +34322,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -34488,7 +34490,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -34673,7 +34675,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 272,
+      "pass": 277,
       "skip": 1,
       "fail": 3
      },
@@ -34842,7 +34844,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -35027,7 +35029,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -35140,7 +35142,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 157,
+      "pass": 158,
       "skip": 0,
       "fail": 0
      },
@@ -35193,7 +35195,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -35318,7 +35320,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 155,
+      "pass": 156,
       "skip": 0,
       "fail": 2
      },
@@ -35380,7 +35382,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 276,
       "skip": 1,
       "fail": 4
      },
@@ -35550,7 +35552,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -35737,7 +35739,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -35905,7 +35907,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -36090,7 +36092,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -36257,7 +36259,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -36442,7 +36444,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -36609,7 +36611,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -36794,7 +36796,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -36961,7 +36963,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -37146,7 +37148,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -37313,7 +37315,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -37498,7 +37500,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -37720,7 +37722,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -37966,7 +37968,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 272,
+      "pass": 277,
       "skip": 1,
       "fail": 3
      },
@@ -38190,7 +38192,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -38438,7 +38440,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -38661,7 +38663,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -38907,7 +38909,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -39184,7 +39186,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -39492,7 +39494,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 276,
       "skip": 1,
       "fail": 4
      },
@@ -39772,7 +39774,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -40083,7 +40085,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 259,
+      "pass": 264,
       "skip": 1,
       "fail": 16
      },
@@ -40375,7 +40377,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -40682,7 +40684,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -40959,7 +40961,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -41266,7 +41268,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 259,
+      "pass": 264,
       "skip": 1,
       "fail": 16
      },
@@ -41397,7 +41399,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 157,
+      "pass": 158,
       "skip": 0,
       "fail": 0
      },
@@ -41527,7 +41529,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 142,
+      "pass": 143,
       "skip": 0,
       "fail": 15
      },
@@ -41657,7 +41659,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 157,
+      "pass": 158,
       "skip": 0,
       "fail": 0
      },
@@ -41790,7 +41792,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 139,
+      "pass": 140,
       "skip": 0,
       "fail": 18
      },
@@ -41923,7 +41925,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 157,
+      "pass": 158,
       "skip": 0,
       "fail": 0
      },
@@ -42052,7 +42054,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 155,
+      "pass": 156,
       "skip": 0,
       "fail": 2
      },
@@ -42294,7 +42296,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 157,
+      "pass": 158,
       "skip": 0,
       "fail": 0
      },
@@ -42424,7 +42426,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 150,
+      "pass": 151,
       "skip": 0,
       "fail": 7
      },
@@ -42604,7 +42606,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -42842,7 +42844,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 275,
       "skip": 1,
       "fail": 5
      },
@@ -43020,7 +43022,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -43243,7 +43245,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 276,
       "skip": 1,
       "fail": 4
      },
@@ -43420,7 +43422,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -43614,7 +43616,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -43788,7 +43790,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -44010,7 +44012,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -44185,7 +44187,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -44377,7 +44379,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -44551,7 +44553,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -44768,7 +44770,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 219,
+      "pass": 224,
       "skip": 1,
       "fail": 56
      },
@@ -44997,7 +44999,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -45207,7 +45209,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -45381,7 +45383,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -45637,7 +45639,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -45872,7 +45874,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -46073,7 +46075,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -46554,7 +46556,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 157,
+      "pass": 158,
       "skip": 0,
       "fail": 0
      },
@@ -46609,7 +46611,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -46737,7 +46739,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 152,
+      "pass": 153,
       "skip": 0,
       "fail": 5
      },
@@ -46804,7 +46806,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -46916,7 +46918,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 157,
+      "pass": 158,
       "skip": 0,
       "fail": 0
      },
@@ -47041,7 +47043,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 155,
+      "pass": 156,
       "skip": 0,
       "fail": 2
      },
@@ -47154,7 +47156,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 157,
+      "pass": 158,
       "skip": 0,
       "fail": 0
      },
@@ -47348,7 +47350,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 113,
+      "pass": 114,
       "skip": 0,
       "fail": 44
      },
@@ -47604,7 +47606,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 157,
+      "pass": 158,
       "skip": 0,
       "fail": 0
      },
@@ -47728,7 +47730,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 156,
+      "pass": 157,
       "skip": 0,
       "fail": 1
      },
@@ -47896,7 +47898,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -48082,7 +48084,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -48761,7 +48763,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -48947,7 +48949,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -49355,7 +49357,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -49541,7 +49543,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 276,
       "skip": 1,
       "fail": 4
      },
@@ -49656,7 +49658,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 157,
+      "pass": 158,
       "skip": 0,
       "fail": 0
      },
@@ -49781,7 +49783,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 151,
+      "pass": 152,
       "skip": 0,
       "fail": 6
      },
@@ -49898,7 +49900,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 157,
+      "pass": 158,
       "skip": 0,
       "fail": 0
      },
@@ -50025,7 +50027,7 @@
      "counts": {
       "pass": 141,
       "skip": 0,
-      "fail": 16
+      "fail": 17
      },
      "fails": [
       "B6f5 D6 an adoption during portable recording keeps the take and its capture blocks continuous",
@@ -50034,6 +50036,7 @@
       "C9a-3 a refused publish keeps the old sources and their preparations, and a resubmit reuses the candidate preparations it still matches",
       "W-C9-asset-1 a clip asset swapped while playing is registered and paged before the publish; the old one is released once the position reaches the seam",
       "W-C9-asset-2 a release answered asset-in-use is asked again at the next position report until the core lets go",
+      "W-C9-asset-2 a thrown asset release remains due for the next position report",
       "W-C9-asset-3 a refused publish keeps the registered asset for the resubmit, which registers nothing again",
       "W-C9-asset-6 a Drum Rack pad sample swapped while a note is held registers the asset before the publish and is adopted without a rebuild",
       "W-C9-asset-7 a Granular sample changed, and a Granular track added and deleted, while playing are adopted with the asset registered before the publish",
@@ -50750,7 +50753,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -50873,14 +50876,15 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 272,
+      "pass": 276,
       "skip": 1,
-      "fail": 3
+      "fail": 4
      },
      "fails": [
       "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
       "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
-      "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key"
+      "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
+      "fingerprints all playback-relevant audio clip compiler fields for paused preview"
      ],
      "fuzz": null,
      "rejection": null,
@@ -50985,7 +50989,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -51107,7 +51111,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -51217,7 +51221,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -51337,7 +51341,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -51447,7 +51451,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -51625,7 +51629,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -51797,7 +51801,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -51975,7 +51979,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -52147,7 +52151,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -52325,7 +52329,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -52497,7 +52501,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -52675,7 +52679,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -52847,7 +52851,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -52969,13 +52973,14 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 273,
+      "pass": 277,
       "skip": 1,
-      "fail": 2
+      "fail": 3
      },
      "fails": [
       "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
-      "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key"
+      "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
+      "fingerprints all playback-relevant audio clip compiler fields for paused preview"
      ],
      "fuzz": null,
      "rejection": null,
@@ -63592,7 +63597,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -63659,7 +63664,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 255,
+      "pass": 260,
       "skip": 1,
       "fail": 20
      },
@@ -63741,7 +63746,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 257,
+      "pass": 262,
       "skip": 1,
       "fail": 18
      },
@@ -63821,7 +63826,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -63888,7 +63893,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -63958,7 +63963,7 @@
      "exit": 0,
      "applied": 2,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -64025,7 +64030,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -64095,7 +64100,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -64164,7 +64169,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 257,
+      "pass": 262,
       "skip": 1,
       "fail": 18
      },
@@ -64244,7 +64249,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 257,
+      "pass": 262,
       "skip": 1,
       "fail": 18
      },
@@ -64330,7 +64335,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 272,
+      "pass": 277,
       "skip": 1,
       "fail": 3
      },
@@ -64401,7 +64406,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -64470,7 +64475,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -64539,7 +64544,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -64608,7 +64613,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -64677,7 +64682,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -64747,7 +64752,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -64816,7 +64821,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -64880,7 +64885,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -64935,7 +64940,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 275,
+      "pass": 280,
       "skip": 1,
       "fail": 0
      },
@@ -64996,7 +65001,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 272,
+      "pass": 277,
       "skip": 1,
       "fail": 3
      },
@@ -65528,7 +65533,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -65597,7 +65602,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 272,
+      "pass": 277,
       "skip": 1,
       "fail": 3
      },
@@ -65662,7 +65667,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -65732,7 +65737,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 273,
+      "pass": 278,
       "skip": 1,
       "fail": 2
      },
@@ -65796,7 +65801,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },
@@ -65865,7 +65870,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 272,
+      "pass": 277,
       "skip": 1,
       "fail": 3
      },
@@ -65930,7 +65935,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 279,
       "skip": 1,
       "fail": 1
      },

@@ -997,6 +997,7 @@ export const createNativePlaybackController = (input: {
           )
         })
         : stopPromise
+      // A refused cancel must not abort Stop: the renderer's recording session is cleared either way and the host Stop is already sent.
       await nativeRecording.cancel().catch(() => undefined)
       // Diagnostics uses the host's single control slot directly. Read the Stop
       // boundary before queuing releases, which would otherwise occupy that slot.

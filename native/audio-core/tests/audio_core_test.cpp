@@ -5,13 +5,13 @@
 #include "graph_fixture.h"
 #if defined(DAW_AUDIO_CORE_TEST_SPECTRAL_INTERNALS)
 
-// Source-level contracts exercise the private transfer without adding a public
-// mutation/inspection API. Build this variant without linking audio_core.cpp twice.
+// The one contract that reads private voice state; see the CMake target that builds this variant.
 #include "../src/audio_core.cpp"
 #endif
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cmath>
 #include <chrono>
@@ -7515,206 +7515,135 @@ void test_phase4_spectral_transfer_late_allocation_free() {
   assert(daw::audio_core::InspectLatencyTransition(edited.core).completed_revision == 2);
 }
 
-#if defined(DAW_AUDIO_CORE_TEST_SPECTRAL_INTERNALS)
-void test_phase4_spectral_transfer_cost() {
-  auto prior = std::make_unique<SpectralHistory>();
-  auto next = std::make_unique<SpectralHistory>();
-  for (const auto sizes : {std::array{512u, 4096u}, std::array{4096u, 512u}}) {
-    for (uint32_t mode : {DAW_AUDIO_SPECTRAL_MODE_GATE, DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE}) {
-      const daw_audio_spectral_state before{.fft_size = sizes[0], .mode = mode};
-      auto after = before; after.fft_size = sizes[1];
-      const auto map = prepare_spectral_transfer(sizes[0], sizes[1]);
-      double total = 0, worst = 0;
-      float checksum = 0;
-      for (uint32_t run = 0; run < 10000; ++run) {
-        for (auto &c : prior->noise_profile) c.fill(.1F + (run % 17) * .01F);
-        for (auto &c : prior->gate_gain) c.fill(.5F);
-        const auto allocations = allocation_count;
-        const auto start = std::chrono::steady_clock::now();
-        apply_spectral_transfer(*prior, before, *next, after, map);
-        const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
-        assert(allocation_count == allocations);
-        total += us; worst = std::max(worst, us);
-        checksum += next->noise_profile[0][run % (sizes[1] / 2 + 1)] + next->gate_gain[0][0];
+constexpr float kSpectralGateThresholdDb = -12.0F;  // at 512; the 4096 threshold, -3 dB, stays under the 0 dB limit
+
+// Energy per octave of a stationary signal, from 1024-sample periodograms: bins 2..511 in eight bands from
+// 94 Hz to 24 kHz at 48 kHz.
+std::array<double, 8> octave_band_energies(const std::vector<float> &samples) {
+  constexpr uint32_t window = 1024;
+  std::array<double, window> cosine{}, sine{};
+  for (uint32_t i = 0; i < window; ++i) {
+    cosine[i] = std::cos(6.283185307179586 * i / window);
+    sine[i] = std::sin(6.283185307179586 * i / window);
+  }
+  std::array<double, 8> bands{};
+  for (size_t at = 0; at + window <= samples.size(); at += window) {
+    for (uint32_t k = 2; k < window / 2; ++k) {
+      double re = 0, im = 0;
+      for (uint32_t i = 0; i < window; ++i) {
+        re += samples[at + i] * cosine[(k * i) % window];
+        im += samples[at + i] * sine[(k * i) % window];
       }
-      std::printf("refresh mode=%u %u->%u mean_us=%g worst_us=%g checksum=%g\n",
-        mode, sizes[0], sizes[1], total / 10000, worst, checksum);
+      bands[std::bit_width(k) - 2] += re * re + im * im;
     }
   }
-  const auto handle = create_core(128, 2, 1);
-  auto &core = *to_core(handle);
-  for (const auto sizes : {std::array{512u, 4096u}, std::array{4096u, 512u}}) {
-    std::array<double, 2> means{}, peaks{};
-    for (uint32_t wet = 0; wet < 2; ++wet) {
-      GraphRevision::Processor old{}, replacement{};
-      old.spectral_slot = 0; replacement.spectral_slot = 1;
-      old.spectral = {.enabled = 1, .fft_size = sizes[0], .overlap = 4,
-        .mode = DAW_AUDIO_SPECTRAL_MODE_FREEZE, .freeze = 1, .mix = 1};
-      replacement.spectral = old.spectral; replacement.spectral.fft_size = sizes[1];
-      core.spectral_inputs[0].initialize_samples(); core.spectral_inputs[1].initialize_samples();
-      uint32_t blocks = 0;
-      for (uint32_t run = 0; run < 100; ++run) {
-        core.spectral_histories[0] = SpectralHistory{};
-        core.spectral_histories[1] = SpectralHistory{};
-        reset_spectral_history(core.spectral_histories[0], old.spectral);
-        reset_spectral_history(core.spectral_histories[1], replacement.spectral);
-        for (uint32_t at = 0; at < sizes[1] * 2u; at += 128) {
-          float l = 0, r = 0;
-          const auto allocations = allocation_count;
-          const auto start = std::chrono::steady_clock::now();
-          for (uint32_t frame = 0; frame < 128; ++frame) {
-            render_spectral_sample(core, old, frame, .25F, .25F, 0, 0, &l, &r);
-            render_spectral_sample(core, replacement, frame, .25F, .25F, 0, 0, &l, &r,
-              wet ? &core.spectral_histories[0].wet_sample : nullptr);
-          }
-          const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
-          assert(allocation_count == allocations);
-          means[wet] += us; peaks[wet] = std::max(peaks[wet], us); ++blocks;
-        }
-      }
-      means[wet] /= blocks;
-    }
-    std::printf("recapture dual-stage 128 frames %u->%u ordinary_mean_us=%g wet_mean_us=%g added_mean_us=%g ordinary_peak_us=%g wet_peak_us=%g\n",
-      sizes[0], sizes[1], means[0], means[1], means[1] - means[0], peaks[0], peaks[1]);
-  }
-  daw_audio_core_destroy(handle);
+  return bands;
 }
 
-void test_phase4_spectral_transfer_relearn() {
-  const auto handle = create_core(64, 2, 1);
-  auto &core = *to_core(handle);
-  auto learned = std::make_unique<std::array<SpectralHistory, 4>>();
-  auto history = std::make_unique<SpectralHistory>();
-  auto next = std::make_unique<SpectralHistory>();
-  constexpr std::array<uint32_t, 4> sizes{512, 4096, 1024, 2048};
-  uint32_t random = 0x7a3579u;
-  const auto uniform = [&] {
-    random ^= random << 13; random ^= random >> 17; random ^= random << 5;
-    return (random + 1.0) / 4294967297.0;
+enum class SpectralSource { White, Pink, Tone };
+
+// Learned Noise Reduce profiles and Gate gains survive an FFT size change. They are judged by what is heard: a core
+// that ran at the new size from the start, fed the same input, is the oracle, and every band that carries energy
+// must match it. The input stays stationary and the profile or gate gains are held afterwards, so a wrongly
+// carried shape cannot be relearned from the input.
+void test_phase4_spectral_transfer_bands(SpectralSource source, uint32_t mode, uint32_t before, uint32_t after) {
+  const bool gate = mode == DAW_AUDIO_SPECTRAL_MODE_GATE;
+  Phase3Rig edited, reference;
+  const auto build = [&](Phase3Rig &rig, uint32_t fft, bool settling) {
+    rig.clear(); rig.add_node(1, DAW_AUDIO_GRAPH_NODE_SOURCE);
+    rig.add_node(2, DAW_AUDIO_GRAPH_NODE_MASTER); rig.add_edge(1, 2);
+    // Magnitudes grow with sqrt(fft), so the same frequency crosses the threshold at every size.
+    const daw_audio_spectral_state state{
+      .enabled = 1, .fft_size = fft, .overlap = 4, .mode = mode,
+      .gate_threshold_db = kSpectralGateThresholdDb + 10.0F * std::log10(fft / 512.0F),
+      .gate_attack_ms = settling ? 1.0F : 1000.0F, .gate_release_ms = settling ? 20.0F : 5000.0F,
+      .noise_reduction = .75F, .profile_learn = settling && !gate ? .1F : 0.0F, .mix = 1,
+    };
+    rig.add_state(1, 10, DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, state);
+    rig.nodes[0].latency_frames = rig.processors.back().latency_frames = fft;
   };
-  for (bool pink : {false, true}) {
-    for (uint32_t index = 0; index < sizes.size(); ++index) {
-      const uint32_t n = sizes[index];
-      GraphRevision::Processor processor{};
-      processor.spectral = {
-        .enabled = 1, .fft_size = n, .overlap = 4, .mode = DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE,
-        .profile_learn = 1, .mix = 1,
-      };
-      reset_spectral_history(*history, processor.spectral);
-      auto &sum = (*learned)[index].noise_profile[0];
-      sum.fill(0);
-      constexpr uint32_t trials = 2048;
-      for (uint32_t trial = 0; trial < trials; ++trial) {
-        // Gaussian frequency coefficients generate a stationary broadband
-        // ensemble. Pink has a fixed 1 kHz corner to avoid a divergent DC PSD.
-        for (uint32_t k = 0; k <= n / 2; ++k) {
-          const double radius = std::sqrt(-2 * std::log(uniform()));
-          const double phase = 6.283185307179586 * uniform();
-          const double psd = pink ? 1000.0 / std::max(1000.0, k * 48000.0 / n) : 1;
-          const double scale = std::sqrt(n * psd / 2);
-          history->real[0][k] = scale * radius * std::cos(phase);
-          history->imaginary[0][k] = (k == 0 || k == n / 2) ? 0 : scale * radius * std::sin(phase);
-          if (k == 0 || k == n / 2) history->real[0][k] *= std::sqrt(2.0);
-          else {
-            history->real[0][n - k] = history->real[0][k];
-            history->imaginary[0][n - k] = -history->imaginary[0][k];
-          }
-        }
-        spectral_fft(history->real[0], history->imaginary[0], n, true);
-        for (uint32_t i = 0; i < n; ++i) {
-          history->input[0][i] = history->real[0][i];
-          history->input[1][i] = history->real[0][i];
-        }
-        history->write_index = n;
-        process_spectral_frame(core, processor, *history, 0);
-        for (uint32_t k = 0; k <= n / 2; ++k)
-          sum[k] += history->noise_profile[0][k] * history->noise_profile[0][k] / trials;
+  build(edited, before, true); build(reference, after, true);
+  edited.commit(1); reference.commit(1);
+  const daw_audio_transport_state transport{.epoch = 1, .running = 1};
+  expect(daw_audio_core_set_transport(edited.core, &transport), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_set_transport(reference.core, &transport), DAW_AUDIO_CORE_OK);
+  uint32_t random = 0x7a3579u;
+  uint64_t position = 0;
+  std::array<double, 3> pink{};
+  const auto render = [&](float level) {
+    std::array<float, Phase3Rig::frames> input{};
+    for (auto &sample : input) {
+      random ^= random << 13; random ^= random >> 17; random ^= random << 5;
+      const double white = random / 2147483648.0 - 1;
+      if (source == SpectralSource::Tone) sample = level * static_cast<float>(std::sin(6.283185307179586 * 750.0 * position++ / 48000.0));
+      else if (source == SpectralSource::White) sample = level * static_cast<float>(white);
+      else {
+        // Paul Kellet's economy pink filter.
+        pink[0] = .99765 * pink[0] + white * .0990460; pink[1] = .96300 * pink[1] + white * .2965164;
+        pink[2] = .57000 * pink[2] + white * 1.0526913;
+        sample = level * static_cast<float>(.25 * (pink[0] + pink[1] + pink[2] + white * .1848));
       }
-      for (uint32_t k = 0; k <= n / 2; ++k) sum[k] = std::sqrt(sum[k]);
     }
-    for (uint32_t index = 0; index < sizes.size(); ++index) {
-      const uint32_t target = index ^ 1u;
-      const daw_audio_spectral_state before{.fft_size = sizes[index], .mode = DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE};
-      auto after = before; after.fft_size = sizes[target];
-      transfer_spectral_persistent((*learned)[index], before, *next, after);
-      double worst = 0;
-      for (uint32_t k = 0; k <= after.fft_size / 2; ++k) {
-        const double ratio = next->noise_profile[0][k] / (*learned)[target].noise_profile[0][k];
-        worst = std::max(worst, std::abs(20 * std::log10(ratio)));
-      }
-      std::printf("actual relearn pink=%u %u->%u worst_band_db=%g\n", pink, before.fft_size, after.fft_size, worst);
-      std::fflush(stdout);
-      assert(worst <= 1);
-    }
+    return std::pair{edited.render_input(input, input), reference.render_input(input, input)};
+  };
+  const float level = gate ? .03F : .5F;
+  for (uint32_t block = 0; block < 2048; ++block) render(gate ? .03F : .25F);
+  // Stop learning, keep the learned profile; the Gate holds its gains.
+  build(edited, before, false); build(reference, after, false);
+  edited.commit(2); reference.commit(2);
+  for (uint32_t block = 0; block < 512; ++block) render(level);
+  build(edited, after, false);
+  expect(edited.prepare(3), DAW_AUDIO_CORE_OK);
+  for (uint32_t block = 0; block < 512; ++block) render(level);
+  edited.publish(3);
+  std::vector<float> heard_edited, heard_reference;
+  for (uint32_t block = 0; block < 2304; ++block) {
+    const auto [a, b] = render(level);
+    // Skip the crossfade from the old stage.
+    if (block < 256) continue;
+    heard_edited.insert(heard_edited.end(), a[0].begin(), a[0].end());
+    heard_reference.insert(heard_reference.end(), b[0].begin(), b[0].end());
   }
-  daw_audio_core_destroy(handle);
+  const auto actual = octave_band_energies(heard_edited);
+  const auto expected = octave_band_energies(heard_reference);
+  double total = 0;
+  for (const double energy : expected) total += energy;
+  uint32_t compared = 0;
+  for (uint32_t band = 0; band < expected.size(); ++band) {
+    if (expected[band] < total * 1e-3) continue;
+    ++compared;
+    const double db = 10 * std::log10(actual[band] / expected[band]);
+    std::printf("transfer source=%u mode=%u %u->%u band=%u delta_db=%g\n", static_cast<unsigned>(source), mode, before, after, band, db);
+    std::fflush(stdout);
+    // A Gate band near the threshold flips bin by bin, so the oracle is looser there.
+    assert(std::abs(db) <= (gate ? 3.0 : 1.0));
+  }
+  assert(compared >= (source == SpectralSource::Tone ? 1u : 4u));
+  assert(daw::audio_core::InspectLatencyTransition(edited.core).completed_revision == 3);
 }
 
 void test_phase4_spectral_transfer_shape(bool pink) {
-  auto prior = std::make_unique<SpectralHistory>();
-  auto next = std::make_unique<SpectralHistory>();
-  for (const auto sizes : {std::array{512u, 4096u}, std::array{4096u, 512u},
-    std::array{1024u, 2048u}, std::array{2048u, 1024u}}) {
-    const auto [a, b] = sizes;
-    for (uint32_t mode : {DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE,
-      DAW_AUDIO_SPECTRAL_MODE_GATE}) {
-      const daw_audio_spectral_state before{.fft_size = a, .mode = mode};
-      auto after = before; after.fft_size = b;
-      auto &source = mode == DAW_AUDIO_SPECTRAL_MODE_GATE ? prior->gate_gain : prior->noise_profile;
-      auto &destination = mode == DAW_AUDIO_SPECTRAL_MODE_GATE ? next->gate_gain : next->noise_profile;
-      const double ratio = double(b) / a;
-      const auto power = [&](uint32_t bin) { return pink ? 1.0 / std::max(1u, bin) : 1.0; };
-      for (auto &channel : source) for (uint32_t bin = 0; bin <= a / 2; ++bin)
-        channel[bin] = std::sqrt(power(bin));
-      transfer_spectral_persistent(*prior, before, *next, after);
-      for (uint32_t bin = 0; bin <= b / 2; ++bin) {
-        const double center = bin / ratio;
-        double expected = 0;
-        if (b >= a) {
-          const uint32_t lo = center, hi = std::min(lo + 1, a / 2);
-          expected = power(lo) + (power(hi) - power(lo)) * (center - lo);
-        } else {
-          const double left = std::max(0.0, (bin - .5) / ratio);
-          const double right = std::min(double(a / 2), (bin + .5) / ratio);
-          for (uint32_t k = 0; k <= a / 2; ++k)
-            expected += power(k) * std::max(0.0, std::min(right, k + .5) - std::max(left, k - .5));
-          expected /= right - left;
-        }
-        if (mode != DAW_AUDIO_SPECTRAL_MODE_GATE) expected *= ratio;
-        const double db = 10 * std::log10(destination[0][bin] * destination[0][bin] / expected);
-        if (std::abs(db) > 1) {
-          std::fprintf(stderr, "shape pink=%u mode=%u %u->%u bin=%u actual=%g expected=%g delta_db=%g\n",
-            pink, mode, a, b, bin, destination[0][bin], std::sqrt(expected), db);
-          assert(false);
-        }
-      }
-    }
-  }
+  for (const auto [before, after] : {std::pair{512u, 4096u}, std::pair{4096u, 512u}})
+    for (const uint32_t mode : {DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE, DAW_AUDIO_SPECTRAL_MODE_GATE})
+      test_phase4_spectral_transfer_bands(pink ? SpectralSource::Pink : SpectralSource::White, mode, before, after);
+}
+
+void test_phase4_spectral_transfer_relearn() {
+  for (const auto [before, after] : {std::pair{1024u, 2048u}, std::pair{2048u, 1024u}})
+    for (const auto source : {SpectralSource::White, SpectralSource::Pink})
+      test_phase4_spectral_transfer_bands(source, DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE, before, after);
 }
 
 void test_phase4_spectral_transfer_narrow() {
-  auto prior = std::make_unique<SpectralHistory>();
-  auto next = std::make_unique<SpectralHistory>();
-  const daw_audio_spectral_state before{.fft_size = 4096, .mode = DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE};
-  auto after = before; after.fft_size = 512;
-  for (uint32_t bin : {1u, 65u, 2047u}) {
-    for (auto &channel : prior->noise_profile) { channel.fill(0); channel[bin] = 1; }
-    transfer_spectral_persistent(*prior, before, *next, after);
-    double energy = 0;
-    for (uint32_t k = 0; k <= 256; ++k)
-      energy += next->noise_profile[0][k] * next->noise_profile[0][k] * (k == 0 || k == 256 ? 1 : 2);
-    // Real-spectrum signal power is 2*sum(|X|²)/N² (sqrt-Hann energy N/2).
-    const double db = 10 * std::log10(energy * 4096.0 * 4096.0 / (2 * 512.0 * 512.0));
-    std::printf("narrow bin=%u destination_raw_energy=%g normalized_delta_db=%g\n", bin, energy, db);
-    std::fflush(stdout);
-    assert(std::abs(db) <= .5);
-  }
+  test_phase4_spectral_transfer_bands(SpectralSource::Tone, DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE, 4096, 512);
 }
 
+// A recaptured Freeze spectrum keeps its DC and Nyquist bins real: a frozen -0.25 DC with a 0.125 alternation comes
+// out of the resized stage with the DC mean and the Nyquist amplitude of a stage that captured at that size.
 void test_phase4_spectral_transfer_endpoints() {
   for (const auto sizes : {std::array{512u, 4096u}, std::array{4096u, 512u}}) {
-    Phase3Rig rig;
-    const auto build = [&](uint32_t fft) {
+    Phase3Rig edited, reference;
+    const auto build = [&](Phase3Rig &rig, uint32_t fft) {
       rig.clear(); rig.add_node(1, DAW_AUDIO_GRAPH_NODE_SOURCE);
       rig.add_node(2, DAW_AUDIO_GRAPH_NODE_MASTER); rig.add_edge(1, 2);
       const daw_audio_spectral_state state{
@@ -7724,29 +7653,39 @@ void test_phase4_spectral_transfer_endpoints() {
       rig.add_state(1, 10, DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, state);
       rig.nodes[0].latency_frames = rig.processors.back().latency_frames = fft;
     };
-    build(sizes[0]); rig.commit(1);
+    build(edited, sizes[0]); build(reference, sizes[1]);
+    edited.commit(1); reference.commit(1);
     const daw_audio_transport_state transport{.epoch = 1, .running = 1};
-    expect(daw_audio_core_set_transport(rig.core, &transport), DAW_AUDIO_CORE_OK);
+    expect(daw_audio_core_set_transport(edited.core, &transport), DAW_AUDIO_CORE_OK);
+    expect(daw_audio_core_set_transport(reference.core, &transport), DAW_AUDIO_CORE_OK);
     std::array<float, Phase3Rig::frames> signal{};
     for (uint32_t k = 0; k < signal.size(); ++k) signal[k] = -.25F + (k % 2 ? -.125F : .125F);
-    for (uint32_t i = 0; i < 512; ++i) rig.render_input(signal, signal);
-    build(sizes[1]); rig.commit(2);
-    for (uint32_t i = 0; i < 512; ++i) rig.render(0);
-    auto &core = *to_core(rig.core);
-    auto &processor = core.published_graph->processors[0];
-    auto &history = core.spectral_histories[processor.spectral_slot];
-    assert(history.freeze_captured[0]);
-    transform_spectrum(core, processor, history, 0, 0);
-    for (uint32_t k : {0u, sizes[1] / 2}) {
-      std::printf("recaptured endpoint %u->%u bin=%u real=%g imaginary=%g\n",
-        sizes[0], sizes[1], k, history.real[0][k], history.imaginary[0][k]);
-      assert(history.imaginary[0][k] == 0);
-      assert(std::signbit(history.real[0][k]) == (k == 0));
-    }
-    assert(daw::audio_core::InspectLatencyTransition(rig.core).completed_revision == 2);
+    for (uint32_t i = 0; i < 512; ++i) { edited.render_input(signal, signal); reference.render_input(signal, signal); }
+    build(edited, sizes[1]); edited.commit(2);
+    for (uint32_t i = 0; i < 512; ++i) { edited.render(0); reference.render(0); }
+    const auto levels = [](Phase3Rig &rig) {
+      double mean = 0, alternation = 0;
+      constexpr uint32_t count = 4096;
+      for (uint32_t at = 0; at < count; at += Phase3Rig::frames) {
+        const auto output = rig.render(0);
+        for (uint32_t i = 0; i < Phase3Rig::frames; ++i) {
+          mean += output[0][i] / count;
+          alternation += ((at + i) % 2 ? -1.0 : 1.0) * output[0][i] / count;
+        }
+      }
+      return std::pair{mean, std::abs(alternation)};
+    };
+    const auto [mean, alternation] = levels(edited);
+    const auto [expected_mean, expected_alternation] = levels(reference);
+    std::printf("recaptured endpoints %u->%u dc=%g (oracle %g) nyquist=%g (oracle %g)\n",
+      sizes[0], sizes[1], mean, expected_mean, alternation, expected_alternation);
+    std::fflush(stdout);
+    assert(expected_mean < -.2 && expected_alternation > .1);
+    assert(std::abs(mean - expected_mean) <= .02 * std::abs(expected_mean));
+    assert(std::abs(alternation - expected_alternation) <= .02 * expected_alternation);
+    assert(daw::audio_core::InspectLatencyTransition(edited.core).completed_revision == 2);
   }
 }
-#endif
 
 // Failure-first: capture/learn a stationary two-band signal, replace the input
 // with silence (Freeze) or twice its amplitude (Noise), then resize without a
@@ -9411,6 +9350,34 @@ void test_phase6i_replacement_leaves_no_voice_on_a_missing_zone() {
 }
 #endif
 
+// Replacements that shrink a drum rack's zone count under held notes: the voices of the lost zones go quiet and free
+// their slots. A second strike of the surviving notes then steals nothing, as in a rack that never held the lost notes.
+void test_phase6i_replacement_silences_the_voices_of_a_missing_zone() {
+  for (const uint32_t zone_count : {7u, 4u, 2u, 1u}) {
+    HeldRig edited(DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK);
+    HeldRig reference(DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK);
+    reference.zones.resize(zone_count);
+    for (HeldRig *rig : {&edited, &reference}) expect(rig->commit(), DAW_AUDIO_CORE_OK);
+    play_chord(edited, 48, 8);
+    play_chord(reference, 48, zone_count);
+    for (HeldRig *rig : {&edited, &reference}) rig->render(10);
+    const size_t edit = edited.rendered();
+    edited.zones.resize(zone_count);
+    expect(edited.commit(), DAW_AUDIO_CORE_OK);
+    for (HeldRig *rig : {&edited, &reference}) {
+      rig->render(12);
+      play_chord(*rig, 48, zone_count);
+      rig->render(12);
+    }
+    phase6i_require(peak_after(reference.heard[0], edit) > 0.05F, "drum rack", "no voice was sounding after the replacement",
+      peak_after(reference.heard[0], edit), 0.05F);
+    const float deviation = largest_difference(edited.heard[0], reference.heard[0], edit + 2 * HeldRig::fade);
+    std::printf("zones %u: reference peak %g, deviation %g\n", zone_count, peak_after(reference.heard[0], edit), deviation);
+    phase6i_require(deviation < 1e-4F, "drum rack", "a voice outlived its zone or a surviving voice was disturbed",
+      deviation, 0.0F);
+  }
+}
+
 // What cannot be set never reaches the voices: a value that is not a number is refused
 // where it enters, a value dragged to nothing ends at exactly nothing (no subnormal
 // tail), and a polyphony above the 32 voices the core holds is refused at configure.
@@ -10534,11 +10501,8 @@ int main(int argc, char **argv) {
         test_phase4_spectral_aligned_completion(DAW_AUDIO_SPECTRAL_MODE_FREEZE, lower, true, rate);
     } else if (std::strcmp(argv[2], "spectral-transfer-late") == 0) {
       test_phase4_spectral_transfer_late_allocation_free();
-#if defined(DAW_AUDIO_CORE_TEST_SPECTRAL_INTERNALS)
     } else if (std::strcmp(argv[2], "spectral-transfer-relearn") == 0) {
       test_phase4_spectral_transfer_relearn();
-    } else if (std::strcmp(argv[2], "spectral-transfer-cost") == 0) {
-      test_phase4_spectral_transfer_cost();
     } else if (std::strcmp(argv[2], "spectral-transfer-flat") == 0) {
       test_phase4_spectral_transfer_shape(false);
     } else if (std::strcmp(argv[2], "spectral-transfer-pink") == 0) {
@@ -10547,7 +10511,6 @@ int main(int argc, char **argv) {
       test_phase4_spectral_transfer_narrow();
     } else if (std::strcmp(argv[2], "spectral-transfer-endpoints") == 0) {
       test_phase4_spectral_transfer_endpoints();
-#endif
     } else if (std::strncmp(argv[2], "spectral-carry-", 15) == 0) {
       const unsigned index = static_cast<unsigned>(std::strtoul(argv[2] + 15, nullptr, 10));
       if (index >= 4) return 2;
@@ -10692,6 +10655,7 @@ int main(int argc, char **argv) {
 #if defined(DAW_AUDIO_CORE_TEST_SPECTRAL_INTERNALS)
     else if (contract == "zones-gone") test_phase6i_replacement_leaves_no_voice_on_a_missing_zone();
 #endif
+    else if (contract == "zones-gone-heard") test_phase6i_replacement_silences_the_voices_of_a_missing_zone();
     else if (name == "carry" && kind != DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) test_phase6i_replacement_goes_on_from_the_applied_value(kind);
     else if (contract == "bad-values") test_phase6i_bad_values_and_the_polyphony_cap();
     else if (contract == "burst") test_phase6i_event_burst_and_reversal_are_smooth();

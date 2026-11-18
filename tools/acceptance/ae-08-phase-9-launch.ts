@@ -7,7 +7,7 @@ import { createDefaultLimiterParams, createDefaultSpectralParams, getSpectralLat
 import { createAvailableDesktopHostClient } from "@daw-browser/desktop-protocol/client"
 import { command } from "../performance/30-track/v3-import-workload"
 import { deleteTrackThroughUi, dragUtilityGainKnob, exportReference, heldInstrumentTrack, heldSynthTrack, insertTargetTrack, pressHistoryKey, reorderTargetTrack, required,
-  sampledInstrumentParams, selectFftSize, setupPhase5Fixture, sineSynthParams, waitForUi, waitImportedClip, waitNativeFrame, liveMidiTrack, type Phase5Context, type SampleAsset } from "./ae-08-phase-5-fixture"
+  sampledInstrumentParams, pageDeadlineMs, selectFftSize, setupPhase5Fixture, sineSynthParams, waitForUi, waitNativeFrame, liveMidiTrack, type Phase5Context, type SampleAsset } from "./ae-08-phase-5-fixture"
 import { awaitPublicationComplete, burstSchedule, judgeStored, MIN_WINDOW_MS, parseHostLines, repetitionsFor, runBurst, type Perform, type Requested, type Timings } from "./ae-08-phase-9-matrix"
 import { phase9Presets, type Row } from "./ae-08-phase-9-rows"
 import { nativeUnavailableReported, takeFile } from "./ae-08-phase-9-compare"
@@ -218,10 +218,19 @@ export const createPerformer = ({ context, runtime, playThenPause, transportStat
     ["undo", history(false, true)],
     ["redo", history(true, false)],
     // The import takes the playhead for its start; the oracle needs the start the clip really took (placedAt in the compare).
+    // A clip edit during playback pauses Follow, so a later import lands at the playhead beyond the unscrolled viewport and renders no
+    // clip node. The snapshot is the only viewport-independent signal that the import was adopted; it has no event, so it is polled
+    // until the page deadline.
     ["asset-import", async () => {
       await runtime(["import", "--path", setup.changedFile])
-      await waitImportedClip(context, "changed")
-      return { ...unmoved, startSec: required((await observe()).clipStartSec("changed"), "Imported changed clip start") }
+      const deadline = Date.now() + pageDeadlineMs
+      let startSec = (await observe()).clipStartSec("changed")
+      while (startSec === undefined) {
+        if (Date.now() > deadline) throw new Error("Import UI deadline: changed")
+        await Bun.sleep(50)
+        startSec = (await observe()).clipStartSec("changed")
+      }
+      return { ...unmoved, startSec }
     }],
     ["asset-clip-delete", deleteImportedClip],
     ["clip-delete", deleteImportedClip],

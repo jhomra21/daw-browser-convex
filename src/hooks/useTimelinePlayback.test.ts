@@ -6336,6 +6336,130 @@ for (const hold of ['begin', 'teardown'] as const) {
     }
   })
 }
+// B6e: a Pause while playing that supersedes a resuming rebuild must leave a live paused graph of the edited tracks.
+// Before the rebuild retires the playing graph, the superseded rebuild returns and the paused-preview owner has skipped
+// the edit; after the rebuild's own Play commits, the superseded rebuild disposes the graph that Pause has just paused.
+const b6eEditedTracks: Track[] = [track, { ...track, id: 'track-b6e', name: 'B6e edit' }]
+const runB6eSupersededRebuild = async (
+  action: 'pause' | 'stop' | 'locate',
+  at: 'before-retire' | 'after-play-commit',
+  hold: boolean,
+) => {
+  const previousWindow = globalThis.window
+  const device = createDeviceMove()
+  const transportGate = Promise.withResolvers<{ ok: true }>()
+  const fixture = createNativeHookBridge(undefined, undefined, undefined, transportGate.promise)
+  const [tracks, setTracks] = createSignal<Track[]>([track])
+  const faults: string[] = []
+  const compiles: { state: string; trackIds: string[] }[] = []
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          outputDeviceId: device.outputDeviceId,
+          compileSnapshot: async (transport) => {
+            compiles.push({ state: transport.state, trackIds: tracks().map(entry => entry.id) })
+            return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
+              renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
+          },
+          reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
+        })
+        for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        playback.setPlayhead(1, tracks())
+        for (let index = 0; index < 20; index += 1) await flushMicrotasks()
+        await playback.handlePlay(tracks())
+        for (let index = 0; index < 20; index += 1) await flushMicrotasks()
+        expect(playback.isPlaying()).toBeTrue()
+        expect(playback.isNativePlayback()).toBeTrue()
+        const compilesBefore = compiles.length
+        const callsBefore = fixture.calls.length
+        const sentBefore = fixture.transportStates.length
+        const retired = () => fixture.calls.slice(callsBefore).some(call => call === 'stop' || call === 'teardown')
+        // An edit while playing, then the output device moving in the same task: the move's resuming rebuild replaces the session.
+        setTracks(b6eEditedTracks)
+        // A locate lands before the device moves; the move resumes the session where the locate left it.
+        if (action === 'locate') playback.setPlayhead(3, tracks())
+        const rebuild = device.move()
+        // The first turn at which the rebuild has retired the old graph and its own Play has committed: the new session
+        // runs and the Play attempt is no longer preparing, but the rebuild has not yet returned from it.
+        const committed = () => retired() && playback.isNativePlayback() && !playback.isPreparingPlayback()
+        let anchorTurn = 0
+        if (at === 'after-play-commit') for (; anchorTurn < 400 && !committed(); anchorTurn += 1) await Promise.resolve()
+        expect(committed()).toBe(at === 'after-play-commit')
+        expect(playback.isStructuralRebuildInProgress()).toBeTrue()
+        expect(playback.isPlaying()).toBeTrue()
+        expect(playback.isNativePlayback()).toBeTrue()
+        expect(retired()).toBe(at === 'after-play-commit')
+        expect(fixture.calls.slice(callsBefore).includes('start')).toBe(at === 'after-play-commit')
+        if (hold) fixture.armTransportGate()
+        const callsAtAction = fixture.calls.length
+        const sentAtAction = fixture.transportStates.length
+        let pending: Promise<unknown> = Promise.resolve()
+        if (action === 'pause') pending = playback.handlePause()
+        if (action === 'stop') pending = playback.handleStop()
+        const playheadAtAction = playback.playheadSec()
+        for (let index = 0; index < 20; index += 1) await flushMicrotasks()
+        const callsWhileHeld = hold ? fixture.calls.slice(callsAtAction) : []
+        transportGate.resolve({ ok: true })
+        await Promise.allSettled([rebuild, pending])
+        for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
+        for (let index = 0; index < 60; index += 1) await flushMicrotasks()
+        console.log('B6E-SUPERSEDED-REBUILD', JSON.stringify({ action, at, hold, anchorTurn, faults, prepared: playback.isNativePlaybackPrepared(),
+          native: playback.isNativePlayback(), playing: playback.isPlaying(), playhead: playback.playheadSec(), playheadAtAction,
+          compilesAfterEdit: compiles.slice(compilesBefore), frames: fixture.transportFrames.slice(sentBefore),
+          sentAfterAction: fixture.transportStates.slice(sentAtAction), callsWhileHeld, calls: fixture.calls.slice(callsBefore) }))
+        if (hold) {
+          expect(callsWhileHeld).toContain('transport')
+          // The replacement graph is prepared only once the host has applied the Pause.
+          expect(callsWhileHeld).not.toContain('begin')
+        }
+        expect(faults).toEqual([])
+        expect(playback.isStructuralRebuildInProgress()).toBeFalse()
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        expect(compiles.length).toBeGreaterThan(compilesBefore)
+        expect(compiles.at(-1)?.trackIds).toEqual(['track-1', 'track-b6e'])
+        if (action === 'locate') {
+          expect(playback.isPlaying()).toBeTrue()
+          expect(playback.isNativePlayback()).toBeTrue()
+          expect(playback.playheadSec()).toBe(3)
+          expect(fixture.transportStates.at(-1)).toBeTrue()
+          expect(fixture.transportFrames.at(-1)).toBe(144_000)
+          expect(compiles.at(-1)?.state).toBe('playing')
+        } else {
+          // Pause stays where it landed: the position the move resumed from, before the retire or after the commit.
+          const expected = action === 'stop' ? 0 : 1
+          expect(playheadAtAction).toBe(expected)
+          expect(fixture.transportStates.slice(sentAtAction)).not.toContain(true)
+          expect(playback.isPlaying()).toBeFalse()
+          expect(playback.playheadSec()).toBe(expected)
+          expect(fixture.transportFrames.at(-1)).toBe(expected * 48_000)
+        }
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+}
+for (const hold of [false, true]) {
+  test(`B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit${hold ? ' (host pause held)' : ''}`, async () => {
+    await runB6eSupersededRebuild('pause', 'before-retire', hold)
+  })
+  test(`B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit${hold ? ' (host pause held)' : ''}`, async () => {
+    await runB6eSupersededRebuild('pause', 'after-play-commit', hold)
+  })
+}
+test("B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start", async () => {
+  await runB6eSupersededRebuild('stop', 'after-play-commit', false)
+})
+test('B6e a locate before a resuming rebuild retires the playing graph plays the edit from the locate', async () => {
+  await runB6eSupersededRebuild('locate', 'before-retire', false)
+})
 test('rebuilds a prepared native backend while paused', async () => {
   const previousWindow = globalThis.window
   const calls: string[] = []

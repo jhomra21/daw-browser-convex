@@ -1,0 +1,9 @@
+{
+ "ruling": "acceptance-reports/pr62-cleanup/PARENT-RULING-PR62-TEST-CLEANUP.md",
+ "removed": [
+  { "file": "apps/desktop/recording-ipc-diagnostics.test.ts", "test": "renderer opt-out allocates no live trace and reset preserves the completed fatal evidence" },
+  { "file": "apps/desktop/application-menu.test.ts", "test": "native application menu > keeps IPC and renderer integration constrained" },
+  { "file": "native/audio-host-macos/tests/realtime_callback_guard.test.ts", "test": "AudioHost publishes running state before opening CoreAudio" },
+  { "file": "native/audio-host-macos/tests/realtime_callback_guard.test.ts", "test": "render-enabled native VST processing is not gated by tail metadata or silence gaps" }
+ ]
+}

@@ -20,10 +20,10 @@ import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { createLocalTrack } from '~/lib/tracks'
 import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
 import { applyTrackClipCreateEntry, applyTrackDeleteEntry } from './track-entry-executors'
-import { planStructuralTransition } from './project-track-structure'
+import { planStructuralOps, planStructuralTransition, structuralOpsOfKind } from './project-track-structure'
 import { flushSharedOutboxOperation, readQueuedClipDeletionRecoveryIds } from '~/lib/shared-outbox'
 
-import { buildHistoryRefIndex, resolveClipId, resolveStoredTrackId, resolveTrackId, resolveTrackRoutingSnapshot } from './refs'
+import { buildHistoryRefIndex, resolveClipId, resolveRemovedTrackId, resolveStoredTrackId, resolveTrackId, resolveTrackRoutingSnapshot } from './refs'
 import type { EffectParamsByEffect, EffectType, HistoryEntry, MidiNoteHistoryChange } from './types'
 import type { LiveProcessorEditIdentity } from '~/lib/live-processor-control'
 import {
@@ -145,10 +145,11 @@ async function applyTrackBooleanEntry(
 
 async function applyTrackRoutingEntry(entry: Extract<HistoryEntry, { type: 'track-routing' }>, deps: Deps, direction: HistoryDirection) {
   const index = buildRefIndex(deps)
-  const trackId = requireResolved(resolveTrackId(index, entry.data.trackRef), 'Track not found for track-routing history entry')
+  const [patch] = structuralOpsOfKind(planStructuralOps(entry, direction), 'patch-track')
+  const trackId = requireResolved(resolveTrackId(index, patch?.trackRef), 'Track not found for track-routing history entry')
   const tracks = deps.getTracks()
   const track = requireResolved(tracks.find((entryValue) => entryValue.id === trackId), 'Track not found for track-routing history entry')
-  const routing = resolveTrackRoutingSnapshot(index, pickDirectionalValue(direction, entry.data.from, entry.data.to))
+  const routing = resolveTrackRoutingSnapshot(index, { sends: patch?.sends ?? [], outputTargetRef: patch?.outputTargetRef })
   const normalizedRouting = normalizeTrackRouting(track, routing, tracks)
   deps.actions.cancelTrackRoutingWrite(trackId)
   await persistHistoryTrackRouting(deps, trackId, normalizedRouting)
@@ -157,15 +158,17 @@ async function applyTrackRoutingEntry(entry: Extract<HistoryEntry, { type: 'trac
 
 async function applyTrackGroupEntry(entry: Extract<HistoryEntry, { type: 'track-group' }>, deps: Deps, direction: HistoryDirection) {
   const index = buildRefIndex(deps)
+  const ops = planStructuralOps(entry, direction)
   if (direction === 'undo') {
+    const [removal] = structuralOpsOfKind(ops, 'remove-track')
     const groupTrackId = requireResolved(
-      resolveTrackId(index, entry.data.groupTrackRef) ?? resolveStoredTrackId(deps.getTracks(), entry.data.currentGroupTrackId),
+      removal && resolveRemovedTrackId(index, deps.getTracks(), removal),
       'Group track not found for track-group undo',
     )
-    for (const child of entry.data.childUpdates) {
-      const trackId = requireResolved(resolveTrackId(index, child.trackRef), 'Child track not found for track-group undo')
-      const previousGroupId = resolveTrackId(index, child.previousGroupRef)
-      const previousOutputTargetId = resolveTrackId(index, child.previousOutputTargetRef)
+    for (const patch of structuralOpsOfKind(ops, 'patch-track')) {
+      const trackId = requireResolved(resolveTrackId(index, patch.trackRef), 'Child track not found for track-group undo')
+      const previousGroupId = resolveTrackId(index, patch.groupRef)
+      const previousOutputTargetId = resolveTrackId(index, patch.outputTargetRef)
       await persistHistoryTrackGroup(deps, trackId, previousGroupId, previousOutputTargetId)
       deps.actions.applyTrackPatch(trackId, { groupId: previousGroupId, outputTargetId: previousOutputTargetId })
     }
@@ -200,25 +203,28 @@ async function applyTrackGroupEntry(entry: Extract<HistoryEntry, { type: 'track-
     color: entry.data.groupTrack.color,
   }), groupTrackIndex)
   const childRefIndex = buildRefIndex(deps)
-  for (const child of entry.data.childUpdates) {
-    const trackId = requireResolved(resolveTrackId(childRefIndex, child.trackRef), 'Child track not found for track-group redo')
-    const outputTargetId = resolveTrackId(childRefIndex, child.nextOutputTargetRef) ?? groupTrackId
-    await persistHistoryTrackGroup(deps, trackId, groupTrackId, outputTargetId)
-    deps.actions.applyTrackPatch(trackId, { groupId: groupTrackId, outputTargetId })
+  for (const patch of structuralOpsOfKind(ops, 'patch-track')) {
+    const trackId = requireResolved(resolveTrackId(childRefIndex, patch.trackRef), 'Child track not found for track-group redo')
+    const groupId = resolveTrackId(childRefIndex, patch.groupRef)
+    const outputTargetId = resolveTrackId(childRefIndex, patch.outputTargetRef) ?? resolveTrackId(childRefIndex, patch.outputFallbackRef)
+    await persistHistoryTrackGroup(deps, trackId, groupId, outputTargetId)
+    deps.actions.applyTrackPatch(trackId, { groupId, outputTargetId })
   }
 }
 
 async function applyTrackUngroupEntry(entry: Extract<HistoryEntry, { type: 'track-ungroup' }>, deps: Deps, direction: HistoryDirection) {
   const index = buildRefIndex(deps)
+  const ops = planStructuralOps(entry, direction)
   if (direction === 'undo') {
     const groupSnapshot = requireResolved(entry.data.groupTrack, 'Cannot restore legacy track-ungroup history entry')
+    const [restored] = structuralOpsOfKind(ops, 'add-track')
     const sourceGroupTrackId = requireResolved(entry.data.sourceGroupTrackId, 'Cannot restore legacy track-ungroup history entry')
     const parentGroupId = resolveTrackId(index, groupSnapshot.groupRef)
     const routing = resolveTrackRoutingSnapshot(index, groupSnapshot.routing)
-    const children = entry.data.childSnapshots.map((child) => ({
-      trackId: requireResolved(resolveTrackId(index, child.trackRef), 'Child track not found for track-ungroup undo'),
-      outputTargetId: resolveTrackId(index, child.previousOutputTargetRef),
-      outputToGroup: child.previousOutputTargetRef === entry.data.groupTrackRef,
+    const children = structuralOpsOfKind(ops, 'patch-track').map((patch) => ({
+      trackId: requireResolved(resolveTrackId(index, patch.trackRef), 'Child track not found for track-ungroup undo'),
+      outputTargetId: resolveTrackId(index, patch.outputTargetRef),
+      outputToGroup: patch.outputTargetRef === restored?.trackRef,
     }))
     const sidechainRoutes = (entry.data.sidechainRoutes ?? []).flatMap((route) => {
       const sourceTrackId = route.sourceTrackRef === entry.data.groupTrackRef
@@ -286,8 +292,9 @@ async function applyTrackUngroupEntry(entry: Extract<HistoryEntry, { type: 'trac
     return
   }
 
+  const [removal] = structuralOpsOfKind(ops, 'remove-track')
   const groupTrackId = requireResolved(
-    resolveTrackId(index, entry.data.groupTrackRef) ?? resolveStoredTrackId(deps.getTracks(), entry.data.currentGroupTrackId),
+    removal && resolveRemovedTrackId(index, deps.getTracks(), removal),
     'Group track not found for track-ungroup redo',
   )
   await persistHistoryUngroup(deps, groupTrackId)
@@ -296,11 +303,12 @@ async function applyTrackUngroupEntry(entry: Extract<HistoryEntry, { type: 'trac
     const rebased = rebaseTrackAutomationEnvelope(envelope, groupTrackId)
     deps.actions.applyAutomationEnvelope(undefined, rebased.targetKey)
   }
-  const parentGroupId = resolveTrackId(index, entry.data.groupTrack?.groupRef)
-  for (const child of entry.data.childSnapshots) {
-    const trackId = requireResolved(resolveTrackId(index, child.trackRef), 'Child track not found for track-ungroup redo')
-    const outputTargetId = resolveTrackId(index, child.nextOutputTargetRef)
-    deps.actions.applyTrackPatch(trackId, { groupId: parentGroupId, outputTargetId })
+  for (const patch of structuralOpsOfKind(ops, 'patch-track')) {
+    const trackId = requireResolved(resolveTrackId(index, patch.trackRef), 'Child track not found for track-ungroup redo')
+    deps.actions.applyTrackPatch(trackId, {
+      groupId: resolveTrackId(index, patch.groupRef),
+      outputTargetId: resolveTrackId(index, patch.outputTargetRef),
+    })
   }
   deps.actions.removeLocalTrack(groupTrackId)
   entry.data.currentGroupTrackId = undefined
@@ -338,15 +346,12 @@ async function applyTrackColorCascadeEntry(entry: Extract<HistoryEntry, { type: 
 async function applyTrackReorderEntry(entry: Extract<HistoryEntry, { type: 'track-reorder' }>, deps: Deps, direction: HistoryDirection) {
   const index = buildRefIndex(deps)
   const currentTracks = deps.getTracks()
-  const patches = entry.data.patches.map((patch) => {
-    const trackId = requireResolved(resolveTrackId(index, patch.trackRef), 'Track not found for track-reorder history entry')
-    return {
-      trackId,
-      index: pickDirectionalValue(direction, patch.fromIndex, patch.toIndex),
-      groupId: resolveTrackId(index, pickDirectionalValue(direction, patch.fromGroupRef, patch.toGroupRef)) ?? null,
-      outputTargetId: resolveTrackId(index, pickDirectionalValue(direction, patch.fromOutputTargetRef, patch.toOutputTargetRef)) ?? null,
-    }
-  })
+  const patches = structuralOpsOfKind(planStructuralOps(entry, direction), 'patch-track').map((patch) => ({
+    trackId: requireResolved(resolveTrackId(index, patch.trackRef), 'Track not found for track-reorder history entry'),
+    index: patch.index,
+    groupId: resolveTrackId(index, patch.groupRef) ?? null,
+    outputTargetId: resolveTrackId(index, patch.outputTargetRef) ?? null,
+  }))
   const patchById = new Map(patches.map((patch) => [patch.trackId, patch]))
   const updates = currentTracks.map((track, trackIndex) => {
     const patch = patchById.get(track.id)
@@ -905,9 +910,9 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
 
     case 'track-create': {
       if (direction === 'undo') {
-        const index = buildRefIndex(deps)
+        const [removal] = structuralOpsOfKind(planStructuralOps(entry, direction), 'remove-track')
         const trackId = requireResolved(
-          resolveTrackId(index, entry.data.trackRef) ?? resolveStoredTrackId(deps.getTracks(), entry.data.currentTrackId),
+          removal && resolveRemovedTrackId(buildRefIndex(deps), deps.getTracks(), removal),
           'Track not found for track-create undo',
         )
         await removeHistoryTrackOrThrow(deps, trackId, 'Failed to remove track during track-create undo')

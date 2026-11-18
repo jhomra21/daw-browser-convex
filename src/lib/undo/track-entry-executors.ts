@@ -4,7 +4,8 @@ import { assertDefined, collectTrackDescendantIds } from '@daw-browser/shared'
 import { createLocalTrack } from '~/lib/tracks'
 import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
 
-import { buildHistoryRefIndex, resolveStoredTrackId, resolveTrackId, resolveTrackRoutingSnapshot } from './refs'
+import { buildHistoryRefIndex, resolveRemovedTrackId, resolveStoredTrackId, resolveTrackId, resolveTrackRoutingSnapshot } from './refs'
+import { planStructuralOps, structuralOpsOfKind } from './project-track-structure'
 import type { Deps } from './exec'
 import type { HistoryEntry } from './types'
 import {
@@ -62,8 +63,9 @@ export async function applyTrackClipCreateEntry(
   const grantScope = { projectId, userId }
 
   if (direction === 'undo') {
+    const [removal] = structuralOpsOfKind(planStructuralOps(entry, direction), 'remove-track')
     const trackId = requireResolved(
-      resolveTrackId(historyContext.refIndex, entry.data.track.trackRef) ?? resolveStoredTrackId(deps.getTracks(), entry.data.track.currentTrackId),
+      removal && resolveRemovedTrackId(historyContext.refIndex, deps.getTracks(), removal),
       'Track not found for track-clip-create undo',
     )
     await removeHistoryTrackOrThrow(deps, trackId, 'Failed to remove track during track-clip-create undo')
@@ -133,7 +135,8 @@ export async function applyTrackDeleteEntry(
   const grantScope = { projectId, userId }
 
   if (direction === 'redo') {
-    const trackId = resolveTrackId(historyContext.refIndex, entry.data.track.trackRef) ?? resolveStoredTrackId(deps.getTracks(), entry.data.recreatedTrackId)
+    const [removal] = structuralOpsOfKind(planStructuralOps(entry, direction), 'remove-track')
+    const trackId = removal && resolveRemovedTrackId(historyContext.refIndex, deps.getTracks(), removal)
     if (!trackId) return
     const alreadyDeleted = historyContext.deletedTrackIds?.has(trackId)
     const currentTracks = deps.getTracks()
@@ -256,14 +259,14 @@ export async function applyTrackDeleteEntry(
       deps.actions.applyTrackRouting(newTrackId, ownRouting)
     }
 
-    for (const inbound of entry.data.inboundRouting ?? []) {
-      const sourceTrackId = resolveTrackId(refreshedIndex, inbound.sourceTrackRef)
+    for (const inbound of structuralOpsOfKind(planStructuralOps(entry, direction), 'merge-routing')) {
+      const sourceTrackId = resolveTrackId(refreshedIndex, inbound.trackRef)
       if (!sourceTrackId) continue
       const sourceTrack = deps.getTracks().find((track) => track.id === sourceTrackId)
       if (!sourceTrack) continue
       const merged = mergeTrackRouting(
         readCurrentTrackRouting(sourceTrack),
-        resolveTrackRoutingSnapshot(refreshedIndex, inbound),
+        resolveTrackRoutingSnapshot(refreshedIndex, inbound.routing),
       )
       const normalized = normalizeTrackRouting(sourceTrack, merged, deps.getTracks())
       await persistHistoryTrackRouting(deps, sourceTrackId, normalized)

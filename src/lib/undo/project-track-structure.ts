@@ -1,5 +1,5 @@
 import { getTrackHistoryRef } from './refs'
-import type { HistoryEntry, TrackRef } from './types'
+import type { HistoryEntry, TrackRef, TrackRoutingHistorySnapshot } from './types'
 
 export type ClosureTrack = {
   id: string
@@ -33,111 +33,161 @@ export const applyRoutingPatches = (tracks: readonly ClosureTrack[], patches: re
 }
 
 // The entries a history entry applies, in execution order: undo runs a section's children last to first.
-// Undo execution and the recording guard's projection both follow it.
 export const planStructuralTransition = (entry: HistoryEntry, direction: Direction): readonly HistoryEntry[] => {
   if (entry.type !== 'section-edit') return [entry]
   return direction === 'undo' ? [...entry.data.entries].reverse() : entry.data.entries
 }
 
+// The structural operations a history entry applies, by history ref and in execution order. Undo execution and the
+// recording guard's projection both interpret this one list; each resolves refs to ids its own way. A patch carries only
+// the fields it touches: an absent key leaves the field alone, an undefined value clears it.
+export type StructuralOp =
+  | { kind: 'remove-track'; trackRef: TrackRef | undefined; currentId: string | undefined }
+  | { kind: 'add-track'; trackRef: TrackRef | undefined; currentId: string | undefined; groupRef?: TrackRef | undefined }
+  | {
+    kind: 'patch-track'
+    trackRef: TrackRef
+    groupRef?: TrackRef | undefined
+    outputTargetRef?: TrackRef | undefined
+    // Applies when outputTargetRef is absent or no longer exists.
+    outputFallbackRef?: TrackRef
+    sends?: TrackRoutingHistorySnapshot['sends']
+    index?: number
+  }
+  | { kind: 'merge-routing'; trackRef: TrackRef; routing: TrackRoutingHistorySnapshot }
+
+export const structuralOpsOfKind = <Kind extends StructuralOp['kind']>(ops: readonly StructuralOp[], kind: Kind) => (
+  ops.filter((op): op is Extract<StructuralOp, { kind: Kind }> => op.kind === kind)
+)
+
+export const planStructuralOps = (entry: HistoryEntry, direction: Direction): readonly StructuralOp[] => {
+  const undo = direction === 'undo'
+  switch (entry.type) {
+    case 'section-edit':
+      return planStructuralTransition(entry, direction).flatMap((child) => planStructuralOps(child, direction))
+    case 'track-create':
+      return undo ? [{ kind: 'remove-track', trackRef: entry.data.trackRef, currentId: entry.data.currentTrackId }] : []
+    case 'track-clip-create':
+      return undo ? [{ kind: 'remove-track', trackRef: entry.data.track.trackRef, currentId: entry.data.track.currentTrackId }] : []
+    case 'track-routing': {
+      const routing = undo ? entry.data.from : entry.data.to
+      return [{ kind: 'patch-track', trackRef: entry.data.trackRef, outputTargetRef: routing.outputTargetRef, sends: routing.sends }]
+    }
+    case 'track-delete': {
+      const { track, inboundRouting = [], recreatedTrackId } = entry.data
+      if (!undo) return [{ kind: 'remove-track', trackRef: track.trackRef, currentId: recreatedTrackId }]
+      return [
+        { kind: 'add-track', trackRef: track.trackRef, currentId: recreatedTrackId },
+        ...inboundRouting.map((inbound): StructuralOp => ({ kind: 'merge-routing', trackRef: inbound.sourceTrackRef, routing: inbound })),
+      ]
+    }
+    case 'track-group': {
+      const { groupTrackRef, currentGroupTrackId, childUpdates } = entry.data
+      if (undo) {
+        return [
+          ...childUpdates.map((child): StructuralOp => ({
+            kind: 'patch-track',
+            trackRef: child.trackRef,
+            groupRef: child.previousGroupRef,
+            outputTargetRef: child.previousOutputTargetRef,
+          })),
+          { kind: 'remove-track', trackRef: groupTrackRef, currentId: currentGroupTrackId },
+        ]
+      }
+      return [
+        { kind: 'add-track', trackRef: groupTrackRef, currentId: currentGroupTrackId },
+        ...childUpdates.map((child): StructuralOp => ({
+          kind: 'patch-track',
+          trackRef: child.trackRef,
+          groupRef: groupTrackRef,
+          outputTargetRef: child.nextOutputTargetRef,
+          outputFallbackRef: groupTrackRef,
+        })),
+      ]
+    }
+    case 'track-ungroup': {
+      const { groupTrackRef, groupTrack, childSnapshots } = entry.data
+      if (undo) {
+        return [
+          { kind: 'add-track', trackRef: groupTrackRef, currentId: entry.data.sourceGroupTrackId, groupRef: groupTrack?.groupRef },
+          ...childSnapshots.map((child): StructuralOp => ({
+            kind: 'patch-track',
+            trackRef: child.trackRef,
+            groupRef: groupTrackRef,
+            outputTargetRef: child.previousOutputTargetRef,
+          })),
+        ]
+      }
+      return [
+        ...childSnapshots.map((child): StructuralOp => ({
+          kind: 'patch-track',
+          trackRef: child.trackRef,
+          groupRef: groupTrack?.groupRef,
+          outputTargetRef: child.nextOutputTargetRef,
+        })),
+        { kind: 'remove-track', trackRef: groupTrackRef, currentId: entry.data.currentGroupTrackId },
+      ]
+    }
+    case 'track-reorder':
+      return entry.data.patches.map((patch): StructuralOp => ({
+        kind: 'patch-track',
+        trackRef: patch.trackRef,
+        groupRef: undo ? patch.fromGroupRef : patch.toGroupRef,
+        outputTargetRef: undo ? patch.fromOutputTargetRef : patch.toOutputTargetRef,
+        index: undo ? patch.fromIndex : patch.toIndex,
+      }))
+    default:
+      return []
+  }
+}
+
+// Ids a replay would mint are stood in for by their history ref.
+const applyStructuralOp = (tracks: readonly ClosureTrack[], op: StructuralOp): readonly ClosureTrack[] => {
+  const idByRef = new Map(tracks.map((track) => [getTrackHistoryRef(track), track.id]))
+  const resolve = (ref: TrackRef | undefined) => ref ? idByRef.get(ref) : undefined
+
+  switch (op.kind) {
+    case 'remove-track': {
+      const removedId = resolve(op.trackRef) ?? op.currentId ?? op.trackRef
+      return tracks.filter((track) => track.id !== removedId)
+    }
+    case 'add-track':
+      if (resolve(op.trackRef)) return tracks
+      return [...tracks, { id: op.currentId ?? op.trackRef ?? '', historyRef: op.trackRef, groupId: resolve(op.groupRef) }]
+    case 'patch-track': {
+      const trackId = resolve(op.trackRef)
+      if (!trackId) return tracks
+      const patch: RoutingPatch = { trackId }
+      if (Object.hasOwn(op, 'groupRef')) patch.groupId = resolve(op.groupRef) ?? null
+      if (Object.hasOwn(op, 'outputTargetRef')) patch.outputTargetId = resolve(op.outputTargetRef) ?? resolve(op.outputFallbackRef) ?? null
+      if (op.sends) {
+        patch.sends = op.sends.flatMap((send) => {
+          const targetId = resolve(send.targetTrackRef)
+          return targetId ? [{ targetId }] : []
+        })
+      }
+      return applyRoutingPatches(tracks, [patch])
+    }
+    case 'merge-routing': {
+      const source = tracks.find((track) => track.id === resolve(op.trackRef))
+      if (!source) return tracks
+      const sends = new Map((source.sends ?? []).map((send) => [send.targetId, send]))
+      for (const send of op.routing.sends) {
+        const targetId = resolve(send.targetTrackRef)
+        if (targetId) sends.set(targetId, { targetId })
+      }
+      return applyRoutingPatches(tracks, [{
+        trackId: source.id,
+        outputTargetId: resolve(op.routing.outputTargetRef) ?? source.outputTargetId,
+        sends: [...sends.values()],
+      }])
+    }
+  }
+}
+
 // The track list a history entry leaves behind, limited to what a take binds: existence, group, output and sends.
-// It mirrors what `exec.ts` applies for each structural entry. Ids a replay would mint are stood in for by their history ref.
 export const projectTrackStructure = (
   entry: HistoryEntry,
   direction: Direction,
   tracks: readonly ClosureTrack[],
-): readonly ClosureTrack[] => {
-  const idByRef = new Map(tracks.map((track) => [getTrackHistoryRef(track), track.id]))
-  const resolve = (ref: TrackRef | undefined) => ref ? idByRef.get(ref) : undefined
-  const without = (id: string | undefined) => tracks.filter((track) => track.id !== id)
-  const undo = direction === 'undo'
-
-  switch (entry.type) {
-    case 'section-edit':
-      return planStructuralTransition(entry, direction)
-        .reduce<readonly ClosureTrack[]>((current, child) => projectTrackStructure(child, direction, current), tracks)
-    case 'track-create':
-      return undo ? without(resolve(entry.data.trackRef) ?? entry.data.currentTrackId) : tracks
-    case 'track-clip-create':
-      return undo ? without(resolve(entry.data.track.trackRef) ?? entry.data.track.currentTrackId) : tracks
-    case 'track-routing': {
-      const trackId = resolve(entry.data.trackRef)
-      if (!trackId) return tracks
-      const routing = undo ? entry.data.from : entry.data.to
-      return applyRoutingPatches(tracks, [{
-        trackId,
-        outputTargetId: resolve(routing.outputTargetRef),
-        sends: routing.sends.flatMap((send) => {
-          const targetId = resolve(send.targetTrackRef)
-          return targetId ? [{ targetId }] : []
-        }),
-      }])
-    }
-    case 'track-delete': {
-      const { track, inboundRouting = [], recreatedTrackId } = entry.data
-      if (!undo) return without(resolve(track.trackRef) ?? recreatedTrackId)
-      const restoredId = recreatedTrackId ?? track.trackRef ?? ''
-      const resolveRestored = (ref: TrackRef | undefined) => ref === track.trackRef ? restoredId : resolve(ref)
-      const bySource = new Map(tracks.map((candidate) => [candidate.id, candidate]))
-      const patches = inboundRouting.flatMap((inbound): RoutingPatch[] => {
-        const source = bySource.get(resolve(inbound.sourceTrackRef) ?? '')
-        if (!source) return []
-        const sends = new Map((source.sends ?? []).map((send) => [send.targetId, send]))
-        for (const send of inbound.sends) {
-          const targetId = resolveRestored(send.targetTrackRef)
-          if (targetId) sends.set(targetId, { targetId })
-        }
-        return [{
-          trackId: source.id,
-          outputTargetId: resolveRestored(inbound.outputTargetRef) ?? source.outputTargetId,
-          sends: [...sends.values()],
-        }]
-      })
-      return [...applyRoutingPatches(tracks, patches), { id: restoredId, historyRef: track.trackRef }]
-    }
-    case 'track-group': {
-      const groupId = resolve(entry.data.groupTrackRef) ?? entry.data.currentGroupTrackId ?? entry.data.groupTrackRef
-      const patches = entry.data.childUpdates.flatMap((child): RoutingPatch[] => {
-        const trackId = resolve(child.trackRef)
-        if (!trackId) return []
-        return undo
-          ? [{ trackId, groupId: resolve(child.previousGroupRef), outputTargetId: resolve(child.previousOutputTargetRef) }]
-          : [{ trackId, groupId, outputTargetId: resolve(child.nextOutputTargetRef) ?? groupId }]
-      })
-      const patched = applyRoutingPatches(tracks, patches)
-      return undo
-        ? patched.filter((track) => track.id !== groupId)
-        : [...patched, { id: groupId, historyRef: entry.data.groupTrackRef }]
-    }
-    case 'track-ungroup': {
-      const groupId = (undo ? entry.data.sourceGroupTrackId : resolve(entry.data.groupTrackRef) ?? entry.data.currentGroupTrackId) ?? entry.data.groupTrackRef
-      const parentGroupId = resolve(entry.data.groupTrack?.groupRef)
-      const patches = entry.data.childSnapshots.flatMap((child): RoutingPatch[] => {
-        const trackId = resolve(child.trackRef)
-        if (!trackId) return []
-        return undo
-          ? [{
-            trackId,
-            groupId,
-            outputTargetId: child.previousOutputTargetRef === entry.data.groupTrackRef ? groupId : resolve(child.previousOutputTargetRef),
-          }]
-          : [{ trackId, groupId: parentGroupId, outputTargetId: resolve(child.nextOutputTargetRef) }]
-      })
-      const patched = applyRoutingPatches(tracks, patches)
-      return undo
-        ? [...patched, { id: groupId, historyRef: entry.data.groupTrackRef, groupId: parentGroupId }]
-        : patched.filter((track) => track.id !== groupId)
-    }
-    case 'track-reorder':
-      return applyRoutingPatches(tracks, entry.data.patches.flatMap((patch): RoutingPatch[] => {
-        const trackId = resolve(patch.trackRef)
-        if (!trackId) return []
-        return [{
-          trackId,
-          groupId: resolve(undo ? patch.fromGroupRef : patch.toGroupRef) ?? null,
-          outputTargetId: resolve(undo ? patch.fromOutputTargetRef : patch.toOutputTargetRef) ?? null,
-        }]
-      }))
-    default:
-      return tracks
-  }
-}
+): readonly ClosureTrack[] => planStructuralOps(entry, direction).reduce(applyStructuralOp, tracks)

@@ -52,6 +52,14 @@ export function resolveStoredTrackId(tracks: Track[], trackId: string | undefine
   return tracks.find((track) => track.id === trackId)?.id
 }
 
+export function resolveRemovedTrackId(
+  index: HistoryRefIndex,
+  tracks: Track[],
+  removal: { trackRef: TrackRef | undefined; currentId: string | undefined },
+): Track['id'] | undefined {
+  return resolveTrackId(index, removal.trackRef) ?? resolveStoredTrackId(tracks, removal.currentId)
+}
+
 export function resolveClipId(index: HistoryRefIndex, clipRef: ClipRef | undefined): string | undefined {
   if (!clipRef) return undefined
   return index.clipIdByRef.get(clipRef)

@@ -1542,6 +1542,7 @@ for (const [resume, replaces] of [[false, false], [true, false], [false, true], 
   Object.defineProperty(globalThis, "AudioBuffer", { configurable: true, value: TestAudioBuffer })
   const fixture = createNativeHookBridge(undefined, undefined, undefined, undefined, "failed", true)
   fixture.setScheduleComplete(false)
+  const reload = createProjectReload()
   const initial = audioTrack(new TestAudioBuffer())
   const [tracks, setTracks] = createSignal<Track[]>([initial])
   const publishGate = Promise.withResolvers<void>()
@@ -1549,6 +1550,7 @@ for (const [resume, replaces] of [[false, false], [true, false], [false, true], 
   const transportGate = Promise.withResolvers<void>()
   let holdTransport = false
   let revision = 1, activeRevision = 1, seam = 0n
+  let replaced = false
   let status: "prepared" | "published" | "rolled-back" = "prepared"
   const captures: { state: string; starts: number[] }[] = []
   const reply = async (): Promise<NativeRevisionReply> => ({ ok: true, hostPid: 123, hostGeneration: 7,
@@ -1560,7 +1562,9 @@ for (const [resume, replaces] of [[false, false], [true, false], [false, true], 
     publish: async () => {
       publishing.resolve()
       await publishGate.promise
-      status = "published"; activeRevision = revision; fixture.setRuntimeRevision(revision)
+      status = "published"; activeRevision = revision
+      // The host's runtime revision belongs to the session in force: a retired session's publication does not move it.
+      if (!replaced) fixture.setRuntimeRevision(revision)
       return reply()
     },
     inspect: reply,
@@ -1573,7 +1577,7 @@ for (const [resume, replaces] of [[false, false], [true, false], [false, true], 
     return setTransport(transport)
   }
   Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: {
-    ...fixture.audioHost, session: { ...fixture.audioHost.session, get revisions() { return replaces && holdTransport ? undefined : revisions },
+    ...fixture.audioHost, session: { ...fixture.audioHost.session, revisions,
       configureInstrumentStates: async () => ({ ok: true }) },
   } } } })
   let dispose = () => {}
@@ -1584,7 +1588,7 @@ for (const [resume, replaces] of [[false, false], [true, false], [false, true], 
         dispose = cleanup
         return useTimelinePlayback(createFakeEngine({ clipId: "x", startSec: 0, endSec: 1 }).engine,
           { getTracks: tracks, bpm: () => 120 }, {
-            requiresNativeAudio: true, enabled: () => true, projectId: () => "project",
+            requiresNativeAudio: true, enabled: () => true, projectId: () => "project", projectGeneration: reload.projectGeneration,
             compileSnapshot: async transport => {
               const captured = tracks()
               captures.push({ state: transport.state, starts: captured.flatMap(track => track.clips.map(clip => clip.startSec)) })
@@ -1607,12 +1611,23 @@ for (const [resume, replaces] of [[false, false], [true, false], [false, true], 
       const stopBefore = fixture.calls.filter(call => call === "stop").length
       const editB = { ...initial, clips: initial.clips.map(clip => ({ ...clip, startSec: 0.75 })) }
       setTracks([editB])
+      // The project reloads under the held pause: the preview it kept is replaced, not adopted into.
+      if (replaces) {
+        reload.reload()
+        // The replacement session is prepared from scratch: it starts at revision 1 and completes its schedule.
+        fixture.setScheduleComplete(true)
+        replaced = true
+        fixture.setRuntimeRevision(1)
+      }
       const restart = resume ? playback.handlePlay(untrack(tracks)) : undefined
       await settle()
-      expect(playback.isNativePlaybackPrepared()).toBe(true)
-      expect(fixture.calls.filter(call => call === "stop").length).toBe(stopBefore)
+      // An edit waits for the held pause before it retires the preview; a reload retires it at once.
+      if (!replaces) {
+        expect(playback.isNativePlaybackPrepared()).toBe(true)
+        expect(fixture.calls.filter(call => call === "stop").length).toBe(stopBefore)
+      }
       console.log("STEP7B3-PAUSED-EDIT-BEFORE-ACK", JSON.stringify({ before, captures, calls: fixture.calls.slice(-15), prepared: playback.isNativePlaybackPrepared() }))
-      if (resume) expect(captures).toHaveLength(before)
+      if (resume && !replaces) expect(captures).toHaveLength(before)
       publishGate.resolve(); transportGate.resolve()
       await pause
       await restart

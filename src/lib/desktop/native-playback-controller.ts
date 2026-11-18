@@ -3200,9 +3200,6 @@ export const createNativePlaybackController = (input: {
     destroy,
     isActive: () => active,
     isAvailable: () => input.bridge !== undefined && !hostLoss.isLost(),
-    // A host that stages revisions and instrument states adopts an edit into the running session instead of replacing it.
-    canAdoptInPlace: () => input.bridge?.session.revisions !== undefined
-      && input.bridge.session.configureInstrumentStates !== undefined,
     canProcessLiveMidi: () => livePreviewActive,
     hasLiveMidiTails: liveMidi.hasTails,
     isPrepared: () => prepared,

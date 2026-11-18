@@ -504,7 +504,11 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     await browser('eval', 'nativeLifecycle.failNextSchedule()')
     await browser('click', '#fail-loop')
     const failedLoop = await save('14-failed-loop-transition', 'nativeLifecycle.settle()')
-    idle(failedLoop)
+    // The rejection stops the session the loop edit was adopted into. The host's graph is released by the next start, as for
+    // any session that failed while playing.
+    expect(failedLoop.isPlaying).toBe(false)
+    expect(failedLoop.prepared).toBe(false)
+    expect(failedLoop.active).toBe(false)
     expect(failedLoop.scheduleRejections).toBeGreaterThan(0)
     expect(failedLoop.faults.some((fault) => fault.includes('Genuine schedule submission rejection'))).toBe(true)
     await browser('click', '#play')

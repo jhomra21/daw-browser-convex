@@ -64,7 +64,6 @@ export const createScheduleReconciliation = (input: ScheduleReconciliationInput)
     // state the session has when it commits, never the ones its intent captured. Only a lifecycle rebuild, which names
     // rebuildBackend, replaces the session.
     if (!((nativePlayback.isActive() || (nativePlayback.isPrepared() && !options?.rebuildBackend))
-      && nativePlayback.canAdoptInPlace()
       && (!options?.rebuildBackend || !options.owner || options.owner === "native")
       && (options?.projectId === undefined || options.projectId === nativeOptions?.projectId?.())
       && (options?.projectGeneration === undefined || options.projectGeneration === nativeOptions?.projectGeneration?.()))) {

@@ -1727,7 +1727,7 @@ export function useTimelinePlayback(
     if (projectionChanged && nativePreviewRequested && (playAttempt === undefined || !portableBrowserOptions)) {
       // The kept native preview adopts the edit in place, tails included, once the clips it adds are hydrated: the
       // effect runs again when they are. One still preparing finishes first and adopts it after (the effect's tail).
-      if (nativePlayback.isPrepared() && nativePlayback.canAdoptInPlace()) {
+      if (nativePlayback.isPrepared()) {
         if (!pendingAudioHydration) adoptPortableEdits()
         return
       }

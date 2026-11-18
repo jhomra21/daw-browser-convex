@@ -28,7 +28,7 @@ let duplicateLeaseReleases = 0
 let controller: ReturnType<typeof createNativePlaybackController> | undefined
 const disposals: Promise<void>[] = []
 const timelineJourney = new URL(location.href).searchParams.has('timeline')
-// `live` mounts the Timeline as the desktop product does: native playback enabled, with the host's revision session.
+// `live` mounts the Timeline as the desktop product does, with native playback enabled.
 const liveEdits = new URL(location.href).searchParams.has('live')
 const sampledKind = new URL(location.href).searchParams.get('sampled')
 const instrumentBudget = createSampledInstrumentRegionBudget(nativeInstrumentBudgetPolicy(18 * 1024 ** 3).aggregateBytes)
@@ -295,7 +295,7 @@ const host = {
     release: async () => undefined,
   },
   session: {
-    ...(liveEdits && { revisions }),
+    revisions,
     beginTransaction: async () => {
       owner += 1
       token = `fixture-transaction-${owner}`

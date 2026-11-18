@@ -115,8 +115,8 @@ const stubWebAssembly = (calls: string[], names: Array<'instantiate' | 'compile'
   })
 }
 
-const readyPortableHost = async (version: 1 | 2) => {
-  const { DawPortableAudioCoreHost } = await import(new URL(`audio-worklets/daw-portable-audio-core-host-v${version}.js`, publicRoot).href)
+const readyPortableHost = async () => {
+  const { DawPortableAudioCoreHost } = await import(new URL('audio-worklets/daw-portable-audio-core-host-v2.js', publicRoot).href)
   const messages: WorkletMessage[] = []
   const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: WorkletMessage) => { messages[messages.length] = message }, close: () => undefined })
   Object.assign(host, {
@@ -170,7 +170,7 @@ test('portable Wasm worklet defers initialization and keeps process allocation-f
   expect(processed).toEqual([[inputs, outputs]])
 
   // A running host renders through the core for the output block size without compiling, allocating or logging.
-  const { host } = await readyPortableHost(2)
+  const { host } = await readyPortableHost()
   const rendered: number[] = []
   host.coreProcess = (frames: number) => { rendered[rendered.length] = frames; return 0 }
   const block = [[new Float32Array(128), new Float32Array(128)]]
@@ -216,34 +216,32 @@ test('portable live processor overrides stay within the core event envelope with
   expect(source).toContain("if (count >= MAX_PROCESSOR_EVENTS) continue")
 })
 
-test('both hosts keep live instrument merging and acknowledgement allocation-free', async () => {
-  for (const version of [1, 2] as const) {
-    const { host, messages } = await readyPortableHost(version)
-    host.handleMessage({ version, type: 'instrument-parameters', requestId: 7, revision: 1, sequence: 1, epoch: 1,
-      events: [{ nodeId: 'track', type: 'parameter', noteId: 1, sequence: 1, frameOffset: 0, channel: 0, note: 3, value: 913 }] })
-    Object.assign(host, {
-      schedule: { transportEpoch: 1, revision: 1 },
-      scheduleEventView: new DataView(new ArrayBuffer(4 + 256 * 20)),
-      scheduleInstrumentEventView: new DataView(new ArrayBuffer(4 + 256 * 48)),
-      scheduleParameterStreams: [],
-      scheduleInstrumentEvents: [{ frame: 0, nodeId: 1n, noteId: 1n, sequence: 1n, type: 1, pitch: 60, value: 1 }],
-    })
+test('the v2 host keeps live instrument merging and acknowledgement allocation-free', async () => {
+  const { host, messages } = await readyPortableHost()
+  host.handleMessage({ version: 2, type: 'instrument-parameters', requestId: 7, revision: 1, sequence: 1, epoch: 1,
+    events: [{ nodeId: 'track', type: 'parameter', noteId: 1, sequence: 1, frameOffset: 0, channel: 0, note: 3, value: 913 }] })
+  Object.assign(host, {
+    schedule: { transportEpoch: 1, revision: 1 },
+    scheduleEventView: new DataView(new ArrayBuffer(4 + 256 * 20)),
+    scheduleInstrumentEventView: new DataView(new ArrayBuffer(4 + 256 * 48)),
+    scheduleParameterStreams: [],
+    scheduleInstrumentEvents: [{ frame: 0, nodeId: 1n, noteId: 1n, sequence: 1n, type: 1, pitch: 60, value: 1 }],
+  })
 
-    let materialized = false
-    expect(observeRealtimeAllocations(() => { materialized = host.materializeSchedule(0, 128) })).toEqual([])
-    expect(materialized).toBe(true)
-    // The live parameter is merged after the scheduled note and both reach the core block.
-    expect(host.materializedLiveInstrumentCount).toBe(1)
-    expect(host.scheduleInstrumentEventCount).toBe(2)
+  let materialized = false
+  expect(observeRealtimeAllocations(() => { materialized = host.materializeSchedule(0, 128) })).toEqual([])
+  expect(materialized).toBe(true)
+  // The live parameter is merged after the scheduled note and both reach the core block.
+  expect(host.materializedLiveInstrumentCount).toBe(1)
+  expect(host.scheduleInstrumentEventCount).toBe(2)
 
-    expect(messages).not.toContainEqual(expect.objectContaining({ type: 'instrument-events-applied' }))
-    expect(observeRealtimeAllocations(() => { host.flushInstrumentAcks('applied') })).toEqual([])
-    expect(messages).toContainEqual({ version, type: 'instrument-events-applied', requestId: 7, revision: 1, epoch: 1, sequence: 1, result: 'applied' })
-  }
+  expect(messages).not.toContainEqual(expect.objectContaining({ type: 'instrument-events-applied' }))
+  expect(observeRealtimeAllocations(() => { host.flushInstrumentAcks('applied') })).toEqual([])
+  expect(messages).toContainEqual({ version: 2, type: 'instrument-events-applied', requestId: 7, revision: 1, epoch: 1, sequence: 1, result: 'applied' })
 })
 
 test('B6f5 the portable worklet stages schedules, refuses discontinuous adoptions and leaves encoding off its thread', async () => {
-  const { host, messages } = await readyPortableHost(2)
+  const { host, messages } = await readyPortableHost()
   host.revision = 1
   const preparedBytes: number[][] = []
   let continuityResult = 1

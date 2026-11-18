@@ -3,99 +3,94 @@ import type { PortableWasmControlMessage, PortableWasmStatusMessage } from './po
 import { createDefaultSpectralParams, createDefaultUtilityParams } from '@daw-browser/shared'
 import { encodeEqProcessorState, encodeLimiterProcessorState, encodeSpectralProcessorState, encodeUtilityProcessorState, mixerParameterRegistry, type AudioCoreGraphSnapshot, type AudioCoreInstrumentState } from '@daw-browser/audio-core-contract'
 
-const hostUrl = new URL('../../../public/audio-worklets/daw-portable-audio-core-host-v1.js', import.meta.url)
 const hostV2Url = new URL('../../../public/audio-worklets/daw-portable-audio-core-host-v2.js', import.meta.url)
 const wasmUrl = new URL('../../../native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm', import.meta.url)
 type InstrumentHostStatus = Omit<Extract<PortableWasmStatusMessage, { type: 'instrument-events-applied' }>, 'version'> & { version: number }
 type HostControl<Type extends PortableWasmControlMessage['type']> = Omit<Extract<PortableWasmControlMessage, { type: Type }>, 'version'> & { version: number }
 
-test('both hosts preserve a full scheduled block and acknowledge live parameters only after rendering', async () => {
-  for (const version of [1, 2]) {
-    const { DawPortableAudioCoreHost } = await import(version === 1 ? hostUrl.href : hostV2Url.href)
-    const messages: Array<PortableWasmStatusMessage | InstrumentHostStatus> = []
-    const host = new DawPortableAudioCoreHost({
-      sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined,
-    })
-    Object.assign(host, {
-      ready: true, revision: 1, maxFramesPerBlock: 128, transportEpoch: 1,
-      memory: { buffer: new ArrayBuffer(65536) }, malloc: () => 8, free: () => undefined,
-      graphSetTransport: () => 0,
-      inputPlanes: Array.from({ length: 128 }, () => new Float32Array(128)),
-      leftOutput: new Float32Array(128), rightOutput: new Float32Array(128),
-      eventOffset: 1,
-      eventBufferView: new DataView(new ArrayBuffer(4)),
-    })
-    host.handleMessage({ version, type: 'instrument-parameters', requestId: 7, revision: 1, sequence: 1, epoch: 1,
-      events: [{ nodeId: 'track', type: 'parameter', noteId: 1, sequence: 1, frameOffset: 0, channel: 0, note: 3, value: 913 }] })
-    expect(messages).not.toContainEqual(expect.objectContaining({ type: 'instrument-events-applied' }))
-    Object.assign(host, {
-      schedule: { transportEpoch: 1, revision: 1 },
-      scheduleEventView: new DataView(new ArrayBuffer(4 + 256 * 20)),
-      scheduleInstrumentEventView: new DataView(new ArrayBuffer(4 + 256 * 48)),
-      scheduleParameterStreams: [],
-      scheduleInstrumentEvents: Array.from({ length: 512 }, (_, index) => ({
-        frame: index < 256 ? 0 : 128, nodeId: 1n, noteId: BigInt(index + 1), sequence: BigInt(index + 1), type: 1, pitch: 60, value: 1,
-      })),
-    })
-    const rendered: number[] = []
-    let notes = 0
-    host.coreProcess = () => {
-      const view = host.scheduleInstrumentEventView
-      for (let index = 0; index < view.getUint32(0, true); index += 1) {
-        if (view.getUint32(4 + index * 48 + 32, true) === 5) rendered.push(view.getFloat32(4 + index * 48 + 44, true))
-        else notes += 1
-      }
-      return 0
+test('the v2 host preserves a full scheduled block and acknowledge live parameters only after rendering', async () => {
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+  const messages: Array<PortableWasmStatusMessage | InstrumentHostStatus> = []
+  const host = new DawPortableAudioCoreHost({
+    sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined,
+  })
+  Object.assign(host, {
+    ready: true, revision: 1, maxFramesPerBlock: 128, transportEpoch: 1,
+    memory: { buffer: new ArrayBuffer(65536) }, malloc: () => 8, free: () => undefined,
+    graphSetTransport: () => 0,
+    inputPlanes: Array.from({ length: 128 }, () => new Float32Array(128)),
+    leftOutput: new Float32Array(128), rightOutput: new Float32Array(128),
+    eventOffset: 1,
+    eventBufferView: new DataView(new ArrayBuffer(4)),
+  })
+  host.handleMessage({ version: 2, type: 'instrument-parameters', requestId: 7, revision: 1, sequence: 1, epoch: 1,
+    events: [{ nodeId: 'track', type: 'parameter', noteId: 1, sequence: 1, frameOffset: 0, channel: 0, note: 3, value: 913 }] })
+  expect(messages).not.toContainEqual(expect.objectContaining({ type: 'instrument-events-applied' }))
+  Object.assign(host, {
+    schedule: { transportEpoch: 1, revision: 1 },
+    scheduleEventView: new DataView(new ArrayBuffer(4 + 256 * 20)),
+    scheduleInstrumentEventView: new DataView(new ArrayBuffer(4 + 256 * 48)),
+    scheduleParameterStreams: [],
+    scheduleInstrumentEvents: Array.from({ length: 512 }, (_, index) => ({
+      frame: index < 256 ? 0 : 128, nodeId: 1n, noteId: BigInt(index + 1), sequence: BigInt(index + 1), type: 1, pitch: 60, value: 1,
+    })),
+  })
+  const rendered: number[] = []
+  let notes = 0
+  host.coreProcess = () => {
+    const view = host.scheduleInstrumentEventView
+    for (let index = 0; index < view.getUint32(0, true); index += 1) {
+      if (view.getUint32(4 + index * 48 + 32, true) === 5) rendered.push(view.getFloat32(4 + index * 48 + 44, true))
+      else notes += 1
     }
-    host.transportRunning = true
-    host.process([], [[new Float32Array(128), new Float32Array(128)]])
-    expect(notes).toBe(256)
-    expect(rendered).toEqual([])
-    expect(messages).not.toContainEqual(expect.objectContaining({ type: 'instrument-events-applied', result: 'applied' }))
-    host.process([], [[new Float32Array(128), new Float32Array(128)]])
-    expect(rendered).toEqual([913])
-    host.process([], [[new Float32Array(128), new Float32Array(128)]])
-    expect(notes).toBe(512)
-    expect(rendered).toEqual([913])
-    expect(host.framesProcessed).toBe(384)
-    expect(messages).toContainEqual({ version, type: 'instrument-events-applied', requestId: 7, revision: 1, epoch: 1, sequence: 1, result: 'applied' })
+    return 0
   }
+  host.transportRunning = true
+  host.process([], [[new Float32Array(128), new Float32Array(128)]])
+  expect(notes).toBe(256)
+  expect(rendered).toEqual([])
+  expect(messages).not.toContainEqual(expect.objectContaining({ type: 'instrument-events-applied', result: 'applied' }))
+  host.process([], [[new Float32Array(128), new Float32Array(128)]])
+  expect(rendered).toEqual([913])
+  host.process([], [[new Float32Array(128), new Float32Array(128)]])
+  expect(notes).toBe(512)
+  expect(rendered).toEqual([913])
+  expect(host.framesProcessed).toBe(384)
+  expect(messages).toContainEqual({ version: 2, type: 'instrument-events-applied', requestId: 7, revision: 1, epoch: 1, sequence: 1, result: 'applied' })
 })
 
-test('both hosts replay pending and applied parameter values under a new epoch', async () => {
-  for (const version of [1, 2]) {
-    const { DawPortableAudioCoreHost } = await import(version === 1 ? hostUrl.href : hostV2Url.href)
-    const messages: Array<PortableWasmStatusMessage | InstrumentHostStatus> = []
-    const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
-    Object.assign(host, { ready: true, revision: 1, maxFramesPerBlock: 128, transportEpoch: 1,
-      memory: { buffer: new ArrayBuffer(65536) }, malloc: () => 8, free: () => undefined, graphSetTransport: () => 0 })
-    host.handleMessage({ version, type: 'instrument-parameters', requestId: 8, revision: 1, sequence: 2, epoch: 1,
-      events: [{ nodeId: 'track', type: 'parameter', noteId: 1, sequence: 2, frameOffset: 0, channel: 0, note: 3, value: 913 }] })
-    host.handleMessage({ version, type: 'transport', requestId: 9, epoch: 2, running: true, frame: 0 })
-    expect(host.instrumentEventView.getUint32(28, true)).toBe(2)
-    expect(host.instrumentEventView.getFloat32(48, true)).toBe(913)
-    expect(messages).toContainEqual({ version, type: 'instrument-events-applied', requestId: 8, revision: 1, epoch: 1, sequence: 2, result: 'rejected' })
-    Object.assign(host, {
-      eventOffset: 1, eventBufferView: new DataView(new ArrayBuffer(4)),
-      inputPlanes: Array.from({ length: 128 }, () => new Float32Array(128)),
-      leftOutput: new Float32Array(128), rightOutput: new Float32Array(128),
-    })
-    const epochs: number[] = []
-    host.coreProcess = () => {
-      if (host.instrumentEventByteCount > 4) {
-        const deliveredEpoch = host.instrumentEventView.getUint32(28, true)
-        if (deliveredEpoch !== host.transportEpoch) return 1
-        epochs.push(deliveredEpoch)
-      }
-      return 0
+test('the v2 host replays pending and applied parameter values under a new epoch', async () => {
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+  const messages: Array<PortableWasmStatusMessage | InstrumentHostStatus> = []
+  const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
+  Object.assign(host, { ready: true, revision: 1, maxFramesPerBlock: 128, transportEpoch: 1,
+    memory: { buffer: new ArrayBuffer(65536) }, malloc: () => 8, free: () => undefined, graphSetTransport: () => 0 })
+  host.handleMessage({ version: 2, type: 'instrument-parameters', requestId: 8, revision: 1, sequence: 2, epoch: 1,
+    events: [{ nodeId: 'track', type: 'parameter', noteId: 1, sequence: 2, frameOffset: 0, channel: 0, note: 3, value: 913 }] })
+  host.handleMessage({ version: 2, type: 'transport', requestId: 9, epoch: 2, running: true, frame: 0 })
+  expect(host.instrumentEventView.getUint32(28, true)).toBe(2)
+  expect(host.instrumentEventView.getFloat32(48, true)).toBe(913)
+  expect(messages).toContainEqual({ version: 2, type: 'instrument-events-applied', requestId: 8, revision: 1, epoch: 1, sequence: 2, result: 'rejected' })
+  Object.assign(host, {
+    eventOffset: 1, eventBufferView: new DataView(new ArrayBuffer(4)),
+    inputPlanes: Array.from({ length: 128 }, () => new Float32Array(128)),
+    leftOutput: new Float32Array(128), rightOutput: new Float32Array(128),
+  })
+  const epochs: number[] = []
+  host.coreProcess = () => {
+    if (host.instrumentEventByteCount > 4) {
+      const deliveredEpoch = host.instrumentEventView.getUint32(28, true)
+      if (deliveredEpoch !== host.transportEpoch) return 1
+      epochs.push(deliveredEpoch)
     }
-    host.process([], [[new Float32Array(128), new Float32Array(128)]])
-    host.process([], [[new Float32Array(128), new Float32Array(128)]])
-    host.handleMessage({ version, type: 'transport', requestId: 10, epoch: 3, running: true, frame: 256 })
-    host.process([], [[new Float32Array(128), new Float32Array(128)]])
-    expect(epochs).toEqual([2, 3])
-    expect(host.instrumentEventByteCount).toBe(0)
+    return 0
   }
+  host.process([], [[new Float32Array(128), new Float32Array(128)]])
+  host.process([], [[new Float32Array(128), new Float32Array(128)]])
+  host.handleMessage({ version: 2, type: 'transport', requestId: 10, epoch: 3, running: true, frame: 256 })
+  host.process([], [[new Float32Array(128), new Float32Array(128)]])
+  expect(epochs).toEqual([2, 3])
+  expect(host.instrumentEventByteCount).toBe(0)
 })
 
 const createTransportHost = async (
@@ -125,8 +120,8 @@ const createTransportHost = async (
   return { host, messages }
 }
 
-test('the portable Wasm host exposes the same explicit API to worklet and Worker callers', async () => {
-  const { DawPortableAudioCoreHost } = await import(hostUrl.href)
+test('the v2 host exposes the same explicit API to worklet and Worker callers', async () => {
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const statuses: unknown[] = []
   const createHost = () => new DawPortableAudioCoreHost({
     sampleRate: 48_000,
@@ -145,11 +140,11 @@ test('the portable Wasm host exposes the same explicit API to worklet and Worker
     contractHash: 'test-contract',
     maxFramesPerBlock: 128,
   })).toBe(false)
-  expect(statuses).toContainEqual({ version: 1, type: 'fault', code: 'initialization-failed' })
+  expect(statuses).toContainEqual({ version: 2, type: 'fault', code: 'initialization-failed' })
 })
 
 test('the shared portable Wasm host has no AudioWorklet-only dependency', async () => {
-  const source = await Bun.file(hostUrl).text()
+  const source = await Bun.file(hostV2Url).text()
 
   expect(source).not.toContain('AudioWorkletProcessor')
   expect(source).not.toContain('registerProcessor')
@@ -159,7 +154,7 @@ test('the shared portable Wasm host has no AudioWorklet-only dependency', async 
   expect(source).toContain('wasmModule instanceof WebAssembly.Module')
 })
 
-test('v1 and v2 portable hosts pass curved fade values and defaults to Wasm', async () => {
+test('the v2 host passes curved fade values and defaults to Wasm', async () => {
   const event = {
     version: 1,
     epoch: 1,
@@ -180,55 +175,49 @@ test('v1 and v2 portable hosts pass curved fade values and defaults to Wasm', as
     fadeOutCurve: -0.5,
     fadeOutCurvePosition: 0.8,
   }
-  for (const hostUrlToUse of [hostUrl, hostV2Url]) {
-    const protocolVersion = hostUrlToUse === hostV2Url ? 2 : 1
-    const { DawPortableAudioCoreHost } = await import(hostUrlToUse.href)
-    const calls: unknown[][] = []
-    const messages: PortableWasmStatusMessage[] = []
-    const host = new DawPortableAudioCoreHost({
-      sampleRate: 48_000,
-      postMessage: (message: PortableWasmStatusMessage) => messages.push(message),
-      close: () => undefined,
-    })
-    host.ready = true
-    host.revision = 1
-    host.transportEpoch = 1
-    host.sourceSchedule = (...args: unknown[]) => {
-      calls.push(args)
-      return 0
-    }
-    host.assets = new Map([['asset', { handle: { value: 1n } }]])
-    host.scheduleSources({
-      version: protocolVersion,
-      type: 'schedule-sources',
-      requestId: 1,
-      revision: 1,
-      epoch: 1,
-      events: [event],
-    })
-    expect(calls[0]?.slice(-5)).toEqual([0, 0.75, 0.25, -0.5, 0.8])
-    expect(messages).toContainEqual(expect.objectContaining({ type: 'sources-scheduled', result: 'scheduled' }))
-    calls.length = 0
-    host.scheduleSources({
-      version: protocolVersion,
-      type: 'schedule-sources',
-      requestId: 2,
-      revision: 1,
-      epoch: 1,
-      events: [{ ...event, sequence: 2, fadeInCurve: undefined, fadeInCurvePosition: undefined, fadeOutCurve: undefined, fadeOutCurvePosition: undefined }],
-    })
-    expect(calls[0]?.slice(-5)).toEqual([0, 0, 0.5, 0, 0.5])
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+  const calls: unknown[][] = []
+  const messages: PortableWasmStatusMessage[] = []
+  const host = new DawPortableAudioCoreHost({
+    sampleRate: 48_000,
+    postMessage: (message: PortableWasmStatusMessage) => messages.push(message),
+    close: () => undefined,
+  })
+  host.ready = true
+  host.revision = 1
+  host.transportEpoch = 1
+  host.sourceSchedule = (...args: unknown[]) => {
+    calls.push(args)
+    return 0
   }
+  host.assets = new Map([['asset', { handle: { value: 1n } }]])
+  host.scheduleSources({
+    version: 2,
+    type: 'schedule-sources',
+    requestId: 1,
+    revision: 1,
+    epoch: 1,
+    events: [event],
+  })
+  expect(calls[0]?.slice(-5)).toEqual([0, 0.75, 0.25, -0.5, 0.8])
+  expect(messages).toContainEqual(expect.objectContaining({ type: 'sources-scheduled', result: 'scheduled' }))
+  calls.length = 0
+  host.scheduleSources({
+    version: 2,
+    type: 'schedule-sources',
+    requestId: 2,
+    revision: 1,
+    epoch: 1,
+    events: [{ ...event, sequence: 2, fadeInCurve: undefined, fadeInCurvePosition: undefined, fadeOutCurve: undefined, fadeOutCurvePosition: undefined }],
+  })
+  expect(calls[0]?.slice(-5)).toEqual([0, 0, 0.5, 0, 0.5])
 })
 
-test('portable Wasm hosts enforce the 24-parameter contract in every parameter validation path', async () => {
-  const v1 = await Bun.file(hostUrl).text()
-  const v2 = await Bun.file(hostV2Url).text()
-  expect(v1).toContain('const MAX_PROCESSOR_PARAMETERS = 24')
-  expect(v1).toContain('block.parameterTargets.length <= MAX_PROCESSOR_PARAMETERS')
-  expect(v2).toContain('const MAX_PROCESSOR_PARAMETERS = 24')
-  expect(v2).toContain('block.parameterTargets.length <= MAX_PROCESSOR_PARAMETERS')
-  expect(v2).toContain('message.parameterTargets.length > MAX_PROCESSOR_PARAMETERS')
+test('the v2 host enforces the 24-parameter contract in every parameter validation path', async () => {
+  const source = await Bun.file(hostV2Url).text()
+  expect(source).toContain('const MAX_PROCESSOR_PARAMETERS = 24')
+  expect(source).toContain('block.parameterTargets.length <= MAX_PROCESSOR_PARAMETERS')
+  expect(source).toContain('message.parameterTargets.length > MAX_PROCESSOR_PARAMETERS')
 })
 
 test('the v2 host acknowledges transport only after its rendered quantum reaches the output', async () => {
@@ -343,7 +332,7 @@ test('the v2 host preserves a pending transport when a newer core command fails'
 })
 
 test('the portable host captures bounded planar PCM only when explicitly configured', async () => {
-  const { DawPortableAudioCoreHost } = await import(hostUrl.href)
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
@@ -353,7 +342,7 @@ test('the portable host captures bounded planar PCM only when explicitly configu
   const wasmBytes = await Bun.file(wasmUrl).arrayBuffer()
   expect(await host.initialize({ wasmBytes, contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
   host.handleMessage({
-    version: 1,
+    version: 2,
     type: 'recording-capture-configure',
     generation: 4,
     sessionId: 9,
@@ -370,7 +359,7 @@ test('the portable host captures bounded planar PCM only when explicitly configu
     type: 'recording-capture-applied',
     action: 'configured',
   }))
-  host.handleMessage({ version: 1, type: 'recording-capture-finalize', stopFrame: 2 })
+  host.handleMessage({ version: 2, type: 'recording-capture-finalize', stopFrame: 2 })
   expect(messages).toContainEqual(expect.objectContaining({
     type: 'recording-capture-block',
     generation: 4,
@@ -387,7 +376,7 @@ test('the portable host captures bounded planar PCM only when explicitly configu
 })
 
 test('the actual portable Wasm host renders built-in effects without native hooks', async () => {
-  const { DawPortableAudioCoreHost } = await import(hostUrl.href)
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
@@ -403,7 +392,7 @@ test('the actual portable Wasm host renders built-in effects without native hook
   utilityView.setFloat32(4, 6, true)
   utilityView.setFloat32(24, 1, true)
   host.handleMessage({
-    version: 1,
+    version: 2,
     type: 'prepare-graph',
     requestId: 1,
     snapshot: {
@@ -456,28 +445,28 @@ test('the actual portable Wasm host renders built-in effects without native hook
   })
 
   expect(messages).toContainEqual(expect.objectContaining({
-    version: 1,
+    version: 2,
     type: 'graph-prepared',
     requestId: 1,
     revision: 1,
     result: 'prepared',
   }))
-  host.handleMessage({ version: 1, type: 'publish-graph', requestId: 2, revision: 1 })
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
   expect(messages).toContainEqual(expect.objectContaining({
-    version: 1,
+    version: 2,
     type: 'graph-published',
     requestId: 2,
     revision: 1,
     result: 'published',
   }))
   expect(messages).toContainEqual(expect.objectContaining({
-    version: 1,
+    version: 2,
     type: 'graph-continuity',
     revision: 1,
     result: 'accepted',
   }))
-  host.handleMessage({ version: 1, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
-  playConstantSources(host, messages, 1, 1, [{ nodeId: 'track', value: 1 }])
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  playConstantSources(host, messages, 2, 1, [{ nodeId: 'track', value: 1 }])
   const outputLeft = new Float32Array(1)
   const outputRight = new Float32Array(1)
   host.process([], [[outputLeft, outputRight]])
@@ -551,7 +540,7 @@ const playConstantSources = (
     asset: { version: 1, assetId: `constant-${value}`, frameCount: frames, sampleRateHz: 48_000, channelCount: 2 },
     planes: [new Float32Array(frames).fill(value), new Float32Array(frames).fill(value)],
   })
-  host.handleMessage({ version, type: 'schedule-sources', requestId, revision, epoch: 1, events: sources.map(({ nodeId, value }, index) => ({
+  host.handleMessage({ version: 2, type: 'schedule-sources', requestId, revision, epoch: 1, events: sources.map(({ nodeId, value }, index) => ({
     version: 1, epoch: 1, sequence: index + 1, sourceNodeId: nodeId, assetId: `constant-${value}`,
     startFrame: 0, stopFrame: frames, sourceOffsetFrame: 0, sourceFrameCount: frames, gain: 1,
     fadeInStartFrame: 0, fadeInEndFrame: 0, fadeOutStartFrame: frames, fadeOutEndFrame: frames,
@@ -704,7 +693,7 @@ test('the v2 host keeps rendering a published revision whose schedule has not ar
   expect([results, blocks.map((block) => block.filter((sample) => sample === 0.5).length)]).toEqual([[0, 0, 0], [128, 128, 128]])
 })
 test('the portable host drains one block per acknowledgement before finalizing', async () => {
-  const { DawPortableAudioCoreHost } = await import(hostUrl.href)
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
@@ -714,7 +703,7 @@ test('the portable host drains one block per acknowledgement before finalizing',
   const wasmBytes = await Bun.file(wasmUrl).arrayBuffer()
   expect(await host.initialize({ wasmBytes, contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
   host.handleMessage({
-    version: 1,
+    version: 2,
     type: 'recording-capture-configure',
     generation: 5,
     sessionId: 10,
@@ -729,14 +718,14 @@ test('the portable host drains one block per acknowledgement before finalizing',
   for (let block = 0; block < 17; block += 1) {
     host.process([[new Float32Array(128)]], [[new Float32Array(128), new Float32Array(128)]])
   }
-  host.handleMessage({ version: 1, type: 'recording-capture-finalize', stopFrame: 128 })
+  host.handleMessage({ version: 2, type: 'recording-capture-finalize', stopFrame: 128 })
   expect(messages.filter((message) => message.type === 'recording-capture-block')).toHaveLength(1)
   expect(messages).not.toContainEqual(expect.objectContaining({
     type: 'recording-capture-applied',
     action: 'finalized',
   }))
 
-  host.handleMessage({ version: 1, type: 'recording-capture-drain' })
+  host.handleMessage({ version: 2, type: 'recording-capture-drain' })
   expect(messages.filter((message) => message.type === 'recording-capture-block')).toHaveLength(2)
   expect(messages).toContainEqual(expect.objectContaining({
     type: 'recording-capture-applied',
@@ -745,7 +734,7 @@ test('the portable host drains one block per acknowledgement before finalizing',
 })
 
 test('installed schedules advance bounded cursors across half-open blocks and seeks', async () => {
-  const { DawPortableAudioCoreHost } = await import(hostUrl.href)
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
@@ -759,7 +748,7 @@ test('installed schedules advance bounded cursors across half-open blocks and se
   host.maxFramesPerBlock = 128
   host.scheduleEventView = new DataView(new ArrayBuffer(4 + 256 * 20))
   host.scheduleInstrumentEventView = new DataView(new ArrayBuffer(4 + 256 * 48))
-  host.preparedSnapshot = {
+  host.publishedSnapshot = {
     revision: 1,
     masterNodeId: 'master',
     nodes: [
@@ -781,7 +770,7 @@ test('installed schedules advance bounded cursors across half-open blocks and se
     ],
   }
   host.handleMessage({
-    version: 1,
+    version: 2,
     type: 'install-schedule',
     requestId: 7,
     schedule: {
@@ -847,7 +836,7 @@ test('installed schedules advance bounded cursors across half-open blocks and se
   expect(first.parameterEvents.map(([frame]) => frame)).toEqual([0, 1, 2])
   expect(second.parameterEvents.map(([frame]) => frame)).toEqual([3, 4, 5])
   expect(second.instrumentCount).toBe(1)
-  expect(boundary.parameterEvents).toEqual([[6, 0.25]])
+  expect(boundary.parameterEvents).toEqual([[6, 1], [6, 0.25]])
 
   host.resetScheduleCursors(0)
   const whole = materialize(0, 7)
@@ -863,7 +852,7 @@ test('installed schedules advance bounded cursors across half-open blocks and se
 })
 
 test('process stages only live buses, clears removed buses, and preserves recording channel mapping', async () => {
-  const { DawPortableAudioCoreHost } = await import(hostUrl.href)
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
     postMessage: () => undefined,
@@ -874,6 +863,8 @@ test('process stages only live buses, clears removed buses, and preserves record
   host.inputPlanes = Array.from({ length: 128 }, () => new Float32Array(8))
   host.leftOutput = new Float32Array(8)
   host.rightOutput = new Float32Array(8)
+  host.eventOffset = 1
+  host.eventBufferView = new DataView(new ArrayBuffer(4))
   host.recordingMonitorPlanes = [new Float32Array(8), new Float32Array(8)]
   const inputBusCounts: number[] = []
   const recordingPlaneCounts: number[] = []
@@ -881,7 +872,6 @@ test('process stages only live buses, clears removed buses, and preserves record
     inputBusCounts.push(inputBusCount)
     return 0
   }
-  host.liveInputBusCount = 2
   const output = [[new Float32Array(2), new Float32Array(2)]]
   host.process([
     [Float32Array.from([1, 2])],
@@ -889,7 +879,6 @@ test('process stages only live buses, clears removed buses, and preserves record
   ], output)
   expect(Array.from(host.inputPlanes[2].slice(0, 2))).toEqual([3, 4])
 
-  host.liveInputBusCount = 1
   host.process([[Float32Array.from([5, 6])]], output)
   expect(inputBusCounts).toEqual([2, 1])
   expect(Array.from(host.inputPlanes[2].slice(0, 2))).toEqual([0, 0])

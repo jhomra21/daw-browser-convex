@@ -1,0 +1,26 @@
+{
+ "name": "pr62-final-review-rtguard",
+ "sequence": 78,
+ "createdAt": "2026-11-18T01:26:56.870Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=x-rtguard",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 3,
+   "new": 1
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "Two source-ordering tests in native/audio-host-macos/tests/realtime_callback_guard.test.ts (\"AudioHost publishes running state before opening CoreAudio\" and \"render-enabled native VST processing is not gated by tail metadata or silence gaps\") read audio-host.cpp text instead of behavior; they are ruled removals listed in tools/certification/removals/pr62-final-review.json under acceptance-reports/pr62-cleanup/PARENT-RULING-PR62-TEST-CLEANUP.md. The token-blacklist test stays, so the gate's pass count moves 3 -> 1 with 0 failures. Measured in CERT 19 (/tmp/fast-cert/int19-chunk-*-measure.json).",
+  "expectationsSha256": "5e66043dbe80e3229aa2eef2209d016e3e62623fb32df9840144ee4ad7bdb79e"
+ }
+}

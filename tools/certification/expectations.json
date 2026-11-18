@@ -1386,7 +1386,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 3,
+     "pass": 1,
      "skip": 0,
      "fail": 0
     },
@@ -3782,11 +3782,11 @@
    "judge": {
     "kind": "stdout",
     "exit": 0,
-    "value": "2621ce39130906e1dca3be686f3fe1ec98f0d3c3c85c19875e2ab924a066770e",
+    "value": "fda21f4c758b030154422e74711a23a24e4dd81f909ec25e6b578f5bfcc306ad",
     "files": {
      "public/audio-core/daw-audio-core.wasm": "860d5056e615a5433a8a2fcea7882a7f6a74fe70b554a61f6580729e1b55a0bc",
      "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm": "860d5056e615a5433a8a2fcea7882a7f6a74fe70b554a61f6580729e1b55a0bc",
-     "public/audio-core/daw-audio-core.manifest.json": "e4bc872ae20cccf570e12717baa64c9f3d38a42cdbe9d32990d00690a3783373"
+     "public/audio-core/daw-audio-core.manifest.json": "b4cd51eedabe5ae048a2bdda489b10edd03b4a74d1161a23861f904eb9f100ca"
     }
    }
   },

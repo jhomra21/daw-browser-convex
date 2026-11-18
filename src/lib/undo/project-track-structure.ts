@@ -43,7 +43,14 @@ export const planStructuralTransition = (entry: HistoryEntry, direction: Directi
 // the fields it touches: an absent key leaves the field alone, an undefined value clears it.
 export type StructuralOp =
   | { kind: 'remove-track'; trackRef: TrackRef | undefined; currentId: string | undefined }
-  | { kind: 'add-track'; trackRef: TrackRef | undefined; currentId: string | undefined; groupRef?: TrackRef | undefined }
+  | {
+    kind: 'add-track'
+    trackRef: TrackRef | undefined
+    currentId: string | undefined
+    groupRef?: TrackRef | undefined
+    // The track's own output and sends, applied once it exists.
+    routing?: TrackRoutingHistorySnapshot
+  }
   | {
     kind: 'patch-track'
     trackRef: TrackRef
@@ -66,9 +73,11 @@ export const planStructuralOps = (entry: HistoryEntry, direction: Direction): re
     case 'section-edit':
       return planStructuralTransition(entry, direction).flatMap((child) => planStructuralOps(child, direction))
     case 'track-create':
-      return undo ? [{ kind: 'remove-track', trackRef: entry.data.trackRef, currentId: entry.data.currentTrackId }] : []
-    case 'track-clip-create':
-      return undo ? [{ kind: 'remove-track', trackRef: entry.data.track.trackRef, currentId: entry.data.track.currentTrackId }] : []
+      return [{ kind: undo ? 'remove-track' : 'add-track', trackRef: entry.data.trackRef, currentId: entry.data.currentTrackId }]
+    case 'track-clip-create': {
+      const { trackRef, currentTrackId } = entry.data.track
+      return [{ kind: undo ? 'remove-track' : 'add-track', trackRef, currentId: currentTrackId }]
+    }
     case 'track-routing': {
       const routing = undo ? entry.data.from : entry.data.to
       return [{ kind: 'patch-track', trackRef: entry.data.trackRef, outputTargetRef: routing.outputTargetRef, sends: routing.sends }]
@@ -77,7 +86,7 @@ export const planStructuralOps = (entry: HistoryEntry, direction: Direction): re
       const { track, inboundRouting = [], recreatedTrackId } = entry.data
       if (!undo) return [{ kind: 'remove-track', trackRef: track.trackRef, currentId: recreatedTrackId }]
       return [
-        { kind: 'add-track', trackRef: track.trackRef, currentId: recreatedTrackId },
+        { kind: 'add-track', trackRef: track.trackRef, currentId: recreatedTrackId, groupRef: track.groupRef, routing: track.routing },
         ...inboundRouting.map((inbound): StructuralOp => ({ kind: 'merge-routing', trackRef: inbound.sourceTrackRef, routing: inbound })),
       ]
     }
@@ -109,7 +118,7 @@ export const planStructuralOps = (entry: HistoryEntry, direction: Direction): re
       const { groupTrackRef, groupTrack, childSnapshots } = entry.data
       if (undo) {
         return [
-          { kind: 'add-track', trackRef: groupTrackRef, currentId: entry.data.sourceGroupTrackId, groupRef: groupTrack?.groupRef },
+          { kind: 'add-track', trackRef: groupTrackRef, currentId: entry.data.sourceGroupTrackId, groupRef: groupTrack?.groupRef, routing: groupTrack?.routing },
           ...childSnapshots.map((child): StructuralOp => ({
             kind: 'patch-track',
             trackRef: child.trackRef,
@@ -151,9 +160,12 @@ const applyStructuralOp = (tracks: readonly ClosureTrack[], op: StructuralOp): r
       const removedId = resolve(op.trackRef) ?? op.currentId ?? op.trackRef
       return tracks.filter((track) => track.id !== removedId)
     }
-    case 'add-track':
+    case 'add-track': {
       if (resolve(op.trackRef)) return tracks
-      return [...tracks, { id: op.currentId ?? op.trackRef ?? '', historyRef: op.trackRef, groupId: resolve(op.groupRef) }]
+      const added = [...tracks, { id: op.currentId ?? op.trackRef ?? '', historyRef: op.trackRef, groupId: resolve(op.groupRef) }]
+      if (!op.routing || !op.trackRef) return added
+      return applyStructuralOp(added, { kind: 'patch-track', trackRef: op.trackRef, outputTargetRef: op.routing.outputTargetRef, sends: op.routing.sends })
+    }
     case 'patch-track': {
       const trackId = resolve(op.trackRef)
       if (!trackId) return tracks

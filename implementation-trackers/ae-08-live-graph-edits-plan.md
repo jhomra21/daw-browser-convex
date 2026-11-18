@@ -473,7 +473,7 @@ This step runs after phase 10, and after DV-01 and the AE-08 packaged certificat
 
 **What it replaces:** the earlier idea of a song based on an RTS game. That idea is dropped.
 
-**Open:** the video has not been received yet. Do not start this step until the user provides it. Record its path, duration and frame rate here when it arrives.
+**Video (received 2026-11-17):** `/Users/juan/.t3/worktrees/cal-macro-tracker/trailer-transitions/build/marketing/trailer/coming-soon.mp4`, 29.0 s, 30 fps, 1080×1920 (portrait), no audio stream. Make the track through the tools other agents and people use (the control platform and the desktop runtime), using every built-in effect at least once.
 ## Open implementation investigations, not reopened product decisions
 
 1. Measure the memory and callback cost of full history provisioning at the product maximum on target hardware: 32 MiB at 64 taps, and 96 MiB in the worst case at 192. This is a measurement, not a release gate.

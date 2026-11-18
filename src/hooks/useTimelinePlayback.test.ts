@@ -4101,6 +4101,72 @@ test('carries the latest inserted processor through coalesced paused rebuild com
   }
 })
 
+test('preserves the latest instrument override across an active structural rebuild', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  const compileContexts: Array<unknown> = []
+  const instrumentA = {
+    kind: 'drum-rack' as const,
+    instanceId: 'instrument-a',
+    params: createDefaultDrumRackParams(),
+  }
+  const instrumentB = {
+    kind: 'drum-rack' as const,
+    instanceId: 'instrument-b',
+    params: createDefaultDrumRackParams(),
+  }
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: async (transport, context) => {
+            compileContexts.push(context)
+            return nativeRequiredSnapshot(transport)
+          },
+        })
+        await playback.handlePlay([track])
+        fixture.calls.length = 0
+
+        const first = playback.restartTimelineSchedule([track], {
+          rebuildBackend: true,
+          resumePlayback: false,
+          owner: "native",
+          projectId: "project",
+          instrumentOverride: { targetId: track.id, instrument: instrumentA },
+        })
+
+        const second = playback.restartTimelineSchedule([track], {
+          rebuildBackend: true,
+          resumePlayback: false,
+          owner: "native",
+          projectId: "project",
+          instrumentOverride: { targetId: track.id, instrument: instrumentB },
+        })
+        await Promise.all([first, second])
+        await settleRebuild()
+
+        expect(compileContexts.at(-1)).toMatchObject({
+          instrumentOverride: { targetId: track.id, instrument: instrumentB },
+        })
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        expect(playback.isPlaying()).toBeTrue()
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+
 test('does not restart after pause wins an active native rebuild', async () => {
   const previousWindow = globalThis.window
   const device = createDeviceMove()

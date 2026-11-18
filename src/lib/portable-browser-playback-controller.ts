@@ -2441,6 +2441,19 @@ export const createPortableBrowserPlaybackController = (input: {
     return request
   }
 
+  const rebuildPrepared = async (transport: LivePlaybackTransport, compileContext?: LivePlaybackCompileContext): Promise<PortableStartResult> => {
+    if (!active) return "unavailable"
+    lifecycleGeneration += 1
+    transportIntent += 1
+    pendingStart = undefined
+    pendingStartMode = undefined
+    refreshPromise = undefined
+    startupAbortController?.abort()
+    startupAbortController = undefined
+    await teardownSession()
+    return ensurePrepared(transport, compileContext)
+  }
+
   const pause = async (playheadSec: number) => {
     transportIntent += 1
     startupAbortController?.abort()
@@ -2884,6 +2897,7 @@ export const createPortableBrowserPlaybackController = (input: {
     reenableProcessorAutomation,
     isRecording: () => recording !== undefined,
     ensurePrepared,
+    rebuildPrepared,
     refreshSchedule,
     adoptSchedule,
     seek,

@@ -701,6 +701,36 @@ test('prepares a fresh portable session while keeping transport paused', async (
   controller.dispose()
 })
 
+test('rebuilds a paused portable session from its authoritative transport position', async () => {
+  const calls: string[] = []
+  let sessionCount = 0
+  const controller = createPortableBrowserPlaybackController({
+    compileSnapshot: async () => compilation(),
+    getAudioContext: () => context,
+    backend: {
+      createPlaybackSession: async () => {
+        sessionCount += 1
+        return createSession(calls, async () => undefined)
+      },
+    },
+    select: async () => selected,
+  })
+  const transport = {
+    ...compilation().snapshot.transport,
+    state: 'paused' as const,
+    playheadSec: 3,
+  }
+
+  expect(await controller.ensurePrepared(transport)).toBe('started')
+  expect(await controller.rebuildPrepared(transport)).toBe('started')
+  expect(controller.isActive()).toBeFalse()
+  expect(controller.isPrepared()).toBeTrue()
+  expect(sessionCount).toBe(2)
+  expect(calls.filter((call) => call === 'dispose')).toHaveLength(1)
+  expect(calls.filter((call) => call === 'prepare-graph')).toHaveLength(2)
+  controller.dispose()
+})
+
 test('rejects unsupported prepared sources before creating or activating a worklet session', async () => {
   const calls: string[] = []
   let createdSessions = 0
@@ -1531,8 +1561,7 @@ const p1Initial: TrackInstrumentParams = { kind: 'synth', instanceId: 'synth:1',
 const p1Synth = (from: TrackInstrumentParams, update: SynthParamsUpdate): TrackInstrumentParams =>
   from.kind === 'synth' ? { ...from, params: mergeSynthParams(from.params, update) } : from
 const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number; failCompile?: number; initial?: TrackInstrumentParams; assetKeys?: readonly string[]; holdAdoptionCompile?: Promise<void>; holdPrepare?: Promise<void> } = {}) => {
-  const revision = 1
-  let projected: TrackInstrumentParams = options.initial ?? p1Initial, rebuilds = 0
+  let projected: TrackInstrumentParams = options.initial ?? p1Initial, revision = 1, rebuilds = 0
   const calls: string[] = [], batches: Array<readonly unknown[]> = [], faults: string[] = []
   const graphs: Parameters<PortableWasmPlaybackSession["prepareGraph"]>[0][] = []
   const snapshot = () => {
@@ -1583,7 +1612,11 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
   }
   expect(await controller.start(snapshot().transport)).toBe('started')
   playing = true
-  const rebuild = async () => { rebuilds++ }
+  const rebuild = async () => {
+    rebuilds++
+    revision++
+    expect(await controller.rebuildPrepared(snapshot().transport)).toBe('started')
+  }
   const apply = createApplyPortableProcessor({
     liveProcessorControl: () => controller.liveProcessorControl, isPortableBrowserPlaybackPrepared: () => controller.isPrepared(),
     isNativePlaybackPrepared: () => false, syncPlaybackBackend: rebuild, renderTracks: () => [track],

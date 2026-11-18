@@ -2,6 +2,12 @@ import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 
 type Install<Result> = (instances: AudioEffectRuntimeInstance[]) => Promise<Result>
 
+// The one way an effect chain reaches an install, for the track and master runtimes. It keeps the chain last asked for
+// (the intent) apart from the work installing it, so the two cannot be mistaken for each other:
+// - a request with nothing to install it on (no audio context) records the intent and is never install work;
+// - an equal request joins work that is still running, and only that: finished work leaves no slot behind;
+// - a context replay and an ordinary request take the same path, so they join each other instead of installing twice.
+// `joined` maps the result of the work a request joined to that request's own result.
 export function createChainAdmission<Result>(joined: (underlying: Result) => Result) {
   let intent: AudioEffectRuntimeInstance[] | undefined
   let awaitingContext = false

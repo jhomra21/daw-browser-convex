@@ -24,6 +24,8 @@ import { z } from 'zod'
 
 export const LOCAL_PROJECT_SCHEMA_VERSION = 2
 export const LOCAL_CONTROL_PROJECT_METADATA_KEY = 'control-project-metadata'
+// Set once by local-write-queue, which depends on this module: deletion flushes and drops the project's queue so the
+// queue registry never outlives its project.
 let releaseLocalEntityWriteQueue: ((projectId: string) => Promise<void>) | undefined
 export const registerLocalEntityWriteQueueRelease = (
   release: (projectId: string) => Promise<void>,

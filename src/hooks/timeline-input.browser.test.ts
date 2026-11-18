@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import { runBrowserFixture } from '~/lib/browser-fixture-test-support'
+import { runBrowserFixture } from '~/test-support/browser-fixture-test-support'
 
 test('live MIDI follows the docked clip and lifecycle, and lane clicks seek only while stopped', async () => {
   const results = await runBrowserFixture(new URL('./timeline-input.browser-runtime.tsx', import.meta.url))

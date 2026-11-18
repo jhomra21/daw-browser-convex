@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import { runBrowserFixture } from '~/lib/browser-fixture-test-support'
+import { runBrowserFixture } from '~/test-support/browser-fixture-test-support'
 
 test('a device folds and unfolds in place and shows its native limitation as a neutral status', async () => {
   const results = await runBrowserFixture(new URL('./device-shell.browser-runtime.tsx', import.meta.url))

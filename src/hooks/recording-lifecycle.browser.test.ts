@@ -1033,7 +1033,9 @@ window.playScenarios = async () => {
   const rebuilding = duringRebuild.restartTimelineSchedule([track], {
     rebuildBackend: true, resumePlayback: true, owner: 'portable-browser',
   })
-  const nestedRebuild = duringRebuild.restartTimelineSchedule([track], { rebuildBackend: true })
+  const nestedRebuild = duringRebuild.restartTimelineSchedule([track], {
+    rebuildBackend: true, resumePlayback: true, owner: 'portable-browser',
+  })
   await rebuildEntered.promise
   const playDuringRebuild = duringRebuild.handlePlay([track])
   results['play-during-rebuild-pending-exposed'] = duringRebuild.isPlayPending()

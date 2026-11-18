@@ -116,10 +116,12 @@ export function useTimelinePlayback(
   let rebuildStartingPlay = false
   let rebuildPromise: Promise<void> | undefined
   let rebuildRequestVersion = 0
-  let pendingRebuildTracks: Track[] | undefined
-  let pendingRebuildIntent: TimelinePlaybackRebuildIntent | undefined
-  let pendingRebuildRequestVersion: number | undefined
-  let pendingRebuildTransportIntentToken: number | undefined
+  let pendingRebuild: {
+    tracks: Track[]
+    intent: TimelinePlaybackRebuildIntent
+    requestVersion: number
+    transportIntentToken: number
+  } | undefined
   let playAttemptToken = 0
   let playAttempt: {
     token: number
@@ -1232,43 +1234,23 @@ export function useTimelinePlayback(
       nativeLifecycleToken += 1
       rebuildRequestVersion += 1
       const requestVersion = rebuildRequestVersion
-      pendingRebuildTracks = tracks
       subscribeRebuildHostLoss()
-      pendingRebuildTransportIntentToken = transportIntentToken
-      pendingRebuildRequestVersion = requestVersion
-      if (playAttempt && playAttemptPhase?.token !== playAttempt.token) {
-        playAttempt.waitingForRebuild = true
-      }
-      const hasExplicitIntent = options.resumePlayback !== undefined
-        || options.playheadSec !== undefined
-        || options.owner !== undefined
-        || options.projectId !== undefined
-        || options.projectGeneration !== undefined
-        || options.instrumentOverride !== undefined
-        || options.externalProcessor !== undefined
-      if (hasExplicitIntent) {
-        pendingRebuildIntent = {
-          resumePlayback: options.resumePlayback === true,
+      pendingRebuild = {
+        tracks,
+        intent: {
+          resumePlayback: options.resumePlayback,
           playheadSec: options.playheadSec ?? lastPublishedPlayheadSec,
           owner: options.owner,
           projectId: options.projectId,
           projectGeneration: options.projectGeneration,
           instrumentOverride: options.instrumentOverride,
           externalProcessor: options.externalProcessor,
-        }
-      } else if (isPlaying() || nativePlayback.isActive() || portableBrowserPlayback.isActive()) {
-        const owner = nativePlayback.isActive() ? 'native'
-          : portableBrowserPlayback.isActive() ? 'portable-browser'
-            : undefined
-        pendingRebuildIntent = {
-          resumePlayback: true,
-          playheadSec: nativePlayback.isActive()
-            ? nativePlayback.currentPositionSec() ?? lastPublishedPlayheadSec
-            : portableBrowserPlayback.isActive()
-              ? portableBrowserPlayback.currentPositionSec() ?? lastPublishedPlayheadSec
-              : lastPublishedPlayheadSec,
-          owner,
-        }
+        },
+        requestVersion,
+        transportIntentToken,
+      }
+      if (playAttempt && playAttemptPhase?.token !== playAttempt.token) {
+        playAttempt.waitingForRebuild = true
       }
       // A rebuild past its last request check takes no more: this request starts the next one.
       if (rebuildPromise && rebuildInProgress) return rebuildPromise
@@ -1278,19 +1260,13 @@ export function useTimelinePlayback(
         // irreversible backend start so queued structural changes coalesce.
         await Promise.resolve()
         try {
-          while (pendingRebuildTracks) {
-            const nextTracks = pendingRebuildTracks
-            pendingRebuildTracks = undefined
-            const nextIntent = pendingRebuildIntent
-            pendingRebuildIntent = undefined
-            const nextRequestVersion = pendingRebuildRequestVersion
-            pendingRebuildRequestVersion = undefined
-            const nextTransportIntentToken = pendingRebuildTransportIntentToken
-            pendingRebuildTransportIntentToken = undefined
+          while (pendingRebuild) {
+            const next = pendingRebuild
+            pendingRebuild = undefined
             try {
-              await rebuildTimelineBackend(nextTracks, nextIntent, nextTransportIntentToken, nextRequestVersion)
+              await rebuildTimelineBackend(next.tracks, next.intent, next.transportIntentToken, next.requestVersion)
             } catch (error: unknown) {
-              if (pendingRebuildTracks) continue
+              if (pendingRebuild) continue
               throw error
             }
           }
@@ -1327,12 +1303,12 @@ export function useTimelinePlayback(
   }
   const rebuildTimelineBackend = async (
     tracks: Track[],
-    requestedIntent?: TimelinePlaybackRebuildIntent,
+    requestedIntent: TimelinePlaybackRebuildIntent,
     requestedTransportIntentToken = transportIntentToken,
     requestedRequestVersion = rebuildRequestVersion,
   ) => {
-    const compileContext = requestedIntent?.instrumentOverride !== undefined
-      || requestedIntent?.externalProcessor !== undefined
+    const compileContext = requestedIntent.instrumentOverride !== undefined
+      || requestedIntent.externalProcessor !== undefined
       ? {
         instrumentOverride: requestedIntent.instrumentOverride,
         externalProcessor: requestedIntent.externalProcessor,
@@ -1348,17 +1324,17 @@ export function useTimelinePlayback(
     const currentProjectGeneration = nativeOptions?.projectGeneration?.()
       ?? portableBrowserOptions?.projectGeneration?.()
     if (
-      requestedIntent?.projectId !== undefined
+      requestedIntent.projectId !== undefined
       && requestedIntent.projectId !== currentProjectId
     ) return
     if (
-      requestedIntent?.projectGeneration !== undefined
+      requestedIntent.projectGeneration !== undefined
       && requestedIntent.projectGeneration !== currentProjectGeneration
     ) return
     const isCurrentRequestedProject = () => (
-      (requestedIntent?.projectId === undefined
+      (requestedIntent.projectId === undefined
         || requestedIntent.projectId === (nativeOptions?.projectId?.()))
-      && (requestedIntent?.projectGeneration === undefined
+      && (requestedIntent.projectGeneration === undefined
         || requestedIntent.projectGeneration === (
           nativeOptions?.projectGeneration?.()
           ?? portableBrowserOptions?.projectGeneration?.()
@@ -1370,14 +1346,11 @@ export function useTimelinePlayback(
     const pendingPlay = pendingPlayWaitsForRebuild ? undefined : playAttempt
     const pendingPlayIntent = pendingPlay !== undefined || rebuildStartingPlay
     // A Play still current when the rebuild starts is the newest transport intent: an edit never cancels it.
-    const resumeIntent = rebuildStartingPlay || pendingPlay?.token === playAttemptToken
-      || (requestedIntent !== undefined
-        ? requestedIntent.resumePlayback
-        : pendingPlayIntent)
+    const resumeIntent = rebuildStartingPlay || pendingPlay?.token === playAttemptToken || requestedIntent.resumePlayback
     // A cold device rebuild temporarily halts callbacks, not the user's Play
     // intent. Keep host/UI transport status playing until resume or cancellation.
     setIsRebuildingPlayback(isRebuildingPlayback() || isPlaying())
-    const requestedOwner = requestedIntent?.owner
+    const requestedOwner = requestedIntent.owner
       ?? (nativePlayback.isActive() || nativePlayback.isPrepared()
         ? 'native'
         : portableBrowserPlayback.isActive() || portableBrowserPlayback.isPrepared()
@@ -1400,7 +1373,7 @@ export function useTimelinePlayback(
     }
     if (resumeIntent) {
       const intentToken = transportIntentToken
-      if (requestedIntent?.resumePlayback === true) publishPlayhead(requestedIntent.playheadSec)
+      if (requestedIntent.resumePlayback) publishPlayhead(requestedIntent.playheadSec)
       if (
         !pendingPlay
         && !pendingPreview
@@ -1482,12 +1455,7 @@ export function useTimelinePlayback(
         && audioLifecycleState() !== "suspended"
         && isCurrentRequestedProject()
       )
-      const sec = requestedIntent?.playheadSec
-        ?? (nativePlayback.isPrepared()
-          ? nativePlayback.currentPositionSec() ?? lastPublishedPlayheadSec
-          : portableBrowserPlayback.isPrepared()
-            ? portableBrowserPlayback.currentPositionSec() ?? lastPublishedPlayheadSec
-            : lastPublishedPlayheadSec)
+      const sec = requestedIntent.playheadSec
       publishPlayhead(sec)
       const transport = {
         state: "paused" as const,
@@ -1550,7 +1518,7 @@ export function useTimelinePlayback(
             : "The prepared native playback graph could not be rebuilt.")
         }
         setActiveBackend("native")
-      } else if (requestedIntent && requiresNativeAudio) {
+      } else if (requiresNativeAudio) {
         const result = await nativePlayback.ensureLivePreview(sec, compileContext)
         if (!isCurrentPausedIntent()) {
           await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
@@ -1578,7 +1546,7 @@ export function useTimelinePlayback(
           await preparePausedCompatibility()
         }
         else setActiveBackend("portable-browser")
-      } else if (requestedIntent && portableBrowserOptions) {
+      } else if (portableBrowserOptions) {
         audioEngine.ensureAudio({ applyCachedTrackGains: false })
         await audioEngine.resume()
         if (!isCurrentPausedIntent()) {
@@ -1598,12 +1566,7 @@ export function useTimelinePlayback(
       }
       return
     }
-    let sec = requestedIntent?.playheadSec
-      ?? (nativePlayback.isActive() || portableBrowserPlayback.isActive()
-        ? (nativePlayback.isActive()
-          ? nativePlayback.currentPositionSec() ?? lastPublishedPlayheadSec
-          : portableBrowserPlayback.currentPositionSec() ?? lastPublishedPlayheadSec)
-        : requiresNativeAudio ? lastPublishedPlayheadSec : audioEngine.currentTimelineSec)
+    let sec = requestedIntent.playheadSec
     publishPlayhead(sec)
     const intentToken = transportIntentToken
     rebuildStartingPlay = true
@@ -1745,9 +1708,7 @@ export function useTimelinePlayback(
     if (projectChanged) {
       setIsRebuildingPlayback(false)
       transportIntentToken += 1
-      pendingRebuildTracks = undefined
-      pendingRebuildIntent = undefined
-      pendingRebuildTransportIntentToken = undefined
+      pendingRebuild = undefined
       publishPlayhead(0)
     }
     invalidatePlayAttempt()

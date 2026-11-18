@@ -292,7 +292,7 @@ test.each(["announce", "unsupported", "announce+sample"])("3B1 r2 actual playbac
         )
         const wiring = {
           isNativePlaybackPrepared: playback.isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared: () => false,
-          syncPlaybackBackend: () => playback.restartTimelineSchedule([track], { rebuildBackend: true }),
+          syncPlaybackBackend: () => playback.restartTimelineSchedule([track], { rebuildBackend: true, resumePlayback: false, playheadSec: 0 }),
           renderTracks: () => [track], captureStructuralPlaybackIntent: () => ({ resumePlayback: false, playheadSec: 0 }),
         }
         const callbacks = {
@@ -1017,7 +1017,7 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
             expect(fixture.transportPayloads.at(-1)?.cycleEndSec).toBeUndefined()
           } else if (scenario === "seek-inflight") {
             setTracks([desired])
-            void playback.restartTimelineSchedule(untrack(tracks), { rebuildBackend: true })
+            void playback.restartTimelineSchedule(untrack(tracks))
             await publishing.promise
             playback.setPlayhead(1, untrack(tracks))
             publicationGate.resolve()
@@ -1031,7 +1031,7 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
             if (scenario === "loop-ui") void playback.updateNativeLoop()
             if (scenario === "loop-clip") setTracks([desired])
           } else if (scenario === "automation-only" || scenario === "mixer-only") setMixRevision(1)
-          else if (scenario === "effect-only") await playback.restartTimelineSchedule(untrack(tracks), { rebuildBackend: true })
+          else if (scenario === "effect-only") await playback.restartTimelineSchedule(untrack(tracks))
           else if (scenario === "tempo") setBpm(137)
           else if (scenario === "burst") {
             for (let i = 1; i <= 5; i++) setTracks([desired, ...Array.from({ length: i }, (_, index) => ({
@@ -1041,7 +1041,7 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
             if (["stale-compile", "burst-during-compile", "inputs-during-compile", "stop", "seek", "project"].includes(scenario)) holdCompile = true
             setTracks(scenario === "add" ? [initial, { ...track, id: "added" }] : [desired])
           }
-          if (scenario === "explicit") await playback.restartTimelineSchedule(untrack(tracks), { rebuildBackend: true })
+          if (scenario === "explicit") await playback.restartTimelineSchedule(untrack(tracks))
           if (["stale-compile", "burst-during-compile", "inputs-during-compile", "stop", "seek", "project"].includes(scenario)) {
             await compiling.promise
             if (scenario === "inputs-during-compile") {
@@ -2992,7 +2992,7 @@ test('rebuilds from the persisted generation when native insertion races delayed
 
         insertionOrder = ["new"]
         projectGeneration = 2
-        const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true })
+        const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true, resumePlayback: false, playheadSec: 0 })
         await flushMicrotasks()
         expect(playback.isPlaying()).toBeFalse()
 
@@ -3308,7 +3308,7 @@ test('waits for lifecycle recovery before restarting an active native graph', as
         await playback.handlePlay([track])
         expect(playback.isPlaying()).toBeTrue()
 
-        const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true })
+        const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true, resumePlayback: true, playheadSec: 0 })
         fixture.emitLifecycle({ state: "recovering", powerGeneration: 2 })
         await expect(rebuild).resolves.toBeUndefined()
 
@@ -3673,7 +3673,7 @@ for (const edit of ["audio-add", "audio-move", "audio-resize", "audio-delete", "
           expect(playback.isNativePlayback()).toBe(true)
           const beforeCompiles = compiles;
           changed = true
-          const restart = playback.restartTimelineSchedule([track], { rebuildBackend: true })
+          const restart = playback.restartTimelineSchedule([track])
           if (edit === "sidechain" || edit === "midi-mappings") {
             await restart.catch(() => undefined)
             expect(staged).toBe(0)
@@ -4165,7 +4165,7 @@ test('does not restart after pause wins an active native rebuild', async () => {
         fixture.calls.length = 0
         fixture.transportStates.length = 0
 
-        const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true })
+        const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true, resumePlayback: true, playheadSec: 0, owner: 'native' })
         await flushMicrotasks()
         await playback.handlePause()
         beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
@@ -4306,7 +4306,7 @@ test('rebuilds a delayed paused native preview without committing play intent', 
         await flushMicrotasks()
         expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(1)
 
-        const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true })
+        const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true, resumePlayback: false, playheadSec: 0 })
         beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await expect(rebuild).resolves.toBeUndefined()
 
@@ -4352,7 +4352,7 @@ test('fails safely when the fresh native graph cannot start after insertion', as
         const play = playback.handlePlay([track])
         await flushMicrotasks()
         projectGeneration = 2
-        const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true })
+        const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true, resumePlayback: false, playheadSec: 0 })
         beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         failFreshBegin = true
 
@@ -5049,7 +5049,7 @@ test('uses the committed native backend without scheduling Web Audio', async () 
         expect(playback.isNativePlaybackPrepared()).toBeTrue()
         expect(playback.nativeLiveMidi.isAvailable()).toBeTrue()
         const initialCalls = [...calls]
-        await playback.restartTimelineSchedule([track], { rebuildBackend: true })
+        await playback.restartTimelineSchedule([track], { rebuildBackend: true, resumePlayback: true, playheadSec: 0, owner: 'native' })
         expect(playback.backendDiagnostics().activeBackend).toBe('native')
         expect(calls.filter((call) => call === 'begin')).toHaveLength(2)
         expect(calls.filter((call) => call === 'graph')).toHaveLength(2)
@@ -5250,7 +5250,7 @@ test('reconciles a paused seek superseded by native preview fingerprint disposal
 
         // The structural edit can request its rebuild BEFORE jumpToClip seeks.
         // Its token has already advanced, but the old graph is still prepared.
-        const rebuild = playback.restartTimelineSchedule(tracks(), { rebuildBackend: true })
+        const rebuild = playback.restartTimelineSchedule(tracks(), { rebuildBackend: true, resumePlayback: false, playheadSec: 6 })
         playback.setPlayhead(6, tracks())
         await rebuild
         await flushMicrotasks()
@@ -6365,7 +6365,7 @@ test('B6d8 a Pause while a paused rebuild is starting keeps a live paused graph 
         fixture.setBeginGate(beginGate.promise)
         const beginsBefore = fixture.calls.filter(call => call === 'begin').length
         // MIDI record arming pauses the transport unconditionally, so a Pause can land while a paused rebuild starts.
-        const rebuild = playback.restartTimelineSchedule(tracks(), { rebuildBackend: true })
+        const rebuild = playback.restartTimelineSchedule(tracks(), { rebuildBackend: true, resumePlayback: false, playheadSec: 1 })
         for (let turn = 0; turn < 800 && fixture.calls.filter(call => call === 'begin').length === beginsBefore; turn += 1) await Promise.resolve()
         expect(fixture.calls.filter(call => call === 'begin').length).toBe(beginsBefore + 1)
         expect(playback.isStructuralRebuildInProgress()).toBeTrue()
@@ -6428,7 +6428,7 @@ for (const hold of ['begin', 'teardown'] as const) {
             return realTeardown()
           }
           // Stop's own Pause and Stop both cancel this rebuild; the graph must still come back at the start.
-          const rebuild = playback.restartTimelineSchedule(tracks(), { rebuildBackend: true })
+          const rebuild = playback.restartTimelineSchedule(tracks(), { rebuildBackend: true, resumePlayback: false, playheadSec: 1 })
           for (let turn = 0; turn < 800 && !held && fixture.calls.filter(call => call === 'begin').length === beginsBefore; turn += 1) await Promise.resolve()
           if (hold === 'begin') expect(fixture.calls.filter(call => call === 'begin').length).toBe(beginsBefore + 1)
           else expect(held).toBeTrue()
@@ -6681,7 +6681,7 @@ test('rebuilds a prepared native backend while paused', async () => {
         expect(playback.backendDiagnostics().activeBackend).toBe('idle')
         expect(calls.filter((call) => call === 'begin')).toHaveLength(1)
 
-        await playback.restartTimelineSchedule([track], { rebuildBackend: true })
+        await playback.restartTimelineSchedule([track], { rebuildBackend: true, resumePlayback: false, playheadSec: 0 })
         expect(playback.isPlaying()).toBeFalse()
         expect(playback.backendDiagnostics().activeBackend).toBe('native')
         expect(playback.isNativePlaybackPrepared()).toBeTrue()

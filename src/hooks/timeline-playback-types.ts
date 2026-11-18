@@ -53,9 +53,9 @@ export type TimelinePlaybackRebuildIntent = {
   externalProcessor?: LivePlaybackCompileContext["externalProcessor"]
 }
 
-export type TimelineScheduleOptions = Partial<TimelinePlaybackRebuildIntent> & {
-  rebuildBackend?: boolean
-}
+export type TimelineScheduleOptions =
+  | (Partial<TimelinePlaybackRebuildIntent> & { rebuildBackend?: false })
+  | (Partial<TimelinePlaybackRebuildIntent> & Pick<TimelinePlaybackRebuildIntent, "resumePlayback"> & { rebuildBackend: true })
 
 export type ActiveAudioBackend = 'idle' | 'legacy' | 'portable-browser' | 'native'
 

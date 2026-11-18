@@ -1529,23 +1529,6 @@ export function useTimelinePlayback(
           throw new Error("The native playback graph could not be prepared.")
         }
         setActiveBackend("native")
-      } else if (!requiresNativeAudio && portableBrowserPlayback.isPrepared()) {
-        audioEngine.ensureAudio({ applyCachedTrackGains: false })
-        await audioEngine.resume()
-        if (!isCurrentPausedIntent()) {
-          await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
-          return
-        }
-        const result = await portableBrowserPlayback.rebuildPrepared(transport, compileContext)
-        if (!isCurrentPausedIntent()) {
-          await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
-          return
-        }
-        if (result !== "started") {
-          disposePortableBrowserPlayback()
-          await preparePausedCompatibility()
-        }
-        else setActiveBackend("portable-browser")
       } else if (portableBrowserOptions) {
         audioEngine.ensureAudio({ applyCachedTrackGains: false })
         await audioEngine.resume()

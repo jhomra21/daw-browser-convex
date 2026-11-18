@@ -3,8 +3,7 @@ type NativeVstStateCaptureInput = {
   report: (instanceId: string, error: Error) => void
 }
 
-// One capture runs per instance at a time. Requests that arrive while it runs
-// share a single follow-up, so a burst of edits costs at most two reads.
+// One capture runs per instance at a time; requests during each capture coalesce into a follow-up.
 export const createNativeVstStateCapture = (input: NativeVstStateCaptureInput) => {
   const running = new Map<string, { again: boolean }>()
   return (instanceId: string) => {

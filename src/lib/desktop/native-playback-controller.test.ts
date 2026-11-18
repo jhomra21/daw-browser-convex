@@ -12499,6 +12499,34 @@ test("loop hydration during Play preparation cannot pause the completed start", 
   }
 })
 
+test("a refused schedule submission during a playing loop change keeps the session, and the next Play retries the loop", async () => {
+  const fixture = createBridge()
+  const faults: string[] = []
+  const controller = createObservedController({
+    bridge: fixture.bridge,
+    reportFault: (fault) => faults.push(fault.kind),
+    compileSnapshot: async (transport) => compileLivePlaybackSnapshot({ ...input(), transport }),
+  })
+  const schedule = fixture.bridge.session.queueScheduleWindow
+  try {
+    expect(await controller.start(input().transport)).toBe("started")
+    fixture.bridge.session.queueScheduleWindow = async () => ({ ok: false, error: "schedule refused" })
+    await expect(controller.updateLoop({ loopEnabled: true, loopStartSec: 0.15, loopEndSec: 0.6 })).rejects.toThrow("schedule refused")
+    fixture.bridge.session.queueScheduleWindow = schedule
+    expect(faults).toEqual(["session-stopped"])
+    expect(controller.isPrepared()).toBeTrue()
+    expect(controller.isActive()).toBeFalse()
+    expect(fixture.calls).not.toContain("stop")
+    expect(fixture.calls).not.toContain("teardown")
+    expect(await controller.start({ ...input().transport, loopEnabled: true, loopStartSec: 0.15, loopEndSec: 0.6 })).toBe("started")
+    expect(controller.isActive()).toBeTrue()
+    expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(1)
+    expect(fixture.calls.filter((call) => call === "start")).toHaveLength(1)
+  } finally {
+    await controller.destroy()
+  }
+})
+
 test("prepares a paused native preview without starting transport", async () => {
   const fixture = createBridge()
   let compiledTransport: LivePlaybackSnapshotInput["transport"] | undefined

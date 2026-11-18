@@ -2239,7 +2239,10 @@ export const createNativePlaybackController = (input: {
       await preparedTransportTransition
     } catch (error) {
       reportStopped(error instanceof Error ? error.message : "Native playback could not update its loop.")
-      await disposeNativeSession(undefined, "native-loop-transition-failure")
+      // Only a host that reports the session gone ends it. Otherwise the transition left the host paused on its graph:
+      // the session stays, and the next Play primes the loop again.
+      if (hostLoss.isLost()) await disposeNativeSession(undefined, "native-loop-transition-failure")
+      else active = false
       throw error
     } finally { pendingLoopUpdates-- }
   }

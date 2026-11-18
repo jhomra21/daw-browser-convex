@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { z } from "zod"
-import { canonicalJsonSha256, type Expectations, type Observation } from "./expectations"
+import type { Observation } from "./expectations"
 
 // A seed passes on its invariants, not on the bytes of its summary. A record keeps what a summary says about correctness (status,
 // failures, rejections), what it says about cost (ceilings) and which checks ran (exercised); ids, step numbers and every other
@@ -56,16 +56,11 @@ export const judgeRecord = (recorded: SeedRecord, live: SeedRecord): string[] =>
   ...recorded.exercised.filter((invariant) => !live.exercised.includes(invariant)).map((invariant) => `${invariant} was exercised when recorded and no longer is`),
 ]
 
-export type HashJudge = { compared: number; differing: number[] }
-
-// Judges seeds first..first+count-1 written under `out` against the invariant records. The summary hash is compared as well and
-// returned as a diagnostic only.
-export const judgeSeeds = (exp: Expectations, records: z.infer<typeof seedRecords> | undefined, fixture: "controller" | "hook", out: string, first: number, count: number) => {
+// Judges seeds first..first+count-1 written under `out` against the invariant records.
+export const judgeSeeds = (records: z.infer<typeof seedRecords> | undefined, fixture: "controller" | "hook", out: string, first: number, count: number) => {
   const reasons: string[] = []
-  const observed: Observation[] = []
   // Each seed's live record, addressed into seed-records.json (rebase.ts diffs these against the file on a bless).
   const recorded: Observation[] = []
-  const differing: number[] = []
   for (let seed = first; seed < first + count; seed++) {
     const file = path.join(out, `seed-${seed}`, "summary.json")
     if (!existsSync(file)) {
@@ -73,17 +68,13 @@ export const judgeSeeds = (exp: Expectations, records: z.infer<typeof seedRecord
       continue
     }
     const contents = readFileSync(file, "utf8")
-    const hash = canonicalJsonSha256(contents, out, false)
-    observed.push({ path: ["seeds", fixture, "summaries", `#${seed - 1}`], value: hash })
-    if (hash !== exp.seeds[fixture].summaries[seed - 1]) differing.push(seed)
     const live = recordOf(contents)
     recorded.push({ path: [seedRecordsKey, fixture, `#${seed - 1}`], value: live })
     const known = records?.[fixture][seed - 1]
     if (!known) reasons.push(`seed ${seed}: no invariant record in seed-records.json`)
     else reasons.push(...judgeRecord(known, live).map((reason) => `seed ${seed}: ${reason}`))
   }
-  const hashJudge: HashJudge = { compared: count, differing }
-  return { reasons, observed, recorded, hashJudge }
+  return { reasons, recorded }
 }
 
 // The first path segment of a seed record observation; the bless baseline holds seed-records.json under it.

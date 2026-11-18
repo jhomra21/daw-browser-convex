@@ -10,7 +10,7 @@ import {
   type Arm, type Campaign, type Command, type Counts, type Gate, type Judge, type Observation,
 } from "./expectations"
 import { measureArm, measureGate, overlayIdentity, scopeOf } from "./measure"
-import { judgeSeeds, seedArgv, seedRecords, seedRecordsFile, type HashJudge } from "./seed-judge"
+import { judgeSeeds, seedArgv, seedRecords, seedRecordsFile } from "./seed-judge"
 import { gateTier, resolvesCommit, retiredArms, retiredCampaigns, selectTier, tierRank, testsReaching, asTier, changedSince, type Tier } from "./tiers"
 import { failuresByFile, judgeTestShard, testBaseline, testBaselineFile, testShards } from "./test-baseline"
 
@@ -122,10 +122,9 @@ const armsById = new Map(exp.mutations.arms.map((arm) => [arm.id, arm]))
 type Run = { exit: number | null; signal: string | null; seconds: number; text: string; log: string }
 type Outcome = {
   id: string; group: string; command: string; exit: number | null; signal: string | null; counts: Counts | null
-  started: number; ended: number; seconds: number; verdict: "PASS" | "FAIL"; reasons: string[]; notes: string[]; log: string; hashJudge?: HashJudge
+  started: number; ended: number; seconds: number; verdict: "PASS" | "FAIL"; reasons: string[]; notes: string[]; log: string
 }
-// `hashJudge` is what the byte-exact summary hash said about a seed batch: reported, never judged.
-type Verdict = { reasons: string[]; notes: string[]; counts: Counts | null; hashJudge?: HashJudge }
+type Verdict = { reasons: string[]; notes: string[]; counts: Counts | null }
 // `reaches`: the product overlay reaches the job's programs (see withProductOverlay). `hard` lists what no rebase may record: the
 // run itself did not work.
 type Job = {
@@ -373,8 +372,8 @@ const campaignJob = (campaign: Campaign): Job => {
     execute: async (dir) => {
       const run = await runCommand(command, dir, "run")
       const verdict = quick ? { reasons: [...signalOf(run), ...(run.exit === 0 || run.exit === 1 ? pairGateReasons(dir) : [`exit ${run.exit}`])], notes: [], counts: null } : judgeGate(campaign.judge, run, dir)
-      const seeds = judgeSeeds(exp, records, campaign.fixture, path.join(dir, "out"), 1, Number(command.argv[command.argv.indexOf("--seeds") + 1]))
-      return { run, ...verdict, reasons: [...verdict.reasons, ...seeds.reasons], hashJudge: seeds.hashJudge,
+      const seeds = judgeSeeds(records, campaign.fixture, path.join(dir, "out"), 1, Number(command.argv[command.argv.indexOf("--seeds") + 1]))
+      return { run, ...verdict, reasons: [...verdict.reasons, ...seeds.reasons],
         observed: quick ? [] : [{ path: ["campaigns", `name=${campaign.name}`, "judge"], value: measureGate(campaign.judge, run, dir) }, ...seeds.recorded] }
     },
   }
@@ -466,9 +465,9 @@ const seedJob = (fixture: "controller" | "hook", first: number, count: number): 
       const reasons: string[] = []
       if (run.signal !== null || run.exit !== 0) reasons.push(`exit ${run.exit} signal ${run.signal}`)
       const out = path.join(dir, "out")
-      const judged = judgeSeeds(exp, records, fixture, out, first, count)
+      const judged = judgeSeeds(records, fixture, out, first, count)
       reasons.push(...judged.reasons)
-      const observed = [...judged.observed, ...judged.recorded]
+      const observed = [...judged.recorded]
       const pinned = exp.seeds.hook206
       if (fixture === "hook" && first <= pinned.seed && pinned.seed < first + count) {
         const entries = z.object({ rejections: z.array(z.object({ id: z.number(), name: z.string().optional(), classification: z.string().optional() })) })
@@ -477,7 +476,7 @@ const seedJob = (fixture: "controller" | "hook", first: number, count: number): 
         if (ids.length !== pinned.ids.length) reasons.push(`seed 206 has ${ids.length} flush/cancelled rejections, recorded ${pinned.ids.length}`)
         observed.push({ path: ["seeds", "hook206", "ids"], value: ids })
       }
-      return { run, reasons, notes: [], counts: null, observed, hashJudge: judged.hashJudge }
+      return { run, reasons, notes: [], counts: null, observed }
     },
   }
 }
@@ -657,7 +656,6 @@ const printPlan = () => {
   if (unknownIds.length > 0) lines.push(`UNKNOWN JOB IDS: ${unknownIds.join(", ")}`)
   lines.push(`pool ${pool} (--jobs, else DAW_JOBS, else the performance-core count minus one); parallel slowdown x${parallelSlowdown}`)
   lines.push(`tier ${everything ? "all (--full or --only)" : tier}: ${everything ? "every job" : tierWhy}`)
-  for (const note of exp.notes ?? []) lines.push(`note (${note.topic}, since ${note.since}, drop after ${note.dropAfter}): ${note.text}`)
   lines.push(`${productOverlay ? `product overlay ${productOverlay.spec} (in memory): ${productOverlay.files.join(", ")}\n` : ""}base ${baseFile ?? exp.manifest.path}${
     exp.rebase && !baseFile ? ` (${Object.entries(exp.rebase.replaced).map(([file, hashes]) => `${file} ${hashes.from.slice(0, 8)}… -> ${hashes.to.slice(0, 8)}…`).join(", ")})` : ""}; base commit ${baseCommit}; watched ${watched.size} files (manifest + fuzz sources); expectations from ${exp.source.rc} (${exp.source.scratch})`)
   lines.push(`changed (${changed.length}): ${changed.length > 40 ? `${changed.slice(0, 40).join(", ")} …` : changed.join(", ") || "none"}${simulated.length > 0 ? `   [simulated: ${simulated.join(", ")}]` : ""}`)
@@ -726,7 +724,7 @@ const execute = async (job: Job, firstAttempt?: Outcome) => {
   // or a seed wrote no summary.
   const reasons = measuring ? [...job.hard(verdict.run), ...verdict.reasons.filter((reason) => reason.startsWith("runner error") || reason.endsWith(": no summary"))] : verdict.reasons
   const outcome: Outcome = { id: job.id, group: job.group, command: job.command, exit: verdict.run.exit, signal: verdict.run.signal, counts: verdict.counts,
-    started, ended, seconds: ended - started, verdict: reasons.length > 0 ? "FAIL" : "PASS", reasons, notes: verdict.notes, log: verdict.run.log, hashJudge: verdict.hashJudge }
+    started, ended, seconds: ended - started, verdict: reasons.length > 0 ? "FAIL" : "PASS", reasons, notes: verdict.notes, log: verdict.run.log }
   observations.set(job.id, { reaches: job.reaches, observed: verdict.observed })
   // SIGKILL is the OS reclaiming memory from a parallel job (a starved-drain fuzz mutant, killed at 23 s in a ten-job phase, passes
   // alone in 11 s); it is rerun alone like the recorded faults.
@@ -780,18 +778,12 @@ const wallSeconds = (performance.now() - runStarted) / 1000
 const freeze = { startDigest: digest(startHashes), endDigest: digest(endHashes), filesUnchanged: digest(startHashes) === digest(endHashes), gitStatusUnchanged: startStatus === endStatus }
 const outcomes = [...results.values()]
 const failing = outcomes.filter((outcome) => outcome.verdict === "FAIL")
-const hashJudge = {
-  gating: false,
-  compared: outcomes.reduce((sum, outcome) => sum + (outcome.hashJudge?.compared ?? 0), 0),
-  differing: outcomes.reduce((sum, outcome) => sum + (outcome.hashJudge?.differing.length ?? 0), 0),
-  jobs: outcomes.flatMap((outcome) => outcome.hashJudge && outcome.hashJudge.differing.length > 0 ? [{ id: outcome.id, seeds: outcome.hashJudge.differing }] : []),
-}
 const verdict = failing.length === 0 && freeze.filesUnchanged && freeze.gitStatusUnchanged ? "PASS" : "FAIL"
 writeFileSync(path.join(outDir, "result.json"), `${JSON.stringify({
   tool: "tools/certification/fast-cert.ts", mode: full ? "full" : "tiered", verdict, outDir, wallSeconds, estimateSeconds: plan.wallSeconds, pool,
   expectations: { file: expectationsFile, sha256: sha256(readFileSync(expectationsFile)), rc: exp.source.rc },
   base: baseFile ?? exp.manifest.path, overlay: productOverlay ?? null, changed, simulated, triggers, seedsPerFixture: triggers.fuzz ? seedsPerFixture : 0, tier: everything ? "all" : tier, tierWhy, baseCommit,
-  head: spawnSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).stdout.trim(), hashJudge, freeze,
+  head: spawnSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).stdout.trim(), freeze,
   failing: failing.map((outcome) => outcome.id), gates: outcomes,
 }, null, 1)}\n`)
 if (measuring) writeFileSync(path.resolve(measureFile), `${JSON.stringify({ reverting, verdict, failing: failing.map((outcome) => outcome.id), hashes: Object.fromEntries(startHashes),
@@ -810,7 +802,6 @@ const summary = [
   `changed: ${changed.join(", ") || "none"}`,
   `freeze: ${freeze.filesUnchanged && freeze.gitStatusUnchanged ? `held (${freeze.startDigest.slice(0, 16)}…)` : `BROKEN (files ${freeze.filesUnchanged}, git status ${freeze.gitStatusUnchanged})`}`,
   `tier: ${everything ? "all" : tier} (${everything ? "--full or --only" : tierWhy}); base commit ${baseCommit}`,
-  `hashJudge (diagnostic, does not gate): ${hashJudge.differing} of ${hashJudge.compared} seed summaries differ from the recorded hash`,
   `failing (${failing.length}):`, ...failing.map((outcome) => `  ${outcome.id}: ${outcome.reasons.join("; ")}`),
   `notes:`, ...outcomes.filter((outcome) => outcome.notes.length > 0).map((outcome) => `  ${outcome.id}: ${outcome.notes.join("; ")}`),
   `per-group wall times:`, ...groupLines,

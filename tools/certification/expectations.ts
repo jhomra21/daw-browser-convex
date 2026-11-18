@@ -127,8 +127,6 @@ const seedFixture = z.object({
   secondsPerSeed: z.number(),
   shardCap: z.number(),
   named: z.array(z.number()),
-  // Index i holds seed i + 1's summary, canonical SHA-256 with the batch output root replaced.
-  summaries: z.array(z.string()),
 })
 
 export const expectationsSchema = z.object({
@@ -167,8 +165,6 @@ export const expectationsSchema = z.object({
     controller: seedFixture, hook: seedFixture,
   }),
   mutations: z.object({ rejectionGateScript: z.string(), arms: z.array(arm), rows: z.array(row) }),
-  // Dated policy notes a run prints, so a temporary arrangement (the hash judge beside the invariant judge) carries its own end date.
-  notes: z.array(z.object({ topic: z.string(), since: z.string(), dropAfter: z.string(), text: z.string() })).optional(),
 })
 export type Expectations = z.infer<typeof expectationsSchema>
 

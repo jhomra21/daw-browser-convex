@@ -7,8 +7,7 @@ import { expectationsFile, expectationsSchema, repoRoot } from "./expectations"
 import { formatSeedRecords, judgeSeeds, recordOf, seedArgv, seedRecordsFile, seedRecords, type SeedRecord } from "./seed-judge"
 
 // Writes seed-records.json: the invariant record of seeds 1..N of both fuzz fixtures, measured on the bytes in the working tree.
-// Usage: bun tools/certification/record-seeds.ts [--out <dir>] [--seeds N]. It also reports how many summary hashes differ from
-// expectations.json; that is a diagnostic only, as in FAST-CERT: a seed passes on its invariants, and a record is the invariants.
+// Usage: bun tools/certification/record-seeds.ts [--out <dir>] [--seeds N].
 const args = process.argv.slice(2)
 const option = (name: string) => args.includes(name) ? args[args.indexOf(name) + 1] : undefined
 const total = Number(option("--seeds") ?? 1000)
@@ -38,9 +37,8 @@ const records = { controller: new Array<SeedRecord>(), hook: new Array<SeedRecor
 const problems: string[] = []
 for (const { fixture, first, count } of shards) {
   const dir = path.join(out, `${fixture}-${first}`, "out")
-  const verdict = judgeSeeds(exp, undefined, fixture, dir, first, count)
+  const verdict = judgeSeeds(undefined, fixture, dir, first, count)
   problems.push(...verdict.reasons.filter((reason) => !reason.includes("no invariant record")))
-  console.log(`${fixture} ${first}-${first + count - 1}: hash judge differs on ${verdict.hashJudge.differing.length} seeds`)
   for (let seed = first; seed < first + count; seed++) {
     const file = path.join(dir, `seed-${seed}`, "summary.json")
     if (existsSync(file)) records[fixture].push(recordOf(readFileSync(file, "utf8")))

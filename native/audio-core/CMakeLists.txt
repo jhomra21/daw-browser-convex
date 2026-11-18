@@ -28,6 +28,7 @@ if(BUILD_TESTING)
   target_compile_features(daw-audio-core-test PRIVATE cxx_std_20)
   target_link_libraries(daw-audio-core-test PRIVATE daw-audio-core)
   add_test(NAME daw-audio-core-test COMMAND daw-audio-core-test)
+  add_test(NAME daw-spectral-spectral-transfer-late COMMAND daw-audio-core-test --phase-4-contract spectral-transfer-late)
   add_executable(daw-audio-core-spectral-transfer-test tests/audio_core_test.cpp tests/utility_fixture.cpp tests/graph_fixture.cpp)
   target_compile_features(daw-audio-core-spectral-transfer-test PRIVATE cxx_std_20)
   target_include_directories(daw-audio-core-spectral-transfer-test PRIVATE include generated)
@@ -36,7 +37,7 @@ if(BUILD_TESTING)
     DAW_AUDIO_CORE_TEST_SPECTRAL_INTERNALS=1)
   foreach(contract IN ITEMS spectral-snapshot-mode spectral-frozen-tone spectral-transfer-flat
       spectral-transfer-pink spectral-transfer-narrow spectral-transfer-endpoints
-      spectral-transfer-relearn spectral-transfer-late spectral-recapture-bound
+      spectral-transfer-relearn spectral-recapture-bound
       spectral-freeze-gesture-0 spectral-freeze-gesture-1
       spectral-freeze-gesture-2 spectral-freeze-gesture-3
       spectral-freeze-toggle-0 spectral-freeze-toggle-1)

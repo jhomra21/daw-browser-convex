@@ -7462,53 +7462,60 @@ void test_phase4_spectral_frozen_tone(bool lower, float mix) {
   assert(std::abs(db) <= 1);
 }
 
-#if defined(DAW_AUDIO_CORE_TEST_SPECTRAL_INTERNALS)
+// A Noise Reduce profile keeps learning on the old stage while a 512 -> 4096 replacement is prepared. The replacement
+// must start from that latest profile, not the one it was prepared with: a core that learned at 4096 from the start,
+// fed the same noise, is the oracle. A stale carry leaves the profile at the quieter level and the output too loud.
 void test_phase4_spectral_transfer_late_allocation_free() {
-  Phase3Rig rig;
-  const auto build = [&](uint32_t fft, bool learn) {
+  Phase3Rig edited, reference;
+  const auto build = [&](Phase3Rig &rig, uint32_t fft, bool learn) {
     rig.clear(); rig.add_node(1, DAW_AUDIO_GRAPH_NODE_SOURCE);
     rig.add_node(2, DAW_AUDIO_GRAPH_NODE_MASTER); rig.add_edge(1, 2);
     const daw_audio_spectral_state state{
       .enabled = 1, .fft_size = fft, .overlap = 4, .mode = DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE,
       .gate_threshold_db = -60, .gate_attack_ms = 1, .gate_release_ms = 20,
-      .noise_reduction = .75F, .profile_learn = learn ? 1.0F : 0.0F, .mix = 1,
+      .noise_reduction = .75F, .profile_learn = learn ? .1F : 0.0F, .mix = 1,
     };
     rig.add_state(1, 10, DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, state);
     rig.nodes[0].latency_frames = rig.processors.back().latency_frames = fft;
   };
-  build(512, true); rig.commit(1);
+  build(edited, 512, true); build(reference, 4096, true);
+  edited.commit(1); reference.commit(1);
   const daw_audio_transport_state transport{.epoch = 1, .running = 1};
-  expect(daw_audio_core_set_transport(rig.core, &transport), DAW_AUDIO_CORE_OK);
-  for (uint32_t i = 0; i < 256; ++i) rig.render(.25F);
-  build(4096, false); expect(rig.prepare(2), DAW_AUDIO_CORE_OK);
-  for (uint32_t i = 0; i < 64; ++i) rig.render(.5F);
-  auto &core = *to_core(rig.core);
-  auto &bank = core.spectral_inputs[2];
-  SpectralHistory tagged{};
-  tagged.state_serial = 42; tagged.fft_size = 512; tagged.noise_profile[0][0] = 7;
-  bank.publish(tagged, DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE);
-  const daw_audio_spectral_state correct{.fft_size = 512, .mode = DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE};
-  auto wrong = correct; wrong.mode = DAW_AUDIO_SPECTRAL_MODE_FREEZE;
-  assert(!bank.read(tagged, wrong) && tagged.state_serial == 0);
-  wrong = correct; wrong.fft_size = 4096;
-  assert(!bank.read(tagged, wrong) && tagged.state_serial == 0);
-  assert(bank.read(tagged, correct) && tagged.state_serial == 42 && tagged.noise_profile[0][0] == 7);
-  const auto source = core.spectral_histories[core.published_graph->processors[0].spectral_slot].noise_profile[0];
-  const auto allocations_before_refresh = allocation_count;
-  rig.publish(2); rig.render(1);
-  assert(allocation_count == allocations_before_refresh);
-  const auto &destination = core.spectral_histories[core.published_graph->processors[0].spectral_slot].noise_profile[0];
-  double worst = 0;
-  for (uint32_t k = 0; k <= 2048; ++k) {
-    const uint32_t lo = k / 8, hi = std::min(lo + 1u, 256u);
-    const double fraction = (k % 8) / 8.0;
-    const double expected = std::sqrt(8 * (source[lo] * source[lo] * (1 - fraction) + source[hi] * source[hi] * fraction));
-    worst = std::max(worst, std::abs(destination[k] - expected) / std::max(1e-9, expected));
+  expect(daw_audio_core_set_transport(edited.core, &transport), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_set_transport(reference.core, &transport), DAW_AUDIO_CORE_OK);
+  uint32_t random = 0x7a3579u;
+  const auto render = [&](float level) {
+    std::array<float, Phase3Rig::frames> noise{};
+    for (auto &sample : noise) {
+      random ^= random << 13; random ^= random >> 17; random ^= random << 5;
+      sample = level * (random / 2147483648.0 - 1);
+    }
+    return std::pair{edited.render_input(noise, noise), reference.render_input(noise, noise)};
+  };
+  for (uint32_t block = 0; block < 2048; ++block) render(.25F);
+  build(edited, 4096, false);
+  expect(edited.prepare(2), DAW_AUDIO_CORE_OK);
+  // The noise doubles after the replacement was prepared; only the old stage hears it before publication.
+  for (uint32_t block = 0; block < 512; ++block) render(.5F);
+  edited.publish(2);
+  build(reference, 4096, false); reference.commit(2);
+  double actual = 0, expected = 0;
+  for (uint32_t block = 0; block < 2048; ++block) {
+    const auto [a, b] = render(.5F);
+    // Skip the crossfade from the old stage.
+    if (block < 256) continue;
+    for (uint32_t i = 0; i < Phase3Rig::frames; ++i) { actual += a[0][i] * a[0][i]; expected += b[0][i] * b[0][i]; }
+    if (block % 64 == 63) {
+      const double db = 10 * std::log10(actual / expected);
+      std::printf("late-learned Noise profile window delta_db=%g\n", db);
+      assert(expected > 1e-9 && std::abs(db) <= 1);
+      actual = expected = 0;
+    }
   }
-  std::printf("latest tagged Noise profile all-bin relative error=%g\n", worst);
-  assert(worst < 1e-5);
+  assert(daw::audio_core::InspectLatencyTransition(edited.core).completed_revision == 2);
 }
 
+#if defined(DAW_AUDIO_CORE_TEST_SPECTRAL_INTERNALS)
 void test_phase4_spectral_transfer_cost() {
   auto prior = std::make_unique<SpectralHistory>();
   auto next = std::make_unique<SpectralHistory>();
@@ -10525,13 +10532,13 @@ int main(int argc, char **argv) {
     } else if (std::strcmp(argv[2], "spectral-recapture-bound") == 0) {
       for (uint32_t rate : {22050u, 1u}) for (bool lower : {false, true})
         test_phase4_spectral_aligned_completion(DAW_AUDIO_SPECTRAL_MODE_FREEZE, lower, true, rate);
+    } else if (std::strcmp(argv[2], "spectral-transfer-late") == 0) {
+      test_phase4_spectral_transfer_late_allocation_free();
 #if defined(DAW_AUDIO_CORE_TEST_SPECTRAL_INTERNALS)
     } else if (std::strcmp(argv[2], "spectral-transfer-relearn") == 0) {
       test_phase4_spectral_transfer_relearn();
     } else if (std::strcmp(argv[2], "spectral-transfer-cost") == 0) {
       test_phase4_spectral_transfer_cost();
-    } else if (std::strcmp(argv[2], "spectral-transfer-late") == 0) {
-      test_phase4_spectral_transfer_late_allocation_free();
     } else if (std::strcmp(argv[2], "spectral-transfer-flat") == 0) {
       test_phase4_spectral_transfer_shape(false);
     } else if (std::strcmp(argv[2], "spectral-transfer-pink") == 0) {

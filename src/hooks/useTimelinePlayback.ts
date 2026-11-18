@@ -1444,168 +1444,106 @@ export function useTimelinePlayback(
       }
       return
     }
-    if (!isPlaying()) {
-      const pausedIntentToken = transportIntentToken
-      const isCurrentPausedIntent = () => (
-        !isSuperseded()
-        &&
-        pausedIntentToken === transportIntentToken
-        && mounted
-        && audioLifecycleState() !== "suspended"
-        && isCurrentRequestedProject()
-      )
-      const sec = requestedIntent.playheadSec
-      publishPlayhead(sec)
-      const transport = {
-        state: "paused" as const,
-        playheadSec: sec,
-        loopEnabled: getLoopParams().isActive,
-        loopStartSec: getLoopParams().start,
-        loopEndSec: getLoopParams().end,
-      }
-      const preparePausedCompatibility = async () => {
-        if (!isCurrentPausedIntent()) return
-        const nativeLifecycleReady = !hasAudioLifecycle || audioLifecycleState() === "ready"
-        if (nativeLifecycleReady && nativeOptions?.enabled?.()) {
-          const result = await nativePlayback.ensureLivePreview(
-            sec,
-            compileContext,
-          )
-          if (!isCurrentPausedIntent()) {
-            await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
-            return
-          }
-          if (result === "started") {
-            setActiveBackend("native")
-            return
-          }
-          if (result === "blocked") {
-            setActiveBackend("idle")
-            throw new Error("The native playback graph could not be prepared.")
-          }
-        }
-        prepareLegacyPaused()
-      }
-      const nativeDispose = pendingNativeDispose
-      await nativeDispose
-      if (nativeDispose !== pendingNativeDispose) await pendingNativeDispose
-      if (isSuperseded() || !isCurrentPausedIntent()) return
-      if ((requestedOwner === 'native' || nativePlayback.isPrepared()) && nativePlayback.isPrepared()) {
-        await disposePreparedBackends(undefined, "paused-preview-rebuild")
-        const result = await nativePlayback.ensureLivePreview(sec, compileContext)
+    const pausedIntentToken = transportIntentToken
+    const isCurrentPausedIntent = () => (
+      !isSuperseded()
+      &&
+      pausedIntentToken === transportIntentToken
+      && mounted
+      && audioLifecycleState() !== "suspended"
+      && isCurrentRequestedProject()
+    )
+    const sec = requestedIntent.playheadSec
+    publishPlayhead(sec)
+    const transport = {
+      state: "paused" as const,
+      playheadSec: sec,
+      loopEnabled: getLoopParams().isActive,
+      loopStartSec: getLoopParams().start,
+      loopEndSec: getLoopParams().end,
+    }
+    const preparePausedCompatibility = async () => {
+      if (!isCurrentPausedIntent()) return
+      const nativeLifecycleReady = !hasAudioLifecycle || audioLifecycleState() === "ready"
+      if (nativeLifecycleReady && nativeOptions?.enabled?.()) {
+        const result = await nativePlayback.ensureLivePreview(
+          sec,
+          compileContext,
+        )
         if (!isCurrentPausedIntent()) {
           await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
           return
         }
-        if (result !== "started") {
-          setActiveBackend("idle")
-          throw new Error(lastNativeFault
-            ? `The prepared native playback graph could not be rebuilt: ${lastNativeFault}`
-            : "The prepared native playback graph could not be rebuilt.")
-        }
-        setActiveBackend("native")
-      } else if (requestedOwner === 'native' || pendingPreviewIntent) {
-        const result = await nativePlayback.ensureLivePreview(sec, compileContext)
-        if (!isCurrentPausedIntent()) {
-          await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
+        if (result === "started") {
+          setActiveBackend("native")
           return
         }
-        if (result !== "started") {
-          setActiveBackend("idle")
-          throw new Error(lastNativeFault
-            ? `The prepared native playback graph could not be rebuilt: ${lastNativeFault}`
-            : "The prepared native playback graph could not be rebuilt.")
-        }
-        setActiveBackend("native")
-      } else if (requiresNativeAudio) {
-        const result = await nativePlayback.ensureLivePreview(sec, compileContext)
-        if (!isCurrentPausedIntent()) {
-          await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
-          return
-        }
-        if (result !== "started") {
+        if (result === "blocked") {
           setActiveBackend("idle")
           throw new Error("The native playback graph could not be prepared.")
         }
-        setActiveBackend("native")
-      } else if (portableBrowserOptions) {
-        audioEngine.ensureAudio({ applyCachedTrackGains: false })
-        await audioEngine.resume()
-        if (!isCurrentPausedIntent()) {
-          await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
-          return
-        }
-        const result = await portableBrowserPlayback.ensurePrepared(transport, compileContext)
-        if (!isCurrentPausedIntent()) {
-          await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
-          return
-        }
-        if (result !== "started") {
-          disposePortableBrowserPlayback()
-          await preparePausedCompatibility()
-        }
-        else setActiveBackend("portable-browser")
       }
-      return
+      prepareLegacyPaused()
     }
-    let sec = requestedIntent.playheadSec
-    publishPlayhead(sec)
-    const intentToken = transportIntentToken
-    rebuildStartingPlay = true
-    setIsPlaying(false)
-    cancelRaf()
-    await disposePreparedBackends({
-      onStoppedPosition: (seconds) => {
-        if (isSuperseded() || !isCurrentRequestedProject()) return
-        sec = seconds
-        publishPlayhead(seconds)
-      },
-    }, "timeline-rebuild-retirement")
-    await pendingNativeDispose
-    await waitForLifecycleReady()
-    if (
-      isSuperseded()
-      ||
-      intentToken !== transportIntentToken
-      || !mounted
-      || audioLifecycleState() === "suspended"
-      || !isCurrentRequestedProject()
-    ) return
-    if (requestedOwner === 'native') {
-      const nativePreview = await nativePlayback.ensureLivePreview(sec, compileContext)
-      if (
-        isSuperseded()
-        ||
-        intentToken !== transportIntentToken
-        || !mounted
-        || audioLifecycleState() === "suspended"
-        || !isCurrentRequestedProject()
-      ) {
-        await disposePreparedBackends(undefined, "timeline-rebuild-superseded")
+    const nativeDispose = pendingNativeDispose
+    await nativeDispose
+    if (nativeDispose !== pendingNativeDispose) await pendingNativeDispose
+    if (isSuperseded() || !isCurrentPausedIntent()) return
+    if ((requestedOwner === 'native' || nativePlayback.isPrepared()) && nativePlayback.isPrepared()) {
+      await disposePreparedBackends(undefined, "paused-preview-rebuild")
+      const result = await nativePlayback.ensureLivePreview(sec, compileContext)
+      if (!isCurrentPausedIntent()) {
+        await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
         return
       }
-      if (nativePreview !== 'started') {
-        if (requiresNativeAudio) throw new Error("The native playback graph could not be prepared.")
+      if (result !== "started") {
+        setActiveBackend("idle")
+        throw new Error(lastNativeFault
+          ? `The prepared native playback graph could not be rebuilt: ${lastNativeFault}`
+          : "The prepared native playback graph could not be rebuilt.")
+      }
+      setActiveBackend("native")
+    } else if (requestedOwner === 'native' || pendingPreviewIntent) {
+      const result = await nativePlayback.ensureLivePreview(sec, compileContext)
+      if (!isCurrentPausedIntent()) {
+        await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
         return
       }
-    } else if (requestedOwner === 'portable-browser') {
-      await disposePreparedBackends(undefined, "portable-backend-switch")
-      await pendingNativeDispose
-    }
-    rebuildStartingPlay = true
-    if (playAttempt?.waitingForRebuild) return
-    await handlePlay(tracks, compileContext)
-    rebuildStartingPlay = false
-    if (
-      intentToken !== transportIntentToken
-      || !mounted
-      || audioLifecycleState() === "suspended"
-      || !isCurrentRequestedProject()
-    ) return
-    if (!isPlaying()) {
-      throw new Error(lastNativeFault
-        ? `The active native playback graph could not be rebuilt after the insertion: ${lastNativeFault}`
-        : "The active native playback graph could not be rebuilt after the insertion.")
+      if (result !== "started") {
+        setActiveBackend("idle")
+        throw new Error(lastNativeFault
+          ? `The prepared native playback graph could not be rebuilt: ${lastNativeFault}`
+          : "The prepared native playback graph could not be rebuilt.")
+      }
+      setActiveBackend("native")
+    } else if (requiresNativeAudio) {
+      const result = await nativePlayback.ensureLivePreview(sec, compileContext)
+      if (!isCurrentPausedIntent()) {
+        await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
+        return
+      }
+      if (result !== "started") {
+        setActiveBackend("idle")
+        throw new Error("The native playback graph could not be prepared.")
+      }
+      setActiveBackend("native")
+    } else if (portableBrowserOptions) {
+      audioEngine.ensureAudio({ applyCachedTrackGains: false })
+      await audioEngine.resume()
+      if (!isCurrentPausedIntent()) {
+        await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
+        return
+      }
+      const result = await portableBrowserPlayback.ensurePrepared(transport, compileContext)
+      if (!isCurrentPausedIntent()) {
+        await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
+        return
+      }
+      if (result !== "started") {
+        disposePortableBrowserPlayback()
+        await preparePausedCompatibility()
+      }
+      else setActiveBackend("portable-browser")
     }
   }
   const unsubscribeStretchRenderState = requiresNativeAudio

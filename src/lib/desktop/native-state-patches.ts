@@ -18,7 +18,7 @@ import {
 } from "./native-processor-state-owner"
 import type { ScheduleRevisionCandidate } from "./native-schedule-publication"
 
-export type NativeStatePatchHost = {
+type NativeStatePatchHost = {
   bridge: { session: { queueProcessorStatePatch?: NonNullable<DesktopBridge["audioHost"]>["session"]["queueProcessorStatePatch"] } } | undefined
   processorState: ReturnType<typeof createNativeProcessorStateOwner<ScheduleRevisionCandidate>>
   // The controller's prepared session as it stands now.

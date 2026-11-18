@@ -4,7 +4,7 @@ import type { DesktopBridge } from "~/types/desktop-bridge"
 import type { createNativeProcessorStateOwner, RetirementObligation } from "./native-processor-state-owner"
 import type { ScheduleRevisionCandidate } from "./native-schedule-publication"
 
-export type NativeRetirementHost = {
+type NativeRetirementHost = {
   processorState: ReturnType<typeof createNativeProcessorStateOwner<ScheduleRevisionCandidate>>
   revisions: NonNullable<DesktopBridge["audioHost"]>["session"]["revisions"] | undefined
   // The controller's session as it stands now.

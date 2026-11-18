@@ -122,7 +122,7 @@ export type NativeRequest = {
 export type QueuedRequest = NativeRequest & { requestId: number; enqueuedAt: number }
 
 /** The supervisor's lifecycle, read when a request is admitted, dispatched or times out. */
-export type NativeRequestBrokerHost = {
+type NativeRequestBrokerHost = {
   readonly child: ChildProcessWithoutNullStreams | undefined
   readonly generation: number
   readonly suspended: boolean
@@ -444,5 +444,3 @@ export const createNativeRequestBroker = (host: NativeRequestBrokerHost) => {
     },
   }
 }
-
-export type NativeRequestBroker = ReturnType<typeof createNativeRequestBroker>

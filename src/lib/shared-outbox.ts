@@ -334,7 +334,7 @@ type SharedOutboxSummary = {
   failed: number
 }
 
-export type SharedOutboxRetryState = {
+type SharedOutboxRetryState = {
   nextAttemptAt?: number
   failure?: { reason: string; permanent: boolean }
 }
@@ -1025,7 +1025,7 @@ type SharedOutboxOperationResult =
   | { status: 'applied'; result: JsonValue; completionOwner: 'background' | 'caller' }
   | { status: 'missing' | 'pending' }
 
-export type SharedOutboxOperationRead =
+type SharedOutboxOperationRead =
   | SharedOutboxOperationResult
   | { status: 'rejected'; lastError?: string }
 

@@ -7,13 +7,13 @@ import type { EffectAdmission, ParameterSaveResult } from "~/components/timeline
 export class ParameterGestureHolder {}
 export type GestureScope = { projectId: string | undefined; generation: number; userId?: string };
 export type GestureLifetime = GestureScope & { incarnation: number };
-export type ApplyPhase = "preview" | "final" | "row";
+type ApplyPhase = "preview" | "final" | "row";
 export type ParameterDrain<Target> = {
   unanswered: Array<{ target: Target; receipt: DeliveryRegistration["receipt"] }>;
   admitted: Array<{ target: Target; entryId: string }>;
 };
-export type ReleaseStatus = "queued" | "applying" | "persisting" | "done" | "failed" | "invalidated";
-export type ReleaseRecord<Target, Params> = {
+type ReleaseStatus = "queued" | "applying" | "persisting" | "done" | "failed" | "invalidated";
+type ReleaseRecord<Target, Params> = {
   readonly target: Target;
   readonly key: string;
   readonly lifetime: GestureLifetime;

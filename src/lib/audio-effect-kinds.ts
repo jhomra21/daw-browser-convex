@@ -10,7 +10,7 @@ import type { EffectChange } from "./processor-edit-semantics";
 
 // Everything that differs between effect kinds and between a master and a track instance, listed once: the
 // normalized params, the history effect each form is recorded under, and the operation that persists them.
-export type AudioEffectForms = {
+type AudioEffectForms = {
   track: EffectChange<AudioEffectKind>;
   master: EffectChange<`master-${AudioEffectKind}`>;
   persist: (targetId: string, instanceId: string) => SharedTimelineOperation;

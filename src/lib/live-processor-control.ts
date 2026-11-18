@@ -113,7 +113,7 @@ export type LiveProcessorControlResult =
       error?: string
     }
 
-export type LiveProcessorControlRejectReason = Extract<
+type LiveProcessorControlRejectReason = Extract<
   LiveProcessorControlResult,
   { accepted: false }
 >["reason"]

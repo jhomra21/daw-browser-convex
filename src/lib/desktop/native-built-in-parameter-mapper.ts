@@ -25,18 +25,18 @@ import {
 import { resolvePortableDelayMs, compilePortableSynthState } from '@daw-browser/audio-engine/mixer/graph-contract'
 import { SYNTH_LIVE_FIELDS, type EffectChange, type NativeBuiltInParameterPayload } from '~/lib/processor-edit-semantics'
 
-export type NativeBuiltInParameterValue = {
+type NativeBuiltInParameterValue = {
   parameterId: string
   value: number
 }
 
-export type NativeBuiltInParameterCommit = {
+type NativeBuiltInParameterCommit = {
   instanceId: string
   values: NativeBuiltInParameterValue[]
   edit?: LiveProcessorEditIdentity
 }
 
-export type NativeBuiltInStateCommit = {
+type NativeBuiltInStateCommit = {
   instanceId: string
   state: Uint8Array
 }
@@ -102,7 +102,7 @@ const nativeBuiltInTimingInput = (payload: EffectParamsCommitPayload): EffectTim
   }
 }
 
-export const enabledValue = (payload: EffectParamsCommitPayload, direction: 'from' | 'to') => {
+ const enabledValue = (payload: EffectParamsCommitPayload, direction: 'from' | 'to') => {
   if (payload.effect === 'synth' || payload.effect === 'instrument' || payload.effect === 'arp') {
     return undefined
   }
@@ -593,7 +593,7 @@ const unchanged = <P extends { from: unknown; to: unknown }>(payload: P): P => (
 
 // Compare the complete non-live content through the same mapping that defines which fields native can change live.
 // The allocator captured absolute values at its tempo; only field membership and structural differences matter here.
-export const nativeBuiltInLiveStateFields = (from: ProcessorTiming, to: ProcessorTiming): readonly string[] | undefined => {
+ const nativeBuiltInLiveStateFields = (from: ProcessorTiming, to: ProcessorTiming): readonly string[] | undefined => {
   if (from.input.kind !== to.input.kind || from.enabled !== to.enabled) return undefined
   const previous = parseJsonValue(from.input.params)
   const next = parseJsonValue(to.input.params)

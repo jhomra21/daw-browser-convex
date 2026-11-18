@@ -28,7 +28,7 @@ export type InstanceResources = {
   staticWorklets: Map<string, StaticWorkletNodeChain>
 }
 
-export const snapshotResources = (resources: InstanceResources): InstanceResources => ({
+ const snapshotResources = (resources: InstanceResources): InstanceResources => ({
   eq: new Map(resources.eq),
   eqByBand: new Map(resources.eqByBand),
   eqSignatures: new Map(resources.eqSignatures),
@@ -40,7 +40,7 @@ export const snapshotResources = (resources: InstanceResources): InstanceResourc
   staticWorklets: new Map(resources.staticWorklets),
 })
 
-export const removeResources = (resources: InstanceResources, id: string) => {
+ const removeResources = (resources: InstanceResources, id: string) => {
   resources.eq.delete(id)
   resources.eqByBand.delete(id)
   resources.eqSignatures.delete(id)
@@ -89,7 +89,7 @@ export type ChainCommit = {
 
 // What a track or the master supplies: where its chain state lives, and how a committed chain reaches its routing and
 // meters. The transaction decides what the nodes hold and when; the host decides how they are wired.
-export type EffectChainHost = {
+type EffectChainHost = {
   // Budget owner, and the prefix of every fault context.
   owner: string
   budget: LiveWorkletBudget

@@ -14,7 +14,7 @@ import type { ScheduleRevisionCandidate } from "./native-schedule-publication"
 export type ParameterReply = NativeDeliveryReply
   | { ok: false; kind: "not-sent"; reason: "unavailable" | "unsupported" | "stale" }
 
-export type NativeParameterEventsHost = {
+type NativeParameterEventsHost = {
   bridge: { session: Pick<NonNullable<DesktopBridge["audioHost"]>["session"], "queueInstrumentEvents" | "queueParameterEvents"> } | undefined
   processorState: ReturnType<typeof createNativeProcessorStateOwner<ScheduleRevisionCandidate>>
   // The controller's prepared session as it stands now.

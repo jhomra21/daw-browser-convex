@@ -32,7 +32,7 @@ import {
 import { createSamplerBufferCache } from '@daw-browser/audio-engine/audio-engine'
 import { nativeInstrumentDeviceDecodedBytes, type NativeInstrumentPreparation } from '~/lib/desktop/native-instrument-budget-policy'
 
-export type DrumRackBufferSyncOptions = SampledInstrumentRegionLoaderOptions & {
+type DrumRackBufferSyncOptions = SampledInstrumentRegionLoaderOptions & {
   isCurrentProject?: () => boolean
   aggregateBudget?: SampledInstrumentRegionBudget
   aggregateMaxDecodedBytes?: number

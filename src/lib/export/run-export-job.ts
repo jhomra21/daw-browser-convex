@@ -238,7 +238,7 @@ const createExportFx = (masterVolume: number): ExportFx => ({
   masterVolume,
 })
 
-export type ExportExternalPluginPolicy = 'browser-export' | 'native-playback' | 'native-offline'
+type ExportExternalPluginPolicy = 'browser-export' | 'native-playback' | 'native-offline'
 
 export const createExportRenderStateSnapshot = async (input: {
   projectId: string | undefined

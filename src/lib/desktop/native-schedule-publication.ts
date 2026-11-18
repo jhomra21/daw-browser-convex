@@ -62,7 +62,7 @@ export type ScheduleSession = Pick<NativeSessionBridge,
 > & Required<Pick<NativeSessionBridge, "configureInstrumentStates">>
 
 // What executePublication captured of the prepared session for one schedule publication.
-export type ScheduleFacts = {
+type ScheduleFacts = {
   candidate: ScheduleRevisionCandidate
   attempt: AdoptionAttempt | undefined
   session: ScheduleSession

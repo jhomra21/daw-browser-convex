@@ -21,10 +21,10 @@ import { preflightNativeVst3Worker } from "./vst3-preflight"
 import type { HostEvidence } from "./ae08-evidence"
 
 type Attachment = NativeExternalAttachmentPlan["attachments"][number]
-export type PreflightAttachment = ResolvedVst3Attachment & { stateRevision: number }
+type PreflightAttachment = ResolvedVst3Attachment & { stateRevision: number }
 type CapturedVst3State = { bytes: Uint8Array; sha256: string }
 
-export type NativeVst3CoordinatorFailureCode =
+type NativeVst3CoordinatorFailureCode =
   | "invalid-plan"
   | "catalog-unavailable"
   | "attachment-unresolved"
@@ -36,7 +36,7 @@ export type NativeVst3CoordinatorFailureCode =
   | "state-invalid"
   | "native-transaction-failed"
 
-export type NativeVst3CoordinatorResult =
+type NativeVst3CoordinatorResult =
   | { ok: true; attached: number }
   | { ok: false; code: NativeVst3CoordinatorFailureCode; message: string; instanceId?: string }
 
@@ -323,7 +323,7 @@ export const createNativeVst3AttachmentLedger = (
   }
 }
 
-export type NativeVst3AttachmentLedger = ReturnType<typeof createNativeVst3AttachmentLedger>
+type NativeVst3AttachmentLedger = ReturnType<typeof createNativeVst3AttachmentLedger>
 
 // One ledger per native session: a transaction begin starts a new one, a live coordination continues it, and the
 // transaction commit, a published revision and a rollback reach the one in force.

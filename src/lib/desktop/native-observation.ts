@@ -6,13 +6,13 @@ import type { NativeSessionReply } from "./native-publication-transaction"
 
 type NativeSessionBridge = NonNullable<DesktopBridge["audioHost"]>["session"]
 
-export type NativeObservationSession = {
+type NativeObservationSession = {
   onMeterBatch?: NativeSessionBridge["onMeterBatch"]
   onSpectrumFrame?: NativeSessionBridge["onSpectrumFrame"]
   setSpectrumNode?: NativeSessionBridge["setSpectrumNode"]
 }
 
-export type NativeObservationHost = {
+type NativeObservationHost = {
   session: NativeObservationSession | undefined
   transportEpoch: () => number
   // The controller's session facts as they stand now; a spectrum selection reply is judged against them.
@@ -27,7 +27,7 @@ export type NativeObservationHost = {
   }
 }
 
-export type NativeObservationMaps = {
+type NativeObservationMaps = {
   meters: Map<bigint, string>
   spectrum: Map<string, bigint>
 }

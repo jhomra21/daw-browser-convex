@@ -90,7 +90,7 @@ const bytesText = (bytes: Uint8Array) => {
   for (const byte of bytes) text += String.fromCharCode(byte)
   return text
 }
-export const processorContentSpec = (content: { state?: Uint8Array; timing?: ProcessorTiming; values?: Readonly<Record<string, number>>; instrument?: ContentSpec["instrument"] }): ContentSpec => ({
+ const processorContentSpec = (content: { state?: Uint8Array; timing?: ProcessorTiming; values?: Readonly<Record<string, number>>; instrument?: ContentSpec["instrument"] }): ContentSpec => ({
   ...(content.instrument ? { instrument: content.instrument } : content.state && { state: bytesText(content.state) }),
   ...(content.timing && { timing: content.timing }),
   values: content.values ?? {},
@@ -105,7 +105,7 @@ type ProcessorEntry = {
   applied?: ProcessorDesired
 }
 
-export type ExecutionSettlement = "applied" | "cancelled"
+type ExecutionSettlement = "applied" | "cancelled"
 
 // One request for a target's content, answered once (design 1.3). `attempts` is the history of every carrier that
 // tried to take it; the carriers' own settlement is bookkeeping and never answers a receipt.
@@ -263,7 +263,7 @@ export type ProcessorReconcile = { desired: ProcessorDesired; values: ReadonlyMa
 
 // The host-wide fence on the patch lane (design 2.4.6). Native holds at most one claim, and a patch or a prepare sent
 // meanwhile is refused, so nothing is sent for any target until the claim's resolution is reported.
-export type PatchFence =
+type PatchFence =
   | { kind: "open" }
   | { kind: "claimed"; token: bigint; carrier?: PatchExecution }
   | { kind: "uncertain"; target: string; resends: 0 | 1 }
@@ -277,10 +277,10 @@ export type PatchReply =
   | { kind: "unconfirmed" }
   | { kind: "unavailable" }
 
-export type RefusalKind = "transient" | "definite" | "uncertain"
-export type RefusalAction = "retry" | "ladder" | "waiting" | "ended"
+type RefusalKind = "transient" | "definite" | "uncertain"
+type RefusalAction = "retry" | "ladder" | "waiting" | "ended"
 
-export type DeliverInput = {
+type DeliverInput = {
   key: string
   editId: string
   order: number
@@ -296,14 +296,14 @@ export type DeliverInput = {
   instrument?: AudioCoreSynthState
   preparedInstrument?: boolean
 }
-export type DeliveryPlan =
+type DeliveryPlan =
   | { carrier: "none" | "publication" }
   | { carrier: "parameters" | "urgent"; values: ReadonlyMap<string, number> }
   | { carrier: "patch"; execution: PatchExecution }
 export type Delivery = { receipt: Receipt; plan: DeliveryPlan }
 
 // What an incident reports once: the category of its first failure and how many targets it holds then.
-export type IncidentReporter = (category: "refused" | "unconfirmed", targets: number) => void
+type IncidentReporter = (category: "refused" | "unconfirmed", targets: number) => void
 
 // What a schedule adoption is for: the projection `key`, and what the compile is handed besides it (the instrument
 // override and external processor change what is compiled without changing the projection). Two intents are the same

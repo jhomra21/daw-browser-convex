@@ -44,7 +44,7 @@ type NativeSchedulePageManager = Pick<NativeTimelinePageManager, 'ensureRanges' 
 
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
 
-export type NativeScheduleCoordinatorBridge = {
+type NativeScheduleCoordinatorBridge = {
   queueScheduleWindow: (bytes: Uint8Array, transactionToken?: string) => Promise<NativeSessionReply>
   queueInstrumentEvents: (bytes: Uint8Array, transactionToken?: string) => Promise<NativeSessionReply>
   reenableVstScheduleAutomation?: (bytes: Uint8Array, transactionToken?: string) => Promise<NativeSessionReply>
@@ -52,7 +52,7 @@ export type NativeScheduleCoordinatorBridge = {
   onLoss: (listener: (error?: string) => void) => () => void
 }
 
-export type NativeScheduleCapacity = {
+type NativeScheduleCapacity = {
   maximumFramesPerBlock: number
   maximumVstEventsPerBlock?: number
 }
@@ -215,7 +215,7 @@ type ScheduleLedgers = {
   sourceOrigins: Map<string, { signature: string; event: NativeSourceEvent }>
 }
 
-export type NativeLoopFrames = LoopFrames
+type NativeLoopFrames = LoopFrames
 
 export const nativeLoopFramesForSnapshot = (
   snapshot: LivePlaybackSnapshot,

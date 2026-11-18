@@ -24,7 +24,7 @@ import { nativeInstrumentDeviceDecodedBytes, type NativeInstrumentPreparation } 
 
 export const DEFAULT_SAMPLED_INSTRUMENT_AGGREGATE_BYTES = 256 * 1024 * 1024
 
-export type SamplerBufferSyncOptions = SampledInstrumentRegionLoaderOptions & {
+type SamplerBufferSyncOptions = SampledInstrumentRegionLoaderOptions & {
   aggregateBudget?: SampledInstrumentRegionBudget
   aggregateMaxDecodedBytes?: number
   nativeAudio?: () => boolean

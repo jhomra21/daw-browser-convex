@@ -2,7 +2,7 @@ import type { AudioEffectRuntimeInstance } from './runtime-instance'
 import { PROCESSOR_RESOURCE_LIMITS } from './processor-release-contract'
 import type { StaticWorkletKind } from './static-worklet-chain'
 
-export type LiveWorkletTransaction = {
+type LiveWorkletTransaction = {
   owner: string
   id: number
 }

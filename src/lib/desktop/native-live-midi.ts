@@ -19,7 +19,7 @@ type LiveNoteReadiness = {
   releaseQueued: boolean
 }
 
-export type NativeLiveMidiHost = {
+type NativeLiveMidiHost = {
   bridge: { session: Pick<NonNullable<DesktopBridge["audioHost"]>["session"], "queueInstrumentEvents"> } | undefined
   // The controller's facts as they stand now.
   state: () => {

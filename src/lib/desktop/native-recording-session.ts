@@ -8,7 +8,7 @@ import { assertReply } from "./native-publication-transaction"
 
 type NativeAudioHost = NonNullable<DesktopBridge["audioHost"]>
 
-export type NativeRecordingBridge = Pick<NativeAudioHost, "resolveInputDevice" | "recordingSpool"> & {
+type NativeRecordingBridge = Pick<NativeAudioHost, "resolveInputDevice" | "recordingSpool"> & {
   session: Pick<
     NativeAudioHost["session"],
     | "configureRecording"
@@ -47,7 +47,7 @@ type NativeRecordingSession = {
   onFailure?: (error: Error, cause: RecordingTerminationCause) => void
 }
 
-export type NativeRecordingHost = {
+type NativeRecordingHost = {
   bridge: NativeRecordingBridge | undefined
   importRecordingSpool: typeof importNativeRecordingSpool | undefined
   // The controller's facts as they stand now.

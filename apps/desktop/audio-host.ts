@@ -587,7 +587,7 @@ export class NativeRecordingConfigureError extends Error {
   }
 }
 
-export type NativeOfflineWaitStage =
+type NativeOfflineWaitStage =
   | "host handshake"
   | "offline configuration"
   | "asset installation"
@@ -602,7 +602,7 @@ export type NativeOfflineWaitStage =
   | "mapped asset range"
   | "offline completion"
 
-export class NativeOfflineRenderTimeoutError extends Error {
+class NativeOfflineRenderTimeoutError extends Error {
   readonly stage: NativeOfflineWaitStage
 
   constructor(stage: NativeOfflineWaitStage) {

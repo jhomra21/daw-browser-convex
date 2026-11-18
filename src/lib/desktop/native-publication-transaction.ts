@@ -35,7 +35,7 @@ type PublicationRefusal = Parameters<ProcessorStateOwner["finishPublication"]>[3
 // What one publication needs of the playback session that admitted it: the facts it captured, and the live questions it
 // asks while it runs. `current` is false once the session it was compiled for has moved; `owned` is false once the
 // session is gone.
-export type PublicationSession = {
+type PublicationSession = {
   record: Publication
   attempt: AdoptionAttempt | undefined
   candidate: { dispose: () => Promise<void> } | undefined

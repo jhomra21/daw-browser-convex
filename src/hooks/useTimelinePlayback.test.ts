@@ -6518,7 +6518,7 @@ for (const hold of ['begin', 'teardown'] as const) {
 // the edit; after the rebuild's own Play commits, the superseded rebuild disposes the graph that Pause has just paused.
 const b6eEditedTracks: Track[] = [track, { ...track, id: 'track-b6e', name: 'B6e edit' }]
 const runB6eSupersededRebuild = async (
-  action: 'pause' | 'stop' | 'locate',
+  action: 'pause' | 'stop' | 'locate' | 'locate-after-move',
   at: 'before-retire' | 'after-play-commit',
   hold: boolean,
 ) => {
@@ -6562,6 +6562,8 @@ const runB6eSupersededRebuild = async (
         // A locate lands before the device moves; the move resumes the session where the locate left it.
         if (action === 'locate') playback.setPlayhead(3, tracks())
         const rebuild = device.move()
+        // A locate after the move was requested, while its rebuild still owns the session, moves where that rebuild resumes.
+        if (action === 'locate-after-move') playback.setPlayhead(3, tracks())
         // The first turn at which the rebuild has retired the old graph and its own Play has committed: the new session
         // runs and the Play attempt is no longer preparing, but the rebuild has not yet returned from it.
         const committed = () => retired() && playback.isNativePlayback() && !playback.isPreparingPlayback()
@@ -6600,7 +6602,7 @@ const runB6eSupersededRebuild = async (
         expect(playback.isNativePlaybackPrepared()).toBeTrue()
         expect(compiles.length).toBeGreaterThan(compilesBefore)
         expect(compiles.at(-1)?.trackIds).toEqual(['track-1', 'track-b6e'])
-        if (action === 'locate') {
+        if (action === 'locate' || action === 'locate-after-move') {
           expect(playback.isPlaying()).toBeTrue()
           expect(playback.isNativePlayback()).toBeTrue()
           expect(playback.playheadSec()).toBe(3)
@@ -6636,6 +6638,9 @@ test("B6e a Stop after a resuming rebuild's Play commits leaves a live paused gr
 })
 test('B6e a locate before a resuming rebuild retires the playing graph plays the edit from the locate', async () => {
   await runB6eSupersededRebuild('locate', 'before-retire', false)
+})
+test('B6e a locate after a resuming rebuild is requested plays the edit from the locate', async () => {
+  await runB6eSupersededRebuild('locate-after-move', 'before-retire', false)
 })
 test('rebuilds a prepared native backend while paused', async () => {
   const previousWindow = globalThis.window

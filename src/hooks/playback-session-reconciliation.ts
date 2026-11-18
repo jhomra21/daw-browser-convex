@@ -60,6 +60,9 @@ export const createScheduleReconciliation = (input: ScheduleReconciliationInput)
     options?: TimelineScheduleOptions,
     explicit = false,
   ): Promise<void> => {
+    // A rebuild in flight is retiring the session: a lifecycle request joins it, so its transport (a locate's playhead)
+    // is the one the replacement takes, instead of being adopted by the session about to go.
+    if (options?.rebuildBackend && host.rebuildInProgress()) return applyTimelineSchedule(tracks, options)
     // A kept paused native preview adopts what it carries, as a playing one does. An edit takes the owner and transport
     // state the session has when it commits, never the ones its intent captured. Only a lifecycle rebuild, which names
     // rebuildBackend, replaces the session.

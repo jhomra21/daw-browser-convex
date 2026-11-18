@@ -1595,7 +1595,7 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
     isPlaying: () => true, isNativePlaybackPrepared: () => false,
     isPortableBrowserPlaybackPrepared: () => controller.isPrepared(),
     syncPlaybackBackend: rebuild, renderTracks: () => [track],
-    captureStructuralPlaybackIntent: () => ({ resumePlayback: false, playheadSec: 0 }),
+    captureStructuralPlaybackIntent: () => ({}),
   })
   const registry = createProcessorEditRegistry(() => 120)
   // The persisted adapter projects each written value before its edit reaches playback.

@@ -1824,7 +1824,7 @@ test.each(["sampler", "granular", "sampler-change"])("3B1 r3 queued %s successor
     isPreparingPlayback: () => armed, isPlaying: () => false,
     isNativePlaybackPrepared: () => false, isPortableBrowserPlaybackPrepared: () => false,
     syncPlaybackBackend: async () => {}, renderTracks: () => [track],
-    captureStructuralPlaybackIntent: () => ({ resumePlayback: false, playheadSec: 0 }),
+    captureStructuralPlaybackIntent: () => ({}),
   });
   let panel: EffectsPanelController | undefined;
   let snapshot: EffectsPanelExportSnapshot | undefined;

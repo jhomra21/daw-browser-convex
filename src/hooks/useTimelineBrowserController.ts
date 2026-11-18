@@ -35,7 +35,7 @@ import type { ExternalProcessor } from "@daw-browser/external-plugins";
 import { hasVst3TrustAcknowledgement, vst3ScanHealthLabel } from "~/lib/external-plugin-ui";
 import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import { autoHealStaleVst3Catalog } from "~/lib/desktop/vst3-catalog-auto-heal";
-import type { TimelinePlaybackRebuildIntent } from "./timeline-playback-types";
+import type { TimelineEditIntent } from "./timeline-playback-types";
 
 type Options = {
   acceptance?: PlaybackAcceptanceObserver;
@@ -57,8 +57,8 @@ type Options = {
   handleInsertSample: (sample: SampleDragData) => void | Promise<void>;
   onDeviceDrop: (payload: BrowserDragPayload, target: BrowserDropTarget) => void | Promise<void>;
   onExternalPluginInsertionResult?: (title: string, message: string) => void;
-  captureStructuralPlaybackIntent?: () => TimelinePlaybackRebuildIntent;
-  onExternalPluginInserted?: (processor: ExternalProcessor, intent?: TimelinePlaybackRebuildIntent) => void | Promise<void>;
+  captureStructuralPlaybackIntent?: () => TimelineEditIntent;
+  onExternalPluginInserted?: (processor: ExternalProcessor, intent?: TimelineEditIntent) => void | Promise<void>;
   enableNativePlayback?: () => void;
 };
 

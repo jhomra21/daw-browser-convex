@@ -16,7 +16,7 @@ import {
   createExternalProcessorEditorRequests,
 } from "./timeline/external-processor-editor-requests";
 import { addInstanceLimit, clearInstanceLimits, clearVstInstanceFailures, markVstInstanceFailed } from "~/lib/desktop/vst-instance-failures";
-import type { TimelinePlaybackRebuildIntent } from "~/hooks/timeline-playback-types";
+import type { TimelineEditIntent } from "~/hooks/timeline-playback-types";
 
 // Failure-first B6 seam inventory: stale/missing project history, captured
 // tracks, incorrect merge key/window, no-merge ignored, native refusal vetoing
@@ -103,7 +103,7 @@ test("settles preparation before comparing instrument-ready callbacks with the p
     preparedInstrument: () => published[0], isStructuralRebuildInProgress: () => false, isPreparingPlayback: () => false,
     isPlaying: () => true, isNativePlaybackPrepared: () => true, isPortableBrowserPlaybackPrepared: () => false,
     syncPlaybackBackend: async (_tracks, _intent, override) => { rebuilds.push(override?.instrument); },
-    renderTracks: () => [], captureStructuralPlaybackIntent: () => ({ resumePlayback: true, playheadSec: 0 }),
+    renderTracks: () => [], captureStructuralPlaybackIntent: () => ({}),
   });
   const announced = announce("track", instrument);
   // The preparation the announce waits on is what publishes the instrument.
@@ -171,14 +171,14 @@ const mountEditorRequests = (options: { captureOk?: boolean } = {}) => {
   const [generation, setGeneration] = createSignal(1);
   const sync = Promise.withResolvers<void>();
   const log: string[] = [];
-  const intents: TimelinePlaybackRebuildIntent[] = [];
+  const intents: TimelineEditIntent[] = [];
   let dispose = () => {};
   const requests = createRoot(end => {
     dispose = end;
     return createExternalProcessorEditorRequests({
       projectId, mountedProjectGeneration: generation,
       openEffectsForTarget: targetId => { log.push(`open:${targetId}`); },
-      captureStructuralPlaybackIntent: () => ({ resumePlayback: true, playheadSec: 2 }),
+      captureStructuralPlaybackIntent: () => ({}),
       syncPlaybackBackend: async (_tracks, intent) => { log.push("sync"); intents.push(intent); await sync.promise; },
       renderTracks: () => [],
       nativePlaybackEnabled: () => true,

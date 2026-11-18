@@ -48,7 +48,7 @@ import TimelineBottomPanelFooter from "~/components/timeline/TimelineBottomPanel
 import type { Clip, ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
 import { BOTTOM_PANEL_EDGE_PADDING_PX } from "~/lib/bottom-panel-layout";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
-import type { TimelinePlaybackRebuildIntent } from "~/hooks/timeline-playback-types";
+import type { TimelineEditIntent } from "~/hooks/timeline-playback-types";
 import {
   createEffectsPanelController,
   type EffectsPanelAudioEffects,
@@ -142,10 +142,10 @@ type EffectsPanelProps = {
   onExternalProcessorUpdated?: (
     processor: ExternalProcessor,
     previous: ExternalProcessor,
-    intent?: TimelinePlaybackRebuildIntent,
+    intent?: TimelineEditIntent,
   ) => void;
-  captureStructuralPlaybackIntent?: () => TimelinePlaybackRebuildIntent;
-  onMixedReorderCommitted?: (intent?: TimelinePlaybackRebuildIntent) => void;
+  captureStructuralPlaybackIntent?: () => TimelineEditIntent;
+  onMixedReorderCommitted?: (intent?: TimelineEditIntent) => void;
   enqueueNativeVstParameter?: NativeVstParameterQueue["enqueue"];
   requestNativeVstStateCapture?: (instanceId: string) => void;
   spectrumProvider?: (targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void;
@@ -1219,7 +1219,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     previous: ExternalProcessor;
     current: ExternalProcessor;
     },
-    playbackIntent?: TimelinePlaybackRebuildIntent,
+    playbackIntent?: TimelineEditIntent,
   ) => {
     setExternalProcessors((processors) => processors.map((processor) => (
       processor.instanceId === commit.current.instanceId ? commit.current : processor

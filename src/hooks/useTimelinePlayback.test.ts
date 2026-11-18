@@ -20,7 +20,7 @@ import { nativePlaybackFaultText, type NativePlaybackFault } from '~/lib/desktop
 import { addInstanceLimit, clearInstanceLimits, clearVstInstanceFailures, instanceLimit, vstInstanceFailed } from '~/lib/desktop/vst-instance-failures'
 import type { AudioEffectRuntimeInstance, DeferredStretchWindow } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
-import type { TimelinePlaybackRebuildIntent } from '~/hooks/timeline-playback-types'
+import type { TimelineEditIntent } from '~/hooks/timeline-playback-types'
 import { createDefaultDelayParams, createDefaultDrumRackParams, createDefaultLimiterParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultSamplerParams, createDefaultUtilityParams, mergeSynthParams } from '@daw-browser/shared'
 import type { AutomationEnvelope, TrackInstrumentParams, UtilityParamsEnvelope } from '@daw-browser/shared'
 import type { AudioCoreGraphSnapshot } from '@daw-browser/audio-core-contract'
@@ -293,7 +293,7 @@ test.each(["announce", "unsupported", "announce+sample"])("3B1 r2 actual playbac
         const wiring = {
           isNativePlaybackPrepared: playback.isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared: () => false,
           syncPlaybackBackend: () => playback.restartTimelineSchedule([track], { rebuildBackend: true, resumePlayback: false, playheadSec: 0 }),
-          renderTracks: () => [track], captureStructuralPlaybackIntent: () => ({ resumePlayback: false, playheadSec: 0 }),
+          renderTracks: () => [track], captureStructuralPlaybackIntent: () => ({}),
         }
         const callbacks = {
           onStructuralPlaybackChange: createInstrumentPlaybackChange({
@@ -7683,17 +7683,12 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean) => {
     enabled: () => nativeEnabled, projectId, projectGeneration: generation, compileSnapshot, playbackInputs,
     reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
   }, { projectGeneration: generation, compileSnapshot, reportFault: (message) => faults.push(message) })
-  // Timeline.tsx:871-895 and :923-934, as written there.
-  type B6f5Intent = TimelinePlaybackRebuildIntent
-  const captureStructuralPlaybackIntent = (): B6f5Intent => ({
-    resumePlayback: playback.isPlaying(), playheadSec: playback.playheadSec(),
-    owner: playback.isNativePlaybackPrepared() ? 'native' : playback.isPortableBrowserPlaybackPrepared() ? 'portable-browser' : undefined,
-    projectId: projectId(), projectGeneration: generation(),
-  })
+  // Timeline.tsx captureStructuralPlaybackIntent and rebuildPlaybackBackend, as written there.
+  const captureStructuralPlaybackIntent = (): TimelineEditIntent => ({ projectId: projectId(), projectGeneration: generation() })
   // Nothing here is a prepared native session, so Timeline's syncPlaybackBackend is the rebuild.
-  const syncPlaybackBackend = (next: Track[], intent?: B6f5Intent,
+  const syncPlaybackBackend = (next: Track[], intent: TimelineEditIntent = captureStructuralPlaybackIntent(),
     instrumentOverride?: { targetId: string; instrument: TrackInstrumentParams }) => playback.restartTimelineSchedule(next, {
-    rebuildBackend: true, ...(intent ?? captureStructuralPlaybackIntent()), instrumentOverride: instrumentOverride ? instrumentOverride : undefined })
+    ...intent, rebuildBackend: true, resumePlayback: playback.isPlaying(), playheadSec: playback.playheadSec(), instrumentOverride })
   const rescheduleTimeline = () => {
     if (playback.isNativePlaybackPrepared() || playback.isPortableBrowserPlaybackPrepared()) return
     if (playback.isPlaying()) playback.restartTimelineSchedule(tracks()).catch((cause: unknown) => faults.push(`reschedule: ${String(cause)}`))
@@ -7710,7 +7705,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean) => {
   })
   const onMixedReorderCommitted = createMixedReorderCommitted({
     isNativePlaybackPrepared: playback.isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared: playback.isPortableBrowserPlaybackPrepared,
-    captureStructuralPlaybackIntent, syncPlaybackBackend, renderTracks: tracks })
+    isPlaying: playback.isPlaying, captureStructuralPlaybackIntent, syncPlaybackBackend, renderTracks: tracks })
   const work: Promise<unknown>[] = []
   // A structural edit with no live path: a Spectral fftSize change, which the core replaces at a seam.
   const addEffect = () => setSpectralFftSize(1024)
@@ -9104,7 +9099,7 @@ test('W-TL-1 a structural playback change that fails is logged with console.erro
   const deps = { mountedProjectGeneration: () => 0, awaitPlaybackPreparation: async () => {}, preparedInstrument: () => undefined,
     isStructuralRebuildInProgress: () => false, isPreparingPlayback: () => false, isPlaying: () => true,
     isNativePlaybackPrepared: () => true, isPortableBrowserPlaybackPrepared: () => false,
-    syncPlaybackBackend: async () => { throw failure }, renderTracks: () => [track], captureStructuralPlaybackIntent: () => ({ resumePlayback: true, playheadSec: 0 }) }
+    syncPlaybackBackend: async () => { throw failure }, renderTracks: () => [track], captureStructuralPlaybackIntent: () => ({}) }
   try {
     await createInstrumentPlaybackChange(deps)(track.id, { kind: 'synth', instanceId: 'synth:replacement', params: createDefaultSynthParams() })
     createMixedReorderCommitted(deps)(undefined)
@@ -9490,11 +9485,9 @@ for (const playing of [true, false]) {
           isPortableBrowserPlaybackPrepared: live.playback.isPortableBrowserPlaybackPrepared,
           restartTimelineSchedule: live.playback.restartTimelineSchedule,
           rebuildPlaybackBackend: () => { rebuilds += 1; return Promise.resolve() },
-          captureStructuralPlaybackIntent: () => ({ resumePlayback: live.playback.isPlaying(), playheadSec: live.playback.playheadSec(),
-            owner: 'portable-browser', projectId: 'project-a', projectGeneration: 1 }),
+          captureStructuralPlaybackIntent: () => ({ projectId: 'project-a', projectGeneration: 1 }),
         })
-        await sync(live.tracks(), { resumePlayback: live.playback.isPlaying(), playheadSec: live.playback.playheadSec(),
-          owner: 'portable-browser', projectId: 'project-a', projectGeneration: 1,
+        await sync(live.tracks(), { projectId: 'project-a', projectGeneration: 1,
           externalProcessor: { projectId: 'project-a', processor: inserted } })
         await live.settle()
         expect({ rebuilds, sameSession: live.liveSession() === session, closed: session?.closed, sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length,

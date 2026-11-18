@@ -20,7 +20,7 @@ import type { BpmDetectionService } from '~/lib/bpm-detection-service'
 import type { Clip, ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import type { ExternalProcessor } from '@daw-browser/external-plugins'
 import type { TimelineDeviceInsertActions } from '~/components/timeline/timeline-device-insert-actions'
-import type { TimelinePlaybackRebuildIntent } from '~/hooks/timeline-playback-types'
+import type { TimelineEditIntent } from '~/hooks/timeline-playback-types'
 import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from '~/components/timeline/create-effects-panel-controller'
 import type { ExportQueue } from '~/lib/export/export-queue'
 import type { TimelineExportService } from '~/lib/export/timeline-export-service'
@@ -88,10 +88,10 @@ export type TimelinePanelsProps = {
     onExternalProcessorUpdated?: (
       processor: ExternalProcessor,
       previous: ExternalProcessor,
-      intent?: TimelinePlaybackRebuildIntent,
+      intent?: TimelineEditIntent,
     ) => void
-    captureStructuralPlaybackIntent?: () => TimelinePlaybackRebuildIntent
-    onMixedReorderCommitted?: (intent?: TimelinePlaybackRebuildIntent) => void
+    captureStructuralPlaybackIntent?: () => TimelineEditIntent
+    onMixedReorderCommitted?: (intent?: TimelineEditIntent) => void
     automationEnvelopes?: AutomationEnvelope[]
     evaluatedValuesByTargetKey?: ReadonlyMap<string, number>
     onSelectAutomationParameter?: (targetKey: Track['id'] | 'master', parameterId: string, effectInstanceId?: string) => void

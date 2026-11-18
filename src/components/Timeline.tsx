@@ -31,7 +31,7 @@ import {
   openProjectFromDashboard as openDashboardProject,
 } from "~/hooks/useTimelineProjectRoute";
 import { usePlayheadControls } from "~/hooks/usePlayheadControls";
-import type { TimelinePlaybackRebuildIntent } from "~/hooks/timeline-playback-types";
+import type { TimelineEditIntent } from "~/hooks/timeline-playback-types";
 import type { NativeInstrumentRetryIdentity } from "~/lib/sampler-buffer-sync";
 import { useClipDrag } from "~/hooks/useClipDrag";
 import { useClipResize } from "~/hooks/useClipResize";
@@ -889,30 +889,25 @@ const Timeline: Component<TimelineProps> = (props) => {
       });
     }
   });
-  const captureStructuralPlaybackIntent = (): TimelinePlaybackRebuildIntent => ({
-    resumePlayback: isPlaying(),
-    playheadSec: playheadSec(),
-    owner: isNativePlaybackPrepared()
-      ? "native"
-      : isPortableBrowserPlaybackPrepared()
-        ? "portable-browser"
-        : undefined,
+  const captureStructuralPlaybackIntent = (): TimelineEditIntent => ({
     projectId: projectId(),
     projectGeneration: mountedProjectGeneration(),
   });
 
+  // Nothing is prepared to adopt the edit, so the session it starts takes the transport as it is now.
   const rebuildPlaybackBackend = (
     tracks: Track[],
-    intent?: TimelinePlaybackRebuildIntent,
+    intent: TimelineEditIntent,
     instrumentOverride?: { targetId: Track["id"]; instrument: TrackInstrumentParams },
   ) => {
     nativePlaybackRevision += 1;
-    const rebuild = restartTimelineSchedule(tracks, {
+    return restartTimelineSchedule(tracks, {
+      ...intent,
       rebuildBackend: true,
-      ...(intent ?? captureStructuralPlaybackIntent()),
-      instrumentOverride: instrumentOverride ? instrumentOverride : undefined,
+      resumePlayback: isPlaying(),
+      playheadSec: playheadSec(),
+      instrumentOverride,
     });
-    return rebuild;
   };
 
   const syncPlaybackBackend = createSyncPlaybackBackend({
@@ -2376,7 +2371,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     liveProcessorControl, isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared, syncPlaybackBackend, renderTracks,
   });
   const onMixedReorderCommitted = createMixedReorderCommitted({
-    isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared, syncPlaybackBackend, renderTracks,
+    isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared, isPlaying, syncPlaybackBackend, renderTracks,
     captureStructuralPlaybackIntent,
   });
   const panelsProps = () => ({
@@ -2461,13 +2456,13 @@ const Timeline: Component<TimelineProps> = (props) => {
       onExternalProcessorUpdated: (
         processor: ExternalProcessor,
         previous: ExternalProcessor,
-        playbackIntent: TimelinePlaybackRebuildIntent | undefined,
+        playbackIntent: TimelineEditIntent | undefined,
       ) => {
         if (processor.bypassed === previous.bypassed) return;
         // A prepared browser session adopts the bypass through the hook's follow.
         if (isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) return;
         const intent = playbackIntent ?? captureStructuralPlaybackIntent();
-        if (!intent.resumePlayback && !isNativePlaybackPrepared()) return;
+        if (!isPlaying() && !isNativePlaybackPrepared()) return;
         void syncPlaybackBackend(renderTracks(), intent).catch((cause: unknown) => {
           console.error("[Timeline] failed to apply an external processor update to native playback", cause);
         });

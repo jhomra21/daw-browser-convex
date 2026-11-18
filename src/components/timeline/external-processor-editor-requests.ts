@@ -1,7 +1,7 @@
 import { createEffect, createSignal } from "solid-js";
 import type { ExternalProcessor } from "@daw-browser/external-plugins";
 import type { Track } from "@daw-browser/timeline-core/types";
-import type { TimelinePlaybackRebuildIntent } from "~/hooks/timeline-playback-types";
+import type { TimelineEditIntent } from "~/hooks/timeline-playback-types";
 import type { CapturedLocalExternalProcessorState } from "~/lib/external-plugins";
 import { instanceLimit, vstInstanceFailed } from "~/lib/desktop/vst-instance-failures";
 
@@ -38,8 +38,8 @@ export const createExternalProcessorEditorRequests = (deps: {
   projectId: () => string;
   mountedProjectGeneration: () => number;
   openEffectsForTarget: (targetId: Track["id"]) => void;
-  captureStructuralPlaybackIntent: () => TimelinePlaybackRebuildIntent;
-  syncPlaybackBackend: (tracks: Track[], intent: TimelinePlaybackRebuildIntent) => Promise<void>;
+  captureStructuralPlaybackIntent: () => TimelineEditIntent;
+  syncPlaybackBackend: (tracks: Track[], intent: TimelineEditIntent) => Promise<void>;
   renderTracks: () => Track[];
   nativePlaybackEnabled: () => boolean;
   captureVstState: (
@@ -60,14 +60,12 @@ export const createExternalProcessorEditorRequests = (deps: {
     if (request && !isCurrent(request)) setPending();
   });
 
-  const inserted = async (processor: ExternalProcessor, playbackIntent?: TimelinePlaybackRebuildIntent) => {
+  const inserted = async (processor: ExternalProcessor, playbackIntent?: TimelineEditIntent) => {
     deps.openEffectsForTarget(processor.targetId);
     const intent = playbackIntent ?? deps.captureStructuralPlaybackIntent();
     const insertedProjectId = intent.projectId ?? deps.projectId();
-    // The drop's project guards the insertion; the transport is read now, because a trust prompt or a plug-in scan
-    // can outlast a Play or a Pause, and a session adopts only the transport state it is in.
-    const insertionIntent: TimelinePlaybackRebuildIntent = {
-      ...deps.captureStructuralPlaybackIntent(),
+    // The drop's project guards the insertion; the transport is the session's own when it adopts it.
+    const insertionIntent: TimelineEditIntent = {
       projectId: intent.projectId,
       projectGeneration: intent.projectGeneration,
       externalProcessor: { projectId: insertedProjectId, processor },
@@ -84,7 +82,6 @@ export const createExternalProcessorEditorRequests = (deps: {
     console.info("[native-vst3] external plugin inserted", {
       instanceId: processor.instanceId,
       targetId: processor.targetId,
-      isPlaying: insertionIntent.resumePlayback,
       nativePlaybackEnabled,
     });
     try {
@@ -106,8 +103,7 @@ export const createExternalProcessorEditorRequests = (deps: {
       console.info("[native-vst3] insertion reached playback", {
         instanceId: processor.instanceId,
         targetId: processor.targetId,
-        isPlaying: insertionIntent.resumePlayback,
-        nativePlaybackEnabled,
+          nativePlaybackEnabled,
       });
     } catch (error) {
       // The insertion stays in the project and the playing graph is unchanged; the next adoption retries it.

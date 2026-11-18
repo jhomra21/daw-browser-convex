@@ -1,7 +1,7 @@
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { TrackInstrumentParams } from "@daw-browser/shared";
 import type { EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller";
-import type { TimelinePlaybackRebuildIntent, TimelineScheduleOptions } from "~/hooks/timeline-playback-types";
+import type { TimelineEditIntent, TimelineScheduleOptions } from "~/hooks/timeline-playback-types";
 import type { LivePlaybackCompileContext } from "~/lib/live-playback-snapshot";
 import type { LiveProcessorControl, LiveProcessorEditIdentity } from "~/lib/live-processor-control";
 import { SYNTH_KIND_ID } from "~/lib/processor-edit-semantics";
@@ -11,7 +11,7 @@ type CompileEffects = Pick<EffectsPanelExportSnapshot, "awaitInstrumentReadiness
 type InstrumentOverride = { targetId: Track["id"]; instrument: TrackInstrumentParams };
 type PlaybackBackendSync = (
   tracks: Track[],
-  intent?: TimelinePlaybackRebuildIntent,
+  intent?: TimelineEditIntent,
   instrumentOverride?: InstrumentOverride,
 ) => Promise<void>;
 type PreparedSessions = {
@@ -39,12 +39,12 @@ export const compileEffectsProjection = (
 // A prepared session, native or browser, playing or paused, adopts a structural edit in place; only a session still
 // starting is rebuilt.
 export const createSyncPlaybackBackend = (deps: PreparedSessions & {
-  rebuildPlaybackBackend: PlaybackBackendSync;
+  rebuildPlaybackBackend: (tracks: Track[], intent: TimelineEditIntent, instrumentOverride?: InstrumentOverride) => Promise<void>;
   restartTimelineSchedule: (tracks: Track[], options?: TimelineScheduleOptions) => Promise<void>;
-  captureStructuralPlaybackIntent: () => TimelinePlaybackRebuildIntent;
+  captureStructuralPlaybackIntent: () => TimelineEditIntent;
 }): PlaybackBackendSync => (tracks, intent, instrumentOverride) => {
   if (!deps.isNativePlaybackPrepared() && !deps.isPortableBrowserPlaybackPrepared()) {
-    return deps.rebuildPlaybackBackend(tracks, intent, instrumentOverride);
+    return deps.rebuildPlaybackBackend(tracks, intent ?? deps.captureStructuralPlaybackIntent(), instrumentOverride);
   }
   const inserted = intent?.externalProcessor?.processor;
   // A browser session cannot host a VST3: it adopts the edit without it, and the device shows the limitation (E6).
@@ -66,7 +66,7 @@ export const createInstrumentPlaybackChange = (deps: PreparedSessions & {
   isPlaying: () => boolean;
   syncPlaybackBackend: PlaybackBackendSync;
   renderTracks: () => Track[];
-  captureStructuralPlaybackIntent: () => TimelinePlaybackRebuildIntent;
+  captureStructuralPlaybackIntent: () => TimelineEditIntent;
 }) => {
   // Serialize graph decisions with live flushes so the newest notification wins.
   let tail = Promise.resolve();
@@ -121,15 +121,15 @@ export const createApplyPortableProcessor = (deps: PreparedSessions & {
 };
 
 export const createMixedReorderCommitted = (deps: PreparedSessions & {
+  isPlaying: () => boolean;
   syncPlaybackBackend: PlaybackBackendSync;
   renderTracks: () => Track[];
-  captureStructuralPlaybackIntent: () => TimelinePlaybackRebuildIntent;
-}) => (playbackIntent: TimelinePlaybackRebuildIntent | undefined) => {
+  captureStructuralPlaybackIntent: () => TimelineEditIntent;
+}) => (playbackIntent: TimelineEditIntent | undefined) => {
   // A prepared browser session adopts the new effect order through the hook's follow.
   if (deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) return;
-  const intent = playbackIntent ?? deps.captureStructuralPlaybackIntent();
-  if (!intent.resumePlayback && !deps.isNativePlaybackPrepared()) return;
-  void deps.syncPlaybackBackend(deps.renderTracks(), intent).catch((cause: unknown) => {
+  if (!deps.isPlaying() && !deps.isNativePlaybackPrepared()) return;
+  void deps.syncPlaybackBackend(deps.renderTracks(), playbackIntent ?? deps.captureStructuralPlaybackIntent()).catch((cause: unknown) => {
     console.error("[Timeline] failed to apply an effect reorder to native playback", cause);
   });
 };

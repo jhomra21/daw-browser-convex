@@ -43,19 +43,25 @@ export type PortableBrowserPlaybackOptions = {
   resolveAudioSource?: AudioPcmSourceResolver
 }
 
-export type TimelinePlaybackRebuildIntent = {
-  resumePlayback: boolean
-  playheadSec: number
-  owner?: 'native' | 'portable-browser'
+// What an edit carries from its gesture. It names the project it was made in and what its compile needs; the transport it
+// joins is the one its session has when it is adopted.
+export type TimelineEditIntent = {
   projectId?: string
   projectGeneration?: number
   instrumentOverride?: LivePlaybackCompileContext["instrumentOverride"]
   externalProcessor?: LivePlaybackCompileContext["externalProcessor"]
 }
 
+// A lifecycle rebuild replaces its session at the transport it names.
+export type TimelinePlaybackRebuildIntent = TimelineEditIntent & {
+  resumePlayback: boolean
+  playheadSec: number
+  owner?: 'native' | 'portable-browser'
+}
+
 export type TimelineScheduleOptions =
-  | (Partial<TimelinePlaybackRebuildIntent> & { rebuildBackend?: false })
-  | (Partial<TimelinePlaybackRebuildIntent> & Pick<TimelinePlaybackRebuildIntent, "resumePlayback"> & { rebuildBackend: true })
+  | (TimelineEditIntent & { rebuildBackend?: false })
+  | (TimelineEditIntent & Partial<TimelinePlaybackRebuildIntent> & Pick<TimelinePlaybackRebuildIntent, "resumePlayback"> & { rebuildBackend: true })
 
 export type ActiveAudioBackend = 'idle' | 'legacy' | 'portable-browser' | 'native'
 

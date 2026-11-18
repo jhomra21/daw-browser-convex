@@ -9198,38 +9198,6 @@ extern "C" daw_audio_core_result daw_audio_core_cancel_staged_processor_state_pa
   return DAW_AUDIO_CORE_NO_DATA;
 }
 
-extern "C" daw_audio_core_result daw_audio_core_retire(
-  daw_audio_core_handle core_handle,
-  uint32_t expected_revision) {
-  Core *core = to_core(core_handle);
-  if (core == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
-  if (expected_revision == 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
-  if (core->published_revision != expected_revision) return DAW_AUDIO_CORE_STALE_REVISION;
-  // The reader may still be inside the plan being retired: its slots only
-  // become reusable once that render epoch has completed.
-  for (RuntimeSlot &slot : core->processor_slots) {
-    if (slot.state.load(std::memory_order_relaxed) == kSlotActive) retire_runtime_slot(*core, slot);
-  }
-  for (RuntimeSlot &slot : core->node_slots) {
-    if (slot.state.load(std::memory_order_relaxed) == kSlotActive) retire_runtime_slot(*core, slot);
-  }
-  core->published_revision = 0;
-  GraphRevision &published = *core->published_graph;
-  published.revision = 0;
-  published.node_count = 0;
-  published.edge_count = 0;
-  published.processor_count = 0;
-  published.ghost_node_count = 0;
-  published.ghost_edge_count = 0;
-  published.ghost_processor_count = 0;
-  published.master_index = kMaximumGraphNodes;
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-  *core->published_native_hooks = {};
-#endif
-  reclaim_retired_slots(*core);
-  return DAW_AUDIO_CORE_OK;
-}
-
 extern "C" daw_audio_core_result daw_audio_core_configure_utility(
   daw_audio_core_handle core_handle,
   const daw_audio_utility_state *state) {

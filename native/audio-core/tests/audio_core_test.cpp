@@ -182,9 +182,6 @@ void test_portable_graph_topology_pdc_and_revision_safety() {
   };
   expect(daw_audio_core_prepare_graph(core, &latency_change), DAW_AUDIO_CORE_OK);
   expect(daw_audio_core_cancel_prepared_graph(core, 6), DAW_AUDIO_CORE_OK);
-  expect(daw_audio_core_retire(core, 4), DAW_AUDIO_CORE_STALE_REVISION);
-  expect(daw_audio_core_retire(core, 5), DAW_AUDIO_CORE_OK);
-  expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_NOT_PREPARED);
   daw_audio_core_destroy(core);
 }
 
@@ -2972,8 +2969,6 @@ void test_abi_and_revision_rejection() {
   core = create_core(64, 2, 1);
   expect(daw_audio_core_publish(core, 0), DAW_AUDIO_CORE_INVALID_ARGUMENT);
   publish(core, 7);
-  expect(daw_audio_core_retire(core, 6), DAW_AUDIO_CORE_STALE_REVISION);
-  expect(daw_audio_core_retire(core, 7), DAW_AUDIO_CORE_OK);
   daw_audio_core_destroy(core);
 }
 
@@ -5460,13 +5455,6 @@ void test_phase3_slot_exhaustion_rollback_and_epoch_delayed_reuse() {
   edited.replace(130, 1);
   expect(edited.prepare(4), DAW_AUDIO_CORE_OK);
   edited.publish(4);
-
-  // A prepared plan that retains slots the published plan has since retired
-  // names stale slots and is refused instead of reviving them.
-  edited.replace(130, 1);
-  expect(edited.prepare(5), DAW_AUDIO_CORE_OK);
-  expect(daw_audio_core_retire(edited.core, 4), DAW_AUDIO_CORE_OK);
-  expect(daw_audio_core_publish(edited.core, 5), DAW_AUDIO_CORE_STALE_REVISION);
 }
 
 void test_phase3_processor_removal_fades_while_retained_stays_exact() {

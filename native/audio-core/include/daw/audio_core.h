@@ -1135,9 +1135,6 @@ daw_audio_core_result daw_audio_core_apply_staged_processor_state_patch(
   daw_audio_core_handle core);
 daw_audio_core_result daw_audio_core_cancel_staged_processor_state_patch(
   daw_audio_core_handle core);
-daw_audio_core_result daw_audio_core_retire(
-  daw_audio_core_handle core,
-  uint32_t expected_revision);
 /* Control thread. Makes the runtime slots of plans published over on this core
  * reusable once the render epoch they retired in has completed; each reused slot
  * gets a new generation, so a stale plan can never name it again. Returns the

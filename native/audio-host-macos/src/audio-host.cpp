@@ -2157,7 +2157,6 @@ struct AudioHost::Impl {
     Evidence("instrument-event-rejected", "permanent-core-validation-failure");
   }
 
-  // The running loop and the final drain after it both dispatch here.
   void DispatchRealtimeBridge(const std::uint32_t pending, const bool final_drain) {
     if ((pending & kRealtimeAssetReaders) != 0) WakeAssetControl();
     // The capture tap can hold samples whose pending bit was consumed by an earlier drain; the last drain empties it.

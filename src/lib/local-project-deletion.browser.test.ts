@@ -15,7 +15,7 @@ import {
 } from '~/lib/local-project-db'
 import { setLocalProjectAssetDirectory } from '~/lib/local-assets'
 import { createLocalProjectEntityRow } from '~/lib/local-project-db'
-import { getLocalEntityWriteQueue, getLocalEntityWriteQueueIfCreated } from '~/lib/local-write-queue'
+import { acquireLocalEntityWriteQueue, getLocalEntityWriteQueueIfCreated } from '~/lib/local-write-queue'
 let project
 let catalog
 let directory
@@ -38,7 +38,8 @@ window.deletionFixture = {
     catalog = await openDB('daw-browser-projects')
   },
   abortDeletion: async () => {
-    const queue = getLocalEntityWriteQueue(project.id)
+    // The open project holds its queue, as the save status does.
+    const { queue, release } = acquireLocalEntityWriteQueue(project.id)
     queue.schedulePut(createLocalProjectEntityRow('track', 'queued-track', { name: 'Queued track' }))
     const originalDelete = IDBObjectStore.prototype.delete
     IDBObjectStore.prototype.delete = function(key) {
@@ -48,16 +49,19 @@ window.deletionFixture = {
     }
     try {
       await deleteLocalProject(project.id)
-      return { aborted: false, queueReleased: getLocalEntityWriteQueueIfCreated(project.id) === undefined }
+      return { aborted: false, queueReleased: getLocalEntityWriteQueueIfCreated(project.id) !== queue }
     } catch {
       const db = await openLocalProjectDb(project.id)
       return {
         aborted: true,
-        queueReleased: getLocalEntityWriteQueueIfCreated(project.id) === undefined,
+        queueReleased: getLocalEntityWriteQueueIfCreated(project.id) !== queue,
         queuedRow: await db.get('entities', ['track', 'queued-track']),
       }
     }
-    finally { IDBObjectStore.prototype.delete = originalDelete }
+    finally {
+      IDBObjectStore.prototype.delete = originalDelete
+      release()
+    }
   },
   state: async () => {
     let bytes

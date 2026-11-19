@@ -23,6 +23,7 @@ import {
   REVERB_WET_MAX,
   REVERB_WET_MIN,
   type AudioEffectKind,
+  type DspAudioEffectKind,
   SATURATOR_COLOR_FREQUENCY_HZ_MAX,
   SATURATOR_COLOR_FREQUENCY_HZ_MIN,
   SATURATOR_DRIVE_DB_MAX,
@@ -41,7 +42,7 @@ export type AutomationParameterDescriptor = {
   label: string
   group: string
   device: string
-  owner: 'mixer' | 'sampler' | 'granular' | 'synth' | 'external' | AudioEffectKind | 'spectral'
+  owner: 'mixer' | 'sampler' | 'granular' | 'synth' | 'external' | DspAudioEffectKind
   targetKinds: AutomationTargetKind[]
   min: number
   max: number
@@ -238,7 +239,8 @@ const descriptorsByEffectKind = {
   autopan: effectDescriptors.filter((descriptor) => descriptor.owner === 'autopan'),
   ensemble: effectDescriptors.filter((descriptor) => descriptor.owner === 'ensemble'),
   spectral: effectDescriptors.filter((descriptor) => descriptor.owner === 'spectral'),
-} satisfies Record<AudioEffectKind | 'spectral', AutomationParameterDescriptor[]>
+  spectrum: [],
+} satisfies Record<AudioEffectKind, AutomationParameterDescriptor[]>
 
 export const getAutomationParameterOptions = (): AutomationParameterOption[] => [
   { id: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer' },

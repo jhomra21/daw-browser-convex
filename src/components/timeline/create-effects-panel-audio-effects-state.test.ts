@@ -642,6 +642,23 @@ describe("effects panel instance engine synchronization", () => {
     });
   });
 
+  test("a Spectrum device stays in the chain but never reaches the engine or the export rows", async () => {
+    await createRoot(async (dispose) => {
+      const engine = new SpyAudioEngine();
+      const { device } = createDevice(engine, { projectId: `project:spectrum-device-${crypto.randomUUID()}` });
+
+      await device.addByKindToTarget("track-1", "delay");
+      const withoutSpectrum = engine.trackFxCalls.at(-1)?.instances.map((instance) => instance.kind);
+      await device.addByKindToTarget("track-1", "spectrum");
+      await device.addByKindToTarget("track-1", "chorus");
+
+      expect(device.orderedEffects().map((effect) => effect.kind)).toEqual(["delay", "spectrum", "chorus"]);
+      expect(withoutSpectrum).toEqual(["delay"]);
+      expect(engine.trackFxCalls.at(-1)?.instances.map((instance) => instance.kind)).toEqual(["delay", "chorus"]);
+      expect(device.snapshotExportRows(["track-1"]).map((row) => row.effect)).toEqual(["delay", "chorus"]);
+      dispose();
+    });
+  });
   test("rolls back drafts, order, and engine state when an inserted chain reorder fails", async () => {
     await createRoot(async (dispose) => {
       const engine = new SpyAudioEngine();

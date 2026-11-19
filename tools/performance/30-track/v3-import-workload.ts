@@ -85,7 +85,7 @@ export const prepareFullDsp = async (session: string, profile: string, projectId
   }
   const snapshot = projectSnapshotSchemaV2.parse(await command(profile, ["snapshot-v2", projectId, "--target", "host"]))
   const processors = snapshot.processors.filter((entry) => entry.processor.kind === "external-vst3"
-    && entry.processor.params.identity.name === "ValhallaSupermassive")
+    && "identity" in entry.processor.params && entry.processor.params.identity.name === "ValhallaSupermassive")
   if (processors.length !== instanceCount) throw new Error(`Expected ${instanceCount} trusted VST processors, found ${processors.length}.`)
   const builtInEffects = snapshot.processors.filter((entry) => entry.processor.kind !== "external-vst3")
   if (builtInEffects.length < instanceCount * 2) throw new Error("Built-in DSP effects were not persisted.")
@@ -93,7 +93,7 @@ export const prepareFullDsp = async (session: string, profile: string, projectId
   if (!first || !("trackId" in first.target)) throw new Error("First VST audio track is missing.")
   const instances = desktopHostVstInstancesResultSchemaV1.parse(await command(profile, ["host", "vst-instances", projectId]))
   const instance = instances.instances.find((item) => item.targetId === first.target.trackId
-    && item.identity.classId === first.processor.params.identity.classId)
+    && "identity" in first.processor.params && item.identity.classId === first.processor.params.identity.classId)
   if (!instance || instance.health.state !== "ready") throw new Error("First trusted VST worker is not ready.")
   const parameters = desktopHostVstParametersResultSchemaV1.parse(await command(profile, ["host", "vst-parameters", projectId, instance.instanceId]))
   const mix = parameters.parameters.filter((item) => item.title.toLowerCase() === "mix" && !item.readOnly && !item.hidden)

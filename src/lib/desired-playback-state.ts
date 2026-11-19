@@ -6,7 +6,7 @@ import {
   type AutomationEnvelope,
   type JsonValue,
   arpeggiatorParamsSchema,
-  isAudioEffectKind,
+  isDspAudioEffectKind,
   isJsonObject,
   normalizeArpeggiatorParams,
   normalizeAutoFilterParamsEnvelope,
@@ -349,7 +349,7 @@ const replaceExportEffectInstancesForTarget = (
 ) => {
   const instances: ExportEffectInstanceRow[] = []
   for (const row of rows) {
-    if (!isAudioEffectKind(row.effect) || !row.instanceId) continue
+    if (!isDspAudioEffectKind(row.effect) || !row.instanceId) continue
     if (row.effect === 'eq') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeEqParams(row.params) })
     else if (row.effect === 'compressor') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeCompressorParams(row.params) })
     else if (row.effect === 'saturator') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeSaturatorParams(row.params) })
@@ -401,7 +401,7 @@ export const applyRoomEffectRowsToFx = (fx: ExportFx, rows: readonly RoomEffectR
   const trackFx = ensureTrackFxMap(fx)
   const instanceRows: ExportEffectInstanceRow[] = []
   for (const row of rows) {
-    if (isAudioEffectKind(row.type)) {
+    if (isDspAudioEffectKind(row.type)) {
       const targetId = row.targetType === 'master' ? 'master' : row.trackId
       if (targetId && row.params) {
         if (!row.instanceId) throw new Error(`Audio effect "${row.type}" is missing an instance ID.`)
@@ -434,7 +434,7 @@ const applyProjectedEffectRowsToFx = (fx: ExportFx, rows: readonly ExportEffectR
   const trackFx = ensureTrackFxMap(fx)
   const instances: ExportEffectInstanceRow[] = []
   for (const row of rows) {
-    if (isAudioEffectKind(row.effect) && row.instanceId) {
+    if (isDspAudioEffectKind(row.effect) && row.instanceId) {
       if (row.effect === 'eq') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeEqParams(row.params) })
       else if (row.effect === 'compressor') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeCompressorParams(row.params) })
       else if (row.effect === 'saturator') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeSaturatorParams(row.params) })

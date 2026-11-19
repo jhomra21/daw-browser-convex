@@ -16,6 +16,7 @@ import {
   nativeAudioHostMaximumSourceEvents,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
+import { MASTER_ROUTE_TARGET } from "./mixer/resolve-timing"
 
 const graphEnvelopeVersion = 3
 const graphEnvelopeVersionExternalLatency = 4
@@ -289,6 +290,9 @@ export const nativeGraphNodeId = (value: string) => {
   }
   return hash === 0n ? 1n : hash
 }
+
+// The graph names the master node by its route target, not by the "master" effects target.
+export const nativeMasterNodeId = nativeGraphNodeId(MASTER_ROUTE_TARGET)
 
 const nodeKind = (kind: AudioCoreGraphSnapshot["nodes"][number]["kind"]) => (
   kind === "source" ? 1 : kind === "instrument" ? 2 : kind === "master" ? 6 : 3

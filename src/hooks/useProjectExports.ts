@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from 'solid-js'
 import { useConvexQuery, convexApi } from '~/lib/convex'
 import { listLocalExportMetadata } from '~/lib/local-export-metadata'
 import { isLocalId } from '@daw-browser/shared'
@@ -25,23 +25,34 @@ type UseProjectExportsArgs = {
 
 type UseProjectExportsResult = {
   exports: Accessor<ProjectExportItem[]>
+  loading: Accessor<boolean>
+  error: Accessor<unknown>
+  retry: () => void
 }
 
 export function useProjectExports(options: UseProjectExportsArgs): UseProjectExportsResult {
   const { projectId, userId, enabled } = options
   const [localExports, setLocalExports] = createSignal<ProjectExportItem[]>([])
+  const [localLoading, setLocalLoading] = createSignal(false)
+  const [localError, setLocalError] = createSignal<unknown>(null)
+  const [localRetry, setLocalRetry] = createSignal(0)
 
   createEffect(() => {
+    localRetry()
+    setLocalExports([])
+    setLocalLoading(false)
+    setLocalError(null)
     if (enabled && !enabled()) {
-      setLocalExports([])
       return
     }
     const rid = projectId()
     if (!rid || !isLocalId('project', rid)) {
-      setLocalExports([])
       return
     }
-    const isCurrentProject = () => (!enabled || enabled()) && projectId() === rid && isLocalId('project', rid)
+    let active = true
+    onCleanup(() => { active = false })
+    setLocalLoading(true)
+    const isCurrentProject = () => active && (!enabled || enabled()) && projectId() === rid
     void listLocalExportMetadata(rid).then((rows) => {
       if (!isCurrentProject()) return
       setLocalExports(rows.map((row) => ({
@@ -57,8 +68,10 @@ export function useProjectExports(options: UseProjectExportsArgs): UseProjectExp
         createdAt: row.createdAt,
         createdBy: 'local',
       })))
-    }).catch(() => {
-      if (isCurrentProject()) setLocalExports([])
+    }).catch((error) => {
+      if (isCurrentProject()) setLocalError(error)
+    }).finally(() => {
+      if (isCurrentProject()) setLocalLoading(false)
     })
   })
 
@@ -79,6 +92,20 @@ export function useProjectExports(options: UseProjectExportsArgs): UseProjectExp
     if (isLocalId('project', rid)) return localExports()
     return Array.isArray(raw.data) ? raw.data : []
   })
+  const cloudQueryEnabled = () => Boolean(
+    (!enabled || enabled())
+    && projectId()
+    && !isLocalId('project', projectId())
+    && userId(),
+  )
 
-  return { exports: list }
+  return {
+    exports: list,
+    loading: () => isLocalId('project', projectId()) ? localLoading() : cloudQueryEnabled() && raw.isLoading,
+    error: () => isLocalId('project', projectId()) ? localError() : cloudQueryEnabled() ? raw.error : null,
+    retry: () => {
+      if (isLocalId('project', projectId())) setLocalRetry((version) => version + 1)
+      else void raw.refetch()
+    },
+  }
 }

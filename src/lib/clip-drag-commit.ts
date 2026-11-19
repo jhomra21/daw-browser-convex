@@ -146,24 +146,31 @@ export const commitMovedClipDrag = async (input: MoveCommitInput) => {
       return false;
     }
   }));
-  const successfulMoves = input.plannedMoves.filter((_, index) => moveApplied[index]);
-  const failedMoves = input.previousMoves.filter((_, index) => !moveApplied[index]);
-
-  if (failedMoves.length > 0) {
-    input.commitClipMoves(failedMoves);
-    if (input.addedTrackId && input.plannedMoves.some((move, index) => !moveApplied[index] && move.trackId === input.addedTrackId)) {
-      input.cleanupUnusedAddedTrack(input.addedTrackId);
-    }
-    for (const rollbackAnchor of failedMoves) {
-      if (rollbackAnchor.clipId === input.selectionAfterCommit.clipId) {
-        input.selection.selectPrimaryClip(
-          { trackId: rollbackAnchor.trackId, clipId: rollbackAnchor.clipId },
-          input.selectionAfterCommit.preserveClipIds ? { preserveClipIds: true } : undefined,
-        );
-        break;
-      }
-    }
+  if (moveApplied.every(Boolean)) {
+    pushMoveHistory(input, input.plannedMoves);
+    return;
   }
 
-  pushMoveHistory(input, successfulMoves);
+  // A rejected multi-clip move reverts at once. A clip whose compensating cloud write fails
+  // stays where the cloud has it and gets its own undo entry.
+  input.commitClipMoves(input.previousMoves);
+  const remainingMoves = (await Promise.all(input.plannedMoves.flatMap((move, index) => {
+    const previous = input.previousPositions.get(move.clipId);
+    if (!moveApplied[index] || !previous) return [];
+    return [input.moveCloudClip({ clipId: move.clipId, ...previous }).catch(() => false).then((compensated) => compensated ? [] : [move])];
+  }))).flat();
+  if (remainingMoves.length > 0) input.commitClipMoves(remainingMoves);
+  pushMoveHistory(input, remainingMoves);
+  if (input.addedTrackId && !remainingMoves.some((move) => move.trackId === input.addedTrackId)) {
+    input.cleanupUnusedAddedTrack(input.addedTrackId);
+  }
+  const selectedMove = remainingMoves.find((move) => move.clipId === input.selectionAfterCommit.clipId);
+  const rollbackAnchor = input.previousMoves.find((move) => move.clipId === input.selectionAfterCommit.clipId);
+  const selectedClip = selectedMove ?? rollbackAnchor;
+  if (selectedClip) {
+    input.selection.selectPrimaryClip(
+      { trackId: selectedClip.trackId, clipId: selectedClip.clipId },
+      input.selectionAfterCommit.preserveClipIds ? { preserveClipIds: true } : undefined,
+    );
+  }
 };

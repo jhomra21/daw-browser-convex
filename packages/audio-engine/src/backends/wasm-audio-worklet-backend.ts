@@ -26,7 +26,9 @@ import {
   type PortableWasmControlMessage,
   type PortableWasmPreparedSourceEvent,
   type PortableWasmProcessorEvent,
+  type PortableWasmSourceTable,
   type PortableWasmStatusMessage,
+  type PortableWasmInstrumentEvent,
 } from '../portable-wasm-protocol'
 import type { PortableFrameSchedule } from '../portable-frame-scheduling'
 import {
@@ -35,6 +37,7 @@ import {
   resolveWorkletModuleUrl,
 } from '../worklet-manifest'
 import { portableWasmCapabilityMatrix } from './portable-wasm-capabilities'
+import { encodePortableGraphEnvelope } from '../native-host-wire'
 
 export type PortableWasmPagedCapabilities = {
   pagedAbi: number
@@ -136,15 +139,15 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
       result: value.result,
     }
   }
-  if (value.type === 'graph-published'
-    && isPositiveInteger(value.revision)
-    && (value.result === 'published' || value.result === 'rejected')) {
-    return {
-      version: portableWasmProtocolVersion,
-      type: value.type,
-      requestId: value.requestId,
-      revision: value.revision,
-      result: value.result,
+  if (value.type === 'graph-published' && isPositiveInteger(value.revision)) {
+    if (value.result === 'published' || value.result === 'rejected' || value.result === 'late') {
+      return {
+        version: portableWasmProtocolVersion,
+        type: value.type,
+        requestId: value.requestId,
+        revision: value.revision,
+        result: value.result,
+      }
     }
   }
   if (value.type === 'asset-registered'
@@ -299,7 +302,7 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
       result: value.result,
     }
   }
-  if (value.type === 'processor-events-applied'
+  if ((value.type === 'processor-events-applied' || value.type === 'instrument-events-applied')
     && isPositiveInteger(value.revision)
     && isPositiveInteger(value.epoch)
     && isPositiveInteger(value.sequence)
@@ -438,7 +441,9 @@ export class PortableWasmPlaybackSession {
     request.resolve(response)
   }
 
-  private request(message: PortableRequestMessage): Promise<PortableRequestStatus> {
+  // A request that times out is a fault of the session, unless `expire` turns it into the error of a request that can
+  // be abandoned.
+  private request(message: PortableRequestMessage, transfer: Transferable[] = [], expire?: () => Error): Promise<PortableRequestStatus> {
     return new Promise((resolve, reject) => {
       if (this.disposed) {
         reject(new Error('Portable playback session was disposed.'))
@@ -450,25 +455,40 @@ export class PortableWasmPlaybackSession {
         const request = this.pending.get(requestId)
         if (!request) return
         this.pending.delete(requestId)
+        if (expire) {
+          request.reject(expire())
+          return
+        }
         request.reject(new Error('Portable playback control request timed out.'))
         this.fail(new Error('Portable playback control request timed out.'))
       }, this.controlTimeoutMs)
       this.pending.set(requestId, { resolve, reject, deadline })
-      this.node.port.postMessage({ ...message, version: portableWasmProtocolVersion, requestId })
+      this.node.port.postMessage({ ...message, version: portableWasmProtocolVersion, requestId }, transfer)
     })
   }
 
   async prepareGraph(snapshot: AudioCoreGraphSnapshot) {
-    const response = await this.request({ type: 'prepare-graph', snapshot })
+    // The worklet prepares on the audio rendering thread, so the envelope is encoded here and its bytes transferred.
+    const envelope = encodePortableGraphEnvelope(snapshot)
+    const response = await this.request({ type: 'prepare-graph', snapshot, envelope }, [envelope.buffer])
     if (response.type !== 'graph-prepared' || response.result !== 'prepared') {
       throw new Error('Portable playback graph-prepared was rejected.')
     }
   }
 
-  async publishGraph(revision: number) {
-    const response = await this.request({ type: 'publish-graph', revision })
+  // An adoption republishes onto the playing graph and requires the core to continue it; the worklet refuses otherwise.
+  // With a publicationFrame the worklet swaps exactly there, or answers late when the transport has already passed it. It
+  // answers from the render thread, so a stalled context leaves the publication late: it is cancelled, never applied
+  // after the caller gave up, and the session lives on.
+  // `sources` is the source table of that revision: the worklet applies it in the block that publishes, right after the
+  // graph, and drops it with a publication that is refused, late or cancelled.
+  async publishGraph(revision: number, options?: { requireContinuity: true; publicationFrame?: number; sources?: PortableWasmSourceTable }) {
+    const response = await this.request({ type: 'publish-graph', revision, ...options }, [], options?.publicationFrame === undefined ? undefined : () => {
+      this.node.port.postMessage({ version: portableWasmProtocolVersion, type: 'cancel-publication', revision })
+      return new Error('Portable playback graph-published was late.')
+    })
     if (response.type !== 'graph-published' || response.result !== 'published') {
-      throw new Error('Portable playback graph-published was rejected.')
+      throw new Error(`Portable playback graph-published was ${response.type === 'graph-published' ? response.result : 'rejected'}.`)
     }
   }
 
@@ -628,6 +648,19 @@ export class PortableWasmPlaybackSession {
     if (response.type !== 'processor-events-applied' || response.result !== 'applied') {
       throw new Error('Portable playback processor-events-applied was rejected.')
     }
+  }
+
+  async queueInstrumentEvents(epoch: number, events: readonly PortableWasmInstrumentEvent[], batch?: { revision: number; sequence: number }) {
+    if (this.disposed) throw new Error('Portable playback session was disposed.')
+    if (batch) {
+      const response = await this.request({ type: 'instrument-parameters', ...batch, epoch, events })
+      if (response.type !== 'instrument-events-applied' || response.result !== 'applied'
+        || response.revision !== batch.revision || response.epoch !== epoch || response.sequence !== batch.sequence) {
+        throw new Error('Portable playback instrument-events-applied was rejected.')
+      }
+      return
+    }
+    this.node.port.postMessage({ version: portableWasmProtocolVersion, type: 'instrument-events', epoch, events })
   }
 
   async reenableProcessorAutomation(

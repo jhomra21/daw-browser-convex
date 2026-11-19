@@ -1,0 +1,1 @@
+{"mode":"mixdown","format":"wav","destination":{"kind":"file","path":"/Users/juan/Documents/daw-browser-convex/acceptance-reports/ae-08-song-v2/macros-coming-soon-score-v2.wav"},"range":{"mode":"custom","startSec":0,"endSec":29},"render":{"sampleRate":48000,"channels":2,"normalization":{"mode":"none"},"tail":{"mode":"none"}},"encoding":{"wav":{"codec":"pcm-s24","dither":"none"}}}

@@ -14,6 +14,30 @@ export const nativeEditorAnchorFromElement = (element: HTMLElement): NativeEdito
   nativeEditorAnchorFromRect(element.getBoundingClientRect())
 )
 
+// Main's command schema refuses an own key whose value is undefined, so absent fields stay absent.
+type NativeEditorCommand = {
+  projectId: string
+  instanceId: string
+  command: 'open' | 'close' | 'focus'
+  requiresState: boolean
+  captureState: boolean
+  serializedPlan?: string
+  initialState?: { bytes: Uint8Array; sha256: string }
+  anchor?: NativeEditorAnchor
+}
+
+export const nativeEditorCommand = (
+  input: Omit<NativeEditorCommand, 'serializedPlan' | 'initialState' | 'anchor'>
+    & { [Key in 'serializedPlan' | 'initialState' | 'anchor']: NativeEditorCommand[Key] | undefined },
+): NativeEditorCommand => {
+  const { serializedPlan, initialState, anchor, ...required } = input
+  const command: NativeEditorCommand = required
+  if (serializedPlan !== undefined) command.serializedPlan = serializedPlan
+  if (initialState !== undefined) command.initialState = initialState
+  if (anchor !== undefined) command.anchor = anchor
+  return command
+}
+
 export const nativeEditorCommandAvailable = (
   bridgeAvailable: boolean,
   _preflightSupportsEditor: boolean,

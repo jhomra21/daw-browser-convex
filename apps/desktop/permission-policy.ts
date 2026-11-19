@@ -61,7 +61,7 @@ export const allowsTrustedMidiPermission = (
   input: MidiPermissionInput,
   isTrustedOrigin: DesktopOriginPolicy = isTrustedDesktopOrigin,
 ): boolean =>
-  input.permission === "midi"
+  (input.permission === "midi" || input.permission === "midiSysex")
   && input.trustedRendererId !== undefined
   && input.requestingRendererId === input.trustedRendererId
   && input.isMainFrame

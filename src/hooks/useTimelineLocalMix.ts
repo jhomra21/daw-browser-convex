@@ -16,7 +16,7 @@ import { useProjectPersistedState } from './useProjectPersistedState'
 type UseTimelineLocalMixOptions = {
   projectId: Accessor<string>
   writableTrackIds: Accessor<Set<Track['id']>>
-  onLocalSaveFailed?: (message: string) => void
+  onLocalSaveFailed?: (projectId: string, message: string) => void
 }
 
 type UseTimelineLocalMixReturn = {
@@ -87,8 +87,8 @@ export function useTimelineLocalMix(
     loadAsync: loadProjectTrackState,
     save: (projectId, value) => saveLocalTrackState(projectId, value),
     saveAsync: saveProjectTrackState,
-    onSaveAsyncError: (error) => {
-      options.onLocalSaveFailed?.(error instanceof Error ? error.message : 'Local mix could not be saved.')
+    onSaveAsyncError: (projectId, error) => {
+      options.onLocalSaveFailed?.(projectId, error instanceof Error ? error.message : 'Local mix could not be saved.')
     },
   })
 

@@ -1,0 +1,14 @@
+{
+ "name": "ae08-d4-release-anchors",
+ "sequence": 15,
+ "createdAt": "2026-11-12T17:00:00.000Z",
+ "revert": [],
+ "watched": [],
+ "changes": [],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 step 6a (D4): the WASM core now releases instrument voices with their tails on an epoch change, as native does, and the portable core artefact was rebuilt. No arm anchors in native/audio-core/src/audio_core.cpp or in the artefact, so no anchor text moved. Run alone with --only: gate:x-host-ctest, x-wasm-artifact, x-portable-wasm, x-wasm-validation, x-validate-wasm, f-engine and x-backends pass, and arm ledger:475 (the only arm witnessed by portable-wasm-host.test.ts) passes as control and is still killed as mutant (see PHASE8-STEP6A-D4.md). The watched hashes of the core, the wasm, its manifest and the host witness file, and the recorded pass count of portable-wasm-host.test.ts, are not recorded: they move only on --full.",
+  "expectationsSha256": "499a810b8ca8921c7024968b1b95c50fffde15167f3fe397bada102b9355d5ec"
+ }
+}

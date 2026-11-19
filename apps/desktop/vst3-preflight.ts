@@ -14,6 +14,7 @@ import {
   type NativeVst3PreflightResult,
 } from "@daw-browser/plugin-host-protocol"
 import type { ResolvedVst3Attachment } from "./audio-host"
+import type { HostEvidence } from "./ae08-evidence"
 
 const maximumWorkerHelloBytes = 16 * 1024
 const defaultPreflightDeadlineMs = 5_000
@@ -52,6 +53,8 @@ export const preflightNativeVst3Worker = async (input: {
   signal?: AbortSignal
   spawnWorker?: SpawnWorker
   accessWorker?: typeof access
+  evidence?: HostEvidence
+  workerEnvironment?: NodeJS.ProcessEnv
 }): Promise<NativeVst3PreflightResult> => {
   const requestId = randomUUID()
   const unavailable = (
@@ -93,13 +96,16 @@ export const preflightNativeVst3Worker = async (input: {
     "--state-revision", String(attachment.stateRevision),
   ]
   return new Promise((resolve, reject) => {
+    const started = performance.now()
+    const environment: NodeJS.ProcessEnv = { PATH: "/usr/bin:/bin", ...input.workerEnvironment }
     const launch = input.spawnWorker ?? ((workerPath, workerArguments) => spawn(workerPath, [...workerArguments], {
-      env: { PATH: "/usr/bin:/bin" },
+      env: environment,
       stdio: ["pipe", "pipe", "pipe"],
     }))
     let child: ChildProcessWithoutNullStreams
     try {
       child = launch(input.workerPath, arguments_)
+      input.evidence?.("vst-preflight-spawn", { pid: child.pid ?? null, instanceId: attachment.instanceId })
     } catch {
       resolve(unavailable("worker-unavailable", "The native VST3 worker could not start."))
       return
@@ -113,6 +119,8 @@ export const preflightNativeVst3Worker = async (input: {
     const finish = (result: NativeVst3PreflightResult) => {
       if (settled) return
       settled = true
+      input.evidence?.("vst-preflight-complete", { pid: child.pid ?? null, instanceId: attachment.instanceId,
+        durationMs: performance.now() - started, status: result.status })
       if (timer !== undefined) clearTimeout(timer)
       input.signal?.removeEventListener("abort", abort)
       resolve(result)

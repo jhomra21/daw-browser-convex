@@ -1,0 +1,101 @@
+{
+ "name": "pr62-p10-unreachable-arms",
+ "sequence": 81,
+ "createdAt": "2026-11-18T20:43:33.764526Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:169:169-plus-409",
+    "expect",
+    "exit"
+   ],
+   "old": 1,
+   "new": 0
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:169:169-plus-409",
+    "expect",
+    "counts"
+   ],
+   "old": {
+    "pass": 4,
+    "skip": 0,
+    "fail": 1
+   },
+   "new": {
+    "pass": 5,
+    "skip": 0,
+    "fail": 0
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:169:169-plus-409",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "STEP7B3 real paused structural edit during held publication that replaces the preview"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:170:0:mutant",
+    "expect",
+    "exit"
+   ],
+   "old": 1,
+   "new": 0
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:170:0:mutant",
+    "expect",
+    "counts"
+   ],
+   "old": {
+    "pass": 0,
+    "skip": 0,
+    "fail": 1
+   },
+   "new": {
+    "pass": 1,
+    "skip": 0,
+    "fail": 0
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:170:0:mutant",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "STEP7B3 real paused structural edit during held publication then queued start that replaces the preview"
+   ],
+   "new": []
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "Phase 10 (pr62-cleanup 0765d0c3; acceptance-reports/pr62-cleanup/PARENT-RULING-PR62-TEST-CLEANUP.md, section 'Phase 10'; hand record, no --bless). diag:169:169-plus-409 and rc2:170:0:mutant no longer kill after a7bacca5 made every prepared native session adopt edits in place: the controller guard on 'paused-preview-structural-change' needs active, which implies prepared, while its only native caller runs unprepared; the handlePlay join after a pending Pause waited for the structural-change dispose that no prepared session issues now. Measured in /tmp/fast-cert/p10-v1: diag:169:169-plus-409 applied 4, 5 pass 0 fail; rc2:170:0:mutant applied 1, 1 pass 0 fail. rc2:170:0:mutant becomes an expected survivor (retired with its control by tiers.ts retiredArms); the diag case records the observed pass.",
+  "expectationsSha256": "4a82d1b81f8fe2bf72cab9ba17a7d4fc83e06eb3a60a5ed2aadd2cd39b6eb772"
+ }
+}

@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from "bun:test"
 import "fake-indexeddb/auto"
-import { createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams } from "@daw-browser/shared"
+import { createDefaultDrumRackParams, createDefaultGranularParams, createDefaultLimiterParams, createDefaultSamplerParams, type SamplerZone } from "@daw-browser/shared"
 import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
 import * as exportMixdown from "@daw-browser/audio-engine/export-mixdown"
 import type { StreamTargetChunk } from "mediabunny"
@@ -26,6 +26,7 @@ import { sampledInstrumentRegion, sampledInstrumentRegionBytes, sampledInstrumen
 import { createLocalProject, deleteLocalProject } from "~/lib/local-project-db"
 import { createLocalAsset, deleteLocalAsset } from "~/lib/local-assets"
 import { loadInstrumentExportBuffers, runStemExport, runTimelineExport } from "~/lib/export/run-export-job"
+import { nativeInstrumentExportMemory } from "~/lib/export/instrument-export-memory"
 import { NativeOfflineRenderError } from "~/lib/export/desktop-native-offline-pcm-renderer"
 import type { ExportOutputTargetFactory } from "~/lib/export/export-output-targets"
 import type { ExportEncodingSettings, ExportRenderSettings } from "~/lib/export/export-settings"
@@ -88,7 +89,7 @@ const outputTargets = (opened: () => void): ExportOutputTargetFactory => ({
 
 const aliasLocalProject = async (source: Awaited<ReturnType<typeof createLocalProject>>, id: string) => {
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open("daw-browser-projects", 1)
+    const request = indexedDB.open("daw-browser-projects")
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
   })
@@ -179,6 +180,8 @@ test("stem export preloads local sampled instruments for a cloud-shaped local pr
   }
   const root = {
     getDirectoryHandle: async (name: string) => name === "assets" ? assets : root,
+    // Mirrors FileSystemDirectoryHandle.resolve: [] for the same entry, null when unrelated.
+    resolve: async (other: FileSystemDirectoryHandle) => other === root ? [] : null,
   }
   Object.defineProperty(navigator, "storage", {
     configurable: true,
@@ -540,9 +543,10 @@ const runStemSpoolProbe = async (input: {
     await onChunk(0, 0, {
       frameCount: 4,
       planes: [new Float32Array(4), new Float32Array(4)],
-    })
+    }, 4)
     return {
       frameCount: 4,
+      latencyFrames: 0,
       sampleRate: 44_100,
       numberOfChannels: 2,
       cleanup: async () => undefined,
@@ -694,6 +698,8 @@ test("instrument export preload reads local-asset bytes with the project context
   }
   const root = {
     getDirectoryHandle: async (name: string) => name === "assets" ? assets : root,
+    // Mirrors FileSystemDirectoryHandle.resolve: [] for the same entry, null when unrelated.
+    resolve: async (other: FileSystemDirectoryHandle) => other === root ? [] : null,
   }
   Object.defineProperty(navigator, "storage", {
     configurable: true,
@@ -797,65 +803,81 @@ test("instrument export preload reads local-asset bytes with the project context
     expect(fetchCalls).toEqual(["https://samples.example/missing.wav"])
     expect(TestOfflineAudioContext.decodeCalls).toBe(0)
 
-    let nativeAssetCount = 0
-    const nativeOutcome = await runTimelineExport({
-      nativeRendererRequired: true,
-      getTracks: () => [{
-        id: "track-local",
-        name: "Local instrument",
-        volume: 1,
-        kind: "instrument",
-        clips: [{
-          id: "clip-local",
-          name: "Audio",
-          color: "#fff",
-          startSec: 0,
-          duration: 1,
-          sourceAssetKey: "asset:captured-clip",
-          buffer: hydratedBuffer,
+    // Other engine suites install minimal global AudioBuffer stand-ins. Native
+    // descriptors need real duration/dimensions, so supply this fixture's exact
+    // regional buffer instead of depending on that process-global constructor.
+    const secondSample = entry.instrument.params.pads[1]?.sample
+    if (!secondSample) throw new Error('Expected the second sample.')
+    const nativeBuffers = new Map(entry.drumRackBuffers)
+    nativeBuffers.set(secondPad.id, {
+      buffer: new TestDecodedAudioBuffer(), sourceStartFrame: 0,
+      sourceIdentity: sampledInstrumentRegionIdentity(secondSample, sampledInstrumentRegion(secondSample.source, 0, 1)),
+    })
+    entry.drumRackBuffers = nativeBuffers
+    for (const mode of ['failure', 'cancel']) {
+      let nativeAssetCount = 0
+      const nativeBudget = createSampledInstrumentRegionBudget(16 * 1024 ** 2)
+      const nativeScope = nativeBudget.createScope('native-export')
+      const controller = new AbortController()
+      const nativeOutcome = await runTimelineExport({
+        nativeRendererRequired: true,
+        getTracks: () => [{
+          id: "track-local",
+          name: "Local instrument",
+          volume: 1,
+          kind: "instrument",
+          clips: [],
         }],
-      }],
-      bpm: 120,
-      projectGeneration: 1,
-      getProjectGeneration: () => 1,
-      masterVolume: 1,
-      range: { mode: "whole" },
-      formats: ["wav"],
-      render,
-      encoding,
-      projectId: project.id,
-      userId: "user-1",
-      sidechainRoutes: [],
-      loadCapturedClipBuffer: async () => undefined,
-      signal: new AbortController().signal,
-      outputTargets: {
-        resourceLimits: desktopLimits,
-        async createMixdownTarget() {
-          return {
-            openFile: async () => undefined,
-            saveBuffer: async () => ({ destination: "local", name: "unused.wav" }),
-          }
+        bpm: 120,
+        projectGeneration: 1,
+        getProjectGeneration: () => 1,
+        masterVolume: 1,
+        range: { mode: "custom", startSec: 0, endSec: 1 },
+        formats: ["wav"],
+        render,
+        encoding,
+        projectId: project.id,
+        userId: "user-1",
+        sidechainRoutes: [],
+        loadCapturedClipBuffer: async () => undefined,
+        signal: controller.signal,
+        sampledInstrumentRegionScope: nativeScope,
+        outputTargets: {
+          resourceLimits: desktopLimits,
+          async createMixdownTarget() {
+            return {
+              openFile: async () => { throw new Error('Failed/canceled native rendering must not open an output file.') },
+              saveBuffer: async () => { throw new Error('Failed/canceled native rendering must not save output.') },
+            }
+          },
+          async createStemTarget() {
+            throw new Error("unexpected stem target")
+          },
         },
-        async createStemTarget() {
-          throw new Error("unexpected stem target")
+        renderStateSnapshot: {
+          fx,
+          automationEnvelopes: [],
         },
-      },
-      renderStateSnapshot: {
-        fx,
-        automationEnvelopes: [],
-      },
-      nativeOfflinePcmRenderer: async (plan) => {
-        nativeAssetCount = plan.assets.length
-        throw new NativeOfflineRenderError("render reached with the captured sampled buffer")
-      },
-    })
-    expect(nativeOutcome).toEqual({
-      type: "error",
-      message: "render reached with the captured sampled buffer",
-      failureOwner: "native",
-      outputs: [],
-    })
-    expect(nativeAssetCount).toBeGreaterThan(0)
+        nativeOfflinePcmRenderer: async (plan, signal, _progress, providePage) => {
+          nativeAssetCount = plan.assets.length
+          const asset = plan.mappedAssets?.[0]
+          if (!asset || !providePage) throw new Error('Expected instrument-only mapped provider.')
+          expect(asset.ranges).toEqual([{ startFrame: 0, frameCount: hydratedBuffer.length }])
+          if (mode === 'cancel') controller.abort()
+          const page = await providePage({ asset, startFrame: 0, frameCount: 16_384, signal })
+          expect(page.planarPcm.byteLength).toBe(16_384 * 2 * 4)
+          throw new NativeOfflineRenderError("render reached with the captured sampled buffer")
+        },
+      })
+      expect(nativeOutcome).toEqual(mode === 'cancel' ? { type: 'canceled', outputs: [] } : {
+        type: "error",
+        message: "render reached with the captured sampled buffer",
+        failureOwner: "native",
+        outputs: [],
+      })
+      expect(nativeAssetCount).toBe(0)
+      expect(nativeBudget.totalBytes()).toBe(0)
+    }
     expect(fetchCalls).toEqual(["https://samples.example/missing.wav"])
     expect(TestOfflineAudioContext.decodeCalls).toBe(0)
   } finally {
@@ -1052,6 +1074,71 @@ test("granular export charges its decoded buffer and worklet PCM mirror at the e
     scope.release()
   }
   expect(budget.totalBytes()).toBe(0)
+})
+
+test("native export accounts shared live PCM plus distinct offline mappings and preserves live leases on pressure", async () => {
+  const buffer = new TestDecodedAudioBuffer(8 * 48_000)
+  const sample: SamplerZone['sample'] = {
+    assetKey: 'native-overlap', url: 'https://example.test/native.wav', sourceKind: 'url',
+    source: { durationSec: 8, sampleRate: 48_000, channelCount: 2 },
+  }
+  const zone: SamplerZone = {
+    id: 'zone', sample, keyLow: 0, keyHigh: 127, velocityLow: 1, velocityHigh: 127, rootNote: 60,
+    tuneCents: 0, gain: 1, pan: 0, roundRobinGroup: 0, roundRobinIndex: 0,
+    playbackMode: 'one-shot', startSec: 0, crossfadeSec: 0, chokeGroup: 0,
+  }
+  const identity = sampledInstrumentRegionIdentity(sample, sampledInstrumentRegion(sample.source, 0, 8))
+  const bytes = buffer.length * 2 * 4
+  const liveMapping = bytes
+  const exportCharges: number[] = []
+  const runExport = async (capacity: number) => {
+    exportCharges.length = 0
+    const budget = createSampledInstrumentRegionBudget(capacity)
+    const live = budget.createScope('live')
+    live.lease([{ key: identity, buffer, bytes }], true)
+    live.set('native-live', liveMapping, () => { throw new Error('Audible mapping was evicted.') })
+    const scope = budget.createScope('export')
+    // The export's mapping and staging charges are read off the scope it allocates through.
+    const recordingScope = {
+      ...scope,
+      set: (key: string, charge: number, onEvict: () => void, physical?: AudioBuffer) => {
+        if (key.startsWith('native-export-')) exportCharges.push(charge)
+        scope.set(key, charge, onEvict, physical)
+      },
+    }
+    const fx: ExportFx = {
+      masterFxInstances: [], masterVolume: 1,
+      trackFx: { instrument: {
+        instances: [], instrument: { kind: 'granular', instanceId: 'granular', params: { ...createDefaultGranularParams(), zone } },
+        granularBuffer: { assetKey: identity, buffer, sourceStartFrame: 0, sourceIdentity: identity },
+      } },
+    }
+    let failure: unknown
+    let held: number | undefined
+    try {
+      await loadInstrumentExportBuffers(fx, new AbortController().signal, undefined, undefined, recordingScope, nativeInstrumentExportMemory)
+      held = budget.totalBytes()
+    } catch (error) {
+      failure = error
+    } finally {
+      scope.release()
+    }
+    const afterExport = budget.totalBytes()
+    const liveStillLeased = live.isLeased(buffer)
+    live.release()
+    return { failure, held, afterExport, liveStillLeased, afterLive: budget.totalBytes() }
+  }
+  const measured = await runExport(1024 ** 4)
+  const exportCharge = exportCharges.reduce((sum, charge) => sum + charge, 0)
+  expect(exportCharges.length).toBeGreaterThan(1)
+  expect(measured.held).toBe(bytes + liveMapping + exportCharge)
+  const capacity = bytes + liveMapping + exportCharge
+  const exact = await runExport(capacity)
+  expect(exact).toMatchObject({ failure: undefined, held: capacity, afterExport: bytes + liveMapping, liveStillLeased: true, afterLive: 0 })
+  const pressured = await runExport(capacity - 1)
+  expect(pressured.failure).toBeInstanceOf(Error)
+  expect(String(pressured.failure)).toContain('Not enough sample memory to export')
+  expect(pressured).toMatchObject({ held: undefined, afterExport: bytes + liveMapping, liveStillLeased: true, afterLive: 0 })
 })
 
 test("shared sampler and granular export consumers charge one physical region at the granular weight", async () => {
@@ -1460,4 +1547,252 @@ test("native export rejects a stale project generation after Stretch preparation
     message: "Project changed while preparing export.",
     outputs: [],
   })
+})
+
+const ALIGN_RATE = 44_100
+const ALIGN_FRAMES = ALIGN_RATE / 2
+const IMPULSE_SEC = 0.25
+const IMPULSE_FRAME = Math.round(IMPULSE_SEC * ALIGN_RATE)
+
+const createImpulseSpool = (totalFrames: number, impulseFrame: number): nativeOfflinePcmSpool.NativeOfflinePcmSpoolSession => {
+  const planes = [new Float32Array(totalFrames), new Float32Array(totalFrames)]
+  for (const plane of planes) plane[impulseFrame] = 0.5
+  return {
+    append: async () => undefined,
+    finalize: async () => ({
+      sessionId: "impulse",
+      sampleRate: ALIGN_RATE,
+      channelCount: 2,
+      totalFrames,
+      byteLength: totalFrames * 8,
+      samplePeak: 0.5,
+    }),
+    replay: async function* (options = {}) {
+      const start = options.startFrame ?? 0
+      const end = options.endFrame ?? totalFrames
+      const block = new TestDecodedAudioBuffer(end - start, ALIGN_RATE, 2)
+      planes.forEach((plane, channel) => block.getChannelData(channel).set(plane.subarray(start, end)))
+      yield block
+    },
+    remove: async () => undefined,
+    abort: async () => undefined,
+  }
+}
+
+const captureEncodedFile = () => {
+  const encoded: { frames: number; impulseFrames: number[] }[] = []
+  const encode = spyOn(exportMixdown, "encodeAudioChunks").mockImplementation(async (chunks) => {
+    let frames = 0
+    const impulseFrames: number[] = []
+    for await (const chunk of chunks) {
+      chunk.getChannelData(0).forEach((sample, frame) => {
+        if (sample !== 0) impulseFrames.push(frames + frame)
+      })
+      frames += chunk.length
+    }
+    encoded.push({ frames, impulseFrames })
+    return { blob: new Blob(), format: "wav", durationSec: frames / ALIGN_RATE, sampleRate: ALIGN_RATE, sizeBytes: 8 }
+  })
+  return { encoded, restore: () => encode.mockRestore() }
+}
+
+const alignTrack = (id: string): RuntimeTrack => ({
+  id,
+  name: id,
+  volume: 1,
+  clips: [{
+    id: `clip-${id}`,
+    name: id,
+    color: "#fff",
+    startSec: 0,
+    duration: ALIGN_FRAMES / ALIGN_RATE,
+    sourceAssetKey: `asset:${id}`,
+    sourceDurationSec: ALIGN_FRAMES / ALIGN_RATE,
+    sourceSampleRate: ALIGN_RATE,
+    sourceChannelCount: 2,
+    buffer: new TestDecodedAudioBuffer(ALIGN_FRAMES, ALIGN_RATE, 2),
+  }],
+})
+
+const alignMixdownInput = {
+  bpm: 120,
+  projectGeneration: 1,
+  getProjectGeneration: () => 1,
+  masterVolume: 1,
+  range: { mode: "whole" },
+  formats: ["wav"],
+  render,
+  encoding,
+  projectId: undefined,
+  userId: undefined,
+  sidechainRoutes: [],
+  loadCapturedClipBuffer: async () => undefined,
+  signal: new AbortController().signal,
+  outputTargets: {
+    resourceLimits: desktopLimits,
+    async createMixdownTarget() {
+      return {
+        openFile: async () => undefined,
+        saveBuffer: async () => ({ destination: "cloud", name: "mixdown.wav", url: "https://example.test/mixdown.wav" }),
+      }
+    },
+    async createStemTarget() {
+      throw new Error("unexpected stem target")
+    },
+  },
+} satisfies Partial<Parameters<typeof runTimelineExport>[0]>
+
+test("a native mixdown with graph latency starts on the timeline and keeps the range length", async () => {
+  const limiterFrames = Math.ceil(5 * ALIGN_RATE / 1000)
+  const file = captureEncodedFile()
+  let renderedFrames = 0
+  try {
+    const outcome = await runTimelineExport({
+      ...alignMixdownInput,
+      nativeRendererRequired: true,
+      getTracks: () => [alignTrack("track-align")],
+      renderStateSnapshot: {
+        ...renderStateSnapshot,
+        fx: {
+          trackFx: {},
+          masterFxInstances: [{ id: "limiter", kind: "limiter", params: { version: 1, state: createDefaultLimiterParams() } }],
+          masterVolume: 1,
+        },
+      },
+      createBuffer: (channels, frames, sampleRate) => new TestDecodedAudioBuffer(frames, sampleRate, channels),
+      nativeOfflinePcmRenderer: async (plan) => {
+        renderedFrames = plan.totalFrames
+        return createImpulseSpool(plan.totalFrames, limiterFrames + IMPULSE_FRAME)
+      },
+    })
+
+    expect(outcome.type).toBe("success")
+    expect(renderedFrames).toBe(ALIGN_FRAMES + limiterFrames)
+    expect(file.encoded).toEqual([{ frames: ALIGN_FRAMES, impulseFrames: [IMPULSE_FRAME] }])
+  } finally {
+    file.restore()
+  }
+})
+
+test("a native mixdown without graph latency renders and encodes the range unchanged", async () => {
+  const file = captureEncodedFile()
+  let renderedFrames = 0
+  try {
+    const outcome = await runTimelineExport({
+      ...alignMixdownInput,
+      nativeRendererRequired: true,
+      getTracks: () => [alignTrack("track-align")],
+      renderStateSnapshot,
+      createBuffer: (channels, frames, sampleRate) => new TestDecodedAudioBuffer(frames, sampleRate, channels),
+      nativeOfflinePcmRenderer: async (plan) => {
+        renderedFrames = plan.totalFrames
+        return createImpulseSpool(plan.totalFrames, IMPULSE_FRAME)
+      },
+    })
+
+    expect(outcome.type).toBe("success")
+    expect(renderedFrames).toBe(ALIGN_FRAMES)
+    expect(file.encoded).toEqual([{ frames: ALIGN_FRAMES, impulseFrames: [IMPULSE_FRAME] }])
+  } finally {
+    file.restore()
+  }
+})
+
+test("a portable mixdown spools the extra latency frames and encodes from the range start", async () => {
+  const latencyFrames = 777
+  const file = captureEncodedFile()
+  const spoolSizes: number[] = []
+  const createSpool = spyOn(nativeOfflinePcmSpool, "createNativeOfflinePcmSpool").mockImplementation(() => ({
+    createSession: async ({ totalFrames }) => {
+      spoolSizes.push(totalFrames)
+      return createImpulseSpool(totalFrames, latencyFrames + IMPULSE_FRAME)
+    },
+  }))
+  const renderPortable = spyOn(exportMixdown, "renderPortableMixdownChunks").mockImplementation(async (_request, onChunk) => {
+    const frameCount = ALIGN_FRAMES + latencyFrames
+    await onChunk(0, 0, { frameCount: 1, planes: [new Float32Array(1), new Float32Array(1)] }, frameCount)
+    return { frameCount, latencyFrames, sampleRate: ALIGN_RATE, numberOfChannels: 2, cleanup: async () => undefined }
+  })
+  try {
+    const outcome = await runTimelineExport({
+      ...alignMixdownInput,
+      getTracks: () => [alignTrack("track-align")],
+      renderStateSnapshot,
+      resolveAudioSource: async () => {
+        throw new Error("mock portable renderer must not resolve source pages")
+      },
+    })
+
+    expect(outcome.type).toBe("success")
+    expect(spoolSizes).toEqual([ALIGN_FRAMES + latencyFrames])
+    expect(file.encoded).toEqual([{ frames: ALIGN_FRAMES, impulseFrames: [IMPULSE_FRAME] }])
+  } finally {
+    renderPortable.mockRestore()
+    createSpool.mockRestore()
+    file.restore()
+  }
+})
+
+test("each stem is aligned by the latency of its own graph", async () => {
+  const latencyByTrack = new Map([["stem-a", 50], ["stem-b", 900]])
+  const file = captureEncodedFile()
+  let stemLatency = 0
+  const createSpool = spyOn(nativeOfflinePcmSpool, "createNativeOfflinePcmSpool").mockImplementation(() => ({
+    createSession: async ({ totalFrames }) => createImpulseSpool(totalFrames, stemLatency + IMPULSE_FRAME),
+  }))
+  const renderPortable = spyOn(exportMixdown, "renderPortableMixdownChunks").mockImplementation(async (request, onChunk) => {
+    stemLatency = [...latencyByTrack].find(([id]) => request.trackIds?.has(id))?.[1] ?? 0
+    const frameCount = ALIGN_FRAMES + stemLatency
+    await onChunk(0, 0, { frameCount: 1, planes: [new Float32Array(1), new Float32Array(1)] }, frameCount)
+    return { frameCount, latencyFrames: stemLatency, sampleRate: ALIGN_RATE, numberOfChannels: 2, cleanup: async () => undefined }
+  })
+  try {
+    const outcome = await runStemExport({
+      getTracks: () => [alignTrack("stem-a"), alignTrack("stem-b")],
+      bpm: 120,
+      projectGeneration: 1,
+      masterVolume: 1,
+      range: { mode: "whole" },
+      formats: ["wav"],
+      render,
+      encoding,
+      projectId: undefined,
+      userId: undefined,
+      sidechainRoutes: [],
+      loadCapturedClipBuffer: async () => undefined,
+      resolveAudioSource: async () => {
+        throw new Error("mock portable renderer must not resolve source pages")
+      },
+      signal: new AbortController().signal,
+      outputTargets: {
+        resourceLimits: desktopLimits,
+        async createMixdownTarget() {
+          throw new Error("unexpected mixdown target")
+        },
+        async createStemTarget() {
+          return {
+            openFile: async (name) => ({
+              name,
+              target: { mode: "stream", writable: new WritableStream<StreamTargetChunk>() },
+              commit: async () => ({ byteLength: 8 }),
+              abort: async () => undefined,
+            }),
+          }
+        },
+      },
+      renderStateSnapshot,
+      stemSelection: "all-tracks",
+      stemMode: "dry-source",
+    })
+
+    expect(outcome.type).toBe("success")
+    expect(file.encoded).toEqual([
+      { frames: ALIGN_FRAMES, impulseFrames: [IMPULSE_FRAME] },
+      { frames: ALIGN_FRAMES, impulseFrames: [IMPULSE_FRAME] },
+    ])
+  } finally {
+    renderPortable.mockRestore()
+    createSpool.mockRestore()
+    file.restore()
+  }
 })

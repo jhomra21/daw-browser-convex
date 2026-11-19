@@ -1,0 +1,159 @@
+{
+ "name": "pr62-p46-strict-history-passes",
+ "sequence": 73,
+ "createdAt": "2026-11-17T21:36:51.036Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=f-strict-history",
+    "command",
+    "argv"
+   ],
+   "old": [
+    "bun",
+    "--conditions=browser",
+    "test",
+    "--timeout",
+    "30000",
+    "/Users/juan/Documents/daw-browser-convex/src/hooks/useEffectsPanelAudioSync.test.ts",
+    "-t",
+    "B5c3 known-red simultaneous release"
+   ],
+   "new": [
+    "bun",
+    "--conditions=browser",
+    "test",
+    "--timeout",
+    "30000",
+    "/Users/juan/Documents/daw-browser-convex/src/hooks/useEffectsPanelAudioSync.test.ts",
+    "-t",
+    "B5c3 simultaneous releases are each undoable"
+   ]
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-strict-history",
+    "command",
+    "env"
+   ],
+   "old": {
+    "DV01_B5_STRICT_HISTORY": "1"
+   },
+   "new": {}
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-strict-history",
+    "judge"
+   ],
+   "old": {
+    "kind": "tests",
+    "exit": 1,
+    "counts": {
+     "pass": 0,
+     "skip": 0,
+     "fail": 2
+    },
+    "fails": [
+     "B5c3 known-red simultaneous release, local track=false, closed and unselected",
+     "B5c3 known-red simultaneous release, local track=true, closed and unselected"
+    ],
+    "appended": null
+   },
+   "new": {
+    "kind": "tests",
+    "exit": 0,
+    "counts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "fails": [],
+    "appended": null
+   }
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-i5-strict-history",
+    "command",
+    "argv"
+   ],
+   "old": [
+    "bun",
+    "test",
+    "--conditions=browser",
+    "--timeout",
+    "30000",
+    "/Users/juan/Documents/daw-browser-convex/src/hooks/useEffectsPanelAudioSync.test.ts",
+    "-t",
+    "B5c3 known-red simultaneous release"
+   ],
+   "new": [
+    "bun",
+    "test",
+    "--conditions=browser",
+    "--timeout",
+    "30000",
+    "/Users/juan/Documents/daw-browser-convex/src/hooks/useEffectsPanelAudioSync.test.ts",
+    "-t",
+    "B5c3 simultaneous releases are each undoable"
+   ]
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-i5-strict-history",
+    "command",
+    "env"
+   ],
+   "old": {
+    "DV01_B5_STRICT_HISTORY": "1"
+   },
+   "new": {}
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-i5-strict-history",
+    "judge"
+   ],
+   "old": {
+    "kind": "tests",
+    "exit": 1,
+    "counts": {
+     "pass": 0,
+     "skip": 0,
+     "fail": 2
+    },
+    "fails": [
+     "B5c3 known-red simultaneous release, local track=false, closed and unselected",
+     "B5c3 known-red simultaneous release, local track=true, closed and unselected"
+    ],
+    "appended": null
+   },
+   "new": {
+    "kind": "tests",
+    "exit": 0,
+    "counts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "fails": [],
+    "appended": null
+   }
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "P46 (pr62-cleanup pick of 1aad2d7b; decision U3 in acceptance-reports/pr62-cleanup/PARENT-RULING-PR62-TEST-CLEANUP.md: fix the product; hand record, no --bless). Two overlapping parameter releases now each push their own undo entry: in create-effects-panel-audio-effects-state.ts `applyToEngine`, a release the engine reports `superseded` resolves to its successor's structural outcome, because the engine builds every replacement from the chain last requested. The two known-red tests in src/hooks/useEffectsPanelAudioSync.test.ts are renamed `B5c3 simultaneous releases are each undoable, local track=true|false, closed and unselected`, assert two history entries unconditionally, and `DV01_B5_STRICT_HISTORY` is gone from src. Gates f-strict-history and rc1-i5-strict-history therefore filter `-t \"B5c3 simultaneous releases are each undoable\"`, drop the env variable, and record exit 0 with 2 pass and no fails; this script ran both gate commands on the merged tree and refused unless each exited 0 with 2 pass / 0 fail. Precedent: a ruled known-red test that now passes (`--allow-now-passing`, PARENT-RULING-P8-BLESS-BLOCKERS.md addendum 2). f-audiosync and rc1-i3-sync keep their counts (the tests ran there already, without the strict assertion).",
+  "expectationsSha256": "a30828442deb868002378d8d9aec13d74ffc179aee1cf00bea4cee3a651bd221"
+ }
+}

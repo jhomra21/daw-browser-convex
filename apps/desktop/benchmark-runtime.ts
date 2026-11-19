@@ -5,13 +5,19 @@ import type {
   IpcMainEvent,
   IpcMainInvokeEvent,
 } from "electron"
-import type { NativeHostRecordingBlock, NativeHostRecordingStatus } from "@daw-browser/audio-engine/native-host-wire"
+import type { NativeHostRecordingStatus } from "@daw-browser/audio-engine/native-host-wire"
+import {
+  benchmarkHeartbeatChannel,
+  benchmarkRendererPingChannel,
+  benchmarkRendererPongChannel,
+} from "@daw-browser/desktop-protocol/ipc-channels"
 import { benchmarkLoadFailure, benchmarkStartupStage } from "./benchmark-startup-stage"
 import { classifyNavigationUrl } from "./quiet-renderer-telemetry"
 import {
   createRecordingIpcDiagnostics,
   createRendererTrafficDiagnostics,
 } from "./recording-ipc-diagnostics"
+import { createRecordingDeliveryTrace } from "../../src/lib/recording/recording-delivery-trace"
 
 type AllowedBenchmarkEvent = (event: IpcMainEvent | IpcMainInvokeEvent) => boolean
 
@@ -21,11 +27,11 @@ export const installBenchmarkHeartbeat = (input: {
   allowed: AllowedBenchmarkEvent
 }) => {
   if (process.env.DAW_BENCHMARK_HEARTBEAT !== "1") return
-  input.ipcMain.handle("daw:benchmark:heartbeat", (event) => (
-    input.allowed(event) ? { mainEpochMs: Date.now() } : null
+  input.ipcMain.handle(benchmarkHeartbeatChannel, (event) => (
+    input.allowed(event) ? { mainEpochMs: Date.now(), mainMonotonicEpochMs: performance.timeOrigin + performance.now() } : null
   ))
   const pending = new Map<number, { senderId: number; startedAt: number }>()
-  input.ipcMain.on("daw:benchmark:renderer-pong", (event, sequence) => {
+  input.ipcMain.on(benchmarkRendererPongChannel, (event, sequence) => {
     if (!input.allowed(event) || !Number.isSafeInteger(sequence)) return
     const request = pending.get(sequence)
     if (!request || request.senderId !== event.sender.id) return
@@ -40,7 +46,7 @@ export const installBenchmarkHeartbeat = (input: {
       if (pending.size >= 8) pending.delete(pending.keys().next().value ?? -1)
       pending.set(sequence, { senderId: window.webContents.id, startedAt: performance.now() })
       console.error(`[quiet-renderer-ping] sequence=${sequence}`)
-      window.webContents.send("daw:benchmark:renderer-ping", sequence)
+      window.webContents.send(benchmarkRendererPingChannel, sequence)
     }, 5_000)
     window.on("closed", () => clearInterval(interval))
   })
@@ -123,10 +129,26 @@ export const createBenchmarkStartupReporter = () => (
 export const createBenchmarkRecordingTelemetry = (
   enabled = process.env.DAW_BENCHMARK_HEARTBEAT === "1",
 ) => {
-  const recording = enabled ? createRecordingIpcDiagnostics(Date.now()) : null
-  const traffic = enabled ? createRendererTrafficDiagnostics(Date.now()) : null
-  let lastLogAt = 0
+  let recording: ReturnType<typeof createRecordingIpcDiagnostics> | null = null
+  let traffic: ReturnType<typeof createRendererTrafficDiagnostics> | null = null
+  let delivery: ReturnType<typeof createRecordingDeliveryTrace> | null = null
+  let generation = -1
+  let sessionId = -1n
+  let observedCapture = false
   let lastStatus: NativeHostRecordingStatus | null = null
+  const observeSession = (nextGeneration: number, nextSessionId: bigint) => {
+    if (generation === nextGeneration && sessionId === nextSessionId) return
+    // A new configuration may follow host cleanup without a final status.
+    if (observedCapture) emit(performance.timeOrigin + performance.now())
+    generation = nextGeneration
+    sessionId = nextSessionId
+    const now = performance.timeOrigin + performance.now()
+    recording = createRecordingIpcDiagnostics(now)
+    traffic = createRendererTrafficDiagnostics(now)
+    delivery = createRecordingDeliveryTrace(true, generation, sessionId, now)
+    observedCapture = false
+    lastStatus = null
+  }
   const reportStatus = () => lastStatus ? {
     generation: lastStatus.generation,
     sessionId: lastStatus.sessionId.toString(),
@@ -143,38 +165,27 @@ export const createBenchmarkRecordingTelemetry = (
     configured: lastStatus.configured,
   } : null
   const emit = (now: number) => {
-    if (!recording || !traffic) return
-    lastLogAt = now
+    const dump = delivery?.dump(now)
+    if (!dump || !recording || !traffic) return null
     console.error(`[quiet-recording-ipc] ${JSON.stringify({
       blocks: recording.report(now),
       traffic: traffic.report(now),
       status: reportStatus(),
+      delivery: dump,
     })}`)
+    return dump
   }
   return {
-    sendBlock(block: NativeHostRecordingBlock, send: () => void) {
-      if (!recording || !traffic) {
-        send()
-        return
-      }
-      const startedAt = performance.now()
-      recording.recordBlock({
-        frameCount: block.frameCount,
-        channelCount: block.channelCount,
-        payloadBytes: block.planarPcm.byteLength,
-      })
-      send()
-      traffic.record("recording-block", block.planarPcm.byteLength + 64)
-      recording.recordSend(performance.now() - startedAt)
-      const now = Date.now()
-      if (now - lastLogAt < 5_000) return
-      emit(now)
-    },
     recordStatus(status: NativeHostRecordingStatus) {
-      if (!traffic) return
-      traffic.record("recording-status", 96)
+      if (!enabled) return
+      observeSession(status.generation, status.sessionId)
+      traffic?.record("recording-status", 96)
       lastStatus = status
-      if (!status.active || status.fatal) emit(Date.now())
+      const now = performance.timeOrigin + performance.now()
+      observedCapture ||= status.active || status.fatal
+      delivery?.status(now, status.queuedBlocks, status.active, status.fatal, status.capturedFrames)
+      if (status.fatal) delivery?.transition("native-fatal", now)
+      if (observedCapture && !status.active && status.queuedBlocks === 0) emit(now)
     },
     recordTraffic(channel: string, estimatedBytes: number) {
       traffic?.record(channel, estimatedBytes)

@@ -3,6 +3,11 @@ import { hasActiveR2DeleteRows } from "./r2Deletes";
 
 type ProjectRowReadCtx = { db: DatabaseReader };
 
+export type ProjectEdit = {
+  revision: number;
+  stamp: () => number;
+};
+
 export function requireUnambiguousProjectOwnershipMarker(
   ownerships: ReadonlyArray<{ trackId?: unknown; clipId?: unknown }>,
 ) {
@@ -28,6 +33,27 @@ export async function requireProjectRow(
   const project = await getProjectRow(ctx, projectId);
   if (!project) throw new Error("Project not found.");
   return project;
+}
+
+export async function withProjectEdit<Value>(
+  ctx: MutationCtx,
+  projectId: string,
+  run: (edit: ProjectEdit) => Promise<Value>,
+): Promise<Value> {
+  const project = await requireProjectRow(ctx, projectId);
+  const revision = project.revision + 1;
+  let stamped = false;
+  try {
+    return await run({
+      revision,
+      stamp: () => {
+        stamped = true;
+        return revision;
+      },
+    });
+  } finally {
+    if (stamped) await ctx.db.patch(project._id, { revision, updatedAt: Date.now() });
+  }
 }
 
 export async function ensureOwnedProjectRow(

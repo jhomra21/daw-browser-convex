@@ -6,6 +6,7 @@ import {
   type SynthEnvelopeParams,
   type SynthLfoParams,
   type SynthParams,
+  clamp,
 } from '@daw-browser/shared'
 import { scheduleAutomationEnvelope } from './automation'
 
@@ -107,7 +108,6 @@ type SynthVoiceScheduleOptions = {
   onEnded?: (voice: SynthVoiceHandle) => void
 }
 
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 
 const hashNoiseSeedKey = (seedKey: string | undefined) => {
   const key = seedKey ?? ''

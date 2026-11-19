@@ -6,12 +6,14 @@ import {
   buildServerTimelineIndex,
   isClipPatchReflected,
   isTrackEntryReflected,
+  normalizedPersistedClip,
   type ClipTimelinePatch,
   type PendingTrackEntry,
   type TimelineViewLike,
 } from '~/lib/resolve-timeline-tracks'
 import type { Track } from '@daw-browser/timeline-core/types'
 import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
+import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
 
@@ -34,6 +36,8 @@ type UseTimelineProjectionStateOptions = {
 }
 
 type UseTimelineProjectionStateReturn = {
+  reconcileLocalSnapshot: (snapshot: TimelineSnapshot) => void
+  hasReflectableOverlays: () => boolean
   pendingTrackEntriesById: Accessor<Map<Track['id'], PendingTrackEntry>>
   pendingClipCreatesById: Accessor<Map<string, PendingClipCreate>>
   removedTrackIds: Accessor<Set<Track['id']>>
@@ -66,6 +70,7 @@ export function reconcileTimelineProjectionSnapshot<TTrackId extends string>(
   data: TimelineViewLike<TTrackId>,
 ): TimelineProjectionSnapshot<TTrackId> {
   const serverIndex = buildServerTimelineIndex(data)
+  const clipRows = new Map(data.clips.map((clip) => [clip._id, clip]))
 
   const committedClipEditsById = (() => {
     let next: Map<string, ClipTimelinePatch<TTrackId>> | null = null
@@ -92,8 +97,12 @@ export function reconcileTimelineProjectionSnapshot<TTrackId extends string>(
 
   const pendingClipCreatesById = (() => {
     let next: Map<string, PendingClipCreate<TTrackId>> | null = null
-    for (const [clipId] of current.pendingClipCreatesById) {
-      if (!serverIndex.clipIds.has(clipId)) continue
+    for (const [clipId, pending] of current.pendingClipCreatesById) {
+      const row = clipRows.get(clipId)
+      const normalized = serverIndex.clipRowsById.get(clipId)
+      if (!row || !normalized || pending.trackId !== row.trackId
+        || JSON.stringify(normalizedPersistedClip({ ...row, id: row._id, fades: normalized.fades }))
+          !== JSON.stringify(normalizedPersistedClip(pending.clip))) continue
       if (!next) next = new Map(current.pendingClipCreatesById)
       next.delete(clipId)
     }
@@ -216,9 +225,7 @@ export function useTimelineProjectionState(
     setPreviewClipsByTrackId(new Map())
   }))
 
-  createEffect(() => {
-    const data = options.serverData()
-    if (!data) return
+  const reconcile = (data: TimelineViewLike) => {
     const next = reconcileTimelineProjectionSnapshot({
       committedClipEditsById: committedClipEditsById(),
       pendingTrackEntriesById: pendingTrackEntriesById(),
@@ -233,6 +240,11 @@ export function useTimelineProjectionState(
     setRemovedTrackIds(next.removedTrackIds)
     setRemovedClipIds(next.removedClipIds)
     setPendingTrackLocksById(next.pendingTrackLocksById)
+  }
+
+  createEffect(() => {
+    const data = options.serverData()
+    if (data) reconcile(data)
   })
 
   const clearDraftClipMoves = (clipIds: Iterable<string>) => {
@@ -311,6 +323,18 @@ export function useTimelineProjectionState(
   }
 
   return {
+    reconcileLocalSnapshot: (snapshot) => reconcile({
+      tracks: snapshot.tracks.map((track) => ({ ...track, _id: track.id })),
+      clips: snapshot.clips.map((clip) => ({ ...clip, _id: clip.id })),
+    }),
+    hasReflectableOverlays: () => (
+      committedClipEditsById().size > 0
+      || pendingTrackEntriesById().size > 0
+      || pendingClipCreatesById().size > 0
+      || removedTrackIds().size > 0
+      || removedClipIds().size > 0
+      || pendingTrackLocksById().size > 0
+    ),
     pendingTrackEntriesById,
     pendingClipCreatesById,
     removedTrackIds,

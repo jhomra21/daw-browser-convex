@@ -1,0 +1,5725 @@
+{
+ "name": "pr62-p36-retire-live-graph-gate",
+ "sequence": 70,
+ "createdAt": "2026-11-17T20:37:03.378Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "gates"
+   ],
+   "old": [
+    {
+     "name": "g-typecheck",
+     "group": "g1",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "run",
+       "typecheck"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 29.591
+     },
+     "judge": {
+      "kind": "exit",
+      "exit": 0
+     }
+    },
+    {
+     "name": "g-lint",
+     "group": "g1",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "run",
+       "lint"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 2.182
+     },
+     "judge": {
+      "kind": "lint",
+      "exit": 1,
+      "found": "Found 17 warnings and 5 errors.",
+      "signature": [
+       [
+        "! eslint(no-unused-vars): Variable 'range' is declared but never used. Unused variables should start with a '_'.",
+        "packages/audio-engine/src/prepared-stretch-store.ts:1192:11"
+       ],
+       [
+        "! solid(reactivity): The reactive variable 'props.onMarkerDragStateChange' should be used within JSX, a tracked scope (like createEffect), or inside an event handler function, or else changes will be ignored.",
+        "src/components/timeline/SampleDetailWaveform.tsx:144:35"
+       ],
+       [
+        "! solid(reactivity): The reactive variable 'props.owner' should be used within JSX, a tracked scope (like createEffect), or inside an event handler function, or else changes will be ignored.",
+        "src/components/effects/effect-parameter-interaction.tsx:10:46"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Granular.tsx:44:167"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Granular.tsx:45:179"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Granular.tsx:46:170"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Granular.tsx:47:161"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Granular.tsx:48:181"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Granular.tsx:49:189"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Granular.tsx:50:176"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Granular.tsx:51:155"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Sampler.tsx:51:235"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Sampler.tsx:67:161"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Sampler.tsx:68:164"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Sampler.tsx:69:176"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Sampler.tsx:70:179"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Sampler.tsx:71:167"
+       ],
+       [
+        "x anti-slop(no-conditional-empty-object-spread): This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
+        "src/lib/local-effects.ts:110:9"
+       ],
+       [
+        "x anti-slop(no-conditional-empty-object-spread): This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
+        "src/lib/local-effects.ts:111:9"
+       ],
+       [
+        "x anti-slop(no-runtime-typeof): A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
+        "src/lib/structured-clone-json.ts:5:7"
+       ],
+       [
+        "x anti-slop(no-unknown-parameters): Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
+        "src/lib/structured-clone-json.ts:1:49"
+       ],
+       [
+        "x anti-slop(no-unknown-returns): This function exposes `unknown` to its caller. Parse the value at its boundary and return a named domain type.",
+        "src/lib/structured-clone-json.ts:1:59"
+       ]
+      ]
+     }
+    },
+    {
+     "name": "g-build",
+     "group": "g1",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "run",
+       "build"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 10.46
+     },
+     "judge": {
+      "kind": "exit",
+      "exit": 0
+     }
+    },
+    {
+     "name": "g-tools-typecheck",
+     "group": "g1",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "x",
+       "tsc",
+       "--noEmit",
+       "-p",
+       "/Users/juan/Documents/daw-browser-convex/acceptance-reports/ae-08-phase-5-2026-10-18/c0/c0-tools-tsconfig.json"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 1.951
+     },
+     "judge": {
+      "kind": "tsc",
+      "exit": 2,
+      "diagnostics": [
+       "tools/acceptance/ae-08-live-graph.ts|TS18048|'failure' is possibly 'undefined'.",
+       "tools/acceptance/ae-08-live-graph.ts|TS2345|Argument of type 'Promise<unknown>' is not assignable to parameter of type 'Promise<{ code: number | null; signal: Signals | null; }>'.",
+       "tools/performance/30-track/v3-import-acceptance.ts|TS18048|'completed.recording.peakSabWriterOccupancy' is possibly 'undefined'.",
+       "tools/performance/30-track/v3-import-acceptance.ts|TS18048|'plan' is possibly 'undefined'.",
+       "tools/performance/30-track/v3-import-acceptance.ts|TS2322|Type '() => Promise<unknown>' is not assignable to type '() => Promise<void>'.",
+       "tools/performance/30-track/v3-import-acceptance.ts|TS2339|Property 'gestures' does not exist on type 'never'.",
+       "tools/performance/30-track/v3-import-acceptance.ts|TS2339|Property 'memoryCheckpoints' does not exist on type 'never'.",
+       "tools/performance/30-track/v3-import-workload.ts|TS2339|Property 'identity' does not exist on type '{ version: 1; state: { enabled: boolean; gainDb: number; polarity: \"normal\" | \"invert\"; inputMode: \"stereo\" | \"mono-sum\"; pan: number; balance: number; width: number; matrix: \"stereo\" | \"mid-side-encode\" | \"mid-side-decode\"; swap: boolean; dcBlock: boolean; }; } | ... 24 more ... | { ...; }'.",
+       "tools/performance/30-track/v3-import-workload.ts|TS2339|Property 'trackId' does not exist on type '{ trackId: string; } | { master: true; }'.",
+       "tools/performance/browser-harness.ts|TS18047|'contentLength' is possibly 'null'.",
+       "tools/performance/browser-harness.ts|TS18047|'size' is possibly 'null'.",
+       "tools/performance/browser-harness.ts|TS2353|Object literal may only specify known properties, and 'alias' does not exist in type 'BuildConfig'.",
+       "tools/performance/browser-harness.ts|TS2554|Expected 1 arguments, but got 0.",
+       "tools/performance/browser-harness.ts|TS2741|Property 'uploadToken' is missing in type '{ url: URL; stop: (closeActiveConnections?: boolean | undefined) => Promise<void>; }' but required in type 'HarnessServer'.",
+       "tools/performance/browser-harness.ts|TS2769|No overload matches this call."
+      ]
+     }
+    },
+    {
+     "name": "g-analyzer-selftest",
+     "group": "g1",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/analyze-ae-08-continuity.ts",
+       "--self-test"
+      ],
+      "alarmSeconds": 120,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 1.926
+     },
+     "judge": {
+      "kind": "selftest",
+      "exit": 0,
+      "rejected": 38
+     }
+    },
+    {
+     "name": "g-spool-wav",
+     "group": "g1",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "120000",
+       "/Users/juan/Documents/daw-browser-convex/tools/performance/30-track/native-spool-wav.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 11.123
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 9,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "g-c0fg-oxlint",
+     "group": "g1",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "x",
+       "oxlint",
+       "--deny-warnings",
+       "--report-unused-disable-directives",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/timeline-audio-import.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/timeline-audio-import-metadata-only.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelineProjectionState.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-phase-5-fixture.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/analyze-ae-08-continuity.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/b5c-playback-witness-support.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.663
+     },
+     "judge": {
+      "kind": "oxlint-clean",
+      "exit": 0
+     }
+    },
+    {
+     "name": "g-c0-oxlint",
+     "group": "g1",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "x",
+       "oxlint",
+       "--deny-warnings",
+       "--report-unused-disable-directives",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/analyze-ae-08-continuity.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-phase-5-fixture.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-live-graph.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/performance/30-track/native-spool-wav.test.ts"
+      ],
+      "alarmSeconds": 120,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.24
+     },
+     "judge": {
+      "kind": "oxlint-clean",
+      "exit": 0
+     }
+    },
+    {
+     "name": "x-test-native",
+     "group": "x",
+     "isolated": true,
+     "trigger": "native",
+     "command": {
+      "argv": [
+       "sh",
+       "/Users/juan/Documents/daw-browser-convex/native/audio-core/scripts/test-native.sh"
+      ],
+      "alarmSeconds": 1200,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 113.035
+     },
+     "judge": {
+      "kind": "ctest",
+      "exit": 0,
+      "total": 17
+     }
+    },
+    {
+     "name": "x-host-ctest",
+     "group": "x",
+     "isolated": true,
+     "trigger": "native",
+     "command": {
+      "argv": [
+       "sh",
+       "-c",
+       "cmake --build /Users/juan/Documents/daw-browser-convex/native/build/audio-host-macos-debug -j 6 && ctest --test-dir /Users/juan/Documents/daw-browser-convex/native/build/audio-host-macos-debug -I 17,23 --output-on-failure"
+      ],
+      "alarmSeconds": 1500,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 33.45
+     },
+     "judge": {
+      "kind": "ctest",
+      "exit": 0,
+      "total": 7
+     }
+    },
+    {
+     "name": "x-host-plugin-tests",
+     "group": "x",
+     "isolated": true,
+     "trigger": "native",
+     "command": {
+      "argv": [
+       "bun",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/run-ae08-test-plugin.ts"
+      ],
+      "alarmSeconds": 1500,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 7
+     },
+     "judge": {
+      "kind": "exit",
+      "exit": 0
+     }
+    },
+    {
+     "name": "x-rtguard",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/native/audio-host-macos/tests/realtime_callback_guard.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.021
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 3,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "x-wasm-artifact",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/native/audio-core/tests/wasm_artifact.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 6.086
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 16,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "x-portable-wasm",
+     "group": "x",
+     "isolated": true,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/portable-wasm-host.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/portable-wasm-protocol.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/portable-wasm-worklet.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.461
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 106,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "x-wasm-validation",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/native/audio-core/tests/portable-wasm-validation.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.144
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 7,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "x-validate-wasm",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "run",
+       "validate:portable-wasm"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.032
+     },
+     "judge": {
+      "kind": "exit",
+      "exit": 0
+     }
+    },
+    {
+     "name": "x-wire",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/native-host-wire.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.032
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 20,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "x-backends",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/backends"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.048
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 13,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "x-matrix",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "--preload",
+       "/tmp/dv01-b6/rc5/tools/dv01-b6f/overlay.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "-t",
+       "B6F5PROBE"
+      ],
+      "alarmSeconds": 600,
+      "env": {
+       "DV01_B6F_PROBE": "/tmp/dv01-b6/rc5/tools/dv01-b6f5-step5b/probe.ts"
+      },
+      "evidence": false,
+      "rc7Seconds": 1.542
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 238,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": 1
+     }
+    },
+    {
+     "name": "x-probe160",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "--preload",
+       "/tmp/dv01-b6/rc5/tools/dv01-b6f/overlay.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "-t",
+       "B6FPROBE"
+      ],
+      "alarmSeconds": 600,
+      "env": {
+       "DV01_B6F_PROBE": "/tmp/dv01-b6/rc5/tools/dv01-b6f5-step5b/probe160-adoption.ts"
+      },
+      "evidence": false,
+      "rc7Seconds": 11.266
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 1,
+      "counts": {
+       "pass": 159,
+       "skip": 0,
+       "fail": 1
+      },
+      "fails": [
+       "B6FPROBE lifecycle suspended-ready"
+      ],
+      "appended": 1
+     }
+    },
+    {
+     "name": "x-b6f5-scoped-lint",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "x",
+       "oxlint",
+       "--deny-warnings",
+       "--report-unused-disable-directives",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/public/audio-worklets/daw-portable-audio-core-host-v2.js",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/portable-wasm-protocol.ts",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/backends",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/portable-wasm-host.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/portable-wasm-protocol.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/portable-wasm-worklet.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.461
+     },
+     "judge": {
+      "kind": "oxlint-clean",
+      "exit": 0
+     }
+    },
+    {
+     "name": "f-playback",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts"
+      ],
+      "alarmSeconds": 400,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.925
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 263,
+       "skip": 1,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-controller",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts"
+      ],
+      "alarmSeconds": 400,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 6.036
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 688,
+       "skip": 1,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-c0f",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelineProjectionState.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/timeline-audio-import-metadata-only.test.ts",
+       "-t",
+       "C0F |creates a local audio clip"
+      ],
+      "alarmSeconds": 400,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.262
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 5,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-c0g",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelineProjectionState.test.ts",
+       "-t",
+       "C0G |fingerprints all playback"
+      ],
+      "alarmSeconds": 400,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.322
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 10,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-projection",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelineProjectionState.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.186
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 8,
+       "skip": 1,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-import-metadata",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/timeline-audio-import-metadata-only.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.12
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 2,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-hookwit",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "-t",
+       "B6d2 |B6d3 |B6d4 |B6d5 |B6d6 |B6d7 |B6d8 |reconciles a paused seek superseded|does not resume a structural rebuild after stop wins"
+      ],
+      "alarmSeconds": 240,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.197
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 31,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-b6d8",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "-t",
+       "B6d8 "
+      ],
+      "alarmSeconds": 240,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.176
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 4,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-b6e",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "-t",
+       "B6e "
+      ],
+      "alarmSeconds": 240,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.171
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 6,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-b6f",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.test.ts",
+       "-t",
+       "B6f "
+      ],
+      "alarmSeconds": 240,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.188
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 8,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-b6f2",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "-t",
+       "B6f2 "
+      ],
+      "alarmSeconds": 240,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.179
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 5,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-b6family",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.test.ts",
+       "-t",
+       "B6d8 |B6e |B6f |B6f2 |B6f3 |B6f4 |B6f5 |B6f5c "
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.542
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 65,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-audiosync",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useEffectsPanelAudioSync.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.836
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 326,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-persisted",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-persisted-effect-state.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.106
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 44,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-portable",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.348
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 157,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-audio-effects",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-effects-panel-audio-effects-state.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.342
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 32,
+       "skip": 3,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-pointer-browser",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/pointer-gesture-ownership.browser.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 26.819
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 12,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-cost-browser",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/device-control-cost.browser.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.383
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 53,
+       "skip": 2,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-buffer",
+     "group": "g2",
+     "isolated": true,
+     "trigger": "full-only",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/instrument-buffer-sync.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 1.178
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 221,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-strict-history",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useEffectsPanelAudioSync.test.ts",
+       "-t",
+       "B5c3 known-red simultaneous release"
+      ],
+      "alarmSeconds": 180,
+      "env": {
+       "DV01_B5_STRICT_HISTORY": "1"
+      },
+      "evidence": true,
+      "rc7Seconds": 0.38
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 1,
+      "counts": {
+       "pass": 0,
+       "skip": 0,
+       "fail": 2
+      },
+      "fails": [
+       "B5c3 known-red simultaneous release, local track=false, closed and unselected",
+       "B5c3 known-red simultaneous release, local track=true, closed and unselected"
+      ],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-engine",
+     "group": "g2",
+     "isolated": true,
+     "trigger": "full-only",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 9.995
+     },
+     "judge": {
+      "kind": "engine",
+      "exit": 0,
+      "files": {
+       "packages/audio-engine/src/streaming-export-fidelity.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/prepared-stretch-store.test.ts": {
+        "pass": 22,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/granular-core.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/sampler-core.test.ts": {
+        "pass": 11,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/dsp-characterization.test.ts": {
+        "pass": 12,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/loudness-analyzer.test.ts": {
+        "pass": 9,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-engine-calibration.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/loop-frame-schedule.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/bpm-detection.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/synth-voice-allocation.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-export-snapshot.test.ts": {
+        "pass": 12,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-frame-scheduling.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/drum-rack-runtime.test.ts": {
+        "pass": 15,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-engine-assets.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-clip-projector.test.ts": {
+        "pass": 13,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/metering-runtime.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-wasm-protocol.test.ts": {
+        "pass": 19,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/reliability-characterization.test.ts": {
+        "pass": 7,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/synth-voice.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/export-encoding.test.ts": {
+        "pass": 13,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-wasm-worklet.test.ts": {
+        "pass": 6,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-session-compiler.test.ts": {
+        "pass": 18,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/prepared-stretch-artifact.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-stretch-cache.test.ts": {
+        "pass": 12,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/true-peak-scanner.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/streaming-loudness-analyzer.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-stretch-rendering.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/synth-runtime.test.ts": {
+        "pass": 47,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-clock.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-wasm-host.test.ts": {
+        "pass": 81,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/live-native-projection.test.ts": {
+        "pass": 24,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/clip-scheduler.test.ts": {
+        "pass": 13,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/automation.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/media-pages.hash.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-engine-live-midi.test.ts": {
+        "pass": 7,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/sampled-instrument-region.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/midi-expression-scheduling.test.ts": {
+        "pass": 7,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/native-host-wire.test.ts": {
+        "pass": 20,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/export-audio-support.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-stretching-async.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/media-pages.test.ts": {
+        "pass": 9,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/granular-runtime.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-runtime.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/native-pcm-chunking.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/spectral-core.test.ts": {
+        "pass": 6,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/master-fx-runtime.test.ts": {
+        "pass": 57,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/live-mixer-runtime.test.ts": {
+        "pass": 67,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/streaming-true-peak-limiter.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/worklet-loader.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/sample-rate-characterization.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/browser-characterization.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-param-ramp.browser.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/export-mixdown.test.ts": {
+        "pass": 20,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-export-worker.test.ts": {
+        "pass": 6,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-stretch-preparation.test.ts": {
+        "pass": 23,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/granular-worklet.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-stretching.test.ts": {
+        "pass": 48,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/worklet-assets.test.ts": {
+        "pass": 13,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-scheduling.test.ts": {
+        "pass": 14,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/export-fidelity.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/calibration.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/encode-wav.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/recorder-core.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/recording-runtime.test.ts": {
+        "pass": 10,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/sab-ring-buffer.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/recording-protocol.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts": {
+        "pass": 9,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/backends/wasm-audio-worklet-backend.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/channel-layout.test.ts": {
+        "pass": 7,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/graph-contract.test.ts": {
+        "pass": 15,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/resolve-timing.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/apply-offline-routing.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/apply-live-routing.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/resolve-routing.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/cue-routing.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/timing.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/chain.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/utility-gate-worklet.test.ts": {
+        "pass": 15,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/dsp.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/compressor-chain-state.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/modulation-worklet.test.ts": {
+        "pass": 6,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/live-worklet-budget.test.ts": {
+        "pass": 11,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/static-worklet-chain.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/autofilter-worklet.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/owned-processor-audio-descriptors.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/compressor-worklet.test.ts": {
+        "pass": 12,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/lofi-worklet.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       }
+      }
+     }
+    },
+    {
+     "name": "rc1-g-controller",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-built-in-parameter-mapper.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-live-playback-processors.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 5.979
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 704,
+       "skip": 1,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-g-coordinator",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-schedule-coordinator.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-timeline-page-manager.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelineProjectionState.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/native-host-wire.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 1.082
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 112,
+       "skip": 1,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-g-playback",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.989
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 263,
+       "skip": 1,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-g-panel-audiohost",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-effects-panel-audio-effects-state.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/apps/desktop/audio-host.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 8.148
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 141,
+       "skip": 3,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-g-native-live-graph-browser",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-live-graph.browser.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 1.596
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 1,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-i3-sync",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useEffectsPanelAudioSync.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.849
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 326,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-i4-consumers",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-persisted-effect-state.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-effects-panel-audio-effects-state.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/components/Timeline.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/shared-outbox.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/convex/revision.mutation.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/convex/effects.contract.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/export/run-export-job.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/live-playback-snapshot.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/export/timeline-export-service.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/sampled-instrument-region-loader.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/undo"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.882
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 396,
+       "skip": 3,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-i5-strict-history",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useEffectsPanelAudioSync.test.ts",
+       "-t",
+       "B5c3 known-red simultaneous release"
+      ],
+      "alarmSeconds": 180,
+      "env": {
+       "DV01_B5_STRICT_HISTORY": "1"
+      },
+      "evidence": true,
+      "rc7Seconds": 0.405
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 1,
+      "counts": {
+       "pass": 0,
+       "skip": 0,
+       "fail": 2
+      },
+      "fails": [
+       "B5c3 known-red simultaneous release, local track=false, closed and unselected",
+       "B5c3 known-red simultaneous release, local track=true, closed and unselected"
+      ],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-i6-desktop",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/apps/desktop"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 9.093
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 430,
+       "skip": 1,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-i6-browser",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "60000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/pointer-gesture-ownership.browser.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-lifecycle.browser.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 51.19
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 17,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-i7-boundary",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/dv01-boundary-witnesses.ts",
+       "--out",
+       "{{DIR}}/out"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 14.145
+     },
+     "judge": {
+      "kind": "exit",
+      "exit": 0
+     }
+    },
+    {
+     "name": "rc1-i7-engine",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/dv01-engine-witnesses.ts",
+       "{{DIR}}/engine-rows.json"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 2.286
+     },
+     "judge": {
+      "kind": "exit",
+      "exit": 0
+     }
+    },
+    {
+     "name": "rc1-i9-scoped-lint",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "x",
+       "oxlint",
+       "--deny-warnings",
+       "--report-unused-disable-directives",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-processor-state-owner.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/undo/types.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/components/Timeline.tsx",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-timeline-effect-commit.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/components/Timeline.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-lifecycle.browser.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/pointer-gesture-ownership.browser.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz-fixture.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz-classes.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz-hook.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz-hook-classes.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/device-control-cost.browser.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/parameter-gesture-owner.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-persisted-effect-state.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-effects-panel-state.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-effects-panel-controller.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/when-number.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/device-control-cost.browser-runtime.tsx",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/device-control-cost.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useEffectsPanelAudioSync.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.766
+     },
+     "judge": {
+      "kind": "oxlint-clean",
+      "exit": 0
+     }
+    },
+    {
+     "name": "rc1-i11-cost-browser",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/device-control-cost.browser.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.362
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 53,
+       "skip": 2,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "last-engine",
+     "group": "last",
+     "isolated": true,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 10.178
+     },
+     "judge": {
+      "kind": "engine",
+      "exit": 0,
+      "files": {
+       "packages/audio-engine/src/streaming-export-fidelity.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/prepared-stretch-store.test.ts": {
+        "pass": 22,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/granular-core.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/sampler-core.test.ts": {
+        "pass": 11,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/dsp-characterization.test.ts": {
+        "pass": 12,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/loudness-analyzer.test.ts": {
+        "pass": 9,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-engine-calibration.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/loop-frame-schedule.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/bpm-detection.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/synth-voice-allocation.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-export-snapshot.test.ts": {
+        "pass": 12,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-frame-scheduling.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/drum-rack-runtime.test.ts": {
+        "pass": 15,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-engine-assets.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-clip-projector.test.ts": {
+        "pass": 13,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/metering-runtime.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-wasm-protocol.test.ts": {
+        "pass": 19,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/reliability-characterization.test.ts": {
+        "pass": 7,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/synth-voice.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/export-encoding.test.ts": {
+        "pass": 13,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-wasm-worklet.test.ts": {
+        "pass": 6,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-session-compiler.test.ts": {
+        "pass": 18,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/prepared-stretch-artifact.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-stretch-cache.test.ts": {
+        "pass": 12,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/true-peak-scanner.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/streaming-loudness-analyzer.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-stretch-rendering.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/synth-runtime.test.ts": {
+        "pass": 47,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-clock.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-wasm-host.test.ts": {
+        "pass": 81,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/live-native-projection.test.ts": {
+        "pass": 24,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/clip-scheduler.test.ts": {
+        "pass": 13,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/automation.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/media-pages.hash.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-engine-live-midi.test.ts": {
+        "pass": 7,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/sampled-instrument-region.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/midi-expression-scheduling.test.ts": {
+        "pass": 7,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/native-host-wire.test.ts": {
+        "pass": 20,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/export-audio-support.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-stretching-async.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/media-pages.test.ts": {
+        "pass": 9,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/granular-runtime.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-runtime.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/native-pcm-chunking.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/spectral-core.test.ts": {
+        "pass": 6,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/master-fx-runtime.test.ts": {
+        "pass": 57,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/live-mixer-runtime.test.ts": {
+        "pass": 67,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/streaming-true-peak-limiter.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/worklet-loader.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/sample-rate-characterization.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/browser-characterization.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-param-ramp.browser.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/export-mixdown.test.ts": {
+        "pass": 20,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-export-worker.test.ts": {
+        "pass": 6,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-stretch-preparation.test.ts": {
+        "pass": 23,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/granular-worklet.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-stretching.test.ts": {
+        "pass": 48,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/worklet-assets.test.ts": {
+        "pass": 13,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-scheduling.test.ts": {
+        "pass": 14,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/export-fidelity.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/calibration.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/encode-wav.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/recorder-core.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/recording-runtime.test.ts": {
+        "pass": 10,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/sab-ring-buffer.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/recording-protocol.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts": {
+        "pass": 9,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/backends/wasm-audio-worklet-backend.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/channel-layout.test.ts": {
+        "pass": 7,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/graph-contract.test.ts": {
+        "pass": 15,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/resolve-timing.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/apply-offline-routing.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/apply-live-routing.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/resolve-routing.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/cue-routing.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/timing.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/chain.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/utility-gate-worklet.test.ts": {
+        "pass": 15,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/dsp.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/compressor-chain-state.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/modulation-worklet.test.ts": {
+        "pass": 6,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/live-worklet-budget.test.ts": {
+        "pass": 11,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/static-worklet-chain.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/autofilter-worklet.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/owned-processor-audio-descriptors.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/compressor-worklet.test.ts": {
+        "pass": 12,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/lofi-worklet.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       }
+      }
+     }
+    },
+    {
+     "name": "last-buffer",
+     "group": "last",
+     "isolated": true,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/instrument-buffer-sync.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 1.093
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 221,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "dp",
+     "group": "dp",
+     "isolated": true,
+     "trigger": "product",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/device-control-cost.ts",
+       "--out",
+       "{{DIR}}/out"
+      ],
+      "alarmSeconds": 3600,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 35.368
+     },
+     "judge": {
+      "kind": "dp",
+      "exit": 0,
+      "files": {
+       "results.json": "a269508648986839342fc2f46a07d99b8304232b528b0e42c692a7fa1b4b6e76",
+       "engine-controls.json": "8fabb5294599afb78165e7defb6d9b520f3230bc5a287e546ba76aff1fa3fe52",
+       "README.md": "ea30217ed4d6fc0f0d02eabd025ff7308c79d2f0f130519ed86c73efda01e6a5"
+      }
+     }
+    },
+    {
+     "name": "dp-repeat",
+     "group": "dp",
+     "isolated": true,
+     "trigger": "full-only",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/device-control-cost.ts",
+       "--out",
+       "{{DIR}}/out"
+      ],
+      "alarmSeconds": 3600,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 32.981
+     },
+     "judge": {
+      "kind": "dp",
+      "exit": 0,
+      "files": {
+       "results.json": "a269508648986839342fc2f46a07d99b8304232b528b0e42c692a7fa1b4b6e76",
+       "engine-controls.json": "8fabb5294599afb78165e7defb6d9b520f3230bc5a287e546ba76aff1fa3fe52",
+       "README.md": "ea30217ed4d6fc0f0d02eabd025ff7308c79d2f0f130519ed86c73efda01e6a5"
+      }
+     }
+    },
+    {
+     "name": "x-wasm-source-hash",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "native/audio-core/scripts/portable-wasm-source-hash.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.051
+     },
+     "judge": {
+      "kind": "stdout",
+      "exit": 0,
+      "value": "2a54ddbf231b352905d5c70277ee452a53606e26df582a8b862c834fb1d34c0e",
+      "files": {
+       "public/audio-core/daw-audio-core.wasm": "2e8d468ac9528fbe4ffd832c4b061f0f51d92bb46298248712109770bd2aba69",
+       "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm": "2e8d468ac9528fbe4ffd832c4b061f0f51d92bb46298248712109770bd2aba69",
+       "public/audio-core/daw-audio-core.manifest.json": "f9d19f3509784104875182b3734117e0a96ac982ed9e07a5effe7686eae129d2"
+      }
+     }
+    },
+    {
+     "name": "x-wasm-contract-hash",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "-e",
+       "import { processorContractHash } from './packages/audio-core-contract/src/generated/processor-contract-metadata'; console.log(processorContractHash)"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.051
+     },
+     "judge": {
+      "kind": "stdout",
+      "exit": 0,
+      "value": "37c63b8aa5786764e443ae5926c865c2b5e662c85c58fff9e0a3c9b1a95f096c",
+      "files": {}
+     }
+    }
+   ],
+   "new": [
+    {
+     "name": "g-typecheck",
+     "group": "g1",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "run",
+       "typecheck"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 29.591
+     },
+     "judge": {
+      "kind": "exit",
+      "exit": 0
+     }
+    },
+    {
+     "name": "g-lint",
+     "group": "g1",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "run",
+       "lint"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 2.182
+     },
+     "judge": {
+      "kind": "lint",
+      "exit": 1,
+      "found": "Found 17 warnings and 5 errors.",
+      "signature": [
+       [
+        "! eslint(no-unused-vars): Variable 'range' is declared but never used. Unused variables should start with a '_'.",
+        "packages/audio-engine/src/prepared-stretch-store.ts:1192:11"
+       ],
+       [
+        "! solid(reactivity): The reactive variable 'props.onMarkerDragStateChange' should be used within JSX, a tracked scope (like createEffect), or inside an event handler function, or else changes will be ignored.",
+        "src/components/timeline/SampleDetailWaveform.tsx:144:35"
+       ],
+       [
+        "! solid(reactivity): The reactive variable 'props.owner' should be used within JSX, a tracked scope (like createEffect), or inside an event handler function, or else changes will be ignored.",
+        "src/components/effects/effect-parameter-interaction.tsx:10:46"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Granular.tsx:44:167"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Granular.tsx:45:179"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Granular.tsx:46:170"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Granular.tsx:47:161"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Granular.tsx:48:181"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Granular.tsx:49:189"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Granular.tsx:50:176"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Granular.tsx:51:155"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Sampler.tsx:51:235"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Sampler.tsx:67:161"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Sampler.tsx:68:164"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Sampler.tsx:69:176"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Sampler.tsx:70:179"
+       ],
+       [
+        "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+        "src/components/effects/Sampler.tsx:71:167"
+       ],
+       [
+        "x anti-slop(no-conditional-empty-object-spread): This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
+        "src/lib/local-effects.ts:110:9"
+       ],
+       [
+        "x anti-slop(no-conditional-empty-object-spread): This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
+        "src/lib/local-effects.ts:111:9"
+       ],
+       [
+        "x anti-slop(no-runtime-typeof): A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
+        "src/lib/structured-clone-json.ts:5:7"
+       ],
+       [
+        "x anti-slop(no-unknown-parameters): Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
+        "src/lib/structured-clone-json.ts:1:49"
+       ],
+       [
+        "x anti-slop(no-unknown-returns): This function exposes `unknown` to its caller. Parse the value at its boundary and return a named domain type.",
+        "src/lib/structured-clone-json.ts:1:59"
+       ]
+      ]
+     }
+    },
+    {
+     "name": "g-build",
+     "group": "g1",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "run",
+       "build"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 10.46
+     },
+     "judge": {
+      "kind": "exit",
+      "exit": 0
+     }
+    },
+    {
+     "name": "g-tools-typecheck",
+     "group": "g1",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "x",
+       "tsc",
+       "--noEmit",
+       "-p",
+       "/Users/juan/Documents/daw-browser-convex/acceptance-reports/ae-08-phase-5-2026-10-18/c0/c0-tools-tsconfig.json"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 1.951
+     },
+     "judge": {
+      "kind": "tsc",
+      "exit": 2,
+      "diagnostics": [
+       "tools/acceptance/ae-08-live-graph.ts|TS18048|'failure' is possibly 'undefined'.",
+       "tools/acceptance/ae-08-live-graph.ts|TS2345|Argument of type 'Promise<unknown>' is not assignable to parameter of type 'Promise<{ code: number | null; signal: Signals | null; }>'.",
+       "tools/performance/30-track/v3-import-acceptance.ts|TS18048|'completed.recording.peakSabWriterOccupancy' is possibly 'undefined'.",
+       "tools/performance/30-track/v3-import-acceptance.ts|TS18048|'plan' is possibly 'undefined'.",
+       "tools/performance/30-track/v3-import-acceptance.ts|TS2322|Type '() => Promise<unknown>' is not assignable to type '() => Promise<void>'.",
+       "tools/performance/30-track/v3-import-acceptance.ts|TS2339|Property 'gestures' does not exist on type 'never'.",
+       "tools/performance/30-track/v3-import-acceptance.ts|TS2339|Property 'memoryCheckpoints' does not exist on type 'never'.",
+       "tools/performance/30-track/v3-import-workload.ts|TS2339|Property 'identity' does not exist on type '{ version: 1; state: { enabled: boolean; gainDb: number; polarity: \"normal\" | \"invert\"; inputMode: \"stereo\" | \"mono-sum\"; pan: number; balance: number; width: number; matrix: \"stereo\" | \"mid-side-encode\" | \"mid-side-decode\"; swap: boolean; dcBlock: boolean; }; } | ... 24 more ... | { ...; }'.",
+       "tools/performance/30-track/v3-import-workload.ts|TS2339|Property 'trackId' does not exist on type '{ trackId: string; } | { master: true; }'.",
+       "tools/performance/browser-harness.ts|TS18047|'contentLength' is possibly 'null'.",
+       "tools/performance/browser-harness.ts|TS18047|'size' is possibly 'null'.",
+       "tools/performance/browser-harness.ts|TS2353|Object literal may only specify known properties, and 'alias' does not exist in type 'BuildConfig'.",
+       "tools/performance/browser-harness.ts|TS2554|Expected 1 arguments, but got 0.",
+       "tools/performance/browser-harness.ts|TS2741|Property 'uploadToken' is missing in type '{ url: URL; stop: (closeActiveConnections?: boolean | undefined) => Promise<void>; }' but required in type 'HarnessServer'.",
+       "tools/performance/browser-harness.ts|TS2769|No overload matches this call."
+      ]
+     }
+    },
+    {
+     "name": "g-analyzer-selftest",
+     "group": "g1",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/analyze-ae-08-continuity.ts",
+       "--self-test"
+      ],
+      "alarmSeconds": 120,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 1.926
+     },
+     "judge": {
+      "kind": "selftest",
+      "exit": 0,
+      "rejected": 38
+     }
+    },
+    {
+     "name": "g-spool-wav",
+     "group": "g1",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "120000",
+       "/Users/juan/Documents/daw-browser-convex/tools/performance/30-track/native-spool-wav.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 11.123
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 9,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "g-c0fg-oxlint",
+     "group": "g1",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "x",
+       "oxlint",
+       "--deny-warnings",
+       "--report-unused-disable-directives",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/timeline-audio-import.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/timeline-audio-import-metadata-only.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelineProjectionState.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-phase-5-fixture.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/analyze-ae-08-continuity.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/b5c-playback-witness-support.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.663
+     },
+     "judge": {
+      "kind": "oxlint-clean",
+      "exit": 0
+     }
+    },
+    {
+     "name": "g-c0-oxlint",
+     "group": "g1",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "x",
+       "oxlint",
+       "--deny-warnings",
+       "--report-unused-disable-directives",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/analyze-ae-08-continuity.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-phase-5-fixture.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-live-graph.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/performance/30-track/native-spool-wav.test.ts"
+      ],
+      "alarmSeconds": 120,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.24
+     },
+     "judge": {
+      "kind": "oxlint-clean",
+      "exit": 0
+     }
+    },
+    {
+     "name": "x-test-native",
+     "group": "x",
+     "isolated": true,
+     "trigger": "native",
+     "command": {
+      "argv": [
+       "sh",
+       "/Users/juan/Documents/daw-browser-convex/native/audio-core/scripts/test-native.sh"
+      ],
+      "alarmSeconds": 1200,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 113.035
+     },
+     "judge": {
+      "kind": "ctest",
+      "exit": 0,
+      "total": 17
+     }
+    },
+    {
+     "name": "x-host-ctest",
+     "group": "x",
+     "isolated": true,
+     "trigger": "native",
+     "command": {
+      "argv": [
+       "sh",
+       "-c",
+       "cmake --build /Users/juan/Documents/daw-browser-convex/native/build/audio-host-macos-debug -j 6 && ctest --test-dir /Users/juan/Documents/daw-browser-convex/native/build/audio-host-macos-debug -I 17,23 --output-on-failure"
+      ],
+      "alarmSeconds": 1500,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 33.45
+     },
+     "judge": {
+      "kind": "ctest",
+      "exit": 0,
+      "total": 7
+     }
+    },
+    {
+     "name": "x-host-plugin-tests",
+     "group": "x",
+     "isolated": true,
+     "trigger": "native",
+     "command": {
+      "argv": [
+       "bun",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/run-ae08-test-plugin.ts"
+      ],
+      "alarmSeconds": 1500,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 7
+     },
+     "judge": {
+      "kind": "exit",
+      "exit": 0
+     }
+    },
+    {
+     "name": "x-rtguard",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/native/audio-host-macos/tests/realtime_callback_guard.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.021
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 3,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "x-wasm-artifact",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/native/audio-core/tests/wasm_artifact.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 6.086
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 16,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "x-portable-wasm",
+     "group": "x",
+     "isolated": true,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/portable-wasm-host.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/portable-wasm-protocol.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/portable-wasm-worklet.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.461
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 106,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "x-wasm-validation",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/native/audio-core/tests/portable-wasm-validation.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.144
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 7,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "x-validate-wasm",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "run",
+       "validate:portable-wasm"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.032
+     },
+     "judge": {
+      "kind": "exit",
+      "exit": 0
+     }
+    },
+    {
+     "name": "x-wire",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/native-host-wire.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.032
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 20,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "x-backends",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/backends"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.048
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 13,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "x-matrix",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "--preload",
+       "/tmp/dv01-b6/rc5/tools/dv01-b6f/overlay.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "-t",
+       "B6F5PROBE"
+      ],
+      "alarmSeconds": 600,
+      "env": {
+       "DV01_B6F_PROBE": "/tmp/dv01-b6/rc5/tools/dv01-b6f5-step5b/probe.ts"
+      },
+      "evidence": false,
+      "rc7Seconds": 1.542
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 238,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": 1
+     }
+    },
+    {
+     "name": "x-probe160",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "--preload",
+       "/tmp/dv01-b6/rc5/tools/dv01-b6f/overlay.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "-t",
+       "B6FPROBE"
+      ],
+      "alarmSeconds": 600,
+      "env": {
+       "DV01_B6F_PROBE": "/tmp/dv01-b6/rc5/tools/dv01-b6f5-step5b/probe160-adoption.ts"
+      },
+      "evidence": false,
+      "rc7Seconds": 11.266
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 1,
+      "counts": {
+       "pass": 159,
+       "skip": 0,
+       "fail": 1
+      },
+      "fails": [
+       "B6FPROBE lifecycle suspended-ready"
+      ],
+      "appended": 1
+     }
+    },
+    {
+     "name": "x-b6f5-scoped-lint",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "x",
+       "oxlint",
+       "--deny-warnings",
+       "--report-unused-disable-directives",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/public/audio-worklets/daw-portable-audio-core-host-v2.js",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/portable-wasm-protocol.ts",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/backends",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/portable-wasm-host.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/portable-wasm-protocol.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/portable-wasm-worklet.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.461
+     },
+     "judge": {
+      "kind": "oxlint-clean",
+      "exit": 0
+     }
+    },
+    {
+     "name": "f-playback",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts"
+      ],
+      "alarmSeconds": 400,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.925
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 263,
+       "skip": 1,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-controller",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts"
+      ],
+      "alarmSeconds": 400,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 6.036
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 688,
+       "skip": 1,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-c0f",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelineProjectionState.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/timeline-audio-import-metadata-only.test.ts",
+       "-t",
+       "C0F |creates a local audio clip"
+      ],
+      "alarmSeconds": 400,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.262
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 5,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-c0g",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelineProjectionState.test.ts",
+       "-t",
+       "C0G |fingerprints all playback"
+      ],
+      "alarmSeconds": 400,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.322
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 10,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-projection",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelineProjectionState.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.186
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 8,
+       "skip": 1,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-import-metadata",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/timeline-audio-import-metadata-only.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.12
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 2,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-hookwit",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "-t",
+       "B6d2 |B6d3 |B6d4 |B6d5 |B6d6 |B6d7 |B6d8 |reconciles a paused seek superseded|does not resume a structural rebuild after stop wins"
+      ],
+      "alarmSeconds": 240,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.197
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 31,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-b6d8",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "-t",
+       "B6d8 "
+      ],
+      "alarmSeconds": 240,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.176
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 4,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-b6e",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "-t",
+       "B6e "
+      ],
+      "alarmSeconds": 240,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.171
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 6,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-b6f",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.test.ts",
+       "-t",
+       "B6f "
+      ],
+      "alarmSeconds": 240,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.188
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 8,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-b6f2",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "-t",
+       "B6f2 "
+      ],
+      "alarmSeconds": 240,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.179
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 5,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-b6family",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.test.ts",
+       "-t",
+       "B6d8 |B6e |B6f |B6f2 |B6f3 |B6f4 |B6f5 |B6f5c "
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.542
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 65,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-audiosync",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useEffectsPanelAudioSync.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.836
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 326,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-persisted",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-persisted-effect-state.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.106
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 44,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-portable",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.348
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 157,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-audio-effects",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-effects-panel-audio-effects-state.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.342
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 32,
+       "skip": 3,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-pointer-browser",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/pointer-gesture-ownership.browser.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 26.819
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 12,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-cost-browser",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/device-control-cost.browser.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.383
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 53,
+       "skip": 2,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-buffer",
+     "group": "g2",
+     "isolated": true,
+     "trigger": "full-only",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/instrument-buffer-sync.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 1.178
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 221,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-strict-history",
+     "group": "g2",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useEffectsPanelAudioSync.test.ts",
+       "-t",
+       "B5c3 known-red simultaneous release"
+      ],
+      "alarmSeconds": 180,
+      "env": {
+       "DV01_B5_STRICT_HISTORY": "1"
+      },
+      "evidence": true,
+      "rc7Seconds": 0.38
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 1,
+      "counts": {
+       "pass": 0,
+       "skip": 0,
+       "fail": 2
+      },
+      "fails": [
+       "B5c3 known-red simultaneous release, local track=false, closed and unselected",
+       "B5c3 known-red simultaneous release, local track=true, closed and unselected"
+      ],
+      "appended": null
+     }
+    },
+    {
+     "name": "f-engine",
+     "group": "g2",
+     "isolated": true,
+     "trigger": "full-only",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 9.995
+     },
+     "judge": {
+      "kind": "engine",
+      "exit": 0,
+      "files": {
+       "packages/audio-engine/src/streaming-export-fidelity.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/prepared-stretch-store.test.ts": {
+        "pass": 22,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/granular-core.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/sampler-core.test.ts": {
+        "pass": 11,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/dsp-characterization.test.ts": {
+        "pass": 12,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/loudness-analyzer.test.ts": {
+        "pass": 9,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-engine-calibration.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/loop-frame-schedule.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/bpm-detection.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/synth-voice-allocation.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-export-snapshot.test.ts": {
+        "pass": 12,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-frame-scheduling.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/drum-rack-runtime.test.ts": {
+        "pass": 15,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-engine-assets.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-clip-projector.test.ts": {
+        "pass": 13,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/metering-runtime.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-wasm-protocol.test.ts": {
+        "pass": 19,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/reliability-characterization.test.ts": {
+        "pass": 7,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/synth-voice.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/export-encoding.test.ts": {
+        "pass": 13,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-wasm-worklet.test.ts": {
+        "pass": 6,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-session-compiler.test.ts": {
+        "pass": 18,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/prepared-stretch-artifact.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-stretch-cache.test.ts": {
+        "pass": 12,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/true-peak-scanner.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/streaming-loudness-analyzer.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-stretch-rendering.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/synth-runtime.test.ts": {
+        "pass": 47,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-clock.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-wasm-host.test.ts": {
+        "pass": 81,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/live-native-projection.test.ts": {
+        "pass": 24,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/clip-scheduler.test.ts": {
+        "pass": 13,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/automation.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/media-pages.hash.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-engine-live-midi.test.ts": {
+        "pass": 7,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/sampled-instrument-region.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/midi-expression-scheduling.test.ts": {
+        "pass": 7,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/native-host-wire.test.ts": {
+        "pass": 20,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/export-audio-support.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-stretching-async.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/media-pages.test.ts": {
+        "pass": 9,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/granular-runtime.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-runtime.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/native-pcm-chunking.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/spectral-core.test.ts": {
+        "pass": 6,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/master-fx-runtime.test.ts": {
+        "pass": 57,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/live-mixer-runtime.test.ts": {
+        "pass": 67,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/streaming-true-peak-limiter.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/worklet-loader.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/sample-rate-characterization.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/browser-characterization.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-param-ramp.browser.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/export-mixdown.test.ts": {
+        "pass": 20,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-export-worker.test.ts": {
+        "pass": 6,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-stretch-preparation.test.ts": {
+        "pass": 23,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/granular-worklet.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-stretching.test.ts": {
+        "pass": 48,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/worklet-assets.test.ts": {
+        "pass": 13,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-scheduling.test.ts": {
+        "pass": 14,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/export-fidelity.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/calibration.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/encode-wav.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/recorder-core.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/recording-runtime.test.ts": {
+        "pass": 10,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/sab-ring-buffer.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/recording-protocol.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts": {
+        "pass": 9,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/backends/wasm-audio-worklet-backend.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/channel-layout.test.ts": {
+        "pass": 7,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/graph-contract.test.ts": {
+        "pass": 15,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/resolve-timing.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/apply-offline-routing.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/apply-live-routing.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/resolve-routing.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/cue-routing.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/timing.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/chain.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/utility-gate-worklet.test.ts": {
+        "pass": 15,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/dsp.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/compressor-chain-state.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/modulation-worklet.test.ts": {
+        "pass": 6,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/live-worklet-budget.test.ts": {
+        "pass": 11,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/static-worklet-chain.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/autofilter-worklet.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/owned-processor-audio-descriptors.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/compressor-worklet.test.ts": {
+        "pass": 12,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/lofi-worklet.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       }
+      }
+     }
+    },
+    {
+     "name": "rc1-g-controller",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-built-in-parameter-mapper.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-live-playback-processors.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 5.979
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 704,
+       "skip": 1,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-g-coordinator",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-schedule-coordinator.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-timeline-page-manager.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelineProjectionState.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src/native-host-wire.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 1.082
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 112,
+       "skip": 1,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-g-playback",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.989
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 263,
+       "skip": 1,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-g-panel-audiohost",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-effects-panel-audio-effects-state.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/apps/desktop/audio-host.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 8.148
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 141,
+       "skip": 3,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-i3-sync",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useEffectsPanelAudioSync.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.849
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 326,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-i4-consumers",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-persisted-effect-state.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-effects-panel-audio-effects-state.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/components/Timeline.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/shared-outbox.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/convex/revision.mutation.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/convex/effects.contract.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/export/run-export-job.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/live-playback-snapshot.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/export/timeline-export-service.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/sampled-instrument-region-loader.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/undo"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.882
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 396,
+       "skip": 3,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-i5-strict-history",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useEffectsPanelAudioSync.test.ts",
+       "-t",
+       "B5c3 known-red simultaneous release"
+      ],
+      "alarmSeconds": 180,
+      "env": {
+       "DV01_B5_STRICT_HISTORY": "1"
+      },
+      "evidence": true,
+      "rc7Seconds": 0.405
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 1,
+      "counts": {
+       "pass": 0,
+       "skip": 0,
+       "fail": 2
+      },
+      "fails": [
+       "B5c3 known-red simultaneous release, local track=false, closed and unselected",
+       "B5c3 known-red simultaneous release, local track=true, closed and unselected"
+      ],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-i6-desktop",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/apps/desktop"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 9.093
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 430,
+       "skip": 1,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-i6-browser",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "60000",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/pointer-gesture-ownership.browser.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-lifecycle.browser.test.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 51.19
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 17,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "rc1-i7-boundary",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/dv01-boundary-witnesses.ts",
+       "--out",
+       "{{DIR}}/out"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 14.145
+     },
+     "judge": {
+      "kind": "exit",
+      "exit": 0
+     }
+    },
+    {
+     "name": "rc1-i7-engine",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/dv01-engine-witnesses.ts",
+       "{{DIR}}/engine-rows.json"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 2.286
+     },
+     "judge": {
+      "kind": "exit",
+      "exit": 0
+     }
+    },
+    {
+     "name": "rc1-i9-scoped-lint",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "x",
+       "oxlint",
+       "--deny-warnings",
+       "--report-unused-disable-directives",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-processor-state-owner.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/undo/types.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/components/Timeline.tsx",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-timeline-effect-commit.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/components/Timeline.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-lifecycle.browser.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/pointer-gesture-ownership.browser.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz-fixture.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz-classes.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz-hook.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz-hook-classes.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/device-control-cost.browser.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/parameter-gesture-owner.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-persisted-effect-state.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-effects-panel-state.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/components/timeline/create-effects-panel-controller.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/when-number.ts",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/device-control-cost.browser-runtime.tsx",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/device-control-cost.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/hooks/useEffectsPanelAudioSync.test.ts",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.766
+     },
+     "judge": {
+      "kind": "oxlint-clean",
+      "exit": 0
+     }
+    },
+    {
+     "name": "rc1-i11-cost-browser",
+     "group": "g3",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "test",
+       "--conditions=browser",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/device-control-cost.browser.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": true,
+      "rc7Seconds": 0.362
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 53,
+       "skip": 2,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "last-engine",
+     "group": "last",
+     "isolated": true,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/packages/audio-engine/src"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 10.178
+     },
+     "judge": {
+      "kind": "engine",
+      "exit": 0,
+      "files": {
+       "packages/audio-engine/src/streaming-export-fidelity.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/prepared-stretch-store.test.ts": {
+        "pass": 22,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/granular-core.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/sampler-core.test.ts": {
+        "pass": 11,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/dsp-characterization.test.ts": {
+        "pass": 12,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/loudness-analyzer.test.ts": {
+        "pass": 9,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-engine-calibration.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/loop-frame-schedule.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/bpm-detection.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/synth-voice-allocation.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-export-snapshot.test.ts": {
+        "pass": 12,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-frame-scheduling.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/drum-rack-runtime.test.ts": {
+        "pass": 15,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-engine-assets.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-clip-projector.test.ts": {
+        "pass": 13,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/metering-runtime.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-wasm-protocol.test.ts": {
+        "pass": 19,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/reliability-characterization.test.ts": {
+        "pass": 7,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/synth-voice.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/export-encoding.test.ts": {
+        "pass": 13,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-wasm-worklet.test.ts": {
+        "pass": 6,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-session-compiler.test.ts": {
+        "pass": 18,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/prepared-stretch-artifact.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-stretch-cache.test.ts": {
+        "pass": 12,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/true-peak-scanner.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/streaming-loudness-analyzer.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-stretch-rendering.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/synth-runtime.test.ts": {
+        "pass": 47,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-clock.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-wasm-host.test.ts": {
+        "pass": 81,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/live-native-projection.test.ts": {
+        "pass": 24,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/clip-scheduler.test.ts": {
+        "pass": 13,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/automation.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/media-pages.hash.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-engine-live-midi.test.ts": {
+        "pass": 7,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/sampled-instrument-region.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/midi-expression-scheduling.test.ts": {
+        "pass": 7,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/native-host-wire.test.ts": {
+        "pass": 20,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/export-audio-support.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-stretching-async.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/media-pages.test.ts": {
+        "pass": 9,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/granular-runtime.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-runtime.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/native-pcm-chunking.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/spectral-core.test.ts": {
+        "pass": 6,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/master-fx-runtime.test.ts": {
+        "pass": 57,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/live-mixer-runtime.test.ts": {
+        "pass": 67,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/streaming-true-peak-limiter.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/worklet-loader.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/sample-rate-characterization.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/browser-characterization.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-param-ramp.browser.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/export-mixdown.test.ts": {
+        "pass": 20,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-export-worker.test.ts": {
+        "pass": 6,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/portable-stretch-preparation.test.ts": {
+        "pass": 23,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/granular-worklet.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-stretching.test.ts": {
+        "pass": 48,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/worklet-assets.test.ts": {
+        "pass": 13,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/audio-scheduling.test.ts": {
+        "pass": 14,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/export-fidelity.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/calibration.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/encode-wav.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/recorder-core.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/recording-runtime.test.ts": {
+        "pass": 10,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/sab-ring-buffer.test.ts": {
+        "pass": 5,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/recording/recording-protocol.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts": {
+        "pass": 9,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/backends/wasm-audio-worklet-backend.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/channel-layout.test.ts": {
+        "pass": 7,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/graph-contract.test.ts": {
+        "pass": 15,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/resolve-timing.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/apply-offline-routing.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/apply-live-routing.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/resolve-routing.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/mixer/cue-routing.test.ts": {
+        "pass": 1,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/timing.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/chain.test.ts": {
+        "pass": 4,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/utility-gate-worklet.test.ts": {
+        "pass": 15,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/dsp.test.ts": {
+        "pass": 8,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/compressor-chain-state.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/modulation-worklet.test.ts": {
+        "pass": 6,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/live-worklet-budget.test.ts": {
+        "pass": 11,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/static-worklet-chain.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/autofilter-worklet.test.ts": {
+        "pass": 3,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/owned-processor-audio-descriptors.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/compressor-worklet.test.ts": {
+        "pass": 12,
+        "skip": 0,
+        "fail": 0
+       },
+       "packages/audio-engine/src/effects/lofi-worklet.test.ts": {
+        "pass": 2,
+        "skip": 0,
+        "fail": 0
+       }
+      }
+     }
+    },
+    {
+     "name": "last-buffer",
+     "group": "last",
+     "isolated": true,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "test",
+       "--timeout",
+       "30000",
+       "/Users/juan/Documents/daw-browser-convex/src/lib/instrument-buffer-sync.test.ts"
+      ],
+      "alarmSeconds": 180,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 1.093
+     },
+     "judge": {
+      "kind": "tests",
+      "exit": 0,
+      "counts": {
+       "pass": 221,
+       "skip": 0,
+       "fail": 0
+      },
+      "fails": [],
+      "appended": null
+     }
+    },
+    {
+     "name": "dp",
+     "group": "dp",
+     "isolated": true,
+     "trigger": "product",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/device-control-cost.ts",
+       "--out",
+       "{{DIR}}/out"
+      ],
+      "alarmSeconds": 3600,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 35.368
+     },
+     "judge": {
+      "kind": "dp",
+      "exit": 0,
+      "files": {
+       "results.json": "a269508648986839342fc2f46a07d99b8304232b528b0e42c692a7fa1b4b6e76",
+       "engine-controls.json": "8fabb5294599afb78165e7defb6d9b520f3230bc5a287e546ba76aff1fa3fe52",
+       "README.md": "ea30217ed4d6fc0f0d02eabd025ff7308c79d2f0f130519ed86c73efda01e6a5"
+      }
+     }
+    },
+    {
+     "name": "dp-repeat",
+     "group": "dp",
+     "isolated": true,
+     "trigger": "full-only",
+     "command": {
+      "argv": [
+       "bun",
+       "--conditions=browser",
+       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/device-control-cost.ts",
+       "--out",
+       "{{DIR}}/out"
+      ],
+      "alarmSeconds": 3600,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 32.981
+     },
+     "judge": {
+      "kind": "dp",
+      "exit": 0,
+      "files": {
+       "results.json": "a269508648986839342fc2f46a07d99b8304232b528b0e42c692a7fa1b4b6e76",
+       "engine-controls.json": "8fabb5294599afb78165e7defb6d9b520f3230bc5a287e546ba76aff1fa3fe52",
+       "README.md": "ea30217ed4d6fc0f0d02eabd025ff7308c79d2f0f130519ed86c73efda01e6a5"
+      }
+     }
+    },
+    {
+     "name": "x-wasm-source-hash",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "native/audio-core/scripts/portable-wasm-source-hash.ts"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.051
+     },
+     "judge": {
+      "kind": "stdout",
+      "exit": 0,
+      "value": "2a54ddbf231b352905d5c70277ee452a53606e26df582a8b862c834fb1d34c0e",
+      "files": {
+       "public/audio-core/daw-audio-core.wasm": "2e8d468ac9528fbe4ffd832c4b061f0f51d92bb46298248712109770bd2aba69",
+       "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm": "2e8d468ac9528fbe4ffd832c4b061f0f51d92bb46298248712109770bd2aba69",
+       "public/audio-core/daw-audio-core.manifest.json": "f9d19f3509784104875182b3734117e0a96ac982ed9e07a5effe7686eae129d2"
+      }
+     }
+    },
+    {
+     "name": "x-wasm-contract-hash",
+     "group": "x",
+     "isolated": false,
+     "trigger": "always",
+     "command": {
+      "argv": [
+       "bun",
+       "-e",
+       "import { processorContractHash } from './packages/audio-core-contract/src/generated/processor-contract-metadata'; console.log(processorContractHash)"
+      ],
+      "alarmSeconds": 300,
+      "env": {},
+      "evidence": false,
+      "rc7Seconds": 0.051
+     },
+     "judge": {
+      "kind": "stdout",
+      "exit": 0,
+      "value": "37c63b8aa5786764e443ae5926c865c2b5e662c85c58fff9e0a3c9b1a95f096c",
+      "files": {}
+     }
+    }
+   ]
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "P36 (pr62-cleanup f620a851, decision U5 in acceptance-reports/pr62-cleanup/PARENT-RULING-PR62-TEST-CLEANUP.md; hand record, no --bless). src/lib/desktop/native-revision-controller.ts and native-revision-session.ts had no production importer; their only consumer, native-live-graph.browser.test.ts (one test, the whole of gate rc1-g-native-live-graph-browser, 1 pass), is deleted with them. A whole-file deletion is not admissible through --allow-removal, so the gate leaves `gates` as one whole-array change, the entry diffJson records when the array's length changes. Direct audit of the deleted test's 11 result keys against production tests: bankSeam and proofGate are covered by native-schedule-coordinator.test.ts `staged bank preserves exact held-note seam ownership and requires publication proof`; bankRebase by `discarding a staged bank leaves active accepted windows and refills intact` plus the added `a bank re-staged at a later frame carries that frame as its publication seam` (9efec8c4; fails with preparedPublicationFrame mutated to the window start). The other eight keys exercised the deleted controller, which production does not use; the production revision path has lostReply (native-playback-controller.test.ts `W03 lost Publish retains caller until native proof`), reconciled (`W17 post-ACK publish-pending is conclusive with one Inspect`), noBlindRollback (`W42 published ACK never rolls back the active latency bank`), partial analogues for ownership, outOfOrder, latest and monotonicUndo, and no test for an exact 64-bit publication frame (noted in the final report).",
+  "expectationsSha256": "4210957ec3146b718b270bc4317a6935d8c9b76554d749f63748ae872aa4163e"
+ }
+}

@@ -52,6 +52,14 @@ type Config = { instanceId: string; params: SamplerParams; buffers: SamplerResol
 type Voice = { id: number; clipId?: string; note: number; chokeGroup: number; regionKey: string; source: AudioBufferSourceNode; sources: AudioBufferSourceNode[]; nodes: AudioNode[]; gain: GainNode; removed: boolean; stopRequested: boolean }
 const EMPTY_BUFFERS: SamplerResolvedBuffers = new Map()
 const SAMPLER_TERMINATION_FADE_SEC = 0.006
+const SEGMENT_FADE_IN_CURVE = Float32Array.from(
+  { length: 32 },
+  (_, index) => Math.sin(index / 31 * Math.PI / 2),
+)
+const SEGMENT_FADE_OUT_CURVE = Float32Array.from(
+  { length: 32 },
+  (_, index) => Math.cos(index / 31 * Math.PI / 2),
+)
 
 export function scheduleSamplerVoice(input: {
   ctx: BaseAudioContext
@@ -120,11 +128,9 @@ export function scheduleSamplerVoice(input: {
     }
     if (segment.fadeInSec > 0 || segment.fadeOutSec > 0) {
       const segmentGain = input.ctx.createGain()
-      const fadeInCurve = Float32Array.from({ length: 32 }, (_, index) => Math.sin(index / 31 * Math.PI / 2))
-      const fadeOutCurve = Float32Array.from({ length: 32 }, (_, index) => Math.cos(index / 31 * Math.PI / 2))
       segmentGain.gain.setValueAtTime(segment.fadeInSec > 0 ? 0 : 1, segment.startTime)
-      if (segment.fadeInSec > 0) segmentGain.gain.setValueCurveAtTime(fadeInCurve, segment.startTime, segment.fadeInSec)
-      if (segment.fadeOutSec > 0) segmentGain.gain.setValueCurveAtTime(fadeOutCurve, segment.startTime + segment.durationSec - segment.fadeOutSec, segment.fadeOutSec)
+      if (segment.fadeInSec > 0) segmentGain.gain.setValueCurveAtTime(SEGMENT_FADE_IN_CURVE, segment.startTime, segment.fadeInSec)
+      if (segment.fadeOutSec > 0) segmentGain.gain.setValueCurveAtTime(SEGMENT_FADE_OUT_CURVE, segment.startTime + segment.durationSec - segment.fadeOutSec, segment.fadeOutSec)
       source.connect(segmentGain)
       segmentGain.connect(filter)
       nodes.push(segmentGain)

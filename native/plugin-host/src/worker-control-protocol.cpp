@@ -346,7 +346,7 @@ std::optional<WorkerControlRequest> ReadWorkerControlCommand(const int fileDescr
   CommandFrame frame{};
   if (fileDescriptor < 0 || !ReadExactly(fileDescriptor, &frame, sizeof(frame))) return std::nullopt;
   if (frame.command >= static_cast<std::uint32_t>(WorkerControlCommand::kProcess)
-    && frame.command <= static_cast<std::uint32_t>(WorkerControlCommand::kStateGet)
+    && frame.command <= static_cast<std::uint32_t>(WorkerControlCommand::kParametersFlush)
     && frame.hasAnchor <= 1) {
     return WorkerControlRequest{
       .command = static_cast<WorkerControlCommand>(frame.command),
@@ -424,6 +424,26 @@ std::optional<WorkerState> ReadWorkerState(const int fileDescriptor) {
     return std::nullopt;
   }
   return state;
+}
+
+bool WriteWorkerParameterEvents(const int fileDescriptor, const std::span<const WorkerTransportEvent> events) {
+  const auto count = static_cast<std::uint32_t>(events.size());
+  return fileDescriptor >= 0 && events.size() <= kMaximumWorkerEvents
+    && WriteExactly(fileDescriptor, &count, sizeof(count))
+    && WriteExactly(fileDescriptor, events.data(), events.size_bytes());
+}
+
+std::optional<std::vector<WorkerTransportEvent>> ReadWorkerParameterEvents(const int fileDescriptor) {
+  std::uint32_t count = 0;
+  if (fileDescriptor < 0 || !ReadExactly(fileDescriptor, &count, sizeof(count)) || count > kMaximumWorkerEvents) {
+    return std::nullopt;
+  }
+  std::vector<WorkerTransportEvent> events(count);
+  if (!ReadExactly(fileDescriptor, events.data(), count * sizeof(WorkerTransportEvent))) return std::nullopt;
+  for (const auto& event : events) {
+    if (event.kind != WorkerEventKind::kParameter) return std::nullopt;
+  }
+  return events;
 }
 
 bool WriteWorkerHello(const int fileDescriptor, const WorkerHello& hello) {

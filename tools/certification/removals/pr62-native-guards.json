@@ -1,0 +1,17 @@
+{
+ "ruling": "acceptance-reports/pr62-cleanup/PARENT-RULING-PR62-TEST-CLEANUP.md",
+ "removed": [
+  {
+   "file": "native/audio-host-macos/tests/realtime_callback_guard.test.ts",
+   "test": "publish, rollback and the callback keep no revision-core branch"
+  },
+  {
+   "file": "native/audio-host-macos/tests/realtime_callback_guard.test.ts",
+   "test": "asset reader completion is bounded and reclamation stays off the callback"
+  },
+  {
+   "file": "native/audio-core/tests/validation_scratch.test.ts",
+   "test": "spectral callback refresh applies one precomputed tagged map without allocation or trig"
+  }
+ ]
+}

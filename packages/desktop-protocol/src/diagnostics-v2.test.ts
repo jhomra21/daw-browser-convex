@@ -187,3 +187,22 @@ test("diagnostics v2 is a distinct public operation", () => {
     input: {},
   }).operation).toBe("diagnostics.snapshot.v2")
 })
+
+
+test("diagnostics v2 accepts native spool without relabeling legacy transports or widening unknown values", () => {
+  for (const transport of [null, "sab", "transferable", "native-spool"]) {
+    const value = { ...diagnostics, recording: { ...diagnostics.recording, transport } }
+    expect(transport).toBe(desktopDiagnosticsSchemaV2.parse(value).recording.transport)
+    expect(parseDesktopResult("diagnostics.snapshot.v2", value)).toEqual(value)
+  }
+  expect(desktopDiagnosticsSchemaV2.safeParse({ ...diagnostics, recording: { ...diagnostics.recording, transport: "file" } }).success).toBeFalse()
+})
+
+test("diagnostics v2 preserves all actual AudioContext states including interrupted", () => {
+  for (const state of ["uninitialized", "suspended", "running", "closed", "interrupted"]) {
+    const value = { ...diagnostics, audio: { ...diagnostics.audio, state } }
+    expect(state).toBe(desktopDiagnosticsSchemaV2.parse(value).audio.state)
+    expect(parseDesktopResult("diagnostics.snapshot.v2", value)).toEqual(value)
+  }
+  expect(desktopDiagnosticsSchemaV2.safeParse({ ...diagnostics, audio: { ...diagnostics.audio, state: "unknown" } }).success).toBeFalse()
+})

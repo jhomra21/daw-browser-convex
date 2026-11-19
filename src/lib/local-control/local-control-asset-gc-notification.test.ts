@@ -89,7 +89,7 @@ test('isolates a failed GC job and notifies after another job finalizes', async 
   }
 })
 
-test('a no-op commit publishes partial GC finalization once without double-publishing applied commits', async () => {
+test('an asset commit publishes partial GC finalization once without double-publishing', async () => {
   const first = await createExpiredAssetRecovery('first-commit-asset')
   const second = await createExpiredAssetRecovery('second-commit-asset', first)
   await expireAssetRecovery(first, Date.now() - 2)
@@ -98,12 +98,7 @@ test('a no-op commit publishes partial GC finalization once without double-publi
   let changes = 0
   const unsubscribe = subscribeToLocalProjectChanges(first.project.id, () => { changes += 1 })
   try {
-    expect(await first.service.commit({
-      version: 'v1',
-      projectId: first.project.id,
-      idempotencyKey: 'no-op-gc-finalization',
-      actions: [{ kind: 'project.rename', name: first.project.name }],
-    })).toMatchObject({ applied: false, idempotencyReplay: false })
+    await createExpiredAssetRecovery('third-commit-asset', first)
     expect(changes).toBe(1)
     expect(await first.db.get('controlAssetGc', first.jobId)).toBeUndefined()
     const failed = await first.db.get('controlAssetGc', second.jobId)
@@ -112,12 +107,7 @@ test('a no-op commit publishes partial GC finalization once without double-publi
     failingStoragePath = undefined
     if (!failed) throw new Error('Expected failed GC job.')
     await first.db.put('controlAssetGc', { ...failed, claimedAt: 0 })
-    expect(await first.service.commit({
-      version: 'v1',
-      projectId: first.project.id,
-      idempotencyKey: 'applied-gc-finalization',
-      actions: [{ kind: 'project.rename', name: 'Applied alongside GC' }],
-    })).toMatchObject({ applied: true, idempotencyReplay: false })
+    await createExpiredAssetRecovery('fourth-commit-asset', first)
     expect(changes).toBe(2)
     expect(await first.db.get('controlAssetGc', second.jobId)).toBeUndefined()
     expect(await first.db.get('controlRecoveries', second.recoveryId)).toBeUndefined()
@@ -125,4 +115,29 @@ test('a no-op commit publishes partial GC finalization once without double-publi
     failingStoragePath = undefined
     unsubscribe()
   }
+})
+
+test('a snapshot read collects an expired job', async () => {
+  const first = await createExpiredAssetRecovery('snapshot-gc-asset')
+  await expireAssetRecovery(first, Date.now() - 1)
+  await first.service.snapshot({ projectId: first.project.id })
+  expect(await first.db.get('controlAssetGc', first.jobId)).toBeUndefined()
+  expect(await first.db.get('controlRecoveries', first.recoveryId)).toBeUndefined()
+})
+
+test('a non-asset commit opens no GC transaction and the next asset commit collects the expired job', async () => {
+  const first = await createExpiredAssetRecovery('idle-gc-asset')
+  await expireAssetRecovery(first, Date.now() - 1)
+  await first.service.commit({
+    version: 'v1',
+    projectId: first.project.id,
+    idempotencyKey: 'rename-leaves-gc',
+    actions: [{ kind: 'project.rename', name: 'No GC here' }],
+  })
+  expect((await first.db.get('controlAssetGc', first.jobId))?.claimToken).toBeUndefined()
+  expect(await first.db.get('controlRecoveries', first.recoveryId)).toBeDefined()
+
+  await createExpiredAssetRecovery('collecting-asset', first)
+  expect(await first.db.get('controlAssetGc', first.jobId)).toBeUndefined()
+  expect(await first.db.get('controlRecoveries', first.recoveryId)).toBeUndefined()
 })

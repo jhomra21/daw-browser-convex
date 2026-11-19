@@ -1,6 +1,5 @@
 import { expect, test } from 'bun:test'
 
-import { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { isJsonObject, isJsonString, type JsonValue } from '@daw-browser/shared'
 type PublishedRequest = { value: JsonValue }
 
@@ -46,6 +45,7 @@ const actions = (inserted: Track['clips']) => ({
   commitClipTiming: () => {},
   commitClipAudioWarp: () => {},
   commitClipFades: () => {},
+  commitClipMidi: () => {},
   rescheduleChangedClips: () => {},
   cancelTrackVolumeWrite: () => {},
   cancelTrackRoutingWrite: () => {},
@@ -69,7 +69,6 @@ const deps = (
   projectId,
   userId: 'user-1',
   persistLocalMix: () => {},
-  audioEngine: new AudioEngine(),
   grantTrackWrite: () => {},
   grantClipWrite: () => {},
   actions: actions(inserted),

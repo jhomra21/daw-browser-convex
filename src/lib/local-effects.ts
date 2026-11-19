@@ -1,6 +1,8 @@
 import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectEntityRow, type LocalProjectStoredValue } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { INSTRUMENT_CONTRACTS, audioEffectOrderItemId, audioEffectOrderItemKind, automationTargetMatchesEffectInstance, createAudioEffectInstanceId, createInstrumentInstanceId, isJsonObject, isJsonString, normalizeTrackInstrumentParams, type AudioEffectKind, type AudioEffectOrderItem, type JsonValue, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
+import { INSTRUMENT_CONTRACTS, audioEffectOrderItemId, audioEffectOrderItemKind, automationTargetMatchesEffectInstance, createAudioEffectInstanceId, createInstrumentInstanceId, isJsonObject, isJsonString, type AudioEffectKind, type AudioEffectOrderItem, type JsonValue, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
+import { readInstrumentParamsFromEffectRow } from '~/lib/effect-row-instrument-params'
+import { structuredCloneJsonValue } from '~/lib/structured-clone-json'
 import { compareAudioEffectOrderEntries } from '~/lib/audio-effect-order-rows'
 import { audioEffectKindFromLocalEffect } from '~/lib/audio-effect-kind'
 import { externalPluginEntityKind, parseExternalProcessorValue } from '@daw-browser/external-plugins'
@@ -52,7 +54,7 @@ export const isLocalEffectRow = <TParams = JsonValue>(
 }
 
 const jsonEntityRows = (rows: readonly LocalProjectEntityRow[]) => rows.flatMap((row) => {
-  const parsed = z.json().safeParse(row.value)
+  const parsed = z.json().safeParse(structuredCloneJsonValue(row.value))
   return parsed.success ? [{ ...row, value: parsed.data }] : []
 })
 
@@ -66,7 +68,7 @@ const localEffectJsonValue = <TParams>(row: LocalEffectRow<TParams>): JsonValue 
   }
   if (row.instanceId !== undefined) Object.assign(value, { instanceId: row.instanceId })
   if (row.index !== undefined) Object.assign(value, { index: row.index })
-  return z.json().parse(value)
+  return z.json().parse(structuredCloneJsonValue(value))
 }
 
 const getExactLocalEffect = async <TParams>(
@@ -96,13 +98,29 @@ export async function getLocalEffect(
 ) {
   const db = await openLocalProjectDb(projectId)
   const row = await db.get('entities', [EFFECT_KIND, localEffectRowId(targetId, effect)])
-  const storedEffect = z.json().safeParse(row?.value)
-  if (storedEffect.success && isJsonObject(storedEffect.data) && localEffectRowSchema.safeParse(storedEffect.data).success) {
-    if (effect !== 'instrument') return storedEffect.data
-    const params = normalizeTrackInstrumentParams(storedEffect.data.params)
-    return params ? { ...storedEffect.data, params } : undefined
+  if (effect === 'instrument') {
+    if (isLocalEffectRow(row?.value)) {
+      const { id, targetId: storedTargetId, effect: storedEffect, instanceId, index, updatedAt } = row.value
+      const params = readInstrumentParamsFromEffectRow({ effect: 'instrument', params: row.value.params })
+      if (!params) return readLegacySynthEffect(targetId, db)
+      const instrumentRow: LocalEffectRow<TrackInstrumentParams> = { id, targetId: storedTargetId, effect: storedEffect, params, updatedAt }
+      if (instanceId !== undefined) instrumentRow.instanceId = instanceId
+      if (index !== undefined) instrumentRow.index = index
+      return instrumentRow
+    }
+    return readLegacySynthEffect(targetId, db)
   }
-  if (effect !== 'instrument') return undefined
+  const storedEffect = z.json().safeParse(structuredCloneJsonValue(row?.value))
+  if (storedEffect.success && isJsonObject(storedEffect.data) && localEffectRowSchema.safeParse(storedEffect.data).success) {
+    return storedEffect.data
+  }
+  return undefined
+}
+
+const readLegacySynthEffect = async (
+  targetId: string,
+  db: Awaited<ReturnType<typeof openLocalProjectDb>>,
+): Promise<LocalEffectRow<TrackInstrumentParams> | undefined> => {
   const synthRow = await db.get('entities', [EFFECT_KIND, localEffectRowId(targetId, 'synth')])
   const synth = synthRow?.value
   if (!isLocalEffectRow<SynthParamsInput>(synth)) return undefined
@@ -134,7 +152,7 @@ export const setLocalEffect = async <TParams>(
   effect: LocalEffectKind,
   params: TParams,
   index?: number,
-): Promise<LocalEffectRow<TParams>> => {
+): Promise<{ row: LocalEffectRow<TParams>; sequence: number }> => {
   return withExternalProcessorProjectWriteLock(projectId, async () => {
     const existingRow = await getExactLocalEffect<TParams>(projectId, targetId, effect)
     const db = await openLocalProjectDb(projectId)
@@ -154,8 +172,7 @@ export const setLocalEffect = async <TParams>(
       await tx.store.delete([EFFECT_KIND, localEffectRowId(targetId, 'synth')])
     }
     await tx.done
-    notifyLocalProjectChanged(projectId)
-    return row
+    return { row, sequence: notifyLocalProjectChanged(projectId) }
   })
 }
 
@@ -168,7 +185,7 @@ export const setLocalEffectInstance = async <TParams>(
     instanceId: string
     index?: number
   },
-): Promise<LocalEffectRow<TParams>> => {
+): Promise<{ row: LocalEffectRow<TParams>; sequence: number }> => {
   return withExternalProcessorProjectWriteLock(projectId, async () => {
     const instanceId = input.instanceId
     const db = await openLocalProjectDb(projectId)
@@ -189,8 +206,7 @@ export const setLocalEffectInstance = async <TParams>(
       updatedAt: timestamp,
     }
     await db.put('entities', createLocalProjectEntityRow(EFFECT_KIND, row.id, localEffectJsonValue(row), row.updatedAt))
-    notifyLocalProjectChanged(projectId)
-    return row
+    return { row, sequence: notifyLocalProjectChanged(projectId) }
   })
 }
 
@@ -432,7 +448,7 @@ export const restoreLocalTrackEffectChain = async (
     }
   }
   for (const [index, effect] of input.audioEffects.entries()) {
-    const params = z.json().parse(effect.params)
+    const params = z.json().parse(structuredCloneJsonValue(effect.params))
     const row: LocalEffectRow<typeof params> = {
       id: localEffectRowId(targetId, effect.kind, effect.id),
       targetId,
@@ -465,7 +481,7 @@ export const restoreLocalTrackEffectChain = async (
     await tx.store.put(createLocalProjectEntityRow(EFFECT_KIND, row.id, localEffectJsonValue(row), timestamp))
   }
   if (input.arp !== undefined) {
-    const params = z.json().parse(input.arp)
+    const params = z.json().parse(structuredCloneJsonValue(input.arp))
     const row: LocalEffectRow<typeof params> = {
       id: localEffectRowId(targetId, 'arp'),
       targetId,

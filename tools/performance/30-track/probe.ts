@@ -329,8 +329,10 @@ export const installBrowserProbe = (): BrowserProbeCoordinator => {
   const onAnimationFrame = (timestamp: number) => {
     if (active) {
       active.timestamps.push(timestamp)
-      lastTimestamp = timestamp
     }
+    // Track delivered frames between phases too: a new phase must not count
+    // intervening setup/screenshot time as one giant frame interval.
+    lastTimestamp = timestamp
     rafId = requestAnimationFrame(onAnimationFrame)
   }
   window.addEventListener("error", onError)

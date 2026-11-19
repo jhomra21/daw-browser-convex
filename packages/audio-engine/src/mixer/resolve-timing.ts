@@ -11,12 +11,13 @@ export type ExternalNodeLatencyFrames = ReadonlyMap<string, number>
 type MixerEdgeKind = 'output' | 'send'
 type MixerSendTap = 'pre-fx' | 'pre-fader' | 'post-fader'
 
+// A send stored without a tap is post-fader, so both spellings name the same route.
 export const mixerRouteKey = (
   sourceId: string,
   targetId: string,
   kind: MixerEdgeKind,
   tap?: MixerSendTap,
-) => JSON.stringify([sourceId, targetId, kind, tap ?? null])
+) => JSON.stringify([sourceId, targetId, kind, kind === 'send' ? tap ?? 'post-fader' : null])
 export const MASTER_ROUTE_TARGET = '$master'
 
 const getChannelLatency = (

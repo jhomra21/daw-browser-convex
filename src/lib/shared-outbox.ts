@@ -52,6 +52,8 @@ type SharedOutboxEntry = {
   userId: string
   payload: LocalProjectStoredValue
   completion?: SharedOutboxCompletion
+  // The publisher reads this entry's result after admission, so a result another drain records waits for it.
+  ownerAwaitsCompletion?: true
   status: SharedOutboxStatus
   attempts: number
   nextAttemptAt: number
@@ -332,12 +334,17 @@ type SharedOutboxSummary = {
   failed: number
 }
 
+type SharedOutboxRetryState = {
+  nextAttemptAt?: number
+  failure?: { reason: string; permanent: boolean }
+}
+
 const OUTBOX_PREFIX = 'shared-outbox:'
 const OUTBOX_STATUS_KEY = 'shared-outbox-status'
 const OUTBOX_SEQUENCE_KEY = 'shared-outbox-sequence'
 const OUTBOX_COMPLETION_PREFIX = 'shared-outbox-completion:'
+const OUTBOX_SETTLEMENT_CHANNEL = 'shared-outbox-settlement:'
 const OUTBOX_LEASE_MS = 30 * 1000
-const OUTBOX_COMPLETION_TTL_MS = 5 * 60 * 1000
 const MAX_OUTBOX_COMPLETIONS_PER_USER = 64
 const outboxFlushes = new Map<string, Promise<unknown>>()
 const outboxOwner = crypto.randomUUID()
@@ -362,7 +369,7 @@ export const setSharedOutboxRuntimeForTesting = (
 }
 
 const now = () => outboxRuntime.now()
-const retryDelayMs = (attempts: number) => Math.min(60 * 1000, 2 ** Math.min(attempts, 6) * 1000)
+const sharedOutboxRetryDelayMs = (attempts: number) => Math.min(60 * 1000, 2 ** Math.min(attempts, 6) * 1000)
 export class SharedOutboxQueuedError extends Error {
   readonly operationId: string
 
@@ -370,6 +377,55 @@ export class SharedOutboxQueuedError extends Error {
     super(`${kind} queued for retry`)
     this.name = 'SharedOutboxQueuedError'
     this.operationId = operationId
+  }
+}
+
+const settlementWakeSchema = z.object({ projectId: z.string(), userId: z.string() })
+const settlementListeners = new Map<string, Set<() => void>>()
+const settlementChannels = new Map<string, BroadcastChannel>()
+
+const settlementScope = (projectId: string, userId: string) => `${projectId}\u0000${userId}`
+
+export const subscribeToSharedOutboxSettlements = (
+  projectId: string,
+  userId: string,
+  listener: () => void,
+) => {
+  const scope = settlementScope(projectId, userId)
+  const listeners = settlementListeners.get(scope) ?? new Set<() => void>()
+  listeners.add(listener)
+  settlementListeners.set(scope, listeners)
+  let channel = settlementChannels.get(scope)
+  if (!channel) {
+    channel = new BroadcastChannel(`${OUTBOX_SETTLEMENT_CHANNEL}${encodeURIComponent(projectId)}:${encodeURIComponent(userId)}`)
+    channel.addEventListener('message', (event: MessageEvent<unknown>) => {
+      const wake = settlementWakeSchema.safeParse(event.data)
+      if (wake.success && wake.data.projectId === projectId && wake.data.userId === userId) {
+        for (const observer of settlementListeners.get(scope) ?? []) observer()
+      }
+    })
+    settlementChannels.set(scope, channel)
+  }
+  return () => {
+    listeners.delete(listener)
+    if (listeners.size > 0) return
+    settlementListeners.delete(scope)
+    settlementChannels.get(scope)?.close()
+    settlementChannels.delete(scope)
+  }
+}
+
+const wakeSettlementObservers = (projectId: string, userId: string) => {
+  for (const listener of settlementListeners.get(settlementScope(projectId, userId)) ?? []) listener()
+  notifyLocalProjectChanged(projectId)
+  const message = { projectId, userId }
+  const channelName = `${OUTBOX_SETTLEMENT_CHANNEL}${encodeURIComponent(projectId)}:${encodeURIComponent(userId)}`
+  const channel = settlementChannels.get(settlementScope(projectId, userId))
+  if (channel) channel.postMessage(message)
+  else {
+    const transientChannel = new BroadcastChannel(channelName)
+    transientChannel.postMessage(message)
+    transientChannel.close()
   }
 }
 
@@ -456,6 +512,7 @@ const sharedOutboxEntrySchema = z.object({
   userId: z.string(),
   payload: z.union([z.json(), uploadedAudioClipPayloadSchema]),
   completion: sharedOutboxCompletionSchema.optional(),
+  ownerAwaitsCompletion: z.literal(true).optional(),
   status: z.enum(['pending', 'failed', 'dead-letter', 'completed']),
   attempts: z.number(),
   nextAttemptAt: z.number(),
@@ -483,6 +540,7 @@ const readEntry = (value: LocalProjectStoredValue): SharedOutboxEntry | null => 
     userId: entry.userId,
     payload: entry.payload,
     completion: entry.completion,
+    ownerAwaitsCompletion: entry.ownerAwaitsCompletion,
     status: entry.status,
     attempts: entry.attempts,
     nextAttemptAt: entry.nextAttemptAt,
@@ -638,6 +696,82 @@ const uploadSharedAudioClipAsset = async (payload: UploadedAudioClipPayload, ide
 export const readSharedOutboxSummary = async (projectId: string, userId: string): Promise<SharedOutboxSummary> => {
   return summarizeOutboxRows(await readOutboxRows(projectId), userId)
 }
+// The one-shot timer of a project's next delivery attempt. The deadline is the persisted head of the outbox, or the
+// backoff after a failed flush when that deadline cannot be read. `onRetryDue` fires once per armed deadline, and
+// `dispose` cancels the timer, so no attempt outlives its owner.
+export const createSharedOutboxRetry = (projectId: string, userId: string, onRetryDue: () => void) => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let version = 0
+  let failures = 0
+  let notBefore = 0
+  let disposed = false
+  const cancel = () => {
+    if (timer === undefined) return
+    outboxRuntime.cancel(timer)
+    timer = undefined
+  }
+  const arm = async () => {
+    const armed = ++version
+    let nextAttemptAt: number | undefined
+    try {
+      nextAttemptAt = (await readSharedOutboxRetryState(projectId, userId)).nextAttemptAt
+    } catch {
+      nextAttemptAt = notBefore || undefined
+    }
+    if (disposed || armed !== version) return
+    cancel()
+    if (nextAttemptAt === undefined && !notBefore) return
+    timer = outboxRuntime.schedule(() => {
+      timer = undefined
+      onRetryDue()
+    }, Math.max(0, Math.max(nextAttemptAt ?? 0, notBefore) - now()))
+  }
+  return {
+    // A flush finished: re-arm from the persisted deadline, with backoff when the flush itself failed.
+    settled: (delivered: boolean) => {
+      failures = delivered ? 0 : failures + 1
+      notBefore = delivered ? 0 : now() + sharedOutboxRetryDelayMs(failures)
+      return arm()
+    },
+    // The persisted outbox changed: the armed deadline may be stale.
+    refresh: () => {
+      version += 1
+      cancel()
+      void arm()
+    },
+    backingOff: () => notBefore !== 0,
+    dispose: () => {
+      disposed = true
+      version += 1
+      cancel()
+    },
+  }
+}
+
+export const readSharedOutboxRetryState = async (
+  projectId: string,
+  userId: string,
+): Promise<SharedOutboxRetryState> => {
+  const entries = readOutboxEntries(await readOutboxRows(projectId), userId)
+    .sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0))
+  const failed = entries.filter((entry) => entry.status === 'failed')
+  const permanent = entries.filter((entry) => entry.status === 'dead-letter')
+  const head = entries.find((entry) => entry.status === 'pending' || entry.status === 'failed')
+  const nextAttemptAt = head?.claimToken === undefined ? head?.nextAttemptAt : head.leaseExpiresAt
+  const latestFailure = [...failed, ...permanent]
+    .sort((left, right) => right.updatedAt - left.updatedAt)[0]
+  return {
+    nextAttemptAt,
+    failure: latestFailure
+      ? {
+        reason: (latestFailure.lastError ?? 'Shared change publish failed')
+          .replace(/^Permanent failure:\s*/, '')
+          .slice(0, 160),
+        permanent: latestFailure.status === 'dead-letter',
+      }
+      : undefined,
+  }
+}
 
 const serializeDurableOperationPayload = (payload: SharedTimelineOperation['payload']) => (
   z.json().parse(JSON.parse(JSON.stringify(payload)))
@@ -651,6 +785,7 @@ const enqueueSharedOutboxOperation = async (
     payload: LocalProjectStoredValue
     error?: unknown
     completion?: SharedOutboxCompletion
+    ownerAwaitsCompletion?: true
   },
 ) => {
   const timestamp = now()
@@ -692,6 +827,7 @@ const enqueueSharedOutboxOperation = async (
     userId: input.userId,
     payload: input.payload,
     completion: input.completion,
+    ownerAwaitsCompletion: input.ownerAwaitsCompletion,
     status: permanent ? 'dead-letter' : 'pending',
     attempts: 0,
     nextAttemptAt: timestamp,
@@ -804,6 +940,36 @@ export const publishDurableSharedTimelineOperation = async <T = undefined>(
   return input.queuedResult
 }
 
+export type DurableEffectsPublication =
+  | { kind: 'applied'; result: JsonValue; entryId: string }
+  | { kind: 'admitted'; entryId: string }
+  | { kind: 'rejected'; entryId: string; reason: string }
+
+// The effects publishers' door to the outbox: the outcome is one of three typed values, and an applied one carries the
+// server's result. A permanent rejection is an outcome here, not an exception.
+export const publishDurableEffectsOperation = async (
+  input: { projectId: string; userId: string; operation: SharedTimelineOperation },
+): Promise<DurableEffectsPublication> => {
+  assert(isDurableSharedTimelineOperationKind(input.operation.kind), `Shared timeline operation ${input.operation.kind} is not durable.`)
+  const entry = await enqueueSharedOutboxOperation({
+    projectId: input.projectId,
+    userId: input.userId,
+    kind: input.operation.kind,
+    payload: serializeDurableOperationPayload(input.operation.payload),
+    ownerAwaitsCompletion: true,
+  })
+  try {
+    const flushed = await flushSharedOutboxOperation(input.projectId, input.userId, entry.id, { completionOwner: 'caller' })
+    if (flushed.status !== 'applied') return { kind: 'admitted', entryId: entry.id }
+    // Another drain recorded the result before this flush ran; returning it here is the owner's read.
+    if (flushed.completionOwner === 'background') await consumeSharedOutboxCompletion(input.projectId, input.userId, entry.id)
+    return { kind: 'applied', result: flushed.result, entryId: entry.id }
+  } catch (error) {
+    if (error instanceof SharedOutboxRejectedError) return { kind: 'rejected', entryId: entry.id, reason: error.message }
+    throw error
+  }
+}
+
 export const enqueueSharedAudioClipCreateOnFailure = async (
   input: { projectId: string; userId: string; assetKey: string; file: File; duration?: number; clipPayload: UploadedAudioClipPayload['clipPayload']; error?: unknown },
 ) => {
@@ -851,19 +1017,24 @@ type ClaimedOutboxEntry = SharedOutboxEntry & { claimToken: string }
 type SharedOutboxCompletionResult = {
   result: JsonValue
   createdAt: number
-  expiresAt: number
   completionOwner: 'background' | 'caller'
+  consumed: boolean
 }
 
 type SharedOutboxOperationResult =
   | { status: 'applied'; result: JsonValue; completionOwner: 'background' | 'caller' }
   | { status: 'missing' | 'pending' }
 
+type SharedOutboxOperationRead =
+  | SharedOutboxOperationResult
+  | { status: 'rejected'; lastError?: string }
+
+// Records written before completions stopped expiring still carry `expiresAt`; zod drops it, so no age decides anything.
 const sharedOutboxCompletionResultSchema = z.object({
   result: z.json(),
   createdAt: z.number(),
-  expiresAt: z.number(),
   completionOwner: z.enum(['background', 'caller']).optional(),
+  consumed: z.boolean().optional(),
 })
 
 const readCompletionResult = (value: LocalProjectStoredValue): SharedOutboxCompletionResult | null => {
@@ -872,8 +1043,8 @@ const readCompletionResult = (value: LocalProjectStoredValue): SharedOutboxCompl
   return {
     result: parsed.data.result,
     createdAt: parsed.data.createdAt,
-    expiresAt: parsed.data.expiresAt,
     completionOwner: parsed.data.completionOwner === 'caller' ? 'caller' : 'background',
+    consumed: parsed.data.consumed !== false,
   }
 }
 
@@ -978,26 +1149,27 @@ const completeClaimedEntry = async (
   const tx = db.transaction('syncState', 'readwrite')
   const store = tx.objectStore('syncState')
   const current = readEntry((await store.get(keyFor(entry.id)))?.value)
+  let completed = false
   if (current?.claimToken === entry.claimToken && current.claimOwner === outboxOwner) {
     const timestamp = now()
+    // The count cap collects consumed history only: a result its awaiting owner has not read stays the answer.
+    const consumed = !(current.ownerAwaitsCompletion && completionOwner === 'background')
     const completions = await store.getAll(outboxCompletionKeyRange(projectId, entry.userId))
-    const expired = completions.flatMap((row) => {
+    const stored: { key: string; completion: SharedOutboxCompletionResult }[] = []
+    for (const row of completions) {
       const completion = readCompletionResult(row.value)
-      return !completion || completion.expiresAt <= timestamp ? [row.key] : []
-    })
-    for (const key of expired) store.delete(key)
-    const active = completions
-      .flatMap((row) => {
-        const completion = readCompletionResult(row.value)
-        return completion && completion.expiresAt > timestamp ? [{ key: row.key, completion }] : []
-      })
+      if (completion) stored.push({ key: row.key, completion })
+      else store.delete(row.key)
+    }
+    const history = stored
+      .filter((row) => row.completion.consumed)
       .sort((left, right) => left.completion.createdAt - right.completion.createdAt)
-    for (const row of active.slice(0, Math.max(0, active.length + 1 - MAX_OUTBOX_COMPLETIONS_PER_USER))) {
+    for (const row of history.slice(0, Math.max(0, history.length + (consumed ? 1 : 0) - MAX_OUTBOX_COMPLETIONS_PER_USER))) {
       store.delete(row.key)
     }
     store.put({
       key: completionKeyFor(projectId, entry.userId, entry.id),
-      value: { result, createdAt: timestamp, expiresAt: timestamp + OUTBOX_COMPLETION_TTL_MS, completionOwner },
+      value: { result, createdAt: timestamp, completionOwner, consumed },
       updatedAt: timestamp,
     })
     if (entry.kind === 'clips.createUploadedAudio') {
@@ -1025,8 +1197,10 @@ const completeClaimedEntry = async (
     } else {
       store.delete(keyFor(entry.id))
     }
+    completed = true
   }
   await tx.done
+  if (completed) wakeSettlementObservers(projectId, entry.userId)
 }
 
 const settleClaimedEntryFailure = async (
@@ -1038,6 +1212,7 @@ const settleClaimedEntryFailure = async (
   const tx = db.transaction('syncState', 'readwrite')
   const store = tx.objectStore('syncState')
   const current = readEntry((await store.get(keyFor(entry.id)))?.value)
+  let didSettle = false
   if (current?.claimToken === entry.claimToken && current.claimOwner === outboxOwner) {
     const timestamp = now()
     const permanent = isPermanentSharedOperationError(error)
@@ -1053,7 +1228,7 @@ const settleClaimedEntryFailure = async (
       ...current,
       status: permanent ? 'dead-letter' : 'failed',
       attempts,
-      nextAttemptAt: permanent ? timestamp : timestamp + retryDelayMs(attempts),
+      nextAttemptAt: permanent ? timestamp : timestamp + sharedOutboxRetryDelayMs(attempts),
       lastError,
       claimOwner: undefined,
       claimToken: undefined,
@@ -1070,9 +1245,12 @@ const settleClaimedEntryFailure = async (
       }
     }
     store.put({ key: keyFor(current.id), value: settled, updatedAt: timestamp })
+    didSettle = true
   }
   await tx.done
-  return isPermanentSharedOperationError(error)
+  const terminal = didSettle && isPermanentSharedOperationError(error)
+  if (terminal) wakeSettlementObservers(projectId, entry.userId)
+  return terminal
 }
 
 const drainSharedOutbox = async (
@@ -1231,6 +1409,43 @@ export const flushSharedOutbox = async (
   return result.summary
 }
 
+// One readonly snapshot of the entry row and the completion record: a drain writes the record and removes the entry in one
+// transaction, so this never observes the in-between state. It is the only reader of an operation's outcome.
+export const readSharedOutboxOperation = async (
+  projectId: string,
+  userId: string,
+  operationId: string,
+): Promise<SharedOutboxOperationRead> => {
+  const db = await openLocalProjectDb(projectId)
+  const tx = db.transaction('syncState', 'readonly')
+  const [entryRow, completionRow] = await Promise.all([
+    tx.store.get(keyFor(operationId)),
+    tx.store.get(completionKeyFor(projectId, userId, operationId)),
+  ])
+  await tx.done
+  const completion = readCompletionResult(completionRow?.value)
+  if (completion) return { status: 'applied', result: completion.result, completionOwner: completion.completionOwner }
+  const entry = readEntry(entryRow?.value)
+  if (!entry || entry.userId !== userId) return { status: 'missing' }
+  if (entry.status === 'dead-letter') return { status: 'rejected', lastError: entry.lastError }
+  return { status: 'pending' }
+}
+
+// The awaiting owner marks a result read once it has bound it; the next completion's cap may then collect it.
+// A dead-letter row is the user's recovery item and is never touched here.
+export const consumeSharedOutboxCompletion = async (
+  projectId: string,
+  userId: string,
+  operationId: string,
+) => {
+  const db = await openLocalProjectDb(projectId)
+  const tx = db.transaction('syncState', 'readwrite')
+  const key = completionKeyFor(projectId, userId, operationId)
+  const completion = readCompletionResult((await tx.store.get(key))?.value)
+  if (completion && !completion.consumed) tx.store.put({ key, value: { ...completion, consumed: true }, updatedAt: now() })
+  await tx.done
+}
+
 export const flushSharedOutboxOperation = async (
   projectId: string,
   userId: string,
@@ -1240,18 +1455,12 @@ export const flushSharedOutboxOperation = async (
   return await serializeSharedOutboxFlush(projectId, userId, async () => {
     return await withSharedOutboxPublicationLock(projectId, userId, async (allowExpiredClaimRecovery) => {
       await retryOutboxFileCleanup(projectId, userId)
-      const before = (await listEntries(projectId, userId)).find((entry) => entry.id === operationId)
-      if (!before) {
-        const db = await openLocalProjectDb(projectId)
-        const completion = readCompletionResult((await db.get('syncState', completionKeyFor(projectId, userId, operationId)))?.value)
-        if (completion && completion.expiresAt > now()) {
-          return { status: 'applied' as const, result: completion.result, completionOwner: completion.completionOwner }
-        }
-        return { status: 'missing' as const }
-      }
-      if (before.status === 'dead-letter') {
+      await listEntries(projectId, userId)
+      const before = await readSharedOutboxOperation(projectId, userId, operationId)
+      if (before.status === 'rejected') {
         throw new SharedOutboxRejectedError(operationId, before.lastError ?? 'Shared change was rejected.')
       }
+      if (before.status !== 'pending') return before
       const drained = await drainSharedOutbox(
         projectId,
         userId,
@@ -1267,16 +1476,11 @@ export const flushSharedOutboxOperation = async (
           completionOwner: options.completionOwner === 'caller' ? 'caller' as const : 'background' as const,
         }
       }
-      const db = await openLocalProjectDb(projectId)
-      const current = readEntry((await db.get('syncState', keyFor(operationId)))?.value)
-      if (current?.status === 'dead-letter') {
-        throw new SharedOutboxRejectedError(operationId, current.lastError ?? 'Shared change was rejected.')
+      const after = await readSharedOutboxOperation(projectId, userId, operationId)
+      if (after.status === 'rejected') {
+        throw new SharedOutboxRejectedError(operationId, after.lastError ?? 'Shared change was rejected.')
       }
-      const completion = readCompletionResult((await db.get('syncState', completionKeyFor(projectId, userId, operationId)))?.value)
-      if (completion && completion.expiresAt > now()) {
-        return { status: 'applied' as const, result: completion.result, completionOwner: completion.completionOwner }
-      }
-      return { status: 'pending' as const }
+      return after.status === 'applied' ? after : { status: 'pending' as const }
     })
   })
 }

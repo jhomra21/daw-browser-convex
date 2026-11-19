@@ -1,9 +1,20 @@
 import { sha256 } from '@noble/hashes/sha2.js'
+import {
+  requirePcmRange,
+  validateAudioPcmSourceMetadata,
+  createAudioBufferPcmSourceDescriptor,
+  defaultDecodedAudioPageFrames,
+  getAudioBufferSessionIdentity,
+  type AudioPcmSourceDescriptor,
+  type DecodedAudioPage,
+  type RemoteMediaOperation,
+} from '@daw-browser/shared'
 import { ALL_FORMATS, AudioSampleSink, BlobSource, Input, UrlSource } from 'mediabunny'
+import { yieldToEventLoop } from './event-loop-yield'
 
 const sourceCacheBytes = 8 * 1024 * 1024
-const audioBufferSessionIds = new WeakMap<object, string>()
-export const defaultDecodedAudioPageFrames = 16_384
+export { defaultDecodedAudioPageFrames }
+export { getAudioBufferSessionIdentity }
 /** Per-range deadline for remote requests, including stalled headers or bodies. */
 export const defaultRemoteMediaRequestTimeoutMs = 120_000
 /** Total deadline shared by all range requests for one decode operation. */
@@ -13,57 +24,12 @@ export const defaultRemoteMediaMaximumBytes = 512 * 1024 * 1024
 /** Finite retry count keeps a reachable but failing remote source bounded. */
 export const defaultRemoteMediaMaxRetries = 3
 
-export const getAudioBufferSessionIdentity = (buffer: AudioBuffer) => {
-  const existing = audioBufferSessionIds.get(buffer)
-  if (existing) return existing
-  const identity = `buffer-session:${crypto.randomUUID()}`
-  audioBufferSessionIds.set(buffer, identity)
-  return identity
-}
-
-export type DecodedAudioPage = {
-  startFrame: number
-  frameCount: number
-  sampleRate: number
-  channelCount: number
-  planes: Float32Array[]
-}
-
 export type DecodeAudioPageSource = Blob | string | URL | Request
-
-export type AudioPcmSourceDescriptor = {
-  readonly identity: string
-  readonly contentHash?: string
-  readonly contentHashVerified?: boolean
-  readonly persistable?: boolean
-  readonly durationSec: number
-  readonly frameCount: number
-  readonly sampleRate: number
-  readonly channelCount: number
-  readonly readPages: (options?: {
-    startSec?: number
-    endSec?: number
-    startFrame?: number
-    endFrame?: number
-    signal?: AbortSignal
-    remoteOperation?: RemoteMediaOperation
-  }) => AsyncGenerator<DecodedAudioPage>
-}
 
 const hex = (bytes: Uint8Array) => Array.from(
   bytes,
   (byte) => byte.toString(16).padStart(2, '0'),
 ).join('')
-
-const yieldToEventLoop = () => new Promise<void>((resolve) => {
-  const channel = new MessageChannel()
-  channel.port1.onmessage = () => {
-    channel.port1.close()
-    channel.port2.close()
-    resolve()
-  }
-  channel.port2.postMessage(null)
-})
 
 export const sha256File = async (
   file: File,
@@ -71,14 +37,12 @@ export const sha256File = async (
   yieldControl: () => Promise<void> = yieldToEventLoop,
 ): Promise<string> => {
   const hash = sha256.create()
-  const chunkBytes = 1024 * 1024
-  let bytesSinceYield = 0
+  // About 0.4 ms of hashing per slice: queued native publication replies run between slices, not after a stream chunk.
+  const sliceBytes = 64 * 1024
   for await (const chunk of file.stream()) {
-    signal?.throwIfAborted()
-    hash.update(chunk)
-    bytesSinceYield += chunk.byteLength
-    if (bytesSinceYield >= chunkBytes) {
-      bytesSinceYield = 0
+    for (let offset = 0; offset < chunk.byteLength; offset += sliceBytes) {
+      signal?.throwIfAborted()
+      hash.update(chunk.subarray(offset, offset + sliceBytes))
       await yieldControl()
     }
   }
@@ -99,19 +63,6 @@ export type DecodeAudioPagesOptions = {
   remoteMaxRetries?: number
   fetchFn?: typeof fetch
   remoteOperation?: RemoteMediaOperation
-}
-
-export type RemoteMediaOperation = {
-  readonly signal: AbortSignal
-  readonly maximumBytes: number
-  readonly transferredBytes: () => number
-  readonly retryAttempts: () => number
-  readonly remainingMs: () => number
-  readonly abort: (reason?: Error | DOMException) => void
-  readonly dispose: () => void
-  readonly takeRetryDelay: () => number
-  readonly consumeRetry: () => boolean
-  readonly addBytes: (value: number) => void
 }
 
 const validPageFrames = (value: number) => Number.isSafeInteger(value) && value > 0
@@ -155,17 +106,6 @@ export const createRemoteMediaOperation = (
   }
 }
 
-const validateDescriptorMetadata = (metadata: Pick<AudioPcmSourceDescriptor, 'durationSec' | 'frameCount' | 'sampleRate' | 'channelCount'>) => {
-  if (!Number.isFinite(metadata.durationSec) || metadata.durationSec < 0) throw new Error('Audio source duration is invalid.')
-  if (!Number.isSafeInteger(metadata.frameCount) || metadata.frameCount < 0) throw new Error('Audio source frame count is invalid.')
-  if (!Number.isFinite(metadata.sampleRate) || metadata.sampleRate <= 0) throw new Error('Audio source sample rate is invalid.')
-  if (!Number.isSafeInteger(metadata.channelCount) || metadata.channelCount <= 0) throw new Error('Audio source channel count is invalid.')
-  const expectedDuration = metadata.frameCount / metadata.sampleRate
-  if (Math.abs(metadata.durationSec - expectedDuration) > 0.5 / metadata.sampleRate) {
-    throw new Error('Audio source duration does not match its frame metadata.')
-  }
-}
-
 const validatePage = (
   page: DecodedAudioPage,
   metadata: Pick<AudioPcmSourceDescriptor, 'sampleRate' | 'channelCount'>,
@@ -179,48 +119,6 @@ const validatePage = (
     || page.planes.length !== metadata.channelCount
     || page.planes.some((plane) => plane.length !== page.frameCount)
   ) throw new Error('Decoded audio page metadata or coverage is invalid.')
-}
-
-const createAudioBufferDescriptor = (input: {
-  identity: string
-  contentHash?: string
-  contentHashVerified?: boolean
-  persistable?: boolean
-  buffer: AudioBuffer
-}): AudioPcmSourceDescriptor => {
-  const metadata = {
-    durationSec: input.buffer.length / input.buffer.sampleRate,
-    frameCount: input.buffer.length,
-    sampleRate: input.buffer.sampleRate,
-    channelCount: input.buffer.numberOfChannels,
-  }
-  validateDescriptorMetadata(metadata)
-  return {
-    identity: input.identity,
-    contentHash: input.contentHash,
-    contentHashVerified: input.contentHashVerified === true,
-    persistable: input.persistable === true && input.contentHashVerified === true,
-    ...metadata,
-    readPages: async function* (options = {}) {
-      const pageFrames = defaultDecodedAudioPageFrames
-      const startFrame = Math.max(0, options.startFrame ?? Math.ceil((options.startSec ?? 0) * metadata.sampleRate))
-      const endFrame = Math.min(metadata.frameCount, options.endFrame ?? Math.ceil((options.endSec ?? metadata.durationSec) * metadata.sampleRate))
-      if (!validFrameBound(startFrame) || !validFrameBound(endFrame) || endFrame < startFrame) {
-        throw new Error('Audio source frame range is invalid.')
-      }
-      options.signal?.throwIfAborted()
-      for (let frame = startFrame; frame < endFrame; frame += pageFrames) {
-        options.signal?.throwIfAborted()
-        const frameCount = Math.min(pageFrames, endFrame - frame)
-        const planes = Array.from({ length: metadata.channelCount }, (_, channelIndex) => {
-          const plane = new Float32Array(frameCount)
-          input.buffer.copyFromChannel(plane, channelIndex, frame)
-          return plane
-        })
-        yield { startFrame: frame, frameCount, sampleRate: metadata.sampleRate, channelCount: metadata.channelCount, planes }
-      }
-    },
-  }
 }
 
 const isAudioBufferSource = (
@@ -243,26 +141,33 @@ export const createAudioPcmSourceDescriptor = (input: {
   pageFrames?: number
   fetchFn?: typeof fetch
 }): AudioPcmSourceDescriptor => {
-  validateDescriptorMetadata(input)
-  if (isAudioBufferSource(input.source)) {
-    if (
-      input.source.length !== input.frameCount
-      || input.source.sampleRate !== input.sampleRate
-      || input.source.numberOfChannels !== input.channelCount
-    ) throw new Error('Audio source buffer metadata does not match its descriptor.')
-    return createAudioBufferDescriptor({
-      identity: input.identity,
-      contentHash: input.contentHash,
-      contentHashVerified: input.contentHashVerified,
-      persistable: input.persistable,
-      buffer: input.source,
-    })
-  }
-  const source = input.source
+  validateAudioPcmSourceMetadata(input)
   const pageFrames = input.pageFrames ?? defaultDecodedAudioPageFrames
   if (!validPageFrames(pageFrames) || pageFrames > defaultDecodedAudioPageFrames) {
     throw new Error(`Audio source page size must be at most ${defaultDecodedAudioPageFrames} frames.`)
   }
+  if (isAudioBufferSource(input.source)) {
+    const buffer = input.source
+    if (
+      buffer.length !== input.frameCount
+      || buffer.sampleRate !== input.sampleRate
+      || buffer.numberOfChannels !== input.channelCount
+    ) throw new Error('Audio source buffer metadata does not match its descriptor.')
+    return createAudioBufferPcmSourceDescriptor({
+      identity: input.identity,
+      contentHash: input.contentHash,
+      contentHashVerified: input.contentHashVerified,
+      persistable: input.persistable,
+      length: buffer.length,
+      sampleRate: buffer.sampleRate,
+      numberOfChannels: buffer.numberOfChannels,
+      pageFrames,
+      copyFromChannel: (destination, channelNumber, bufferOffset) => (
+        buffer.copyFromChannel(destination, channelNumber, bufferOffset)
+      ),
+    })
+  }
+  const source = input.source
   const contentHashVerified = source instanceof Blob && input.contentHashVerified === true
   return {
     identity: input.identity,
@@ -274,22 +179,20 @@ export const createAudioPcmSourceDescriptor = (input: {
     sampleRate: input.sampleRate,
     channelCount: input.channelCount,
     readPages: async function* (options = {}) {
-      const startFrame = options.startFrame ?? (options.startSec === undefined
+      const requestedStartFrame = options.startFrame ?? (options.startSec === undefined
         ? 0
         : Math.ceil(options.startSec * input.sampleRate))
-      const endFrame = options.endFrame ?? (options.endSec === undefined
+      const requestedEndFrame = options.endFrame ?? (options.endSec === undefined
         ? input.frameCount
         : Math.ceil(options.endSec * input.sampleRate))
-      if (!validFrameBound(startFrame) || !validFrameBound(endFrame) || endFrame < startFrame || endFrame > input.frameCount) {
-        throw new Error('Audio source frame range is invalid.')
-      }
-      let expectedStartFrame = startFrame
+      const range = requirePcmRange(requestedStartFrame, requestedEndFrame, input.frameCount)
+      let expectedStartFrame = range.startFrame
       for await (const page of decodeAudioPages(source, {
         ...options,
-        startSec: startFrame / input.sampleRate,
-        endSec: endFrame / input.sampleRate,
-        startFrame,
-        endFrame,
+        startSec: range.startFrame / input.sampleRate,
+        endSec: range.endFrame / input.sampleRate,
+        startFrame: range.startFrame,
+        endFrame: range.endFrame,
         pageFrames,
         fetchFn: input.fetchFn,
         remoteOperation: options.remoteOperation,
@@ -298,7 +201,7 @@ export const createAudioPcmSourceDescriptor = (input: {
         expectedStartFrame += page.frameCount
         yield page
       }
-      if (expectedStartFrame !== endFrame) throw new Error('Decoded audio pages do not cover the requested range exactly.')
+      if (expectedStartFrame !== range.endFrame) throw new Error('Decoded audio pages do not cover the requested range exactly.')
     },
   }
 }

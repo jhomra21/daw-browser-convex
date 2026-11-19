@@ -20,6 +20,7 @@ import {
 } from '@daw-browser/shared'
 import { useSteppedValueControl } from '~/hooks/useSteppedValueControl'
 import { cn } from '~/lib/utils'
+import { formatDeviceFrequency, formatDeviceMilliseconds, formatDevicePercent } from '~/lib/device-value-format'
 
 type DelayProps = {
   params: DelayParams
@@ -35,9 +36,8 @@ type DelayProps = {
 const DEFAULT_PARAMS = createDefaultDelayParams()
 const DIVISIONS: DelaySyncDivision[] = ['1/16', '1/8', '1/4', '1/2', '1/1']
 
-const formatPercent = (value: number) => `${Math.round(value * 100)}%`
-const formatMs = (value: number) => `${Math.round(value)} ms`
-const formatFrequency = (value: number) => value >= 1000 ? `${(value / 1000).toFixed(1)} kHz` : `${Math.round(value)} Hz`
+const formatMs = (value: number) => formatDeviceMilliseconds(value, 0)
+const formatFrequency = (value: number) => formatDeviceFrequency(value, 1)
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 const normalizeLowCut = (value: number, highCutHz: number) => Math.round(clamp(value, DELAY_LOW_CUT_HZ_MIN, Math.min(DELAY_LOW_CUT_HZ_MAX, highCutHz - 1)))
@@ -60,6 +60,7 @@ function DelayValueStrip(props: {
   min: number
   max: number
   step: number
+  resetValue: number
   disabled: boolean
   onValueChange: (value: number) => void
 }) {
@@ -79,6 +80,9 @@ function DelayValueStrip(props: {
       return 10 ** (logMin + normalizedNext * (logMax - logMin))
     },
   })
+  const handleDoubleClick = () => {
+    if (!props.disabled) control.commitValue(props.resetValue)
+  }
 
   return (
     <div
@@ -93,6 +97,10 @@ function DelayValueStrip(props: {
       class={props.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-ns-resize'}
       onPointerDown={control.onPointerDown}
       onKeyDown={control.handleKeyDown}
+      onKeyUp={control.handleKeyUp}
+      onBlur={control.handleBlur}
+      onWheel={control.handleWheel}
+      onDblClick={handleDoubleClick}
     >
       <DeviceValueStrip value={props.valueLabel} valueClass="text-left" />
     </div>
@@ -230,8 +238,8 @@ export default function Delay(props: DelayProps) {
             />
             <div class="grid grid-cols-[4.2rem_minmax(0,1fr)_minmax(0,1fr)] gap-1">
               <DeviceToggleButton label="Filter" active={props.params.filterEnabled} disabled={!props.params.enabled} onClick={() => props.onChange({ filterEnabled: !props.params.filterEnabled })} />
-              <DelayValueStrip label="Delay low cut frequency" value={props.params.lowCutHz} valueLabel={formatFrequency(props.params.lowCutHz)} min={DELAY_LOW_CUT_HZ_MIN} max={DELAY_LOW_CUT_HZ_MAX} step={1} disabled={!props.params.enabled || !props.params.filterEnabled} onValueChange={updateAutomatedLowCut} />
-              <DelayValueStrip label="Delay high cut frequency" value={props.params.highCutHz} valueLabel={formatFrequency(props.params.highCutHz)} min={DELAY_HIGH_CUT_HZ_MIN} max={DELAY_HIGH_CUT_HZ_MAX} step={100} disabled={!props.params.enabled || !props.params.filterEnabled} onValueChange={updateAutomatedHighCut} />
+              <DelayValueStrip label="Delay low cut frequency" value={props.params.lowCutHz} valueLabel={formatFrequency(props.params.lowCutHz)} min={DELAY_LOW_CUT_HZ_MIN} max={DELAY_LOW_CUT_HZ_MAX} step={1} resetValue={DEFAULT_PARAMS.lowCutHz} disabled={!props.params.enabled || !props.params.filterEnabled} onValueChange={updateAutomatedLowCut} />
+              <DelayValueStrip label="Delay high cut frequency" value={props.params.highCutHz} valueLabel={formatFrequency(props.params.highCutHz)} min={DELAY_HIGH_CUT_HZ_MIN} max={DELAY_HIGH_CUT_HZ_MAX} step={100} resetValue={DEFAULT_PARAMS.highCutHz} disabled={!props.params.enabled || !props.params.filterEnabled} onValueChange={updateAutomatedHighCut} />
             </div>
           </div>
 
@@ -243,8 +251,8 @@ export default function Delay(props: DelayProps) {
         <div class="mt-auto grid grid-cols-4 gap-3 pb-2 pt-3">
           <Knob class="px-1 py-1" label="Low Cut" valueLabel={formatFrequency(props.params.lowCutHz)} value={props.params.lowCutHz} resetValue={DEFAULT_PARAMS.lowCutHz} min={DELAY_LOW_CUT_HZ_MIN} max={DELAY_LOW_CUT_HZ_MAX} step={1} logarithmic disabled={!props.params.enabled || !props.params.filterEnabled} automationRange={automationRange('delay.lowCutHz')} automated={!!automationRange('delay.lowCutHz')} onAutomationSelect={() => props.onAutomationParameterTouch?.('delay.lowCutHz')} onValueChange={updateAutomatedLowCut} />
           <Knob class="px-1 py-1" label="High Cut" valueLabel={formatFrequency(props.params.highCutHz)} value={props.params.highCutHz} resetValue={DEFAULT_PARAMS.highCutHz} min={DELAY_HIGH_CUT_HZ_MIN} max={DELAY_HIGH_CUT_HZ_MAX} step={1} logarithmic disabled={!props.params.enabled || !props.params.filterEnabled} automationRange={automationRange('delay.highCutHz')} automated={!!automationRange('delay.highCutHz')} onAutomationSelect={() => props.onAutomationParameterTouch?.('delay.highCutHz')} onValueChange={updateAutomatedHighCut} />
-          <Knob class="px-1 py-1" label="Feedback" valueLabel={formatPercent(props.params.feedback)} value={props.params.feedback} resetValue={DEFAULT_PARAMS.feedback} min={DELAY_FEEDBACK_MIN} max={DELAY_FEEDBACK_MAX} step={0.01} disabled={!props.params.enabled} automationRange={automationRange('delay.feedback')} automated={!!automationRange('delay.feedback')} onAutomationSelect={() => props.onAutomationParameterTouch?.('delay.feedback')} onValueChange={(feedback) => changeAutomated('delay.feedback', { feedback })} />
-          <Knob class="px-1 py-1" label="Dry/Wet" valueLabel={formatPercent(props.params.dryWet)} value={props.params.dryWet} resetValue={DEFAULT_PARAMS.dryWet} min={DELAY_DRY_WET_MIN} max={DELAY_DRY_WET_MAX} step={0.01} disabled={!props.params.enabled} automationRange={automationRange('delay.dryWet')} automated={!!automationRange('delay.dryWet')} onAutomationSelect={() => props.onAutomationParameterTouch?.('delay.dryWet')} onValueChange={(dryWet) => changeAutomated('delay.dryWet', { dryWet })} />
+              <Knob class="px-1 py-1" label="Feedback" valueLabel={formatDevicePercent(props.params.feedback)} value={props.params.feedback} resetValue={DEFAULT_PARAMS.feedback} min={DELAY_FEEDBACK_MIN} max={DELAY_FEEDBACK_MAX} step={0.01} disabled={!props.params.enabled} automationRange={automationRange('delay.feedback')} automated={!!automationRange('delay.feedback')} onAutomationSelect={() => props.onAutomationParameterTouch?.('delay.feedback')} onValueChange={(feedback) => changeAutomated('delay.feedback', { feedback })} />
+              <Knob class="px-1 py-1" label="Dry/Wet" valueLabel={formatDevicePercent(props.params.dryWet)} value={props.params.dryWet} resetValue={DEFAULT_PARAMS.dryWet} min={DELAY_DRY_WET_MIN} max={DELAY_DRY_WET_MAX} step={0.01} disabled={!props.params.enabled} automationRange={automationRange('delay.dryWet')} automated={!!automationRange('delay.dryWet')} onAutomationSelect={() => props.onAutomationParameterTouch?.('delay.dryWet')} onValueChange={(dryWet) => changeAutomated('delay.dryWet', { dryWet })} />
         </div>
       </div>
     </EffectShell>

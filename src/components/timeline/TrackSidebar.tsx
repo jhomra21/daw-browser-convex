@@ -8,6 +8,7 @@ import {
   onCleanup,
 } from "solid-js";
 import { createStore, produce } from "solid-js/store";
+import { useDrag } from "~/hooks/useDrag";
 import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
 import {
   assertDefined,
@@ -54,6 +55,7 @@ import {
 } from "./track-send-targets";
 import { trackNumberById } from "~/lib/track-sidebar-mixer";
 import TrackSidebarRow from "./TrackSidebarRow";
+import type { RecordingTargetLock } from "~/lib/track-recording-target";
 
 export type TrackSidebarProps = {
   scrollRef: (el: HTMLDivElement) => void;
@@ -82,6 +84,7 @@ export type TrackSidebarProps = {
     onToggleMute: (trackId: Track["id"]) => void;
     onToggleSolo: (trackId: Track["id"]) => void;
     recordArmTrackId: Track["id"] | null;
+    recordingTargetLock: RecordingTargetLock;
     onToggleRecordArm: (trackId: Track["id"]) => void;
     onToggleTrackCollapsed: (trackId: Track["id"]) => void;
     onSetTracksCollapsed: (
@@ -153,7 +156,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   }>();
   const [suppressTrackClickId, setSuppressTrackClickId] =
     createSignal<Track["id"]>();
-  let cleanupAutomationResize: (() => void) | undefined;
   let returnSectionElement: HTMLDivElement | undefined;
 
   createEffect(() => {
@@ -161,14 +163,11 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       setMeters(
         produce((current) => {
           for (const [trackId, levels] of levelsByTrackId) {
-            const next = {
-              left: clampUnit(levels.left),
-              right: clampUnit(levels.right),
-            };
+            const left = clampUnit(levels.left);
+            const right = clampUnit(levels.right);
             const previous = current[trackId];
-            if (previous?.left === next.left && previous.right === next.right)
-              continue;
-            current[trackId] = next;
+            if (previous?.left === left && previous.right === right) continue;
+            current[trackId] = { left, right };
           }
         }),
       );
@@ -657,35 +656,30 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     sidebar().onVolumeChange(trackId, volume);
   };
 
+  let automationResize:
+    | { trackId: Track["id"]; startY: number; startHeight: number }
+    | undefined;
+  const automationResizeDrag = useDrag({
+    onDragMove: (pos) => {
+      if (!automationResize) return;
+      props.automation.actions.resizeTrackLane(
+        automationResize.trackId,
+        clampAutomationLaneHeight(
+          automationResize.startHeight + pos.y - automationResize.startY,
+        ),
+      );
+    },
+  });
   const startAutomationResize = (
     trackId: Track["id"],
     startHeight: number,
     event: PointerEvent,
   ) => {
-    event.preventDefault();
     event.stopPropagation();
-    const startY = event.clientY;
-    const move = (moveEvent: PointerEvent) => {
-      props.automation.actions.resizeTrackLane(
-        trackId,
-        clampAutomationLaneHeight(startHeight + moveEvent.clientY - startY),
-      );
-    };
-    const cleanup = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", cleanup);
-      window.removeEventListener("pointercancel", cleanup);
-      if (cleanupAutomationResize === cleanup)
-        cleanupAutomationResize = undefined;
-    };
-    cleanupAutomationResize?.();
-    cleanupAutomationResize = cleanup;
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", cleanup, { once: true });
-    window.addEventListener("pointercancel", cleanup, { once: true });
+    if (automationResizeDrag.isDragging()) return;
+    automationResize = { trackId, startY: event.clientY, startHeight };
+    automationResizeDrag.onPointerDown(event);
   };
-
-  onCleanup(() => cleanupAutomationResize?.());
 
   return (
     <div

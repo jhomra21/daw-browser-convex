@@ -10,7 +10,7 @@ import { useProjectPersistedState } from './useProjectPersistedState'
 
 type UseTimelineProjectMixOptions = {
   projectId: Accessor<string>
-  onLocalSaveFailed?: (message: string) => void
+  onLocalSaveFailed?: (projectId: string, message: string) => void
 }
 
 const loadProjectMixState = async (projectId: string): Promise<ProjectMixState | undefined> => {
@@ -30,8 +30,8 @@ export function useTimelineProjectMix(options: UseTimelineProjectMixOptions) {
     loadAsync: loadProjectMixState,
     save: () => undefined,
     saveAsync: saveProjectMixState,
-    onSaveAsyncError: (error) => {
-      options.onLocalSaveFailed?.(error instanceof Error ? error.message : 'Project mix could not be saved.')
+    onSaveAsyncError: (projectId, error) => {
+      options.onLocalSaveFailed?.(projectId, error instanceof Error ? error.message : 'Project mix could not be saved.')
     },
   })
 

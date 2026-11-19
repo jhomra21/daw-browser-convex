@@ -15,7 +15,7 @@ export const nativeVst3WorkerArtifactVersion = '3'
 export const nativeVst3WorkerManifestVersion = 1
 export const nativeVst3WorkerStartupProtocolVersion = 1
 export const nativeVst3WorkerControlProtocolVersion = vst3WorkerProtocolVersion
-export const nativeVst3WorkerTransportAbiVersion = 6
+export const nativeVst3WorkerTransportAbiVersion = 7
 
 const requestIdSchema = z.string().min(1).max(96).regex(/^[A-Za-z0-9._-]+$/)
 const uuidSchema = z.string().uuid()
@@ -208,6 +208,37 @@ export const isPluginHostProtocolCompatible = (version: number) => (
   version >= pluginHostProtocolCompatibility.minimum
   && version <= pluginHostProtocolCompatibility.maximum
 )
+
+export const nativeVst3WorkerFaultOrigins = Object.freeze({
+  unknown: 0,
+  childExit: 1,
+  childSignal: 2,
+  transportFault: 3,
+  dispatchFailure: 4,
+  callbackMissTermination: 5,
+  startupFailure: 6,
+  startupException: 7,
+  configureFailure: 8,
+  configureException: 9,
+  processFailure: 10,
+  processException: 11,
+  workerNotification: 12,
+  unknownWorkerNotification: 13,
+  offlineCompletionFailure: 14,
+  controlIoFailure: 15,
+  launchNotTrusted: 16,
+})
+export const nativeVst3ZeroDiagnosticFaultOrigin = nativeVst3WorkerFaultOrigins.workerNotification
+export const nativeVst3LaunchNotTrustedFaultOrigin = nativeVst3WorkerFaultOrigins.launchNotTrusted
+export const nativeVst3PluginFaultOrigins: ReadonlySet<number> = new Set([
+  nativeVst3WorkerFaultOrigins.childExit,
+  nativeVst3WorkerFaultOrigins.childSignal,
+  nativeVst3WorkerFaultOrigins.configureFailure,
+  nativeVst3WorkerFaultOrigins.configureException,
+  nativeVst3WorkerFaultOrigins.processFailure,
+  nativeVst3WorkerFaultOrigins.processException,
+  nativeVst3WorkerFaultOrigins.workerNotification,
+])
 
 const workerEnvelopeSchemaV2 = z.object({
   version: z.literal(vst3WorkerProtocolVersion),

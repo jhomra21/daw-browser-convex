@@ -39,9 +39,9 @@ describe('routing transitions', () => {
       ramp,
       gain: {
         value: 1,
-        cancelScheduledValues: (time: number) => ramp.push(['cancel', 0, time]),
-        setValueAtTime: (value: number, time: number) => ramp.push(['set', value, time]),
-        linearRampToValueAtTime: (value: number, time: number) => ramp.push(['ramp', value, time]),
+        cancelScheduledValues: (time: number) => { ramp.push(['cancel', 0, time]) },
+        setValueAtTime: (value: number, time: number) => { ramp.push(['set', value, time]) },
+        linearRampToValueAtTime: (value: number, time: number) => { ramp.push(['ramp', value, time]) },
       },
     }
   }
@@ -120,6 +120,36 @@ describe('routing transitions', () => {
       throw new Error('Disposed owner scheduled a new transition.')
     })
     expect(scheduled.length).toBe(scheduledCount)
+    for (const timer of timers) clearTimeout(timer)
+  })
+
+  test('settles only after fade-in scheduling succeeds', () => {
+    const { gain } = createTestGain()
+    const scheduled: Array<() => void> = []
+    const timers: Array<ReturnType<typeof setTimeout>> = []
+    const owner = createGainTransitionOwner({ gain }, () => 2, {
+      schedule: (callback) => {
+        scheduled.push(callback)
+        const timer = setTimeout(() => undefined, 60_000)
+        timers.push(timer)
+        return timer
+      },
+      clear: clearTimeout,
+    })
+    let settled = 0
+    owner.request(() => {}, () => { settled += 1 })
+    scheduled[0]?.()
+    expect(settled).toBe(1)
+
+    const originalRamp = gain.linearRampToValueAtTime
+    gain.linearRampToValueAtTime = (value, time) => {
+      if (value === 1) throw new Error('Fade-in failed.')
+      originalRamp(value, time)
+    }
+    owner.request(() => {}, () => { settled += 1 })
+    expect(() => scheduled[1]?.()).toThrow('Fade-in failed.')
+    expect(settled).toBe(1)
+    owner.dispose()
     for (const timer of timers) clearTimeout(timer)
   })
 })

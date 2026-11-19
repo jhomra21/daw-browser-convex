@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { createDefaultDrumRackParams, createDefaultSamplerParams, createDefaultSynthParams, type DrumRackPadSample, type SamplerZone } from '@daw-browser/shared'
+import { createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams, createDefaultSynthParams, type DrumRackPadSample, type SamplerZone } from '@daw-browser/shared'
 import { createDrumRackRuntime, scheduleDrumRackHit } from './drum-rack-runtime'
 import { createSamplerRuntime } from './sampler-runtime'
 import { sampledInstrumentRegionForBuffer, sampledInstrumentRegionIdentity } from './sampled-instrument-region'
@@ -159,6 +159,82 @@ const createTrack = (): Track<AudioBuffer> => ({
 })
 
 describe('Instrument runtime', () => {
+  test('reports granular as dropped when no AudioContext can install it', async () => {
+    const runtime = createInstrumentRuntime({
+      ensureAudio: () => {},
+      getAudioContext: () => null,
+      getBpm: () => 120,
+      timelineToCtxTime: (timeSec) => timeSec,
+      ensureTrackInput: () => { throw new Error('No track input without an AudioContext.') },
+      sources: { add: () => {}, remove: () => {}, snapshot: () => [], clear: () => {}, stopClip: () => {} },
+    })
+
+    await expect(runtime.setTrackGranular('track-1', createDefaultGranularParams())).resolves.toBe('dropped')
+  })
+
+  test('closes stale granular runtimes after creation and supersedes pending installs', async () => {
+    const moduleLoad = Promise.withResolvers<void>()
+    const nodes: Array<{ disconnected: number; port: { close: () => void } }> = []
+    const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'AudioWorkletNode')
+    Object.defineProperty(globalThis, 'AudioWorkletNode', {
+      configurable: true,
+      value: function () {
+        const node = {
+          parameters: new Map(),
+          connect: () => {},
+          disconnect: () => { node.disconnected += 1 },
+          onprocessorerror: null,
+          disconnected: 0,
+          port: { onmessage: null, postMessage: () => {}, close: () => {} },
+        }
+        nodes.push(node)
+        return node
+      },
+    })
+    try {
+      const context = Object.assign(Object.create(null), {
+        currentTime: 0,
+        audioWorklet: { addModule: () => moduleLoad.promise },
+      })
+      const audio = createTestAudio()
+      const runtime = createInstrumentRuntime({
+        ensureAudio: () => {},
+        getAudioContext: () => context,
+        getBpm: () => 120,
+        timelineToCtxTime: (timeSec) => timeSec,
+        ensureTrackInput: () => audio.ctx.createGain(),
+        sources: { add: () => {}, remove: () => {}, snapshot: () => [], clear: () => {}, stopClip: () => {} },
+      })
+      const params = createDefaultGranularParams()
+      const stale = runtime.setTrackGranular('track-1', params)
+      const current = runtime.setTrackGranular('track-1', params)
+      moduleLoad.resolve()
+
+      await expect(stale).resolves.toBe('superseded')
+      await expect(current).resolves.toBe('applied')
+      expect(nodes).toHaveLength(2)
+      expect(nodes[0]?.disconnected).toBe(1)
+      expect(nodes[1]?.disconnected).toBe(0)
+
+      const installBuffer = createSampledBuffer(1)
+      const installing = runtime.setTrackGranular('track-install', params, {
+        assetKey: 'asset-install',
+        ...installBuffer,
+      })
+      await Promise.resolve()
+      await Promise.resolve()
+      const replacement = runtime.setTrackGranular('track-install', params)
+      await expect(installing).resolves.toBe('superseded')
+      await expect(replacement).resolves.toBe('applied')
+      expect(nodes[2]?.disconnected).toBe(1)
+      runtime.clearTrackInstrument('track-1')
+      runtime.clearTrackInstrument('track-install')
+    } finally {
+      if (originalDescriptor) Object.defineProperty(globalThis, 'AudioWorkletNode', originalDescriptor)
+      else Reflect.deleteProperty(globalThis, 'AudioWorkletNode')
+    }
+  })
+
   test('keeps Synth and Drum Rack scheduling exclusive per track', () => {
     const audio = createTestAudio()
     const params = createDefaultDrumRackParams()
@@ -217,6 +293,24 @@ const createMidiClip = (pitch: number): Clip<AudioBuffer> => ({
 })
 
 describe('Drum Rack runtime', () => {
+  test('reports applied configuration and equal skip', () => {
+    const audio = createTestAudio()
+    const params = createDefaultDrumRackParams()
+    const runtime = createDrumRackRuntime({
+      ensureAudio: () => {},
+      getAudioContext: () => audio.ctx,
+      getBpm: () => 120,
+      timelineToCtxTime: (time) => time,
+      ensureTrackInput: () => audio.ctx.createGain(),
+      sources: { add: () => {}, remove: () => {}, stopClip: () => {}, clear: () => {}, snapshot: () => [] },
+      getArpeggiator: () => undefined,
+    })
+
+    expect(runtime.setTrackDrumRack('track-1', params)).toBe('applied')
+    expect(runtime.setTrackDrumRack('track-1', params)).toBe('skipped')
+    runtime.clear()
+  })
+
   test('schedules live MIDI notes through note-to-pad routing', () => {
     const audio = createTestAudio()
     const params = createDefaultDrumRackParams()

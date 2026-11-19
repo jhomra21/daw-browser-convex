@@ -76,7 +76,7 @@ const readNativeReleaseArtifactManifest = async (
   return value
 }
 
-export const validateNativeReleaseArtifactPlan = (
+const validateNativeReleaseArtifactPlan = (
   artifacts: readonly NativeReleaseArtifact[],
 ): readonly NativeReleaseArtifact[] => {
   if (artifacts.length !== artifactNames.length) throw new Error("Native release artifact plan is incomplete.")

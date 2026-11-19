@@ -9,7 +9,7 @@ import {
 } from './prepared-stretch-store'
 import { preparedStretchTestLockManager } from './prepared-stretch-test-lock-manager'
 import { createAudioStretchReadPlan } from './audio-stretch-read-plan'
-import type { AudioPcmSourceDescriptor } from './media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 
 const source: AudioPcmSourceDescriptor = {
   identity: 'source',

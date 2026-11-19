@@ -1,0 +1,89 @@
+{
+ "name": "ae08-f20-m4-anchors",
+ "sequence": 14,
+ "createdAt": "2026-11-12T15:58:26.467Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:473:mutant:b6f5",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        activeSnapshot = { ...folded, revision: candidate.graph.revision }\n",
+   "new": "        activeSnapshot = {\n          ...folded,\n          revision: candidate.graph.revision,\n          transport: { ...folded.transport, loopEnabled: runLoop.loopEnabled },\n        }\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:473:mutant:portable",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        activeSnapshot = { ...folded, revision: candidate.graph.revision }\n",
+   "new": "        activeSnapshot = {\n          ...folded,\n          revision: candidate.graph.revision,\n          transport: { ...folded.transport, loopEnabled: runLoop.loopEnabled },\n        }\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:502:mutant:b6f5c",
+    "expect",
+    "fails",
+    "#1"
+   ],
+   "old": "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+   "new": "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:502:mutant:playback",
+    "expect",
+    "fails",
+    "#1"
+   ],
+   "old": "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+   "new": "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:509:mutant:b6f5c",
+    "expect",
+    "fails",
+    "#0"
+   ],
+   "old": "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+   "new": "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:509:mutant:playback",
+    "expect",
+    "fails",
+    "#0"
+   ],
+   "old": "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+   "new": "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 step 5 (F20, M4): the adoption commit in the portable controller now also carries the run loop into the committed snapshot, so the assignment that arms 473 delete spans five lines. The mutant keeps its meaning (drop the committed snapshot of an adoption) and is run alone with --only (see PHASE8-STEP5-F20.md). The watched hashes of the controller and the two witness files are not recorded: they move only on --full. The arms 502 and 509 (b6f5c, playback) record the clip-move witness that step 4 renamed when a MIDI clip move became an adoption; it is recorded under its new name, which their mutants still fail.",
+  "expectationsSha256": "499a810b8ca8921c7024968b1b95c50fffde15167f3fe397bada102b9355d5ec"
+ }
+}

@@ -7,7 +7,7 @@ import {
 } from '@daw-browser/external-plugins'
 import { parseExternalPluginJsonValue } from '~/lib/external-plugin-json'
 import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectEntityRow } from '~/lib/local-project-db'
-import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
+import { notifyLocalProjectChanged, subscribeToLocalProjectChanges } from '~/lib/local-project-changes'
 import { mixedOrderFromRows, normalizeMixedEffectEntityRows } from '~/lib/mixed-effect-order'
 import {
   localVstStateArtifactLocation,
@@ -317,6 +317,33 @@ export const listLocalExternalProcessors = async (projectId: string): Promise<Ex
   const db = await openLocalProjectDb(projectId)
   const rows = await db.getAllFromIndex('entities', 'by-kind', externalPluginEntityKind)
   return rows.map((row) => parseExternalProcessor(parseExternalPluginJsonValue(row.value), row.id))
+}
+
+// The mounted project's processor list, kept until a local project change invalidates it, so a playback compile of a project
+// that did not change reads no IndexedDB. Every writer above notifies after its transaction commits, so a read that starts
+// after a write sees it and a read in flight during one is dropped.
+export const createLocalExternalProcessorCache = (list: (projectId: string) => Promise<ExternalProcessor[]> = listLocalExternalProcessors) => {
+  type Entry = { projectId: string; processors: Promise<ExternalProcessor[]> | undefined; stop: () => void }
+  let entry: Entry | undefined
+  const dispose = () => {
+    entry?.stop()
+    entry = undefined
+  }
+  const read = (projectId: string) => {
+    if (entry?.projectId !== projectId) {
+      dispose()
+      const created: Entry = { projectId, processors: undefined, stop: () => undefined }
+      created.stop = subscribeToLocalProjectChanges(projectId, () => { created.processors = undefined })
+      entry = created
+    }
+    const current = entry
+    if (current.processors) return current.processors
+    const pending = list(projectId)
+    current.processors = pending
+    pending.catch(() => { if (current.processors === pending) current.processors = undefined })
+    return pending
+  }
+  return { read, dispose }
 }
 
 export const getLocalExternalProcessor = async (

@@ -70,6 +70,7 @@ type LaunchIdentityInput = {
   readonly listenerPids: readonly number[]
   readonly processes: readonly ProcessIdentity[]
   readonly websocketUrl: string
+  readonly observe?: (predicate: string, matched: boolean) => void
 }
 
 type LaunchIdentityResult =
@@ -258,23 +259,31 @@ const commandContainsArgument = (command: string, argument: string): boolean => 
 
 export const verifyElectronLaunchIdentity = (input: LaunchIdentityInput): LaunchIdentityResult => {
   const root = input.processes.find((process) => process.pid === input.rootPid)
+  input.observe?.("root-present", root !== undefined)
   if (!root) return { verified: false, reason: "Electron root process exited before attachment." }
+  input.observe?.("root-owned-group", root.processGroupId === input.rootPid)
   if (root.processGroupId !== input.rootPid) {
     return { verified: false, reason: "Electron process group is not runner-owned." }
   }
   const executableBasename = path.basename(input.executablePath)
-  if (!root.command.startsWith(input.executablePath)
-    && !root.command.startsWith(`${executableBasename} `)
-    && root.command !== executableBasename) {
+  const executableMatches = root.command.startsWith(input.executablePath)
+    || root.command.startsWith(`${executableBasename} `) || root.command === executableBasename
+  input.observe?.("root-executable", executableMatches)
+  if (!executableMatches) {
     return { verified: false, reason: "Electron root executable identity does not match." }
   }
-  if (!commandContainsArgument(root.command, `--user-data-dir=${input.profilePath}`)) {
+  const profileMatches = commandContainsArgument(root.command, `--user-data-dir=${input.profilePath}`)
+  input.observe?.("root-profile", profileMatches)
+  if (!profileMatches) {
     return { verified: false, reason: "Electron profile identity does not match." }
   }
-  if (!commandContainsArgument(root.command, "--remote-debugging-port=0")
-    || !commandContainsArgument(root.command, "--remote-debugging-address=127.0.0.1")) {
+  const debuggingMatches = commandContainsArgument(root.command, "--remote-debugging-port=0")
+    && commandContainsArgument(root.command, "--remote-debugging-address=127.0.0.1")
+  input.observe?.("root-debugging-arguments", debuggingMatches)
+  if (!debuggingMatches) {
     return { verified: false, reason: "Electron debugging endpoint identity does not match." }
   }
+  input.observe?.("listener-present", input.listenerPids.length > 0)
   if (input.listenerPids.length === 0) {
     return { verified: false, reason: "Electron debugging endpoint has no listener." }
   }
@@ -282,18 +291,24 @@ export const verifyElectronLaunchIdentity = (input: LaunchIdentityInput): Launch
     input.rootPid,
     ...descendantsOf(input.processes, input.rootPid),
   ])
-  if (input.listenerPids.some((pid) => !ownedPids.has(pid))) {
+  const listenersOwned = input.listenerPids.every((pid) => ownedPids.has(pid))
+  input.observe?.("listeners-owned", listenersOwned)
+  if (!listenersOwned) {
     return { verified: false, reason: "Electron debugging endpoint is owned by another process." }
   }
   let websocket: URL
   try {
     websocket = new URL(input.websocketUrl)
   } catch {
+    input.observe?.("browser-target-url", false)
     return { verified: false, reason: "Electron debugging endpoint returned an invalid browser target." }
   }
-  if (websocket.protocol !== "ws:" || websocket.hostname !== "127.0.0.1"
-    || websocket.port !== String(input.port)
-    || !/^\/devtools\/browser\/[a-zA-Z0-9-]{32,}$/.test(websocket.pathname)) {
+  input.observe?.("browser-target-url", true)
+  const capabilityValid = websocket.protocol === "ws:" && websocket.hostname === "127.0.0.1"
+    && websocket.port === String(input.port)
+    && /^\/devtools\/browser\/[a-zA-Z0-9-]{32,}$/.test(websocket.pathname)
+  input.observe?.("browser-capability", capabilityValid)
+  if (!capabilityValid) {
     return { verified: false, reason: "Electron browser target capability is invalid." }
   }
   return { verified: true, processGroupId: root.processGroupId }

@@ -177,7 +177,7 @@ test('uses deterministic keyboard adjustments and accessible values', () => {
   const curve = updateFadeDraftForKeyboard(baseline, 'fadeIn', 'curve', 8, 'ArrowUp')
   expect(curve?.fadeInCurve).toBe(0.05)
   expect(updateFadeDraftForKeyboard(curve ?? baseline, 'fadeIn', 'curve', 8, 'ArrowRight')?.fadeInCurvePosition).toBe(0.55)
-  expect(clipFadeControlValueText(baseline, 'fadeInEnd')).toBe('1.00 seconds')
+  expect(clipFadeControlValueText(baseline, 'fadeInEnd', 120)).toBe('0.2.0')
   expect(curveFadeControlValueText({ x: 0.25, y: 0.8 })).toBe('Curve position 25%, gain 80%')
 })
 

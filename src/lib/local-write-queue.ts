@@ -1,5 +1,9 @@
-import type { LocalProjectEntityRow } from '~/lib/local-project-db'
-import { openLocalProjectDb } from '~/lib/local-project-db'
+import { createSignal, type Accessor } from 'solid-js'
+import {
+  openLocalProjectDb,
+  registerLocalEntityWriteQueueRelease,
+  type LocalProjectEntityRow,
+} from '~/lib/local-project-db'
 
 type QueuedEntityWrite = {
   kind: string
@@ -16,8 +20,15 @@ type ScheduledIdleFlush = {
   cancel: () => void
 }
 
+export type LocalEntityWriteStatus = 'saved' | 'saving' | 'failed'
+const queuesByProject = new Map<string, LocalEntityWriteQueue>()
+
 const INITIAL_RETRY_DELAY_MS = 250
 const MAX_RETRY_DELAY_MS = 30_000
+const createWriteStatus = () => {
+  const [status, setStatus] = createSignal<LocalEntityWriteStatus>('saved')
+  return { status, setStatus }
+}
 
 const entityKey = (kind: string, id: string) => `${kind}:${id}`
 
@@ -41,8 +52,39 @@ export class LocalEntityWriteQueue {
   private scheduledFlush: ScheduledIdleFlush | null = null
   private flushPromise: Promise<void> | null = null
   private retryDelayMs = 0
+  private holders = 0
+  private readonly statusState = createWriteStatus()
+  private readonly listeners = new Set<(status: LocalEntityWriteStatus) => void>()
 
   public constructor(private projectId: string) {}
+
+  public getStatus(): LocalEntityWriteStatus {
+    return this.statusState.status()
+  }
+
+  public hold(): () => void {
+    this.holders += 1
+    let held = true
+    return () => {
+      if (!held) return
+      held = false
+      this.holders -= 1
+      this.unregisterIfIdle()
+    }
+  }
+
+  public hasPendingWrites(): boolean {
+    return this.puts.size > 0 || this.deletes.size > 0 || this.flushPromise !== null
+  }
+
+  public getStatusAccessor(): Accessor<LocalEntityWriteStatus> {
+    return this.statusState.status
+  }
+
+  public subscribe(listener: (status: LocalEntityWriteStatus) => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
 
   public getPending(kind: string, id: string): LocalProjectEntityRow | null | undefined {
     const key = entityKey(kind, id)
@@ -65,6 +107,7 @@ export class LocalEntityWriteQueue {
     const key = entityKey(row.kind, row.id)
     this.deletes.delete(key)
     this.puts.set(key, { kind: row.kind, id: row.id, row })
+    this.setStatus(this.statusState.status() === 'failed' ? 'failed' : 'saving')
     this.scheduleFlush()
   }
 
@@ -72,6 +115,7 @@ export class LocalEntityWriteQueue {
     const key = entityKey(kind, id)
     this.puts.delete(key)
     this.deletes.set(key, { kind, id })
+    this.setStatus(this.statusState.status() === 'failed' ? 'failed' : 'saving')
     this.scheduleFlush()
   }
 
@@ -86,8 +130,16 @@ export class LocalEntityWriteQueue {
     this.flushPromise = this.flushBatches().finally(() => {
       this.flushPromise = null
       if (this.puts.size > 0 || this.deletes.size > 0) this.scheduleFlush()
+      else this.unregisterIfIdle()
     })
     return this.flushPromise
+  }
+
+  // A queue with pending or failed writes stays registered, so a reopen shares it instead of racing its retry.
+  private unregisterIfIdle() {
+    if (this.holders === 0 && !this.hasPendingWrites() && queuesByProject.get(this.projectId) === this) {
+      queuesByProject.delete(this.projectId)
+    }
   }
 
   private scheduleFlush() {
@@ -103,6 +155,11 @@ export class LocalEntityWriteQueue {
   private cancelScheduledFlush() {
     this.scheduledFlush?.cancel()
     this.scheduledFlush = null
+  }
+
+  private setStatus(status: LocalEntityWriteStatus): void {
+    this.statusState.setStatus(status)
+    for (const listener of this.listeners) listener(status)
   }
 
   private async flushBatches(): Promise<void> {
@@ -121,6 +178,7 @@ export class LocalEntityWriteQueue {
         ])
         await tx.done
         this.retryDelayMs = 0
+        this.setStatus(this.puts.size > 0 || this.deletes.size > 0 ? 'saving' : 'saved')
       } catch (error) {
         for (const write of puts) {
           const key = entityKey(write.kind, write.id)
@@ -133,8 +191,33 @@ export class LocalEntityWriteQueue {
         this.retryDelayMs = this.retryDelayMs === 0
           ? INITIAL_RETRY_DELAY_MS
           : Math.min(this.retryDelayMs * 2, MAX_RETRY_DELAY_MS)
+        this.setStatus('failed')
         throw error
       }
     }
   }
 }
+
+export const getLocalEntityWriteQueue = (projectId: string) => {
+  const existing = queuesByProject.get(projectId)
+  if (existing) return existing
+  const queue = new LocalEntityWriteQueue(projectId)
+  queuesByProject.set(projectId, queue)
+  return queue
+}
+
+export const acquireLocalEntityWriteQueue = (projectId: string) => {
+  const queue = getLocalEntityWriteQueue(projectId)
+  return { queue, release: queue.hold() }
+}
+
+export const getAllLocalEntityWriteQueues = () => Array.from(queuesByProject.values())
+export const getLocalEntityWriteQueueIfCreated = (projectId: string) => queuesByProject.get(projectId)
+
+export const releaseLocalEntityWriteQueue = async (projectId: string): Promise<void> => {
+  const queue = queuesByProject.get(projectId)
+  if (!queue) return
+  await queue.flush()
+  if (!queue.hasPendingWrites() && queuesByProject.get(projectId) === queue) queuesByProject.delete(projectId)
+}
+registerLocalEntityWriteQueueRelease(releaseLocalEntityWriteQueue)

@@ -1,10 +1,8 @@
 import type { AudioAssetRef } from '../../audio-core-contract/src/index'
 import { audioCoreContractVersion } from '../../audio-core-contract/src/index'
 import type { Clip } from '@daw-browser/timeline-core/types'
-import {
-  createAudioPcmSourceDescriptor,
-  type AudioPcmSourceDescriptor,
-} from './media-pages'
+import { createAudioPcmSourceDescriptor } from './media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 import {
   renderStretchedAudioToArtifact,
 } from './audio-stretch-rendering'

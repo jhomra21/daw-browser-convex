@@ -87,7 +87,7 @@ describe('compressor chain state recovery', () => {
     original.state = 'faulted'
     original.fault = new Error('processor failed')
 
-    expect(await state.set(context, params)).toEqual({ changed: false, requiresRoutingRebuild: false })
+    expect(await state.set(context, params)).toEqual({ changed: false, requiresRoutingRebuild: false, unavailable: 'faulted' })
     expect(state.chain()).toBe(original)
     expect(original.state).toBe('faulted')
   })

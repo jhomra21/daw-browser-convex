@@ -66,9 +66,6 @@ export const SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS: readonly number[] = [
   PROJECT_MANIFEST_SCHEMA_VERSION,
 ];
 
-const isRecord = (value: JsonValue): value is JsonObject =>
-  isJsonObject(value);
-
 const readNumber = (value: JsonValue, field: string) => {
   if (!isJsonNumber(value) || !Number.isFinite(value)) {
     throw new Error(`Project manifest has invalid ${field}.`);
@@ -94,7 +91,7 @@ const readOptionalSourceKind = (value: JsonValue): ProjectManifestAsset["sourceK
   value === "upload" || value === "url" || value === "recording" ? value : undefined
 );
 const readPluginArtifact = (value: JsonValue): ProjectManifestPluginArtifact => {
-  if (!isRecord(value)) throw new Error("Project manifest has invalid external plugin artifact.");
+  if (!isJsonObject(value)) throw new Error("Project manifest has invalid external plugin artifact.");
   const id = readString(value.id, "externalPluginArtifact.id");
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
     throw new Error("Project manifest has invalid external plugin artifact id.");
@@ -139,7 +136,7 @@ export const normalizeProjectManifestPluginArtifact = (
 ): ProjectManifestPluginArtifact => readPluginArtifact(value);
 
 const readEntityRow = (value: JsonValue): ProjectManifestEntityRow => {
-  if (!isRecord(value)) throw new Error("Project manifest has invalid entity.");
+  if (!isJsonObject(value)) throw new Error("Project manifest has invalid entity.");
   return {
     kind: readString(value.kind, "entity.kind"),
     id: readString(value.id, "entity.id"),
@@ -149,7 +146,7 @@ const readEntityRow = (value: JsonValue): ProjectManifestEntityRow => {
 };
 
 const readProjectStateRow = (value: JsonValue): ProjectManifestStateRow => {
-  if (!isRecord(value)) throw new Error("Project manifest has invalid project state row.");
+  if (!isJsonObject(value)) throw new Error("Project manifest has invalid project state row.");
   return {
     key: readString(value.key, "projectState.key"),
     value: value.value,
@@ -158,7 +155,7 @@ const readProjectStateRow = (value: JsonValue): ProjectManifestStateRow => {
 };
 
 const readSyncStateRow = (value: JsonValue): ProjectManifestStateRow => {
-  if (!isRecord(value)) throw new Error("Project manifest has invalid sync state row.");
+  if (!isJsonObject(value)) throw new Error("Project manifest has invalid sync state row.");
   return {
     key: readString(value.key, "syncState.key"),
     value: value.value,
@@ -223,7 +220,7 @@ const readProjectManifest = (raw: JsonObject): ProjectManifest => {
   const mode: ProjectManifest["mode"] = raw.mode === "backup" ? "backup" : "shared";
   const entities = readArray(raw.entities, "entities").map(readEntityRow);
   const assets = readArray(raw.assets, "assets").map((asset) => {
-    if (!isRecord(asset)) throw new Error("Project manifest has invalid asset.");
+    if (!isJsonObject(asset)) throw new Error("Project manifest has invalid asset.");
     return {
       id: readString(asset.id, "asset.id"),
       name: readString(asset.name, "asset.name"),
@@ -265,7 +262,7 @@ const readProjectManifest = (raw: JsonObject): ProjectManifest => {
 };
 
 export const normalizeProjectManifest = (raw: JsonValue): ProjectManifest => {
-  if (!isRecord(raw)) throw new Error("Project manifest must be an object.");
+  if (!isJsonObject(raw)) throw new Error("Project manifest must be an object.");
   return readProjectManifest(raw);
 };
 

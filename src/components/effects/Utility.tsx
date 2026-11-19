@@ -2,6 +2,7 @@ import { createDefaultUtilityParams, type UtilityParams } from '@daw-browser/sha
 import EffectShell from '~/components/effects/EffectShell'
 import { DeviceToggleButton } from '~/components/ui/device-control'
 import Knob from '~/components/ui/knob'
+import { formatDeviceDb, formatDevicePercent } from '~/lib/device-value-format'
 
 type UtilityProps = {
   params: UtilityParams
@@ -24,10 +25,10 @@ export default function Utility(props: UtilityProps) {
     <EffectShell title="Utility" typeLabel="Audio" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="w-[360px] min-w-[360px]">
       <div class="grid min-h-0 flex-1 grid-rows-[1fr_auto] gap-3 px-3 py-3">
         <div class="grid grid-cols-2 place-content-center gap-x-8 gap-y-4">
-          <Knob label="Gain" value={props.params.gainDb} valueLabel={`${props.params.gainDb.toFixed(1)} dB`} resetValue={defaults.gainDb} min={-60} max={24} step={0.1} bipolar disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get('utility.gainDb')} automated={props.automationRangesByParameterId?.has('utility.gainDb')} onAutomationSelect={() => props.onAutomationParameterTouch?.('utility.gainDb')} onValueChange={(gainDb) => automated('utility.gainDb', { gainDb })} />
+          <Knob label="Gain" value={props.params.gainDb} valueLabel={formatDeviceDb(props.params.gainDb, 1)} resetValue={defaults.gainDb} min={-60} max={24} step={0.1} bipolar disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get('utility.gainDb')} automated={props.automationRangesByParameterId?.has('utility.gainDb')} onAutomationSelect={() => props.onAutomationParameterTouch?.('utility.gainDb')} onValueChange={(gainDb) => automated('utility.gainDb', { gainDb })} />
           <Knob label="Pan" value={props.params.pan} valueLabel={`${Math.round(props.params.pan * 100)}`} resetValue={defaults.pan} min={-1} max={1} step={0.01} bipolar disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get('utility.pan')} automated={props.automationRangesByParameterId?.has('utility.pan')} onAutomationSelect={() => props.onAutomationParameterTouch?.('utility.pan')} onValueChange={(pan) => automated('utility.pan', { pan })} />
           <Knob label="Balance" value={props.params.balance} valueLabel={`${Math.round(props.params.balance * 100)}`} resetValue={defaults.balance} min={-1} max={1} step={0.01} bipolar disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get('utility.balance')} automated={props.automationRangesByParameterId?.has('utility.balance')} onAutomationSelect={() => props.onAutomationParameterTouch?.('utility.balance')} onValueChange={(balance) => automated('utility.balance', { balance })} />
-          <Knob label="Width" value={props.params.width} valueLabel={`${Math.round(props.params.width * 100)}%`} resetValue={defaults.width} min={0} max={2} step={0.01} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get('utility.width')} automated={props.automationRangesByParameterId?.has('utility.width')} onAutomationSelect={() => props.onAutomationParameterTouch?.('utility.width')} onValueChange={(width) => automated('utility.width', { width })} />
+          <Knob label="Width" value={props.params.width} valueLabel={formatDevicePercent(props.params.width)} resetValue={defaults.width} min={0} max={2} step={0.01} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get('utility.width')} automated={props.automationRangesByParameterId?.has('utility.width')} onAutomationSelect={() => props.onAutomationParameterTouch?.('utility.width')} onValueChange={(width) => automated('utility.width', { width })} />
         </div>
         <div class="grid grid-cols-3 gap-1 border-t border-border pt-3">
           <DeviceToggleButton label="Normal" active={props.params.polarity === 'normal'} onClick={() => props.onChange({ polarity: 'normal' })} />

@@ -92,7 +92,7 @@ test('keeps the mounted timeline surface pinned through runway scrolling', async
   const session = `daw-timeline-workspace-${crypto.randomUUID()}`
   try {
     await browserCommand(session, ['open', server.url.toString()])
-    await browserCommand(session, ['wait', '3000'])
+    await browserCommand(session, ['wait', '--fn', '!!window.__timelineWorkspaceRegressionResult'])
     const output = await browserCommand(session, [
       'eval',
       'JSON.stringify(window.__timelineWorkspaceRegressionResult)',

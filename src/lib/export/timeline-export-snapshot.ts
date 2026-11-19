@@ -8,7 +8,7 @@ import { createAutomationTarget, type ExportAudioFormat, type MidiClip } from '@
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { ExportEncodingSettings, ExportRenderSettings } from '~/lib/export/export-settings'
-import type { ExportAutomationPatch } from '~/lib/export/run-export-job'
+import type { ExportAutomationPatch } from '~/lib/desired-playback-state'
 
 type TimelineExportSettings = {
   range: ExportRange

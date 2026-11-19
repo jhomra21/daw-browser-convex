@@ -1,3 +1,4 @@
+import { barIndexAtTime } from '~/lib/musical-time-format'
 import { MAX_PIXELS_PER_SECOND } from './timeline-viewport-geometry'
 
 export const DEFAULT_PIXELS_PER_SECOND = 100
@@ -95,9 +96,7 @@ export const normalizeWheelZoomFactor = (deltaY: number, deltaMode: number) => {
   return Math.exp(-normalizedDelta / 400)
 }
 
-export const musicalBarLabelAtTime = (timeSec: number, bpm: number) => (
-  Math.floor(Math.max(0, timeSec) / (60 / Math.max(1e-6, bpm) * 4)) + 1
-)
+export const musicalBarLabelAtTime = (timeSec: number, bpm: number) => barIndexAtTime(timeSec, bpm) + 1
 
 type TimelineGridIntervals = { minorSec: number; majorSec: number }
 

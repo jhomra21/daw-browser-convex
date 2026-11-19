@@ -1,0 +1,495 @@
+{
+ "name": "ae08-e5-seam-anchors",
+ "sequence": 13,
+ "createdAt": "2026-11-12T16:00:00.000Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:playback",
+    "expect",
+    "fails",
+    "#13"
+   ],
+   "old": "B6f5 a warm resume after an adoption plays the newest state without another compile",
+   "new": "B6f5 a resume after an adoption plays the newest state"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:playback",
+    "expect",
+    "fails",
+    "#22"
+   ],
+   "old": "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+   "new": "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:471:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 a warm resume after an adoption plays the newest state without another compile",
+    "failed lifecycle transition cancels delayed native startup",
+    "keeps a paused portable session compatible when enabling a loop",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "failed lifecycle transition cancels delayed native startup",
+    "keeps a paused portable session compatible when enabling a loop",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:472:mutant:b6f5",
+    "expect",
+    "fails",
+    "#1"
+   ],
+   "old": "B6f5 a refused or structural adoption asks for a rebuild and keeps the session revision",
+   "new": "B6f5 a refused adoption answers failed and keeps the session revision; a MIDI clip edit is adopted at a seam"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:472:mutant:portable",
+    "expect",
+    "fails",
+    "#1"
+   ],
+   "old": "B6f5 a refused or structural adoption asks for a rebuild and keeps the session revision",
+   "new": "B6f5 a refused adoption answers failed and keeps the session revision; a MIDI clip edit is adopted at a seam"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:476:mutant:b6f5",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+    "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
+    "B6f5 a refused or structural adoption asks for a rebuild and keeps the session revision",
+    "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the rebuild carries it",
+    "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and keeps the take"
+   ],
+   "new": [
+    "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+    "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
+    "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the rebuild carries it",
+    "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and keeps the take"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:476:mutant:portable",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
+    "B6f5 a refused or structural adoption asks for a rebuild and keeps the session revision",
+    "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the rebuild carries it",
+    "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and keeps the take"
+   ],
+   "new": [
+    "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
+    "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the rebuild carries it",
+    "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and keeps the take"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:mutant:b6f5",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+    "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
+    "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+    "B6f5 a warm resume after an adoption plays the newest state without another compile",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces"
+   ],
+   "new": [
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+    "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
+    "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+    "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
+    "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+    "B6f5 a warm resume after an adoption plays the newest state without another compile",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
+    "B6f5c a failed take followed by the caller stop or cancel adopts or rebuilds each edit once",
+    "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
+    "B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take",
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+    "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
+    "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
+    "B6f5c a failed take followed by the caller stop or cancel adopts or rebuilds each edit once",
+    "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
+    "B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take",
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:486:mutant:b6f5",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
+    "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
+    "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from",
+    "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+    "B6f5 a warm resume after an adoption plays the newest state without another compile",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces"
+   ],
+   "new": [
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
+    "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
+    "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from",
+    "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:486:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
+    "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
+    "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from",
+    "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+    "B6f5 a warm resume after an adoption plays the newest state without another compile",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
+    "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
+    "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from",
+    "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:489:mutant:step5b",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "    if (fingerprint(withLiveContentOf(compilation.snapshot, activeSnapshot)) !== fingerprint(activeSnapshot)) {\n      return { supported: false, reasons: [\"Portable playback requires a schedule rebuild.\"] }\n    }\n",
+   "new": "    if (fingerprint(withLiveContentOf(adoptable, activeSnapshot)) !== fingerprint(activeSnapshot)) {\n      return { supported: false, reasons: [\"Portable playback requires a schedule rebuild.\"] }\n    }\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:489:mutant:portable",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "    if (fingerprint(withLiveContentOf(compilation.snapshot, activeSnapshot)) !== fingerprint(activeSnapshot)) {\n      return { supported: false, reasons: [\"Portable playback requires a schedule rebuild.\"] }\n    }\n",
+   "new": "    if (fingerprint(withLiveContentOf(adoptable, activeSnapshot)) !== fingerprint(activeSnapshot)) {\n      return { supported: false, reasons: [\"Portable playback requires a schedule rebuild.\"] }\n    }\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:489:mutant:portable",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 a refused or structural adoption asks for a rebuild and keeps the session revision",
+    "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the rebuild carries it",
+    "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and keeps the take"
+   ],
+   "new": [
+    "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the rebuild carries it",
+    "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and keeps the take"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:mutant:b6f5",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "fingerprint(withLiveContentOf(compilation.snapshot, activeSnapshot)) !== fingerprint(activeSnapshot)",
+   "new": "fingerprint(withLiveContentOf(adoptable, activeSnapshot)) !== fingerprint(activeSnapshot)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:mutant:b6f5",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "fingerprint(compilation.snapshot) !== fingerprint(activeSnapshot)",
+   "new": "fingerprint(adoptable) !== fingerprint(activeSnapshot)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:mutant:b6f5",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 D6 an adoption during portable recording keeps the take and its capture blocks continuous",
+    "B6f5 R2 a live send crossing an adoption publish never faults the session",
+    "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
+    "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
+    "B6f5 a playing portable session adopts a mixer edit on the same session and follows it",
+    "B6f5 a refused or structural adoption asks for a rebuild and keeps the session revision",
+    "B6f5 a warm resume after an adoption plays the newest state without another compile",
+    "B6f5 adoptions coalesce to one in flight and one queued that carries the newest edit",
+    "B6f5 m1 a live synth send while the adoption prepares waits for the publish and reaches the revision that carries it",
+    "B6f5 m1 a live synth value accepted during an adoption compile is in the configuration the adoption publishes",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces"
+   ],
+   "new": [
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 D6 an adoption during portable recording keeps the take and its capture blocks continuous",
+    "B6f5 R2 a live send crossing an adoption publish never faults the session",
+    "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
+    "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
+    "B6f5 a playing portable session adopts a mixer edit on the same session and follows it",
+    "B6f5 a refused adoption answers failed and keeps the session revision; a MIDI clip edit is adopted at a seam",
+    "B6f5 adoptions coalesce to one in flight and one queued that carries the newest edit",
+    "B6f5 m1 a live synth send while the adoption prepares waits for the publish and reaches the revision that carries it",
+    "B6f5 m1 a live synth value accepted during an adoption compile is in the configuration the adoption publishes",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:mutant:portable",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "fingerprint(withLiveContentOf(compilation.snapshot, activeSnapshot)) !== fingerprint(activeSnapshot)",
+   "new": "fingerprint(withLiveContentOf(adoptable, activeSnapshot)) !== fingerprint(activeSnapshot)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:mutant:portable",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "fingerprint(compilation.snapshot) !== fingerprint(activeSnapshot)",
+   "new": "fingerprint(adoptable) !== fingerprint(activeSnapshot)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:mutant:portable",
+    "expect",
+    "fails",
+    "#4"
+   ],
+   "old": "B6f5 a refused or structural adoption asks for a rebuild and keeps the session revision",
+   "new": "B6f5 a refused adoption answers failed and keeps the session revision; a MIDI clip edit is adopted at a seam"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:mutant:matrix",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "fingerprint(withLiveContentOf(compilation.snapshot, activeSnapshot)) !== fingerprint(activeSnapshot)",
+   "new": "fingerprint(withLiveContentOf(adoptable, activeSnapshot)) !== fingerprint(activeSnapshot)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:mutant:matrix",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "fingerprint(compilation.snapshot) !== fingerprint(activeSnapshot)",
+   "new": "fingerprint(adoptable) !== fingerprint(activeSnapshot)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:491:mutant:step5b",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation\n    if (fingerprint(",
+   "new": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation\n    // An adoption installs its schedule at a seam, so it also takes tempo, loop and MIDI edits; a refresh or a start does not.\n    const adoptable = context?.liveAdoption ? withSeamContentOf(compilation.snapshot, activeSnapshot) : compilation.snapshot\n    if (fingerprint("
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:491:mutant:step5b",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot) return compilation\n    if (fingerprint && fingerprint(",
+   "new": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot) return compilation\n    // An adoption installs its schedule at a seam, so it also takes tempo, loop and MIDI edits; a refresh or a start does not.\n    const adoptable = context?.liveAdoption ? withSeamContentOf(compilation.snapshot, activeSnapshot) : compilation.snapshot\n    if (fingerprint && fingerprint("
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:491:mutant:portable",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation\n    if (fingerprint(",
+   "new": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation\n    // An adoption installs its schedule at a seam, so it also takes tempo, loop and MIDI edits; a refresh or a start does not.\n    const adoptable = context?.liveAdoption ? withSeamContentOf(compilation.snapshot, activeSnapshot) : compilation.snapshot\n    if (fingerprint("
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:491:mutant:portable",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot) return compilation\n    if (fingerprint && fingerprint(",
+   "new": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot) return compilation\n    // An adoption installs its schedule at a seam, so it also takes tempo, loop and MIDI edits; a refresh or a start does not.\n    const adoptable = context?.liveAdoption ? withSeamContentOf(compilation.snapshot, activeSnapshot) : compilation.snapshot\n    if (fingerprint && fingerprint("
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:494:mutant:b6f5",
+    "expect",
+    "fails",
+    "#4"
+   ],
+   "old": "B6f5 a warm resume after an adoption plays the newest state without another compile",
+   "new": "B6f5 a resume after an adoption plays the newest state"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:497:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 a warm resume after an adoption plays the newest state without another compile",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 steps 3+4 (M3, E5) added the seam-adoptable snapshot to compileSnapshot of the portable controller, so the live-content gate now reads withLiveContentOf(adoptable, activeSnapshot). The anchors of the gate arms 489, 490 and 491 are re-pointed to the same gate lines (the 490 and 491 mutants keep their meaning: drop the live-content normalisation, drop the fingerprint guard). Each is run alone with --only (see PHASE8-STEP3-4-E5.md). The watched hashes of the controller and the three witness files are not recorded: they move only on --full. The recorded failing sets of the arms 469, 471, 472, 476, 482, 486, 489, 490 and 494 name tests that phase 8 renamed or whose expectation it changed on purpose (a structural MIDI clip edit and a MIDI clip move are now adopted, so the test that expected a rebuild is renamed; a resume after an adoption re-prepares, because the adopted schedule starts at its seam and ends where the old one ended, so no resume in place is left to compile nothing). Each renamed witness is recorded under its new name where the mutant still fails it; a witness that no longer fails under its mutant is dropped from that arm, whose remaining recorded witnesses still kill it.",
+  "expectationsSha256": "bc54b7c4d0860f18fc0fa2183234b86553f442e5f17779c2789cf0b806084a60"
+ }
+}

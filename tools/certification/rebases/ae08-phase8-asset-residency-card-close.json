@@ -1,0 +1,279 @@
+{
+ "name": "ae08-phase8-asset-residency-card-close",
+ "sequence": 55,
+ "createdAt": "2026-11-16T18:49:22.074Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:382:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 772,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:424:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 772,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:383:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 772,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:385:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 772,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 772,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 771,
+   "new": 787
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:383:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 771,
+   "new": 787
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:424:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 771,
+   "new": 787
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:0:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 772,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:0:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 771,
+   "new": 787
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:385:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 771,
+   "new": 787
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:405:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 772,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:405:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 771,
+   "new": 787
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:411:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 772,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:411:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 771,
+   "new": 787
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:412:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 772,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:412:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 771,
+   "new": 787
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:382:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 770,
+   "new": 786
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:275:0:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 689,
+   "new": 705
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:275:0:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 688,
+   "new": 704
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 772,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 771,
+   "new": 787
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 asset calibration round worker (hand record, no --bless). Tree: 8f6ab1fa plus the picks 4b6df1f1 (b1c2e731, resident instrument mapping), 42783292 (135f6d00, D1/D3/D4 budget scope, oversized retiree, resident map clear), 11448e91 (aae3ec0f, D2 64-slot table reclaim) and de8b9412 (dc635d79, asset-page-write evidence and gate), plus 69a29b2b (the plug-in card's editor command carries no undefined keys; adds the native-session-bridge witness through main's nativeEditorCommandSchema, which moved to apps/desktop/native-session-schemas.ts) and 7812759a (vst-state-get host evidence and the open-editor step). Measured with `fast-cert.ts --only <422 jobs> --jobs 1 --measure`: every non-retired arm whose targets or witnesses touch native-playback-controller.ts and its test, apps/desktop/audio-host.ts, apps/desktop/main.ts, native-session-bridge.test.ts, external-plugin-card.tsx, external-plugin-editor.ts or audio_host_test.cpp, with every row sibling and control: verdict PASS, freeze held, 0 failing, no anchor failed to apply. Only pass counts moved (22 fields, no fail count, exit code or failing test): the controller file 689 to 705 (+16) and the desktop files 772 to 788 (+16). Every control and mutant of an arm that runs the whole file moves by the same delta.",
+  "expectationsSha256": "082263ed166d8fb2becffa268de2a93c3bb232059a9338588c8d1c403734ed24"
+ }
+}

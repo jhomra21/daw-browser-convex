@@ -1,16 +1,17 @@
 import type {
+  NativeAudioDevice,
   NativeInputDevice,
   NativeHostMeterBatch,
   NativeHostSpectrumFrame,
   NativeHostPcmAsset,
   NativeHostMappedAsset,
   NativeHostMappedAssetPage,
-  NativeHostRecordingBlock,
   NativeHostRecordingConfiguration,
   NativeHostRecordingStatus,
   NativeHostDiagnostics,
   NativeHostTransport,
   NativeScheduleProgress,
+  NativeProcessorPatchRefusal,
   NativeOutputDevice,
   NativeOfflinePcmChunk,
   NativeOfflineMappedAsset,
@@ -21,6 +22,7 @@ import type {
   ControlErrorV1,
   HostErrorV1,
   DesktopVstParameterEditPayload,
+  DesktopVstInstanceEvent,
 } from "@daw-browser/desktop-protocol"
 import type {
   DesktopApplicationMenuMessage,
@@ -32,7 +34,64 @@ import type {
 } from "@daw-browser/plugin-host-protocol"
 import type { ExportAudioFormat } from "@daw-browser/shared"
 
+import type { NativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol/native-audio-host"
+import type { NativeRevisionSession } from "@daw-browser/desktop-protocol/native-revision"
+import type { NativeInstrumentBudgetPolicy } from "../lib/desktop/native-instrument-budget-policy"
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
+/** `plugin`: the plug-in's own crash or API error. `host`: ours. */
+type NativeVstCoordinationReply = { ok: true } | {
+  ok: false
+  error: string
+  failure?: { code: string; origin: "plugin" | "host"; instanceId?: string }
+}
+/** `refused`: native answered no. `unavailable`: nothing was delivered. `unconfirmed`: it may have been delivered. */
+export type NativeDeliveryFailureKind = "refused" | "unconfirmed" | "unavailable"
+export type NativeDeliveryReply = { ok: true } | { ok: false; error: string; kind: NativeDeliveryFailureKind }
+/** Claim tokens are u64 decimal strings: they can exceed Number.MAX_SAFE_INTEGER. */
+export type NativeProcessorPatchReply =
+  | { ok: true; outcome: "applied" }
+  | { ok: true; outcome: "claimed"; token: string }
+  | {
+    ok: true
+    outcome: "refused"
+    refusal: NativeProcessorPatchRefusal
+    coreResult: number
+    token?: string
+  }
+  | { ok: false; error: string; kind: NativeDeliveryFailureKind }
+export type NativeRecordingScope = { projectId: string; projectGeneration: number }
+export type NativeRecordingTake = {
+  takeId: string
+  state: "pending" | "interrupted" | "complete" | "damaged"
+  damagedReason?: "receipt" | "resolved-manifest"
+  sampleRateHz: number | null
+  channelCount: number
+  frames: number | null
+  bytes: number | null
+  blocks: number | null
+}
+export type NativeRecordingRelease = { reason: "discard" } | {
+  reason: "imported"
+  sessionId: string
+  frames: number
+  bytes: number
+  blocks: number
+  sampleRateHz: number
+  channelCount: number
+  finalized: boolean
+  savedClip?: { clipId: string; sourceAssetKey: string }
+}
+export type NativeRecordingImportedTake = {
+  takeId: string
+  scope: NativeRecordingScope
+  acknowledgment: Extract<NativeRecordingRelease, { reason: "imported" }>
+}
+export type NativeRecordingFailure = { generation: number; sessionId: bigint; message: string }
+export type NativeRecordingSpoolBridge = {
+  list(scope: NativeRecordingScope, cursor?: string): Promise<{ takes: NativeRecordingTake[]; nextCursor: string | null }>
+  read(scope: NativeRecordingScope, takeId: string, offset: number, length: number): Promise<Uint8Array>
+  release(scope: NativeRecordingScope, takeId: string, acknowledgment: NativeRecordingRelease): Promise<void>
+}
 type NativeVstEditorReply = {
   ok: true
   status: {
@@ -109,12 +168,15 @@ type NativeAudioHostHello = {
 type NativeAudioHostStatus = {
   running: boolean
   hello?: NativeAudioHostHello
+  pid?: number
+  generation: number
 }
 type NativeAudioHostDiagnosticsReply = (
   | {
       ok: true
       hello: NativeAudioHostHello
       status: NativeAudioHostStatus
+      configurationGeneration: number
       diagnostics: NativeHostDiagnostics
     }
   | { ok: false; error: string }
@@ -138,6 +200,7 @@ type DesktopRequestCancellationHandler = (requestId: string) => void
 type DesktopPrepareToCloseHandler = () => Promise<{ flushed: boolean }>
 
 type NativeSessionBridge = {
+  revisions: NativeRevisionSession
   setRequestHandler(next: DesktopRequestHandler | undefined): void
   onPrepareToClose(next: DesktopPrepareToCloseHandler | undefined): void
   commitTransaction(transactionToken: string): Promise<NativeSessionReply>
@@ -168,34 +231,38 @@ type NativeSessionBridge = {
   releaseAsset(sessionAssetId: number, transactionToken?: string): Promise<NativeSessionReply>
   publishGraph(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
   configureInstrumentStates?: (bytes: Uint8Array, transactionToken?: string) => Promise<NativeSessionReply>
-  queueParameterEvents(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
-  queueProcessorStatePatch(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
+  queueParameterEvents(bytes: Uint8Array, transactionToken?: string): Promise<NativeDeliveryReply>
+  queueProcessorStatePatch(bytes: Uint8Array, transactionToken?: string): Promise<NativeProcessorPatchReply>
   queueVstParameterEvents(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
-  queueInstrumentEvents(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
+  queueInstrumentEvents(bytes: Uint8Array, transactionToken?: string): Promise<NativeDeliveryReply>
   queueScheduleWindow(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
   reenableVstScheduleAutomation(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
   queueSourceEvents(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
-  coordinateVstAttachments(input: NativeVstAttachmentCoordinationInput, transactionToken?: string): Promise<NativeSessionReply>
+  coordinateVstAttachments(input: NativeVstAttachmentCoordinationInput, transactionToken?: string): Promise<NativeVstCoordinationReply>
   setTransport(input: NativeHostTransport, transactionToken?: string): Promise<NativeSessionReply>
-  configureRecording(input: NativeHostRecordingConfiguration): Promise<NativeSessionReply>
-  startRecording(): Promise<NativeSessionReply>
+  configureRecording(input: NativeHostRecordingConfiguration & { spoolImportVersion: NativeRecordingSpoolImportVersion }): Promise<
+    { ok: true; takeId: string; sampleRateHz: number; channelCount: number } | { ok: false; error: string }
+  >
+  startRecording(binding?: Pick<NativeHostRecordingConfiguration, "projectId" | "projectGeneration" | "generation" | "sessionId">): Promise<NativeSessionReply>
   stopRecording(stopFrame?: number): Promise<NativeSessionReply>
   cancelRecording(): Promise<NativeSessionReply>
   start(): Promise<NativeSessionReply>
-  stop(): Promise<NativeSessionReply>
-  teardown(): Promise<NativeSessionReply>
+  stop(reason?: string): Promise<NativeSessionReply>
+  teardown(reason: string): Promise<NativeSessionReply>
   onLoss(listener: (error?: string) => void): () => void
-  onRecordingBlock(listener: (block: NativeHostRecordingBlock) => void): () => void
+  onRecordingFailure?: (listener: (failure: NativeRecordingFailure) => void) => () => void
   onRecordingStatus(listener: (status: NativeHostRecordingStatus) => void): () => void
   onMeterBatch(listener: (batch: NativeHostMeterBatch) => void): () => void
   setSpectrumNode(nodeId: bigint | null): Promise<NativeSessionReply>
   onSpectrumFrame(listener: (frame: NativeHostSpectrumFrame) => void): () => void
   onScheduleProgress(listener: (progress: NativeScheduleProgress) => void): () => void
   onVstParameterEdit(listener: (payload: DesktopVstParameterEditPayload) => void): () => void
+  onVstInstanceEvent(listener: (event: DesktopVstInstanceEvent) => void): () => void
 }
 
 type NativeOutputDeviceReply = { ok: true; device: NativeOutputDevice | null } | { ok: false; error: string }
 type NativeInputDeviceReply = { ok: true; device: NativeInputDevice | null } | { ok: false; error: string }
+type NativeDeviceListReply = { ok: true; devices: NativeAudioDevice[] } | { ok: false; error: string }
 export type DesktopAudioLifecycle = {
   state: "suspended" | "recovering" | "ready" | "failed"
   powerGeneration: number
@@ -203,6 +270,11 @@ export type DesktopAudioLifecycle = {
 
 type DesktopBridge = {
   benchmarkSabRecording?: boolean
+  /**
+   * Present only when the app was launched with DAW_AE08_EXTERNAL_NATIVE_SESSION=1 (the acceptance runner owns the native
+   * session) or DAW_AE08_EVIDENCE_DIR (`mark` logs one renderer mark of the edit-to-publish path).
+   */
+  acceptance?: { externalNativeSession: boolean; mark?: (name: string, key: string) => void }
   benchmarkHeartbeat?: () => Promise<{ mainEpochMs: number } | null>
   traceDiagnosticsV2(id: string, stage: "controller-before-native" | "controller-after-native" | "controller-parsed"): void
   setRequestHandler(next: DesktopRequestHandler | undefined, onCancel?: DesktopRequestCancellationHandler): void
@@ -224,10 +296,13 @@ type DesktopBridge = {
   exportTerminal(jobId: string, status: "success" | "canceled" | "error"): void
   importTerminal(jobId: string): void
   audioHost?: {
+    instrumentBudgetPolicy?: NativeInstrumentBudgetPolicy
     diagnostics(): Promise<NativeAudioHostDiagnosticsReply>
     resolveOutputDevice(preferredDeviceId?: string): Promise<NativeOutputDeviceReply>
     resolveInputDevice(preferredDeviceId?: string): Promise<NativeInputDeviceReply>
+    listDevices(): Promise<NativeDeviceListReply>
     session: NativeSessionBridge
+    recordingSpool: NativeRecordingSpoolBridge
     offlineRender: {
       start(
         jobId: string,

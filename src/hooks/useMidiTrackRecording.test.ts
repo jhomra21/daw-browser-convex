@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { createMidiTrackRecordingController } from '~/lib/midi/midi-recording-controller'
 import type { MidiInputEvent, MidiSourceReset } from '~/lib/midi/midi-input'
 import { createLocalProject } from '~/lib/local-project-db'
+import { convexApi, convexClient } from '~/lib/convex'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { readSharedOutboxSummary } from '~/lib/shared-outbox'
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -51,24 +52,30 @@ const flush = async () => {
 }
 
 const originalFetch = globalThis.fetch
-const originalWindow = globalThis.window
+// Bun has no global window; redefining it by value would leave a non-writable `undefined` behind for later files.
+const originalWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window')
 let runMidiRecordingHeartbeat: (() => void) | undefined
 
 const createHarness = (input: {
   projectId?: string
+  openProjectId?: () => string
   bpm?: () => number
   loopEnabled?: boolean
   requestAccess?: () => Promise<void>
   requestTransportPlay?: () => Promise<void>
   inputs?: () => Array<{ id: string; selected: boolean; connected: boolean }>
+  tracks?: () => Track[]
+  createTrackForRecording?: () => Promise<Track | null>
 } = {}) => {
   const operations: RecordedOperation[] = []
   const notifications: string[] = []
+  const saveFailures: Array<{ projectId: string; message: string }> = []
   const provisional: Array<string | null> = []
   const activeTargets: Array<string | null> = []
   const history: unknown[] = []
   const inserted: Array<{ trackId: string; clip: Track['clips'][number] }> = []
   const removed: string[][] = []
+  const removedTracks: string[] = []
   const locks: Array<{ trackId: string; locker: string | null }> = []
   const subscribers = new Set<(event: MidiInputEvent) => void>()
   const resetSubscribers = new Set<(event: MidiSourceReset) => void>()
@@ -87,8 +94,9 @@ const createHarness = (input: {
           scheduledContextTime: timeStamp / 1_000,
         }),
       },
-      tracks: () => [track()],
-      projectId: () => input.projectId ?? 'cloud-project',
+      tracks: input.tracks ?? (() => [track()]),
+      createTrackForRecording: input.createTrackForRecording ?? (async () => null),
+      projectId: input.openProjectId ?? (() => input.projectId ?? 'cloud-project'),
       userId: () => 'user-1',
       playheadSec: () => 0,
       bpm: () => input.bpm?.() ?? 120,
@@ -98,10 +106,15 @@ const createHarness = (input: {
       clearTrackLock: (trackId) => { locks.push({ trackId, locker: null }) },
       insertLocalClip: (trackId, clip) => { inserted.push({ trackId, clip }) },
       removeLocalClips: (clipIds) => { removed.push([...clipIds]) },
+      removeLocalTrack: (trackId) => { removedTracks.push(trackId) },
+      clearRecordArmForTrack: () => {},
+      convexClient,
+      convexApi,
       selection: { selectPrimaryClip: () => {} },
       requestTransportPlay: input.requestTransportPlay ?? (async () => {}),
       pauseTransport: () => {},
       notify: (message) => { notifications.push(message) },
+      onLocalSaveFailed: (projectId, message) => { saveFailures.push({ projectId, message }) },
       historyPush: (entry) => { history.push(entry) },
       setActiveRecordingTarget: (trackId) => { activeTargets.push(trackId) },
       setProvisionalClipId: (clipId) => { provisional.push(clipId) },
@@ -136,11 +149,13 @@ const createHarness = (input: {
     projectId: input.projectId ?? 'cloud-project',
     operations,
     notifications,
+    saveFailures,
     provisional,
     activeTargets,
     history,
     inserted,
     removed,
+    removedTracks,
     locks,
     emit: (event: MidiInputEvent) => { for (const subscriber of subscribers) subscriber(event) },
     reset: (sourceId: string) => {
@@ -169,7 +184,8 @@ beforeEach(() => {
 
 afterEach(() => {
   Object.defineProperty(globalThis, 'fetch', { configurable: true, value: originalFetch })
-  Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow })
+  if (originalWindowDescriptor) Object.defineProperty(globalThis, 'window', originalWindowDescriptor)
+  else Reflect.deleteProperty(globalThis, 'window')
   runMidiRecordingHeartbeat = undefined
 })
 
@@ -229,9 +245,7 @@ describe('useMidiTrackRecording transactions', () => {
     allowAccess()
     await Promise.all([start, transition])
     expect(events).toEqual(['settle', 'resolve'])
-    expect(recording.operations.map((operation) => operation.kind)).toEqual([
-      'tracks.lock', 'clips.create', 'clips.removeMany', 'tracks.unlock',
-    ])
+    expect(recording.operations.map((operation) => operation.kind)).toEqual([])
     recording.dispose()
   })
 
@@ -274,6 +288,26 @@ describe('useMidiTrackRecording transactions', () => {
     expect(clip?.duration).toBeGreaterThan(0)
     expect(recording.history).toHaveLength(1)
     expect(recording.provisional.at(-1)).toBeNull()
+    recording.dispose()
+  })
+
+  test('reports a failed local final checkpoint as a save failure for its own project, not a notice', async () => {
+    const project = await createLocalProject(`MIDI recording ${crypto.randomUUID()}`)
+    const repository = createLocalTimelineRepository(project.id)
+    await repository.createTrack({ id: 'instrument-track', kind: 'instrument' })
+    let openProjectId = project.id
+    const recording = createHarness({ projectId: project.id, openProjectId: () => openProjectId })
+
+    await expect(recording.controller.startRecording()).resolves.toBe(true)
+    const clipId = recording.provisional.at(-1)
+    if (!clipId) throw new Error('Expected a provisional MIDI clip.')
+    await repository.deleteClip(clipId)
+    recording.emit(noteOn('keyboard', 0))
+    openProjectId = 'project:opened-while-settling'
+    await recording.controller.stopRecording()
+
+    expect(recording.saveFailures).toEqual([{ projectId: project.id, message: 'MIDI recording could not be saved to this project.' }])
+    expect(recording.notifications).toEqual([])
     recording.dispose()
   })
 
@@ -353,6 +387,7 @@ describe('useMidiTrackRecording transactions', () => {
     expect(recording.history).toHaveLength(0)
     expect(recording.provisional.at(-1)).toBeNull()
     expect(recording.notifications).toContain('MIDI recording could not be saved to this project.')
+    expect(recording.saveFailures).toEqual([])
     recording.dispose()
   })
 
@@ -484,6 +519,165 @@ describe('useMidiTrackRecording transactions', () => {
     expect(final?.payload.midi).toEqual(expect.objectContaining({
       notes: [expect.objectContaining({ length: 1 })],
     }))
+    recording.dispose()
+  })
+
+  const keptNotice = 'The recording target was removed, so the take was kept on a new track.'
+  const keptTrack = (): Track => ({ id: 'kept-instrument', name: 'MIDI 2', volume: 1, clips: [], kind: 'instrument' })
+
+  test('keeps a cloud take on a new instrument track when its target was removed, as one history entry', async () => {
+    let current = [track()]
+    const recording = createHarness({
+      tracks: () => current,
+      createTrackForRecording: async () => { current = [keptTrack()]; return keptTrack() },
+    })
+    setFetch((operation) => {
+      if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock') return json({ ok: true })
+      if (operation.kind === 'clips.create') return json(operation.payload.trackId === 'kept-instrument' ? 'clip-kept' : 'clip-1')
+      throw new Error(`Unexpected ${operation.kind}`)
+    }, recording.operations)
+
+    await recording.controller.startRecording()
+    recording.emit(noteOn('keyboard', 0))
+    recording.emit(noteOff('keyboard', 1_000))
+    current = []
+    await recording.controller.stopRecording()
+
+    const kept = recording.operations.filter((operation) => operation.kind === 'clips.create' && operation.payload.trackId === 'kept-instrument')
+    expect(kept).toHaveLength(1)
+    expect(kept[0]?.payload.startSec).toBe(0)
+    expect(kept[0]?.payload.midi).toEqual(expect.objectContaining({ notes: [expect.objectContaining({ pitch: 60 })] }))
+    expect(recording.operations.map((operation) => operation.kind)).not.toContain('clips.setMidiAndTiming')
+    expect(recording.history).toHaveLength(1)
+    expect(recording.history[0]).toMatchObject({ type: 'track-clip-create' })
+    expect(recording.notifications).toEqual([keptNotice])
+    expect(recording.notifications).not.toContain('MIDI recording could not be saved to this project.')
+    recording.dispose()
+  })
+
+  test('removes the kept track when its clip cannot be created, with no history entry', async () => {
+    let current = [track()]
+    const recording = createHarness({
+      tracks: () => current,
+      createTrackForRecording: async () => { current = [keptTrack()]; return keptTrack() },
+    })
+    const mutations: unknown[][] = []
+    const originalMutation = Object.getOwnPropertyDescriptor(convexClient, 'mutation')
+    Object.defineProperty(convexClient, 'mutation', { configurable: true, value: async (...args: unknown[]) => { mutations.push(args); return { status: 'deleted' } } })
+    try {
+      setFetch((operation) => {
+        if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock' || operation.kind === 'clips.removeMany') return json({ ok: true })
+        if (operation.kind === 'clips.create') return json(operation.payload.trackId === 'kept-instrument' ? null : 'clip-1')
+        throw new Error(`Unexpected ${operation.kind}`)
+      }, recording.operations)
+
+      await recording.controller.startRecording()
+      recording.emit(noteOn('keyboard', 0))
+      recording.emit(noteOff('keyboard', 1_000))
+      current = []
+      await recording.controller.stopRecording()
+
+      expect(recording.removedTracks).toEqual(['kept-instrument'])
+      expect(mutations).toEqual([[expect.anything(), expect.objectContaining({ trackId: 'kept-instrument' })]])
+      expect(recording.history).toEqual([])
+      expect(recording.notifications).toEqual(['MIDI recording could not be saved to this project.'])
+      recording.dispose()
+    } finally {
+      if (originalMutation) Object.defineProperty(convexClient, 'mutation', originalMutation)
+      else Reflect.deleteProperty(convexClient, 'mutation')
+    }
+  })
+
+  test('sizes the kept clip from the take snapshot, not from a clock read after the track is created', async () => {
+    const originalNow = performance.now
+    let nowMs = 0
+    Object.defineProperty(performance, 'now', { configurable: true, value: () => nowMs })
+    try {
+      let current = [track()]
+      const recording = createHarness({
+        tracks: () => current,
+        createTrackForRecording: async () => { nowMs = 9_000; current = [keptTrack()]; return keptTrack() },
+      })
+      setFetch((operation) => {
+        if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock') return json({ ok: true })
+        if (operation.kind === 'clips.create') return json(operation.payload.trackId === 'kept-instrument' ? 'clip-kept' : 'clip-1')
+        throw new Error(`Unexpected ${operation.kind}`)
+      }, recording.operations)
+
+      await recording.controller.startRecording()
+      recording.emit(noteOn('keyboard', 0))
+      recording.emit(noteOff('keyboard', 1_000))
+      current = []
+      nowMs = 2_000
+      await recording.controller.stopRecording()
+
+      const kept = recording.operations.find((operation) => operation.kind === 'clips.create' && operation.payload.trackId === 'kept-instrument')
+      expect(kept?.payload.duration).toBe(2)
+      recording.dispose()
+    } finally {
+      Object.defineProperty(performance, 'now', { configurable: true, value: originalNow })
+    }
+  })
+
+  test('leaves no provisional clip id behind when the kept take fails and the removed target cannot delete it', async () => {
+    let current = [track()]
+    const recording = createHarness({
+      tracks: () => current,
+      createTrackForRecording: async () => { current = [keptTrack()]; return keptTrack() },
+    })
+    const originalMutation = Object.getOwnPropertyDescriptor(convexClient, 'mutation')
+    Object.defineProperty(convexClient, 'mutation', { configurable: true, value: async () => ({ status: 'deleted' }) })
+    try {
+      setFetch((operation) => {
+        if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock') return json({ ok: true })
+        if (operation.kind === 'clips.removeMany') throw new Error('network down')
+        if (operation.kind === 'clips.create') return json(operation.payload.trackId === 'kept-instrument' ? null : 'clip-1')
+        throw new Error(`Unexpected ${operation.kind}`)
+      }, recording.operations)
+
+      await recording.controller.startRecording()
+      recording.emit(noteOn('keyboard', 0))
+      recording.emit(noteOff('keyboard', 1_000))
+      current = []
+      await recording.controller.stopRecording()
+
+      expect(recording.provisional.at(-1)).toBeNull()
+      recording.dispose()
+    } finally {
+      if (originalMutation) Object.defineProperty(convexClient, 'mutation', originalMutation)
+      else Reflect.deleteProperty(convexClient, 'mutation')
+    }
+  })
+
+  test('keeps a local take on a new instrument track when its target was removed, as one history entry', async () => {
+    const project = await createLocalProject(`MIDI recording ${crypto.randomUUID()}`)
+    const repository = createLocalTimelineRepository(project.id)
+    await repository.createTrack({ id: 'instrument-track', kind: 'instrument' })
+    let current = [track()]
+    const recording = createHarness({
+      projectId: project.id,
+      tracks: () => current,
+      createTrackForRecording: async () => {
+        const row = await repository.createTrack({ id: 'kept-instrument', kind: 'instrument' })
+        current = [{ ...keptTrack(), id: row.id }]
+        return keptTrack()
+      },
+    })
+
+    await expect(recording.controller.startRecording()).resolves.toBe(true)
+    recording.emit(noteOn('keyboard', 0))
+    recording.emit(noteOff('keyboard', 1_000))
+    await repository.deleteTrack('instrument-track')
+    current = []
+    await recording.controller.stopRecording()
+
+    const snapshot = await repository.loadSnapshot()
+    expect(snapshot.clips.map((clip) => clip.trackId)).toEqual(['kept-instrument'])
+    expect(snapshot.clips[0]?.midi?.notes).toEqual([expect.objectContaining({ pitch: 60 })])
+    expect(recording.history).toHaveLength(1)
+    expect(recording.history[0]).toMatchObject({ type: 'track-clip-create' })
+    expect(recording.notifications).toEqual([keptNotice])
+    expect(recording.saveFailures).toEqual([])
     recording.dispose()
   })
 })

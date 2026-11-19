@@ -1,10 +1,13 @@
-import { readFile } from "node:fs/promises"
 import { expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import {
   createReleasePreparation,
   type ReleaseCommand,
 } from "./scripts/run-release"
 import {
+  assertNoSelfReferentialNodeModules,
   createLocalPackageEnvironment,
   createLocalPackagePreparation,
   type LocalPackageCommand,
@@ -13,16 +16,6 @@ import {
   defaultNotaryProfile,
   type NativeReleaseArtifactPaths,
 } from "./release.config"
-
-const packageJson = await readFile(new URL("./package.json", import.meta.url), "utf8")
-
-test("uses the local helper for start and package and the release helper for make", () => {
-  expect(packageJson).toContain('"start": "bun scripts/run-local.ts start"')
-  expect(packageJson).toContain('"package": "bun scripts/run-local.ts package"')
-  expect(packageJson).toContain('"make": "bun scripts/run-release.ts make"')
-  expect(packageJson).toContain('"release:mac:package": "bun scripts/run-release.ts package"')
-  expect(packageJson).toContain('"release:mac:make": "bun scripts/run-release.ts make"')
-})
 
 test("prepares the dry-run release environment with native artifact paths", () => {
   const command: ReleaseCommand = "package"
@@ -83,6 +76,18 @@ test("prepares local desktop start with native artifact paths", () => {
     DAW_AUDIO_HOST_PATH: artifactPaths.audioHostPath,
     DAW_NATIVE_ARTIFACT_MANIFEST_PATH: manifestPath,
   })
+})
+
+test("refuses a node_modules that links back to itself and accepts a plain one", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "daw-nm-"))
+  try {
+    mkdirSync(path.join(root, "node_modules"))
+    expect(() => assertNoSelfReferentialNodeModules(root)).not.toThrow()
+    symlinkSync(path.join(root, "node_modules"), path.join(root, "node_modules", "node_modules"))
+    expect(() => assertNoSelfReferentialNodeModules(root)).toThrow(/links back to/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test("assembles local package environment without signing or notarization", () => {

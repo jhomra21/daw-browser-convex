@@ -1,4 +1,5 @@
 #include "worker-supervisor.h"
+#include "../../audio-core/include/daw/graph_latency.h"
 
 #include <algorithm>
 #include <cmath>
@@ -92,7 +93,7 @@ bool IsValidWorkerManifest(const WorkerManifest& manifest) {
     || manifest.transport.maximumFrames == 0 || manifest.transport.maximumFrames > kMaximumWorkerFrames
     || manifest.transport.inputChannels > kMaximumWorkerChannels
     || manifest.transport.outputChannels == 0 || manifest.transport.outputChannels > kMaximumWorkerChannels
-    || manifest.transport.maximumEventsPerBlock > kMaximumWorkerEvents || manifest.latencyFrames > 10'000'000
+    || manifest.transport.maximumEventsPerBlock > kMaximumWorkerEvents || manifest.latencyFrames > kMaximumGraphLatencyFrames
     || (manifest.tailFrames && !IsValidFiniteWorkerTailFrames(*manifest.tailFrames))
     || manifest.stateRevision > 0x7fff'ffffU
     || manifest.parameters.size() > 16'384) {

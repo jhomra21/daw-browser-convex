@@ -5,6 +5,7 @@ import type { ClipMediaCache } from '~/lib/clip-buffer-cache'
 import type { convexApi } from '~/lib/convex'
 import {
   resolveTimelineTracks,
+  reuseResolvedTracks,
   type ClipTimelinePatch,
   type PendingTrackEntry,
 } from '~/lib/resolve-timeline-tracks'
@@ -110,30 +111,29 @@ export function useTimelineResolvedModel(
     })
   }
 
-  const resolvedTracks = createMemo(() => {
-    return resolveTracks({
-      draftClipEditsById: emptyDraftClipEditsById,
-      previewClipsByTrackId: emptyPreviewClipsByTrackId,
-    })
-  })
+  // Each resolve rebuilds every track and clip; reusing the unchanged ones keeps the lanes keyed on them mounted.
+  const resolvedTracks = createMemo<RuntimeTrack[]>((previous) => reuseResolvedTracks(previous, resolveTracks({
+    draftClipEditsById: emptyDraftClipEditsById,
+    previewClipsByTrackId: emptyPreviewClipsByTrackId,
+  })), [])
 
-  const placementTracks = createMemo(() => {
+  const placementTracks = createMemo<RuntimeTrack[]>((previous) => {
     const draftClipEditsById = options.projection.draftClipEditsById()
     if (draftClipEditsById.size === 0) return resolvedTracks()
-    return resolveTracks({
+    return reuseResolvedTracks(previous, resolveTracks({
       draftClipEditsById,
       previewClipsByTrackId: emptyPreviewClipsByTrackId,
-    })
-  })
+    }))
+  }, [])
 
-  const renderTracks = createMemo(() => {
+  const renderTracks = createMemo<RuntimeTrack[]>((previous) => {
     const previewClipsByTrackId = options.projection.previewClipsByTrackId()
     if (previewClipsByTrackId.size === 0) return placementTracks()
-    return resolveTracks({
+    return reuseResolvedTracks(previous, resolveTracks({
       draftClipEditsById: options.projection.draftClipEditsById(),
       previewClipsByTrackId,
-    })
-  })
+    }))
+  }, [])
 
   const trackLookup = createMemo(() => createTimelineTrackIndex(renderTracks()))
 

@@ -1,0 +1,12892 @@
+{
+ "name": "ae08-phase8-closure",
+ "sequence": 36,
+ "createdAt": "2026-11-14T03:00:00.000Z",
+ "revert": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 closure (parent ruling PARENT-RULING-PHASE8-INTEGRATION.md items 2, 3, 6). Commits 8848fc69 (item 4), 91ded5df (item 2 witness), fdf1ab40 (item 6), a02302ee (item 7). (1) Item 2, the 12 arms whose killers narrowed: every one is class (a), the mutated code has distinct observable behaviour on a reachable path, so no code is deleted and no live code is retired. rc2:427:1:mutant and diag 418:418-plus-427-playback, 418:427-alone-playback, 419:419-plus-427, 419:427-alone: the mutation drops the Stop-path re-prepare after the cancellation settles. The B6d7 begin-released-first witness no longer reaches it, because 11d A made the held dispose the project switch's, whose own `.then(ensureLivePortableSession)` restores the paused session once the begin reply lands; in the teardown-released-first ordering that restore runs while the Play's begin is still held, so only the Stop-path re-prepare restores it and the mutant fails. The record keeps 22 of 23 (24 of 25 for 418-plus-427) killers, the teardown variant renamed `schedule-replacement dispose` -> `project-switch dispose`. ledger:468:mutant:playback (removing the paused portable adoption in the disabled branch) keeps 4 of 5 recorded killers (W-UD7p-2 no longer reaches the branch, it adopts through the native path), gains C9e W-C9-track-11 and the new W-S11d-C2. 468:mutant:b6f4 keeps both recorded killers. ledger:469 (the branch condition `projectionChanged && playAttempt === undefined && (isPrepared || isPreparing)` replaced by `true`): 469:mutant:playback keeps 17 of 49, because the 32 B6f5/E3/F20/C0G tests it lost are playing-transport tests, which return from the effect before this branch; it gains W-S11d-E1. 469:mutant:b6f4 keeps the re-run witness; the mixer-edit test has projectionChanged true, where the mutant and the original take the same path. 469:mutant:b6f3 is recorded as a survivor (exit 0, nothing failing): B6f3's fault-while-playing path has no projection change and a prepared session, where both branches leave the same session, the same compile count (measured 9 against 9) and the same posts, so no witness on that path can tell them apart. The mutation itself is killed by 469:mutant:playback and 469:mutant:b6f4, so tiers.ts retires only this narrow view and test-debt.md lists it. ledger:470 (the paused adoption's baseline `previewProjectionBaseline = key` dropped): the arms were not narrowed by 11d; the B6f4 re-run witness settled too early, so the Pause's own paused-preview run re-baselined the session and hid the missing baseline. Commit 91ded5df adds the settling turns; 470:mutant:playback and 470:mutant:b6f4 fail the recorded tests again with no record change. (2) The 468 anchors re-point: item 6 made the adoption `if (!pendingAudioHydration) adoptPortableEdits()` with a longer comment, so ledger:468:mutant:playback and ledger:468:mutant:b6f4 move their `from`. Each is killed with the names above. (3) Item 3, the hook seeds: all 33 hook shards (21-1000) fail at HEAD, not only 201-230. The cause is the record, not a product defect or an oracle gap. All 2000 seeds (controller and hook, 1-1000, 100 per run) pass every invariant at HEAD. seed-records.json was last recorded at 22321b83; seed 204's compileCount went 22 (22321b83, b3a835d4) -> 25 (e78643dc, step 10: a prepared native session adopts a structural edit in place) -> 34 (711f1041, step 11a: Play resuming a paused session adopts the edit, then recompiles and resumes) -> 31 at HEAD; each adoption is one more compile by design. Over the 1000 hook seeds the compile ceilings moved on 855 (465 up, 390 down, 16848 -> 17148 in total, no seed above +11), the benign cancelled-rejection sets on 83 (the latency/ending-transport-domain and flush/ending-incarnation cancellations appear or disappear with the new scheduling order), and the I9 exercise on 11 (8 gained, 3 lost: seeds 294, 391, 457, with I9 exercised on 967 seeds against 963 recorded). The controller record is unchanged. seeds.hook206 now pins the three flush/cancelled rejections seed 206 has (205, 209, 214; was 240, 244). seed-records.json was measured from the working tree with the campaign command and `--steps 2000 --drain-steps 1000` (record-seeds.ts refuses to write because the summary hashes differ, as the hash judge's diagnostic note says; those hashes, `seeds.*.summaries`, stay for --full). Not changed: the pins and hashes of records 31-35 and g-tools-typecheck (17 recorded, 15 live), both for --full.",
+  "expectationsSha256": "d13afe7130e49ac6ce18c6a2fabf4301180013e3604b60bf6282bf4a2f3ffb28"
+ },
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:468:mutant:playback",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          // The kept paused session adopts the edit in place; what it cannot carry replaces it (requestTimelineSchedule).\n          adoptPortableEdits()\n",
+   "new": "          // The kept paused session adopts the edit in place, once the clips it adds are hydrated: the effect runs again\n          // when they are. What it cannot carry replaces it (requestTimelineSchedule).\n          if (!pendingAudioHydration) adoptPortableEdits()\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:468:mutant:b6f4",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          // The kept paused session adopts the edit in place; what it cannot carry replaces it (requestTimelineSchedule).\n          adoptPortableEdits()\n",
+   "new": "          // The kept paused session adopts the edit in place, once the clips it adds are hydrated: the effect runs again\n          // when they are. What it cannot carry replaces it (requestTimelineSchedule).\n          if (!pendingAudioHydration) adoptPortableEdits()\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:427:1:mutant",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d5 a Pause that cancels a pending Play keeps a live paused graph at the pause position",
+    "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
+    "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
+    "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
+    "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is starting leaves nothing running and a live paused graph at the start",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit (host pause held)",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit (host pause held)",
+    "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "does not restart after pause wins an active native rebuild",
+    "does not resume a structural rebuild after stop wins",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6d5 a Pause that cancels a pending Play keeps a live paused graph at the pause position",
+    "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
+    "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
+    "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
+    "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is starting leaves nothing running and a live paused graph at the start",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit (host pause held)",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit (host pause held)",
+    "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "does not restart after pause wins an active native rebuild",
+    "does not resume a structural rebuild after stop wins",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:418:418-plus-427-playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d4 a Stop while the paused replacement is starting keeps a live graph at the start",
+    "B6d5 a Pause that cancels a pending Play keeps a live paused graph at the pause position",
+    "B6d5 a Stop after a locate during an uncommitted paused preview still returns it to the start",
+    "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
+    "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
+    "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
+    "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is starting leaves nothing running and a live paused graph at the start",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit (host pause held)",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit (host pause held)",
+    "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "does not restart after pause wins an active native rebuild",
+    "does not resume a structural rebuild after stop wins",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6d4 a Stop while the paused replacement is starting keeps a live graph at the start",
+    "B6d5 a Pause that cancels a pending Play keeps a live paused graph at the pause position",
+    "B6d5 a Stop after a locate during an uncommitted paused preview still returns it to the start",
+    "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
+    "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
+    "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
+    "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is starting leaves nothing running and a live paused graph at the start",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit (host pause held)",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit (host pause held)",
+    "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "does not restart after pause wins an active native rebuild",
+    "does not resume a structural rebuild after stop wins",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:418:427-alone-playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d5 a Pause that cancels a pending Play keeps a live paused graph at the pause position",
+    "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
+    "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
+    "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
+    "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is starting leaves nothing running and a live paused graph at the start",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit (host pause held)",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit (host pause held)",
+    "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "does not restart after pause wins an active native rebuild",
+    "does not resume a structural rebuild after stop wins",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6d5 a Pause that cancels a pending Play keeps a live paused graph at the pause position",
+    "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
+    "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
+    "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
+    "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is starting leaves nothing running and a live paused graph at the start",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit (host pause held)",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit (host pause held)",
+    "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "does not restart after pause wins an active native rebuild",
+    "does not resume a structural rebuild after stop wins",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-427",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d5 a Pause that cancels a pending Play keeps a live paused graph at the pause position",
+    "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
+    "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
+    "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
+    "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is starting leaves nothing running and a live paused graph at the start",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit (host pause held)",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit (host pause held)",
+    "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "does not restart after pause wins an active native rebuild",
+    "does not resume a structural rebuild after stop wins",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6d5 a Pause that cancels a pending Play keeps a live paused graph at the pause position",
+    "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
+    "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
+    "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
+    "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is starting leaves nothing running and a live paused graph at the start",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit (host pause held)",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit (host pause held)",
+    "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "does not restart after pause wins an active native rebuild",
+    "does not resume a structural rebuild after stop wins",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:427-alone",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d5 a Pause that cancels a pending Play keeps a live paused graph at the pause position",
+    "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
+    "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
+    "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
+    "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is starting leaves nothing running and a live paused graph at the start",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit (host pause held)",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit (host pause held)",
+    "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "does not restart after pause wins an active native rebuild",
+    "does not resume a structural rebuild after stop wins",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6d5 a Pause that cancels a pending Play keeps a live paused graph at the pause position",
+    "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
+    "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
+    "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
+    "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is starting leaves nothing running and a live paused graph at the start",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit (host pause held)",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit (host pause held)",
+    "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "does not restart after pause wins an active native rebuild",
+    "does not resume a structural rebuild after stop wins",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:468:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play resumes the same session",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "C9e W-C9-track-11 a track added, reordered and deleted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "UD7n W-S11d-C2 an unhydrated clip inserted into a paused portable session keeps the session, stages nothing, and is adopted after hydration",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:b6f4",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session"
+   ],
+   "new": [
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f a project switch leaves a live paused portable session of the new project at the start",
+    "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
+    "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
+    "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 479 a rebuild requested after the running rebuild passed its last request check runs next with the newest tracks",
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 A an edit the playing portable session cannot take live is adopted once at a seam, with no rebuild",
+    "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
+    "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
+    "B6f5 D a structural edit during a warm Play keeps the Play and reaches its session",
+    "B6f5 E5 a note and a tempo edit while playing are adopted at a seam without a dispose or a restart",
+    "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
+    "B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play resumes the same session",
+    "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
+    "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+    "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
+    "B6f5 a resume after an adoption plays the newest state",
+    "B6f5 renaming and recolouring a track while playing is neither adopted nor rebuilt",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
+    "B6f5c W-R8a a loop edit during a portable take is adopted once the take has stopped or been cancelled",
+    "B6f5c a failed take followed by the caller stop or cancel adopts each edit once",
+    "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
+    "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
+    "B6f5c a structural edit during a portable take is adopted in place and the take stops or is cancelled afterwards",
+    "B6f5c a take ended by a device fault follows the edit it held",
+    "B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take",
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
+    "C0G a clip waveform key or key order change while playing is neither adopted nor rebuilt",
+    "C9b W-C9-clip-6 an audio clip move while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9c W-C9-asset-7 an audio clip asset swap while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9d W-C9-warp-8 a tempo or warp marker edit under a Stretch clip while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9e W-C9-track-11 a track added, reordered and deleted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9f W-C9-fx-5 an effect inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9g W-C9-inst-7 an instrument replaced or a processor parameter edited while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9h W-C9-fx-8 a limiter inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "E3 W-E3-6 a locate while playing seeks the same session without a dispose or a Play, and the follow adopts the edit after it",
+    "E3 W-E3-R9 a locate the live session refuses without a failure rebuilds at the target and keeps playing",
+    "F20 W-F20b changing the loop end while playing is adopted at a seam and the schedule loops at the new end",
+    "F20 W-F20f toggling the loop on and off while playing is adopted without a dispose or a restart",
+    "W-FB-2 a refused adopting publish while playing keeps the session and a later adoption carries the edit",
+    "W-FB-3 a structural edit while a session is kept paused reaches its adoption and rebuilds nothing",
+    "failed lifecycle transition cancels delayed native startup",
+    "keeps a paused portable session compatible when enabling a loop",
+    "native-required play retries failed recovery and stays stopped while recovery runs",
+    "pauses Web Audio transport before disposing active portable playback on cleanup",
+    "pauses Web Audio transport before disposing portable playback on project generation change",
+    "preserves an explicitly captured native owner across queued generation rebuilds",
+    "rebuilds active portable playback into compatibility playback for a loop"
+   ],
+   "new": [
+    "B6f a project switch leaves a live paused portable session of the new project at the start",
+    "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play resumes the same session",
+    "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
+    "B6f5 a resume after an adoption plays the newest state",
+    "C9b W-C9-clip-6 an audio clip move while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9c W-C9-asset-7 an audio clip asset swap while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9d W-C9-warp-8 a tempo or warp marker edit under a Stretch clip while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9e W-C9-track-11 a track added, reordered and deleted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9f W-C9-fx-5 an effect inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9g W-C9-inst-7 an instrument replaced or a processor parameter edited while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9h W-C9-fx-8 a limiter inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "UD7n W-S11d-E1 a VST3 insert while paused with only a browser session prepared rebuilds nothing and shows the limitation",
+    "W-FB-3 a structural edit while a session is kept paused reaches its adoption and rebuilds nothing",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:b6f3",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:b6f3",
+    "expect",
+    "exit"
+   ],
+   "old": 1,
+   "new": 0
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:b6f3",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 0,
+   "new": 1
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:b6f3",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 1,
+   "new": 0
+  },
+  {
+   "path": [
+    "seeds",
+    "hook206",
+    "ids"
+   ],
+   "old": [
+    240,
+    244
+   ],
+   "new": [
+    205,
+    209,
+    214
+   ]
+  }
+ ],
+ "seedRecordChanges": [
+  {
+   "path": [
+    "hook",
+    "#0",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#1",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#2",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 11
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#3",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#4",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#5",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#7",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#8",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#9",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#10",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#12",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#13",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#14",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#15",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#16",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#17",
+    "exercised"
+   ],
+   "old": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+   ],
+   "new": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "I9"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#17",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 11
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#18",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#19",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#20",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#21",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#22",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#23",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#24",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 28
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#26",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#26",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#27",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#28",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#30",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#30",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#31",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#32",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#34",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#35",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#36",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#37",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#38",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#39",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#40",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#41",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#43",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#43",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#44",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#44",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 31
+   },
+   "new": {
+    "compileCount": 38
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#45",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#47",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#48",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#49",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#50",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#52",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#53",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#54",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#55",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#56",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#57",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#58",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#58",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#59",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#60",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#61",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#62",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 31
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#65",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#66",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#67",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#67",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#68",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#69",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#70",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#71",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#72",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#73",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#75",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#76",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#77",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 12
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#78",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#81",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#82",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#83",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 10
+   },
+   "new": {
+    "compileCount": 11
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#84",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#85",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 11
+   },
+   "new": {
+    "compileCount": 9
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#86",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#87",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#88",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 11
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#89",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 32
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#92",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#93",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#94",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#95",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#97",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#98",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#99",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#100",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#101",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#102",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#103",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#103",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#104",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#105",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#106",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#107",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#109",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#110",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#112",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#113",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#114",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#115",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#116",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#117",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#118",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 30
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#119",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#120",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#121",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#122",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#122",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#124",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#125",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#126",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#126",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#127",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 32
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#128",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#130",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#132",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#133",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#134",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#134",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#135",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#137",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#139",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#139",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#141",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#142",
+    "exercised"
+   ],
+   "old": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+   ],
+   "new": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "I9"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#142",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#143",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#145",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#146",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#148",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#148",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#149",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#149",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#151",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#152",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#153",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#155",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#155",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#156",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#157",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#158",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#159",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#159",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#160",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#161",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#162",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#164",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#164",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#165",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#166",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#167",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#168",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#169",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#170",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#171",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#172",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#174",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#175",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#176",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#177",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#178",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#179",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#180",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#181",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 10
+   },
+   "new": {
+    "compileCount": 8
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#182",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#183",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#184",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#186",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#187",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#189",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#190",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#191",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#192",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#193",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#194",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#195",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#196",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 29
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#197",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#198",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#203",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 31
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#204",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#205",
+    "rejections"
+   ],
+   "old": [
+    "flush|cancelled|ending-incarnation",
+    "flush|cancelled|ending-incarnation"
+   ],
+   "new": [
+    "flush|cancelled|ending-incarnation",
+    "flush|cancelled|ending-incarnation",
+    "flush|cancelled|ending-incarnation"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#205",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#206",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#207",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#208",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#210",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#211",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#212",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#214",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#215",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#216",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#217",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#217",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#219",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#222",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#223",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#224",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#225",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#226",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#227",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#228",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#229",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "flush|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#229",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#230",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#231",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#232",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 29
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#233",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#234",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#235",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 28
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#236",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#238",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#238",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#239",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#239",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 11
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#240",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#240",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#241",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#242",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#243",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#245",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#246",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#248",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#248",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#249",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#250",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#252",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#252",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#253",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#254",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#255",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#257",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#258",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#259",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#260",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 33
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#262",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#263",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#264",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 9
+   },
+   "new": {
+    "compileCount": 8
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#265",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#266",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#267",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#268",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#269",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 11
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#270",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#271",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#273",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#274",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#275",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#276",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#277",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#278",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#279",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#280",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#282",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#284",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#285",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#285",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#286",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#287",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#288",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#289",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#290",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#291",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#293",
+    "exercised"
+   ],
+   "old": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "I9"
+   ],
+   "new": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#293",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#294",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-incarnation"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#294",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#295",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#295",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#296",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#297",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#298",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#299",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#300",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#302",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#303",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#305",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#306",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#307",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#308",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 31
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#309",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 9
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#310",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#311",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#312",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#313",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#314",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "flush|cancelled|ending-transport-domain",
+    "flush|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#314",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#315",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 11
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#316",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#317",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#317",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#318",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#318",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#319",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#320",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 28
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#321",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#323",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#324",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#327",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#329",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#330",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#331",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#332",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#333",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#334",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 30
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#335",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#336",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#338",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#339",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#340",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 28
+   },
+   "new": {
+    "compileCount": 33
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#341",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 33
+   },
+   "new": {
+    "compileCount": 32
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#342",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#343",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#344",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#345",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#346",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#347",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#348",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#349",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#350",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#352",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 11
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#353",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#354",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#355",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#356",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#357",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#358",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 9
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#360",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 29
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#361",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#362",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#363",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#363",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#364",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#365",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#366",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 30
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#367",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 32
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#369",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#370",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#371",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#372",
+    "exercised"
+   ],
+   "old": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+   ],
+   "new": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "I9"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#372",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#373",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#374",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#375",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#376",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#377",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 12
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#378",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 28
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#379",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#380",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#381",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#382",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 8
+   },
+   "new": {
+    "compileCount": 9
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#383",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#384",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#385",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#386",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 32
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#387",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#388",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#389",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#390",
+    "exercised"
+   ],
+   "old": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "I9"
+   ],
+   "new": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#390",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#391",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#392",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#393",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#394",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#395",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#396",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#397",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#398",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#399",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#400",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#401",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#402",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#403",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#404",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#404",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 30
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#405",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#406",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#406",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#407",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#408",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#409",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 28
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#410",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#411",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#412",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#412",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#413",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#414",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#415",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#416",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#417",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 29
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#418",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#419",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#420",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#421",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#422",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#423",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#423",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#424",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 30
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#425",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#426",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#427",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#428",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#429",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#430",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#433",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#434",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#435",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#436",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#437",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#438",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#439",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#440",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#441",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#445",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#446",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#446",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#447",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#448",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#449",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#450",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#451",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#452",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#453",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#454",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#455",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#456",
+    "exercised"
+   ],
+   "old": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "I9"
+   ],
+   "new": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#456",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 11
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#457",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#458",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#458",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#459",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#460",
+    "exercised"
+   ],
+   "old": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+   ],
+   "new": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "I9"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#460",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#461",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#462",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#463",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#464",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#465",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#466",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#466",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#467",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#468",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 11
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#469",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#471",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#472",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#473",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#475",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#476",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#477",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#478",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#479",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#480",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#481",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#482",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 10
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#483",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#484",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#485",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#486",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#487",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#488",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 12
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#489",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#491",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#492",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#493",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#494",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 10
+   },
+   "new": {
+    "compileCount": 9
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#496",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#497",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#500",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#501",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#502",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#505",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#506",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#508",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#509",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#510",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#511",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#512",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#513",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#514",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#515",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#515",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#516",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#517",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#519",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#520",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#521",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#522",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#524",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#525",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 31
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#526",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#527",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#528",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#529",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#530",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#531",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#532",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#534",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#535",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#536",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#537",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#538",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#539",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#540",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#541",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#542",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#542",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#543",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#544",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 34
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#545",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#547",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#549",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#550",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#551",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#552",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#552",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#553",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#554",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#555",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#555",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#556",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 8
+   },
+   "new": {
+    "compileCount": 10
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#557",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#558",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#559",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#560",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#561",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#563",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#564",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 11
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#565",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#565",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#566",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#568",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#569",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#570",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 11
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#571",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#572",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 11
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#573",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#574",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#575",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#576",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#577",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#578",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 29
+   },
+   "new": {
+    "compileCount": 32
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#579",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#580",
+    "exercised"
+   ],
+   "old": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+   ],
+   "new": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "I9"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#580",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#581",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#582",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#583",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#585",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#586",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#588",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#589",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#590",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#591",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#592",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#593",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#594",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#595",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#596",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#597",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#598",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#599",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#600",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#601",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#602",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#603",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#604",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#604",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#605",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#606",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 32
+   },
+   "new": {
+    "compileCount": 33
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#608",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#609",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#609",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#610",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#612",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#613",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#614",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#615",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#616",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#617",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#619",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#620",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#621",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#622",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#623",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#624",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#625",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#627",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#628",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#629",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#630",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": [
+    "latency|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#631",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#632",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#632",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#633",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#634",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#635",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#636",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#637",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#638",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#639",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#642",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#643",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#644",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#645",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#646",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#647",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 34
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#648",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#648",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#649",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#650",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#650",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#651",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#651",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#652",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#653",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#654",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#655",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#656",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#657",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#658",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#659",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#660",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#662",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#663",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#663",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#664",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#665",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#666",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#668",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#669",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#670",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#671",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 10
+   },
+   "new": {
+    "compileCount": 11
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#672",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#673",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#674",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#675",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#676",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#677",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#677",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#678",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#679",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#680",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#681",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 12
+   },
+   "new": {
+    "compileCount": 11
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#682",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#682",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#683",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#685",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#686",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#687",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#688",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#689",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#690",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#691",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#692",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#693",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#694",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#695",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#696",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#697",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#697",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#698",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#699",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#701",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 30
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#702",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#703",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#703",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#706",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 30
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#707",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#708",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 29
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#709",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#710",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#711",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#712",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#713",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 29
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#714",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 28
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#715",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#715",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#716",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#717",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#718",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#720",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#722",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#723",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#723",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#724",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 11
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#725",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#725",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#726",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#727",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#728",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#729",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#731",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#732",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#733",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#733",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#734",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#735",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#736",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#737",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#738",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#740",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#741",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#742",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#743",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#743",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#744",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#745",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#746",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#747",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#748",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#748",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#749",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#750",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 10
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#751",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#753",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#754",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#755",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 12
+   },
+   "new": {
+    "compileCount": 10
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#757",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#759",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#760",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#761",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#762",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#763",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 11
+   },
+   "new": {
+    "compileCount": 10
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#764",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#766",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#767",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 31
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#768",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#769",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#771",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#772",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#773",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#774",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#775",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#776",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#777",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#778",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#779",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#780",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#781",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#782",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#783",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#784",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#785",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#786",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#788",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#789",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#790",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#791",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#792",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#794",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#794",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#795",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#796",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#797",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#798",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#800",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#801",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#801",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#803",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#803",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#805",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#806",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#807",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#809",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#810",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#812",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 11
+   },
+   "new": {
+    "compileCount": 7
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#813",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#814",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#815",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#816",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#817",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#818",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#819",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#820",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-incarnation",
+    "latency|cancelled|ending-incarnation"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#820",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#821",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#822",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#823",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#824",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 31
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#825",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#826",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 29
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#827",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#828",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#829",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#830",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#831",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#832",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#833",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 11
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#834",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#835",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#835",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 30
+   },
+   "new": {
+    "compileCount": 33
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#836",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#837",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 31
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#838",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#838",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#839",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#840",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#841",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#842",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#843",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#843",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#844",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#845",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#846",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#846",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#847",
+    "exercised"
+   ],
+   "old": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+   ],
+   "new": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "I9"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#847",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#848",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#849",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#850",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 31
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#851",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#852",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#853",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#854",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#855",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#856",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#857",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#858",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#859",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#861",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#862",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#863",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#864",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#865",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#866",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#867",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#868",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#869",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#870",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#871",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#872",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#874",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#875",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#876",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#878",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#879",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#879",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#881",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#881",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#882",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#884",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#887",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#888",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#889",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#890",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#891",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#892",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#895",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#896",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#897",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#899",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#900",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#901",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#902",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#903",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#905",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#905",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#906",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#907",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#908",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 12
+   },
+   "new": {
+    "compileCount": 10
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#909",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#910",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#910",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#911",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#912",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#913",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#914",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#915",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#916",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#919",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#920",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#921",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#922",
+    "exercised"
+   ],
+   "old": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+   ],
+   "new": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "I9"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#922",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#923",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#924",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 12
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#925",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#927",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 28
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#928",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#929",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#930",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#931",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#932",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#934",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#935",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 12
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#936",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#937",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#938",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#940",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#941",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 29
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#942",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 31
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#943",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": [
+    "latency|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#943",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#944",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#945",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#945",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#946",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#947",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#948",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#950",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 30
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#951",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#951",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#952",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#953",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#954",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#955",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#956",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#957",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#957",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#960",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#961",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#963",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#964",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#965",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#966",
+    "exercised"
+   ],
+   "old": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+   ],
+   "new": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "I9"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#966",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#967",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#968",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#969",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#970",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#971",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#972",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#973",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 12
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#975",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#976",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#977",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#978",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#979",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#980",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#981",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#982",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#983",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#984",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#985",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#986",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#987",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#987",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#989",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#990",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#991",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#994",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#996",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#999",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 15
+   }
+  }
+ ]
+}

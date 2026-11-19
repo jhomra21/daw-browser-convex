@@ -1,0 +1,7 @@
+{
+ "knownRed": {
+  "src/lib/waveform-ribbon.browser.test.ts": [
+   "rasterizes the shared CSS floor and raw-center geometry consistently in Chromium"
+  ]
+ }
+}

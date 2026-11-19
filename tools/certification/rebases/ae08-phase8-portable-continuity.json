@@ -1,0 +1,42 @@
+{
+ "name": "ae08-phase8-portable-continuity",
+ "sequence": 37,
+ "createdAt": "2026-11-14T05:00:00.000Z",
+ "revert": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 portable continuity integration (cherry-picks of t3/8a9153b3: b7d1e651 D1 in-place handoff, 32449e29 D2 50 ms reports and adaptive seam, c16c3d52 D3 render-stall probe; hand record, no --bless). (1) ledger:476:mutant:portable (`activeRevision === undefined` -> `!==` in the portable compileSnapshot): its 7 recorded killers still fail it. D1 renamed one of them, W-F20c `...refreshes from the arrangement position` -> `...extends in place from the arrangement position`, so the record follows the rename and no killer is lost. (2) No arm lost a killer. D1 deleted four rebuild-only PBT tests; none of them was a recorded killer of a live arm (111 live arms anchored in or witnessed by the touched files, run one at a time with --only --jobs 1, all PASS but this rename and one flake below); ruling item 2 therefore has no arm to classify. (3) No arm anchor moved: every spec `from` still applies (applied marker count unchanged). (4) ledger:481:control:b6f5 failed once in the first run ('B6f5 a refused adoption answers failed and keeps the session revision; a MIDI clip edit is adopted at a seam', install-schedule:1 against 2) and passed in 3 isolated reruns, in 15 standalone PBT runs and in the gate runs; the cause is not found (it is not performance.now: a 5, 30 and 100 ms per-call clock leaves the test green). Not recorded as an arm change. Pins and watched hashes left for --full (not touched here): WK public/audio-worklets/daw-portable-audio-core-host-v2.js 01dcf7efedd56a96ee6719a34a315fe784d1c4cc96912addb3fdd91f1271e246 -> 40cfc893967ce25980ba31e0a89a4023b805d506a45c7f707326998a58c5974b (expectations.json pins bae84bd0..., already stale); PB src/lib/portable-browser-playback-controller.ts; PBT src/lib/portable-browser-playback-controller.test.ts; the WASM host test packages/audio-engine/src/portable-wasm-host.test.ts; and the Chromium file src/lib/desktop/native-playback-lifecycle.browser.test.ts (manifest-7a entry 2488292c...), whose refresh probe asserted the rebuilt second session that D1 removed and now asserts the in-place handoff (one session, one start, 2 installs).",
+  "expectationsSha256": "556b1c996f910ec23c11f1ff3444f35ac4a2cdfce34e67cebf6820c251236a93"
+ },
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:476:mutant:portable",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
+    "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the follow adopts it",
+    "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and the follow adopts it during the take",
+    "W-C9-clip-R an audio clip move during a take is adopted and the take refresh schedules the moved clip once",
+    "W-C9-track-5 a reorder is the session's own graph again: unchanged, nothing published, and the next edit keeps the node order",
+    "W-F20c a loop edit after a wrap maps positions across the seam, compiles the loop shifted and refreshes from the arrangement position",
+    "W-R7 an adoption that shortens the window while recording does not make the refresh schedule a source twice"
+   ],
+   "new": [
+    "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
+    "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the follow adopts it",
+    "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and the follow adopts it during the take",
+    "W-C9-clip-R an audio clip move during a take is adopted and the take refresh schedules the moved clip once",
+    "W-C9-track-5 a reorder is the session's own graph again: unchanged, nothing published, and the next edit keeps the node order",
+    "W-F20c a loop edit after a wrap maps positions across the seam, compiles the loop shifted and extends in place from the arrangement position",
+    "W-R7 an adoption that shortens the window while recording does not make the refresh schedule a source twice"
+   ]
+  }
+ ],
+ "seedRecordChanges": []
+}

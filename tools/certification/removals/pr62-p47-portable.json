@@ -1,0 +1,6 @@
+{
+ "ruling": "acceptance-reports/pr62-cleanup/PARENT-RULING-PR62-TEST-CLEANUP.md",
+ "removed": [
+  { "file": "src/lib/portable-browser-playback-controller.test.ts", "test": "3B1 r3 extraction ignores stale commented callbacks and rejects missing or ambiguous bindings" }
+ ]
+}

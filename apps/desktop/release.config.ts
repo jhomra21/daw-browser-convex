@@ -10,6 +10,7 @@ import {
   type NativeReleaseArtifact,
 } from "./native-release-artifacts"
 import { nativeVst3WorkerArtifactId } from "@daw-browser/plugin-host-protocol"
+import { jobLimit } from "../../tools/jobs"
 
 export const defaultNotaryProfile = "DAW_NOTARY_PROFILE"
 
@@ -115,6 +116,7 @@ export const rebuildNativePackageArtifacts = (
       "--target",
       ...build.targets,
       "--parallel",
+      String(jobLimit()),
     ])
     if (compile.error || compile.status !== 0) {
       throw new Error(`CMake build failed for ${build.name}.`)
@@ -198,7 +200,7 @@ export const resolveNativeArtifactPaths = (
   }
 }
 
-export const getNativeReleaseArtifacts = (
+const getNativeReleaseArtifacts = (
   artifactPaths: NativeReleaseArtifactPaths,
 ): NativeReleaseArtifact[] => [
   { name: nativeVst3ScannerArtifactName, sourcePath: artifactPaths.scannerPath },

@@ -1,3 +1,4 @@
+import { lstatSync, realpathSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { spawnSync } from "node:child_process"
 import path from "node:path"
@@ -62,6 +63,16 @@ export const createLocalPackagePreparation = (
   environment: createLocalPackageEnvironment(sourceEnvironment, artifactPaths, manifestPath),
 })
 
+// `ln -s <node_modules> <tree>/node_modules` over a tree that already has one creates the link inside the real directory, so
+// `node_modules/node_modules` points back at `node_modules`. Packaging walks it forever, so it is refused before any build.
+export const assertNoSelfReferentialNodeModules = (projectRoot: string): void => {
+  const modules = path.join(projectRoot, "node_modules")
+  const nested = path.join(modules, "node_modules")
+  if (lstatSync(nested, { throwIfNoEntry: false })?.isSymbolicLink() && realpathSync(nested) === realpathSync(modules)) {
+    throw new Error(`${nested} links back to ${modules}. Remove that link (rm "${nested}"), then package again.`)
+  }
+}
+
 const commandArgument = process.argv[2]
 const arguments_ = process.argv.slice(3)
 const diagnostic = arguments_.includes("--dry-run") || arguments_.includes("--diagnostic")
@@ -84,6 +95,7 @@ const main = async (): Promise<void> => {
 
   const desktopRoot = path.resolve(import.meta.dirname, "..")
   const projectRoot = path.resolve(desktopRoot, "../..")
+  assertNoSelfReferentialNodeModules(projectRoot)
   if (!diagnostic) rebuildNativePackageArtifacts(projectRoot)
   const artifactPaths = resolveNativeArtifactPaths(projectRoot)
   const manifestPath = getNativeReleaseManifestPath(desktopRoot)

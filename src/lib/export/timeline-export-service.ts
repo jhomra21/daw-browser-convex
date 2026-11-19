@@ -1,11 +1,12 @@
-import { isLocalId, resolveClipSampleUrl, type ExportAudioFormat } from "@daw-browser/shared"
+import { isLocalId, resolveClipSampleUrl, type AudioPcmSourceDescriptor, type ExportAudioFormat } from "@daw-browser/shared"
 import type { ExportRange } from "@daw-browser/audio-engine/export-range"
 import type { StemMode } from "@daw-browser/audio-engine/export-mixdown"
 import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types"
 import type { RuntimeClip, RuntimeTrack } from "~/lib/timeline-runtime-types"
 import type { ExportEncodingSettings, ExportRenderSettings } from "~/lib/export/export-settings"
 import type { ExportOutputTargetFactory } from "~/lib/export/export-output-targets"
-import { cloneExportEffectsProjection, createExportRenderStateSnapshot, NATIVE_EXPORT_UNAVAILABLE_MESSAGE, snapshotCloudRenderRows, type ExportAutomationPatch, type ExportCloudRenderRowsSnapshot, type ExportOutcome, type ExportProgress, type ExportRenderStateSnapshot, runStemExport, runTimelineExport } from "~/lib/export/run-export-job"
+import { createExportRenderStateSnapshot, NATIVE_EXPORT_UNAVAILABLE_MESSAGE, runStemExport, runTimelineExport, type ExportOutcome, type ExportProgress } from "~/lib/export/run-export-job"
+import { cloneExportEffectsProjection, snapshotCloudRenderRows, type ExportAutomationPatch, type ExportCloudRenderRowsSnapshot, type ExportRenderStateSnapshot } from "~/lib/desired-playback-state"
 import type { ExportQueue } from "~/lib/export/export-queue"
 import type { CapturedClipBufferLoadResult, CapturedClipMediaReference } from "~/hooks/useClipBuffers"
 import type { EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller"
@@ -17,7 +18,6 @@ import { preflightExportResources } from "~/lib/export/export-resource-preflight
 import { getLocalProject } from "~/lib/local-project-db"
 import type { SampledInstrumentRegionBudget, SampledInstrumentRegionBudgetScope } from "~/lib/sampled-instrument-region-budget"
 import type { SampledInstrumentSession } from "~/lib/sampled-instrument-session"
-import type { AudioPcmSourceDescriptor } from "@daw-browser/audio-engine/media-pages"
 import type { AudioStretchRuntimeClip } from "@daw-browser/audio-engine/audio-stretch-rendering"
 import {
   sampledInstrumentRegionBytes,
@@ -214,8 +214,8 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
         bytes: sampledInstrumentRetainedBytes(sampledInstrumentRegionBytes({
           sourceStartFrame: sampled.sourceStartFrame,
           sourceEndFrame: sampled.sourceStartFrame + sampled.buffer.length,
-        }, sampled.buffer.numberOfChannels), mirrors),
-      })))
+        }, sampled.buffer.numberOfChannels), dependencies.nativeRendererRequired ? 1 : mirrors),
+      })), dependencies.nativeRendererRequired === true)
       return scope
     } catch (error) {
       scope.release()

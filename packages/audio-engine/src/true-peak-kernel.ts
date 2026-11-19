@@ -1,11 +1,11 @@
-export const truePeakOversampling = 8
+const truePeakOversampling = 8
 export const truePeakTapsPerPhase = 24
-export const truePeakCenterTap = truePeakTapsPerPhase / 2 - 1
+const truePeakCenterTap = truePeakTapsPerPhase / 2 - 1
 export const truePeakFutureFrames = truePeakTapsPerPhase - 1 - truePeakCenterTap
 
 const sinc = (value: number) => value === 0 ? 1 : Math.sin(Math.PI * value) / (Math.PI * value)
 
-export const truePeakPolyphaseCoefficients: readonly Float64Array[] = Array.from(
+const truePeakPolyphaseCoefficients: readonly Float64Array[] = Array.from(
   { length: truePeakOversampling },
   (_, phase) => {
     const coefficients = new Float64Array(truePeakTapsPerPhase)

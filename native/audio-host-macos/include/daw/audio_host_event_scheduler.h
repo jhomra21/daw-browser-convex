@@ -37,6 +37,19 @@ class NativeVstEventScheduler final {
     return true;
   }
 
+  // The parameter events queued and not yet committed to a block, oldest first. Producer thread only:
+  // the producer is the one writer of the ring, so entries between read and write stay put while this reads.
+  // An event the callback has prepared but not committed is included; applying it twice is harmless.
+  std::size_t PendingParameters(const std::span<daw::plugin_host::WorkerTransportEvent> out) const noexcept {
+    const auto write = event_write_.load(std::memory_order_relaxed);
+    std::size_t count = 0;
+    for (auto cursor = event_read_.load(std::memory_order_acquire); cursor != write && count < out.size(); ++cursor) {
+      const auto& event = queued_events_[cursor % kCapacity];
+      if (event.kind == daw::plugin_host::WorkerEventKind::kParameter) out[count++] = event;
+    }
+    return count;
+  }
+
   bool PrepareBlock(
     const std::uint32_t frame_count,
     const std::span<daw::plugin_host::WorkerTransportEvent> block_events,

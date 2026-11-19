@@ -33,6 +33,9 @@ export const maxDesktopReplyChunks = Math.ceil(maxDesktopReplyBytes / maxDesktop
 export const maxCorrelationIdLength = 96
 export const maxDeadlineMs = 60_000
 export const desktopCapabilityMaximumChunkBytes = 1024 * 1024
+export const recordingSpoolBlockHeaderBytes = 4
+export const recordingSpoolSampleBytes = 4
+export const maximumRecordingSpoolBlockFrames = 2048
 
 export type DesktopJsonValue =
   | null
@@ -59,6 +62,19 @@ export const desktopVstParameterEditPayloadSchema = z.object({
   normalizedValue: z.number().finite().min(0).max(1),
 }).strict()
 export type DesktopVstParameterEditPayload = z.infer<typeof desktopVstParameterEditPayloadSchema>
+
+// What a loaded plug-in instance tells the renderer. "failed" is only ever the plug-in's own fault;
+// "launch-not-trusted" is the worker's trust gate refusing the launch record, which the trust flow resolves.
+export const desktopVstInstanceEventSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("launch-not-trusted"), instanceId: z.string().uuid() }).strict(),
+  z.object({
+    kind: z.literal("latency"),
+    instanceId: z.string().uuid(),
+    latencyFrames: z.number().int().min(0).max(65_536),
+  }).strict(),
+  z.object({ kind: z.literal("failed"), instanceId: z.string().uuid() }).strict(),
+])
+export type DesktopVstInstanceEvent = z.infer<typeof desktopVstInstanceEventSchema>
 
 const correlationId = z.string().min(1).max(maxCorrelationIdLength).regex(/^[A-Za-z0-9._-]+$/)
 const version = z.literal(desktopProtocolVersion)

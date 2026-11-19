@@ -12,14 +12,22 @@ import {
   createDefaultSpectralParams,
   createDefaultUtilityParams,
   normalizeCompressorParams,
+  normalizeEqParams,
   normalizeGateParamsEnvelope,
   normalizeSpectralParamsEnvelope,
   normalizeUtilityParamsEnvelope,
 } from '@daw-browser/shared'
 import { createCompressorNodeChain } from './effects/chain'
+import { createEqNodes } from './effects/dsp'
 import { createStaticWorkletNodeChain } from './effects/static-worklet-chain'
 import type { StaticWorkletKind } from './effects/static-worklet-chain'
-import { measureAudio, measureChannelLeakageDb } from './dsp-characterization'
+import {
+  createSineFixture,
+  measureAudio,
+  measureCrosstalkDb,
+  measureThdPlusNoise,
+  measureToneTransfer,
+} from './dsp-characterization'
 import {
   createSrcImpulseFixture,
   createSrcStereoIsolationFixture,
@@ -252,6 +260,66 @@ const capture = async (run: () => Promise<BrowserCharacterizationCase>): Promise
   }
 }
 
+const connectSingleEqFilter = (context: BaseAudioContext, source: AudioNode, frequencyHz: number) => {
+  const params = normalizeEqParams({
+    enabled: true,
+    channelMode: 'stereo',
+    bands: [{ id: 'characterization', type: 'peaking', frequency: frequencyHz, gainDb: 6, q: 1, enabled: true }],
+  })
+  const [filter, ...rest] = createEqNodes(context, params, 2)
+  if (!filter || rest.length > 0) throw new Error('Characterization EQ must create exactly one filter.')
+  source.connect(filter)
+  filter.connect(context.destination)
+}
+
+const characterizeBrowserStereoIsolation = async (): Promise<BrowserCharacterizationCase> => capture(async () => {
+  const rendered = await render(48_000, 2, 128, (context, source) => {
+    source.buffer?.getChannelData(0).set([1])
+    connectSingleEqFilter(context, source, 1_000)
+  })
+  const left = rendered.getChannelData(0)
+  const right = rendered.getChannelData(1)
+  const leftPeak = measureAudio([left]).peak
+  const rightPeak = measureAudio([right]).peak
+  const crosstalkDb = Math.max(-300, measureCrosstalkDb(left, right))
+  return {
+    status: Number.isFinite(leftPeak) && leftPeak > 0 && crosstalkDb <= -120 ? 'pass' : 'fail',
+    metrics: { leftPeak, rightPeak, crosstalkDb },
+  }
+})
+
+const characterizeBrowserEq = async (): Promise<BrowserCharacterizationCase> => capture(async () => {
+  const sampleRate = 48_000
+  const frequencyHz = 1_000
+  const input = createSineFixture(4_800, frequencyHz, sampleRate)[0].map((sample) => sample * 0.25)
+  const rendered = await render(sampleRate, 2, input.length, (context, source) => {
+    source.buffer?.getChannelData(0).set(input)
+    source.buffer?.getChannelData(1).set(input)
+    connectSingleEqFilter(context, source, frequencyHz)
+  })
+  const output = rendered.getChannelData(0)
+  const settleFrame = 480
+  const settledInput = input.subarray(settleFrame)
+  const settledOutput = output.subarray(settleFrame)
+  const transfer = measureToneTransfer(settledInput, settledOutput, frequencyHz, sampleRate)
+  const thdPlusNoiseDb = Math.max(-300, measureThdPlusNoise(settledOutput, frequencyHz, sampleRate))
+  return {
+    status: transfer.finite
+      && transfer.gainDb > 5.5
+      && transfer.gainDb < 6.5
+      && Math.abs(transfer.phaseDegrees) < 5
+      && thdPlusNoiseDb < -60
+      ? 'pass'
+      : 'fail',
+    metrics: {
+      rms: measureAudio([settledOutput]).rms,
+      gainDb: transfer.gainDb,
+      phaseDegrees: transfer.phaseDegrees,
+      thdPlusNoiseDb,
+    },
+  }
+})
+
 type CharacterizationEnvelope<State> = { version: 1; state: State }
 
 const envelope = <State>(state: State): CharacterizationEnvelope<State> => ({ version: 1, state })
@@ -405,40 +473,8 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
     return { status: Math.abs(metrics.peak - 0.5) < 1e-3 ? 'pass' : 'fail', metrics: { peak: metrics.peak, rms: metrics.rms } }
   })
 
-  const stereoIsolation = await capture(async () => {
-    const rendered = await render(48_000, 2, 128, (context, source) => {
-      if (source.buffer) {
-        source.buffer.getChannelData(0)[0] = 1
-        source.buffer.getChannelData(1)[0] = 0
-      }
-      source.connect(context.destination)
-    })
-    const leftPeak = measureAudio([rendered.getChannelData(0)]).peak
-    const rightPeak = measureAudio([rendered.getChannelData(1)]).peak
-    const leakageDetected = Number.isFinite(measureChannelLeakageDb(leftPeak, rightPeak))
-    return {
-      status: Math.abs(leftPeak - 1) < 1e-3 && rightPeak < 1e-6 ? 'pass' : 'fail',
-      metrics: { leftPeak, rightPeak, leakageDetected },
-    }
-  })
-
-  const eq = await capture(async () => {
-    const rendered = await render(48_000, 1, 4_800, (context, source) => {
-      if (source.buffer) {
-        const channel = source.buffer.getChannelData(0)
-        for (let frame = 0; frame < channel.length; frame += 1) channel[frame] = Math.sin(2 * Math.PI * 1_000 * frame / 48_000) * 0.25
-      }
-      const filter = context.createBiquadFilter()
-      filter.type = 'peaking'
-      filter.frequency.value = 1_000
-      filter.Q.value = 1
-      filter.gain.value = 6
-      source.connect(filter)
-      filter.connect(context.destination)
-    })
-    const rms = measureAudio(readBuffer(rendered)).rms
-    return { status: rms > 0.3 && rms < 0.4 ? 'pass' : 'fail', metrics: { rms } }
-  })
+  const stereoIsolation = await characterizeBrowserStereoIsolation()
+  const eq = await characterizeBrowserEq()
 
   const compressorRegistration = await capture(async () => {
     const rendered = await render(48_000, 2, 128, async (context, source) => {

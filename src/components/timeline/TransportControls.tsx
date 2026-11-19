@@ -10,10 +10,12 @@ import {
 } from "~/components/ui/dropdown-menu";
 import { Menubar } from "~/components/ui/menubar";
 import { useTransportTempoController } from "~/hooks/useTransportTempoController";
+import { formatBarsBeatsSixteenths } from "~/lib/musical-time-format";
 import { cn } from "~/lib/utils";
 import { nativeMenuTriggerClass } from "./toolbar-context";
 import type { TransportControlsProps } from "./transport-types";
-import { getProjectSaveStatus } from "~/lib/project-save-status";
+import { useProjectSaveStatus } from "~/hooks/useProjectSaveStatus";
+import { useSharedOutboxFailure } from "~/hooks/useSharedOutboxFailure";
 import { EditMenu } from "./menus/edit-menu";
 import { FileMenu } from "./menus/file-menu";
 import { SettingsMenu } from "./menus/settings-menu";
@@ -21,10 +23,12 @@ import { TracksMenu } from "./menus/tracks-menu";
 import { ViewMenu } from "./menus/view-menu";
 import { gridDenominators } from "./grid-options";
 
-type TransportBarController = {
+export type TransportBarController = {
   isRecording: boolean;
+  isRecordingPending?: boolean;
   onToggleRecord: () => void;
   isPlaying: boolean;
+  isPlayPending?: boolean;
   onPlay: () => void;
   onPause: () => void;
   onStop: () => void;
@@ -42,12 +46,14 @@ type TransportBarController = {
   onToggleLoop: () => void;
   gridEnabled: boolean;
   onToggleGrid: () => void;
+  followEnabled: boolean;
+  onToggleFollow: () => void;
   gridDenominator: number;
   onChangeGridDenominator: (next: number) => void;
   bpm: number;
 };
 
-const TransportBar: Component<{ transport: TransportBarController }> = (
+export const TransportBar: Component<{ transport: TransportBarController }> = (
   props,
 ) => {
   const transport = () => props.transport;
@@ -60,6 +66,7 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
         variant="ghost"
         size="icon"
         onClick={transport().onToggleRecord}
+        aria-busy={transport().isRecordingPending}
         aria-pressed={transport().isRecording}
         aria-label={
           transport().isRecording ? "Stop recording" : "Start recording"
@@ -84,8 +91,10 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
             transport().onPause();
             return;
           }
+          if (transport().isPlayPending) return;
           transport().onPlay();
         }}
+        aria-busy={transport().isPlayPending}
         aria-label={transport().isPlaying ? "Pause" : "Play"}
         class={centerIconButtonClass}
       >
@@ -183,6 +192,20 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
         >
           <Icon name="grid" class="h-4 w-4" />
         </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={transport().onToggleFollow}
+        aria-pressed={transport().followEnabled}
+        aria-label="Toggle Follow"
+        title="Follow playback (Option+Shift+F on Mac, Ctrl+Shift+F on Windows)"
+        class={cn(
+          "h-7 px-2 text-xs text-muted-foreground hover:bg-timeline-surface-muted hover:text-foreground",
+          transport().followEnabled && "bg-timeline-surface-muted text-foreground",
+        )}
+      >
+        Follow
+      </Button>
         <DropdownMenu>
           <DropdownMenuTrigger>
             <Button variant="ghost" size="sm" class={nativeMenuTriggerClass}>
@@ -218,13 +241,19 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
 const SaveStatus: Component<{ projectMenu: TransportControlsProps["projectMenu"] }> = (props) => {
   const currentProject = () =>
     props.projectMenu.projects.find((project) => project.projectId === props.projectMenu.currentProjectId);
-  const status = () => getProjectSaveStatus({
+  const sharedOutboxFailure = useSharedOutboxFailure(() => ({
+    projectId: props.projectMenu.currentProjectId,
+    userId: props.projectMenu.currentUserId,
+  }));
+  const status = useProjectSaveStatus(() => ({
     projectId: props.projectMenu.currentProjectId,
     userId: props.projectMenu.currentUserId,
     mode: currentProject()?.mode,
     sharedOutboxStatus: props.projectMenu.sharedOutboxStatus,
     cloudBackupStatus: props.projectMenu.cloudBackupStatus,
-  });
+    saveFailed: props.projectMenu.saveFailed,
+    sharedOutboxFailure: sharedOutboxFailure(),
+  }));
   const isLocal = () => status().compactLabel === "Local";
 
   return (
@@ -361,8 +390,10 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
       <TransportBar
         transport={{
           isRecording: props.isRecording,
+          isRecordingPending: props.isRecordingPending,
           onToggleRecord: props.onToggleRecord,
           isPlaying: props.isPlaying,
+          isPlayPending: props.isPlayPending,
           onPlay: props.onPlay,
           onPause: props.onPause,
           onStop: props.onStop,
@@ -380,6 +411,8 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
           onToggleLoop: props.onToggleLoop,
           gridEnabled: props.gridEnabled,
           onToggleGrid: props.onToggleGrid,
+          followEnabled: props.followEnabled,
+          onToggleFollow: props.onToggleFollow,
           gridDenominator: props.gridDenominator,
           onChangeGridDenominator: props.onChangeGridDenominator,
           bpm: props.bpm,
@@ -401,7 +434,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
         <div class="flex items-center gap-2 text-xs">
           <span class="text-muted-foreground">Playhead</span>
           <span class="tabular-nums text-foreground">
-            {props.playheadSec.toFixed(2)}s
+            {formatBarsBeatsSixteenths(props.playheadSec, props.bpm)}
           </span>
         </div>
       </div>

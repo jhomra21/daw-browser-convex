@@ -5,6 +5,7 @@ import Knob from '~/components/ui/knob'
 import type { Track } from '@daw-browser/timeline-core/types'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { For, createEffect, createSignal, onCleanup } from 'solid-js'
+import { formatDeviceDb, formatDeviceFrequency, formatDeviceMilliseconds, formatDevicePercent } from '~/lib/device-value-format'
 
 type GateProps = {
   params: GateParams
@@ -23,8 +24,8 @@ type GateProps = {
 }
 
 const defaults = createDefaultGateParams()
-const formatDb = (value: number) => `${value.toFixed(1)} dB`
-const formatMs = (value: number) => `${value.toFixed(value < 10 ? 1 : 0)} ms`
+const formatDb = (value: number) => formatDeviceDb(value, 1)
+const formatMs = (value: number) => formatDeviceMilliseconds(value, value < 10 ? 1 : 0)
 
 export default function Gate(props: GateProps) {
   const [gainReductionDb, setGainReductionDb] = createSignal(0)
@@ -48,7 +49,7 @@ export default function Gate(props: GateProps) {
           <Knob label="Hysteresis" value={props.params.hysteresisDb} valueLabel={formatDb(props.params.hysteresisDb)} resetValue={defaults.hysteresisDb} min={0} max={24} step={0.1} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get('gate.hysteresisDb')} automated={props.automationRangesByParameterId?.has('gate.hysteresisDb')} onAutomationSelect={() => props.onAutomationParameterTouch?.('gate.hysteresisDb')} onValueChange={(hysteresisDb) => { props.onManualAutomationOverride?.('gate.hysteresisDb'); props.onChange({ hysteresisDb }) }} />
           <Knob label="Range" value={props.params.rangeDb} valueLabel={formatDb(props.params.rangeDb)} resetValue={defaults.rangeDb} min={-80} max={0} step={0.1} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get('gate.rangeDb')} automated={props.automationRangesByParameterId?.has('gate.rangeDb')} onAutomationSelect={() => props.onAutomationParameterTouch?.('gate.rangeDb')} onValueChange={(rangeDb) => { props.onManualAutomationOverride?.('gate.rangeDb'); props.onChange({ rangeDb }) }} />
           <Knob label="Lookahead" value={props.params.lookaheadMs} valueLabel={formatMs(props.params.lookaheadMs)} resetValue={defaults.lookaheadMs} min={0} max={2} step={0.1} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get('gate.lookaheadMs')} automated={props.automationRangesByParameterId?.has('gate.lookaheadMs')} onAutomationSelect={() => props.onAutomationParameterTouch?.('gate.lookaheadMs')} onValueChange={(lookaheadMs) => { props.onManualAutomationOverride?.('gate.lookaheadMs'); props.onChange({ lookaheadMs }) }} />
-          <Knob label="Link" value={props.params.link} valueLabel={`${Math.round(props.params.link * 100)}%`} resetValue={defaults.link} min={0} max={1} step={0.01} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get('gate.link')} automated={props.automationRangesByParameterId?.has('gate.link')} onAutomationSelect={() => props.onAutomationParameterTouch?.('gate.link')} onValueChange={(link) => { props.onManualAutomationOverride?.('gate.link'); props.onChange({ link }) }} />
+          <Knob label="Link" value={props.params.link} valueLabel={formatDevicePercent(props.params.link)} resetValue={defaults.link} min={0} max={1} step={0.01} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get('gate.link')} automated={props.automationRangesByParameterId?.has('gate.link')} onAutomationSelect={() => props.onAutomationParameterTouch?.('gate.link')} onValueChange={(link) => { props.onManualAutomationOverride?.('gate.link'); props.onChange({ link }) }} />
         </div>
         <div class="grid content-center gap-1">
           <div class="border border-border bg-background/80 px-1.5 py-1">
@@ -69,7 +70,7 @@ export default function Gate(props: GateProps) {
           <div class="grid grid-cols-2 gap-1">
             <DeviceToggleButton label="Filter" active={props.params.sidechain.enabled} onClick={() => props.onChange({ sidechain: { ...props.params.sidechain, enabled: !props.params.sidechain.enabled } })} />
             <DeviceToggleButton label="Highpass" active onClick={() => props.onChange({ sidechain: { ...props.params.sidechain, filterType: 'highpass' } })} />
-            <Knob size={28} label="Freq" value={props.params.sidechain.frequencyHz} valueLabel={`${Math.round(props.params.sidechain.frequencyHz)} Hz`} resetValue={defaults.sidechain.frequencyHz} min={20} max={20000} step={1} logarithmic disabled={!props.params.sidechain.enabled} onValueChange={(frequencyHz) => props.onChange({ sidechain: { ...props.params.sidechain, frequencyHz } })} />
+            <Knob size={28} label="Freq" value={props.params.sidechain.frequencyHz} valueLabel={formatDeviceFrequency(props.params.sidechain.frequencyHz, 1)} resetValue={defaults.sidechain.frequencyHz} min={20} max={20000} step={1} logarithmic disabled={!props.params.sidechain.enabled} onValueChange={(frequencyHz) => props.onChange({ sidechain: { ...props.params.sidechain, frequencyHz } })} />
             <Knob size={28} label="Q" value={props.params.sidechain.q} resetValue={defaults.sidechain.q} min={0.1} max={18} step={0.01} disabled={!props.params.sidechain.enabled} onValueChange={(q) => props.onChange({ sidechain: { ...props.params.sidechain, q } })} />
           </div>
         </div>

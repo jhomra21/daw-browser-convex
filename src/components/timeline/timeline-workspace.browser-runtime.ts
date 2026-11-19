@@ -38,18 +38,7 @@ type TimelineWorkspaceRegressionResult = {
   readonly panZoomExpectedPhases: readonly number[]
 }
 
-// Headless Chromium may throttle animation frames; the finite timer fallback
-// keeps this test measuring the same post-scroll layout without polling.
-const afterFrame = () => new Promise<void>((resolve) => {
-  let settled = false
-  const settle = () => {
-    if (settled) return
-    settled = true
-    resolve()
-  }
-  requestAnimationFrame(settle)
-  setTimeout(settle, 16)
-})
+const afterFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 
 const requireElement = (id: string): HTMLElement => {
   const element = document.getElementById(id)

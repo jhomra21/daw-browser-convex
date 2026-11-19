@@ -1,0 +1,6 @@
+{
+ "ruling": "acceptance-reports/ae-08-phase-5-2026-10-18/TEST-CLEANUP-B-REPORT.md",
+ "removed": [
+  { "file": "apps/desktop/native-session-bridge.test.ts", "test": "routes recording IPC through production native session envelopes" }
+ ]
+}

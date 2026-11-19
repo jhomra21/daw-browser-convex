@@ -17,6 +17,10 @@ import {
   nativeVst3WorkerManifestVersion,
   nativeVst3WorkerStartupProtocolVersion,
   nativeVst3WorkerTransportAbiVersion,
+  nativeVst3WorkerFaultOrigins,
+  nativeVst3ZeroDiagnosticFaultOrigin,
+  nativeVst3LaunchNotTrustedFaultOrigin,
+  nativeVst3PluginFaultOrigins,
   nativeVst3PreflightProtocolVersion,
   type NativeExternalAttachmentPlan,
   type NativeVst3PreflightRequest,
@@ -31,6 +35,13 @@ import {
 } from './index'
 
 describe('plugin host control protocol', () => {
+  test('defines every native fault origin and classification in one contract', () => {
+    expect(Object.values(nativeVst3WorkerFaultOrigins).map(Number)).toEqual(Array.from({ length: 17 }, (_, index) => index))
+    expect([...nativeVst3PluginFaultOrigins]).toEqual([1, 2, 8, 9, 10, 11, 12])
+    expect(nativeVst3ZeroDiagnosticFaultOrigin).toBe(12)
+    expect(nativeVst3LaunchNotTrustedFaultOrigin).toBe(16)
+  })
+
   test('accepts the complete unsigned VST3 ParamID range and rejects overflow', () => {
     for (const id of [0, 0x7fff_ffff, 0x8000_0000, 0xffff_ffff]) {
       expect(pluginParameterDescriptorSchema.safeParse({
@@ -206,7 +217,7 @@ test('round trips the bounded native worker artifact and runtime hello contract'
       artifact: { id: 'daw-vst3-worker', version: '3' },
       startupProtocolVersion: 1,
       controlProtocolVersion: 2,
-      transportAbiVersion: 6,
+      transportAbiVersion: 7,
       architecture: 'arm64',
       role: 'effect',
       latencyFrames: 32,
@@ -473,4 +484,15 @@ test('rejects paths, invalid fingerprints, and out-of-bounds attachment dimensio
       nativeGraphNodeId: `${index + 1}`,
     })),
   }))).toThrow()
+})
+
+test('worker protocol versions retain the deployed compatibility values', () => {
+  expect([
+    nativeVst3WorkerTransportAbiVersion,
+    nativeVst3WorkerManifestVersion,
+    nativeVst3WorkerStartupProtocolVersion,
+    nativeVst3WorkerControlProtocolVersion,
+    nativeVst3WorkerArtifactId,
+    nativeVst3WorkerArtifactVersion,
+  ]).toEqual([7, 1, 1, 2, 'daw-vst3-worker', '3'])
 })

@@ -42,9 +42,14 @@ export function Dashboard(props: DashboardProps) {
 
   return (
     <Show when={props.view}>
-      <Dialog open preventScroll={false} onOpenChange={(open) => { if (!open) close(); }}>
+      <Dialog
+        open
+        preventScroll={false}
+        onOpenChange={(open) => { if (!open) close(); }}
+      >
         <DialogContent
           showCloseButton={false}
+          onEscapeKeyDown={() => close()}
           class="h-[min(90vh,42rem)] w-[min(94vw,64rem)] max-w-none overflow-hidden border-border bg-background p-0 text-foreground"
         >
           <div class="flex h-full min-h-0">

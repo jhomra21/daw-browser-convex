@@ -2,9 +2,9 @@ import { createEffect, createSignal, on, onCleanup } from 'solid-js'
 
 import { isEditableKeyboardTarget } from '~/lib/keyboard-event-target'
 import { canUseLocalStorage } from '~/lib/timeline-storage'
+import { DEFAULT_NOTE_VELOCITY } from '~/lib/midi-editor-grid'
 
 const BASE_C4 = 60
-const DEFAULT_VELOCITY = 0.9
 const VELOCITY_STEP = 0.1
 
 const whiteKeySemitones = new Map<string, number>([
@@ -62,14 +62,14 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
     }
   }
   const readStoredVelocity = () => {
-    if (!canUseLocalStorage()) return DEFAULT_VELOCITY
+    if (!canUseLocalStorage()) return DEFAULT_NOTE_VELOCITY
     try {
       const raw = window.localStorage.getItem(velocityKey())
-      if (raw === null) return DEFAULT_VELOCITY
+      if (raw === null) return DEFAULT_NOTE_VELOCITY
       const value = Number.parseFloat(raw)
-      return Number.isFinite(value) ? clampMidiKeyboardVelocity(value) : DEFAULT_VELOCITY
+      return Number.isFinite(value) ? clampMidiKeyboardVelocity(value) : DEFAULT_NOTE_VELOCITY
     } catch {
-      return DEFAULT_VELOCITY
+      return DEFAULT_NOTE_VELOCITY
     }
   }
   const [octave, setOctave] = createSignal(readStoredOctave())

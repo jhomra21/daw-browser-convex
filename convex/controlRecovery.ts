@@ -38,6 +38,7 @@ import {
 import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { ControlDomainError } from "./controlPreflight";
+import type { ProjectEdit } from "./projectRows";
 import { readProjectControlSnapshotV2 } from "./controlSnapshot";
 import { findSampleRow } from "./sampleRows";
 
@@ -682,7 +683,7 @@ const requireTrack = async (ctx: RecoveryCtx, projectId: string, trackId: string
   return row;
 };
 
-const ensureEffectTarget = async (ctx: RecoveryCtx, projectId: string, effect: RecoveryEffect, actionIndex: number) => {
+const ensureEffectTarget = async (ctx: RecoveryCtx, edit: ProjectEdit, projectId: string, effect: RecoveryEffect, actionIndex: number) => {
   const track = effect.target.kind === "track"
     ? await requireTrack(ctx, projectId, effect.target.trackId, actionIndex)
     : undefined;
@@ -698,35 +699,43 @@ const ensureEffectTarget = async (ctx: RecoveryCtx, projectId: string, effect: R
   ))) {
     throw new ControlDomainError("validation", "Recovery processor collides with current state.", actionIndex);
   }
+  const revision = edit.revision;
   for (const row of rows) {
-    if (row.index >= effect.index) await ctx.db.patch(row._id, { index: row.index + 1 });
+    if (row.index >= effect.index) {
+      edit.stamp();
+      await ctx.db.patch(row._id, { index: row.index + 1, revision });
+    }
   }
-  return track;
+  return { track };
 };
 
 const restoreEffectBundle = async (
   ctx: RecoveryCtx,
+  edit: ProjectEdit,
   projectId: string,
   data: EffectBundle,
   mappings: Mapping[],
   actionIndex: number,
 ) => {
+  const revision = edit.revision;
   for (const item of data.effects) {
-    const track = await ensureEffectTarget(ctx, projectId, item.effect, actionIndex);
+    const target = await ensureEffectTarget(ctx, edit, projectId, item.effect, actionIndex);
     const instrument = normalizePersistedInstrumentParams(
       item.effect.processor.kind,
       item.effect.instanceId ?? null,
       item.effect.processor.params,
     );
+    edit.stamp();
     const id = await ctx.db.insert("effects", {
       projectId: item.effect.projectId,
       targetType: item.effect.target.kind,
-      trackId: track === undefined ? undefined : track._id,
+      trackId: target.track === undefined ? undefined : target.track._id,
       index: item.effect.index,
       type: instrument ? "instrument" : item.effect.processor.kind,
       instanceId: item.effect.instanceId,
       params: instrument ?? item.effect.processor.params,
       createdAt: item.effect.createdAt,
+      revision,
     });
     mappings.push({ entity: "effect", sourceId: item.id, restoredId: String(id) });
   }
@@ -785,6 +794,7 @@ const restoredTrackId = (ctx: RecoveryCtx, map: Map<string, Id<"tracks">>, id: s
 
 const restoreTrackBundle = async (
   ctx: RecoveryCtx,
+  edit: ProjectEdit,
   input: {
     projectId: string;
     data: TrackBundleRecoveryData;
@@ -902,6 +912,7 @@ const restoreTrackBundle = async (
       sends,
     });
   }
+  const effectRevision = edit.revision;
   for (const item of input.data.effects) {
     const effect = item.effect;
     const trackId = effect.target.kind === "track" ? resolve(effect.target.trackId) : undefined;
@@ -916,11 +927,13 @@ const restoreTrackBundle = async (
         : effect.instanceId !== undefined && row.instanceId === effect.instanceId
     ))) throw new ControlDomainError("validation", "Recovery processor collides with current state.", input.actionIndex);
     const instrument = normalizePersistedInstrumentParams(effect.processor.kind, effect.instanceId ?? null, effect.processor.params);
+    edit.stamp();
     const id = await ctx.db.insert("effects", {
       projectId: effect.projectId, targetType: effect.target.kind, trackId,
       index: effect.index, type: instrument ? "instrument" : effect.processor.kind,
       instanceId: effect.instanceId,
       params: instrument ?? effect.processor.params, createdAt: effect.createdAt,
+      revision: effectRevision,
     });
     mappings.push({ entity: "effect", sourceId: item.id, restoredId: String(id) });
   }
@@ -1155,6 +1168,7 @@ const restoreTimelineRange = async (
 
 export const restoreRecovery = async (
   ctx: RecoveryCtx,
+  edit: ProjectEdit,
   input: { projectId: string; recovery: Awaited<ReturnType<typeof loadRecovery>>; actionIndex: number },
 ) => {
   const { row, payload } = input.recovery;
@@ -1166,7 +1180,7 @@ export const restoreRecovery = async (
     ) {
       throw new ControlDomainError("validation", "Local recovery ownership cannot be restored to cloud.", input.actionIndex);
     }
-    await restoreTrackBundle(ctx, {
+    await restoreTrackBundle(ctx, edit, {
       projectId: input.projectId,
       data: payload.data,
       survivors: payload.data.survivors,
@@ -1179,7 +1193,7 @@ export const restoreRecovery = async (
     ) {
       throw new ControlDomainError("validation", "Local recovery ownership cannot be restored to cloud.", input.actionIndex);
     }
-    await restoreTrackBundle(ctx, {
+    await restoreTrackBundle(ctx, edit, {
       projectId: input.projectId,
       data: payload.data,
       survivors: payload.data.children.map((child) => ({
@@ -1291,7 +1305,7 @@ export const restoreRecovery = async (
     });
     mappings.push({ entity: "sidechain", sourceId: data.sidechainId, restoredId: String(id) });
   } else {
-    await restoreEffectBundle(ctx, input.projectId, payload.data, mappings, input.actionIndex);
+    await restoreEffectBundle(ctx, edit, input.projectId, payload.data, mappings, input.actionIndex);
   }
   await ctx.db.patch(row._id, { consumedAt: Date.now() });
   return { actionIndex: input.actionIndex, recoveryId: String(row._id), entities: mappings };

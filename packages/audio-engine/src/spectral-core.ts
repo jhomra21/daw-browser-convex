@@ -1,4 +1,4 @@
-import type { SpectralFftSize, SpectralMode, SpectralOverlap } from '@daw-browser/shared'
+import { linearFromDb, type SpectralFftSize, type SpectralMode, type SpectralOverlap } from '@daw-browser/shared'
 
 export type ComplexSpectrum = { real: Float64Array; imaginary: Float64Array }
 
@@ -136,7 +136,7 @@ export const transformSpectrum = (
       }
     }
   } else if (params.mode === 'gate') {
-    const threshold = 10 ** (params.gateThresholdDb / 20)
+    const threshold = linearFromDb(params.gateThresholdDb)
     const attack = Math.exp(-hopSize / Math.max(1, params.gateAttackMs * sampleRate / 1000))
     const release = Math.exp(-hopSize / Math.max(1, params.gateReleaseMs * sampleRate / 1000))
     for (let bin = 0; bin < bins; bin += 1) {

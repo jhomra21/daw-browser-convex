@@ -22,6 +22,19 @@ export const loopFramesForTransport = (
   return { startFrame, endFrame, lengthFrames: endFrame - startFrame }
 }
 
+// A locate at/past the loop end starts a linear run, without changing the
+// configured loop. Keep this decision fixed for that run, not each callback.
+export const effectiveLoopForStart = <T extends LoopTransport>(
+  configured: T,
+  startFrame: number,
+  sampleRateHz: number,
+): Omit<T, 'loopEnabled'> & { loopEnabled: boolean } => {
+  const loop = loopFramesForTransport(configured, sampleRateHz)
+  return loop && startFrame < loop.endFrame
+    ? configured
+    : { ...configured, loopEnabled: false }
+}
+
 export const arrangementFrameForLoop = (
   frame: number,
   loop: LoopFrames | undefined,

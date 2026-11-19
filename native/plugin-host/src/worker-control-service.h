@@ -115,6 +115,7 @@ class WorkerControlService {
   void Stop();
   [[nodiscard]] bool Restart();
   [[nodiscard]] bool SetState(const WorkerState& state);
+  [[nodiscard]] bool FlushParameters(std::span<const WorkerTransportEvent> events);
   [[nodiscard]] std::optional<WorkerState> GetState();
   [[nodiscard]] WorkerHealth health() const noexcept;
   [[nodiscard]] std::uint64_t workerGeneration() const noexcept;
@@ -158,9 +159,11 @@ class WorkerControlService {
   [[nodiscard]] WorkerHealth ReadHealthFromCallback() const noexcept;
   void Run();
   void NotifyService() noexcept;
-  void PublishFault() noexcept;
+  void PublishFault(std::uint32_t value, std::uint64_t sequence = 0) noexcept;
 
   WorkerRuntime runtime_;
+  // Control-plane ordinal only; never log the shared-memory authentication token.
+  std::uint64_t incidentWorkerGeneration_ = 0;
   SpscQueue<QueuedSubmission, kQueueCapacity> submissions_;
   SpscQueue<WorkerCompletion, kQueueCapacity> completions_;
   SpscQueue<WorkerDiagnostic, kQueueCapacity> callbackDiagnostics_;

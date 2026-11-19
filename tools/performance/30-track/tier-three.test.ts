@@ -1,5 +1,35 @@
 import { expect, test } from "bun:test"
-import { collectLongTaskRecords, correlateRecordingStall, parseLongTaskEvidence, TierThreeRecordingFailure, selectTierThreeParameter, selectTierThreeSecondaryParameter, validateTierThreeRecording, validateTierThreeAudioRecording, matchingWorkerAutomation, tierThreeAutomationObservationMs, startTraceBeforeRecordingDiagnostics, reEnableAutomationBeforePlayback, retainTierThreeRecordingFailure, diagnosticStageFailure } from "./tier-three"
+import { assessRecordedAudioContent, collectLongTaskRecords, correlateRecordingStall, parseLongTaskEvidence, summarizeRecordingWindowState, TierThreeRecordingFailure, selectTierThreeParameter, selectTierThreeSecondaryParameter, validateTierThreeRecording, validateTierThreeAudioRecording, matchingWorkerAutomation, tierThreeAutomationObservationMs, startTraceBeforeRecordingDiagnostics, reEnableAutomationBeforePlayback, retainTierThreeRecordingFailure, diagnosticStageFailure } from "./tier-three"
+
+test("persisted spool audio must match the asset row and exact proven frames", () => {
+  const asset = { sizeBytes: 1_152_044, contentSha256: "a".repeat(64), sampleRate: 48_000, channelCount: 2, durationSec: 3 }
+  const content = { sizeBytes: 1_152_044, sha256: "a".repeat(64), formatTag: 3, channels: 2, sampleRate: 48_000, bitsPerSample: 32, frames: 144_000, nonzeroSamples: 10, nonFiniteSamples: 0, peakAbs: 0.2 }
+  expect(assessRecordedAudioContent(asset, content, 144_000, 48_000)).toEqual([])
+  expect(assessRecordedAudioContent(asset, content, 140_000, 48_000)).toContain("frames")
+  expect(assessRecordedAudioContent(asset, { ...content, sizeBytes: 44 }, 140_000, 48_000)).toContain("size")
+  expect(assessRecordedAudioContent(asset, { ...content, sha256: "b".repeat(64) }, 140_000, 48_000)).toContain("sha256")
+  expect(assessRecordedAudioContent(asset, { ...content, formatTag: 1, bitsPerSample: 16 }, 140_000, 48_000)).toContain("format")
+  expect(assessRecordedAudioContent(asset, { ...content, channels: 1 }, 140_000, 48_000)).toContain("channels")
+  expect(assessRecordedAudioContent(asset, content, 140_000, 44_100)).toContain("sample-rate")
+  expect(assessRecordedAudioContent(asset, content, 150_000, 48_000)).toContain("frames")
+  expect(assessRecordedAudioContent({ ...asset, durationSec: 2 }, content, 140_000, 48_000)).toContain("duration")
+  expect(assessRecordedAudioContent(asset, { ...content, nonFiniteSamples: 1 }, 140_000, 48_000)).toContain("non-finite")
+  expect(assessRecordedAudioContent(asset, { ...content, nonzeroSamples: 0, peakAbs: 0 }, 144_000, 48_000)).toEqual([])
+})
+
+test("window-state report attributes the writer worst only when it occurred inside the state", () => {
+  const before = { capturedFrames: 100, droppedFrames: 0, overrunFrames: 0, writerReturnMaxMs: 7, writerReturnDeliveryMaxMs: 6, writerReturnDeliveryWorst: { returnedAtEpochMs: 10, receivedAtEpochMs: 16 }, nativeArrivalGapMaxMs: 12, writerOldestOutstandingMs: 9, peakQueuedFrames: 512, termination: null, writerTiming: null }
+  const inside = { ...before, capturedFrames: 1_200_100, writerReturnDeliveryMaxMs: 40, writerReturnDeliveryWorst: { returnedAtEpochMs: 1_500, receivedAtEpochMs: 1_540 }, writerTiming: { storage: { channelWriteMs: { max: 30 } } } }
+  const observation = { raf: { minimized: 0 }, visibility: [{ label: "minimized", state: "hidden", epochMs: 1_001 }], losses: [{ label: "minimized", error: "Native VST3 worker missed its deadline.", epochMs: 1_200 }] }
+  const report = summarizeRecordingWindowState("minimized", 1_000, 26_000, "hidden", before, before, inside, observation)
+  expect(report).toMatchObject({ state: "minimized", durationMs: 25_000, sampledVisibility: "hidden", rafCallbacks: 0, capturedFrames: 1_200_000, droppedFrames: 0, overrunFrames: 0, writerReturnDeliveryWorstInStateMs: 40, storageChannelWriteMaxMsCumulative: 30, terminationAfterTransition: null, terminationAtEnd: null })
+  expect(report.visibilityTransitions).toEqual(["hidden"])
+  expect(report.hostLosses).toEqual([{ error: "Native VST3 worker missed its deadline.", afterStateStartMs: 200 }])
+  const ended = { ...inside, capturedFrames: 0, droppedFrames: 3, termination: { cause: "writer-failure" } }
+  const unchanged = summarizeRecordingWindowState("occluded", 30_000, 55_000, "visible", inside, ended, ended, { raf: {}, visibility: [], losses: [] })
+  expect(unchanged.hostLosses).toEqual([])
+  expect(unchanged).toMatchObject({ writerReturnDeliveryWorstInStateMs: null, writerReturnDeliveryMaxMsUpperBound: 40, droppedFrames: 3, rafCallbacks: 0, terminationAfterTransition: "writer-failure", terminationAtEnd: "writer-failure" })
+})
 
 test("labels a failed host diagnostic with its Tier 3 stage", () => {
   expect(diagnosticStageFailure('after-manual-override', new Error('deadline-exceeded')).message)

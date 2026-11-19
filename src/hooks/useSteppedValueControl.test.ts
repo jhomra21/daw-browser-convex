@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { createRoot } from 'solid-js'
 import { knobValueFromDrag } from '~/components/ui/knob'
+import { useDrag } from './useDrag'
 import { useSteppedValueControl } from './useSteppedValueControl'
 
 type ListenerEntry = {
@@ -32,7 +33,8 @@ class CapturedPointerWindow {
     this.listeners.set(type, entries.filter((entry) => entry.listener !== listener || entry.capture !== capture))
   }
 
-  dispatch(type: string, event: PointerLifecycleEvent) {
+  dispatch(type: string, event: Event) {
+    if (!(event instanceof PointerEvent)) return
     for (const entry of this.listeners.get(type) ?? []) {
       entry.listener(event)
     }
@@ -44,7 +46,33 @@ class CapturedPointerWindow {
 }
 
 class TestHTMLElement {
-  setPointerCapture() {}
+  readonly capturedPointerIds = new Set<number>()
+  releaseCount = 0
+  private readonly listeners = new Map<string, ((event: PointerEvent) => void)[]>()
+
+  setPointerCapture(pointerId: number) {
+    this.capturedPointerIds.add(pointerId)
+  }
+
+  hasPointerCapture(pointerId: number) {
+    return this.capturedPointerIds.has(pointerId)
+  }
+
+  releasePointerCapture(pointerId: number) {
+    this.releaseCount += 1
+    this.capturedPointerIds.delete(pointerId)
+  }
+
+  addEventListener(type: string, listener: (event: PointerEvent) => void) {
+    const entries = this.listeners.get(type) ?? []
+    entries.push(listener)
+    this.listeners.set(type, entries)
+  }
+
+  removeEventListener(type: string, listener: (event: PointerEvent) => void) {
+    const entries = this.listeners.get(type) ?? []
+    this.listeners.set(type, entries.filter((entry) => entry !== listener))
+  }
 }
 
 class TestPointerEvent extends Event {
@@ -52,13 +80,15 @@ class TestPointerEvent extends Event {
   readonly clientX: number
   readonly clientY: number
   readonly shiftKey: boolean
+  readonly key: string
 
-  constructor(_type: string, init: PointerEventInit) {
-    super('pointerdown')
+  constructor(type: string, init: PointerEventInit & { key?: string }) {
+    super(type)
     this.pointerId = init.pointerId ?? 0
     this.clientX = init.clientX ?? 0
     this.clientY = init.clientY ?? 0
     this.shiftKey = init.shiftKey ?? false
+    this.key = init.key ?? ''
     Object.defineProperty(this, 'currentTarget', { value: new TestHTMLElement() })
   }
 }
@@ -70,6 +100,140 @@ const pointerEvent = (clientY: number, shiftKey = false, pointerId = 1) => ({
 })
 
 describe('useSteppedValueControl pointer lifecycle', () => {
+  test('ignores a second pointer-down and keeps the original pointer in control', () => {
+    const previousWindow = globalThis.window
+    const previousDocument = globalThis.document
+    const previousHTMLElement = globalThis.HTMLElement
+    const previousPointerEvent = globalThis.PointerEvent
+    const capturedWindow = new CapturedPointerWindow()
+    const bodyClasses = new Set<string>()
+    Reflect.set(globalThis, 'window', capturedWindow)
+    Reflect.set(globalThis, 'HTMLElement', TestHTMLElement)
+    Reflect.set(globalThis, 'PointerEvent', TestPointerEvent)
+    Reflect.set(globalThis, 'document', {
+      body: { classList: { add: (name: string) => bodyClasses.add(name), remove: (name: string) => bodyClasses.delete(name) } },
+    })
+
+    try {
+      createRoot((dispose) => {
+        const starts: number[] = []
+        const moves: number[] = []
+        const ends: number[] = []
+        const drag = useDrag({
+          onDragStart: (_pos, event) => { starts.push(event.pointerId) },
+          onDragMove: (_pos, event) => { moves.push(event.pointerId) },
+          onDragEnd: (_pos, event) => { ends.push(event.pointerId) },
+        })
+
+        drag.onPointerDown(new PointerEvent('pointerdown', pointerEvent(10, false, 1)))
+        drag.onPointerDown(new PointerEvent('pointerdown', pointerEvent(20, false, 2)))
+        capturedWindow.dispatch('pointermove', new PointerEvent('pointermove', pointerEvent(30, false, 2)))
+        capturedWindow.dispatch('pointermove', new PointerEvent('pointermove', pointerEvent(40, false, 1)))
+        capturedWindow.dispatch('pointerup', new PointerEvent('pointerup', pointerEvent(50, false, 2)))
+        capturedWindow.dispatch('pointerup', new PointerEvent('pointerup', pointerEvent(60, false, 1)))
+
+        expect(starts).toEqual([1])
+        expect(moves).toEqual([1])
+        expect(ends).toEqual([1])
+        expect(bodyClasses.has('select-none')).toBe(false)
+        dispose()
+      })
+    } finally {
+      Reflect.set(globalThis, 'window', previousWindow)
+      Reflect.set(globalThis, 'document', previousDocument)
+      Reflect.set(globalThis, 'HTMLElement', previousHTMLElement)
+      Reflect.set(globalThis, 'PointerEvent', previousPointerEvent)
+    }
+  })
+
+  test.each(['Escape', 'blur'] as const)('%s cancellation releases the owned pointer capture once', (cause) => {
+    const previousWindow = globalThis.window
+    const previousDocument = globalThis.document
+    const previousHTMLElement = globalThis.HTMLElement
+    const previousPointerEvent = globalThis.PointerEvent
+    const capturedWindow = new CapturedPointerWindow()
+    const bodyClasses = new Set<string>()
+    Reflect.set(globalThis, 'window', capturedWindow)
+    Reflect.set(globalThis, 'HTMLElement', TestHTMLElement)
+    Reflect.set(globalThis, 'PointerEvent', TestPointerEvent)
+    Reflect.set(globalThis, 'document', {
+      body: { classList: { add: (name: string) => bodyClasses.add(name), remove: (name: string) => bodyClasses.delete(name) } },
+    })
+
+    try {
+      createRoot((dispose) => {
+        let cancellations = 0
+        const drag = useDrag({ onDragCancel: () => { cancellations += 1 } })
+        const down = new PointerEvent('pointerdown', pointerEvent(10))
+        drag.onPointerDown(down)
+        const captureTarget = down.currentTarget
+
+        if (!(captureTarget instanceof TestHTMLElement)) throw new Error('Expected pointer capture target')
+
+        if (cause === 'Escape') {
+          capturedWindow.dispatch('keydown', new TestPointerEvent('keydown', { key: 'Escape' }))
+        } else {
+          capturedWindow.dispatch('blur', new TestPointerEvent('blur', {}))
+        }
+
+        expect(captureTarget.releaseCount).toBe(1)
+        expect(cancellations).toBe(1)
+        expect(drag.isDragging()).toBe(false)
+        expect(bodyClasses.has('select-none')).toBe(false)
+        dispose()
+        expect(captureTarget.releaseCount).toBe(1)
+        expect(cancellations).toBe(1)
+      })
+    } finally {
+      Reflect.set(globalThis, 'window', previousWindow)
+      Reflect.set(globalThis, 'document', previousDocument)
+      Reflect.set(globalThis, 'HTMLElement', previousHTMLElement)
+      Reflect.set(globalThis, 'PointerEvent', previousPointerEvent)
+    }
+  })
+
+  test('normal pointer-up does not release capture as cancellation or cancel twice', () => {
+    const previousWindow = globalThis.window
+    const previousDocument = globalThis.document
+    const previousHTMLElement = globalThis.HTMLElement
+    const previousPointerEvent = globalThis.PointerEvent
+    const capturedWindow = new CapturedPointerWindow()
+    Reflect.set(globalThis, 'window', capturedWindow)
+    Reflect.set(globalThis, 'HTMLElement', TestHTMLElement)
+    Reflect.set(globalThis, 'PointerEvent', TestPointerEvent)
+    Reflect.set(globalThis, 'document', { body: { classList: { add: () => undefined, remove: () => undefined } } })
+
+    try {
+      createRoot((dispose) => {
+        let cancellations = 0
+        let ends = 0
+        const drag = useDrag({
+          onDragCancel: () => { cancellations += 1 },
+          onDragEnd: () => { ends += 1 },
+        })
+        const down = new PointerEvent('pointerdown', pointerEvent(10))
+        drag.onPointerDown(down)
+        const captureTarget = down.currentTarget
+
+        if (!(captureTarget instanceof TestHTMLElement)) throw new Error('Expected pointer capture target')
+
+        capturedWindow.dispatch('pointerup', new PointerEvent('pointerup', pointerEvent(20)))
+        capturedWindow.dispatch('blur', new TestPointerEvent('blur', {}))
+
+        expect(ends).toBe(1)
+        expect(cancellations).toBe(0)
+        expect(captureTarget.releaseCount).toBe(0)
+        dispose()
+        expect(cancellations).toBe(0)
+      })
+    } finally {
+      Reflect.set(globalThis, 'window', previousWindow)
+      Reflect.set(globalThis, 'document', previousDocument)
+      Reflect.set(globalThis, 'HTMLElement', previousHTMLElement)
+      Reflect.set(globalThis, 'PointerEvent', previousPointerEvent)
+    }
+  })
+
   test('does not start a disabled control interaction', () => {
     const previousWindow = globalThis.window
     const previousDocument = globalThis.document

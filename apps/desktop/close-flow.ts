@@ -1,9 +1,20 @@
 type CloseFlow = {
+  waitForRecording?: () => Promise<boolean>
+  onError?: (error: Error) => void | Promise<void>
+  prepareQuit?: () => Promise<void>
   prepare: () => Promise<boolean>
   confirmDiscard: () => Promise<boolean>
   beginQuit: () => void
   destroy: () => void
   finishQuit: () => Promise<void>
+}
+
+// A renderer that cannot flush is a failed preparation, which the user may discard; it is not a close error.
+export const prepareForClose = async (steps: { flushRenderer: () => Promise<boolean>; captureEditors: () => Promise<void> }) => {
+  let flushed: boolean
+  try { flushed = await steps.flushRenderer() } catch { return false }
+  await steps.captureEditors()
+  return flushed
 }
 
 export const createCloseHandler = (flow: CloseFlow) => {
@@ -12,17 +23,16 @@ export const createCloseHandler = (flow: CloseFlow) => {
     if (inProgress) return
     inProgress = true
     try {
-      if (await flow.prepare()) {
-        flow.beginQuit()
-        flow.destroy()
-        await flow.finishQuit()
-        return
-      }
-      if (await flow.confirmDiscard()) {
-        flow.beginQuit()
-        flow.destroy()
-        await flow.finishQuit()
-      }
+      if (flow.waitForRecording && !await flow.waitForRecording()) return
+      if (!await flow.prepare() && !await flow.confirmDiscard()) return
+      if (flow.waitForRecording && !await flow.waitForRecording()) return
+      await flow.prepareQuit?.()
+      flow.beginQuit()
+      flow.destroy()
+      await flow.finishQuit()
+    } catch (error) {
+      if (!flow.onError) throw error
+      await flow.onError(error instanceof Error ? error : new Error("Close preparation failed."))
     } finally {
       inProgress = false
     }

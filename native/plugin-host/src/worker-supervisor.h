@@ -1,5 +1,7 @@
 #pragma once
 
+#include "plugin-host-contract-generated.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <array>
@@ -26,13 +28,7 @@ constexpr std::size_t kMaximumWorkerRestarts = 3;
 constexpr std::size_t kMaximumWorkerStateBytes = 512U * 1024U;
 constexpr std::uint32_t kMaximumWorkerTailFrames = 100'000'000U;
 constexpr std::uint32_t kInfiniteTailFrames = std::numeric_limits<std::uint32_t>::max();
-constexpr std::uint32_t kWorkerTransportAbiVersion = 7;
 constexpr std::size_t kWorkerProcessingHistogramBuckets = 32;
-constexpr std::uint32_t kWorkerManifestVersion = 1;
-constexpr std::uint32_t kWorkerStartupProtocolVersion = 1;
-constexpr std::uint32_t kWorkerControlProtocolVersion = 2;
-constexpr std::string_view kWorkerArtifactId = "daw-vst3-worker";
-constexpr std::string_view kWorkerArtifactVersion = "3";
 
 [[nodiscard]] constexpr bool IsInfiniteTailFrames(const std::uint64_t tailFrames) noexcept {
   return tailFrames == kInfiniteTailFrames;
@@ -67,6 +63,7 @@ struct WorkerArtifactIdentity {
 
 struct WorkerHostConfiguration {
   std::string executable;
+  std::string evidence_directory;
   WorkerArtifactIdentity artifact;
 };
 
@@ -295,6 +292,49 @@ enum class WorkerDiagnosticKind : std::uint32_t {
   kScheduledAutomationInput,
 };
 
+// VST3 `IComponentHandler::restartComponent` flags; vst3-worker.cpp asserts they match the SDK.
+namespace RestartFlag {
+constexpr std::uint32_t kReloadComponent = 1U << 0U;
+constexpr std::uint32_t kIoChanged = 1U << 1U;
+constexpr std::uint32_t kParamValuesChanged = 1U << 2U;
+constexpr std::uint32_t kLatencyChanged = 1U << 3U;
+constexpr std::uint32_t kParamTitlesChanged = 1U << 4U;
+constexpr std::uint32_t kMidiCCAssignmentChanged = 1U << 5U;
+constexpr std::uint32_t kNoteExpressionChanged = 1U << 6U;
+}  // namespace RestartFlag
+
+// What a plug-in's restart request asks of the worker. Only a component restart
+// needs the worker to re-set the component up; the others refresh what the host
+// already knows and never reach the host as a restart.
+struct RestartEffects {
+  bool refreshMetadata = false;
+  bool latencyChanged = false;
+  bool componentRestart = false;
+};
+
+constexpr RestartEffects DecodeRestartFlags(const std::uint32_t flags) noexcept {
+  return {
+    .refreshMetadata = (flags & (RestartFlag::kParamValuesChanged | RestartFlag::kParamTitlesChanged)) != 0,
+    .latencyChanged = (flags & RestartFlag::kLatencyChanged) != 0,
+    .componentRestart = (flags & (RestartFlag::kReloadComponent | RestartFlag::kIoChanged)) != 0,
+  };
+}
+
+constexpr std::uint32_t EncodeWorkerFault(
+  const WorkerFaultOrigin origin,
+  const std::uint32_t childCode = 0,
+  const std::uint32_t childStatus = 0
+) noexcept {
+  return (static_cast<std::uint32_t>(origin) & 0xffU)
+    | ((childCode & 0xffU) << 8U) | ((childStatus & 0xffU) << 16U);
+}
+
+// A fault notification raised inside the worker names its own origin in `value`; one that names none came from the
+// plug-in's component callbacks.
+constexpr std::uint32_t EncodeFaultNotification(const std::uint32_t value) noexcept {
+  return value != 0 ? value : EncodeWorkerFault(kZeroDiagnosticFaultOrigin);
+}
+
 struct WorkerDiagnostic {
   WorkerDiagnosticKind kind = WorkerDiagnosticKind::kFault;
   std::uint32_t value = 0;
@@ -424,6 +464,8 @@ class WorkerRuntime {
   // until the host has quiesced callback ports and calls Stop().
   [[nodiscard]] bool TerminateForFault();
   [[nodiscard]] bool SetState(const WorkerState& state);
+  // Applies parameter events to the plug-in with a zero-sample process call, so a paused session still takes them.
+  [[nodiscard]] bool FlushParameters(std::span<const WorkerTransportEvent> events);
   [[nodiscard]] std::optional<WorkerState> GetState();
   [[nodiscard]] bool Restart();
   // Control-service-only lifecycle and command operations. The callback-facing
@@ -462,6 +504,7 @@ class WorkerRuntime {
   [[nodiscard]] bool DiscardLate(std::size_t slotIndex, std::uint64_t sequence);
   [[nodiscard]] WorkerHealth callbackHealth() const;
   [[nodiscard]] WorkerHealth health() const;
+  [[nodiscard]] std::uint32_t faultValue() const;
   [[nodiscard]] int processGroupId() const noexcept;
   [[nodiscard]] std::optional<WorkerDiagnostic> ReadDiagnostic();
   [[nodiscard]] std::optional<WorkerTailMetadata> ReadTailMetadata() const;

@@ -1,0 +1,279 @@
+{
+ "name": "ae08-phase8-asset-seam-bind",
+ "sequence": 56,
+ "createdAt": "2026-11-16T19:52:07.303Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:382:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 789
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:424:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 789
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:383:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 789
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:385:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 789
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 789
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 787,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:383:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 787,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:424:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 787,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:0:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 789
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:0:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 787,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:385:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 787,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:405:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 789
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:405:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 787,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:411:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 789
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:411:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 787,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:412:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 789
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:412:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 787,
+   "new": 788
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:382:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 786,
+   "new": 787
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:275:0:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 705,
+   "new": 706
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:275:0:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 704,
+   "new": 705
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 789
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 787,
+   "new": 788
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 asset recalibration round worker (hand record, no --bless). Tree: 9d690212 plus the pick e8e92aa4 (9dd48c46, an asset publication whose hydration outlasts the provisional seam binds a fresh seam after hydration; adds the asset-add-slow-upload witness to native-playback-controller.test.ts). Measured with `fast-cert.ts --only <422 jobs> --jobs 1 --measure`: every non-retired arm whose targets or witnesses touch native-playback-controller.ts and its test, with every row sibling and control: tier T2n verdict PASS, freeze held, 0 failing. Only pass counts moved (22 fields, each +1; no fail count, exit code or failing test): the controller file 705 to 706 and the desktop files 788 to 789 for the arms that run the whole file.",
+  "expectationsSha256": "776d16caf06c421e46bfb192c49c9c209249977cd84315db0930b5e36468ac6e"
+ }
+}

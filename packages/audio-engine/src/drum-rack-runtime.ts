@@ -3,6 +3,7 @@ import { disconnectAudioNodes } from './effects/chain'
 import { stopAndDisconnectSource, type SourceRegistry } from './source-registry'
 import { MAX_SAMPLED_INSTRUMENT_VOICES, normalizeDrumRackParams, type ArpParams, type DrumRackPadParams, type DrumRackParams } from '@daw-browser/shared'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
+import type { EngineDisposition } from './engine-disposition'
 import {
   localizeSampledInstrumentSeconds,
   sampledInstrumentRegion,
@@ -229,10 +230,10 @@ export function createDrumRackRuntime(options: DrumRackRuntimeOptions) {
   }
 
   return {
-    setTrackDrumRack: (trackId: string, params: DrumRackParams, buffers?: DrumRackResolvedBuffers) => {
+    setTrackDrumRack: (trackId: string, params: DrumRackParams, buffers?: DrumRackResolvedBuffers): EngineDisposition => {
       const current = configs.get(trackId)
       const resolvedBuffers = buffers ?? current?.buffers ?? EMPTY_DRUM_RACK_BUFFERS
-      if (current?.inputParams === params && current.buffers === resolvedBuffers) return
+      if (current?.inputParams === params && current.buffers === resolvedBuffers) return 'skipped'
       const normalized = normalizeDrumRackParams(params)
       configs.set(trackId, {
         inputParams: params,
@@ -240,6 +241,7 @@ export function createDrumRackRuntime(options: DrumRackRuntimeOptions) {
         buffers: resolvedBuffers,
         padIndexByNote: buildPadIndex(normalized),
       })
+      return 'applied'
     },
     clearTrackDrumRack: (trackId: string) => {
       disposeTrack(trackId)

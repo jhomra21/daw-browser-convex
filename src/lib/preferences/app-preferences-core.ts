@@ -14,7 +14,7 @@ import {
 export { parseHexColor } from "~/lib/color"
 
 export const APP_PREFERENCES_STORAGE_KEY = "daw-browser.app-preferences.v1"
-export const APP_PREFERENCES_VERSION = 8
+export const APP_PREFERENCES_VERSION = 9
 export const TIMELINE_DEFAULT_TRACK_COLOR = "timeline-surface"
 export const TIMELINE_DEFAULT_GROUP_COLOR = "timeline-surface"
 const LEGACY_DARK_TIMELINE_SURFACE_COLOR = "#181824"
@@ -28,6 +28,9 @@ export type AudioLatencyMode = "interactive" | "balanced" | "playback"
 export type AudioPreferences = {
   inputDeviceId: string
   outputDeviceId: string
+  /** `coreaudio:<uid>` of the desktop native engine's device; empty is the system default. Never a MediaDevices id. */
+  nativeInputDeviceId: string
+  nativeOutputDeviceId: string
   sampleRate: AudioSampleRatePreference
   latencyMode: AudioLatencyMode
   echoCancellation: boolean
@@ -53,6 +56,7 @@ export type AppPreferences = {
   timeline: {
     defaultTrackColor: string
     defaultGroupColor: string
+    follow: boolean
   }
   audio: AudioPreferences
   recording: RecordingPreferences
@@ -73,11 +77,14 @@ export const defaultAppPreferences: AppPreferences = {
   },
   timeline: {
     defaultTrackColor: TIMELINE_DEFAULT_TRACK_COLOR,
-    defaultGroupColor: TIMELINE_DEFAULT_GROUP_COLOR
+    defaultGroupColor: TIMELINE_DEFAULT_GROUP_COLOR,
+    follow: true,
   },
   audio: {
     inputDeviceId: "",
     outputDeviceId: "",
+    nativeInputDeviceId: "",
+    nativeOutputDeviceId: "",
     sampleRate: "default",
     latencyMode: "interactive",
     echoCancellation: false,
@@ -109,6 +116,8 @@ export const parseAppTheme = (value: JsonValue): AppTheme =>
 const parseBoolean = (value: JsonValue, fallback: boolean): boolean =>
   isJsonBoolean(value) ? value : fallback
 const parseDeviceId = (value: JsonValue): string => isJsonString(value) ? value : ""
+const parseNativeDeviceId = (value: JsonValue): string =>
+  isJsonString(value) && value.startsWith("coreaudio:") && value.length > "coreaudio:".length ? value : ""
 const parseFiniteInteger = (value: JsonValue, minimum: number, maximum: number, fallback: number): number =>
   isJsonNumber(value) && Number.isFinite(value)
     ? Math.min(maximum, Math.max(minimum, Math.round(value)))
@@ -210,14 +219,14 @@ export const updateRecordingCalibrations = (
 
 export const normalizeAppPreferences = (value: JsonValue): AppPreferences => {
   if (!isJsonObject(value)) return defaultAppPreferences
-  if (value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4 && value.version !== 5 && value.version !== 6 && value.version !== 7 && value.version !== APP_PREFERENCES_VERSION) return defaultAppPreferences
+  if (value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4 && value.version !== 5 && value.version !== 6 && value.version !== 7 && value.version !== 8 && value.version !== APP_PREFERENCES_VERSION) return defaultAppPreferences
 
   const appearance = isJsonObject(value.appearance) ? value.appearance : {}
   const sidebar = isJsonObject(value.sidebar) ? value.sidebar : {}
   const timeline = isJsonObject(value.timeline) ? value.timeline : {}
   const audio = value.version !== 1 && isJsonObject(value.audio) ? value.audio : {}
-  const recording = (value.version === 3 || value.version === 4 || value.version === 5 || value.version === 6 || value.version === APP_PREFERENCES_VERSION) && isJsonObject(value.recording) ? value.recording : {}
-  const midi = (value.version === 4 || value.version === 5 || value.version === 6 || value.version === APP_PREFERENCES_VERSION) && isJsonObject(value.midi) ? value.midi : {}
+  const recording = (value.version === 3 || value.version === 4 || value.version === 5 || value.version === 6 || value.version === 8 || value.version === APP_PREFERENCES_VERSION) && isJsonObject(value.recording) ? value.recording : {}
+  const midi = (value.version === 4 || value.version === 5 || value.version === 6 || value.version === 8 || value.version === APP_PREFERENCES_VERSION) && isJsonObject(value.midi) ? value.midi : {}
 
   return {
     version: APP_PREFERENCES_VERSION,
@@ -238,17 +247,20 @@ export const normalizeAppPreferences = (value: JsonValue): AppPreferences => {
         timeline.defaultGroupColor,
         defaultAppPreferences.timeline.defaultGroupColor,
         LEGACY_BRANCH_GROUP_ROW_COLOR,
-      )
+      ),
+      follow: parseBoolean(timeline.follow, defaultAppPreferences.timeline.follow),
     },
     audio: {
       inputDeviceId: parseDeviceId(audio.inputDeviceId),
       outputDeviceId: parseDeviceId(audio.outputDeviceId),
+      nativeInputDeviceId: parseNativeDeviceId(audio.nativeInputDeviceId),
+      nativeOutputDeviceId: parseNativeDeviceId(audio.nativeOutputDeviceId),
       sampleRate: parseAudioSampleRate(audio.sampleRate),
       latencyMode: parseAudioLatencyMode(audio.latencyMode),
       echoCancellation: parseBoolean(audio.echoCancellation, defaultAppPreferences.audio.echoCancellation),
       noiseSuppression: parseBoolean(audio.noiseSuppression, defaultAppPreferences.audio.noiseSuppression),
       autoGainControl: parseBoolean(audio.autoGainControl, defaultAppPreferences.audio.autoGainControl),
-      nativePlaybackEnabled: (value.version === 5 || value.version === 6 || value.version === 7 || value.version === APP_PREFERENCES_VERSION)
+      nativePlaybackEnabled: (value.version === 5 || value.version === 6 || value.version === 7 || value.version === 8 || value.version === APP_PREFERENCES_VERSION)
         ? parseBoolean(audio.nativePlaybackEnabled, value.version === APP_PREFERENCES_VERSION
           ? defaultAppPreferences.audio.nativePlaybackEnabled
           : false)

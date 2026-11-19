@@ -1,3 +1,4 @@
+import { dbFromLinear, linearFromDb } from '@daw-browser/shared'
 import { analyzeLoudness, type LoudnessAnalysis } from './loudness-analyzer'
 import { predictLinkedTruePeakAtFrame } from './true-peak-kernel'
 
@@ -41,8 +42,6 @@ export type ExportAnalysisReport = {
 }
 
 const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value))
-const linearFromDb = (value: number) => 10 ** (value / 20)
-const dbFromLinear = (value: number) => value > 0 ? 20 * Math.log10(value) : Number.NEGATIVE_INFINITY
 
 type WavEncodingInput = {
   codec?: unknown

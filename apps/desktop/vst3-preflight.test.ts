@@ -44,7 +44,7 @@ const hello: NativeVst3WorkerHello = {
     artifact: { id: "daw-vst3-worker", version: "3" },
     startupProtocolVersion: 1,
     controlProtocolVersion: 2,
-    transportAbiVersion: 6,
+    transportAbiVersion: 7,
     architecture: "arm64",
     role: "effect",
     inputBuses: [{ name: "Main Input", channels: 2, enabled: true }],

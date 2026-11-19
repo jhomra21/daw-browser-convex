@@ -286,7 +286,8 @@ const coalesceOperations = (operations: readonly MidiEditorOperation[]) => {
     const entryKey = (entry: MidiEditorOperation) => entry.kind === 'insert'
       ? entry.note.id
       : entry.kind === 'insert-mapping' ? `mapping:${entry.mapping.id}`
-        : entry.kind === 'set-input-channel' ? 'input-channel' : entry.kind === 'update-mapping' || entry.kind === 'delete-mapping' ? `mapping:${entry.id}` : entry.id
+        : entry.kind === 'set-input-channel' ? 'input-channel'
+          : entry.kind === 'update-mapping' || entry.kind === 'delete-mapping' ? `mapping:${entry.id}` : entry.id
     const index = result.findIndex((entry) => entryKey(entry) === entryKey(operation))
     const previous = index < 0 ? undefined : result[index]
     if (previous?.kind === 'insert' && operation.kind === 'update') {
@@ -357,7 +358,8 @@ const asError = (cause: unknown) => (
 const operationId = (operation: MidiEditorOperation) => (
   operation.kind === 'insert' ? operation.note.id
     : operation.kind === 'insert-mapping' ? operation.mapping.id
-      : operation.kind === 'set-input-channel' ? 'input-channel' : operation.id
+      : operation.kind === 'set-input-channel' ? 'input-channel'
+        : operation.id
 )
 
 const clipMidi = (snapshot: ProjectSnapshotV2, clipId: string) => {
@@ -579,5 +581,34 @@ export const createMidiEditorPersistence = (input: {
       void flush().catch(input.onError)
       if (!inFlight && pending.length === 0) unregister()
     },
+  }
+}
+
+// One-shot write for history replay when no MIDI editor is open on the clip.
+// A failed replay is discarded before dispose, so it never retries in the background.
+export const commitMidiEditorOperations = async (input: {
+  projectId: string
+  clipId: string
+  operations: MidiEditorOperation[]
+}): Promise<NormalizedLegacyMidiClip> => {
+  const committed: NormalizedLegacyMidiClip[] = []
+  const adapter = createMidiEditorPersistence({
+    projectId: input.projectId,
+    clipId: input.clipId,
+    onCommitted: (midi) => committed.push(midi),
+  })
+  try {
+    for (const operation of input.operations) adapter.enqueue(operation)
+    await adapter.flush()
+    const failure = adapter.error()
+    if (failure) throw failure.error
+    const midi = committed[committed.length - 1]
+    if (!midi) throw new Error('MIDI notes were not committed.')
+    return midi
+  } catch (error) {
+    adapter.discard()
+    throw error
+  } finally {
+    adapter.dispose()
   }
 }

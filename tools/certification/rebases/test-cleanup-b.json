@@ -1,0 +1,294 @@
+{
+ "name": "test-cleanup-b",
+ "sequence": 7,
+ "createdAt": "2026-11-11T20:01:45.748Z",
+ "revert": [
+  {
+   "file": "apps/desktop/native-session-bridge.test.ts",
+   "entryCopy": "/tmp/tcb-entry/apps_desktop_native-session-bridge.test.ts",
+   "entrySha256": "1262cebe91c4b75d8466041724c91170a332b06371fab613b39a2f159b121399",
+   "liveSha256": "ed77b49c9c09c0de83285ef5c52a817ce51aebdfdeca8549223e05910ebb47da"
+  },
+  {
+   "file": "packages/audio-engine/src/granular-worklet.test.ts",
+   "entryCopy": "/tmp/tcb-entry/packages_audio-engine_src_granular-worklet.test.ts",
+   "entrySha256": "1e62130974789ecc4a899e1b0ca0510550b4450733bf31845dbdafa233d430e5",
+   "liveSha256": "14224978421a97fbb652a34a8d7816f624f9b8be892fd472b446d61a489156c9"
+  },
+  {
+   "file": "packages/audio-engine/src/portable-wasm-worklet.test.ts",
+   "entryCopy": "/tmp/tcb-entry/packages_audio-engine_src_portable-wasm-worklet.test.ts",
+   "entrySha256": "2ee51eecb72f730eb915f150b2fe235fe8b6c0bbcbab54b80879f8db5f41e6de",
+   "liveSha256": "dd2dff481ec8ba5ac68e48f48dbc4547b3a504a426e304fea3ab41c9c20e024f"
+  },
+  {
+   "file": "src/components/Timeline.test.ts",
+   "entryCopy": "/tmp/tcb-entry/src_components_Timeline.test.ts",
+   "entrySha256": "7f125294b30a1fab74ebf3aedac2eb2acb1516a5b9adfa7feb9bae3d8a248d96",
+   "liveSha256": "b82519275ba6919910a0a3f6ed341c3f101ad2a8308eb229a5955921a5774317"
+  },
+  {
+   "file": "src/hooks/useTimelineActions.test.ts",
+   "entryCopy": "/tmp/tcb-entry/src_hooks_useTimelineActions.test.ts",
+   "entrySha256": "4c6c13e0dd0e3d025ba7bb92f24f67054e597927d274651bea36b429c707314f",
+   "liveSha256": "9122990d035c0d7cbaa736b85d688474ca91613cb554989043f42bbda27c7192"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.test.ts",
+   "entryCopy": "/tmp/tcb-entry/src_hooks_useTimelinePlayback.test.ts",
+   "entrySha256": "1f8eb9226fe8b7748f43d6075333f4978f02b1d38f4eb0aa5159b27959e6946d",
+   "liveSha256": "6d5e509c40923a7159ac64a43c7830a507c54c6d40077356c645b9fe303310f5"
+  },
+  {
+   "file": "src/lib/waveform-canvas.test.ts",
+   "entryCopy": "/tmp/tcb-entry/src_lib_waveform-canvas.test.ts",
+   "entrySha256": "485e2bedd8026ea0d62c483c03b44699bbd38b6eac7715a8dd533e644785dfbb",
+   "liveSha256": "def68e3064efa8a4a322c94ef777092a5d9d5ca962c37486f8dea96ac3fd225b"
+  }
+ ],
+ "watched": [
+  {
+   "file": "packages/audio-engine/src/portable-wasm-worklet.test.ts",
+   "from": "2ee51eecb72f730eb915f150b2fe235fe8b6c0bbcbab54b80879f8db5f41e6de",
+   "to": "dd2dff481ec8ba5ac68e48f48dbc4547b3a504a426e304fea3ab41c9c20e024f"
+  },
+  {
+   "file": "src/components/Timeline.test.ts",
+   "from": "7f125294b30a1fab74ebf3aedac2eb2acb1516a5b9adfa7feb9bae3d8a248d96",
+   "to": "b82519275ba6919910a0a3f6ed341c3f101ad2a8308eb229a5955921a5774317"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.test.ts",
+   "from": "1f8eb9226fe8b7748f43d6075333f4978f02b1d38f4eb0aa5159b27959e6946d",
+   "to": "6d5e509c40923a7159ac64a43c7830a507c54c6d40077356c645b9fe303310f5"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=rc1-i6-desktop",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 396,
+   "new": 400
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:404:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 201,
+   "new": 200
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:404:1:mutant",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:404:1:mutant",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d2 a paused structural change requested while the pause is pending is not dropped",
+    "B6d3 a paused structural replacement prepares at the playhead a Stop published while it waited",
+    "B6d3 a seek made while Play waits on a structural replacement preview leaves the hook and native in agreement",
+    "B6d4 a Play superseded by a locate on a structural replacement preview keeps playing from the locate",
+    "B6d4 a Stop in the same tick as a paused structural edit reports no fault",
+    "B6d4 a Stop while the paused replacement is starting keeps a live graph at the start",
+    "B6d5 a Stop after a locate during an uncommitted paused preview still returns it to the start",
+    "B6d5 a locate during an uncommitted paused preview reaches native once it commits",
+    "B6d5 a locate during an uncommitted paused preview reaches native once it commits while Stop waits on it",
+    "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 renaming a track while paused on native does not recompile the paused preview; a volume edit does",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6d2 a paused structural change requested while the pause is pending is not dropped",
+    "B6d3 a paused structural replacement prepares at the playhead a Stop published while it waited",
+    "B6d3 a seek made while Play waits on a structural replacement preview leaves the hook and native in agreement",
+    "B6d4 a Play superseded by a locate on a structural replacement preview keeps playing from the locate",
+    "B6d4 a Stop in the same tick as a paused structural edit reports no fault",
+    "B6d4 a Stop while the paused replacement is starting keeps a live graph at the start",
+    "B6d5 a Stop after a locate during an uncommitted paused preview still returns it to the start",
+    "B6d5 a locate during an uncommitted paused preview reaches native once it commits",
+    "B6d5 a locate during an uncommitted paused preview reaches native once it commits while Stop waits on it",
+    "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 renaming a track while paused on native does not recompile the paused preview; a volume edit does",
+    "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:509:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 211
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:509:mutant:playback",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 3,
+   "new": 4
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:509:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+    "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:502:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 211,
+   "new": 210
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:502:mutant:playback",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 4,
+   "new": 5
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:502:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+    "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "rebase",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedRemovals": {
+   "manifest": "tools/certification/removals/test-cleanup-b.json",
+   "manifestSha256": "f0fa7f2ae0dd51024a1260a08af30401b7e7d6e798845ebcd78e97339929a3c2",
+   "ruling": "acceptance-reports/ae-08-phase-5-2026-10-18/TEST-CLEANUP-B-REPORT.md",
+   "rulingSha256": "00dbe5b47ad40fc010bc9ebade145ab11e4c12d6a4182c6a88b3cd61ff4527c8",
+   "tests": 1
+  },
+  "scope": "--full --base-commit HEAD --allow-removal tools/certification/removals/test-cleanup-b.json",
+  "provenance": {
+   "scope": [
+    "--full",
+    "--base-commit",
+    "HEAD",
+    "--allow-removal",
+    "tools/certification/removals/test-cleanup-b.json"
+   ],
+   "head": "aa3ee1a2f3f9072136c4086d0034718e26cd685a",
+   "gitStatusSha256": "e139f7ec5f6d953816980ac68c4bf15de308f756e9515f00f6cc76b8d41acfa1",
+   "expectationsSha256": "e2d063bcabc5b6f63edea9296987ae08b352d5fb35f9c4cbad4a18c984ccd24a",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "e2d063bcabc5b6f63edea9296987ae08b352d5fb35f9c4cbad4a18c984ccd24a",
+  "revertRun": {
+   "dir": "/tmp/fast-cert/rebase-test-cleanup-b-2026-11-11T19-33-01.113Z/revert",
+   "resultSha256": "884cae6c3005554a9fd1bd0be05ae502b70ad45c197ba6d22aa0808b3649f0d6",
+   "seconds": 862.6341569580001,
+   "observationsEqualToExpectations": 4902
+  },
+  "liveRun": {
+   "dir": "/tmp/fast-cert/rebase-test-cleanup-b-2026-11-11T19-33-01.113Z/live",
+   "resultSha256": "022eafa7fc6f6e4ae60099965e8f5c03f89017784b9b79f5aefc7e69c8fa23f5",
+   "seconds": 861.625308583,
+   "observations": 4902
+  },
+  "unreachedByOverlay": [
+   "gate:g-typecheck",
+   "gate:g-build",
+   "gate:g-lint",
+   "gate:g-tools-typecheck",
+   "gate:rc1-i9-scoped-lint",
+   "gate:g-c0fg-oxlint",
+   "gate:x-b6f5-scoped-lint",
+   "gate:g-c0-oxlint",
+   "arm:search:124-settled-call-sites",
+   "arm:search:124-deletion-search",
+   "arm:search:258-anchor-search",
+   "arm:search:430-anchor-search-0",
+   "arm:search:431-anchor-search-0",
+   "arm:search:258-deletion-search",
+   "gate:x-validate-wasm",
+   "gate:x-test-native",
+   "gate:x-host-ctest"
+  ]
+ }
+}

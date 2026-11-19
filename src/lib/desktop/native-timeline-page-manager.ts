@@ -1,11 +1,13 @@
-import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 import type { NativeHostMappedAssetPage } from '@daw-browser/audio-engine/native-host-wire'
 import {
   nativeAudioHostMaximumAssetChannels,
   nativeAudioHostMaximumMappedAssetPageFramesForChannels,
+  nativeAudioHostMaximumPayloadBytes,
 } from '@daw-browser/desktop-protocol/native-audio-host'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import type { PreparedStretchArtifactRepository } from '@daw-browser/audio-engine/prepared-stretch-store'
+import { NativePlaybackAbortError } from './native-playback-abort'
 
 export type NativeTimelineSource = {
   sourceAssetKey: string
@@ -16,12 +18,17 @@ export type NativeTimelineSource = {
   descriptor?: AudioPcmSourceDescriptor
   preparedStretchArtifactId?: string
   artifactRepository?: PreparedStretchArtifactRepository
+  immutableAfterPreparation?: boolean
 }
 
 export type NativeTimelinePageManager = {
+  addSources: (sources: readonly NativeTimelineSource[]) => () => Promise<void>
+  removeSources: (sessionAssetIds: readonly number[]) => Promise<void>
+  /** `mark` logs the page writes and range prepares this call starts (opt-in acceptance evidence). */
   ensureRanges: (
     ranges: readonly { sourceAssetKey: string; startFrame: number; endFrame: number }[],
     signal?: AbortSignal,
+    mark?: (name: string) => void,
   ) => Promise<void>
   readPage: (
     sourceAssetKey: string,
@@ -33,6 +40,7 @@ export type NativeTimelinePageManager = {
     ranges: readonly { sourceAssetKey: string; startFrame: number; endFrame: number }[],
   ) => void
   dispose: () => Promise<void>
+  isDisposed: () => boolean
 }
 
 type PageWriter = (page: NativeHostMappedAssetPage, signal?: AbortSignal) => Promise<void>
@@ -42,9 +50,30 @@ type RangePreparer = (
   frameCount: number,
   signal?: AbortSignal,
 ) => Promise<void>
+type Mark = (name: string) => void
+const markedRequest = async (
+  mark: Mark | undefined,
+  names: readonly [request: string, reply: string],
+  send: () => Promise<void>,
+) => {
+  mark?.(names[0])
+  await send()
+  mark?.(names[1])
+}
 const maximumDecoders = 2
 const maximumDecodedPageFrames = 16_384
 export const nativeTimelineMaximumUploadedPages = 128
+/** Two concurrent pages, each a plane copy plus its planar wire payload, at the largest page the wire allows. */
+export const nativeTimelinePageStagingBytes = maximumDecoders * 2 * nativeAudioHostMaximumPayloadBytes
+
+const validateSource = (source: NativeTimelineSource) => {
+  if (!Number.isSafeInteger(source.frameCount) || source.frameCount <= 0
+    || !Number.isSafeInteger(source.sampleRateHz) || source.sampleRateHz <= 0
+    || !Number.isSafeInteger(source.channelCount) || source.channelCount <= 0
+    || source.channelCount > nativeAudioHostMaximumAssetChannels) {
+    throw new Error(`Native audio asset "${source.sourceAssetKey}" metadata is invalid.`)
+  }
+}
 
 const pageKey = (sourceAssetKey: string, startFrame: number) => (
   `${sourceAssetKey}:${startFrame}`
@@ -79,29 +108,25 @@ export const createNativeTimelinePageManager = (input: {
   const inFlight = new Map<string, Promise<void>>()
   const readInFlight = new Map<string, Promise<NativeHostMappedAssetPage>>()
   const uploaded = new Map<string, Map<number, number>>()
+  const fullyPrepared = new Set<string>()
   const slotWaiters: Array<() => void> = []
   const abortController = new AbortController()
   let disposePromise: Promise<void> | undefined
   let accessSequence = 0
-  const requestedPageFrames = input.pageFrames ?? maximumDecodedPageFrames
-  if (!Number.isSafeInteger(requestedPageFrames) || requestedPageFrames <= 0) {
+  const requestedPageFrames = input.pageFrames ?? Number.POSITIVE_INFINITY
+  if (!(requestedPageFrames > 0) || (input.pageFrames !== undefined && !Number.isSafeInteger(requestedPageFrames))) {
     throw new Error('Native timeline page size must be a positive integer.')
   }
-  const boundedRequestedPageFrames = Math.min(requestedPageFrames, maximumDecodedPageFrames)
-  for (const source of input.sources) {
-    if (!Number.isSafeInteger(source.frameCount) || source.frameCount <= 0
-      || !Number.isSafeInteger(source.sampleRateHz) || source.sampleRateHz <= 0
-      || !Number.isSafeInteger(source.channelCount) || source.channelCount <= 0
-      || source.channelCount > nativeAudioHostMaximumAssetChannels) {
-      throw new Error(`Native audio asset "${source.sourceAssetKey}" metadata is invalid.`)
-    }
-  }
+  for (const source of input.sources) validateSource(source)
   const pageFramesForSource = (source: NativeTimelineSource) => {
     const payloadFrames = nativeAudioHostMaximumMappedAssetPageFramesForChannels(source.channelCount)
     if (payloadFrames <= 0) {
       throw new Error(`Native audio asset "${source.sourceAssetKey}" has too many channels for mapped pages.`)
     }
-    return Math.min(boundedRequestedPageFrames, payloadFrames)
+    // The host publishes an instrument only once its whole mapping is uploaded, and refuses writes after that.
+    // Those pages are in-memory regions, not windowed decodes, so only the wire payload bounds them.
+    const decodedFrames = source.immutableAfterPreparation ? Number.POSITIVE_INFINITY : maximumDecodedPageFrames
+    return Math.min(requestedPageFrames, decodedFrames, payloadFrames)
   }
   const invalidateSourceRange = (
     source: NativeTimelineSource,
@@ -120,6 +145,7 @@ export const createNativeTimelinePageManager = (input: {
     if (current.size === 0) uploaded.delete(source.sourceAssetKey)
   }
   const isUploaded = (sourceAssetKey: string, startFrame: number) => {
+    if (fullyPrepared.has(sourceAssetKey)) return true
     const pages = uploaded.get(sourceAssetKey)
     const timestamp = pages?.get(startFrame)
     if (timestamp === undefined) return false
@@ -256,6 +282,7 @@ export const createNativeTimelinePageManager = (input: {
     sourceAssetKey: string,
     startFrame: number,
     signal?: AbortSignal,
+    mark?: Mark,
   ) => {
     const source = sources.get(sourceAssetKey)
     if (!source) throw new Error(`Native audio asset "${sourceAssetKey}" is not registered.`)
@@ -283,13 +310,15 @@ export const createNativeTimelinePageManager = (input: {
             endFrame - startFrame,
             operationSignal,
           )
-          await input.writePage(page, operationSignal)
+          await markedRequest(mark, ['asset-page-write-request', 'asset-page-write-reply'], () => input.writePage(page, operationSignal))
           markUploaded(sourceAssetKey, startFrame)
           return
         }
+        const bytesPerPlane = (endFrame - startFrame) * Float32Array.BYTES_PER_ELEMENT
+        const planarPcm = new Uint8Array(source.channelCount * bytesPerPlane)
         const pagePlanes = Array.from(
           { length: source.channelCount },
-          () => new Float32Array(endFrame - startFrame),
+          (_, channel) => new Float32Array(planarPcm.buffer, channel * bytesPerPlane, endFrame - startFrame),
         )
         const written: { startFrame: number; endFrame: number }[] = []
         const descriptor = source.descriptor
@@ -330,22 +359,12 @@ export const createNativeTimelinePageManager = (input: {
           || covered[0]?.endFrame !== endFrame) {
           throw new Error(`Native audio asset "${sourceAssetKey}" did not decode the requested page.`)
         }
-        const planarPcm = new Uint8Array(
-          source.channelCount * (endFrame - startFrame) * Float32Array.BYTES_PER_ELEMENT,
-        )
-        const bytesPerPlane = (endFrame - startFrame) * Float32Array.BYTES_PER_ELEMENT
-        pagePlanes.forEach((plane, channel) => {
-          planarPcm.set(
-            new Uint8Array(plane.buffer, plane.byteOffset, plane.byteLength),
-            channel * bytesPerPlane,
-          )
-        })
-        await input.writePage({
+        await markedRequest(mark, ['asset-page-write-request', 'asset-page-write-reply'], () => input.writePage({
           sessionAssetId: source.sessionAssetId,
           startFrame,
           frameCount: endFrame - startFrame,
           planarPcm,
-        }, operationSignal)
+        }, operationSignal))
         markUploaded(sourceAssetKey, startFrame)
       } finally {
         if (slotAcquired) {
@@ -425,8 +444,32 @@ export const createNativeTimelinePageManager = (input: {
     return await awaitWithSignal(operation, signal)
   }
 
+  const removeSources = async (sessionAssetIds: readonly number[]) => {
+    const ids = new Set(sessionAssetIds)
+    const removed = [...sources.values()].filter((source) => ids.has(source.sessionAssetId))
+    const keys = removed.map((source) => `${source.sourceAssetKey}:`)
+    await Promise.allSettled([
+      ...[...inFlight].filter(([key]) => keys.some((prefix) => key.startsWith(prefix))).map(([, work]) => work),
+      ...[...readInFlight].filter(([key]) => keys.some((prefix) => key.startsWith(`read:${prefix}`))).map(([, work]) => work),
+    ])
+    for (const source of removed) {
+      if (sources.get(source.sourceAssetKey) !== source) continue
+      sources.delete(source.sourceAssetKey)
+      uploaded.delete(source.sourceAssetKey)
+      fullyPrepared.delete(source.sourceAssetKey)
+    }
+  }
   return {
-    ensureRanges: async (ranges, signal) => {
+    removeSources,
+    addSources: (added) => {
+      for (const source of added) {
+        if (sources.has(source.sourceAssetKey)) throw new Error(`Native audio asset "${source.sourceAssetKey}" is already registered.`)
+        validateSource(source)
+      }
+      for (const source of added) sources.set(source.sourceAssetKey, source)
+      return () => removeSources(added.map((source) => source.sessionAssetId))
+    },
+    ensureRanges: async (ranges, signal, mark) => {
       signal?.throwIfAborted()
       const merged = new Map<string, { sourceAssetKey: string; startFrame: number; endFrame: number }[]>()
       for (const range of ranges) {
@@ -471,12 +514,19 @@ export const createNativeTimelinePageManager = (input: {
         hydrationJobs.push(...[...pageStarts].map((pageStart) => ({ sourceAssetKey, pageStart })))
       }
       await runWithConcurrency(hydrationJobs, maximumDecoders, async ({ sourceAssetKey, pageStart }) => {
-        await hydratePage(sourceAssetKey, pageStart, signal)
+        await hydratePage(sourceAssetKey, pageStart, signal, mark)
       })
+      const prepareRange = (job: (typeof prepareJobs)[number]) => markedRequest(mark, ['asset-range-request', 'asset-range-reply'],
+        async () => { await input.prepareRange?.(job.source.sessionAssetId, job.startFrame, job.frameCount, signal) })
       for (const job of prepareJobs) {
         try {
-          await input.prepareRange?.(job.source.sessionAssetId, job.startFrame, job.frameCount, signal)
+          await prepareRange(job)
         } catch {
+          // Published instrument mappings cannot be rewritten, even when the
+          // ordinary timeline coverage hints have been evicted.
+          if (fullyPrepared.has(job.source.sourceAssetKey)) {
+            throw new Error(`Native instrument "${job.source.sourceAssetKey}" lost prepared coverage. Reload the device and retry.`)
+          }
           // A bounded host range ledger may evict a page between hydration and
           // preparation. Rehydrate once so an eviction never becomes a hole.
           invalidateSourceRange(job.source, job.startFrame, job.frameCount)
@@ -490,14 +540,19 @@ export const createNativeTimelinePageManager = (input: {
             retryPages.push({ sourceAssetKey: job.source.sourceAssetKey, pageStart })
           }
           await runWithConcurrency(retryPages, maximumDecoders, async ({ sourceAssetKey, pageStart }) => {
-            await hydratePage(sourceAssetKey, pageStart, signal)
+            await hydratePage(sourceAssetKey, pageStart, signal, mark)
           })
-          await input.prepareRange?.(job.source.sessionAssetId, job.startFrame, job.frameCount, signal)
+          await prepareRange(job)
+        }
+        if (job.source.immutableAfterPreparation
+          && job.startFrame === 0 && job.frameCount === job.source.frameCount) {
+          fullyPrepared.add(job.source.sourceAssetKey)
         }
       }
     },
     invalidateRanges: (ranges) => {
       for (const range of ranges) {
+        if (fullyPrepared.has(range.sourceAssetKey)) continue
         const current = uploaded.get(range.sourceAssetKey)
         if (!current) continue
         const source = sources.get(range.sourceAssetKey)
@@ -510,14 +565,16 @@ export const createNativeTimelinePageManager = (input: {
       }
     },
     readPage,
+    isDisposed: () => abortController.signal.aborted,
     dispose: async () => {
       if (disposePromise) return disposePromise
-      abortController.abort()
+      abortController.abort(new NativePlaybackAbortError('page-manager-disposed'))
       disposePromise = (async () => {
         await Promise.allSettled([...inFlight.values(), ...readInFlight.values()])
         inFlight.clear()
         readInFlight.clear()
         uploaded.clear()
+        fullyPrepared.clear()
       })()
       return disposePromise
     },

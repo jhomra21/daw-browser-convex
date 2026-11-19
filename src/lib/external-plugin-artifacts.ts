@@ -110,16 +110,6 @@ export const writeLocalExternalPluginState = async (
   return row
 }
 
-export const deleteLocalExternalPluginState = async (
-  projectId: string,
-  metadata: OpaquePluginStateMetadata,
-): Promise<void> => {
-  const parsed = validLocalStateMetadata(metadata)
-  const db = await openLocalProjectDb(projectId)
-  await db.delete('externalPluginArtifacts', parsed.artifactId)
-  notifyLocalProjectChanged(projectId)
-}
-
 export const setLocalExternalPluginArtifact = async (
   projectId: string,
   artifact: ProjectManifestPluginArtifact,

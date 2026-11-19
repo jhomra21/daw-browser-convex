@@ -204,6 +204,39 @@ bool decode_block_partitions(
   return true;
 }
 
+constexpr uint32_t kMaximumGraphEdits = 8;
+
+struct GraphEdit {
+  uint32_t frame = 0;
+  const uint8_t *graph = nullptr;
+  uint32_t graph_bytes = 0;
+};
+
+// Edits are applied between partitions, so each must name a frame where one starts;
+// they are strictly increasing and never at frame 0, where the first graph is.
+bool decode_graph_edits(
+  const uint8_t *bytes,
+  size_t byte_count,
+  uint32_t frame_count,
+  std::array<GraphEdit, kMaximumGraphEdits> *edits,
+  uint32_t *edit_count) {
+  size_t offset = 0;
+  uint32_t count = 0;
+  if (!read_u32_at(bytes, byte_count, &offset, &count) || count == 0 || count > edits->size()) return false;
+  uint32_t previous = 0;
+  for (uint32_t index = 0; index < count; ++index) {
+    GraphEdit &edit = (*edits)[index];
+    if (!read_u32_at(bytes, byte_count, &offset, &edit.frame) || edit.frame <= previous || edit.frame >= frame_count
+      || !read_u32_at(bytes, byte_count, &offset, &edit.graph_bytes)
+      || edit.graph_bytes < DAW_AUDIO_CORE_WASM_GRAPH_HEADER_BYTES
+      || !read_bytes(bytes, byte_count, &offset, edit.graph_bytes, &edit.graph)) return false;
+    previous = edit.frame;
+  }
+  if (offset != byte_count) return false;
+  *edit_count = count;
+  return true;
+}
+
 }  // namespace
 
 extern "C" uint32_t daw_audio_core_graph_fixture_protocol_version(void) {
@@ -243,7 +276,7 @@ extern "C" daw_audio_core_result daw_audio_core_run_graph_fixture(
   const uint32_t block_partition_bytes = version == DAW_AUDIO_GRAPH_FIXTURE_VERSION ? read_u32(fixture_bytes, 72) : 0;
   if (version == DAW_AUDIO_GRAPH_FIXTURE_VERSION_ASSETS
     && (read_u32(fixture_bytes, 72) != 0 || read_u32(fixture_bytes, 76) != 0)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
-  if (version == DAW_AUDIO_GRAPH_FIXTURE_VERSION && read_u32(fixture_bytes, 76) != 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  const uint32_t graph_edit_bytes = version == DAW_AUDIO_GRAPH_FIXTURE_VERSION ? read_u32(fixture_bytes, 76) : 0;
   if (sample_rate_hz == 0 || max_frames == 0 || frame_count == 0
     || input_bus_count > 64 || channel_count == 0 || channel_count > 2 || graph_revision == 0
     || transport_epoch == 0 || transport_running > 1) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
@@ -255,7 +288,7 @@ extern "C" daw_audio_core_result daw_audio_core_run_graph_fixture(
     || !add_bytes(&expected_bytes, parameter_bytes) || !add_bytes(&expected_bytes, event_bytes)
     || !add_bytes(&expected_bytes, instrument_event_bytes) || !add_bytes(&expected_bytes, asset_bytes)
     || !add_bytes(&expected_bytes, instrument_state_bytes) || !add_bytes(&expected_bytes, block_partition_bytes)
-    || expected_bytes != fixture_byte_count) {
+    || !add_bytes(&expected_bytes, graph_edit_bytes) || expected_bytes != fixture_byte_count) {
     return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   }
   const uint8_t *graph = fixture_bytes + header_bytes;
@@ -266,6 +299,7 @@ extern "C" daw_audio_core_result daw_audio_core_run_graph_fixture(
   const uint8_t *assets = instrument_events + instrument_event_bytes;
   const uint8_t *instrument_states = assets + asset_bytes;
   const uint8_t *block_partitions = instrument_states + instrument_state_bytes;
+  const uint8_t *graph_edit_envelope = block_partitions + block_partition_bytes;
   std::array<uint32_t, 64> partitions{};
   uint32_t partition_count = 1;
   partitions[0] = frame_count;
@@ -274,6 +308,12 @@ extern "C" daw_audio_core_result daw_audio_core_run_graph_fixture(
   } else if (parameter_bytes != 0 || event_bytes != 0 || instrument_event_bytes != 0
     || !decode_block_partitions(
       block_partitions, block_partition_bytes, frame_count, max_frames, &partitions, &partition_count)) {
+    return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  std::array<GraphEdit, kMaximumGraphEdits> graph_edits{};
+  uint32_t graph_edit_count = 0;
+  if (graph_edit_bytes != 0
+    && !decode_graph_edits(graph_edit_envelope, graph_edit_bytes, frame_count, &graph_edits, &graph_edit_count)) {
     return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   }
   daw_audio_core_result result = daw_audio_core_wasm_graph_initialize_planar(
@@ -290,7 +330,17 @@ extern "C" daw_audio_core_result daw_audio_core_run_graph_fixture(
   }
   if (result == DAW_AUDIO_CORE_OK) result = daw_audio_core_wasm_graph_publish(graph_revision);
   uint32_t frame_offset = 0;
+  uint32_t active_revision = graph_revision;
+  uint32_t applied_edits = 0;
   for (uint32_t partition = 0; result == DAW_AUDIO_CORE_OK && partition < partition_count; ++partition) {
+    if (applied_edits < graph_edit_count && graph_edits[applied_edits].frame == frame_offset) {
+      const GraphEdit &edit = graph_edits[applied_edits++];
+      result = daw_audio_core_wasm_graph_prepare(edit.graph, edit.graph_bytes);
+      if (result != DAW_AUDIO_CORE_OK) break;
+      active_revision = read_u32(edit.graph, 4);
+      result = daw_audio_core_wasm_graph_publish(active_revision);
+      if (result != DAW_AUDIO_CORE_OK) break;
+    }
     const uint32_t partition_frames = partitions[partition];
     if (transport_frame > std::numeric_limits<int64_t>::max() - frame_offset) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
     result = daw_audio_core_wasm_graph_set_transport(
@@ -306,10 +356,12 @@ extern "C" daw_audio_core_result daw_audio_core_run_graph_fixture(
     }
     result = daw_audio_core_wasm_graph_process_planar(
       partition_frames, input_bus_count, channel_count, input_bus_count == 0 ? nullptr : inputs.data(), partition_outputs.data(),
-      graph_revision, parameter_bytes == 0 ? nullptr : parameters, parameter_bytes,
+      active_revision, parameter_bytes == 0 ? nullptr : parameters, parameter_bytes,
       event_bytes == 0 ? nullptr : events, event_bytes,
       instrument_event_bytes == 0 ? nullptr : instrument_events, instrument_event_bytes);
     frame_offset += partition_frames;
   }
+  // An edit that names no partition boundary never ran, which is a malformed fixture.
+  if (result == DAW_AUDIO_CORE_OK && applied_edits != graph_edit_count) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   return result;
 }

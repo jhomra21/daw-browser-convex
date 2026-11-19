@@ -1,173 +1,290 @@
 import { expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
+import "fake-indexeddb/auto";
+import { createRoot, createSignal } from "solid-js";
+import { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
+import { createDefaultSynthParams, createDefaultUtilityParams, type TrackInstrumentParams } from "@daw-browser/shared";
+import type { Track } from "@daw-browser/timeline-core/types";
+import type { HistoryEntry, EffectParamsCommitPayload } from "~/lib/undo/types";
+import { setLocalEffectInstance, listLocalEffects } from "~/lib/local-effects";
+import { createProcessorEditRegistry } from "./timeline/create-processor-edit-registry";
+import { createEffectsPanelAudioDevice } from "./timeline/create-effects-panel-audio-effects-state";
+import { createLocalEffectsView } from "./timeline/create-local-effects-view";
+import createTimelineEffectCommit from "./timeline/create-timeline-effect-commit";
+import { createInstrumentPlaybackChange } from "./timeline/timeline-playback-wiring";
+import {
+  createCapturedEditorStatePersister,
+  createExternalProcessorEditorRequests,
+} from "./timeline/external-processor-editor-requests";
+import { addInstanceLimit, clearInstanceLimits, clearVstInstanceFailures, markVstInstanceFailed } from "~/lib/desktop/vst-instance-failures";
+import type { TimelineEditIntent } from "~/hooks/timeline-playback-types";
 
-test("patches supported native built-in commits and rebuilds unsupported commits", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  const handlerStart = source.indexOf("function handleEffectParamsCommitted");
-  if (handlerStart < 0) throw new Error("Expected the effect commit handler.");
-  const handlerEnd = source.indexOf("\n  // DOM refs", handlerStart);
-  if (handlerEnd < 0) throw new Error("Expected the effect commit handler boundary.");
-  const handler = source.slice(handlerStart, handlerEnd);
-
-  expect(handler).toContain("pushEffectParamsHistory(payload, committedProjectId);");
-  expect(handler).toContain('if (payload.effect === "instrument") return;');
-  expect(handler.indexOf('if (payload.effect === "instrument") return;'))
-    .toBeGreaterThan(handler.indexOf("pushEffectParamsHistory(payload, committedProjectId);"));
-  expect(handler).toContain("encodeNativeBuiltInStateCommit(payload, bpm())");
-  expect(handler).toContain("isNativePlaybackPrepared()");
-  expect(handler).toContain("isPortableBrowserPlaybackPrepared()");
-  expect(handler).toContain("handleNativeBuiltInStatePatchResult(payload)");
-  expect(handler.match(/rebuildPlaybackBackend\(renderTracks\(\)\)/g))
-    .toHaveLength(1);
-  expect(handler.indexOf("pushEffectParamsHistory(payload, committedProjectId);"))
-    .toBeLessThan(handler.indexOf("mapNativeBuiltInParameterCommit(payload, bpm())"));
-  expect(handler.indexOf("const result = await control?.flush(mapped);"))
-    .toBeLessThan(handler.indexOf("handleNativeBuiltInStatePatchResult(payload)"));
-  expect(handler).toContain("if (isPlaying() || isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared())");
-  expect(handler).toContain('notify(\n          "Built-in effect update failed"');
+// Failure-first B6 seam inventory: stale/missing project history, captured
+// tracks, incorrect merge key/window, no-merge ignored, native refusal vetoing
+// a durable panel commit, and a fixture copy bypassing the production callback.
+test("B6 production effect commit reads current project/tracks and preserves merge history", () => {
+  let projectId: string | undefined;
+  let tracks: Track[] = [];
+  const calls: { entry: HistoryEntry; mergeKey?: string; mergeWindowMs?: number }[] = [];
+  const commit = createTimelineEffectCommit({ projectId: () => projectId, tracks: () => tracks,
+    pushHistory: (entry, mergeKey, mergeWindowMs) => calls.push({ entry, mergeKey, mergeWindowMs }) });
+  const from = createDefaultUtilityParams();
+  const payload: EffectParamsCommitPayload = { effect: "utility", targetId: "track", instanceId: "utility:1",
+    from: { version: 1, state: from }, to: { version: 1, state: { ...from, gainDb: -6 } } };
+  commit.committed(payload);
+  expect(calls).toHaveLength(0);
+  projectId = "project:current";
+  tracks = [{ id: "track", historyRef: "history:current", name: "Current", volume: 1, clips: [] }];
+  commit.committed(payload, "project:previous");
+  expect(calls).toHaveLength(0);
+  commit.committed(payload);
+  expect(calls[0]).toMatchObject({ entry: { type: "effect-params", projectId: "project:current",
+    data: { effect: "utility", instanceId: "utility:1", trackRef: "history:current", from: payload.from, to: payload.to } },
+    mergeKey: "fx:utility:track:utility:1", mergeWindowMs: 600 });
+  tracks = [{ id: "track", historyRef: "history:new", name: "New", volume: 1, clips: [] }];
+  commit.committed(payload, projectId, { mergeHistory: false });
+  expect(calls[1]).toMatchObject({ entry: { data: { trackRef: "history:new" } } });
+  expect(calls[1]?.mergeKey).toBeUndefined();
+  expect(calls[1]?.mergeWindowMs).toBeUndefined();
+  projectId = "project:navigated";
+  commit.committed(payload, "project:current");
+  expect(calls).toHaveLength(2);
 });
 
-test("scopes effect history to the committed project and keeps patch failures silent", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  const historyStart = source.indexOf("const pushEffectParamsHistory");
-  const historyEnd = source.indexOf("\n  const handleNativeBuiltInStatePatchResult", historyStart);
-  if (historyStart < 0 || historyEnd < 0) throw new Error("Expected the effect history boundary.");
-  const history = source.slice(historyStart, historyEnd);
-  expect(history).toContain("const rid = committedProjectId ?? projectId();");
-  expect(history).toContain("if (rid !== projectId()) return;");
-  const patchStart = source.indexOf("const handleNativeBuiltInStatePatchResult");
-  const patchEnd = source.indexOf("\n  const handleNativeBuiltInPreview", patchStart);
-  if (patchStart < 0 || patchEnd < 0) throw new Error("Expected the state patch boundary.");
-  expect(source.slice(patchStart, patchEnd)).not.toContain("notify(");
+test("B6 panel release records production history despite native refusal without duplicate delivery", async () => {
+  const projectId = `project:b6-history-${crypto.randomUUID()}`;
+  const instanceId = "utility:1";
+  const params = { version: 1, state: createDefaultUtilityParams() };
+  await setLocalEffectInstance(projectId, "track", "utility", params, { instanceId });
+  const history: HistoryEntry[] = [];
+  let deliveries = 0;
+  let dispose = () => {};
+  const mounted = createRoot(end => {
+    dispose = end;
+    const view = createLocalEffectsView({ projectId: () => projectId });
+    const registry = createProcessorEditRegistry(() => 120);
+    const commit = createTimelineEffectCommit({ projectId: () => projectId, tracks: () => [],
+      pushHistory: entry => { history.push(entry); } });
+    const device = createEffectsPanelAudioDevice({
+      audioEngine: () => new AudioEngine(), projectId: () => projectId, userId: () => "local",
+      projectGeneration: () => 1, roomEffects: () => [], sidechainRoutes: () => [],
+      canWriteCurrentTargetEffects: () => true, usesLegacyAudioEngine: () => false, localEffectsView: view,
+      allocateProcessorEdit: registry.allocate,
+      deliverProcessor: () => {
+        deliveries++;
+        return { receipt: { key: instanceId, serial: deliveries },
+          settled: Promise.resolve({ state: "refused", reason: "native-refused" }) };
+      },
+      onEffectParamsCommitted: commit.committed,
+    }, () => "track", () => undefined);
+    return { view, device };
+  });
+  try {
+    await mounted.view.reload();
+    mounted.device.utility.changeInstance(instanceId, value => ({ ...value, state: { ...value.state, gainDb: -6 } }));
+    await mounted.device.flushPending();
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ type: "effect-params", projectId, data: { to: { state: { gainDb: -6 } } } });
+    expect((await listLocalEffects(projectId)).find(row => row.instanceId === instanceId)?.params)
+      .toMatchObject({ state: { gainDb: -6 } });
+    const atRelease = deliveries;
+    await mounted.device.flushPending();
+    expect(deliveries).toBe(atRelease);
+    expect(history).toHaveLength(1);
+  } finally { dispose(); }
 });
 
-test("persists captured editor state using its bound project after navigation", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  const start = source.indexOf("const unsubscribeCapturedEditorState");
-  const end = source.indexOf("\n    });", start);
-  if (start < 0 || end < 0) throw new Error("Expected the captured editor state handler.");
-  const handler = source.slice(start, end);
-  expect(handler).toContain("persistLocalExternalProcessorState(");
-  expect(handler).toContain("payload.projectId");
-  expect(handler).toContain("localVstStateOwnerId(payload.projectId, userId())");
-  expect(handler).toContain("if (!persisted) throw new Error");
-  expect(handler).not.toContain("payload.projectId !== projectId()");
+test("settles preparation before comparing instrument-ready callbacks with the prepared graph", async () => {
+  const instrument: TrackInstrumentParams = { kind: "synth", instanceId: "synth:1", params: createDefaultSynthParams() };
+  const preparation = Promise.withResolvers<void>();
+  const published: TrackInstrumentParams[] = [];
+  const rebuilds: (TrackInstrumentParams | undefined)[] = [];
+  const announce = createInstrumentPlaybackChange({
+    mountedProjectGeneration: () => 0, awaitPlaybackPreparation: () => preparation.promise,
+    preparedInstrument: () => published[0], isStructuralRebuildInProgress: () => false, isPreparingPlayback: () => false,
+    isPlaying: () => true, isNativePlaybackPrepared: () => true, isPortableBrowserPlaybackPrepared: () => false,
+    syncPlaybackBackend: async (_tracks, _intent, override) => { rebuilds.push(override?.instrument); },
+    renderTracks: () => [], captureStructuralPlaybackIntent: () => ({}),
+  });
+  const announced = announce("track", instrument);
+  // The preparation the announce waits on is what publishes the instrument.
+  published.push(instrument);
+  preparation.resolve();
+  await announced;
+  expect(rebuilds).toEqual([]);
 });
 
-test("bypasses degraded external processors and excludes persisted degraded rows from playback", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
+test("scopes effect history to the committed project and keeps patch failures silent", () => {
+  let projectId: string | undefined = "project:a";
+  const pushed: HistoryEntry[] = [];
+  const commit = createTimelineEffectCommit({ projectId: () => projectId,
+    tracks: () => [{ id: "track", historyRef: "history:a", name: "A", volume: 1, clips: [] }],
+    pushHistory: entry => { pushed.push(entry); } });
+  const from = createDefaultUtilityParams();
+  const payload: EffectParamsCommitPayload = { effect: "utility", targetId: "track", instanceId: "utility:1",
+    from: { version: 1, state: from }, to: { version: 1, state: { ...from, gainDb: -6 } } };
 
-  expect(source).toContain(
-    `.filter((processor) => !processor.bypassed && processor.health.state !== "degraded");`,
-  );
+  // A patch settling after navigation names the project it was made in; it is dropped without an error.
+  projectId = "project:b";
+  expect(() => commit.committed(payload, "project:a")).not.toThrow();
+  expect(pushed).toHaveLength(0);
+
+  commit.committed(payload, "project:b");
+  commit.committed(payload);
+  expect(pushed.map(entry => entry.projectId)).toEqual(["project:b", "project:b"]);
 });
 
-test("rebuilds prepared browser or native ownership with captured project intent", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  expect(source).toContain("projectGeneration: mountedProjectGeneration(),");
-  expect(source).toContain("if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared())");
-  expect(source).toContain("&& !isStructuralRebuildInProgress()");
-  expect(source).toContain("&& !isPreparingPlayback()) return;");
-  expect(source).toContain("rebuildBackend: true,");
-  expect(source).toContain("const rebuildPlaybackBackend =");
-  expect(source).toContain("nativePlaybackRevision += 1;");
-  expect(source).toContain("if (isPlaying()) restartTimelineSchedule(renderTracks()).catch");
+const externalProcessor = (instanceId: string, supportsState: boolean) => ({
+  instanceId,
+  targetId: "track",
+  index: 0,
+  manifest: {
+    identity: { format: "vst3" as const, classId: "class", vendor: "vendor", name: "effect", version: "1",
+      architecture: "arm64" as const, binaryFingerprint: "a".repeat(64) },
+    role: "effect" as const,
+    audioInputs: [{ name: "Input", channels: 2, enabled: true }],
+    audioOutputs: [{ name: "Output", channels: 2, enabled: true }],
+    sidechainInputs: [],
+    parameters: [],
+    latencyFrames: 0,
+    tailFrames: 0,
+    supportsBypass: true,
+    supportsEditor: true,
+    supportsState,
+  },
+  parameterOverrides: {},
+  latencyFrames: 0,
+  tailFrames: 0,
+  bypassed: false,
+  health: { state: "ready" as const, updatedAt: 1 },
+  updatedAt: 1,
 });
 
-test("keeps graph revisions stable during compilation and bumps them at structural rebuild boundaries", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  expect(source).toContain("let nativePlaybackRevision = 1;");
-  expect(source).toContain("revision: nativePlaybackRevision,");
-  expect(source).toContain("nativePlaybackRevision += 1;");
-  expect(source).not.toContain("revision: ++nativePlaybackRevision,");
+const quietConsole = () => {
+  const { info, error } = console;
+  console.info = () => {};
+  console.error = () => {};
+  return () => { console.info = info; console.error = error; };
+};
+
+const mountEditorRequests = (options: { captureOk?: boolean } = {}) => {
+  const [projectId, setProjectId] = createSignal("project:a");
+  const [generation, setGeneration] = createSignal(1);
+  const sync = Promise.withResolvers<void>();
+  const log: string[] = [];
+  const intents: TimelineEditIntent[] = [];
+  let dispose = () => {};
+  const requests = createRoot(end => {
+    dispose = end;
+    return createExternalProcessorEditorRequests({
+      projectId, mountedProjectGeneration: generation,
+      openEffectsForTarget: targetId => { log.push(`open:${targetId}`); },
+      captureStructuralPlaybackIntent: () => ({}),
+      syncPlaybackBackend: async (_tracks, intent) => { log.push("sync"); intents.push(intent); await sync.promise; },
+      renderTracks: () => [],
+      nativePlaybackEnabled: () => true,
+      captureVstState: async instanceId => {
+        log.push(`capture:${instanceId}`);
+        return options.captureOk === false
+          ? { ok: false as const, error: "worker gone" }
+          : { ok: true as const, bytes: new Uint8Array([1]), sha256: "hash" };
+      },
+      persistState: async (project, instanceId) => { log.push(`persist:${project}:${instanceId}`); return externalProcessor(instanceId, true); },
+    });
+  });
+  return { requests, sync, log, intents, setProjectId, setGeneration, dispose };
+};
+
+test("opens an inserted VST editor only after the matching playback rebuild and baseline state capture", async () => {
+  const restore = quietConsole();
+  const mounted = mountEditorRequests();
+  try {
+    const processor = externalProcessor("vst:ready", true);
+    const inserted = mounted.requests.inserted(processor);
+    expect(mounted.requests.autoOpenInstanceId()).toBeUndefined();
+    expect(mounted.intents[0]).toMatchObject({ projectId: undefined, externalProcessor: { projectId: "project:a", processor } });
+    mounted.sync.resolve();
+    await inserted;
+    expect(mounted.log).toEqual(["open:track", "sync", "capture:vst:ready", "persist:project:a:vst:ready"]);
+    expect(mounted.requests.autoOpenInstanceId()).toBe("vst:ready");
+    mounted.requests.autoOpenHandled("vst:other");
+    expect(mounted.requests.autoOpenInstanceId()).toBe("vst:ready");
+    mounted.requests.autoOpenHandled("vst:ready");
+    expect(mounted.requests.autoOpenInstanceId()).toBeUndefined();
+  } finally { mounted.dispose(); restore(); }
 });
 
-test("hands an inserted processor to the bound rebuild compiler and verifies current persistence", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  const playbackSource = await readFile(new URL("../hooks/useTimelinePlayback.ts", import.meta.url), "utf8");
-  expect(source).toContain("readPersisted: getLocalExternalProcessor,");
-  expect(source).toContain("externalProcessor: {");
-  expect(source).toContain("projectId: insertedProjectId,");
-  expect(source).toContain("processor,");
-  expect(source).toContain("await rebuildPlaybackBackend(renderTracks(), insertionIntent);");
-  expect(source).toContain("await deleteLocalExternalProcessor(insertedProjectId, processor.instanceId);");
-  expect(source).toContain("externalProcessor: undefined,");
-  expect(playbackSource).toContain("externalProcessor: options.externalProcessor,");
-  expect(source).toContain("resolveNativeLivePlaybackProcessors");
-  expect(playbackSource).toContain("externalProcessor?: LivePlaybackCompileContext[\"externalProcessor\"]");
-  expect(playbackSource).toContain("const compileContext = requestedIntent?.instrumentOverride !== undefined");
+test("a plug-in without saved state opens its editor without a capture", async () => {
+  const restore = quietConsole();
+  const mounted = mountEditorRequests();
+  try {
+    mounted.sync.resolve();
+    await mounted.requests.inserted(externalProcessor("vst:stateless", false));
+    expect(mounted.log).toEqual(["open:track", "sync"]);
+    expect(mounted.requests.autoOpenInstanceId()).toBe("vst:stateless");
+  } finally { mounted.dispose(); restore(); }
 });
 
-test("opens an inserted VST editor only after the matching playback rebuild", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  const start = source.indexOf("onExternalPluginInserted: async");
-  const end = source.indexOf("\n    },\n  });", start);
-  if (start < 0 || end < 0) throw new Error("Expected the external plugin insertion handler.");
-  const handler = source.slice(start, end);
+test("never opens the editor of a plug-in that failed while staged, was refused by the browser engine, or lost its capture", async () => {
+  const restore = quietConsole();
+  try {
+    const failed = mountEditorRequests();
+    markVstInstanceFailed("vst:failed");
+    failed.sync.resolve();
+    await failed.requests.inserted(externalProcessor("vst:failed", true));
+    expect(failed.log).toEqual(["open:track", "sync"]);
+    expect(failed.requests.autoOpenInstanceId()).toBeUndefined();
+    failed.dispose();
 
-  expect(handler).toContain("instanceId: processor.instanceId");
-  expect(handler).toContain("projectId: intent.projectId ?? projectId()");
-  expect(handler).toContain("projectGeneration: intent.projectGeneration ?? mountedProjectGeneration()");
-  expect(handler).toContain("requestToken: ++externalProcessorEditorRequestToken");
-  expect(handler).toContain("ready: false");
-  expect(handler.indexOf("setPendingExternalProcessorEditorRequest(request)"))
-    .toBeLessThan(handler.indexOf("await rebuildPlaybackBackend(renderTracks(), insertionIntent)"));
-  expect(handler).toContain("pendingExternalProcessorEditorRequest()?.requestToken === request.requestToken");
-  expect(handler).toContain("currentRequest?.requestToken === request.requestToken");
-  expect(handler).toContain("setPendingExternalProcessorEditorRequest();");
-  expect(handler).toContain("currentRequest.projectId === projectId()");
-  expect(handler).toContain("currentRequest.projectGeneration === mountedProjectGeneration()");
-  expect(handler).toContain("{ ...currentRequest, ready: true }");
-  expect(handler.indexOf("await rebuildPlaybackBackend(renderTracks(), insertionIntent)"))
-    .toBeLessThan(handler.indexOf("setPendingExternalProcessorEditorRequest({ ...currentRequest, ready: true })"));
+    const limited = mountEditorRequests();
+    addInstanceLimit("vst:limited", "The browser engine does not host VST3 plug-ins yet.");
+    limited.sync.resolve();
+    await limited.requests.inserted(externalProcessor("vst:limited", true));
+    expect(limited.log).toEqual(["open:track", "sync"]);
+    expect(limited.requests.autoOpenInstanceId()).toBeUndefined();
+    limited.dispose();
 
-  const exposureStart = source.indexOf("autoOpenExternalProcessorId:");
-  const exposureEnd = source.indexOf("\n      onExternalProcessorAutoOpenHandled:", exposureStart);
-  if (exposureStart < 0 || exposureEnd < 0) throw new Error("Expected the external editor exposure.");
-  const exposure = source.slice(exposureStart, exposureEnd);
-  expect(exposure).toContain("request?.ready");
-  expect(exposure).toContain("request.projectId === projectId()");
-  expect(exposure).toContain("request.projectGeneration === mountedProjectGeneration()");
-  const handledEnd = source.indexOf("\n      captureStructuralPlaybackIntent", exposureEnd);
-  if (handledEnd < 0) throw new Error("Expected the external editor handled callback boundary.");
-  const handled = source.slice(exposureEnd, handledEnd);
-  expect(handled).toContain("request?.ready && request.instanceId === instanceId");
-  expect(handled).toContain("setPendingExternalProcessorEditorRequest();");
+    const uncaptured = mountEditorRequests({ captureOk: false });
+    uncaptured.sync.resolve();
+    await uncaptured.requests.inserted(externalProcessor("vst:uncaptured", true));
+    expect(uncaptured.log).toEqual(["open:track", "sync", "capture:vst:uncaptured"]);
+    expect(uncaptured.requests.autoOpenInstanceId()).toBeUndefined();
+    uncaptured.dispose();
+  } finally { clearVstInstanceFailures(); clearInstanceLimits(); restore(); }
 });
 
-test("offers trusted VST3 catalog recovery without retrying playback automatically", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  const recoveryStart = source.indexOf("if (classifyNativeVst3PlaybackFault(message)");
-  const recoveryEnd = source.indexOf('\n        notify("Native playback stopped", message);', recoveryStart);
-  if (recoveryStart < 0 || recoveryEnd < 0) throw new Error("Expected the native VST3 recovery handler.");
-  const recovery = source.slice(recoveryStart, recoveryEnd);
-
-  expect(recovery).toContain('title: "Plug-in authorization required"');
-  expect(recovery).toContain("This project uses VST3 plug-ins that must be verified again before playback.");
-  expect(recovery).toContain('label: "Rescan plug-ins"');
-  expect(recovery).toContain('busyLabel: "Rescanning…"');
-  expect(recovery).toContain('cancelLabel: "Cancel"');
-  expect(recovery).toContain("canUseVst3CatalogAction");
-  expect(recovery).toContain("saveVst3TrustAcknowledgement");
-  expect(source).toContain("await bridge.scan()");
-  expect(source).toContain('new Event("daw-plugin-catalog-changed")');
-  expect(source).toContain("setAppMessage(null)");
-  expect(recovery).toContain("onAction: scanVst3Catalog");
-  expect(recovery).toContain("void scanVst3Catalog().catch");
-  expect(recovery).toContain("setVst3TrustAcknowledged(acknowledged);");
-  expect(recovery).toContain("saveVst3TrustAcknowledgement(vst3TrustStorage);");
-  expect(source).toContain("vst3ScanPromise");
-  expect(recovery.match(/scanVst3Catalog\(\)/g)).toHaveLength(1);
-  expect(recovery).not.toContain("requestPlay()");
-  expect(source).toContain('notify("Native playback stopped", message);');
+test("drops the editor request when the project or generation changes during the rebuild, and persists to the drop's project", async () => {
+  const restore = quietConsole();
+  try {
+    for (const navigate of [
+      (mounted: ReturnType<typeof mountEditorRequests>) => mounted.setProjectId("project:b"),
+      (mounted: ReturnType<typeof mountEditorRequests>) => mounted.setGeneration(2),
+    ]) {
+      const mounted = mountEditorRequests();
+      const inserted = mounted.requests.inserted(externalProcessor("vst:navigated", true));
+      navigate(mounted);
+      mounted.sync.resolve();
+      await inserted;
+      expect(mounted.log).toContain("persist:project:a:vst:navigated");
+      expect(mounted.requests.autoOpenInstanceId()).toBeUndefined();
+      mounted.dispose();
+    }
+  } finally { restore(); }
 });
 
-test("routes browser keyboard toggles through the extension host exactly once", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  expect(source).toContain("const timelineExtensionHost = createTimelineExtensionHost({");
-  expect(source).toContain("toggle: leftBrowser.toggleOpen,");
-  expect(source).toContain("executeExtensionShortcut: timelineExtensionHost.shortcuts.execute,");
-  expect(source).not.toContain("onToggleBrowser: leftBrowser.toggleOpen");
-  expect(source.match(/createTimelineExtensionHost\(/g)).toHaveLength(1);
-  expect(source.match(/timelineExtensionHost\.dispose\(\)/g)).toHaveLength(1);
+test("persists a captured editor state to the project it names, even after navigation", async () => {
+  const restore = quietConsole();
+  try {
+    const persisted: string[] = [];
+    const state = { bytes: new Uint8Array([1]), sha256: "hash" };
+    const persist = createCapturedEditorStatePersister(async (projectId, instanceId) => {
+      persisted.push(`${projectId}:${instanceId}`);
+      return instanceId === "vst:deleted" ? undefined : externalProcessor(instanceId, true);
+    });
+    await persist({ projectId: "project:old", instanceId: "vst:one", state });
+    expect(persisted).toEqual(["project:old:vst:one"]);
+    await expect(persist({ projectId: "project:old", instanceId: "vst:deleted", state }))
+      .rejects.toThrow('The captured native VST editor processor "vst:deleted" no longer exists.');
+    const failing = createCapturedEditorStatePersister(async () => { throw new Error("disk full"); });
+    await expect(failing({ projectId: "project:old", instanceId: "vst:one", state })).rejects.toThrow("disk full");
+  } finally { restore(); }
 });

@@ -1,0 +1,116 @@
+{
+ "name": "ae08-bind-from-prepare",
+ "sequence": 59,
+ "createdAt": "2026-11-17T02:04:38.229Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:1:control",
+    "command",
+    "argv",
+    "#8"
+   ],
+   "old": "35",
+   "new": "73"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:1:mutant",
+    "command",
+    "argv",
+    "#8"
+   ],
+   "old": "35",
+   "new": "73"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:1:control",
+    "expect",
+    "fuzz",
+    "seed"
+   ],
+   "old": 35,
+   "new": 73
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:1:mutant",
+    "expect",
+    "fuzz",
+    "seed"
+   ],
+   "old": 35,
+   "new": 73
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:268:0:mutant",
+    "expect",
+    "fuzz",
+    "failures",
+    "#0",
+    "step"
+   ],
+   "old": 120,
+   "new": 116
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:394:0:mutant",
+    "expect",
+    "rejection",
+    "#0",
+    "#1"
+   ],
+   "old": 203,
+   "new": 200
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:394:0:mutant",
+    "expect",
+    "rejection",
+    "#1",
+    "#1"
+   ],
+   "old": 207,
+   "new": 204
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:394:0:mutant",
+    "expect",
+    "rejection",
+    "#2",
+    "#1"
+   ],
+   "old": 212,
+   "new": 209
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "The bind reads the prepare reply's progress when nothing was awaited, and the fuzz bindSeam drops its inspect: each hook publication has one fewer step. rc2:384:1 re-seeded: hook seed 570 no longer kills it (control and mutant pass); the search over hook seeds 1-400 (steps 2000, drain 1000) fails the mutant at 73, 84, 89, 126, 394; the first three qualifying seeds 73, 84, 89 are all I1 retained-override and pass the control; seed 73 kills with I1 retained-override and I4 latency-starvation, as the original arm. rc2:268:0 mutant (step 120 to 116, same I1 class and detail) and rc2:394:0 mutant (rejection records [206,203],[206,207],[206,212] to [206,200],[206,204],[206,209]) moved by the same step shift.",
+  "expectationsSha256": "c105a656fae5c949b882ec80088c947df97422ae980d4dfe83afa22776c14ac8"
+ }
+}

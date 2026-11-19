@@ -7,4 +7,4 @@ if ! command -v cmake >/dev/null 2>&1; then
 fi
 
 cmake -S native -B native/build/audio-core-debug -DDAW_BUILD_PLUGIN_HOST=OFF -DBUILD_TESTING=ON
-cmake --build native/build/audio-core-debug
+cmake --build native/build/audio-core-debug --parallel "$(bun tools/jobs.ts)"

@@ -43,7 +43,7 @@ struct WorkerInstanceRequest {
 
 class Vst3Worker {
  public:
-  Vst3Worker();
+  explicit Vst3Worker(std::string evidence_directory = {});
   ~Vst3Worker();
   Vst3Worker(const Vst3Worker&) = delete;
   Vst3Worker& operator=(const Vst3Worker&) = delete;
@@ -57,9 +57,12 @@ class Vst3Worker {
     std::uint32_t parameterId,
     std::uint64_t generation
   );
+  [[nodiscard]] bool FlushParameters(std::span<const WorkerTransportEvent> events);
   [[nodiscard]] std::optional<WorkerState> GetState();
   [[nodiscard]] bool SetState(const WorkerState& state);
   void RefreshLifecycleMetadata();
+  // Acts, on the worker thread, on restart flags the plug-in recorded since the last call.
+  void ApplyPendingRestart();
   [[nodiscard]] bool EditorCommandSupported() const;
   [[nodiscard]] WorkerEditorStatus EditorStatus() const;
   [[nodiscard]] bool ExecuteEditorCommand(
@@ -77,6 +80,7 @@ class Vst3Worker {
  private:
   class Implementation;
   [[nodiscard]] bool ApplyState(const WorkerState& state);
+  [[nodiscard]] bool ReactivateComponent(const WorkerState* state, bool ioChanged = false);
   Implementation* implementation_;
 };
 

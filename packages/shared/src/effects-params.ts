@@ -1,3 +1,4 @@
+import { clamp } from './numeric'
 import { isJsonBoolean, isJsonNumber, isJsonObject, isJsonString, type JsonObject, type JsonValue } from './json-value'
 import {
   createDefaultSpectralParams,
@@ -40,10 +41,6 @@ export const EQ_GAIN_DB_MAX = 24
 export const EQ_Q_MIN = 0.2
 export const EQ_Q_MAX = 18
 const DEFAULT_EQ_FREQUENCIES = [40, 100, 200, 500, 1000, 2500, 6000, 12000]
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value))
-}
 
 function readFiniteNumber(value: JsonValue | undefined): number | undefined {
   return isJsonNumber(value) && Number.isFinite(value) ? value : undefined
@@ -93,7 +90,11 @@ export function isEqBandType(value: JsonValue | undefined): value is EqBandType 
 
 export function normalizeEqParams(input: EqParamsInput): EqParams {
   const defaults = createDefaultEqParams()
-  const bandsInput = Array.isArray(input.bands) && input.bands.length > 0 ? input.bands : defaults.bands
+  // The EQ has exactly eight bands, which the engine contract requires: slots the input leaves out keep their flat default band.
+  const given = Array.isArray(input.bands) ? input.bands.slice(0, defaults.bands.length) : []
+  const givenIds = new Set(given.flatMap((band) => isJsonString(band.id) ? [band.id] : []))
+  const bandsInput = defaults.bands.map((defaultBand, index) => given[index]
+    ?? (givenIds.has(defaultBand.id) ? { ...defaultBand, id: `${defaultBand.id}-default` } : defaultBand))
   return {
     enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
     channelMode: normalizeEqChannelMode(input.channelMode),
@@ -629,10 +630,7 @@ export type UtilityParamsInput = Partial<Omit<UtilityParams, 'polarity' | 'input
 }
 export type UtilityParamsEnvelope = ProcessorStateEnvelope<UtilityParams>
 
-const isObjectRecord = (value: JsonValue): value is JsonObject => (
-  isJsonObject(value)
-)
-const readObject = (value: JsonValue): JsonObject => isObjectRecord(value) ? value : {}
+const readObject = (value: JsonValue): JsonObject => isJsonObject(value) ? value : {}
 
 export function createDefaultUtilityParams(): UtilityParams {
   return { enabled: true, gainDb: 0, polarity: 'normal', inputMode: 'stereo', pan: 0, balance: 0, width: 1, matrix: 'stereo', swap: false, dcBlock: true }

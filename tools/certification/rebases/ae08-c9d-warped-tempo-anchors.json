@@ -1,0 +1,13 @@
+{
+ "name": "ae08-c9d-warped-tempo-anchors",
+ "sequence": 23,
+ "createdAt": "2026-11-13T01:40:00.000Z",
+ "revert": [],
+ "watched": [],
+ "changes": [],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 step 9d: warped audio is adopted at a seam on the portable controller (class 2). A tempo edit, or an edit of a warped clip's warp markers, warp on or off, start, trim or asset, prepares the candidate's Stretch artifacts at the candidate tempo before the seam, registers them, ships the sources with the publish and commits the artifacts with the seam; the old Stretch leases are released once the position reaches it. The retry cache (AdoptionCache) now holds the Stretch artifacts and their leases, so a late or refused publish is retried without preparing again. The gate no longer refuses warped tempo (withSeamContentOf takes the tempo from the installed snapshot) or warped clips (withSeamClips carries audioWarp and every audio clip). No anchor text moved: all 37 anchored changes in the touched files (controller, PBT, HT, WHT) still match their from-text. Every arm anchored in the controller and the worklet host (31 PB/TL mutants and ledger:475 host, with controls, 64 jobs) ran alone with --jobs 1 --only: 64 of 64 PASS, 0 fail. gate:x-portable-wasm 90/0/0, gate:f-portable 132/0/0 and gate:f-engine ran clean; their counts rose with the new tests and the recorded counts move only on --full. Tests added: W-C9-warp-1 to 6 (PBT; the W-E5 tempo-with-warp witness inverted from rebuild to adopted), W-C9-warp-7 (WHT), W-C9-warp-8 (HT; the HT fake worklet now answers the paged-asset messages). See PHASE8-STEP9D.md."
+ }
+}

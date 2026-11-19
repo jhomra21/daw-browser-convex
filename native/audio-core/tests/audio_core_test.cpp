@@ -4906,7 +4906,7 @@ struct OscillatorMeasurement {
 
 // One held voice with the filter off: the oscillator is the only thing heard.
 OscillatorMeasurement measure_oscillator(uint32_t waveform, uint32_t note) {
-  constexpr uint32_t kRate = 48000, kBlock = 1024, kSkip = 4800, kAnalysis = 32768;
+  constexpr uint32_t kRate = 48000, kBlock = 1024, kSkip = 4096, kAnalysis = 32768;
   constexpr float kLevel = 0.5F;
   const daw_audio_synth_state synth{
     .version = 1, .seed = 1U,
@@ -4983,6 +4983,205 @@ void test_synth_saw_and_square_are_band_limited() {
       assert(std::fabs(measured.rms_error_db) <= 0.5);
       assert(std::fabs(measured.mean) <= 0.5 / measured.periods + 0.002);
     }
+  }
+}
+
+static_assert(sizeof(daw_audio_reverb_state) == 72);
+
+struct ReverbRender {
+  std::vector<float> left, right;
+};
+
+daw_audio_reverb_state quality_reverb_state() {
+  return {
+    .enabled = 1, .wet = 1.0F, .decay_sec = 2.0F, .pre_delay_ms = 0.0F, .reflections = 0.5F, .reflection_spin = 0,
+    .reflection_mod_amount_ms = 0.0F, .reflection_mod_rate_hz = 1.0F, .reflection_shape = 0.5F, .diffuse = 1.0F,
+    .size = 0.5F, .diffusion = 1.0F, .density = 1.0F, .low_cut_hz = 20.0F, .high_cut_hz = 20000.0F,
+    .diffusion_low_cut_hz = 20.0F, .diffusion_high_cut_hz = 20000.0F, .stereo_width = 1.0F,
+  };
+}
+
+// Runs a stereo source through one reverb; input_left/right are zero-extended to total_frames.
+ReverbRender render_reverb(
+  const daw_audio_reverb_state &state, const std::vector<float> &input_left, const std::vector<float> &input_right,
+  uint32_t total_frames, uint32_t rate = 48000) {
+  constexpr uint32_t kBlock = 512;
+  const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
+    {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
+    {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
+  }};
+  const std::array<daw_audio_graph_edge_descriptor, 1> edges{{
+    {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
+  }};
+  daw_audio_reverb_state wire = state;
+  daw_audio_processor_descriptor reverb{
+    .node_id = 2, .instance_id = 14, .kind = DAW_AUDIO_PROCESSOR_KIND_REVERB, .state_version = 1, .state_size = sizeof(wire),
+    .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+    .latency_frames = 0, .tail_frames = total_frames, .parameter_count = 0, .parameter_targets = nullptr,
+    .state = reinterpret_cast<const uint8_t *>(&wire),
+  };
+  daw_audio_core_handle core = create_core_at_rate(kBlock, 2, 1, rate);
+  daw_audio_graph_prepare_request prepare{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = 1, .node_count = 2, .edge_count = 1,
+    .processor_count = 1, .nodes = nodes.data(), .edges = edges.data(), .processors = &reverb,
+  };
+  expect(daw_audio_core_prepare_graph(core, &prepare), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_publish(core, 1), DAW_AUDIO_CORE_OK);
+  ReverbRender out{std::vector<float>(total_frames), std::vector<float>(total_frames)};
+  std::array<float, kBlock> in_left{}, in_right{};
+  for (uint32_t offset = 0; offset < total_frames; offset += kBlock) {
+    for (uint32_t frame = 0; frame < kBlock; ++frame) {
+      in_left[frame] = offset + frame < input_left.size() ? input_left[offset + frame] : 0.0F;
+      in_right[frame] = offset + frame < input_right.size() ? input_right[offset + frame] : 0.0F;
+    }
+    const float *inputs[]{in_left.data(), in_right.data()};
+    float *outputs[]{out.left.data() + offset, out.right.data() + offset};
+    const daw_audio_core_process_block block{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = std::min(kBlock, total_frames - offset), .channel_count = 2,
+      .input_bus_count = 1, .inputs = inputs, .outputs = outputs,
+    };
+    expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+  }
+  daw_audio_core_destroy(core);
+  return out;
+}
+
+ReverbRender render_reverb_impulse(const daw_audio_reverb_state &state, uint32_t total_frames, uint32_t rate = 48000) {
+  const std::vector<float> impulse{1.0F};
+  return render_reverb(state, impulse, impulse, total_frames, rate);
+}
+
+// Abel and Huang normalized echo density: the share of samples outside one standard
+// deviation of a window, over the 31.7% a Gaussian has there. It is taken on the second
+// difference, with a floor 80 dB under its peak, so the slow smear the reverb's own
+// high-pass leaves behind an echo cannot make a sparse echo train look dense.
+double mean_normalized_echo_density(const std::vector<float> &signal, size_t first, size_t last, size_t window) {
+  std::vector<float> x(signal.size(), 0.0F);
+  for (size_t i = 2; i < x.size(); ++i) x[i] = signal[i] - 2.0F * signal[i - 1] + signal[i - 2];
+  const double floor = 1e-4 * *std::max_element(x.begin(), x.end());
+  double total = 0.0;
+  size_t count = 0;
+  for (size_t start = first; start + window <= last; start += window / 4) {
+    double mean = 0.0, square = 0.0;
+    for (size_t i = start; i < start + window; ++i) mean += x[i];
+    mean /= static_cast<double>(window);
+    for (size_t i = start; i < start + window; ++i) square += (x[i] - mean) * (x[i] - mean);
+    const double deviation = std::max(std::sqrt(square / static_cast<double>(window)), floor);
+    size_t outside = 0;
+    for (size_t i = start; i < start + window; ++i) outside += std::fabs(x[i] - mean) > deviation ? 1 : 0;
+    total += static_cast<double>(outside) / static_cast<double>(window) / std::erfc(1.0 / std::sqrt(2.0));
+    ++count;
+  }
+  return total / static_cast<double>(count);
+}
+
+// T20 from the Schroeder backward-integrated decay of both channels, extrapolated to 60 dB.
+double schroeder_rt60_sec(const ReverbRender &r, uint32_t rate) {
+  std::vector<double> decay(r.left.size());
+  double sum = 0.0;
+  for (size_t i = r.left.size(); i-- > 0;) {
+    sum += static_cast<double>(r.left[i]) * r.left[i] + static_cast<double>(r.right[i]) * r.right[i];
+    decay[i] = sum;
+  }
+  double n = 0.0, sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0;
+  for (size_t i = 0; i < decay.size(); ++i) {
+    const double db = 10.0 * std::log10(decay[i] / decay[0]);
+    if (db > -5.0 || db < -25.0) continue;
+    const double time = static_cast<double>(i) / rate;
+    n += 1.0; sx += time; sy += db; sxx += time * time; sxy += time * db;
+  }
+  return -60.0 / ((n * sxy - sx * sy) / (n * sxx - sx * sx));
+}
+
+double max_abs_autocorrelation(const std::vector<float> &x, size_t first, size_t last, size_t min_lag, size_t max_lag) {
+  double energy = 0.0;
+  for (size_t i = first; i < last; ++i) energy += static_cast<double>(x[i]) * x[i];
+  double worst = 0.0;
+  for (size_t lag = min_lag; lag <= max_lag; ++lag) {
+    double sum = 0.0;
+    for (size_t i = first; i < last; ++i) sum += static_cast<double>(x[i]) * x[i + lag];
+    worst = std::max(worst, std::fabs(sum / energy));
+  }
+  return worst;
+}
+
+double correlation(const std::vector<float> &a, const std::vector<float> &b, size_t first, size_t last) {
+  double ab = 0.0, aa = 0.0, bb = 0.0;
+  for (size_t i = first; i < last; ++i) {
+    ab += static_cast<double>(a[i]) * b[i]; aa += static_cast<double>(a[i]) * a[i]; bb += static_cast<double>(b[i]) * b[i];
+  }
+  return ab / std::sqrt(aa * bb);
+}
+
+void test_reverb_tail_is_diffuse() {
+  constexpr uint32_t kRate = 48000;
+  const auto ms = [](double value) { return static_cast<size_t>(value * kRate / 1000.0); };
+  const daw_audio_reverb_state base = quality_reverb_state();
+  const ReverbRender impulse = render_reverb_impulse(base, kRate * 2);
+  const double density = mean_normalized_echo_density(impulse.left, ms(80), ms(250), ms(20));
+  const double periodicity = max_abs_autocorrelation(impulse.left, ms(150), ms(500), ms(20), ms(100));
+  const double stereo = correlation(impulse.left, impulse.right, ms(100), ms(1000));
+  std::fprintf(stderr, "reverb density=%.3f periodicity=%.3f lr_correlation=%.3f\n", density, periodicity, stereo);
+  assert(density >= 0.6);
+  assert(periodicity <= 0.25);
+  assert(std::fabs(stereo) < 0.5);
+
+  for (const float decay : {1.0F, 3.0F}) {
+    daw_audio_reverb_state state = base;
+    state.decay_sec = decay;
+    const double rt60 = schroeder_rt60_sec(render_reverb_impulse(state, static_cast<uint32_t>(kRate * decay * 2.5F)), kRate);
+    std::fprintf(stderr, "reverb decay=%.1f rt60=%.3f\n", decay, rt60);
+    assert(rt60 >= decay * 0.7 && rt60 <= decay * 1.3);
+  }
+
+  // The declared tail is pre-delay + decay; nothing audible may remain after it.
+  daw_audio_reverb_state delayed = base;
+  delayed.pre_delay_ms = 100.0F; delayed.decay_sec = 1.0F;
+  const ReverbRender tail = render_reverb_impulse(delayed, kRate * 3);
+  float peak = 0.0F, after_tail = 0.0F, before_pre_delay = 0.0F;
+  for (size_t i = 0; i < tail.left.size(); ++i) {
+    const float magnitude = std::max(std::fabs(tail.left[i]), std::fabs(tail.right[i]));
+    peak = std::max(peak, magnitude);
+    if (i >= ms(1100)) after_tail = std::max(after_tail, magnitude);
+    if (i < ms(99)) before_pre_delay = std::max(before_pre_delay, magnitude);
+  }
+  std::fprintf(stderr, "reverb after_declared_tail=%.1f dB before_pre_delay=%g\n", 20.0 * std::log10(after_tail / peak), before_pre_delay);
+  assert(after_tail / peak < std::pow(10.0F, -45.0F / 20.0F));
+  assert(before_pre_delay < 1e-6F);
+
+  // Late texture stays off when diffuse, density or diffusion is zero; only early reflections remain.
+  for (int knob = 0; knob < 3; ++knob) {
+    daw_audio_reverb_state off = base;
+    (knob == 0 ? off.diffuse : knob == 1 ? off.density : off.diffusion) = 0.0F;
+    const ReverbRender dry_tail = render_reverb_impulse(off, kRate);
+    float late = 0.0F;
+    for (size_t i = ms(150); i < dry_tail.left.size(); ++i) late = std::max(late, std::fabs(dry_tail.left[i]));
+    assert(late < 1e-6F);
+  }
+
+  // wet=0 is the dry signal, bit for bit; sustained noise through the longest tail stays finite and bounded.
+  std::vector<float> noise_left(kRate * 4), noise_right(kRate * 4);
+  uint32_t seed = 12345U;
+  for (size_t i = 0; i < noise_left.size(); ++i) {
+    seed = seed * 1664525U + 1013904223U; noise_left[i] = static_cast<float>(seed >> 8) / 8388608.0F - 1.0F;
+    seed = seed * 1664525U + 1013904223U; noise_right[i] = static_cast<float>(seed >> 8) / 8388608.0F - 1.0F;
+  }
+  daw_audio_reverb_state dry = base;
+  dry.wet = 0.0F;
+  const ReverbRender passthrough = render_reverb(dry, noise_left, noise_right, kRate * 4);
+  for (size_t i = 0; i < noise_left.size(); ++i) assert(passthrough.left[i] == noise_left[i] && passthrough.right[i] == noise_right[i]);
+  for (const uint32_t rate : {44100u, 96000u, 192000u}) {
+    daw_audio_reverb_state extreme = base;
+    extreme.decay_sec = 12.0F; extreme.size = 1.0F; extreme.pre_delay_ms = 250.0F; extreme.reflection_spin = 1;
+    extreme.reflection_mod_amount_ms = 25.0F; extreme.reflection_mod_rate_hz = 3.0F; extreme.reflection_shape = 1.0F;
+    const ReverbRender loud = render_reverb(extreme, noise_left, noise_right, rate * 4, rate);
+    float loud_peak = 0.0F;
+    for (size_t i = 0; i < loud.left.size(); ++i) {
+      assert(std::isfinite(loud.left[i]) && std::isfinite(loud.right[i]));
+      loud_peak = std::max(loud_peak, std::max(std::fabs(loud.left[i]), std::fabs(loud.right[i])));
+    }
+    std::fprintf(stderr, "reverb extreme rate=%u peak=%.3f\n", rate, loud_peak);
+    assert(loud_peak < 8.0F);
   }
 }
 
@@ -11034,6 +11233,7 @@ int main(int argc, char **argv) {
   test_instrument_synthesis_lifecycle_determinism_and_boundaries();
   test_synth_filter_modes_and_partition_invariance();
   test_synth_saw_and_square_are_band_limited();
+  test_reverb_tail_is_diffuse();
   test_sampler_and_drum_rack_asset_voices();
   test_granular_asset_seed_freeze_and_note_ownership();
   test_recording_capture_boundaries_ownership_and_overflow();

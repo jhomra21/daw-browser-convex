@@ -1986,7 +1986,9 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
         && onset >= 880
         && onset <= 1_080
         && decay !== null
-        && decay <= onset + 4
+        // Only the early-reflection taps remain without late texture: the last is 47.5 ms
+        // (2,280 frames) after the first at this size.
+        && decay <= onset + 2_300
     }
     return fixture
   })(),

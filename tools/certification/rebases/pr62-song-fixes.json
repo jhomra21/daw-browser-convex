@@ -1,0 +1,128 @@
+{
+ "name": "pr62-song-fixes",
+ "sequence": 84,
+ "createdAt": "2026-11-19T04:22:25.539Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "src/components/effects/Granular.tsx",
+   "from": "bd70f972b350d2888527f7ba28e107c2b4af681b3f6aca8022a406c8e873dd91",
+   "to": "fbe9fc7779af8359dd593e4232ba5bf8546335e15cebc602bf1da82bc6ec6982"
+  },
+  {
+   "file": "src/components/effects/Sampler.tsx",
+   "from": "65164a653cf2fdad60d96fd33ae7b29d6b7239801b102b37e208e8ac9e58b19b",
+   "to": "100afdc2e12c7a644e38dad806344cc7f3faad4572c619fecad541000d82d8e7"
+  },
+  {
+   "file": "src/lib/local-effects.ts",
+   "from": "4bf53a70c2d602cf459013e453b2e0ce44c1605006480421bc3637529c2add81",
+   "to": "93d1315b15d6529fdd7db235f78acd5052ef3d1d9c60511229cc4bb9eb437316"
+  },
+  {
+   "file": "src/lib/when-number.ts",
+   "from": "b52ff4e7bb3ea935af21ef607c0458d658c79cd892c4a27339a8c3e195e517d9",
+   "to": "150b8cec20b6dbb8758327b24c25ddad21050c2f30297d247360382d326a08f4"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "042551275e3f1c223f5e4786742bc1702c8eca91cd228fdb3be4f59f89d0a312",
+   "new": "5c18c687f75d8279b36bd7ef847e7220c8a8575ad824460cad41064dfd79aebc"
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-i4-consumers",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 408,
+   "new": 412
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/portable-export-snapshot.test.ts",
+    "pass"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/mixer/graph-contract.test.ts",
+    "pass"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/portable-export-snapshot.test.ts",
+    "pass"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/mixer/graph-contract.test.ts",
+    "pass"
+   ],
+   "old": 15,
+   "new": 16
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "c298c365e605b8cfaa316b8b3afb08f8b32917e6",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "9e1cf2092a09efe45e84cb09c13d2e71b29749d6592a9dc56afaedd46be87675",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "9e1cf2092a09efe45e84cb09c13d2e71b29749d6592a9dc56afaedd46be87675",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/bless-pr62-song-fixes-2/live",
+   "resultSha256": "64b99c9f39e1858b66482a189938db2bf3e4f715f41f7d4dd98d5a5bf6ecffa4",
+   "seconds": 1249.595081542,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

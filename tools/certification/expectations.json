@@ -41,9 +41,9 @@
    "src/components/timeline/create-effects-panel-state.ts": "b279d747ebf6aef10f1eb77e2fce2bf8a1e17808d078c4b09d31a7aea79df200",
    "src/components/timeline/create-effects-panel-controller.ts": "bce1fe2c11516522b05f92b968e6fc06486cb3c256946117f93ba4ec117790b8",
    "src/lib/portable-browser-playback-controller.ts": "f02a0d0f80490c1f9883b91348c40a568b474281f349a8f1d60a0ce6bcd2a83c",
-   "src/components/effects/Sampler.tsx": "65164a653cf2fdad60d96fd33ae7b29d6b7239801b102b37e208e8ac9e58b19b",
-   "src/components/effects/Granular.tsx": "bd70f972b350d2888527f7ba28e107c2b4af681b3f6aca8022a406c8e873dd91",
-   "src/lib/when-number.ts": "b52ff4e7bb3ea935af21ef607c0458d658c79cd892c4a27339a8c3e195e517d9",
+   "src/components/effects/Sampler.tsx": "100afdc2e12c7a644e38dad806344cc7f3faad4572c619fecad541000d82d8e7",
+   "src/components/effects/Granular.tsx": "fbe9fc7779af8359dd593e4232ba5bf8546335e15cebc602bf1da82bc6ec6982",
+   "src/lib/when-number.ts": "150b8cec20b6dbb8758327b24c25ddad21050c2f30297d247360382d326a08f4",
    "tools/acceptance/device-control-cost.browser-runtime.tsx": "00b35b36c9932e396b05304ddea7c4dd8d75ec2c768088680cc34848b38983fb",
    "tools/acceptance/device-control-cost.ts": "cbfc01c361f83eba5061512fc866b6de1686b06a81f5a6ad4bf6adc1fc4ef3fe",
    "src/hooks/useEffectsPanelAudioSync.test.ts": "8e1b3461865537cc810225d15d4055fb14c3166c14e99ad1f850f5a1922aa1f1",
@@ -159,7 +159,7 @@
    "src/hooks/useTimelinePlayback.ts": "68e5f405e511fd1f6ae4647139eacd9d0221450c67c8f13324d2f14cbbcd7bf2",
    "src/components/timeline/create-effects-panel-audio-effects-state.ts": "056f15fdfc8dff5bbe77be3be25a84e705c070bf5104ab316e32f1b794bdeceb",
    "src/lib/desktop/native-playback-controller.ts": "e60cc5f1bebaa5640bb8d61392f03b576b2332e845e48cb0ad2f2c2ebda4f98b",
-   "src/lib/local-effects.ts": "4bf53a70c2d602cf459013e453b2e0ce44c1605006480421bc3637529c2add81",
+   "src/lib/local-effects.ts": "93d1315b15d6529fdd7db235f78acd5052ef3d1d9c60511229cc4bb9eb437316",
    "src/lib/desktop/native-processor-state-owner.ts": "53750681a61f1fada917534a649b3bb299699c9e0c775656f421a9defaaabf48",
    "src/lib/desktop/native-built-in-parameter-mapper.ts": "dff45138f0e19ddbe4d77a90a06dab3343013bdda6d6d804b1c502aadd6e423b",
    "src/lib/live-processor-control.ts": "690e6414550836e6b20fe001095a01e4bb25f5c531e836a506e8a1c9c910bdcb",
@@ -2312,7 +2312,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/portable-export-snapshot.test.ts": {
-      "pass": 12,
+      "pass": 13,
       "skip": 0,
       "fail": 0
      },
@@ -2607,7 +2607,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/mixer/graph-contract.test.ts": {
-      "pass": 15,
+      "pass": 16,
       "skip": 0,
       "fail": 0
      },
@@ -2894,7 +2894,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 408,
+     "pass": 412,
      "skip": 3,
      "fail": 0
     },
@@ -3201,7 +3201,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/portable-export-snapshot.test.ts": {
-      "pass": 12,
+      "pass": 13,
       "skip": 0,
       "fail": 0
      },
@@ -3496,7 +3496,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/mixer/graph-contract.test.ts": {
-      "pass": 15,
+      "pass": 16,
       "skip": 0,
       "fail": 0
      },
@@ -4175,7 +4175,7 @@
    "b": "trace-controller-b"
   },
   "hook": {
-   "treeSha256": "042551275e3f1c223f5e4786742bc1702c8eca91cd228fdb3be4f59f89d0a312",
+   "treeSha256": "5c18c687f75d8279b36bd7ef847e7220c8a8575ad824460cad41064dfd79aebc",
    "files": 4459,
    "a": "trace-hook-a",
    "b": "trace-hook-b"

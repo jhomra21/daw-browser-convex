@@ -90,7 +90,11 @@ export function isEqBandType(value: JsonValue | undefined): value is EqBandType 
 
 export function normalizeEqParams(input: EqParamsInput): EqParams {
   const defaults = createDefaultEqParams()
-  const bandsInput = Array.isArray(input.bands) && input.bands.length > 0 ? input.bands : defaults.bands
+  // The EQ has exactly eight bands, which the engine contract requires: slots the input leaves out keep their flat default band.
+  const given = Array.isArray(input.bands) ? input.bands.slice(0, defaults.bands.length) : []
+  const givenIds = new Set(given.flatMap((band) => isJsonString(band.id) ? [band.id] : []))
+  const bandsInput = defaults.bands.map((defaultBand, index) => given[index]
+    ?? (givenIds.has(defaultBand.id) ? { ...defaultBand, id: `${defaultBand.id}-default` } : defaultBand))
   return {
     enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
     channelMode: normalizeEqChannelMode(input.channelMode),

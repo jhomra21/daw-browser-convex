@@ -33,7 +33,7 @@ describe('EQ channel mode', () => {
   test('omits channel mode from empty EQ topology signatures', () => {
     const mono = normalizeEqParams({
       channelMode: 'mono',
-      bands: [{ id: 'b1', type: 'peaking', frequency: 1000, gainDb: 0, q: 1, enabled: false }],
+      bands: normalizeEqParams({}).bands.map((band) => ({ ...band, enabled: false })),
     })
 
     expect(getEqTopologySignature(mono)).toBe('')

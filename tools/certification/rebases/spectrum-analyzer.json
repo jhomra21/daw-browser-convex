@@ -1,0 +1,201 @@
+{
+ "name": "spectrum-analyzer",
+ "sequence": 86,
+ "createdAt": "2026-11-19T20:04:50.956Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "packages/audio-engine/src/native-host-wire.ts",
+   "from": "db562f34edfd51dca19b52fadeba8ab5bf15ec1b0f65f36eb5438da2651c694f",
+   "to": "bfcc2dd12794d91bed86ddb6edd67dffeff03df62fbd1f084384e1ea441fe1c7"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-audio-effects-state.test.ts",
+   "from": "41a9a2627451f3007fd7c1d03e794218282bb7e97e172a02a9e341ef31b9f52f",
+   "to": "7b3523f6af14e318e734bd62a10429d2f70aa1dd119ac29db2c869559480a9f6"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-audio-effects-state.ts",
+   "from": "056f15fdfc8dff5bbe77be3be25a84e705c070bf5104ab316e32f1b794bdeceb",
+   "to": "5901f7a2bedf8ffbae92e967e659bc74022a50b924d29601fcb94d25a20a8142"
+  },
+  {
+   "file": "src/lib/desktop/native-observation.ts",
+   "from": "24c6fa76d3592cb1c1b5e5bcdcf748606e12344ab23147c4c75d46b8e8570505",
+   "to": "faf78a4eb7d08eac973a4c8da0a69afa0dbc16efbb7672dfe745ec918bc8fb17"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.test.ts",
+   "from": "7bfce22f593d16f179eb6ac82ba52878926a3481f9b44f560b4dab6c99ea644a",
+   "to": "db9a3d447ddf55251bd99436a98377a767a967dc5d3219037e7e20cc628762c5"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=rc1-g-panel-audiohost",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 145,
+   "new": 146
+  },
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "95d808614acf0f341afbcc88862634b84df1f4d518ec6690ee823c6e58759727",
+   "new": "9a5199a6d4bf7e70518aa8412c6f2993cf4688952a90cc5f47f3e7a7be5b1ca6"
+  },
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "5c18c687f75d8279b36bd7ef847e7220c8a8575ad824460cad41064dfd79aebc",
+   "new": "aa08fdad6f5cd17e9b76972ad1268f68b85b03827b06325aa4cac4f2bc4876ea"
+  },
+  {
+   "path": [
+    "gates",
+    "name=g-tools-typecheck",
+    "judge",
+    "diagnostics"
+   ],
+   "old": [
+    "tools/acceptance/ae-08-live-graph.ts|TS18048|'failure' is possibly 'undefined'.",
+    "tools/acceptance/ae-08-live-graph.ts|TS2345|Argument of type 'Promise<unknown>' is not assignable to parameter of type 'Promise<{ code: number | null; signal: Signals | null; }>'.",
+    "tools/performance/30-track/v3-import-acceptance.ts|TS18048|'completed.recording.peakSabWriterOccupancy' is possibly 'undefined'.",
+    "tools/performance/30-track/v3-import-acceptance.ts|TS18048|'plan' is possibly 'undefined'.",
+    "tools/performance/30-track/v3-import-acceptance.ts|TS2322|Type '() => Promise<unknown>' is not assignable to type '() => Promise<void>'.",
+    "tools/performance/30-track/v3-import-acceptance.ts|TS2339|Property 'gestures' does not exist on type 'never'.",
+    "tools/performance/30-track/v3-import-acceptance.ts|TS2339|Property 'memoryCheckpoints' does not exist on type 'never'.",
+    "tools/performance/30-track/v3-import-workload.ts|TS2339|Property 'identity' does not exist on type '{ version: 1; state: { enabled: boolean; gainDb: number; polarity: \"normal\" | \"invert\"; inputMode: \"stereo\" | \"mono-sum\"; pan: number; balance: number; width: number; matrix: \"stereo\" | \"mid-side-encode\" | \"mid-side-decode\"; swap: boolean; dcBlock: boolean; }; } | ... 24 more ... | { ...; }'.",
+    "tools/performance/30-track/v3-import-workload.ts|TS2339|Property 'trackId' does not exist on type '{ trackId: string; } | { master: true; }'.",
+    "tools/performance/browser-harness.ts|TS18047|'contentLength' is possibly 'null'.",
+    "tools/performance/browser-harness.ts|TS18047|'size' is possibly 'null'.",
+    "tools/performance/browser-harness.ts|TS2353|Object literal may only specify known properties, and 'alias' does not exist in type 'BuildConfig'.",
+    "tools/performance/browser-harness.ts|TS2554|Expected 1 arguments, but got 0.",
+    "tools/performance/browser-harness.ts|TS2741|Property 'uploadToken' is missing in type '{ url: URL; stop: (closeActiveConnections?: boolean | undefined) => Promise<void>; }' but required in type 'HarnessServer'.",
+    "tools/performance/browser-harness.ts|TS2769|No overload matches this call."
+   ],
+   "new": [
+    "tools/acceptance/ae-08-live-graph.ts|TS18048|'failure' is possibly 'undefined'.",
+    "tools/acceptance/ae-08-live-graph.ts|TS2345|Argument of type 'Promise<unknown>' is not assignable to parameter of type 'Promise<{ code: number | null; signal: Signals | null; }>'.",
+    "tools/performance/30-track/v3-import-acceptance.ts|TS18048|'completed.recording.peakSabWriterOccupancy' is possibly 'undefined'.",
+    "tools/performance/30-track/v3-import-acceptance.ts|TS18048|'plan' is possibly 'undefined'.",
+    "tools/performance/30-track/v3-import-acceptance.ts|TS2322|Type '() => Promise<unknown>' is not assignable to type '() => Promise<void>'.",
+    "tools/performance/30-track/v3-import-acceptance.ts|TS2339|Property 'gestures' does not exist on type 'never'.",
+    "tools/performance/30-track/v3-import-acceptance.ts|TS2339|Property 'memoryCheckpoints' does not exist on type 'never'.",
+    "tools/performance/30-track/v3-import-workload.ts|TS2339|Property 'trackId' does not exist on type '{ trackId: string; } | { master: true; }'.",
+    "tools/performance/browser-harness.ts|TS18047|'contentLength' is possibly 'null'.",
+    "tools/performance/browser-harness.ts|TS18047|'size' is possibly 'null'.",
+    "tools/performance/browser-harness.ts|TS2353|Object literal may only specify known properties, and 'alias' does not exist in type 'BuildConfig'.",
+    "tools/performance/browser-harness.ts|TS2554|Expected 1 arguments, but got 0.",
+    "tools/performance/browser-harness.ts|TS2741|Property 'uploadToken' is missing in type '{ url: URL; stop: (closeActiveConnections?: boolean | undefined) => Promise<void>; }' but required in type 'HarnessServer'.",
+    "tools/performance/browser-harness.ts|TS2769|No overload matches this call."
+   ]
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-i4-consumers",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 412,
+   "new": 414
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-audio-effects",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 32,
+   "new": 33
+  },
+  {
+   "path": [
+    "gates",
+    "name=dp",
+    "judge",
+    "files",
+    "results.json"
+   ],
+   "old": "a269508648986839342fc2f46a07d99b8304232b528b0e42c692a7fa1b4b6e76",
+   "new": "edb0c0d0d0d532bcb998b6e09981854e84af2ec4b7aa502ed636be15a828f1be"
+  },
+  {
+   "path": [
+    "gates",
+    "name=dp",
+    "judge",
+    "files",
+    "README.md"
+   ],
+   "old": "ea30217ed4d6fc0f0d02eabd025ff7308c79d2f0f130519ed86c73efda01e6a5",
+   "new": "878e780276790d585411d7555ddc18fcf3d74d11b1f1c11b7c111ddf0194953d"
+  },
+  {
+   "path": [
+    "gates",
+    "name=dp-repeat",
+    "judge",
+    "files",
+    "results.json"
+   ],
+   "old": "a269508648986839342fc2f46a07d99b8304232b528b0e42c692a7fa1b4b6e76",
+   "new": "edb0c0d0d0d532bcb998b6e09981854e84af2ec4b7aa502ed636be15a828f1be"
+  },
+  {
+   "path": [
+    "gates",
+    "name=dp-repeat",
+    "judge",
+    "files",
+    "README.md"
+   ],
+   "old": "ea30217ed4d6fc0f0d02eabd025ff7308c79d2f0f130519ed86c73efda01e6a5",
+   "new": "878e780276790d585411d7555ddc18fcf3d74d11b1f1c11b7c111ddf0194953d"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "daaa0bc1e18e2431c270612e79f1029d4694e3ee",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "f379c0bf93eae187e239fa3bbf3743a52f0b9ccc4438a492a03e0d91dd30c135",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "f379c0bf93eae187e239fa3bbf3743a52f0b9ccc4438a492a03e0d91dd30c135",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/bless-spectrum/live",
+   "resultSha256": "f79bb9927fc22125300ec48df61679601fe62cf5e5fb99aacc6560098bffcbcb",
+   "seconds": 1336.253475167,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

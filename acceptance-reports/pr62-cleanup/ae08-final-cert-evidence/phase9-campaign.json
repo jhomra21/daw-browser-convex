@@ -3,422 +3,422 @@
   "rows": [
     {
       "launch": 1,
-      "seconds": 133.299,
-      "capturedSeconds": 126.136
+      "seconds": 132.719,
+      "capturedSeconds": 126.137
     },
     {
       "launch": 2,
-      "seconds": 79.304,
-      "capturedSeconds": 46.884
+      "seconds": 79.462,
+      "capturedSeconds": 47.143
     },
     {
       "launch": 3,
-      "seconds": 74.498,
-      "capturedSeconds": 45.292
+      "seconds": 73.87,
+      "capturedSeconds": 45.317
     },
     {
       "launch": 4,
-      "seconds": 7.351,
+      "seconds": 8.237,
       "capturedSeconds": 3.807
     },
     {
       "launch": 5,
-      "seconds": 7.895,
-      "capturedSeconds": 3.789
-    },
-    {
-      "launch": 6,
-      "seconds": 7.278,
-      "capturedSeconds": 3.787
-    },
-    {
-      "launch": 7,
-      "seconds": 7.426,
-      "capturedSeconds": 3.795
-    },
-    {
-      "launch": 8,
-      "seconds": 7.367,
-      "capturedSeconds": 3.793
-    },
-    {
-      "launch": 9,
-      "seconds": 8.378,
-      "capturedSeconds": 3.787
-    },
-    {
-      "launch": 10,
-      "seconds": 7.291,
-      "capturedSeconds": 3.793
-    },
-    {
-      "launch": 11,
-      "seconds": 7.375,
-      "capturedSeconds": 3.809
-    },
-    {
-      "launch": 12,
-      "seconds": 7.388,
+      "seconds": 7.871,
       "capturedSeconds": 3.806
     },
     {
-      "launch": 13,
-      "seconds": 7.313,
+      "launch": 6,
+      "seconds": 7.349,
+      "capturedSeconds": 3.828
+    },
+    {
+      "launch": 7,
+      "seconds": 7.428,
+      "capturedSeconds": 3.809
+    },
+    {
+      "launch": 8,
+      "seconds": 7.374,
+      "capturedSeconds": 3.808
+    },
+    {
+      "launch": 9,
+      "seconds": 7.43,
+      "capturedSeconds": 3.818
+    },
+    {
+      "launch": 10,
+      "seconds": 7.392,
       "capturedSeconds": 3.812
     },
     {
+      "launch": 11,
+      "seconds": 7.281,
+      "capturedSeconds": 3.81
+    },
+    {
+      "launch": 12,
+      "seconds": 7.296,
+      "capturedSeconds": 3.8
+    },
+    {
+      "launch": 13,
+      "seconds": 7.369,
+      "capturedSeconds": 3.833
+    },
+    {
       "launch": 14,
-      "seconds": 7.377,
-      "capturedSeconds": 3.803
+      "seconds": 7.325,
+      "capturedSeconds": 3.805
     },
     {
       "launch": 15,
-      "seconds": 7.366,
-      "capturedSeconds": 3.786
+      "seconds": 7.37,
+      "capturedSeconds": 3.812
     },
     {
       "launch": 16,
-      "seconds": 7.379,
-      "capturedSeconds": 3.79
+      "seconds": 7.279,
+      "capturedSeconds": 3.799
     },
     {
       "launch": 17,
-      "seconds": 7.377,
-      "capturedSeconds": 3.797
+      "seconds": 7.373,
+      "capturedSeconds": 3.803
     },
     {
       "launch": 18,
-      "seconds": 7.338,
-      "capturedSeconds": 3.816
+      "seconds": 7.321,
+      "capturedSeconds": 3.817
     },
     {
       "launch": 19,
-      "seconds": 84.494,
-      "capturedSeconds": 56.479
+      "seconds": 85.148,
+      "capturedSeconds": 56.84
     },
     {
       "launch": 20,
-      "seconds": 78.709,
-      "capturedSeconds": 48.561
+      "seconds": 79.636,
+      "capturedSeconds": 48.908
     },
     {
       "launch": 21,
-      "seconds": 73.834,
-      "capturedSeconds": 46.116
+      "seconds": 74.741,
+      "capturedSeconds": 46.314
     },
     {
       "launch": 22,
-      "seconds": 46.758,
-      "capturedSeconds": 41.735
+      "seconds": 46.783,
+      "capturedSeconds": 41.761
     },
     {
       "launch": 23,
-      "seconds": 55.215,
-      "capturedSeconds": 49.733
+      "seconds": 56.783,
+      "capturedSeconds": 49.728
     },
     {
       "launch": 24,
-      "seconds": 11.38,
-      "capturedSeconds": 6.981
+      "seconds": 10.996,
+      "capturedSeconds": 7.016
     },
     {
       "launch": 25,
-      "seconds": 10.943,
-      "capturedSeconds": 6.978
+      "seconds": 10.962,
+      "capturedSeconds": 6.996
     },
     {
       "launch": 26,
-      "seconds": 10.949,
-      "capturedSeconds": 6.972
-    },
-    {
-      "launch": 27,
-      "seconds": 10.969,
-      "capturedSeconds": 6.967
-    },
-    {
-      "launch": 28,
-      "seconds": 11.003,
-      "capturedSeconds": 6.98
-    },
-    {
-      "launch": 29,
-      "seconds": 11.135,
-      "capturedSeconds": 7.041
-    },
-    {
-      "launch": 30,
-      "seconds": 11.018,
-      "capturedSeconds": 6.985
-    },
-    {
-      "launch": 31,
-      "seconds": 10.832,
-      "capturedSeconds": 6.994
-    },
-    {
-      "launch": 32,
-      "seconds": 10.99,
-      "capturedSeconds": 6.969
-    },
-    {
-      "launch": 33,
-      "seconds": 10.845,
-      "capturedSeconds": 6.977
-    },
-    {
-      "launch": 34,
-      "seconds": 11.067,
-      "capturedSeconds": 6.98
-    },
-    {
-      "launch": 35,
-      "seconds": 10.885,
-      "capturedSeconds": 6.993
-    },
-    {
-      "launch": 36,
-      "seconds": 10.939,
-      "capturedSeconds": 6.977
-    },
-    {
-      "launch": 37,
-      "seconds": 10.833,
-      "capturedSeconds": 6.964
-    },
-    {
-      "launch": 38,
-      "seconds": 10.919,
-      "capturedSeconds": 6.967
-    },
-    {
-      "launch": 39,
-      "seconds": 10.894,
-      "capturedSeconds": 7.011
-    },
-    {
-      "launch": 40,
-      "seconds": 10.851,
-      "capturedSeconds": 6.978
-    },
-    {
-      "launch": 41,
-      "seconds": 10.941,
-      "capturedSeconds": 6.99
-    },
-    {
-      "launch": 42,
-      "seconds": 10.884,
-      "capturedSeconds": 6.984
-    },
-    {
-      "launch": 43,
-      "seconds": 11.807,
-      "capturedSeconds": 6.997
-    },
-    {
-      "launch": 44,
-      "seconds": 11.01,
-      "capturedSeconds": 6.984
-    },
-    {
-      "launch": 45,
-      "seconds": 11.002,
-      "capturedSeconds": 7.073
-    },
-    {
-      "launch": 46,
-      "seconds": 10.864,
-      "capturedSeconds": 6.981
-    },
-    {
-      "launch": 47,
-      "seconds": 11.005,
-      "capturedSeconds": 6.989
-    },
-    {
-      "launch": 48,
-      "seconds": 10.993,
-      "capturedSeconds": 6.973
-    },
-    {
-      "launch": 49,
-      "seconds": 10.873,
-      "capturedSeconds": 7.011
-    },
-    {
-      "launch": 50,
-      "seconds": 11.064,
-      "capturedSeconds": 6.972
-    },
-    {
-      "launch": 51,
-      "seconds": 11.059,
-      "capturedSeconds": 6.989
-    },
-    {
-      "launch": 52,
-      "seconds": 10.967,
-      "capturedSeconds": 6.997
-    },
-    {
-      "launch": 53,
-      "seconds": 10.777,
-      "capturedSeconds": 6.985
-    },
-    {
-      "launch": 54,
-      "seconds": 87.11,
-      "capturedSeconds": 57.257
-    },
-    {
-      "launch": 55,
-      "seconds": 37.494,
-      "capturedSeconds": 33.07
-    },
-    {
-      "launch": 56,
-      "seconds": 9.594,
-      "capturedSeconds": 5.567
-    },
-    {
-      "launch": 57,
-      "seconds": 8.508,
-      "capturedSeconds": 4.628
-    },
-    {
-      "launch": 58,
-      "seconds": 7.342,
-      "capturedSeconds": 3.503
-    },
-    {
-      "launch": 59,
-      "seconds": 55.343,
-      "capturedSeconds": 49.646
-    },
-    {
-      "launch": 60,
-      "seconds": 55.858,
-      "capturedSeconds": 50.156
-    },
-    {
-      "launch": 61,
-      "seconds": 53.422,
-      "capturedSeconds": 48.299
-    },
-    {
-      "launch": 62,
-      "seconds": 56.42,
-      "capturedSeconds": 50.365
-    },
-    {
-      "launch": 63,
-      "seconds": 55.65,
-      "capturedSeconds": 50.161
-    },
-    {
-      "launch": 64,
-      "seconds": 55.821,
-      "capturedSeconds": 50.362
-    },
-    {
-      "launch": 65,
-      "seconds": 55.063,
-      "capturedSeconds": 50.077
-    },
-    {
-      "launch": 66,
-      "seconds": 11.515,
-      "capturedSeconds": 7.155
-    },
-    {
-      "launch": 67,
-      "seconds": 11.365,
-      "capturedSeconds": 6.987
-    },
-    {
-      "launch": 68,
-      "seconds": 10.916,
-      "capturedSeconds": 6.976
-    },
-    {
-      "launch": 69,
-      "seconds": 10.865,
-      "capturedSeconds": 6.982
-    },
-    {
-      "launch": 70,
-      "seconds": 10.869,
-      "capturedSeconds": 6.99
-    },
-    {
-      "launch": 71,
-      "seconds": 11.086,
-      "capturedSeconds": 6.99
-    },
-    {
-      "launch": 72,
-      "seconds": 10.901,
-      "capturedSeconds": 7.006
-    },
-    {
-      "launch": 73,
-      "seconds": 11.019,
-      "capturedSeconds": 7.004
-    },
-    {
-      "launch": 74,
-      "seconds": 10.812,
-      "capturedSeconds": 7.001
-    },
-    {
-      "launch": 75,
-      "seconds": 10.996,
-      "capturedSeconds": 7.003
-    },
-    {
-      "launch": 76,
-      "seconds": 10.963,
+      "seconds": 11.024,
       "capturedSeconds": 6.999
     },
     {
-      "launch": 77,
-      "seconds": 10.996,
-      "capturedSeconds": 7.017
+      "launch": 27,
+      "seconds": 10.992,
+      "capturedSeconds": 7.025
     },
     {
-      "launch": 78,
-      "seconds": 11.005,
-      "capturedSeconds": 7.001
+      "launch": 28,
+      "seconds": 11.557,
+      "capturedSeconds": 7.002
     },
     {
-      "launch": 79,
-      "seconds": 10.859,
+      "launch": 29,
+      "seconds": 11.019,
+      "capturedSeconds": 6.99
+    },
+    {
+      "launch": 30,
+      "seconds": 10.95,
+      "capturedSeconds": 6.995
+    },
+    {
+      "launch": 31,
+      "seconds": 10.941,
+      "capturedSeconds": 6.981
+    },
+    {
+      "launch": 32,
+      "seconds": 11.705,
+      "capturedSeconds": 7.023
+    },
+    {
+      "launch": 33,
+      "seconds": 10.934,
+      "capturedSeconds": 6.994
+    },
+    {
+      "launch": 34,
+      "seconds": 11.119,
+      "capturedSeconds": 6.995
+    },
+    {
+      "launch": 35,
+      "seconds": 10.854,
       "capturedSeconds": 6.988
     },
     {
+      "launch": 36,
+      "seconds": 11.018,
+      "capturedSeconds": 6.992
+    },
+    {
+      "launch": 37,
+      "seconds": 11,
+      "capturedSeconds": 6.979
+    },
+    {
+      "launch": 38,
+      "seconds": 11.117,
+      "capturedSeconds": 6.982
+    },
+    {
+      "launch": 39,
+      "seconds": 12.179,
+      "capturedSeconds": 7.004
+    },
+    {
+      "launch": 40,
+      "seconds": 10.928,
+      "capturedSeconds": 7.004
+    },
+    {
+      "launch": 41,
+      "seconds": 11.055,
+      "capturedSeconds": 7.008
+    },
+    {
+      "launch": 42,
+      "seconds": 10.977,
+      "capturedSeconds": 7.006
+    },
+    {
+      "launch": 43,
+      "seconds": 10.991,
+      "capturedSeconds": 7.02
+    },
+    {
+      "launch": 44,
+      "seconds": 10.908,
+      "capturedSeconds": 6.999
+    },
+    {
+      "launch": 45,
+      "seconds": 10.945,
+      "capturedSeconds": 7.014
+    },
+    {
+      "launch": 46,
+      "seconds": 11.026,
+      "capturedSeconds": 7.023
+    },
+    {
+      "launch": 47,
+      "seconds": 10.87,
+      "capturedSeconds": 7.031
+    },
+    {
+      "launch": 48,
+      "seconds": 11.02,
+      "capturedSeconds": 7.014
+    },
+    {
+      "launch": 49,
+      "seconds": 10.999,
+      "capturedSeconds": 6.999
+    },
+    {
+      "launch": 50,
+      "seconds": 11.025,
+      "capturedSeconds": 6.991
+    },
+    {
+      "launch": 51,
+      "seconds": 10.875,
+      "capturedSeconds": 6.986
+    },
+    {
+      "launch": 52,
+      "seconds": 10.98,
+      "capturedSeconds": 6.993
+    },
+    {
+      "launch": 53,
+      "seconds": 11.01,
+      "capturedSeconds": 7.022
+    },
+    {
+      "launch": 54,
+      "seconds": 86.657,
+      "capturedSeconds": 57.032
+    },
+    {
+      "launch": 55,
+      "seconds": 37.393,
+      "capturedSeconds": 32.952
+    },
+    {
+      "launch": 56,
+      "seconds": 9.975,
+      "capturedSeconds": 5.297
+    },
+    {
+      "launch": 57,
+      "seconds": 8.627,
+      "capturedSeconds": 4.591
+    },
+    {
+      "launch": 58,
+      "seconds": 7.269,
+      "capturedSeconds": 3.502
+    },
+    {
+      "launch": 59,
+      "seconds": 55.363,
+      "capturedSeconds": 49.793
+    },
+    {
+      "launch": 60,
+      "seconds": 56.499,
+      "capturedSeconds": 50.315
+    },
+    {
+      "launch": 61,
+      "seconds": 53.395,
+      "capturedSeconds": 48.353
+    },
+    {
+      "launch": 62,
+      "seconds": 56.366,
+      "capturedSeconds": 50.406
+    },
+    {
+      "launch": 63,
+      "seconds": 56.043,
+      "capturedSeconds": 50.341
+    },
+    {
+      "launch": 64,
+      "seconds": 55.473,
+      "capturedSeconds": 50.405
+    },
+    {
+      "launch": 65,
+      "seconds": 56.248,
+      "capturedSeconds": 50.192
+    },
+    {
+      "launch": 66,
+      "seconds": 12.131,
+      "capturedSeconds": 7.168
+    },
+    {
+      "launch": 67,
+      "seconds": 11.358,
+      "capturedSeconds": 7.029
+    },
+    {
+      "launch": 68,
+      "seconds": 11.016,
+      "capturedSeconds": 7.026
+    },
+    {
+      "launch": 69,
+      "seconds": 10.904,
+      "capturedSeconds": 7.027
+    },
+    {
+      "launch": 70,
+      "seconds": 10.936,
+      "capturedSeconds": 7.01
+    },
+    {
+      "launch": 71,
+      "seconds": 10.914,
+      "capturedSeconds": 6.991
+    },
+    {
+      "launch": 72,
+      "seconds": 10.935,
+      "capturedSeconds": 7.004
+    },
+    {
+      "launch": 73,
+      "seconds": 10.913,
+      "capturedSeconds": 7.016
+    },
+    {
+      "launch": 74,
+      "seconds": 10.999,
+      "capturedSeconds": 7.01
+    },
+    {
+      "launch": 75,
+      "seconds": 10.929,
+      "capturedSeconds": 7.018
+    },
+    {
+      "launch": 76,
+      "seconds": 10.962,
+      "capturedSeconds": 7.005
+    },
+    {
+      "launch": 77,
+      "seconds": 12.097,
+      "capturedSeconds": 7.015
+    },
+    {
+      "launch": 78,
+      "seconds": 11.012,
+      "capturedSeconds": 7.008
+    },
+    {
+      "launch": 79,
+      "seconds": 10.879,
+      "capturedSeconds": 7.023
+    },
+    {
       "launch": 80,
-      "seconds": 10.954,
-      "capturedSeconds": 7.007
+      "seconds": 11.009,
+      "capturedSeconds": 7.035
     },
     {
       "launch": 81,
-      "seconds": 4.524,
-      "capturedSeconds": 0.033
+      "seconds": 3.998,
+      "capturedSeconds": 0.036
     },
     {
       "launch": 82,
-      "seconds": 4.281,
-      "capturedSeconds": 0.803
+      "seconds": 4.357,
+      "capturedSeconds": 0.81
     },
     {
       "launch": 83,
-      "seconds": 41.952,
-      "capturedSeconds": 38.141
+      "seconds": 42.644,
+      "capturedSeconds": 38.75
     },
     {
       "launch": 84,
-      "seconds": 13.078,
+      "seconds": 12.911,
       "capturedSeconds": 7.84
     }
   ]

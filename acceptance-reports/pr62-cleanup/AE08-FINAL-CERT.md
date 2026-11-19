@@ -1,28 +1,28 @@
 # PR 62: final packaged AE-08 certification
 
-Rerun on 2026-11-18, after the fixes the AE-08 song session found (`acceptance-reports/ae-08-song/SONG-REPORT.md`), on the `pr62-cleanup` tree. The certification of `8b893e32` that this replaces had the same totals; its package predates those fixes.
+Rerun on 2026-11-19, after the DSP quality fixes and the app fixes from the AE-08 song v2 session (`acceptance-reports/ae-08-song-v2/`), on the `synth-dsp-quality` tree. The certification of `1706c4b4` that this replaces (song v1 fixes) had the same totals; its package predates these fixes.
 
-**Package.** Built at `1706c4b4` with a clean tracked tree. Artifact hashes (`ae08-final-cert-evidence/provenance.json`):
+**Package.** Built at `9ad09783` with a clean tracked tree. Artifact hashes (`ae08-final-cert-evidence/provenance.json`):
 
 | Artifact | SHA-256 |
 |---|---|
-| `app.asar` | `8f14acdc4e73fc47fb43e2bebe45426d6e820fa23c634eccbf2513a501f71014` |
-| `daw-audio-host-macos` | `c6e6bff814716d81d45621879572d8751a45427810ba337abf6644eafc26c9c4` |
+| `app.asar` | `37ec18385c0db37606c31c563da0f0b4eddd5518cfb0c461ecd5b1a23b2c7781` |
+| `daw-audio-host-macos` | `af9e71a2dd26ffed1d339be9ef2b8bfcb29b15ad8f222ae96c027af4c1baf24f` |
 | `daw-vst3-worker` | `ee97be92db9ad62028d1af6eefc37e2354fbc4172f32645f104905148a5f1bf5` |
 | `daw-vst3-scanner` | `6c13c5382f4b871fcbb3272119878f405cd101ea585bd4b2c6242fdb8e4c670e` |
 
-Only `app.asar` differs from the `8b893e32` package; the native binaries are byte-identical. The phase 8 rows and the phase 9 matrix ran on this one package. The matrix ran at `44bb6a6b`, which changes only harness files under `tools/acceptance/` after the package was built.
+`app.asar` and the audio host differ from the `1706c4b4` package (the host links the audio core); the plug-in worker and scanner are byte-identical. The phase 8 rows and the phase 9 matrix ran on this one package at `005302eb`, which adds only the FAST-CERT record after the package was built.
 
-What the package adds over `8b893e32`:
-- `e6820371`: a grid-aligned placement never snaps to a negative start.
-- `c795a349`: an EQ always has eight bands.
-- `247811e2`: a send stored without a tap is compensated as post-fader.
-- `b6b60b12`: an export starts on the timeline, not one graph latency late.
-- `c4847f0e`, `1706c4b4`: the lint errors and warnings from the phase 5 commit.
+What the package adds over `1706c4b4`:
+- `646fc35d`: band-limited (polyBLEP) saw and square oscillators.
+- `fcef4611`: a diffuse 8-line feedback-delay-network reverb, in the native core and the worklet.
+- `0fd3e1ba`, `a2b3bc82`: the limiter holds its gain through the lookahead and its true-peak detector includes the samples it interpolates between, so peaks stay under the ceiling.
+- `7397ebf9`: an export the host refuses reaches the client with the real reason.
+- `3ebe5b66`: File > New Project closes the projects dashboard.
 
 ## Phase 8 rows
 
-`bun tools/acceptance/ae-08-live-graph.ts --phase 8 --out /tmp/ae08-recert-phase8`
+`bun tools/acceptance/ae-08-live-graph.ts --phase 8 --out /tmp/ae08-synth-phase8`
 
 `PHASE 8 PACKAGED PASS: 2/2 rows`. A structural edit (a new track) while paused and while playing. Each row had:
 - one host process and one device session across the edit;
@@ -32,16 +32,18 @@ What the package adds over `8b893e32`:
 
 ## Phase 9 certifying matrix
 
-`bun tools/acceptance/ae-08-live-graph.ts --phase 9 --matrix cert --out /tmp/ae08-recert5`
+`bun tools/acceptance/ae-08-live-graph.ts --phase 9 --matrix cert --out /tmp/ae08-synth-phase9`
 
-`AE-08 phase 9 PASS: 84 launches, 0 failed, 663 judged edits, 0 failed` (30.6 minutes). The pooled failure bound is below 1 %. Mean launch overhead was 5.97 s; a built-in edit step took 1.17 s and a VST step 1.11 s (`phase9-timings.json`).
+`AE-08 phase 9 PASS: 84 launches, 0 failed, 663 judged edits, 0 failed` (30.7 minutes, first run on this package). The pooled failure bound is below 1 %. Mean launch overhead was 6.04 s; a built-in edit step took 1.17 s and a VST step 1.11 s (`phase9-timings.json`).
 
-Earlier attempts on this package:
+Attempts on the previous (`1706c4b4`) package, kept for the record:
+
 1. **`66d039c6`: the first run was NON-CERTIFYING.** It ran 84 launches with 0 failed and 632 judged edits with 2 failed.
    - `lookahead-transition` failed at edit 1. A "states" row without a reference compared the capture with each state's export unshifted. That worked only because the export used to start one graph latency late, which equals the live pinned budget there. With the export fix, every state's export is compared delayed by the pinned budget, as the reference rows already were.
    - `output-device-switch-instruments` failed at edit 3: the rebuilt session had a plug-in worker spawned but not yet ready when the step was observed. It did not recur in the probe run of both rows (35 judged edits, 0 failed) or in the certifying run.
 2. **`44bb6a6b`: two runs stopped at launch 1.** In `raise-lower-burst`, around edit 80, the harness's asset-inventory `diagnostics-v2` read was refused while another host request was pending. This is the race `PHASE9-CERT-MATRIX.md` recorded. A refused read is now asked again, up to a bound; any other reply still fails.
 3. **A fourth run was cut off** at launch 83 of 84 (0 failed) when the session running it restarted. It wrote no verdict.
+
 Every row of the preset has a judge. The run of 2026-11-17 (`PHASE9-CERT-MATRIX.md`) was NON-CERTIFYING only because four rows had none; they were added in `fb049f20` and `2ecfb8be`:
 
 - `vst-remove-undo` uses the `states` judge. Each window is compared with the export of the state without the plug-in, delayed by the pinned latency budget (the test plug-in passes audio through at its default latency, so both states sound alike). The edited channel is not compared during its swap window (one transport block plus the 10 ms crossfade). Every edit must also leave the playing host untouched and start no worker beyond an insert's own.
@@ -66,16 +68,15 @@ Every row of the preset has a judge. The run of 2026-11-17 (`PHASE9-CERT-MATRIX.
 
 ## FAST-CERT
 
-The song-session fixes are blessed in two records:
-- `pr62-lint-cleared` (record 83, ruling U15 in `PARENT-RULING-PR62-TEST-CLEANUP.md`) is a hand record. Gate `g-lint` moves from the 5 errors and 17 warnings the phase 5 commit left (exit 1) to a clean run (exit 0, no findings). `--bless` refuses an exit move that no named test explains; the first bless attempt was refused on that field alone, with its live run passing.
-- `pr62-song-fixes` (record 84) is the `--bless --full` run. It moves 6 fields, all added passing tests (`graph-contract.test.ts` and `portable-export-snapshot.test.ts` in `f-engine` and `last-engine`, and four `rc1-i4-consumers` tests), 4 watched hashes and the hook trace tree. Nothing was weakened, and the source freeze held.
+The DSP quality fixes are blessed in record 85 (`pr62-synth-dsp`, `--bless --full`): only the wasm artifact hashes and four watched files move; the live run passed and the source freeze held.
 
-The confirming `bun tools/certification/fast-cert.ts --full` run at `934a8810` passes: 929 jobs, 0 failing, freeze held (19.8 minutes). One earlier confirming run also had 0 failing jobs but reported the freeze broken: the tracked files were unchanged, but `git status` differed between the start and the end of the run, and FAST-CERT records only a hash of it, not the paths. The rerun captured `git status` before and after; both were identical.
+The first confirming `bun tools/certification/fast-cert.ts --full` run had one failing job, `gate:x-host-ctest`: `TestRetiringASlowWorkerDoesNotBlockTheCommandLoop` asserted that a never-ready plug-in worker's process group was gone 2 s after its retirement (`audio_host_test.cpp:6306`). The retirement escalates stop, then SIGTERM after 250 ms, then SIGKILL after another 250 ms, on a reaper thread. No audio host code changed in this branch. The test passed 6 of 6 times when rerun alone, 3 of them with 14 busy processes loading the CPU. The second confirming run at `005302eb` passes: 929 jobs, 0 failing, freeze held, `git status` identical before and after (20.1 minutes).
 
+The earlier records, for the song v1 fixes: `pr62-lint-cleared` (record 83, a hand record for the lint gate moving from exit 1 to a clean run) and `pr62-song-fixes` (record 84, 6 added passing tests, 4 watched hashes and the hook trace tree; nothing weakened).
 ## Evidence
 
 - `ae08-final-cert-evidence/`: the matrix verdict, campaign, plan, timings, provenance, and every row's `verdict.json`; `phase8/` holds the phase 8 verdict, analysis and provenance.
-- The full run directories (`/tmp/ae08-recert5`, about 9 GB of PCM and host logs, and `/tmp/ae08-recert-phase8`) are not kept in the repository.
+- The full run directories (`/tmp/ae08-synth-phase9`, about 3 GB of PCM and host logs, and `/tmp/ae08-synth-phase8`) are not kept in the repository.
 
 ## Known gaps
 
@@ -83,3 +84,4 @@ The confirming `bun tools/certification/fast-cert.ts --full` run at `934a8810` p
 - The main process still refuses a native diagnostics read while another host request is pending; the harness now re-reads, but any other client sees the refusal.
 - `output-device-switch-instruments` once observed a plug-in worker not yet ready after a device switch (see above).
 - `--judge-only` does not accept a phase 9 run directory yet.
+- `TestRetiringASlowWorkerDoesNotBlockTheCommandLoop` failed once in a full FAST-CERT run and has not reproduced (see FAST-CERT).

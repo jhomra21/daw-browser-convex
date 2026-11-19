@@ -4,6 +4,7 @@ import {
   normalizeEqParamsForUpdate,
   normalizeReverbParamsForUpdate,
   normalizeSaturatorParamsForUpdate,
+  mergeSpectrumParamsEnvelope,
 } from './effects-params'
 import { isOwnedProcessorKind, mergeOwnedProcessorParams } from './owned-processor-descriptors'
 
@@ -17,6 +18,7 @@ export const normalizeAudioEffectParamsForUpdate = (
   if (kind === 'saturator') return normalizeSaturatorParamsForUpdate(params, existing)
   if (kind === 'delay') return normalizeDelayParamsForUpdate(params, existing)
   if (kind === 'reverb') return normalizeReverbParamsForUpdate(params, existing)
+  if (kind === 'spectrum') return mergeSpectrumParamsEnvelope(params, existing)
   if (isOwnedProcessorKind(kind)) return mergeOwnedProcessorParams(kind, params, existing)
   throw new Error(`Unsupported audio effect kind "${kind}".`)
 }

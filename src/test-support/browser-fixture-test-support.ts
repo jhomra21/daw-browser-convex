@@ -5,7 +5,7 @@ import { z } from 'zod'
 
 // Bundles a browser-runtime fixture, opens it in an isolated Chromium session and returns the scenario results the
 // fixture publishes as window.__browserFixtureResults (or fails with the error it published).
-export const runBrowserFixture = async (runtime: URL) => {
+export const runBrowserFixture = async (runtime: URL, options: { screenshot?: string } = {}) => {
   const directory = `/tmp/daw-fixture-${crypto.randomUUID()}`
   const session = `daw-fixture-${crypto.randomUUID()}`
   const browser = async (...args: string[]) => {
@@ -50,6 +50,7 @@ export const runBrowserFixture = async (runtime: URL) => {
     )
     await browser('open', `file://${directory}/index.html`)
     await browser('wait', '--fn', '!!window.__browserFixtureResults || !!window.__browserFixtureError')
+    if (options.screenshot) await browser('screenshot', options.screenshot)
     const published = JSON.parse(JSON.parse(await browser(
       'eval',
       'JSON.stringify({ results: window.__browserFixtureResults ?? null, error: window.__browserFixtureError ?? null })',

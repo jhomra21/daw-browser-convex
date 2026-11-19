@@ -1,4 +1,4 @@
-import type { Component } from "solid-js";
+import { Show, type Component } from "solid-js";
 import { Button } from "~/components/ui/button";
 import { BOTTOM_PANEL_FOOTER_HEIGHT_PX } from "~/lib/bottom-panel-layout";
 import { cn } from "~/lib/utils";
@@ -8,6 +8,7 @@ type TimelineBottomPanelFooterProps = {
   toggleLabel: "Hide" | "Show";
   onEffectsTabClick: () => void;
   onClipTabClick?: () => void;
+  analyzer?: { active: boolean; onToggle: () => void };
   onToggle: () => void;
 };
 
@@ -42,6 +43,20 @@ const TimelineBottomPanelFooter: Component<TimelineBottomPanelFooterProps> = (pr
         >
           Clip
         </Button>
+        <Show when={props.analyzer}>
+          {(analyzer) => (
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              class={tabClass(analyzer().active)}
+              aria-pressed={analyzer().active}
+              onClick={analyzer().onToggle}
+            >
+              Analyzer
+            </Button>
+          )}
+        </Show>
       </div>
       <Button
         variant="ghost"

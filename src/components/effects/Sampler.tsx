@@ -1,4 +1,4 @@
-import { whenNumber } from "~/lib/when-number";
+import { takeTypedNumber } from "~/lib/when-number";
 import { For, type Component } from "solid-js";
 import { MAX_SAMPLED_INSTRUMENT_VOICES, type SamplerParams, type SamplerZone } from "@daw-browser/shared";
 import EffectShell from "~/components/effects/EffectShell";
@@ -48,7 +48,7 @@ const Sampler: Component<SamplerProps> = (props) => {
     <EffectShell title="Sampler" typeLabel="Instrument" onReset={props.onReset} disabled={!props.canWrite}  class="w-176 min-w-176">
       <div class="flex h-full flex-col gap-2 p-3 text-xs text-muted-foreground">
         <div class="flex items-center gap-3">
-          <label>Voices <input class="w-14 bg-app-surface px-1 text-foreground" type="number" min="1" max={MAX_SAMPLED_INSTRUMENT_VOICES} value={props.params.polyphony} onChange={(event) => whenNumber(event.currentTarget, (polyphony) => props.onUpdate({ polyphony }), props.params.polyphony)} /></label>
+          <label>Voices <input class="w-14 bg-app-surface px-1 text-foreground" type="number" min="1" max={MAX_SAMPLED_INSTRUMENT_VOICES} value={props.params.polyphony} onChange={(event) => { const polyphony = takeTypedNumber(event.currentTarget, props.params.polyphony); if (polyphony !== undefined) props.onUpdate({ polyphony }); }} /></label>
           <label>Cache <select class="bg-app-surface text-foreground" value={props.params.cachePolicy} onChange={(event) => props.onUpdate({ cachePolicy: event.currentTarget.value === "lazy" ? "lazy" : "preload" })}><option value="preload">Preload</option><option value="lazy">Lazy</option></select></label>
           <span>{props.params.zones.length} zones</span>
           <span>{Math.round((props.status?.totalBytes ?? 0) / 1048576)} / {Math.round((props.status?.maxBytes ?? props.params.maxDecodedBytes) / 1048576)} MB</span>
@@ -64,11 +64,11 @@ const Sampler: Component<SamplerProps> = (props) => {
               <>
                 <div class="grid grid-cols-[1fr_repeat(5,4rem)_5rem_4rem_2rem] items-center gap-1 border-b border-border py-1">
                   <span class="truncate text-foreground">{zone.sample.name ?? zone.sample.assetKey}</span>
-                  <input aria-label="Low key" type="number" min="0" max="127" value={zone.keyLow} onChange={(event) => whenNumber(event.currentTarget, (keyLow) => props.onUpdateZone(zone.id, { keyLow }), zone.keyLow)} />
-                  <input aria-label="High key" type="number" min="0" max="127" value={zone.keyHigh} onChange={(event) => whenNumber(event.currentTarget, (keyHigh) => props.onUpdateZone(zone.id, { keyHigh }), zone.keyHigh)} />
-                  <input aria-label="Low velocity" type="number" min="1" max="127" value={zone.velocityLow} onChange={(event) => whenNumber(event.currentTarget, (velocityLow) => props.onUpdateZone(zone.id, { velocityLow }), zone.velocityLow)} />
-                  <input aria-label="High velocity" type="number" min="1" max="127" value={zone.velocityHigh} onChange={(event) => whenNumber(event.currentTarget, (velocityHigh) => props.onUpdateZone(zone.id, { velocityHigh }), zone.velocityHigh)} />
-                  <input aria-label="Root note" type="number" min="0" max="127" value={zone.rootNote} onChange={(event) => whenNumber(event.currentTarget, (rootNote) => props.onUpdateZone(zone.id, { rootNote }), zone.rootNote)} />
+                  <input aria-label="Low key" type="number" min="0" max="127" value={zone.keyLow} onChange={(event) => { const keyLow = takeTypedNumber(event.currentTarget, zone.keyLow); if (keyLow !== undefined) props.onUpdateZone(zone.id, { keyLow }); }} />
+                  <input aria-label="High key" type="number" min="0" max="127" value={zone.keyHigh} onChange={(event) => { const keyHigh = takeTypedNumber(event.currentTarget, zone.keyHigh); if (keyHigh !== undefined) props.onUpdateZone(zone.id, { keyHigh }); }} />
+                  <input aria-label="Low velocity" type="number" min="1" max="127" value={zone.velocityLow} onChange={(event) => { const velocityLow = takeTypedNumber(event.currentTarget, zone.velocityLow); if (velocityLow !== undefined) props.onUpdateZone(zone.id, { velocityLow }); }} />
+                  <input aria-label="High velocity" type="number" min="1" max="127" value={zone.velocityHigh} onChange={(event) => { const velocityHigh = takeTypedNumber(event.currentTarget, zone.velocityHigh); if (velocityHigh !== undefined) props.onUpdateZone(zone.id, { velocityHigh }); }} />
+                  <input aria-label="Root note" type="number" min="0" max="127" value={zone.rootNote} onChange={(event) => { const rootNote = takeTypedNumber(event.currentTarget, zone.rootNote); if (rootNote !== undefined) props.onUpdateZone(zone.id, { rootNote }); }} />
                   <select value={zone.playbackMode} onChange={(event) => props.onUpdateZone(zone.id, { playbackMode: event.currentTarget.value === "forward-loop" ? "forward-loop" : event.currentTarget.value === "crossfade-loop" ? "crossfade-loop" : "one-shot" })}><option value="one-shot">One shot</option><option value="forward-loop">Loop</option><option value="crossfade-loop">Xfade</option></select>
                   <button
                     classList={{ "text-destructive": props.status?.zones.get(zone.id) === "error" }}

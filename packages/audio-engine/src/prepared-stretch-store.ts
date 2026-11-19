@@ -1189,7 +1189,7 @@ const createPersistentRepository = (input: {
       if (candidate) break
     }
     if (!candidate) return
-    const range = validateRange(startFrame, endFrame, candidate.manifest.frameCount)
+    validateRange(startFrame, endFrame, candidate.manifest.frameCount)
     const release = await holdLock(lockManager, writeLockName(candidate.manifest.writeId), 'shared')
     let db: IDBDatabase | undefined
     const leaseId = crypto.randomUUID()

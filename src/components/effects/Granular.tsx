@@ -2,7 +2,7 @@ import type { Component } from "solid-js";
 import type { GranularParams, SamplerZone } from "@daw-browser/shared";
 import EffectShell from "~/components/effects/EffectShell";
 import { parseSampleDragData, SAMPLE_DRAG_DATA_TYPE } from "~/lib/sample-drag-data";
-import { whenNumber } from "~/lib/when-number";
+import { takeTypedNumber } from "~/lib/when-number";
 import type { GranularLoadStatus } from "~/lib/sampler-buffer-sync";
 
 type GranularProps = {
@@ -41,14 +41,14 @@ const Granular: Component<GranularProps> = (props) => {
           Drop a sample to replace the granular source
         </div>
         <div class="grid grid-cols-4 gap-2">
-          <label>Grain ms <input type="number" min="5" max="1000" value={props.params.grainSizeMs} onChange={(event) => whenNumber(event.currentTarget, (grainSizeMs) => props.onUpdate({ grainSizeMs }), props.params.grainSizeMs)} /></label>
-          <label>Density Hz <input type="number" min="0.25" max="200" step="0.25" value={props.params.densityHz} onChange={(event) => whenNumber(event.currentTarget, (densityHz) => props.onUpdate({ densityHz }), props.params.densityHz)} /></label>
-          <label>Position <input type="number" min="0" max="1" step="0.01" value={props.params.position} onChange={(event) => whenNumber(event.currentTarget, (position) => props.onUpdate({ position }), props.params.position)} /></label>
-          <label>Spray <input type="number" min="0" max="1" step="0.01" value={props.params.spray} onChange={(event) => whenNumber(event.currentTarget, (spray) => props.onUpdate({ spray }), props.params.spray)} /></label>
-          <label>Pitch <input type="number" min="-48" max="48" step="0.1" value={props.params.pitchSemitones} onChange={(event) => whenNumber(event.currentTarget, (pitchSemitones) => props.onUpdate({ pitchSemitones }), props.params.pitchSemitones)} /></label>
-          <label>Reverse <input type="number" min="0" max="1" step="0.01" value={props.params.reverseProbability} onChange={(event) => whenNumber(event.currentTarget, (reverseProbability) => props.onUpdate({ reverseProbability }), props.params.reverseProbability)} /></label>
-          <label>Spread <input type="number" min="0" max="1" step="0.01" value={props.params.stereoSpread} onChange={(event) => whenNumber(event.currentTarget, (stereoSpread) => props.onUpdate({ stereoSpread }), props.params.stereoSpread)} /></label>
-          <label>Seed <input type="number" min="1" max="2147483647" value={props.params.seed} onChange={(event) => whenNumber(event.currentTarget, (seed) => props.onUpdate({ seed }), props.params.seed)} /></label>
+          <label>Grain ms <input type="number" min="5" max="1000" value={props.params.grainSizeMs} onChange={(event) => { const grainSizeMs = takeTypedNumber(event.currentTarget, props.params.grainSizeMs); if (grainSizeMs !== undefined) props.onUpdate({ grainSizeMs }); }} /></label>
+          <label>Density Hz <input type="number" min="0.25" max="200" step="0.25" value={props.params.densityHz} onChange={(event) => { const densityHz = takeTypedNumber(event.currentTarget, props.params.densityHz); if (densityHz !== undefined) props.onUpdate({ densityHz }); }} /></label>
+          <label>Position <input type="number" min="0" max="1" step="0.01" value={props.params.position} onChange={(event) => { const position = takeTypedNumber(event.currentTarget, props.params.position); if (position !== undefined) props.onUpdate({ position }); }} /></label>
+          <label>Spray <input type="number" min="0" max="1" step="0.01" value={props.params.spray} onChange={(event) => { const spray = takeTypedNumber(event.currentTarget, props.params.spray); if (spray !== undefined) props.onUpdate({ spray }); }} /></label>
+          <label>Pitch <input type="number" min="-48" max="48" step="0.1" value={props.params.pitchSemitones} onChange={(event) => { const pitchSemitones = takeTypedNumber(event.currentTarget, props.params.pitchSemitones); if (pitchSemitones !== undefined) props.onUpdate({ pitchSemitones }); }} /></label>
+          <label>Reverse <input type="number" min="0" max="1" step="0.01" value={props.params.reverseProbability} onChange={(event) => { const reverseProbability = takeTypedNumber(event.currentTarget, props.params.reverseProbability); if (reverseProbability !== undefined) props.onUpdate({ reverseProbability }); }} /></label>
+          <label>Spread <input type="number" min="0" max="1" step="0.01" value={props.params.stereoSpread} onChange={(event) => { const stereoSpread = takeTypedNumber(event.currentTarget, props.params.stereoSpread); if (stereoSpread !== undefined) props.onUpdate({ stereoSpread }); }} /></label>
+          <label>Seed <input type="number" min="1" max="2147483647" value={props.params.seed} onChange={(event) => { const seed = takeTypedNumber(event.currentTarget, props.params.seed); if (seed !== undefined) props.onUpdate({ seed }); }} /></label>
           <label>Window <select value={props.params["windowShape"]} onChange={(event) => props.onUpdate({ ["windowShape"]: event.currentTarget.value === "tukey" ? "tukey" : event.currentTarget.value === "gaussian" ? "gaussian" : "hann" })}><option value="hann">Hann</option><option value="tukey">Tukey</option><option value="gaussian">Gaussian</option></select></label>
           <label class="flex items-center gap-1"><input type="checkbox" checked={props.params.freeze} onChange={(event) => props.onUpdate({ freeze: event.currentTarget.checked })} /> Freeze</label>
         </div>

@@ -100,16 +100,13 @@ export async function getLocalEffect(
   const row = await db.get('entities', [EFFECT_KIND, localEffectRowId(targetId, effect)])
   if (effect === 'instrument') {
     if (isLocalEffectRow(row?.value)) {
+      const { id, targetId: storedTargetId, effect: storedEffect, instanceId, index, updatedAt } = row.value
       const params = readInstrumentParamsFromEffectRow({ effect: 'instrument', params: row.value.params })
-      return params ? {
-        id: row.value.id,
-        targetId: row.value.targetId,
-        effect: row.value.effect,
-        params,
-        updatedAt: row.value.updatedAt,
-        ...(row.value.instanceId === undefined ? {} : { instanceId: row.value.instanceId }),
-        ...(row.value.index === undefined ? {} : { index: row.value.index }),
-      } : readLegacySynthEffect(targetId, db)
+      if (!params) return readLegacySynthEffect(targetId, db)
+      const instrumentRow: LocalEffectRow<TrackInstrumentParams> = { id, targetId: storedTargetId, effect: storedEffect, params, updatedAt }
+      if (instanceId !== undefined) instrumentRow.instanceId = instanceId
+      if (index !== undefined) instrumentRow.index = index
+      return instrumentRow
     }
     return readLegacySynthEffect(targetId, db)
   }

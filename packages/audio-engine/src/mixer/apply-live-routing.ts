@@ -68,9 +68,6 @@ const disconnectEdge = (edge: LiveMixerEdgeRuntime) => {
 
 const initializedMasterInputs = new WeakSet<GainNode>()
 
-const sendEdgeId = (sourceId: string, targetId: string, tap?: 'pre-fx' | 'pre-fader' | 'post-fader') =>
-  mixerRouteKey(sourceId, targetId, 'send', tap ?? 'post-fader')
-
 const updateDelay = (delay: DelayNode, seconds: number, currentTime: number) => {
   delay.delayTime.cancelScheduledValues(currentTime)
   delay.delayTime.setValueAtTime(delay.delayTime.value, currentTime)
@@ -164,7 +161,7 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
         : send.tap === 'pre-fader'
           ? nodes.postFx
           : nodes.output
-      const edgeId = sendEdgeId(channelId, send.targetId, send.tap)
+      const edgeId = mixerRouteKey(channelId, send.targetId, 'send', send.tap)
       activeEdgeIds.add(edgeId)
       const delaySeconds = (timing.routeDelayFrames.get(edgeId) ?? 0) / options.sampleRate
       const sendGainValue = resolvedChannel?.channel.muted ? 0 : send.amount

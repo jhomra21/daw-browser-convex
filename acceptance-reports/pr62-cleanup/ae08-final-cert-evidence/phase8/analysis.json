@@ -20,7 +20,7 @@
         "resumesAtPause": true
       },
       "spawns": 1,
-      "deviceSession": "32212-0x7a34c84000",
+      "deviceSession": "18663-0x757acb8000",
       "publications": [
         {
           "revision": 4,
@@ -30,8 +30,8 @@
       ],
       "lifecycle": [],
       "owner": {
-        "pid": 32212,
-        "captureId": 4
+        "pid": 18663,
+        "captureId": 3
       },
       "analyzerSha256": "73e88c056ea480cf1ca7922d6c8569841dce78b84cfee34062b513300af6e2c9"
     },
@@ -51,7 +51,7 @@
         "resumesAtPause": true
       },
       "spawns": 1,
-      "deviceSession": "32360-0x78b6cc0000",
+      "deviceSession": "18826-0x79a6cdc000",
       "publications": [
         {
           "revision": 4,
@@ -61,8 +61,8 @@
       ],
       "lifecycle": [],
       "owner": {
-        "pid": 32360,
-        "captureId": 3
+        "pid": 18826,
+        "captureId": 4
       },
       "analyzerSha256": "73e88c056ea480cf1ca7922d6c8569841dce78b84cfee34062b513300af6e2c9"
     }

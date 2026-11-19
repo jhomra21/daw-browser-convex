@@ -20,6 +20,7 @@ import type {
   ReverbParamsInput,
   SaturatorParams,
   SaturatorParamsInput,
+  SpectrumParamsEnvelope,
   TremoloParamsEnvelope,
   UtilityParamsEnvelope,
 } from './effects-params'
@@ -132,6 +133,7 @@ type SharedModulationEffectPayload =
   | { effect: 'autopan'; instanceId: string; params: AutoPanParamsEnvelope }
   | { effect: 'ensemble'; instanceId: string; params: EnsembleParamsEnvelope }
   | { effect: 'lofi'; instanceId: string; params: LoFiParamsEnvelope }
+  | { effect: 'spectrum'; instanceId: string; params: SpectrumParamsEnvelope }
 
 type SharedModulationEffectEnvelope =
   | { effect: 'autofilter'; params: AutoFilterParamsEnvelope }
@@ -142,6 +144,7 @@ type SharedModulationEffectEnvelope =
   | { effect: 'autopan'; params: AutoPanParamsEnvelope }
   | { effect: 'ensemble'; params: EnsembleParamsEnvelope }
   | { effect: 'lofi'; params: LoFiParamsEnvelope }
+  | { effect: 'spectrum'; params: SpectrumParamsEnvelope }
 
 export type SharedTimelineOperation =
   | { kind: 'tracks.create'; payload: { name?: string; index?: number; kind?: string; channelRole?: string; collapsed?: boolean; color?: string; operationId?: string } }
@@ -340,6 +343,7 @@ const readModulationEnvelope = (effect: JsonValue, value: JsonValue): SharedModu
   if (effect === 'autopan') return { effect, params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(value) }
   if (effect === 'ensemble') return { effect, params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(value) }
   if (effect === 'lofi') return { effect, params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(value) }
+  if (effect === 'spectrum') return { effect, params: AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(value) }
   return null
 }
 
@@ -906,6 +910,7 @@ export const normalizeSharedUngroupRestoreEffects = (value: JsonValue): SharedUn
         case 'tremolo':
         case 'autopan':
         case 'ensemble':
+        case 'spectrum':
           return readModulationEnvelope(effect.type, effect.params)?.params ?? null
         case 'gate':
           return readProcessorEnvelope('gate', effect.params)

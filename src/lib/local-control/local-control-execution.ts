@@ -273,7 +273,7 @@ const localEffectKind = (kind: string, master = false): LocalEffectKind | undefi
     || kind === 'compressor' || kind === 'saturator' || kind === 'limiter' || kind === 'lofi'
     || kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo'
     || kind === 'autopan' || kind === 'ensemble' || kind === 'delay' || kind === 'reverb'
-    || kind === 'spectral'
+    || kind === 'spectral' || kind === 'spectrum'
     ? master ? `master-${kind}` : kind
     : undefined
 }

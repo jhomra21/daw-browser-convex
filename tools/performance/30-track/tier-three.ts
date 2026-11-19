@@ -272,12 +272,12 @@ export const runTierThree = async (
   if (!tier2Track) throw new Error("Tier 2 instrument track missing after insertion.")
   const processor = snapshot.processors.find((entry) => "trackId" in entry.target
     && entry.target.trackId === tier2Track.id && entry.processor.kind === "external-vst3"
-    && entry.processor.params.identity.name === "ValhallaSupermassive")
+    && "identity" in entry.processor.params && entry.processor.params.identity.name === "ValhallaSupermassive")
   if (!processor) throw new Error("ValhallaSupermassive insertion was not persisted.")
 
   const instances = data(desktopHostVstInstancesResultSchemaV1, await command(["host", "vst-instances", projectId]))
   const instance = instances.instances.find((entry) => entry.targetId === tier2Track.id
-    && entry.identity.classId === processor.processor.params.identity.classId
+    && "identity" in processor.processor.params && entry.identity.classId === processor.processor.params.identity.classId
     && entry.identity.name === "ValhallaSupermassive")
   if (!instance || instance.health.state !== "ready") throw new Error("Real Valhalla worker is not ready.")
   const parameters = data(desktopHostVstParametersResultSchemaV1, await command(["host", "vst-parameters", projectId, instance.instanceId]))

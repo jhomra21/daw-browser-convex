@@ -34,6 +34,7 @@ import Flanger from "~/components/effects/Flanger";
 import Phaser from "~/components/effects/Phaser";
 import Tremolo from "~/components/effects/Tremolo";
 import Spectral from "~/components/effects/Spectral";
+import Spectrum from "~/components/effects/Spectrum";
 import Synth from "~/components/effects/Synth";
 import DrumRack from "~/components/effects/DrumRack";
 import Sampler from "~/components/effects/Sampler";
@@ -566,6 +567,7 @@ const createAudioEffectContextMenuControls = (
   if (effect.kind === "autopan") return { label: audioEffectLabel("autopan"), enabled: () => AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(effectParamsInput(audioEffects.paramsForInstance(effect))).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.autopan.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.autopan.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams({})), remove };
   if (effect.kind === "ensemble") return { label: audioEffectLabel("ensemble"), enabled: () => AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(effectParamsInput(audioEffects.paramsForInstance(effect))).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.ensemble.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.ensemble.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams({})), remove };
   if (effect.kind === "lofi") return { label: audioEffectLabel("lofi"), enabled: () => AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(effectParamsInput(audioEffects.paramsForInstance(effect))).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.lofi.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.lofi.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams({})), remove };
+  if (effect.kind === "spectrum") return { label: audioEffectLabel("spectrum"), enabled: () => AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(effectParamsInput(audioEffects.paramsForInstance(effect))).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.spectrum.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.spectrum.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.spectrum.createDefaultParams()), remove };
   if (effect.kind === "spectral") return { label: audioEffectLabel("spectral"), enabled: () => normalizeSpectralParamsEnvelope(effectParamsInput(audioEffects.paramsForInstance(effect))).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.spectral.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.spectral.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.spectral.createDefaultParams()), remove };
   return {
     label: audioEffectLabel("reverb"),
@@ -676,6 +678,9 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
       <Show when={displayedParams()}>
         {(value) => <Delay params={normalizeDelayParams(effectParamsInput(value()))} onChange={(updates) => props.audioEffects.delay.changeInstance(props.effect.id, (prev) => normalizeDelayParams({ ...prev, ...updates }))} onToggleEnabled={(enabled) => props.audioEffects.delay.changeInstance(props.effect.id, (prev) => ({ ...prev, enabled }))} onReset={() => props.audioEffects.delay.changeInstance(props.effect.id, () => normalizeDelayParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}
       </Show>
+      </Match>
+      <Match when={props.effect.kind === "spectrum"}>
+        <Show when={displayedParams()}>{(value) => <Spectrum params={AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(value()).state} frame={props.spectrum} onChange={(updates) => props.audioEffects.spectrum.changeInstance(props.effect.id, (prev) => AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.spectrum.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.spectrum.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.spectrum.createDefaultParams())} />}</Show>
       </Match>
       <Match when={props.effect.kind === "spectral"}>
       <Show when={displayedParams()}>

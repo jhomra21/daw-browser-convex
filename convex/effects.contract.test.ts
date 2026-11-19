@@ -20,6 +20,13 @@ describe('audio effect persistence instance contract', () => {
     expect(() => validateAudioEffectInstanceId(rows, 'shared-instance', 'utility')).not.toThrow()
   })
 
+  test('accepts a Spectrum device as a canonical effect kind with the usual instance identity rules', () => {
+    const rows = [{ _id: 'effect-1', type: 'spectrum', instanceId: 'spectrum-1' }]
+
+    expect(() => validateAudioEffectInstanceId(rows, 'spectrum-1', 'spectrum')).not.toThrow()
+    expect(() => validateAudioEffectInstanceId(rows, 'spectrum-1', 'utility')).toThrow('unique per target')
+  })
+
   test('accepts only canonical restore-chain audio effect fields', () => {
     const audioEffects = restoreChainArgsValidator.audioEffects
 

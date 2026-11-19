@@ -93,6 +93,7 @@ const ensemble = envelope(z.object({
   enabled: z.boolean(), voices: z.literal(3), delayMs: finiteNumber, depthMs: finiteNumber,
   rateHz: finiteNumber, spread: finiteNumber, mix: finiteNumber,
 }).strict())
+const spectrum = envelope(z.object({ enabled: z.boolean(), view: z.enum(['spectrum', 'spectrogram', 'both']) }).strict())
 const lofi = envelope(z.object({
   enabled: z.boolean(), bitDepth: finiteNumber, sampleRateRatio: finiteNumber, jitter: finiteNumber,
   noiseDb: finiteNumber, quantization: z.enum(['round', 'floor', 'truncate']),
@@ -200,6 +201,7 @@ export const audioEffectAddPayloadSchema = z.discriminatedUnion('effectKind', [
   z.object({ effectKind: z.literal('delay'), params: delay.optional() }).strict(),
   z.object({ effectKind: z.literal('reverb'), params: reverb.optional() }).strict(),
   z.object({ effectKind: z.literal('spectral'), params: spectral.optional() }).strict(),
+  z.object({ effectKind: z.literal('spectrum'), params: spectrum.optional() }).strict(),
 ])
 
 export const instrumentAddPayloadSchema = z.discriminatedUnion('instrumentKind', [
@@ -227,6 +229,7 @@ export const persistedProcessorSnapshotSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('delay'), params: delay }).strict(),
   z.object({ kind: z.literal('reverb'), params: reverb }).strict(),
   z.object({ kind: z.literal('spectral'), params: spectral }).strict(),
+  z.object({ kind: z.literal('spectrum'), params: spectrum }).strict(),
   z.object({ kind: z.literal('synth'), params: z.union([synth, legacySynth]) }).strict(),
   z.object({ kind: z.literal('drum-rack'), params: drumRack }).strict(),
   z.object({ kind: z.literal('sampler'), params: sampler }).strict(),

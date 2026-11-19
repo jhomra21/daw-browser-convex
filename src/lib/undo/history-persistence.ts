@@ -615,6 +615,7 @@ export const persistHistoryEffectParams = async (
     case "master-tremolo":
     case "master-autopan":
     case "master-ensemble":
+    case "master-spectrum":
     case "master-lofi": {
       const effect = entry.data.effect.slice(7);
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
@@ -626,6 +627,7 @@ export const persistHistoryEffectParams = async (
       else if (effect === "autopan") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(params), instanceId: instanceId } });
       else if (effect === "ensemble") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(params), instanceId: instanceId } });
       else if (effect === "lofi") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(params), instanceId: instanceId } });
+      else if (effect === "spectrum") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(params), instanceId: instanceId } });
       return;
     }
     case "master-eq": {
@@ -685,6 +687,7 @@ export const persistHistoryEffectParams = async (
     case "tremolo":
     case "autopan":
     case "ensemble":
+    case "spectrum":
     case "lofi": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       const instanceId = assertDefined(entry.data.instanceId, "Effect history requires an instance ID");
@@ -695,6 +698,7 @@ export const persistHistoryEffectParams = async (
       else if (entry.data.effect === "tremolo") await publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId: targetId, effect: "tremolo", params: AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(params), instanceId } });
       else if (entry.data.effect === "autopan") await publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId: targetId, effect: "autopan", params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(params), instanceId } });
       else if (entry.data.effect === "ensemble") await publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId: targetId, effect: "ensemble", params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(params), instanceId } });
+      else if (entry.data.effect === "spectrum") await publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId: targetId, effect: "spectrum", params: AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(params), instanceId } });
       else await publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId: targetId, effect: "lofi", params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(params), instanceId } });
       return;
     }

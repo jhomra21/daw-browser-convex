@@ -1,9 +1,8 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js'
+import type { SpectrumView as SpectrumViewMode } from '@daw-browser/shared'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import { DeviceToggleButton } from '~/components/ui/device-control'
 import { createSpectrogramHistory, drawSpectrumCurve } from '~/lib/spectrum-render'
-
-export type SpectrumViewMode = 'spectrum' | 'spectrogram' | 'both'
 
 const VIEW_OPTIONS: readonly { value: SpectrumViewMode; label: string }[] = [
   { value: 'spectrum', label: 'Spectrum' },

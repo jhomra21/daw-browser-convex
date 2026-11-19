@@ -1011,8 +1011,10 @@ export const normalizeLoFiParamsEnvelope = (value: JsonValue): LoFiParamsEnvelop
   }
 }
 
-export type AudioEffectKind = 'utility' | 'eq' | 'autofilter' | 'gate' | 'compressor' | 'saturator' | 'lofi' | 'limiter' | 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' | 'delay' | 'reverb' | 'spectral'
+export type AudioEffectKind = 'utility' | 'eq' | 'autofilter' | 'gate' | 'compressor' | 'saturator' | 'lofi' | 'limiter' | 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' | 'delay' | 'reverb' | 'spectral' | 'spectrum'
 export type PlannedAudioEffectKind = AudioEffectKind
+// The Spectrum device only observes: it has no processor in any audio graph.
+export type DspAudioEffectKind = Exclude<AudioEffectKind, 'spectrum'>
 export type MasterAudioEffectKind = `master-${AudioEffectKind}`
 export type AudioEffectInstance = {
   id: string
@@ -1147,6 +1149,25 @@ type EnsembleAudioEffectContract = {
   normalizeParams: (params: JsonValue) => EnsembleParamsEnvelope
   serializeParams: (params: EnsembleParamsEnvelope) => string
 }
+export type SpectrumView = 'spectrum' | 'spectrogram' | 'both'
+export type SpectrumParams = { enabled: boolean; view: SpectrumView }
+export type SpectrumParamsEnvelope = ProcessorStateEnvelope<SpectrumParams>
+export const createDefaultSpectrumParams = (): SpectrumParams => ({ enabled: true, view: 'both' })
+export const normalizeSpectrumParamsEnvelope = (value: JsonValue): SpectrumParamsEnvelope => normalizeModulationEnvelope(value, (state) => ({
+  enabled: isJsonBoolean(state.enabled) ? state.enabled : true,
+  view: state.view === 'spectrum' || state.view === 'spectrogram' ? state.view : 'both',
+}))
+export const mergeSpectrumParamsEnvelope = (update: JsonValue, existing?: JsonValue): SpectrumParamsEnvelope => normalizeSpectrumParamsEnvelope({
+  version: 1,
+  state: { ...normalizeSpectrumParamsEnvelope(existing ?? null).state, ...readObject(readObject(update).state) },
+})
+type SpectrumAudioEffectContract = {
+  kind: 'spectrum'
+  masterKind: 'master-spectrum'
+  createDefaultParams: () => SpectrumParamsEnvelope
+  normalizeParams: (params: JsonValue) => SpectrumParamsEnvelope
+  serializeParams: (params: SpectrumParamsEnvelope) => string
+}
 type AudioEffectContractByKind = {
   utility: UtilityAudioEffectContract
   eq: EqAudioEffectContract
@@ -1159,6 +1180,7 @@ type AudioEffectContractByKind = {
   delay: DelayAudioEffectContract
   reverb: ReverbAudioEffectContract
   spectral: SpectralAudioEffectContract
+  spectrum: SpectrumAudioEffectContract
   chorus: ChorusAudioEffectContract
   flanger: FlangerAudioEffectContract
   phaser: PhaserAudioEffectContract
@@ -1253,6 +1275,7 @@ export const AUDIO_EFFECT_CONTRACTS = {
     normalizeParams: normalizeSpectralParamsEnvelope,
     serializeParams: serializeSpectralParams,
   },
+  spectrum: { kind: 'spectrum', masterKind: 'master-spectrum', createDefaultParams: () => ({ version: 1, state: createDefaultSpectrumParams() }), normalizeParams: normalizeSpectrumParamsEnvelope, serializeParams: (params: SpectrumParamsEnvelope) => JSON.stringify(normalizeSpectrumParamsEnvelope(params)) },
 } satisfies AudioEffectContractByKind
 
 export const normalizeArpeggiatorParams = (params: {
@@ -1271,11 +1294,15 @@ export const normalizeArpeggiatorParams = (params: {
   hold: params.hold,
 })
 
-const AUDIO_EFFECT_CATALOG_ORDER: PlannedAudioEffectKind[] = ['utility', 'eq', 'autofilter', 'gate', 'compressor', 'saturator', 'limiter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'delay', 'reverb', 'spectral']
+const AUDIO_EFFECT_CATALOG_ORDER: PlannedAudioEffectKind[] = ['utility', 'eq', 'autofilter', 'gate', 'compressor', 'saturator', 'limiter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'delay', 'reverb', 'spectral', 'spectrum']
 export const AUDIO_EFFECT_ORDER: AudioEffectKind[] = AUDIO_EFFECT_CATALOG_ORDER
 
 export function isAudioEffectKind(value: JsonValue): value is AudioEffectKind {
   return AUDIO_EFFECT_ORDER.some((kind) => value === kind)
+}
+
+export function isDspAudioEffectKind(value: JsonValue): value is DspAudioEffectKind {
+  return isAudioEffectKind(value) && value !== 'spectrum'
 }
 
 export function normalizeAudioEffectOrder(order: readonly JsonValue[], enabled: readonly AudioEffectKind[]): AudioEffectKind[] {

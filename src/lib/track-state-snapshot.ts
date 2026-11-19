@@ -66,6 +66,7 @@ const snapshotAudioEffectRow = (row: EffectRowSnapshotInput): TrackAudioEffectSn
     case 'tremolo': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(params) }
     case 'autopan': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(params) }
     case 'ensemble': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(params) }
+    case 'spectrum': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(params) }
   }
 }
 

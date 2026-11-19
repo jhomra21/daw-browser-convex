@@ -4867,6 +4867,125 @@ void test_synth_filter_modes_and_partition_invariance() {
 }
 
 
+// Windowed power spectrum of a block whose length is a power of two.
+std::vector<double> hann_power_spectrum(const float *samples, size_t size) {
+  std::vector<double> re(size), im(size, 0.0);
+  for (size_t index = 0; index < size; ++index) {
+    re[index] = samples[index] * (0.5 - 0.5 * std::cos(2.0 * M_PI * static_cast<double>(index) / static_cast<double>(size)));
+  }
+  for (size_t index = 1, other = 0; index < size; ++index) {
+    size_t bit = size >> 1;
+    for (; other & bit; bit >>= 1) other ^= bit;
+    other ^= bit;
+    if (index < other) std::swap(re[index], re[other]);
+  }
+  for (size_t length = 2; length <= size; length <<= 1) {
+    const double step = -2.0 * M_PI / static_cast<double>(length);
+    for (size_t start = 0; start < size; start += length) {
+      for (size_t k = 0; k < length / 2; ++k) {
+        const double wr = std::cos(step * static_cast<double>(k)), wi = std::sin(step * static_cast<double>(k));
+        const size_t a = start + k, b = start + k + length / 2;
+        const double tr = re[b] * wr - im[b] * wi, ti = re[b] * wi + im[b] * wr;
+        re[b] = re[a] - tr; im[b] = im[a] - ti;
+        re[a] += tr; im[a] += ti;
+      }
+    }
+  }
+  std::vector<double> power(size / 2);
+  for (size_t index = 0; index < power.size(); ++index) power[index] = re[index] * re[index] + im[index] * im[index];
+  return power;
+}
+
+struct OscillatorMeasurement {
+  double alias_db = 0.0;
+  double rms_error_db = 0.0;
+  double mean = 0.0;
+  double periods = 0.0;
+  float peak = 0.0F;
+};
+
+// One held voice with the filter off: the oscillator is the only thing heard.
+OscillatorMeasurement measure_oscillator(uint32_t waveform, uint32_t note) {
+  constexpr uint32_t kRate = 48000, kBlock = 1024, kSkip = 4800, kAnalysis = 32768;
+  constexpr float kLevel = 0.5F;
+  const daw_audio_synth_state synth{
+    .version = 1, .seed = 1U,
+    .oscillators = {
+      {.enabled = 1, .waveform = waveform, .level = kLevel, .octave = 0, .semitone = 0, .detune_cents = 0.0F},
+      {.enabled = 0, .waveform = DAW_AUDIO_SYNTH_WAVEFORM_SINE, .level = 0.0F, .octave = 0, .semitone = 0, .detune_cents = 0.0F},
+    },
+    .filter_enabled = 0, .filter_cutoff_hz = 1000.0F, .filter_resonance = 0.707F, .amp_attack_ms = 0.0F, .amp_decay_ms = 0.0F, .amp_sustain = 1.0F, .amp_release_ms = 4.0F,
+    .lfo_enabled = 0, .lfo_rate_hz = 1.0F, .output_gain = 1.0F, .output_pan = 0.0F,
+  };
+  const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
+    {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_INSTRUMENT, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0,
+      .instrument = {.kind = DAW_AUDIO_INSTRUMENT_KIND_SYNTH, .version = 1, .voice_capacity = 1,
+        .parameter_count = 0, .parameter_targets = {}}},
+    {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
+  }};
+  const std::array<daw_audio_graph_edge_descriptor, 1> edges{{
+    {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
+  }};
+  daw_audio_core_handle core = create_core_at_rate(kBlock, 2, 1, kRate);
+  prepare_graph(core, 1, nodes.data(), nodes.size(), edges.data(), edges.size());
+  expect(daw_audio_core_configure_synth(core, 1, &synth), DAW_AUDIO_CORE_OK);
+  const daw_audio_transport_state transport{.epoch = 1, .running = 1, .frame = 0};
+  expect(daw_audio_core_set_transport(core, &transport), DAW_AUDIO_CORE_OK);
+  const daw_audio_instrument_event on{
+    .node_id = 1, .note_id = 1, .sequence = 1, .epoch = 1, .frame_offset = 0,
+    .type = DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON, .channel = 0, .note = note, .value = 1.0F};
+  std::vector<float> rendered(kSkip + kAnalysis + kBlock), scratch(kBlock);
+  for (size_t offset = 0; offset < rendered.size(); offset += kBlock) {
+    float *outputs[]{rendered.data() + offset, scratch.data()};
+    const daw_audio_core_process_block block{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = kBlock, .channel_count = 2,
+      .input_bus_count = 0, .inputs = nullptr, .outputs = outputs, .graph_revision = 1,
+      .transport_epoch = 1, .instrument_event_count = offset == 0 ? 1u : 0u, .instrument_events = offset == 0 ? &on : nullptr,
+    };
+    expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+  }
+  daw_audio_core_destroy(core);
+  const float *window = rendered.data() + kSkip;
+  const double frequency = 440.0 * std::pow(2.0, (static_cast<double>(note) - 69.0) / 12.0);
+  const std::vector<double> power = hann_power_spectrum(window, kAnalysis);
+  const double bin_hz = static_cast<double>(kRate) / kAnalysis;
+  std::vector<bool> harmonic(power.size(), false);
+  for (double partial = frequency; partial < 8000.0 + 6.0 * bin_hz; partial += frequency) {
+    const long center = std::lround(partial / bin_hz);
+    for (long bin = center - 6; bin <= center + 6; ++bin) if (bin >= 0 && bin < static_cast<long>(power.size())) harmonic[bin] = true;
+  }
+  double alias = 0.0, partials = 0.0;
+  for (size_t bin = 6; bin < static_cast<size_t>(8000.0 / bin_hz); ++bin) (harmonic[bin] ? partials : alias) += power[bin];
+  double energy = 0.0, sum = 0.0;
+  float peak = 0.0F;
+  for (size_t index = 0; index < kAnalysis; ++index) {
+    energy += static_cast<double>(window[index]) * window[index]; sum += window[index];
+    peak = std::max(peak, std::fabs(window[index]));
+  }
+  const double expected_rms = waveform == DAW_AUDIO_SYNTH_WAVEFORM_SQUARE ? kLevel
+    : waveform == DAW_AUDIO_SYNTH_WAVEFORM_SAWTOOTH ? kLevel / std::sqrt(3.0) : kLevel / std::sqrt(3.0);
+  return {
+    .alias_db = 10.0 * std::log10(alias / partials),
+    .rms_error_db = 20.0 * std::log10(std::sqrt(energy / kAnalysis) / expected_rms),
+    .mean = sum / kAnalysis, .periods = frequency * kAnalysis / kRate, .peak = peak,
+  };
+}
+
+void test_synth_saw_and_square_are_band_limited() {
+  for (const uint32_t waveform : {DAW_AUDIO_SYNTH_WAVEFORM_SAWTOOTH, DAW_AUDIO_SYNTH_WAVEFORM_SQUARE, DAW_AUDIO_SYNTH_WAVEFORM_TRIANGLE}) {
+    for (const uint32_t note : {45u, 69u, 81u, 93u}) {
+      const OscillatorMeasurement measured = measure_oscillator(waveform, note);
+      std::fprintf(stderr, "oscillator waveform=%u note=%u alias=%.1f dB rms_error=%.2f dB mean=%.5f peak=%.3f\n",
+        waveform, note, measured.alias_db, measured.rms_error_db, measured.mean, measured.peak);
+      assert(measured.alias_db <= -45.0);
+      assert(std::fabs(measured.rms_error_db) <= 0.5);
+      assert(std::fabs(measured.mean) <= 0.5 / measured.periods + 0.002);
+    }
+  }
+}
+
 void test_sampler_and_drum_rack_asset_voices() {
   daw_audio_core_handle core = create_core(8, 2, 2);
   const std::array<daw_audio_graph_node_descriptor, 3> nodes{{
@@ -10914,6 +11033,7 @@ int main(int argc, char **argv) {
   test_instrument_reindex_retains_sustain_and_live_parameter_override();
   test_instrument_synthesis_lifecycle_determinism_and_boundaries();
   test_synth_filter_modes_and_partition_invariance();
+  test_synth_saw_and_square_are_band_limited();
   test_sampler_and_drum_rack_asset_voices();
   test_granular_asset_seed_freeze_and_note_ownership();
   test_recording_capture_boundaries_ownership_and_overflow();

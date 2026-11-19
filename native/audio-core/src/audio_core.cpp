@@ -4370,6 +4370,32 @@ float waveform(uint32_t shape, float phase) {
   return std::sin(6.2831853071795864769F * phase);
 }
 
+// Two-sample polynomial band-limited step: the correction for a unit discontinuity
+// at phase 0, given the per-sample phase increment.
+float poly_blep(float phase, float increment) {
+  if (phase < increment) {
+    const float x = phase / increment;
+    return x + x - x * x - 1.0F;
+  }
+  if (phase > 1.0F - increment) {
+    const float x = (phase - 1.0F) / increment;
+    return x * x + x + x + 1.0F;
+  }
+  return 0.0F;
+}
+
+// The audio oscillator shapes: saw and square are band-limited, the rest are as in waveform().
+// An LFO stays a naive shape, so it keeps calling waveform().
+float oscillator_waveform(uint32_t shape, float phase, float increment) {
+  const float step = std::fmin(increment, 0.5F);
+  if (shape == DAW_AUDIO_SYNTH_WAVEFORM_SAWTOOTH) return waveform(shape, phase) - poly_blep(phase, step);
+  if (shape == DAW_AUDIO_SYNTH_WAVEFORM_SQUARE) {
+    const float falling_phase = phase + 0.5F - std::floor(phase + 0.5F);
+    return waveform(shape, phase) + poly_blep(phase, step) - poly_blep(falling_phase, step);
+  }
+  return waveform(shape, phase);
+}
+
 float envelope_step(float level, uint32_t *stage, bool released, float attack, float decay, float sustain, float release) {
   if (released) {
     *stage = 3;
@@ -4566,7 +4592,7 @@ void render_instrument_frame(
       const float increment = base_frequency * std::pow(2.0F, semitones / 12.0F) / static_cast<float>(sample_rate_hz);
       voice.oscillator_phase[oscillator_index] += increment;
       voice.oscillator_phase[oscillator_index] -= std::floor(voice.oscillator_phase[oscillator_index]);
-      sample += waveform(oscillator.waveform, voice.oscillator_phase[oscillator_index]) * oscillator.level;
+      sample += oscillator_waveform(oscillator.waveform, voice.oscillator_phase[oscillator_index], increment) * oscillator.level;
     }
     float cutoff = synth.filter_cutoff_hz;
     cutoff *= std::pow(2.0F, (static_cast<float>(voice.note) - 60.0F) / 12.0F * synth.filter_key_tracking

@@ -402,6 +402,8 @@ Report callback time and peak memory, not just wall-clock edit latency. Save a r
 
 **Size/risk:** L (5–8 days), medium execution and high discovery risk. Analyzer and report review can run beside the matrix in different files. Do not run two packaged runs on the same profile or device capture.
 
+**Status (2026-11-18): packaged-certified.** `--phase 9 --matrix cert` on the phase 10 package: `AE-08 phase 9 PASS: 84 launches, 0 failed, 663 judged edits, 0 failed`. Every row of the preset has a judge (`fb049f20`, `2ecfb8be`). Report: `acceptance-reports/pr62-cleanup/AE08-FINAL-CERT.md`. The overnight `--matrix full --repetitions 100` run and the soak remain outside the certifying budget and have not been run.
+
 ## Phase 10: Remove edit restart path and document retained lifecycle
 
 **Failure modes first → guards**
@@ -423,6 +425,8 @@ Update `docs/native-vst3.md` (attachment, worker, editor, and latency behavior) 
 **Verification:** shared checks, the native harness, both Chromium files, the package, and runner `--phase 10`. Rerun the full matrix only if cleanup changes behavior. Audit the edit call paths in source to prove there are no configure, start, stop, or teardown calls, no continuity fallback, and no public catalog additions.
 
 **Size/risk:** M (2–4 days), medium. Sequential after phase 9. No parallel edits to files being cleaned.
+
+**Status (2026-11-18): complete.** The edit restart path is gone on `pr62-cleanup`: `canAdoptInPlace`, `rememberInstrumentParameters`, the playing-rebuild tail, the v1 portable host and `daw_audio_core_retire` are removed, and every lifecycle rebuild names its transport intent. Kept on their own paths: the paused browser rebuild a project switch or a suspended-to-ready lifecycle needs, native seek, the refused portable locate, retried instrument preparation, first configure and start, device and project changes, Stop and teardown, and host-loss recovery. A locate during a resuming device-move rebuild is now where the move resumes (`0765d0c3`). Certification: FAST-CERT `--full` PASS (records 81 and 82), all browser suites, the packaged phase 8 rows (2/2) and the phase 9 matrix on the same package. The packaged proof is the phase 8 and phase 9 runners, so no separate `--phase 10` runner was added. `docs/native-vst3.md` "Live graph edits" documents the retained lifecycle.
 
 ## Dependencies, parallelism and completion criteria
 

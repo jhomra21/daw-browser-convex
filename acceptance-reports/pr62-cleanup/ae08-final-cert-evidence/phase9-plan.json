@@ -1,0 +1,191 @@
+{
+  "preset": "cert",
+  "repetitionFlag": null,
+  "vstRepetitionFlag": null,
+  "modeledMinutes": 28.802500000000006,
+  "budgetMinutes": 70,
+  "launches": 84,
+  "rows": [
+    {
+      "row": "attach-remove-long-latency",
+      "repetitions": 30,
+      "stepsPerLaunch": 30,
+      "modeledMinutes": 0.84
+    },
+    {
+      "row": "fft-transition",
+      "repetitions": 30,
+      "stepsPerLaunch": 30,
+      "modeledMinutes": 0.725
+    },
+    {
+      "row": "raise-lower-burst",
+      "repetitions": 30,
+      "stepsPerLaunch": 30,
+      "modeledMinutes": 0.725
+    },
+    {
+      "row": "lookahead-transition",
+      "repetitions": 30,
+      "stepsPerLaunch": 30,
+      "modeledMinutes": 1.0066666666666666
+    },
+    {
+      "row": "undo-redo-burst",
+      "repetitions": 30,
+      "stepsPerLaunch": 32,
+      "modeledMinutes": 1.055
+    },
+    {
+      "row": "delete-while-starting",
+      "repetitions": 15,
+      "stepsPerLaunch": 1,
+      "modeledMinutes": 1.9250000000000005
+    },
+    {
+      "row": "paged-playback",
+      "repetitions": 30,
+      "stepsPerLaunch": 30,
+      "modeledMinutes": 1.0066666666666666
+    },
+    {
+      "row": "held-note-unrelated-edit",
+      "repetitions": 30,
+      "stepsPerLaunch": 30,
+      "modeledMinutes": 1.0066666666666666
+    },
+    {
+      "row": "tempo-burst",
+      "repetitions": 30,
+      "stepsPerLaunch": 30,
+      "modeledMinutes": 1.0066666666666666
+    },
+    {
+      "row": "manual-automation-override",
+      "repetitions": 30,
+      "stepsPerLaunch": 30,
+      "modeledMinutes": 0.84
+    },
+    {
+      "row": "sustained-live-midi",
+      "repetitions": 30,
+      "stepsPerLaunch": 30,
+      "modeledMinutes": 0.84
+    },
+    {
+      "row": "record-target-guard",
+      "repetitions": 15,
+      "stepsPerLaunch": 1,
+      "modeledMinutes": 2.725000000000001
+    },
+    {
+      "row": "unaffected-input",
+      "repetitions": 15,
+      "stepsPerLaunch": 1,
+      "modeledMinutes": 2.75
+    },
+    {
+      "row": "vst-remove-undo",
+      "repetitions": 40,
+      "stepsPerLaunch": 40,
+      "modeledMinutes": 1.395
+    },
+    {
+      "row": "vst-latency-switch",
+      "repetitions": 20,
+      "stepsPerLaunch": 20,
+      "modeledMinutes": 0.6716666666666666
+    },
+    {
+      "row": "open-editor",
+      "repetitions": 1,
+      "stepsPerLaunch": 2,
+      "modeledMinutes": 0.16333333333333336
+    },
+    {
+      "row": "faulty-plugin",
+      "repetitions": 1,
+      "stepsPerLaunch": 1,
+      "modeledMinutes": 0.13916666666666666
+    },
+    {
+      "row": "trust-negative",
+      "repetitions": 1,
+      "stepsPerLaunch": 1,
+      "modeledMinutes": 0.13916666666666666
+    },
+    {
+      "row": "instrument-insert",
+      "repetitions": 30,
+      "stepsPerLaunch": 30,
+      "modeledMinutes": 0.84
+    },
+    {
+      "row": "effect-reorder",
+      "repetitions": 30,
+      "stepsPerLaunch": 30,
+      "modeledMinutes": 0.84
+    },
+    {
+      "row": "polyphony-down-held-chord",
+      "repetitions": 30,
+      "stepsPerLaunch": 30,
+      "modeledMinutes": 0.84
+    },
+    {
+      "row": "asset-swap-held-note",
+      "repetitions": 30,
+      "stepsPerLaunch": 30,
+      "modeledMinutes": 0.84
+    },
+    {
+      "row": "held-note-sampler",
+      "repetitions": 30,
+      "stepsPerLaunch": 30,
+      "modeledMinutes": 0.84
+    },
+    {
+      "row": "held-note-drum-rack",
+      "repetitions": 30,
+      "stepsPerLaunch": 30,
+      "modeledMinutes": 0.84
+    },
+    {
+      "row": "held-note-granular",
+      "repetitions": 30,
+      "stepsPerLaunch": 30,
+      "modeledMinutes": 0.84
+    },
+    {
+      "row": "record-target-reroute",
+      "repetitions": 15,
+      "stepsPerLaunch": 1,
+      "modeledMinutes": 2.850000000000001
+    },
+    {
+      "row": "host-failure-during-play",
+      "repetitions": 1,
+      "stepsPerLaunch": 1,
+      "modeledMinutes": 0.13916666666666666
+    },
+    {
+      "row": "pause-stop-during-play-start",
+      "repetitions": 1,
+      "stepsPerLaunch": 6,
+      "modeledMinutes": 0.26
+    },
+    {
+      "row": "output-device-switch",
+      "repetitions": 1,
+      "stepsPerLaunch": 15,
+      "modeledMinutes": 0.4775
+    },
+    {
+      "row": "output-device-switch-instruments",
+      "repetitions": 1,
+      "stepsPerLaunch": 5,
+      "modeledMinutes": 0.23583333333333334
+    }
+  ],
+  "missing": []
+}

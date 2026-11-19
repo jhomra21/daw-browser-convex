@@ -110,6 +110,25 @@ If scanner, fingerprint, manifest, bus, protocol, or worker checks fail, the att
 
 The attachment payload has strict size and count limits. The native decoder also accepts the current parameter-ID extension emitted by the TypeScript serializer. That compatibility fix was required for the real packaged VST campaign.
 
+## Live graph edits
+
+Edits to a playing or paused project do not stop, restart or rebuild the native session. The renderer compiles each edit into a new graph revision. The host prepares it off the audio thread and publishes it at a render-block boundary. The host process, the device session, retained voices and effect tails, and running plug-in workers all stay. Deleted objects fade out over about 5 ms and then stop contributing.
+
+- **Attachment.** Inserting a plug-in while playing starts its worker. The plug-in shows **Starting…** and joins at a scheduled seam once it is validated, its state is restored, and it is ready. The rest of the mix keeps playing meanwhile, and no other worker restarts. Removing a plug-in retires its instance silently.
+- **Latency.** The output latency equals the largest compensated path latency, and every path is compensated to it. The host reports a plug-in's latency plus one transport block. An edit that raises the maximum moves every compensated path once, under a short fade out and back in, at one seam. An edit that lowers it keeps the old latency until the transport stops. Monitored or armed tracks are not compensated. The product maximum is 65,536 frames.
+- **Editor.** The editor runs in its own supervisor. Opening it publishes no graph, and edits made while it is open publish in place without closing it.
+- **Faults.** A plug-in that fails during playback is muted on its own. Unrelated audio keeps sounding, and nothing restarts or falls back to an unchecked path.
+
+These lifecycle events still rebuild or restart a session. Each one runs on its own path, not as part of an edit:
+
+- the first Play, which configures the device and starts the session
+- an output device change, which rebuilds the session once and resumes where it was
+- a project switch or reload
+- host loss, which the supervisor recovers on the next Play
+- a worker crash, recovered as described in [Worker loss and recovery](#worker-loss-and-recovery)
+- explicit Stop, app shutdown, and an audio lifecycle suspend
+
+The [final packaged AE-08 certification](../acceptance-reports/pr62-cleanup/AE08-FINAL-CERT.md) measured this on the AE-08 test plug-in: 663 judged edits across 84 launches, with no edit-caused worker restart and no host stop or start.
 ## Parameters
 
 `host.vst.parameters` reports the parameters the native worker exposes for an attached instance.
@@ -210,5 +229,6 @@ That 2026-08-20 packaged campaign certified re-enable only with stopped transpor
 - Public control does not expose arbitrary plugin insertion, removal, editor control, or worker control.
 - Native Phase A mixdown has packaged real-VST evidence for VST3, track mixer, and built-in processor automation; unsupported targets fail closed.
 - Live-running real-VST re-enable has source/test support but remains pending packaged runtime certification.
+- Live graph edits are certified on the AE-08 test plug-in. Real third-party plug-ins join and retire through the same path, but each plug-in's own startup time and latency reports decide how long **Starting…** lasts.
 - Native stem export with VST3 remains outside the current native offline mixdown path.
 - VST worker processes do not sandbox malicious plugin code.

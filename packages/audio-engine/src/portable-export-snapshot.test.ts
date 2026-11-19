@@ -31,6 +31,7 @@ import {
   type PortableExportSnapshotInput,
 } from './portable-export-snapshot'
 import type { ExportFx } from './export-types'
+import { resolveExportMixerGraph } from './export-mixer-graph'
 import type { PortablePreparedStretchAsset } from './portable-stretch-preparation'
 
 class TestAudioBuffer implements AudioBuffer {
@@ -861,4 +862,34 @@ test('rejects graphs that exceed aggregate audio-core processor capacity', () =>
     reasons: ['The portable core supports at most 512 aggregate graph processors.'],
     diagnostics: [],
   })
+})
+
+test('reports the total output latency of the exact graph it compiled', () => {
+  const source = track([clip()])
+  const limiterFx: ExportFx = {
+    masterFxInstances: [{ id: 'master-limiter', kind: 'limiter', params: { version: 1, state: createDefaultLimiterParams() } }],
+    trackFx: {},
+  }
+  const compileLatency = (patch: Partial<PortableExportSnapshotInput>) => {
+    const result = compilePortableExportSnapshot({
+      tracks: [source],
+      bpm: 120,
+      range: { mode: 'custom', startSec: 0, endSec: 1 },
+      sampleRateHz: 48_000,
+      revision: 1,
+      epoch: 1,
+      firstSequence: 1,
+      ...patch,
+    })
+    if (!result.supported) throw new Error(result.reasons.join(' '))
+    return result.graphLatencyFrames
+  }
+
+  expect(compileLatency({})).toBe(0)
+  expect(compileLatency({ fx: limiterFx })).toBe(240)
+  expect(compileLatency({ fx: limiterFx, externalLatencyFrames: new Map([['track-1', 100]]) })).toBe(340)
+  expect(compileLatency({
+    fx: limiterFx,
+    mixerGraph: resolveExportMixerGraph({ tracks: [source], fx: { masterFxInstances: [], trackFx: {} } }),
+  })).toBe(0)
 })

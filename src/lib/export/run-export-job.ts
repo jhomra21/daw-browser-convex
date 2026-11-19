@@ -707,7 +707,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     if (input.getProjectGeneration && input.getProjectGeneration() !== input.projectGeneration) {
       throw new Error('Project changed while preparing export.')
     }
-    const nativePlan = input.nativeRendererRequired
+    const nativeRender = input.nativeRendererRequired
       ? compileNativeOfflineRenderPlan({
         tracks: nativeTracks,
         fx,
@@ -729,6 +729,8 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         },
       })
       : undefined
+    const nativePlan = nativeRender?.plan
+    let latencyFrames = nativeRender?.latencyFrames ?? 0
     outputTarget = await input.outputTargets.createMixdownTarget({
       projectId,
       localProject: Boolean(localProjectId),
@@ -759,14 +761,14 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         preparedStretchRepository: portableRepository,
         projectGeneration: input.projectGeneration,
         signal: input.signal,
-      }, async (index, startFrame, pcm) => {
+      }, async (index, startFrame, pcm, totalFrames) => {
         if (!portableSpool) {
           const spools = createNativeOfflinePcmSpool()
           const session = await spools.createSession({
             sessionId: `portable-${crypto.randomUUID()}`,
             sampleRate: input.render.sampleRate,
             channelCount: input.render.numberOfChannels,
-            totalFrames: Math.ceil((renderRange.endSec - renderRange.startSec) * input.render.sampleRate),
+            totalFrames,
           })
           portableSpool = session
           nativeSpool = portableSpool
@@ -784,6 +786,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       })
       if (!portableMixdown) throw new Error('Portable timeline export is unavailable for this project.')
       portableWorkerCleanup = portableMixdown.cleanup
+      latencyFrames = portableMixdown.latencyFrames
     }
     if (nativePlan || portableSpool) {
       const nativeRenderer = input.nativeOfflinePcmRenderer
@@ -895,6 +898,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       }
       const processed = await processNativeOfflinePcmSpool({
         spool,
+        latencyFrames,
         sourceDurationSec: sourceBounds.endSec - sourceBounds.startSec,
         render: input.render,
         signal: input.signal,
@@ -1144,14 +1148,14 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
           mixerGraph: plan.graph,
           trackIds: stemTrackIds,
           signal: input.signal,
-        }, async (index, startFrame, pcm) => {
+        }, async (index, startFrame, pcm, totalFrames) => {
           if (!stemSpool) {
             const spools = createNativeOfflinePcmSpool()
             stemSpool = await spools.createSession({
               sessionId: `portable-stem-${crypto.randomUUID()}`,
               sampleRate: input.render.sampleRate,
               channelCount: pcm.planes.length,
-              totalFrames: Math.ceil((renderRange.endSec - renderRange.startSec) * input.render.sampleRate),
+              totalFrames,
             })
           }
           await stemSpool.append({
@@ -1168,6 +1172,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
         const spool = stemSpool
         processedSpool = await processNativeOfflinePcmSpool({
           spool,
+          latencyFrames: portable.latencyFrames,
           sourceDurationSec: sourceBounds.endSec - sourceBounds.startSec,
           render: input.render,
           signal: input.signal,

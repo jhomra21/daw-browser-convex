@@ -11,7 +11,7 @@ import { resolveExportMixerGraph } from './export-mixer-graph'
 import type { ExportRange } from './export-range'
 import { getExportRangeBounds } from './export-range'
 import { createPortableGraphSnapshot } from './mixer/graph-contract'
-import type { ExternalNodeLatencyFrames } from './mixer/resolve-timing'
+import { resolveMixerTiming, type ExternalNodeLatencyFrames } from './mixer/resolve-timing'
 import { projectPortableClipEvents } from './portable-clip-projector'
 import { portableWasmCapabilityMatrix } from './backends/portable-wasm-capabilities'
 import { nativeAudioCoreProcessorKinds } from './backends/native-audio-core-capabilities'
@@ -50,6 +50,8 @@ export type PortableExportSnapshot =
   | {
     supported: true
     graph: AudioCoreGraphSnapshot
+    /** Frames the graph delays its master output by; the render runs this far behind the timeline. */
+    graphLatencyFrames: number
     assets: readonly PortableExportAsset[]
     instrumentRegionSources?: readonly { sourceAssetKey: string; buffer: AudioBuffer }[]
     events: readonly AudioCoreSampleSourceEventDto[]
@@ -596,11 +598,12 @@ export const compilePortableExportSnapshot = (
     if (instrumentCompilation.unsupportedInstruments.length > 0) {
       return unsupported([...reasons, ...instrumentCompilation.unsupportedInstruments], diagnostics)
     }
+    const mixerGraph = input.mixerGraph ?? resolveExportMixerGraph({
+      tracks: [...input.tracks],
+      fx: input.fx,
+    })
     const baseGraph = createPortableGraphSnapshot({
-      graph: input.mixerGraph ?? resolveExportMixerGraph({
-        tracks: [...input.tracks],
-        fx: input.fx,
-      }),
+      graph: mixerGraph,
       revision: input.revision,
       sampleRate: input.sampleRateHz,
       bpm: input.bpm,
@@ -627,6 +630,12 @@ export const compilePortableExportSnapshot = (
     const snapshot = {
       supported: true,
       graph: instrumentGraph.graph,
+      graphLatencyFrames: resolveMixerTiming(
+        mixerGraph,
+        input.sampleRateHz,
+        input.bpm,
+        input.externalLatencyFrames,
+      ).graphLatencyFrames,
       assets,
       events,
     } satisfies Extract<PortableExportSnapshot, { supported: true }>

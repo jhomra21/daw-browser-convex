@@ -545,14 +545,26 @@ const renderPortableMixdown = async (
   }
 }
 
+/**
+ * Renders the range plus the graph's output latency. The first `latencyFrames` frames are the
+ * graph's delay: dropping them puts the range start at frame 0. `onChunk` receives the total
+ * rendered `frameCount` so the caller can size its sink before the first chunk.
+ */
 export const renderPortableMixdownChunks = async (
   req: ExportRequest,
-  onChunk: (index: number, startFrame: number, pcm: PlanarPcm) => Promise<void> | void,
-): Promise<{ frameCount: number; sampleRate: number; numberOfChannels: number; cleanup: () => Promise<void> } | undefined> => {
+  onChunk: (index: number, startFrame: number, pcm: PlanarPcm, frameCount: number) => Promise<void> | void,
+): Promise<{
+  frameCount: number
+  latencyFrames: number
+  sampleRate: number
+  numberOfChannels: number
+  cleanup: () => Promise<void>
+} | undefined> => {
   const prepared = prepareExportRender(req)
   const portable = await selectPortableMixdown(req, prepared)
   if (!portable.selected) return undefined
-  const frameCount = Math.ceil(prepared.range.durationSec * prepared.sampleRate)
+  const latencyFrames = portable.snapshot.graphLatencyFrames
+  const frameCount = Math.ceil(prepared.range.durationSec * prepared.sampleRate) + latencyFrames
   const worker = new PortableExportWorker(undefined, undefined, portable.artifact)
   const releaseWorker = observeResource(prepared.resourceObserver, 'workers', worker)
   const cancel = () => worker.cancel()
@@ -569,7 +581,7 @@ export const renderPortableMixdownChunks = async (
       onProgress: req.onRenderProgress,
       onChunk: (index, startFrame, pcm) => {
         if (prepared.numberOfChannels === 2) {
-          return onChunk(index, startFrame, pcm)
+          return onChunk(index, startFrame, pcm, frameCount)
         }
         const left = pcm.planes[0]
         const right = pcm.planes[1]
@@ -580,12 +592,13 @@ export const renderPortableMixdownChunks = async (
         for (let frame = 0; frame < pcm.frameCount; frame += 1) {
           mono[frame] = convertStereoToMonoSample(left[frame] ?? 0, right[frame] ?? 0)
         }
-        return onChunk(index, startFrame, { frameCount: pcm.frameCount, planes: [mono] })
+        return onChunk(index, startFrame, { frameCount: pcm.frameCount, planes: [mono] }, frameCount)
       },
       readPage: portable.readPage,
     })
     return {
       frameCount,
+      latencyFrames,
       sampleRate: prepared.sampleRate,
       numberOfChannels: prepared.numberOfChannels,
       cleanup: async () => {

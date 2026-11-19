@@ -233,7 +233,7 @@ export const compileNativeOfflineRenderPlan = (input: {
     bytes: Uint8Array
     sha256: string
   }[]
-}): NativeOfflineRenderPlan => {
+}) => {
   const sourceBounds = getExportRangeBounds(input.tracks, input.range)
   const renderRange: ExportRange = {
     mode: 'custom',
@@ -370,7 +370,8 @@ export const compileNativeOfflineRenderPlan = (input: {
   ) {
     throw new Error('Native Phase A export exceeds the offline asset capacity.')
   }
-  const totalFrames = Math.ceil((renderRange.endSec - renderRange.startSec) * input.sampleRateHz)
+  const latencyFrames = snapshot.graphLatencyFrames
+  const totalFrames = Math.ceil((renderRange.endSec - renderRange.startSec) * input.sampleRateHz) + latencyFrames
   const blockFrames = nativeOfflineBlockFrames(totalFrames, externalAttachments)
   const processorAutomationEvents = nativeProcessorAutomationEventsWithRampEnds(
     nativeProcessorAutomationEventsForSchedule(snapshot.graph, schedule.events),
@@ -477,7 +478,7 @@ export const compileNativeOfflineRenderPlan = (input: {
       ? [{ nodeId: node.id, state: node.instrument }]
       : []
   ))
-  return {
+  const plan: NativeOfflineRenderPlan = {
     version: 1,
     sampleRateHz: input.sampleRateHz,
     channelCount: input.channelCount,
@@ -501,4 +502,6 @@ export const compileNativeOfflineRenderPlan = (input: {
     schedule: scheduleBytes,
     scheduleWindows: scheduleWindows.length > 1 ? scheduleWindows : undefined,
   }
+  // The plan renders `latencyFrames` past the range; the caller drops them so the file starts on the timeline.
+  return { plan, latencyFrames }
 }

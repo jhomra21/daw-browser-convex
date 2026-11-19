@@ -544,3 +544,41 @@ describe('native offline PCM spool', () => {
     })).rejects.toMatchObject({ failure: 'unsupported' })
   })
 })
+
+describe('native offline PCM spool replay start', () => {
+  const seeded = async () => {
+    Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
+    const session = await createSpool(createMemoryFilesystem(), { replayFrames: 2 }).createSession({
+      sessionId: 'render-start',
+      sampleRate: 48_000,
+      channelCount: 2,
+      totalFrames: 7,
+    })
+    await session.append(chunk(0, [0, 1, 2, 3, 4, 5, 6], [10, 11, 12, 13, 14, 15, 16]))
+    await session.finalize()
+    return session
+  }
+
+  test('replays from a start frame across replay block boundaries', async () => {
+    const session = await seeded()
+    const blocks = await collectReplay(session.replay({ startFrame: 3, endFrame: 6 }))
+
+    expect(blocks.map((block) => block.length)).toEqual([2, 1])
+    expect(blocks.flatMap((block) => Array.from(block.getChannelData(0)))).toEqual([3, 4, 5])
+    expect(blocks.flatMap((block) => Array.from(block.getChannelData(1)))).toEqual([13, 14, 15])
+  })
+
+  test('replays to the final frame from a start frame', async () => {
+    const session = await seeded()
+    const blocks = await collectReplay(session.replay({ startFrame: 5 }))
+
+    expect(blocks.flatMap((block) => Array.from(block.getChannelData(0)))).toEqual([5, 6])
+  })
+
+  test('rejects a start frame that is negative, fractional, or not before the end frame', async () => {
+    const session = await seeded()
+    for (const options of [{ startFrame: -1 }, { startFrame: 1.5 }, { startFrame: 7 }, { startFrame: 4, endFrame: 4 }]) {
+      await expect(collectReplay(session.replay(options))).rejects.toMatchObject({ failure: 'read-failed' })
+    }
+  })
+})

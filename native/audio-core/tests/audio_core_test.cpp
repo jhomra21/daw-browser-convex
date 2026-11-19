@@ -2369,6 +2369,81 @@ void test_portable_dynamics_processor_characterization() {
   assert(limiter <= std::pow(10.0F, -6.0F / 20.0F) + 1e-3F);
 }
 
+// A kick-like train peaking 6 dB over the ceiling: the output sample peak must stay at the ceiling
+// (0.01 dB covers float rounding of the gain product) and the gain must return to unity afterwards.
+void test_limiter_holds_its_gain_through_the_lookahead() {
+  constexpr float kCeilingDb = -1.0F;
+  const float ceiling = std::pow(10.0F, kCeilingDb / 20.0F);
+  const float ceiling_with_tolerance = ceiling * std::pow(10.0F, 0.01F / 20.0F);
+  bool held = true;
+  for (const uint32_t rate : {48000u, 96000u}) {
+    for (const float lookahead_ms : {1.5F, 5.0F}) {
+      for (const float release_ms : {50.0F, 120.0F}) {
+        for (const float link : {0.0F, 1.0F}) {
+          const uint32_t latency = static_cast<uint32_t>(std::ceil(5.0F * static_cast<float>(rate) / 1000.0F));
+          const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
+            {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
+            {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = latency},
+          }};
+          const std::array<daw_audio_graph_edge_descriptor, 1> edges{{
+            {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
+          }};
+          const daw_audio_limiter_state state{.enabled = 1, .ceiling_dbtp = kCeilingDb, .release_ms = release_ms,
+            .lookahead_ms = lookahead_ms, .link = link, .detector_oversampling = 4};
+          std::array<uint8_t, sizeof(state)> state_bytes{};
+          std::memcpy(state_bytes.data(), &state, state_bytes.size());
+          const daw_audio_processor_descriptor processor{
+            .node_id = 2, .instance_id = 1, .kind = DAW_AUDIO_PROCESSOR_KIND_LIMITER, .state_version = 1, .state_size = state_bytes.size(),
+            .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+            .latency_frames = latency, .tail_frames = 0, .parameter_count = 0, .parameter_targets = nullptr, .state = state_bytes.data(),
+          };
+          daw_audio_core_handle core = create_core_at_rate(512, 2, 1, rate);
+          const daw_audio_graph_prepare_request request{
+            .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = 1, .node_count = 2, .edge_count = 1,
+            .processor_count = 1, .nodes = nodes.data(), .edges = edges.data(), .processors = &processor,
+          };
+          expect(daw_audio_core_prepare_graph(core, &request), DAW_AUDIO_CORE_OK);
+          expect(daw_audio_core_publish(core, 1), DAW_AUDIO_CORE_OK);
+          const uint32_t burst_frames = rate * 30 / 1000;
+          const uint32_t train_frames = rate * 3 / 2;
+          const uint32_t quiet_frames = static_cast<uint32_t>(rate * 5.0F * release_ms / 1000.0F) + rate / 10;
+          const uint32_t total = ((train_frames + quiet_frames + 511) / 512) * 512;
+          std::vector<float> input_left(total, 0.0F), input_right(total, 0.0F);
+          for (uint32_t frame = 0; frame < total; ++frame) {
+            const uint32_t into_burst = frame % (rate / 2);
+            const bool bursting = frame < train_frames && into_burst < burst_frames;
+            const float time = static_cast<float>(into_burst) / static_cast<float>(rate);
+            // A kick's click (+6 dB on its first sample, gone within 0.5 ms, so shorter than the
+            // lookahead) over its 60 Hz body: the gain must not recover before the click leaves the delay line.
+            const float burst = ceiling * (2.0F * std::cos(6.2831853F * 1000.0F * time) * std::exp(-time / 0.0001F)
+              + 0.5F * std::sin(6.2831853F * 60.0F * time) * std::exp(-time / 0.05F));
+            input_left[frame] = bursting ? burst : frame < train_frames ? 0.0F : 0.1F;
+            input_right[frame] = bursting ? 0.7F * burst : frame < train_frames ? 0.0F : 0.1F;
+          }
+          std::vector<float> output_left(total), output_right(total);
+          for (uint32_t start = 0; start < total; start += 512) {
+            const float *inputs[]{input_left.data() + start, input_right.data() + start};
+            float *outputs[]{output_left.data() + start, output_right.data() + start};
+            const daw_audio_core_process_block block{
+              .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = 512, .channel_count = 2, .input_bus_count = 1, .inputs = inputs, .outputs = outputs,
+            };
+            expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+          }
+          float peak = 0.0F;
+          for (uint32_t frame = 0; frame < total; ++frame) peak = std::fmax(peak, std::fmax(std::abs(output_left[frame]), std::abs(output_right[frame])));
+          std::fprintf(stderr, "limiter rate=%u lookahead=%.1f release=%.0f link=%.0f peak=%.4f dBFS (ceiling %.2f)\n",
+            rate, lookahead_ms, release_ms, link, 20.0F * std::log10(peak), kCeilingDb);
+          held = held && peak <= ceiling_with_tolerance;
+          const float recovered = output_left[total - 1] / 0.1F;
+          assert(std::abs(20.0F * std::log10(recovered)) < 0.1F);
+          daw_audio_core_destroy(core);
+        }
+      }
+    }
+  }
+  assert(held);
+}
+
 void test_portable_delay_and_reverb_characterization() {
   const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
     {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
@@ -11202,6 +11277,7 @@ int main(int argc, char **argv) {
   test_targeted_sidechain_routing();
   test_portable_modulation_processor_characterization();
   test_portable_dynamics_processor_characterization();
+  test_limiter_holds_its_gain_through_the_lookahead();
   test_portable_delay_and_reverb_characterization();
   test_eight_delay_fallback_releases_retirement_slots_and_tails();
   test_live_delay_and_reverb_retirement_materialization();

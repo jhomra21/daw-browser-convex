@@ -399,6 +399,16 @@ struct EqHistory {
   float bypass = 0.0F;
 };
 
+// Monotonic-deque sliding minimum of the limiter's recent gain targets, so the gain
+// stays down until the peak that caused it has left the lookahead delay line.
+struct LimiterTargetWindow {
+  std::array<float, kMaximumDynamicsDelayFrames> value{};
+  std::array<uint32_t, kMaximumDynamicsDelayFrames> frame{};
+  uint32_t head = 0;
+  uint32_t count = 0;
+  uint32_t now = 0;
+};
+
 struct DynamicsHistory {
   std::array<float, kMaximumDynamicsDelayFrames> delay_left{};
   std::array<float, kMaximumDynamicsDelayFrames> delay_right{};
@@ -407,6 +417,7 @@ struct DynamicsHistory {
   std::array<double, 12> limiter_true_peak_left{};
   std::array<double, 12> limiter_true_peak_right{};
   uint32_t limiter_true_peak_write = 0;
+  std::array<LimiterTargetWindow, 2> limiter_targets{};
   uint32_t write = 0;
   std::array<float, 2> gain{1.0F, 1.0F};
   std::array<float, 2> rms{};
@@ -3289,6 +3300,22 @@ double limiter_true_peak(const std::array<double, 12> &history, uint32_t history
   return peak;
 }
 
+// Minimum of the targets pushed over the last `window` + 1 frames; window < kMaximumDynamicsDelayFrames
+// keeps the deque within capacity.
+float limiter_window_minimum(LimiterTargetWindow &targets, float target, uint32_t window) {
+  const auto slot = [&targets](uint32_t offset) { return (targets.head + offset) % kMaximumDynamicsDelayFrames; };
+  while (targets.count > 0 && targets.value[slot(targets.count - 1)] >= target) --targets.count;
+  while (targets.count > 0 && targets.now - targets.frame[slot(0)] > window) {
+    targets.head = slot(1);
+    --targets.count;
+  }
+  const uint32_t tail = slot(targets.count);
+  targets.value[tail] = target;
+  targets.frame[tail] = targets.now++;
+  ++targets.count;
+  return targets.value[slot(0)];
+}
+
 float compressor_curve_db(float input_db, const daw_audio_compressor_state &state) {
   if (state.dynamics_mode != 0) {
     if (input_db >= state.threshold_db) return input_db;
@@ -3440,7 +3467,13 @@ void render_dynamics_processor(
     const float linked = std::fmin(target_left, target_right);
     const std::array<float, 2> targets{target_left + (linked - target_left) * state.link, target_right + (linked - target_right) * state.link};
     const float release = std::exp(-1.0F / (state.release_ms * 0.001F * static_cast<float>(core.config.sample_rate_hz)));
-    for (uint32_t channel = 0; channel < 2; ++channel) history.gain[channel] = targets[channel] < history.gain[channel] ? targets[channel] : 1.0F + release * (history.gain[channel] - 1.0F);
+    // The detector runs `lookahead` frames ahead of the output, so a target must hold for that many frames
+    // after it is computed; the true-peak window only reaches back to samples that are still in the delay line.
+    const uint32_t lookahead = std::min(fixed_delay, dynamics_delay_frames(state.lookahead_ms, core.config.sample_rate_hz));
+    for (uint32_t channel = 0; channel < 2; ++channel) {
+      const float floor = limiter_window_minimum(history.limiter_targets[channel], targets[channel], lookahead);
+      history.gain[channel] = std::fmin(floor, 1.0F + release * (history.gain[channel] - 1.0F));
+    }
   }
   history.write = (write + 1) % kMaximumDynamicsDelayFrames;
   if (gate) {

@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js'
+import { For, Show, createEffect, onCleanup, onMount } from 'solid-js'
 import type { SpectrumView as SpectrumViewMode } from '@daw-browser/shared'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import { DeviceToggleButton } from '~/components/ui/device-control'
@@ -86,20 +86,6 @@ export default function SpectrumView(props: { frame: SpectrumFrame | null; view:
       <Show when={props.view !== 'spectrum'}>
         <SpectrumCanvas frame={props.frame} label="Spectrogram" paint={(context, width, height) => history.paint(context, width, height)} />
       </Show>
-    </div>
-  )
-}
-
-export function SpectrumAnalyzer(props: { frame: SpectrumFrame | null }) {
-  const [view, setView] = createSignal<SpectrumViewMode>('both')
-  return (
-    <div class="flex h-full min-h-0 flex-col gap-1 px-1 py-1">
-      <div class="w-72">
-        <SpectrumViewToggle view={view()} onChange={setView} />
-      </div>
-      <div class="min-h-0 flex-1">
-        <SpectrumView frame={props.frame} view={view()} />
-      </div>
     </div>
   )
 }

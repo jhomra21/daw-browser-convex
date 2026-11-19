@@ -19,7 +19,6 @@ import Arpeggiator from "~/components/effects/Arpeggiator";
 import Delay from "~/components/effects/Delay";
 import Compressor from "~/components/effects/Compressor";
 import Eq from "~/components/effects/Eq";
-import { SpectrumAnalyzer } from "~/components/effects/SpectrumView";
 import Reverb from "~/components/effects/Reverb";
 import Saturator from "~/components/effects/Saturator";
 import Utility from "~/components/effects/Utility";
@@ -1187,7 +1186,6 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const { target, devices, spectrum, canWriteCurrentTargetEffects, isCurrentTargetReadOnly } = controller;
   const { instrument, audioEffects } = devices;
   const deviceCollapse = createEffectsPanelDeviceCollapse(() => props.projectId);
-  const [analyzerOpen, setAnalyzerOpen] = createSignal(false);
   const [externalProcessors, setExternalProcessors] = createSignal<ExternalProcessor[]>([]);
   createEffect(() => {
     const projectId = props.projectId;
@@ -1319,7 +1317,6 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
               toggleLabel="Hide"
               onEffectsTabClick={props.onOpen}
               onClipTabClick={props.clipTab.canOpen ? props.clipTab.onOpen : undefined}
-              analyzer={{ active: analyzerOpen(), onToggle: () => setAnalyzerOpen((open) => !open) }}
               onToggle={controller.close}
             />
           }
@@ -1327,77 +1324,72 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
           <TimelineContextMenu items={panelContextMenuItems}>
             <div class="flex h-full min-h-0 flex-col">
               <div class="flex flex-1 flex-col overflow-hidden min-h-0">
-                <Show
-                  when={!analyzerOpen()}
-                  fallback={<Show when={props.selectedFXTarget} keyed>{(_target) => <SpectrumAnalyzer frame={spectrum()} />}</Show>}
+                <div
+                  class="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-1 py-1"
                 >
-                  <div
-                    class="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-1 py-1"
-                  >
-                    <div class="flex h-full min-h-0 min-w-min items-stretch gap-3">
-                      <Show when={target.isInstrumentTrack()}>
-                        <EffectsPanelInstrumentSection
-                          instrument={{
-                            state: instrument,
-                            canWrite: canWriteCurrentTargetEffects(),
-                          }}
-                          audioEngine={props.audioEngine}
-                          targetId={props.selectedFXTarget}
-                          projectId={props.projectId}
-                          onPreviewNote={props.onPreviewNote}
-                          synthAutomationRangesByParameterId={synthAutomation().ranges}
-                          synthAutomationParameterIds={synthAutomation().parameterIds}
-                          synthAutomationDisplayParams={synthAutomationDisplayParams()}
-                          onSelectSynthAutomationParameter={(parameterId) => props.onSelectAutomationParameter?.(props.selectedFXTarget, parameterId)}
-                          onManualSynthAutomationOverride={(parameterId) => props.onManualAutomationOverride?.(props.selectedFXTarget, parameterId)}
-                          deviceCollapse={deviceCollapse}
-                        />
-                      </Show>
-                      <EffectsPanelEffectCards
-                        acceptance={props.acceptance}
-                        projectId={props.projectId}
-                        projectGeneration={props.projectGeneration?.() ?? 0}
-                        audioEffects={audioEffects}
-                        externalProcessors={externalProcessorsForTarget()}
-                        externalInstrument={externalProcessorsForTarget().find((processor) => processor.manifest.role === "instrument")}
-                        enqueueParameter={props.enqueueNativeVstParameter ?? (() => Promise.resolve("rejected"))}
-                        canWrite={canWriteCurrentTargetEffects()}
-                        onElementChange={props.onEffectChainElementChange}
-                        spectrum={spectrum()}
+                  <div class="flex h-full min-h-0 min-w-min items-stretch gap-3">
+                    <Show when={target.isInstrumentTrack()}>
+                      <EffectsPanelInstrumentSection
+                        instrument={{
+                          state: instrument,
+                          canWrite: canWriteCurrentTargetEffects(),
+                        }}
                         audioEngine={props.audioEngine}
                         targetId={props.selectedFXTarget}
-                        tracks={props.tracks}
-                        sidechainRoutes={props.sidechainRoutes}
-                        automationRangesByInstanceId={automationRangesByInstanceId()}
-                        evaluatedValuesByTargetKey={props.evaluatedValuesByTargetKey}
-                        onSelectAutomationParameter={(parameterId, effectInstanceId) => props.onSelectAutomationParameter?.(props.selectedFXTarget, parameterId, effectInstanceId)}
-                        onManualAutomationOverride={(parameterId, effectInstanceId) => props.onManualAutomationOverride?.(props.selectedFXTarget, parameterId, effectInstanceId)}
-                        autoOpenExternalProcessorId={props.autoOpenExternalProcessorId}
-                        onExternalProcessorAutoOpenHandled={props.onExternalProcessorAutoOpenHandled}
-                        onRemoveExternalProcessor={removeExternalProcessor}
-                        onExternalParameterChange={updateExternalProcessorParameter}
-                        onExternalParameterGestureEnd={props.requestNativeVstStateCapture}
-                        onExternalBypassChange={updateExternalProcessorBypass}
-                        onMixedReorder={reorderMixed}
+                        projectId={props.projectId}
+                        onPreviewNote={props.onPreviewNote}
+                        synthAutomationRangesByParameterId={synthAutomation().ranges}
+                        synthAutomationParameterIds={synthAutomation().parameterIds}
+                        synthAutomationDisplayParams={synthAutomationDisplayParams()}
+                        onSelectSynthAutomationParameter={(parameterId) => props.onSelectAutomationParameter?.(props.selectedFXTarget, parameterId)}
+                        onManualSynthAutomationOverride={(parameterId) => props.onManualAutomationOverride?.(props.selectedFXTarget, parameterId)}
                         deviceCollapse={deviceCollapse}
                       />
-                      <Show when={isCurrentTargetReadOnly()}>
-                        <EffectsPanelReadOnlyNotice />
-                      </Show>
-                      <EffectsPanelEmptyState
-                        empty={{
-                          visible:
-                            audioEffects.orderedEffects().length === 0 &&
-                            externalProcessorsForTarget().length === 0 &&
-                            !instrument.arp.params() &&
-                            (!instrument.activeInstrument() ||
-                              !target.isInstrumentTrack()),
-                          currentTargetId: target.currentTargetId(),
-                        }}
-                      />
-                    </div>
+                    </Show>
+                    <EffectsPanelEffectCards
+                      acceptance={props.acceptance}
+                      projectId={props.projectId}
+                      projectGeneration={props.projectGeneration?.() ?? 0}
+                      audioEffects={audioEffects}
+                      externalProcessors={externalProcessorsForTarget()}
+                      externalInstrument={externalProcessorsForTarget().find((processor) => processor.manifest.role === "instrument")}
+                      enqueueParameter={props.enqueueNativeVstParameter ?? (() => Promise.resolve("rejected"))}
+                      canWrite={canWriteCurrentTargetEffects()}
+                      onElementChange={props.onEffectChainElementChange}
+                      spectrum={spectrum()}
+                      audioEngine={props.audioEngine}
+                      targetId={props.selectedFXTarget}
+                      tracks={props.tracks}
+                      sidechainRoutes={props.sidechainRoutes}
+                      automationRangesByInstanceId={automationRangesByInstanceId()}
+                      evaluatedValuesByTargetKey={props.evaluatedValuesByTargetKey}
+                      onSelectAutomationParameter={(parameterId, effectInstanceId) => props.onSelectAutomationParameter?.(props.selectedFXTarget, parameterId, effectInstanceId)}
+                      onManualAutomationOverride={(parameterId, effectInstanceId) => props.onManualAutomationOverride?.(props.selectedFXTarget, parameterId, effectInstanceId)}
+                      autoOpenExternalProcessorId={props.autoOpenExternalProcessorId}
+                      onExternalProcessorAutoOpenHandled={props.onExternalProcessorAutoOpenHandled}
+                      onRemoveExternalProcessor={removeExternalProcessor}
+                      onExternalParameterChange={updateExternalProcessorParameter}
+                      onExternalParameterGestureEnd={props.requestNativeVstStateCapture}
+                      onExternalBypassChange={updateExternalProcessorBypass}
+                      onMixedReorder={reorderMixed}
+                      deviceCollapse={deviceCollapse}
+                    />
+                    <Show when={isCurrentTargetReadOnly()}>
+                      <EffectsPanelReadOnlyNotice />
+                    </Show>
+                    <EffectsPanelEmptyState
+                      empty={{
+                        visible:
+                          audioEffects.orderedEffects().length === 0 &&
+                          externalProcessorsForTarget().length === 0 &&
+                          !instrument.arp.params() &&
+                          (!instrument.activeInstrument() ||
+                            !target.isInstrumentTrack()),
+                        currentTargetId: target.currentTargetId(),
+                      }}
+                    />
                   </div>
-                </Show>
+                </div>
               </div>
             </div>
           </TimelineContextMenu>

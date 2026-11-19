@@ -2,7 +2,7 @@ import { createSignal } from 'solid-js'
 import { render } from 'solid-js/web'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 
-import { SpectrumAnalyzer } from '~/components/effects/SpectrumView'
+import SpectrumView from '~/components/effects/SpectrumView'
 
 const scenarios: Record<string, boolean> = {}
 const SAMPLE_RATE = 48000
@@ -22,14 +22,8 @@ const run = async () => {
   host.style.cssText = 'width:640px;height:420px;display:flex;flex-direction:column;'
     + '--device-graph-background:#0b0b10;--device-graph-grid:#2a2a33;--device-graph-accent:#3fd0f0'
   document.body.append(host)
-  render(() => <SpectrumAnalyzer frame={frame()} />, host)
-  // Tailwind is not loaded here, so give the analyzer the flex layout its classes describe.
-  const analyzer = host.firstElementChild
-  if (!(analyzer instanceof HTMLElement)) throw new Error('The analyzer did not render')
-  analyzer.style.cssText = 'display:flex;flex-direction:column;height:100%'
-  const body = analyzer.lastElementChild
-  if (!(body instanceof HTMLElement)) throw new Error('The analyzer body did not render')
-  body.style.cssText = 'flex:1 1 0;min-height:0'
+  render(() => <SpectrumView frame={frame()} view="both" />, host)
+  // Tailwind is not loaded here, so give the view the flex layout its classes describe.
   const view = host.querySelector<HTMLElement>('[data-spectrum-view]')
   if (view) view.style.cssText = 'display:flex;flex-direction:column;height:100%;gap:4px'
   for (const frame of host.querySelectorAll<HTMLElement>('[data-spectrum-canvas]')) frame.style.cssText = 'position:relative;flex:1 1 0;min-height:0'

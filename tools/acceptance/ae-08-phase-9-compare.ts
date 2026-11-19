@@ -384,8 +384,8 @@ export const compareLane = (events: readonly HostEvent[], editWallMs: (index: nu
   return laneEvents > 0 ? undefined : "the re-enabled lane's schedule windows carry no lane event"
 }
 
-// The live output holds every path back by the pinned latency budget, which only rises while playing: a state's offline export (no
-// budget) is compared delayed by it.
+// The live output holds every path back by the pinned latency budget, which only rises while playing: a state's offline export starts on
+// the timeline (no budget), so it is compared delayed by it.
 export const delayedBy = (pcm: Pcm, frames: number): Pcm => frames === 0 ? pcm
   : { ...pcm, samples: Float32Array.from({ length: pcm.samples.length }, (_, index) => index < frames * pcm.channels ? 0 : pcm.samples[index - frames * pcm.channels] ?? NaN) }
 // A plug-in row's edited (right) channel is swapped between the plug-in's output and the path that replaces it for one transport block (the
@@ -476,7 +476,7 @@ export const judgeRowCapture = async (input: { launchOut: string; directory: str
     const states = initial ? [initial, ...entered.map((state, position) => {
       const startSec = steps[position]?.startSec
       return startSec === undefined ? state : placedAt(state, initial, startSec)
-    })].map((state) => delayedBy(state, row.reference === undefined ? 0 : pinnedBefore ?? 0)) : []
+    })].map((state) => delayedBy(state, pinnedBefore ?? 0)) : []
     const endFrame = Math.min(captured, ...states.map((state) => state.samples.length / state.channels))
     const entries = steps.map((step) => row.cycle[(step.index - 1) % row.cycle.length]?.entry)
     const live = transportIndexed(capture, mine, endFrame)

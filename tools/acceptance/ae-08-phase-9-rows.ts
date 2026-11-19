@@ -40,8 +40,8 @@ export type PackagedRun = {
   // A hardware device the row needs. A launch checks that it is present before the app starts.
   device?: "iac-midi" | "blackhole"
   judge?: Judge
-  // The state whose offline export stands for every state of a "states" row: an export that includes a plug-in delays the retained path by
-  // its own compensation, not the live pinned budget, so only the export without it is a reference (the compare delays it by that budget).
+  // The state whose offline export stands for every state of a "states" row: the plug-in's own output is not compared (its channel is
+  // swapped at each edit), so the export without it stands for every state. The compare delays every export by the live pinned budget.
   reference?: string
   // What every step of the row settles on, unless the step names its own.
   settle?: Settle

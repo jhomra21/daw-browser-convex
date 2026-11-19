@@ -1,0 +1,10 @@
+[info] [export-preparation] begin {traceId: "b2ea1bef-b642-4092-b99c-97c916095838", native: true}
+[info] [export-preparation] start {traceId: "b2ea1bef-b642-4092-b99c-97c916095838", stage: "flush-midi"}
+[info] [export-preparation] complete {traceId: "b2ea1bef-b642-4092-b99c-97c916095838", stage: "flush-midi", elapsedMs: 0}
+[info] [export-preparation] start {traceId: "b2ea1bef-b642-4092-b99c-97c916095838", stage: "flush-effects"}
+[info] [export-preparation] complete {traceId: "b2ea1bef-b642-4092-b99c-97c916095838", stage: "flush-effects", elapsedMs: 0}
+[info] [export-preparation] start {traceId: "b2ea1bef-b642-4092-b99c-97c916095838", stage: "render-state"}
+[info] [export-preparation] complete {traceId: "b2ea1bef-b642-4092-b99c-97c916095838", stage: "render-state", elapsedMs: 2}
+[info] [export-preparation] start {traceId: "b2ea1bef-b642-4092-b99c-97c916095838", stage: "native-attachments"}
+[info] [export-preparation] complete {traceId: "b2ea1bef-b642-4092-b99c-97c916095838", stage: "native-attachments", elapsedMs: 1}
+[info] [export-preparation] complete {traceId: "b2ea1bef-b642-4092-b99c-97c916095838"}

@@ -1,0 +1,16 @@
+[10:09:30] import samples
+[10:09:32] build tracks, instruments and patches
+v2-setup: r0 -> r1 applied=true project rename | project settings set | clip delete | clip delete | clip delete | clip delete | clip delete | clip delete | clip delete | clip delete | clip delete | clip delete | clip delete | clip delete | clip delete | clip delete | clip delete | track rename | track color set | track rename | track color set | track create | track create | track create | track create | track create | track create | track create | track create | track create | track create | track create | track create
+v2-instruments: r1 -> r2 applied=true instrument set | instrument set | instrument set | instrument set
+v2-patches: r2 -> r3 applied=true instrument set | instrument set | instrument set | instrument set | instrument set | instrument set | instrument set | instrument set | instrument set
+[10:09:33] clips and devices while playing
+v2-clips: r3 -> r4 applied=true clip midi create | clip midi create | clip midi create | clip midi create | clip midi create | clip midi create | clip midi create
+v2-clips-2: r4 -> r5 applied=true clip midi create | clip midi create | clip audio create | clip audio create | clip audio create | clip audio create | clip audio create | clip audio create | clip audio create | clip audio create | clip audio create | clip audio create
+v2-effects: r5 -> r6 applied=true effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert
+v2-tune: r6 -> r7 applied=true effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert | effect upsert
+v2-mix: r7 -> r8 applied=true track mix set | track mix set | track mix set | track mix set | track mix set | track mix set | track mix set | track mix set | track mix set | track mix set | track mix set | track mix set | track mix set | track routing set | track routing set | track routing set | track routing set | track routing set | track routing set | track routing set | track routing set | track routing set | track routing set | track routing set | master volume set
+v2-automation: r8 -> r9 applied=true automation set | automation set
+v2-polish: r9 -> r10 applied=true instrument set | effect upsert | track mix set | track mix set | track mix set | track mix set | track mix set | master volume set
+[10:09:56] full playback from the top
+[10:10:27] export
+[10:10:37] done

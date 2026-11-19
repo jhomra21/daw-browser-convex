@@ -18,6 +18,7 @@ Ruled by the parent from the user's answers on 2026-11-17. Plan: `implementation
 - U12: the cleanup lands on branch `pr62-cleanup`, stacked on `production-dsp-characterization`, merged into the PR branch after the final phase.
 - U13: the seed summary hash judge (`dropAfter: 2026-11-17`) is dropped in the final bless.
 - U14: the packaged phase 9 `--matrix cert` preset runs once at the end.
+- U15 (2026-11-18, from the user's "fix everything" and "push and recertify"): the 5 lint errors and 17 lint warnings the phase 5 commit `22321b83` left are fixed, and gate `g-lint` moves from that known set (exit 1) to exit 0 with no findings by hand record `pr62-lint-cleared` (83). `--bless` cannot record an exit move that no named test explains.
 
 ## Test removals this ruling allows
 

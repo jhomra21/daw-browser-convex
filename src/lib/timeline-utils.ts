@@ -106,8 +106,9 @@ export function calcNonOverlapStartGridAligned(
       if (nearLeft) start = leftEdge
       else if (nearRight) start = rightEdge
     } else {
-      // If snapped just outside the gap, allow snapping to the nearest edge within one grid step
-      if (Number.isFinite(rightEdge) && start >= rightEdge && (start - rightEdge) <= step + 1e-7) {
+      // If snapped just outside the gap, allow snapping to the nearest edge within one grid step.
+      // A clip at the timeline start leaves no room before it, so its edge would be a negative start.
+      if (Number.isFinite(rightEdge) && rightEdge >= 0 && start >= rightEdge && (start - rightEdge) <= step + 1e-7) {
         start = rightEdge
       } else if (Number.isFinite(leftEdge) && start <= leftEdge && (leftEdge - start) <= step + 1e-7) {
         start = leftEdge

@@ -25,6 +25,7 @@ import {
   desktopTrustedRendererRequestSchemaV1,
   projectIdSchemaV1,
   hostError,
+  hostErrorSchemaV1,
   hostErrorV2,
   isDesktopControlOperation,
   type DesktopFrameV1,
@@ -106,7 +107,7 @@ import { createCloseHandler, prepareForClose } from "./close-flow"
 import { initializeRecordingSpoolRegistry, recordingSpoolReleaseSchema } from "./recording-spool"
 import { createRecordingSessionOwner } from "./recording-session-owner"
 import { createRecordingSpoolOrderEvidence } from "./recording-spool-evidence"
-import { createFileCapabilityManager } from "./file-capabilities"
+import { createFileCapabilityManager, FileCapabilityError } from "./file-capabilities"
 import { registerFileCapabilitiesIpc } from "./ipc/file-capabilities-ipc"
 import { registerApplicationMenuIpc } from "./ipc/application-menu-ipc"
 import { registerVstEditorStateAckIpc } from "./ipc/vst-editor-state-ack-ipc"
@@ -465,6 +466,12 @@ const recoverAudioHost = (recoveryGeneration: number) => {
 }
 const operationFailure = (_operation: DesktopOperationV1, code: Parameters<typeof hostError>[0], message: string) => hostError(code, message)
 const operationFailureV2 = (_operation: DesktopOperationV1, code: Parameters<typeof hostError>[0], message: string) => hostErrorV2(code, message)
+// A refusal the renderer gave while a request was being prepared; the client gets its code and message.
+class RendererRefusal extends Error {
+  constructor(readonly code: Parameters<typeof hostError>[0], message: string) {
+    super(message)
+  }
+}
 const writeSocketFailure = (
   socket: Socket,
   protocolVersion: DesktopProtocolVersion,
@@ -659,7 +666,10 @@ const prepareRendererInput = async (
       preflightOnly: true,
       destination: placeholderDestination,
     }), scope.requestId)
-    if (preflight.error) throw new Error(preflight.error.message)
+    if (preflight.error) {
+      const refusal = hostErrorSchemaV1.safeParse(preflight.error)
+      throw new RendererRefusal(refusal.success ? refusal.data.code : "internal", preflight.error.message)
+    }
     preparedExportModes.set(scope.requestId, request.mode)
     try {
       signal.throwIfAborted()
@@ -938,9 +948,13 @@ const handleSocket = (socket: Socket) => {
       const externalId = correlation.getExternal(rendererId)
       if (!externalId) return
       correlation.removeExternal(externalId)
-      const message = error instanceof Error && error.message === "Renderer deadline exceeded." ? "The request deadline elapsed." : "The renderer is unavailable."
-      const code = error instanceof Error && error.message === "Renderer deadline exceeded." ? "deadline-exceeded" : "unavailable"
-      writeSocketFailure(socket, sessionProtocolVersion, frame.operation, externalId, code, message)
+      // Renderer refusals and file capability errors carry messages written for the user (an existing output
+      // path, a stem mode the native renderer cannot produce); anything else stays an opaque failure.
+      const failure = error instanceof RendererRefusal ? hostError(error.code, error.message)
+        : error instanceof FileCapabilityError ? hostError("invalid-request", error.message)
+        : error instanceof Error && error.message === "Renderer deadline exceeded." ? hostError("deadline-exceeded", "The request deadline elapsed.")
+        : hostError("unavailable", "The renderer is unavailable.")
+      writeSocketFailure(socket, sessionProtocolVersion, frame.operation, externalId, failure.code, failure.message)
       if (frame.operation === "diagnostics.snapshot.v2") diagnosticsTrace.mark(diagnosticsStarts.get(rendererId) ?? diagnosticsTrace.start(), "socket-error-reply")
       diagnosticsStarts.delete(rendererId)
     })

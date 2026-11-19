@@ -790,6 +790,9 @@ export const createAttachedHostController = (input: {
             }
           } catch (error) {
             if (prepared) releasePreparedExport(prepared)
+            // The export service refuses with messages written for the user, such as a format or stem mode
+            // the native renderer cannot produce, so the client gets the same reason the export dialog shows.
+            if (error instanceof Error) return { id: request_.id, error: hostError("invalid-request", error.message) }
             throw error
           }
           return { id: request_.id, result: { status: "canceled" } }

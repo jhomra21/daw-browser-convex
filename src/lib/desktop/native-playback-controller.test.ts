@@ -33,7 +33,7 @@ import { createPreparedStretchArtifactRepository } from "@daw-browser/audio-engi
 import { compileLiveNativeProjection } from "@daw-browser/audio-engine/live-native-projection"
 import { getEffectTiming } from "@daw-browser/audio-engine/effects/timing"
 import { automationTargetKey, createDefaultDelayParams, normalizeDelayParams, createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams, createDefaultReverbParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultUtilityParams, mergeSynthParams, AUDIO_EFFECT_CONTRACTS, externalAutomationParameterId, type AutomationEnvelope, type AudioPcmSourceDescriptor, type TrackInstrumentParams, type SamplerZone, type SynthParamsUpdate } from "@daw-browser/shared"
-import { nativeGraphNodeId, serializeNativeGraph, serializeNativeInstrumentStates, serializeNativeProcessorEvents, type NativeHostMappedAsset, type NativeHostMappedAssetPage, type NativeHostMeterBatch, type NativeHostPcmAsset, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeHostTransport, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
+import { nativeGraphNodeId, nativeMasterNodeId, serializeNativeGraph, serializeNativeInstrumentStates, serializeNativeProcessorEvents, type NativeHostMappedAsset, type NativeHostMappedAssetPage, type NativeHostMeterBatch, type NativeHostPcmAsset, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeHostTransport, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
 import { listLocalEffects, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects"
 import { AudioEngine, type AudioEffectRuntimeInstance, type EngineDisposition, type SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
@@ -11514,7 +11514,7 @@ test("maps native graph meters and ignores stale revision or sequence batches", 
     sequence: 1n,
     entries: [
       { nodeId: nativeGraphNodeId("track"), leftRms: 0.25, rightRms: 0.5 },
-      { nodeId: nativeGraphNodeId("master"), leftRms: 0.75, rightRms: 1 },
+      { nodeId: nativeMasterNodeId, leftRms: 0.75, rightRms: 1 },
     ],
   })
   fixture.emitMeterBatch({
@@ -11798,7 +11798,7 @@ for (const ok of [true, false]) test(`spectrum A B A restores acknowledged A aft
   const first = controller.subscribeSpectrum("track", () => {})
   for (let turn = 0; turn < 10; turn++) await Promise.resolve()
   const delayed = Promise.withResolvers<BridgeReply>()
-  fixture.setSpectrumReply((nodeId) => nodeId === nativeGraphNodeId("master")
+  fixture.setSpectrumReply((nodeId) => nodeId === nativeMasterNodeId
     ? delayed.promise : Promise.resolve({ ok: true }))
   const second = controller.subscribeSpectrum("master", () => {})
   await Promise.resolve()
@@ -11837,9 +11837,9 @@ test("ignores a spectrum selection reply after a newer target was selected", asy
   await Promise.resolve()
   const selections = fixture.spectrumSelections.length
   fixture.emitSpectrumFrame({ graphRevision: 1, transportEpoch: 1, sequence: 1n,
-    nodeId: nativeGraphNodeId("master"), sampleRateHz: 48_000, fftSize: 2_048,
+    nodeId: nativeMasterNodeId, sampleRateHz: 48_000, fftSize: 2_048,
     binCount: 1_024, data: new Float32Array(1_024) })
-  expect(frames.at(-1)).toMatchObject({ nodeId: nativeGraphNodeId("master") })
+  expect(frames.at(-1)).toMatchObject({ nodeId: nativeMasterNodeId })
   expect(fixture.spectrumSelections).toHaveLength(selections)
   first()
   second()
@@ -11867,9 +11867,9 @@ test("ignores stale spectrum selection replies and clears pending selection on p
   await expect(controller.seekPrepared(0.25)).resolves.toBe("started")
   expect(fixture.spectrumSelections).toHaveLength(selectionsBeforeSeek)
   fixture.emitSpectrumFrame({ graphRevision: 1, transportEpoch: 2, sequence: 1n,
-    nodeId: nativeGraphNodeId("master"), sampleRateHz: 48_000, fftSize: 2_048,
+    nodeId: nativeMasterNodeId, sampleRateHz: 48_000, fftSize: 2_048,
     binCount: 1_024, data: new Float32Array(1_024) })
-  expect(latestFrames.at(-1)).toMatchObject({ nodeId: nativeGraphNodeId("master") })
+  expect(latestFrames.at(-1)).toMatchObject({ nodeId: nativeMasterNodeId })
   first()
   latest()
   const selectionsBeforeSwitch = fixture.spectrumSelections.length

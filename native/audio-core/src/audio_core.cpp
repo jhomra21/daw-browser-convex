@@ -3297,6 +3297,9 @@ double limiter_true_peak(const std::array<double, 12> &history, uint32_t history
     }
     peak = std::max(peak, std::abs(value));
   }
+  // Tap t reads the frame t + 1 behind history_write, so the centre taps interpolate between the frames 6 and 7
+  // behind it, and no phase lands on an input frame. Include those raw frames: a sample on the grid is never read low.
+  for (const uint32_t frames_behind : {6u, 7u}) peak = std::max(peak, std::abs(history[(history_write + 12 - frames_behind) % 12]));
   return peak;
 }
 

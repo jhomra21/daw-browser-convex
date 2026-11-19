@@ -131,6 +131,9 @@ class DawLimiterProcessor extends AudioWorkletProcessor {
       }
       peak = Math.max(peak, Math.abs(value))
     }
+    // Tap t reads the frame t + 1 behind historyWrite, so the centre taps interpolate between the frames 6 and 7
+    // behind it, and no phase lands on an input frame. Include those raw frames: a sample on the grid is never read low.
+    for (const framesBehind of [6, 7]) peak = Math.max(peak, Math.abs(history[(this.historyWrite + 12 - framesBehind) % 12]))
     return peak
   }
 

@@ -2444,6 +2444,81 @@ void test_limiter_holds_its_gain_through_the_lookahead() {
   assert(held);
 }
 
+// Output sample peak (linear) of a master limiter with a -1 dBTP ceiling, 50 ms release and full link,
+// fed the same signal on both channels. `signal` must be a multiple of 512 frames long.
+float limiter_output_sample_peak(uint32_t rate, float lookahead_ms, const std::vector<float> &signal) {
+  constexpr float kCeilingDb = -1.0F;
+  const uint32_t latency = static_cast<uint32_t>(std::ceil(5.0F * static_cast<float>(rate) / 1000.0F));
+  const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
+    {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
+    {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = latency},
+  }};
+  const std::array<daw_audio_graph_edge_descriptor, 1> edges{{
+    {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
+  }};
+  const daw_audio_limiter_state state{.enabled = 1, .ceiling_dbtp = kCeilingDb, .release_ms = 50.0F,
+    .lookahead_ms = lookahead_ms, .link = 1.0F, .detector_oversampling = 4};
+  std::array<uint8_t, sizeof(state)> state_bytes{};
+  std::memcpy(state_bytes.data(), &state, state_bytes.size());
+  const daw_audio_processor_descriptor processor{
+    .node_id = 2, .instance_id = 1, .kind = DAW_AUDIO_PROCESSOR_KIND_LIMITER, .state_version = 1, .state_size = state_bytes.size(),
+    .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+    .latency_frames = latency, .tail_frames = 0, .parameter_count = 0, .parameter_targets = nullptr, .state = state_bytes.data(),
+  };
+  daw_audio_core_handle core = create_core_at_rate(512, 2, 1, rate);
+  const daw_audio_graph_prepare_request request{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = 1, .node_count = 2, .edge_count = 1,
+    .processor_count = 1, .nodes = nodes.data(), .edges = edges.data(), .processors = &processor,
+  };
+  expect(daw_audio_core_prepare_graph(core, &request), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_publish(core, 1), DAW_AUDIO_CORE_OK);
+  const uint32_t total = static_cast<uint32_t>(signal.size());
+  std::vector<float> output_left(total), output_right(total);
+  for (uint32_t start = 0; start < total; start += 512) {
+    const float *inputs[]{signal.data() + start, signal.data() + start};
+    float *outputs[]{output_left.data() + start, output_right.data() + start};
+    const daw_audio_core_process_block block{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = 512, .channel_count = 2, .input_bus_count = 1, .inputs = inputs, .outputs = outputs,
+    };
+    expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+  }
+  daw_audio_core_destroy(core);
+  float peak = 0.0F;
+  for (uint32_t frame = 0; frame < total; ++frame) peak = std::fmax(peak, std::fmax(std::abs(output_left[frame]), std::abs(output_right[frame])));
+  return peak;
+}
+
+// A single sample at +6 dB over the ceiling must not leave the master limiter above the ceiling. The 4x
+// true-peak FIR has no phase on an input frame, so an isolated sample can be read up to 0.24 dB low.
+// The 1e-4 relative tolerance (0.0009 dB) covers float32 gain products (about 1e-6 relative) and is far below
+// the 0.026 dB overshoot seen in export, so it cannot hide the bug.
+void test_limiter_ceiling_holds_for_single_sample_peaks() {
+  constexpr float kCeilingDb = -1.0F;
+  const float ceiling = std::pow(10.0F, kCeilingDb / 20.0F);
+  const float peak_amplitude = 2.0F * ceiling;
+  const float ceiling_with_tolerance = ceiling * (1.0F + 1e-4F);
+  bool held = true;
+  for (const uint32_t rate : {48000u, 96000u}) {
+    for (const float lookahead_ms : {1.5F, 5.0F}) {
+      // One isolated impulse per run, placed on 12 frames that straddle the 1024-frame block boundary, alternating polarity.
+      float impulse_peak = 0.0F;
+      for (uint32_t offset = 0; offset < 12; ++offset) {
+        std::vector<float> signal(4096, 0.0F);
+        signal[1018 + offset] = (offset % 2 == 0 ? 1.0F : -1.0F) * peak_amplitude;
+        impulse_peak = std::fmax(impulse_peak, limiter_output_sample_peak(rate, lookahead_ms, signal));
+      }
+      // Kick-like click train: one +6 dB sample then silence every 2400 frames.
+      std::vector<float> click_train(24576, 0.0F);
+      for (uint32_t click = 0; click < 10; ++click) click_train[click * 2400] = peak_amplitude;
+      const float click_peak = limiter_output_sample_peak(rate, lookahead_ms, click_train);
+      std::fprintf(stderr, "limiter single-sample rate=%u lookahead=%.1f impulse overshoot=%.4f dB click overshoot=%.4f dB\n",
+        rate, lookahead_ms, 20.0F * std::log10(impulse_peak / ceiling), 20.0F * std::log10(click_peak / ceiling));
+      held = held && impulse_peak <= ceiling_with_tolerance && click_peak <= ceiling_with_tolerance;
+    }
+  }
+  assert(held);
+}
+
 void test_portable_delay_and_reverb_characterization() {
   const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
     {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
@@ -11278,6 +11353,7 @@ int main(int argc, char **argv) {
   test_portable_modulation_processor_characterization();
   test_portable_dynamics_processor_characterization();
   test_limiter_holds_its_gain_through_the_lookahead();
+  test_limiter_ceiling_holds_for_single_sample_peaks();
   test_portable_delay_and_reverb_characterization();
   test_eight_delay_fallback_releases_retirement_slots_and_tails();
   test_live_delay_and_reverb_retirement_materialization();

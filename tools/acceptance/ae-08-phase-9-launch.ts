@@ -314,6 +314,8 @@ const lastHostPid = async (out: string) => {
   return spawned.pid
 }
 const diagnosticsSchema = z.object({ native: z.object({ diagnostics: z.object({ installedAssets: z.number() }) }) })
+const refusedDiagnosticsSchema = z.object({ native: z.object({ status: z.literal("failed") }) })
+const refusedDiagnosticsAttempts = 40
 
 export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Launch) => {
   const { out, profile, mark } = context
@@ -361,7 +363,18 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
   const tone = takeRow ? playToneIntoBlackhole(path.join(out, "tone.wav"), toneSeconds).then(() => undefined, (error) => error instanceof Error ? error : new Error(String(error))) : undefined
   // Asset inventory: the installed-asset count the host reports, recorded before the burst and after each publication with that
   // publication's revision.
-  const installedAssets = async () => diagnosticsSchema.parse(await runtime(["diagnostics-v2"])).native.diagnostics.installedAssets
+  // The main process refuses a native diagnostics read while another host request is pending (it answers status "failed"), and a
+  // publication can still be in flight after its edit settles, so a refused read is asked again once that request has had its turn.
+  const installedAssets = async () => {
+    for (let attempt = 1; ; attempt++) {
+      const reply = await runtime(["diagnostics-v2"])
+      if (attempt < refusedDiagnosticsAttempts && refusedDiagnosticsSchema.safeParse(reply).success) {
+        await Bun.sleep(50)
+        continue
+      }
+      return diagnosticsSchema.parse(reply).native.diagnostics.installedAssets
+    }
+  }
   if (!driven) await mark("asset-inventory", { revision: 0, installedAssets: await installedAssets() })
   for (const row of launch.rows) {
     const logged = await runBurst({ out, directory: path.join(launch.directory, row.name), row, perform, mark, sampleRate,

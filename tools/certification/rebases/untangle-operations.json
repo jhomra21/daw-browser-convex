@@ -1,0 +1,50 @@
+{
+ "name": "untangle-operations",
+ "sequence": 93,
+ "createdAt": "2026-11-20T21:43:06.951Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=rc1-i6-desktop",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 448,
+   "new": 450
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "e31361a4827f7a13230b8bb7b6881f8643bc6d2c",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "240906e0b555df3b511c1d00bd9233937b6905b0456cfcf57ae9c30119f6479d",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "240906e0b555df3b511c1d00bd9233937b6905b0456cfcf57ae9c30119f6479d",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b6-bless/live",
+   "resultSha256": "9ec900f7dc827da8b8d53b039f14554ec3a5dffd51b86ebb195b5401815b1333",
+   "seconds": 1343.096699,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

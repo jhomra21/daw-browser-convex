@@ -1,0 +1,283 @@
+{
+  "replay": {
+    "section-edit": [
+      "undo",
+      "Failed to apply clip color during history replay",
+      "redo",
+      "cancelTrackVolumeWrite",
+      "applyTrackVolume",
+      "replaceLocalClip",
+      "ok"
+    ],
+    "control-range-delete": [
+      "undo",
+      "Control client is unavailable for range deletion history.",
+      "redo",
+      "Control client is unavailable for range deletion history."
+    ],
+    "clip-create": [
+      "undo",
+      "removeLocalClips",
+      "ok",
+      "redo",
+      "grantClipWrite",
+      "insertLocalClip",
+      "rescheduleChangedClips",
+      "ok"
+    ],
+    "clip-delete": [
+      "undo",
+      "grantClipWrite",
+      "insertLocalClip",
+      "rescheduleChangedClips",
+      "ok",
+      "redo",
+      "removeLocalClips",
+      "ok"
+    ],
+    "clips-move": [
+      "undo",
+      "Failed to move local clip because a clip was not found.",
+      "redo",
+      "Failed to move local clip because a clip was not found."
+    ],
+    "clip-timing": [
+      "undo",
+      "Failed to apply clip timing during history replay",
+      "redo",
+      "Failed to apply clip timing during history replay"
+    ],
+    "clip-fades": [
+      "undo",
+      "Failed to apply clip fades during history replay",
+      "redo",
+      "Failed to apply clip fades during history replay"
+    ],
+    "clip-audio-warp": [
+      "undo",
+      "Failed to apply clip warp during history replay",
+      "redo",
+      "Failed to apply clip warp during history replay"
+    ],
+    "clip-midi-notes": [
+      "undo",
+      "Local project was not found.",
+      "redo",
+      "Local project was not found."
+    ],
+    "clip-color": [
+      "undo",
+      "Failed to apply clip color during history replay",
+      "redo",
+      "Failed to apply clip color during history replay"
+    ],
+    "track-create": [
+      "undo",
+      "Track not found for track-create undo",
+      "redo",
+      "grantTrackWrite",
+      "insertLocalTrack",
+      "ok"
+    ],
+    "track-clip-create": [
+      "undo",
+      "Track not found for track-clip-create undo",
+      "redo",
+      "grantTrackWrite",
+      "insertLocalTrack",
+      "grantClipWrite",
+      "insertLocalClip",
+      "rescheduleChangedClips",
+      "ok"
+    ],
+    "track-delete": [
+      "undo",
+      "grantTrackWrite",
+      "insertLocalTrack",
+      "applyAutomationEnvelope",
+      "grantClipWrite",
+      "insertLocalClip",
+      "rescheduleChangedClips",
+      "ok",
+      "redo",
+      "ok"
+    ],
+    "track-volume": [
+      "undo",
+      "cancelTrackVolumeWrite",
+      "applyTrackVolume",
+      "ok",
+      "redo",
+      "cancelTrackVolumeWrite",
+      "applyTrackVolume",
+      "ok"
+    ],
+    "track-mute": [
+      "undo",
+      "cancelTrackMixWrite",
+      "applyTrackMixState",
+      "ok",
+      "redo",
+      "cancelTrackMixWrite",
+      "applyTrackMixState",
+      "ok"
+    ],
+    "track-solo": [
+      "undo",
+      "cancelTrackMixWrite",
+      "applyTrackMixState",
+      "ok",
+      "redo",
+      "cancelTrackMixWrite",
+      "applyTrackMixState",
+      "ok"
+    ],
+    "track-routing": [
+      "undo",
+      "cancelTrackRoutingWrite",
+      "applyTrackRouting",
+      "ok",
+      "redo",
+      "cancelTrackRoutingWrite",
+      "applyTrackRouting",
+      "ok"
+    ],
+    "track-group": [
+      "undo",
+      "Group track not found for track-group undo",
+      "redo",
+      "grantTrackWrite",
+      "insertLocalTrack",
+      "applyTrackPatch",
+      "ok"
+    ],
+    "track-ungroup": [
+      "undo",
+      "Failed to restore local group because its track id is already in use.",
+      "redo",
+      "Group track not found for track-ungroup redo"
+    ],
+    "track-color": [
+      "undo",
+      "applyTrackPatch",
+      "ok",
+      "redo",
+      "applyTrackPatch",
+      "ok"
+    ],
+    "track-color-cascade": [
+      "undo",
+      "Missing clip color for track-color-cascade history entry",
+      "redo",
+      "Failed to update local clip colors because a clip was not found."
+    ],
+    "track-reorder": [
+      "undo",
+      "Failed to reorder local timeline because updates must cover every track exactly once.",
+      "redo",
+      "Failed to reorder local timeline because updates must cover every track exactly once."
+    ],
+    "effect-params": [
+      "undo",
+      "ok",
+      "redo",
+      "ok"
+    ],
+    "automation-envelope-change": [
+      "undo",
+      "applyAutomationEnvelope",
+      "ok",
+      "redo",
+      "applyAutomationEnvelope",
+      "ok"
+    ]
+  },
+  "merge": {
+    "section-edit": 2,
+    "control-range-delete": 2,
+    "clip-create": 2,
+    "clip-delete": 2,
+    "clips-move": 2,
+    "clip-timing": 1,
+    "clip-fades": 1,
+    "clip-audio-warp": 2,
+    "clip-midi-notes": 2,
+    "clip-color": 2,
+    "track-create": 2,
+    "track-clip-create": 2,
+    "track-delete": 2,
+    "track-volume": 1,
+    "track-mute": 1,
+    "track-solo": 1,
+    "track-routing": 1,
+    "track-group": 2,
+    "track-ungroup": 2,
+    "track-color": 2,
+    "track-color-cascade": 2,
+    "track-reorder": 2,
+    "effect-params": 1,
+    "automation-envelope-change": 2,
+    "effect-params other instance": 2
+  },
+  "legacyV6": {
+    "undo": [
+      {
+        "type": "clip-delete",
+        "projectId": "project:history-format",
+        "data": {
+          "items": [
+            {
+              "trackRef": "track-1",
+              "clip": {
+                "clipRef": "clip-1",
+                "startSec": 0,
+                "duration": 4,
+                "name": "Clip 1",
+                "legacyHistory": true
+              }
+            }
+          ],
+          "legacyRecreate": true
+        }
+      },
+      {
+        "type": "section-edit",
+        "projectId": "project:history-format",
+        "data": {
+          "entries": [
+            {
+              "type": "clip-delete",
+              "projectId": "project:history-format",
+              "data": {
+                "items": [
+                  {
+                    "trackRef": "track-1",
+                    "clip": {
+                      "clipRef": "clip-1",
+                      "startSec": 0,
+                      "duration": 4,
+                      "name": "Clip 1",
+                      "legacyHistory": true
+                    }
+                  }
+                ],
+                "legacyRecreate": true
+              }
+            },
+            {
+              "type": "track-volume",
+              "projectId": "project:history-format",
+              "data": {
+                "trackRef": "track-1",
+                "scope": "local",
+                "from": 0.5,
+                "to": 0.9
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "redo": []
+  }
+}

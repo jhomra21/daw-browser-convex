@@ -108,6 +108,14 @@ export type Deps = {
 
 type HistoryDirection = 'undo' | 'redo'
 
+type HistoryEntryOf<Type extends HistoryEntry['type']> = Extract<HistoryEntry, { type: Type }>
+
+type HistoryEntryDefinition<Type extends HistoryEntry['type']> = {
+  apply: (entry: HistoryEntryOf<Type>, deps: Deps, direction: HistoryDirection) => Promise<void>
+}
+
+type HistoryEntryDefinitions = { [Type in HistoryEntry['type']]: HistoryEntryDefinition<Type> }
+
 function pickDirectionalValue<T>(direction: HistoryDirection, from: T, to: T) {
   return direction === 'undo' ? from : to
 }
@@ -878,302 +886,224 @@ async function applyControlRangeDeleteEntry(
   deps.actions.rescheduleTimeline?.()
 }
 
+async function applySectionEditEntry(entry: HistoryEntryOf<'section-edit'>, deps: Deps, direction: HistoryDirection) {
+  const entries = planStructuralTransition(entry, direction)
+
+  const trackDeleteContext = direction === 'redo'
+    ? { refIndex: buildRefIndex(deps), deletedTrackIds: new Set<Track['id']>() }
+    : null
+
+  const completed: HistoryEntry[] = []
+
+  try {
+    for (const child of entries) {
+      const refusal = deps.refuseStep?.(child)
+
+      if (refusal) throw new Error(refusal)
+
+      if (trackDeleteContext && child.type === 'track-delete') {
+        await applyTrackDeleteEntry(child, deps, direction, trackDeleteContext)
+      } else {
+        await execHistoryEntry(child, deps, direction)
+      }
+
+      completed.push(child)
+    }
+  } catch (error) {
+    const compensationErrors: unknown[] = []
+    const inverseDirection = direction === 'undo' ? 'redo' : 'undo'
+
+    for (const child of completed.reverse()) {
+      try {
+        await execHistoryEntry(child, deps, inverseDirection)
+      } catch (compensationError) {
+        compensationErrors.push(compensationError)
+      }
+    }
+
+    if (compensationErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...compensationErrors],
+        'Section history replay failed and compensation was incomplete.',
+      )
+    }
+
+    throw error
+  }
+}
+
+async function applyClipCreateEntry(entry: HistoryEntryOf<'clip-create'>, deps: Deps, direction: HistoryDirection) {
+  const index = buildRefIndex(deps)
+
+  if (direction === 'undo') {
+    const clipId = requireResolved(resolveClipId(index, entry.data.clip.clipRef) ?? entry.data.clip.currentId, 'Clip not found for clip-create undo')
+    const trackIdByClipId = createTimelineTrackIndex(deps.getTracks()).clipTrackIdById
+    requireResolved(trackIdByClipId.get(clipId) ?? resolveTrackId(index, entry.data.trackRef), 'Track not found for clip-create undo')
+    const deleteOperationId = entry.data.clip.deleteOperationId ?? crypto.randomUUID()
+    entry.data.clip.deleteOperationId = deleteOperationId
+    await removeHistoryClipIdsOrThrow(
+      deps,
+      [clipId],
+      deleteOperationId,
+      'Failed to remove clip during clip-create undo',
+    )
+    deps.actions.removeLocalClips([clipId])
+    entry.data.clip.currentId = undefined
+    entry.data.clip.deleteOperationId = undefined
+
+    return
+  }
+
+  const trackId = requireResolved(resolveTrackId(index, entry.data.trackRef), 'Track not found for clip-create redo')
+  const existingId = entry.data.clip.currentId
+  const clipSnapshot = entry.data.clip
+  const newId = existingId || await createHistoryClip(deps, trackId, clipSnapshot)
+  const resolvedNewId = assertDefined(newId, 'Failed to recreate clip')
+  entry.data.clip.currentId = resolvedNewId
+  deps.grantClipWrite(resolvedNewId, { projectId: deps.projectId, userId: deps.userId })
+
+  if (clipSnapshot.sampleUrl) {
+    await deps.ensureClipBuffer?.(resolvedNewId, clipSnapshot.sampleUrl)
+  }
+
+  deps.actions.insertLocalClip(trackId, buildLocalClip({ id: resolvedNewId, clip: clipSnapshot }))
+  deps.actions.rescheduleChangedClips([resolvedNewId])
+}
+
+async function applyClipDeleteEntry(entry: HistoryEntryOf<'clip-delete'>, deps: Deps, direction: HistoryDirection) {
+  if (direction === 'undo') {
+    await recreateDeletedClips(entry, deps)
+
+    return
+  }
+
+  const ids = (entry.data.recreatedClips ?? []).map((item) => item.clipId)
+
+  if (ids.length === 0) return
+  const deleteOperationId = entry.data.deleteOperationId ?? crypto.randomUUID()
+  entry.data.deleteOperationId = deleteOperationId
+
+  const recoveryIdsByClipId = await removeHistoryClipIdsOrThrow(
+    deps,
+    ids,
+    deleteOperationId,
+    'Failed to remove clips during clip-delete redo',
+  )
+
+  deps.actions.removeLocalClips(ids)
+
+  for (const item of entry.data.items) {
+    const recreated = (entry.data.recreatedClips ?? []).find((entry) => entry.clipRef === item.clip.clipRef)
+
+    if (!recreated) continue
+    const recoveryId = recoveryIdsByClipId.get(recreated.clipId)
+
+    if (recoveryId) item.clip.recoveryId = recoveryId
+  }
+
+  entry.data.recreatedClips = []
+  entry.data.deleteOperationId = undefined
+}
+
+async function applyClipsMoveEntry(entry: HistoryEntryOf<'clips-move'>, deps: Deps, direction: HistoryDirection) {
+  const index = buildRefIndex(deps)
+
+  const moves = entry.data.moves.map((move) => {
+    const clipId = requireResolved(resolveClipId(index, move.clipRef), 'Clip not found for clips-move history entry')
+    const target = pickDirectionalValue(direction, move.from, move.to)
+    const toTrackId = requireResolved(resolveTrackId(index, target.trackRef), 'Target track not found for clips-move history entry')
+
+    return { clipId, trackId: toTrackId, startSec: target.startSec }
+  })
+
+  await persistHistoryClipMovesOrThrow(deps, moves, 'Failed to move clip during history replay')
+  deps.actions.commitClipMoves(moves)
+  deps.actions.rescheduleChangedClips(moves.map((move) => move.clipId))
+}
+
+async function applyTrackCreateEntry(entry: HistoryEntryOf<'track-create'>, deps: Deps, direction: HistoryDirection) {
+  if (direction === 'undo') {
+    const [removal] = structuralOpsOfKind(planStructuralOps(entry, direction), 'remove-track')
+
+    const trackId = requireResolved(
+      removal && resolveRemovedTrackId(buildRefIndex(deps), deps.getTracks(), removal),
+      'Track not found for track-create undo',
+    )
+
+    await removeHistoryTrackOrThrow(deps, trackId, 'Failed to remove track during track-create undo')
+    deps.actions.removeLocalTrack(trackId)
+    entry.data.currentTrackId = undefined
+
+    return
+  }
+
+  let newId = resolveStoredTrackId(deps.getTracks(), entry.data.currentTrackId)
+  const collapsed = trackCreationCollapsed(entry.data.channelRole, entry.data.collapsed)
+  let index = entry.data.index
+
+  if (!newId) {
+    const createdTrack = await createHistoryTrack(deps, {
+      trackRef: entry.data.trackRef,
+      name: entry.data.name,
+      index: entry.data.index,
+      kind: entry.data.kind,
+      channelRole: entry.data.channelRole,
+      collapsed,
+      color: entry.data.color,
+    })
+
+    newId = createdTrack.trackId
+    index = createdTrack.index
+  }
+
+  const resolvedNewId = assertDefined(newId, 'Failed to recreate track')
+  entry.data.currentTrackId = resolvedNewId
+  deps.grantTrackWrite(resolvedNewId, { projectId: deps.projectId, userId: deps.userId })
+  deps.actions.insertLocalTrack(createLocalTrack({
+    id: resolvedNewId,
+    historyRef: entry.data.trackRef,
+    index,
+    name: entry.data.name,
+    kind: entry.data.kind ?? 'audio',
+    channelRole: entry.data.channelRole ?? 'track',
+    collapsed,
+    color: entry.data.color,
+  }), index)
+}
+
+// One row per entry type; a missing row is a type error. What persists and merges lives in history-entry-format.ts.
+const HISTORY_ENTRIES: HistoryEntryDefinitions = {
+  'section-edit': { apply: applySectionEditEntry },
+  'control-range-delete': { apply: applyControlRangeDeleteEntry },
+  'clip-create': { apply: applyClipCreateEntry },
+  'clip-delete': { apply: applyClipDeleteEntry },
+  'clips-move': { apply: applyClipsMoveEntry },
+  'clip-timing': { apply: applyClipTimingEntry },
+  'clip-audio-warp': { apply: applyClipAudioWarpEntry },
+  'clip-fades': { apply: applyClipFadesEntry },
+  'clip-midi-notes': { apply: applyClipMidiNotesEntry },
+  'clip-color': { apply: applyClipColorEntry },
+  'track-create': { apply: applyTrackCreateEntry },
+  'track-clip-create': { apply: (entry, deps, direction) => applyTrackClipCreateEntry(entry, deps, direction, { refIndex: buildRefIndex(deps) }) },
+  'track-delete': { apply: (entry, deps, direction) => applyTrackDeleteEntry(entry, deps, direction, { refIndex: buildRefIndex(deps) }) },
+  'track-volume': { apply: applyTrackVolumeEntry },
+  'track-mute': { apply: applyTrackBooleanEntry },
+  'track-solo': { apply: applyTrackBooleanEntry },
+  'track-routing': { apply: applyTrackRoutingEntry },
+  'track-group': { apply: applyTrackGroupEntry },
+  'track-ungroup': { apply: applyTrackUngroupEntry },
+  'track-color': { apply: applyTrackColorEntry },
+  'track-color-cascade': { apply: applyTrackColorCascadeEntry },
+  'track-reorder': { apply: applyTrackReorderEntry },
+  'effect-params': { apply: applyEffectParamsEntry },
+  'automation-envelope-change': { apply: applyAutomationEnvelopeEntry },
+}
+
+const entryOf = <Type extends HistoryEntry['type']>(type: Type): HistoryEntryDefinition<Type> => HISTORY_ENTRIES[type]
+
 async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: HistoryDirection) {
   assert(entry.projectId === deps.projectId, `History entry room mismatch: expected ${deps.projectId}, received ${entry.projectId}`)
-  const { projectId, userId } = deps
-  const grantScope = { projectId, userId }
-
-  switch (entry.type) {
-    case 'section-edit': {
-      const entries = planStructuralTransition(entry, direction)
-
-      const trackDeleteContext = direction === 'redo'
-        ? { refIndex: buildRefIndex(deps), deletedTrackIds: new Set<Track['id']>() }
-        : null
-
-      const completed: HistoryEntry[] = []
-
-      try {
-        for (const child of entries) {
-          const refusal = deps.refuseStep?.(child)
-
-          if (refusal) throw new Error(refusal)
-
-          if (trackDeleteContext && child.type === 'track-delete') {
-            await applyTrackDeleteEntry(child, deps, direction, trackDeleteContext)
-          } else {
-            await execHistoryEntry(child, deps, direction)
-          }
-
-          completed.push(child)
-        }
-      } catch (error) {
-        const compensationErrors: unknown[] = []
-        const inverseDirection = direction === 'undo' ? 'redo' : 'undo'
-
-        for (const child of completed.reverse()) {
-          try {
-            await execHistoryEntry(child, deps, inverseDirection)
-          } catch (compensationError) {
-            compensationErrors.push(compensationError)
-          }
-        }
-
-        if (compensationErrors.length > 0) {
-          throw new AggregateError(
-            [error, ...compensationErrors],
-            'Section history replay failed and compensation was incomplete.',
-          )
-        }
-
-        throw error
-      }
-
-      return
-    }
-
-    case 'control-range-delete':
-      await applyControlRangeDeleteEntry(entry, deps, direction)
-
-      return
-
-    case 'clip-create': {
-      const index = buildRefIndex(deps)
-
-      if (direction === 'undo') {
-        const clipId = requireResolved(resolveClipId(index, entry.data.clip.clipRef) ?? entry.data.clip.currentId, 'Clip not found for clip-create undo')
-        const trackIdByClipId = createTimelineTrackIndex(deps.getTracks()).clipTrackIdById
-        requireResolved(trackIdByClipId.get(clipId) ?? resolveTrackId(index, entry.data.trackRef), 'Track not found for clip-create undo')
-        const deleteOperationId = entry.data.clip.deleteOperationId ?? crypto.randomUUID()
-        entry.data.clip.deleteOperationId = deleteOperationId
-        await removeHistoryClipIdsOrThrow(
-          deps,
-          [clipId],
-          deleteOperationId,
-          'Failed to remove clip during clip-create undo',
-        )
-        deps.actions.removeLocalClips([clipId])
-        entry.data.clip.currentId = undefined
-        entry.data.clip.deleteOperationId = undefined
-
-        return
-      }
-
-      const trackId = requireResolved(resolveTrackId(index, entry.data.trackRef), 'Track not found for clip-create redo')
-      const existingId = entry.data.clip.currentId
-      const clipSnapshot = entry.data.clip
-      const newId = existingId || await createHistoryClip(deps, trackId, clipSnapshot)
-      const resolvedNewId = assertDefined(newId, 'Failed to recreate clip')
-      entry.data.clip.currentId = resolvedNewId
-      deps.grantClipWrite(resolvedNewId, grantScope)
-
-      if (clipSnapshot.sampleUrl) {
-        await deps.ensureClipBuffer?.(resolvedNewId, clipSnapshot.sampleUrl)
-      }
-
-      deps.actions.insertLocalClip(trackId, buildLocalClip({ id: resolvedNewId, clip: clipSnapshot }))
-      deps.actions.rescheduleChangedClips([resolvedNewId])
-
-      return
-    }
-
-    case 'clip-delete': {
-      if (direction === 'undo') {
-        await recreateDeletedClips(entry, deps)
-
-        return
-      }
-
-      const ids = (entry.data.recreatedClips ?? []).map((item) => item.clipId)
-
-      if (ids.length === 0) return
-      const deleteOperationId = entry.data.deleteOperationId ?? crypto.randomUUID()
-      entry.data.deleteOperationId = deleteOperationId
-
-      const recoveryIdsByClipId = await removeHistoryClipIdsOrThrow(
-        deps,
-        ids,
-        deleteOperationId,
-        'Failed to remove clips during clip-delete redo',
-      )
-
-      deps.actions.removeLocalClips(ids)
-
-      for (const item of entry.data.items) {
-        const recreated = (entry.data.recreatedClips ?? []).find((entry) => entry.clipRef === item.clip.clipRef)
-
-        if (!recreated) continue
-        const recoveryId = recoveryIdsByClipId.get(recreated.clipId)
-
-        if (recoveryId) item.clip.recoveryId = recoveryId
-      }
-
-      entry.data.recreatedClips = []
-      entry.data.deleteOperationId = undefined
-
-      return
-    }
-
-    case 'clips-move': {
-      const index = buildRefIndex(deps)
-
-      const moves = entry.data.moves.map((move) => {
-        const clipId = requireResolved(resolveClipId(index, move.clipRef), 'Clip not found for clips-move history entry')
-        const target = pickDirectionalValue(direction, move.from, move.to)
-        const toTrackId = requireResolved(resolveTrackId(index, target.trackRef), 'Target track not found for clips-move history entry')
-
-        return { clipId, trackId: toTrackId, startSec: target.startSec }
-      })
-
-      await persistHistoryClipMovesOrThrow(deps, moves, 'Failed to move clip during history replay')
-      deps.actions.commitClipMoves(moves)
-      deps.actions.rescheduleChangedClips(moves.map((move) => move.clipId))
-
-      return
-    }
-
-    case 'clip-timing':
-      await applyClipTimingEntry(entry, deps, direction)
-
-      return
-
-    case 'clip-audio-warp':
-      await applyClipAudioWarpEntry(entry, deps, direction)
-
-      return
-
-    case 'clip-fades':
-      await applyClipFadesEntry(entry, deps, direction)
-
-      return
-
-    case 'clip-midi-notes':
-      await applyClipMidiNotesEntry(entry, deps, direction)
-
-      return
-
-    case 'clip-color':
-      await applyClipColorEntry(entry, deps, direction)
-
-      return
-
-    case 'track-create': {
-      if (direction === 'undo') {
-        const [removal] = structuralOpsOfKind(planStructuralOps(entry, direction), 'remove-track')
-
-        const trackId = requireResolved(
-          removal && resolveRemovedTrackId(buildRefIndex(deps), deps.getTracks(), removal),
-          'Track not found for track-create undo',
-        )
-
-        await removeHistoryTrackOrThrow(deps, trackId, 'Failed to remove track during track-create undo')
-        deps.actions.removeLocalTrack(trackId)
-        entry.data.currentTrackId = undefined
-
-        return
-      }
-
-      let newId = resolveStoredTrackId(deps.getTracks(), entry.data.currentTrackId)
-      const collapsed = trackCreationCollapsed(entry.data.channelRole, entry.data.collapsed)
-      let index = entry.data.index
-
-      if (!newId) {
-        const createdTrack = await createHistoryTrack(deps, {
-          trackRef: entry.data.trackRef,
-          name: entry.data.name,
-          index: entry.data.index,
-          kind: entry.data.kind,
-          channelRole: entry.data.channelRole,
-          collapsed,
-          color: entry.data.color,
-        })
-
-        newId = createdTrack.trackId
-        index = createdTrack.index
-      }
-
-      const resolvedNewId = assertDefined(newId, 'Failed to recreate track')
-      entry.data.currentTrackId = resolvedNewId
-      deps.grantTrackWrite(resolvedNewId, grantScope)
-      deps.actions.insertLocalTrack(createLocalTrack({
-        id: resolvedNewId,
-        historyRef: entry.data.trackRef,
-        index,
-        name: entry.data.name,
-        kind: entry.data.kind ?? 'audio',
-        channelRole: entry.data.channelRole ?? 'track',
-        collapsed,
-        color: entry.data.color,
-      }), index)
-
-      return
-    }
-
-    case 'track-clip-create': {
-      const historyContext = { refIndex: buildRefIndex(deps) }
-      await applyTrackClipCreateEntry(entry, deps, direction, historyContext)
-
-      return
-    }
-
-    case 'track-delete': {
-      const historyContext = { refIndex: buildRefIndex(deps) }
-      await applyTrackDeleteEntry(entry, deps, direction, historyContext)
-
-      return
-    }
-
-    case 'track-volume':
-      await applyTrackVolumeEntry(entry, deps, direction)
-
-      return
-
-    case 'track-mute':
-    case 'track-solo':
-      await applyTrackBooleanEntry(entry, deps, direction)
-
-      return
-
-    case 'track-routing':
-      await applyTrackRoutingEntry(entry, deps, direction)
-
-      return
-
-    case 'track-group':
-      await applyTrackGroupEntry(entry, deps, direction)
-
-      return
-
-    case 'track-ungroup':
-      await applyTrackUngroupEntry(entry, deps, direction)
-
-      return
-
-    case 'track-color':
-      await applyTrackColorEntry(entry, deps, direction)
-
-      return
-
-    case 'track-color-cascade':
-      await applyTrackColorCascadeEntry(entry, deps, direction)
-
-      return
-
-    case 'track-reorder':
-      await applyTrackReorderEntry(entry, deps, direction)
-
-      return
-
-    case 'effect-params':
-      await applyEffectParamsEntry(entry, deps, direction)
-
-      return
-
-    case 'automation-envelope-change':
-      await applyAutomationEnvelopeEntry(entry, deps, direction)
-
-      return
-  }
+  await entryOf(entry.type).apply(entry, deps, direction)
 }
 
 export function execUndo(entry: HistoryEntry, deps: Deps) {

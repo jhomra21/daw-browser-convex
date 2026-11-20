@@ -204,13 +204,14 @@ import {
 } from "./benchmark-runtime"
 import { offlinePcmAckSchema } from "./offline-pcm-protocol"
 import { createRecordingStartDiagnostic } from "./recording-start-diagnostic"
+import { desktopEnv } from "./env"
 
 protocol.registerSchemesAsPrivileged([{ scheme: "daw", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
-const captureInhibited = process.env.DAW_RECORDING_START_DIAGNOSTIC === "1"
+const captureInhibited = desktopEnv.recordingStartDiagnostic()
 
 const recordingStartDiagnostic = createRecordingStartDiagnostic(
-  process.env.DAW_RECORDING_START_DIAGNOSTIC === "1" || process.env.DAW_RECORDING_START_EVIDENCE === "1",
+  desktopEnv.recordingStartDiagnostic() || desktopEnv.recordingStartEvidence(),
   (event) => console.log("[recording-start-diagnostic]", JSON.stringify(event)),
 )
 
@@ -305,7 +306,7 @@ const nativeInstanceEnvelopeSchema = nativeSessionEnvelopeSchema(uuidSchema)
 const pluginDirectorySchema = z.object({ directory: z.string() }).passthrough()
 const closePreparationResultSchema = z.object({ flushed: z.literal(true) }).passthrough()
 
-const diagnosticsTraceEnabled = process.env.DAW_DIAGNOSTICS_V2_TRACE === "1"
+const diagnosticsTraceEnabled = desktopEnv.diagnosticsV2Trace()
 const diagnosticsTrace = createDiagnosticsTrace(diagnosticsTraceEnabled, console.error)
 const diagnosticsStarts = new Map<string, number>()
 
@@ -352,7 +353,7 @@ const pendingEditorStateAcks = new Map<string, {
   reject: (error: Error) => void
 }>()
 
-const evidenceDirectory = process.env.DAW_AE08_EVIDENCE_DIR
+const evidenceDirectory = desktopEnv.ae08EvidenceDirectory()
 const ae08Evidence = createAe08Evidence(evidenceDirectory)
 
 const ae08WorkerEnvironment: NodeJS.ProcessEnv = evidenceDirectory
@@ -2642,9 +2643,9 @@ else {
         }
       }
     } else if (process.platform === "darwin") {
-      scannerPath = packagedVst3ScannerPath(process.resourcesPath, false, process.env.DAW_VST3_SCANNER_PATH)
-      vst3WorkerPath = packagedVst3WorkerPath(process.resourcesPath, false, process.env.DAW_VST3_WORKER_PATH)
-      audioHostPath = packagedAudioHostPath(process.resourcesPath, false, process.env.DAW_AUDIO_HOST_PATH)
+      scannerPath = packagedVst3ScannerPath(process.resourcesPath, false, desktopEnv.vst3ScannerPath())
+      vst3WorkerPath = packagedVst3WorkerPath(process.resourcesPath, false, desktopEnv.vst3WorkerPath())
+      audioHostPath = packagedAudioHostPath(process.resourcesPath, false, desktopEnv.audioHostPath())
       nativeReleaseArtifactVerification = { status: "development" }
     }
 
@@ -2668,7 +2669,7 @@ else {
     }
 
     const recordingOrderEvidence = createRecordingSpoolOrderEvidence(
-      process.env.DAW_RECORDING_SPOOL_ORDER_EVIDENCE,
+      desktopEnv.recordingSpoolOrderEvidence(),
       (line) => { process.stdout.write(line) },
     )
 
@@ -2824,7 +2825,7 @@ else {
       responseHeaders: {
         ...details.responseHeaders,
         "Content-Security-Policy": [createContentSecurityPolicy(Boolean(MAIN_WINDOW_VITE_DEV_SERVER_URL))],
-        ...benchmarkSabHeaders(details.url, process.env.DAW_BENCHMARK_SAB_RECORDING === "1"),
+        ...benchmarkSabHeaders(details.url, desktopEnv.benchmarkSabRecording()),
       },
     }))
     session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => callback(

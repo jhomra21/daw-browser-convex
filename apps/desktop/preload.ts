@@ -149,8 +149,9 @@ import { offlinePcmMessageSchema } from "./offline-pcm-protocol"
 import { deliverOfflinePcmChunk } from "./offline-pcm-ack"
 import { diagnosticValidationPaths } from "./diagnostics-trace"
 import { safePreloadReply } from "./preload-reply"
+import { desktopEnv } from "./env"
 
-if (process.env.DAW_BENCHMARK_HEARTBEAT === "1") {
+if (desktopEnv.benchmarkHeartbeat()) {
   ipcRenderer.on(benchmarkRendererPingChannel, (_event, sequence) => {
     const parsed = z.number().int().safe().safeParse(sequence)
 
@@ -346,11 +347,11 @@ ipcRenderer.on(hostRequestChannel, (_event, message) => {
 })
 
 const desktopBridge = {
-  benchmarkSabRecording: process.env.DAW_BENCHMARK_SAB_RECORDING === "1",
-  acceptance: process.env.DAW_AE08_EXTERNAL_NATIVE_SESSION === "1" || process.env.DAW_AE08_EVIDENCE_DIR
+  benchmarkSabRecording: desktopEnv.benchmarkSabRecording(),
+  acceptance: desktopEnv.ae08ExternalNativeSession() || desktopEnv.ae08EvidenceDirectory()
     ? {
-      externalNativeSession: process.env.DAW_AE08_EXTERNAL_NATIVE_SESSION === "1",
-      mark: process.env.DAW_AE08_EVIDENCE_DIR
+      externalNativeSession: desktopEnv.ae08ExternalNativeSession(),
+      mark: desktopEnv.ae08EvidenceDirectory()
         ? (name: string, key: string) => {
           try { ipcRenderer.send(ae08RendererMarkChannel, [name, key]) } catch { /* evidence is best-effort */ }
         }
@@ -358,7 +359,7 @@ const desktopBridge = {
     }
     : undefined,
   benchmarkHeartbeat: (): Promise<{ mainEpochMs: number } | null> =>
-    process.env.DAW_BENCHMARK_HEARTBEAT === "1" ? ipcRenderer.invoke(benchmarkHeartbeatChannel) : Promise.resolve(null),
+    desktopEnv.benchmarkHeartbeat() ? ipcRenderer.invoke(benchmarkHeartbeatChannel) : Promise.resolve(null),
   traceDiagnosticsV2(id: string, stage: "controller-before-native" | "controller-after-native" | "controller-parsed") {
     traceDiagnostics(id, stage)
   },

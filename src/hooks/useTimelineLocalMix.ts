@@ -1,7 +1,6 @@
 import { createEffect, on, type Accessor } from 'solid-js'
 
-import { isLocalId } from '@daw-browser/shared'
-import { loadLocalProjectState, saveLocalProjectState } from '~/lib/local-project-state'
+import { projectPreferenceStorage } from '~/lib/project-preference-storage'
 import {
   loadLocalMixMap,
   saveLocalMixMap,
@@ -59,38 +58,12 @@ function mergeLocalMixPatch(current: LocalMixMap, trackId: Track['id'], patch: L
   }
 }
 
-const loadLocalTrackState = (projectId: string): LocalMixMap => {
-  if (isLocalId('project', projectId)) return {}
-
-  return loadLocalMixMap(projectId)
-}
-
-const saveLocalTrackState = (projectId: string, value: LocalMixMap) => {
-  if (isLocalId('project', projectId)) return
-  saveLocalMixMap(projectId, value)
-}
-
-const loadProjectTrackState = async (projectId: string): Promise<LocalMixMap | undefined> => {
-  if (!isLocalId('project', projectId)) return undefined
-
-  return await loadLocalProjectState<LocalMixMap>(projectId, 'localMix')
-}
-
-const saveProjectTrackState = async (projectId: string, value: LocalMixMap): Promise<void> => {
-  if (!isLocalId('project', projectId)) return
-  await saveLocalProjectState(projectId, 'localMix', value)
-}
-
 export function useTimelineLocalMix(
   options: UseTimelineLocalMixOptions,
 ): UseTimelineLocalMixReturn {
   const persistedState = useProjectPersistedState<LocalMixMap>({
     projectId: options.projectId,
-    createInitial: () => ({}),
-    load: (projectId) => loadLocalTrackState(projectId),
-    loadAsync: loadProjectTrackState,
-    save: (projectId, value) => saveLocalTrackState(projectId, value),
-    saveAsync: saveProjectTrackState,
+    ...projectPreferenceStorage<LocalMixMap>('localMix', () => ({}), { load: loadLocalMixMap, save: saveLocalMixMap }),
     onSaveAsyncError: (projectId, error) => {
       options.onLocalSaveFailed?.(projectId, error instanceof Error ? error.message : 'Local mix could not be saved.')
     },

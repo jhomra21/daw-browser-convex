@@ -72,28 +72,6 @@ function TextFieldInput(
   )
 }
 
-type TextFieldTextAreaProps<T extends ValidComponent = "textarea"> =
-  TextFieldPrimitive.TextFieldTextAreaProps<T> & { class?: string | undefined }
-
-function TextFieldTextArea<T extends ValidComponent = "textarea">(
-  props: PolymorphicProps<T, TextFieldTextAreaProps<T>>,
-): JSX.Element
-function TextFieldTextArea(
-  props: PolymorphicProps<ValidComponent, TextFieldTextAreaProps<ValidComponent>>,
-): JSX.Element {
-  const [local, others] = splitProps(props, ["class"])
-
-  return (
-    <TextFieldPrimitive.TextArea
-      class={cn(
-        "flex min-h-20 w-full border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
-        local.class
-      )}
-      {...others}
-    />
-  )
-}
-
 const labelVariants = cva(
   "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70",
   {
@@ -124,53 +102,8 @@ function TextFieldLabel(
   return <TextFieldPrimitive.Label class={cn(labelVariants(), local.class)} {...others} />
 }
 
-type TextFieldDescriptionProps<T extends ValidComponent = "div"> =
-  TextFieldPrimitive.TextFieldDescriptionProps<T> & {
-    class?: string | undefined
-  }
-
-function TextFieldDescription<T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, TextFieldDescriptionProps<T>>,
-): JSX.Element
-function TextFieldDescription(
-  props: PolymorphicProps<ValidComponent, TextFieldDescriptionProps<ValidComponent>>,
-): JSX.Element {
-  const [local, others] = splitProps(props, ["class"])
-
-  return (
-    <TextFieldPrimitive.Description
-      class={cn(labelVariants({ variant: "description" }), local.class)}
-      {...others}
-    />
-  )
-}
-
-type TextFieldErrorMessageProps<T extends ValidComponent = "div"> =
-  TextFieldPrimitive.TextFieldErrorMessageProps<T> & {
-    class?: string | undefined
-  }
-
-function TextFieldErrorMessage<T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, TextFieldErrorMessageProps<T>>,
-): JSX.Element
-function TextFieldErrorMessage(
-  props: PolymorphicProps<ValidComponent, TextFieldErrorMessageProps<ValidComponent>>,
-): JSX.Element {
-  const [local, others] = splitProps(props, ["class"])
-
-  return (
-    <TextFieldPrimitive.ErrorMessage
-      class={cn(labelVariants({ variant: "error" }), local.class)}
-      {...others}
-    />
-  )
-}
-
 export {
   TextField,
   TextFieldInput,
-  TextFieldTextArea,
-  TextFieldLabel,
-  TextFieldDescription,
-  TextFieldErrorMessage
+  TextFieldLabel
 }

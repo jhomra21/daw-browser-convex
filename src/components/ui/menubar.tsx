@@ -87,8 +87,6 @@ const Menubar: Component<MenubarProps> = (props) => {
   );
 };
 
-const MenubarPortal = MenubarPrimitive.Portal;
-
 const MenubarMenu: Component<MenubarPrimitive.MenubarMenuProps> = (props) => {
   const mergedProps = mergeProps({ gutter: 8, shift: -4 }, props);
   const value = createMemo(() => props.value);
@@ -98,12 +96,6 @@ const MenubarMenu: Component<MenubarPrimitive.MenubarMenuProps> = (props) => {
       <MenubarPrimitive.Menu {...mergedProps} />
     </MenubarMenuValueContext.Provider>
   );
-};
-
-const MenubarSub: Component<MenubarPrimitive.MenubarSubProps> = (props) => {
-  const mergedProps = mergeProps({ gutter: 8 }, props);
-
-  return <MenubarPrimitive.Sub {...mergedProps} />;
 };
 
 type MenubarTriggerProps<T extends ValidComponent = "button"> =
@@ -209,26 +201,6 @@ const MenubarShortcut: Component<ComponentProps<"span">> = (props) => {
   );
 };
 
-type MenubarLabelProps = ComponentProps<"div"> & {
-  inset?: boolean;
-  class?: string;
-};
-
-const MenubarLabel: Component<MenubarLabelProps> = (props) => {
-  const [local, rest] = splitProps(props, ["class", "inset"]);
-
-  return (
-    <div
-      class={cn(
-        "px-2 py-1 text-xs font-semibold leading-5",
-        local.inset && "pl-6",
-        local.class,
-      )}
-      {...rest}
-    />
-  );
-};
-
 type MenubarSeparatorProps<T extends ValidComponent = "hr"> =
   MenubarPrimitive.MenubarSeparatorProps<T> & {
     class?: string | undefined;
@@ -252,72 +224,7 @@ function MenubarSeparator(
 
 ;
 
-type MenubarSubTriggerProps<T extends ValidComponent = "div"> =
-  MenubarPrimitive.MenubarSubTriggerProps<T> & {
-    class?: string | undefined;
-    children?: JSX.Element;
-    inset?: boolean;
-  };
-
-function MenubarSubTrigger<T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, MenubarSubTriggerProps<T>>,
-): JSX.Element
-function MenubarSubTrigger(
-  props: PolymorphicProps<ValidComponent, MenubarSubTriggerProps<ValidComponent>>,
-): JSX.Element {
-  const [local, rest] = splitProps(props, ["class", "children", "inset"]);
-
-  return (
-    <MenubarPrimitive.SubTrigger
-      class={cn(
-        "flex min-h-6 cursor-default select-none items-center gap-2 px-2 py-0.5 text-xs leading-5 outline-none focus:bg-accent focus:text-accent-foreground data-[expanded]:bg-accent data-[expanded]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:size-3.5 [&_svg]:shrink-0",
-        local.inset && "pl-6",
-        local.class,
-      )}
-      {...rest}
-    >
-      {local.children}
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        class="ml-auto size-3.5"
-      >
-        <path d="M9 6l6 6l-6 6" />
-      </svg>
-    </MenubarPrimitive.SubTrigger>
-  );
-}
-
 ;
-
-type MenubarSubContentProps<T extends ValidComponent = "div"> =
-  MenubarPrimitive.MenubarSubContentProps<T> & {
-    class?: string | undefined;
-  };
-
-function MenubarSubContent<T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, MenubarSubContentProps<T>>,
-): JSX.Element
-function MenubarSubContent(
-  props: PolymorphicProps<ValidComponent, MenubarSubContentProps<ValidComponent>>,
-): JSX.Element {
-  const [local, rest] = splitProps(props, ["class"]);
-
-  return (
-    <MenubarPrimitive.SubContent
-      class={cn(
-        "z-50 min-w-32 overflow-hidden border bg-popover p-0.5 text-xs text-popover-foreground shadow-lg outline-none",
-        "origin-[var(--kb-menu-content-transform-origin)] data-[expanded]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0 data-[closed]:zoom-out-95 data-[expanded]:zoom-in-95",
-        "data-[placement=bottom]:slide-in-from-top-2 data-[placement=left]:slide-in-from-right-2 data-[placement=right]:slide-in-from-left-2 data-[placement=top]:slide-in-from-bottom-2",
-        local.class,
-      )}
-      {...rest}
-    />
-  );
-}
 
 ;
 
@@ -325,13 +232,8 @@ export {
   Menubar,
   MenubarMenu,
   MenubarTrigger,
-  MenubarPortal,
   MenubarContent,
   MenubarItem,
   MenubarShortcut,
-  MenubarLabel,
   MenubarSeparator,
-  MenubarSub,
-  MenubarSubTrigger,
-  MenubarSubContent,
 };

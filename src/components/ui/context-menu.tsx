@@ -10,9 +10,6 @@ const ContextMenu: Component<ContextMenuPrimitive.ContextMenuRootProps> = (props
 );
 
 const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
-const ContextMenuPortal = ContextMenuPrimitive.Portal;
-const ContextMenuSub = ContextMenuPrimitive.Sub;
-const ContextMenuGroup = ContextMenuPrimitive.Group;
 
 type ContextMenuContentProps = ContextMenuPrimitive.ContextMenuContentProps & {
   class?: string | undefined;
@@ -93,50 +90,6 @@ const ContextMenuSeparator: Component<ContextMenuSeparatorProps> = (props) => {
   );
 };
 
-type ContextMenuSubTriggerProps = ContextMenuPrimitive.ContextMenuSubTriggerProps & {
-  class?: string | undefined;
-  children?: JSX.Element;
-  inset?: boolean;
-};
-
-const ContextMenuSubTrigger: Component<ContextMenuSubTriggerProps> = (props) => {
-  const [local, rest] = splitProps(props, ["class", "children", "inset"]);
-
-  return (
-    <ContextMenuPrimitive.SubTrigger
-      class={cn(
-        "flex min-h-6 cursor-default select-none items-center gap-2 whitespace-nowrap px-2 py-0.5 text-xs leading-5 text-foreground outline-none focus:bg-muted focus:text-foreground data-[expanded]:bg-muted data-[expanded]:text-foreground [&_svg]:pointer-events-none [&_svg]:size-3.5 [&_svg]:shrink-0",
-        local.inset && "pl-6",
-        local.class,
-      )}
-      {...rest}
-    >
-      {local.children}
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="ml-auto size-3.5">
-        <path d="M9 6l6 6l-6 6" />
-      </svg>
-    </ContextMenuPrimitive.SubTrigger>
-  );
-};
-
-type ContextMenuSubContentProps = ContextMenuPrimitive.ContextMenuSubContentProps & {
-  class?: string | undefined;
-};
-
-const ContextMenuSubContent: Component<ContextMenuSubContentProps> = (props) => {
-  const [local, rest] = splitProps(props, ["class"]);
-
-  return (
-    <ContextMenuPrimitive.SubContent
-      class={cn(
-        "z-50 min-w-32 overflow-hidden border border-border bg-app-surface p-0.5 text-xs text-foreground shadow-md shadow-background/40",
-        local.class,
-      )}
-      {...rest}
-    />
-  );
-};
-
 export {
   ContextMenu,
   ContextMenuTrigger,
@@ -145,9 +98,4 @@ export {
   ContextMenuShortcut,
   ContextMenuLabel,
   ContextMenuSeparator,
-  ContextMenuPortal,
-  ContextMenuSub,
-  ContextMenuSubTrigger,
-  ContextMenuSubContent,
-  ContextMenuGroup,
 };

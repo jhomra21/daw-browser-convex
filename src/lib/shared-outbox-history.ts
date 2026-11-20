@@ -2,7 +2,7 @@ import { loadHistory, saveHistory } from '~/lib/timeline-storage'
 import { buildCommittedSharedUngroupHistoryEntry, readSharedUngroupResult } from '~/lib/undo/shared-ungroup-history'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { JsonValue } from '@daw-browser/shared'
-import type { SharedOutboxEntry } from '~/lib/shared-outbox-entry'
+import type { SharedOutboxCompletion } from '~/lib/shared-outbox-entry'
 import { z } from 'zod'
 
 export type SharedOutboxHistoryUpdate =
@@ -85,7 +85,10 @@ const publishHistoryUpdate = (update: SharedOutboxHistoryUpdate) => {
   return false
 }
 
-export const completeUngroup = (entry: SharedOutboxEntry, result: JsonValue) => {
+export const completeUngroup = (
+  entry: { projectId: string; userId: string; completion?: SharedOutboxCompletion },
+  result: JsonValue,
+) => {
   if (entry.completion?.kind !== 'tracks.ungroup') return
   const committed = readSharedUngroupResult(result)
 
@@ -115,7 +118,10 @@ const clipDeletionPayloadSchema = z.object({
   clipIds: z.array(z.string()),
 })
 
-export const attachQueuedClipDeletionRecoveries = (entry: SharedOutboxEntry, result: JsonValue) => {
+export const attachQueuedClipDeletionRecoveries = (
+  entry: { id: string; kind: string; projectId: string; userId: string; payload: unknown },
+  result: JsonValue,
+) => {
   if (entry.kind !== 'clips.removeMany') return
   const parsedResult = clipDeletionResultSchema.safeParse(result)
 

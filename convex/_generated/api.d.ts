@@ -36,6 +36,7 @@ import type * as projects from "../projects.js";
 import type * as r2Deletes from "../r2Deletes.js";
 import type * as resumableAssetUploads from "../resumableAssetUploads.js";
 import type * as resumableUploadLifecycle from "../resumableUploadLifecycle.js";
+import type * as retention from "../retention.js";
 import type * as sampleRows from "../sampleRows.js";
 import type * as samples from "../samples.js";
 import type * as shareInvites from "../shareInvites.js";
@@ -82,6 +83,7 @@ declare const fullApi: ApiFromModules<{
   r2Deletes: typeof r2Deletes;
   resumableAssetUploads: typeof resumableAssetUploads;
   resumableUploadLifecycle: typeof resumableUploadLifecycle;
+  retention: typeof retention;
   sampleRows: typeof sampleRows;
   samples: typeof samples;
   shareInvites: typeof shareInvites;

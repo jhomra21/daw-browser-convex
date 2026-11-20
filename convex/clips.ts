@@ -20,6 +20,7 @@ import {
 } from './controlEffectiveValues'
 import { fail } from './errors'
 import { audioWarpValidator, clipFadesValidator, midiValidator } from './validators'
+import { recoveryRetention } from './retention'
 import { normalizeClipFades, type ClipFades } from '@daw-browser/timeline-core/clip-fades'
 import { hashCanonicalJsonSyncV1 } from '@daw-browser/control'
 
@@ -79,9 +80,12 @@ const clipRestoreResult = v.union(
   v.object({ status: v.literal('rejected'), reason: v.optional(v.string()) }),
 )
 
-const clipDeletionRecoveryLifetimeMs = 7 * 24 * 60 * 60 * 1000
-const maxClipDeletionRecoveriesPerProject = 1000
-const maxClipDeletionRecoveriesPerActorProject = 128
+const {
+  lifetimeMs: clipDeletionRecoveryLifetimeMs,
+  maxPerProject: maxClipDeletionRecoveriesPerProject,
+  maxPerActorProject: maxClipDeletionRecoveriesPerActorProject,
+} = recoveryRetention
+
 const clipDeletionRecoveryReceiptLifetimeMs = 24 * 60 * 60 * 1000
 const maxClipDeletionRecoveryReceiptsPerProject = 1000
 const maxClipDeletionRecoveryReceiptsPerActorProject = 128

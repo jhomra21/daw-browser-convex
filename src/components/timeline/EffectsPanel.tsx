@@ -94,6 +94,7 @@ import {
   type DeviceCollapseIdentity,
 } from "~/components/timeline/create-effects-panel-device-collapse";
 import { isDeviceInteractiveTarget } from "~/components/timeline/device-interaction";
+import { settleReportedAction } from "~/components/timeline/reported-action-outcome";
 import { ParameterGestureProvider } from "~/components/effects/effect-parameter-interaction";
 
 type EffectsPanelProps = {
@@ -497,7 +498,7 @@ const createAudioEffectContextMenuControls = (
 ) => {
   const remove = targetId
     ? () => {
-      void audioEffects.removeByInstanceFromTarget(targetId, effect).catch(() => undefined);
+      void settleReportedAction(audioEffects.removeByInstanceFromTarget(targetId, effect));
     }
     : undefined;
 
@@ -845,7 +846,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
     event.preventDefault();
     event.stopPropagation();
     setSelection();
-    void props.audioEffects.removeByInstanceFromTarget(props.targetId, effect).catch(() => undefined);
+    void settleReportedAction(props.audioEffects.removeByInstanceFromTarget(props.targetId, effect));
   };
 
   const reorderMixedCards = (key: string, targetIndex: number) => {
@@ -1108,7 +1109,7 @@ const createEffectsPanelContextMenuItems = (input: {
     label: `Add ${entry.label}`,
     disabled: !input.canWrite || !input.audioEffects.canAddByKindToTarget(input.targetId, entry.kind),
     onSelect: () => {
-      void input.audioEffects.addByKindToTarget(input.targetId, entry.kind).catch(() => undefined);
+      void settleReportedAction(input.audioEffects.addByKindToTarget(input.targetId, entry.kind));
     },
   }));
 
@@ -1185,7 +1186,7 @@ const createEffectsPanelContextMenuItems = (input: {
       label: "Delete all audio effects",
       disabled: !input.canWrite || !hasAudioEffects(),
       onSelect: () => {
-        void input.audioEffects.removeAllFromTarget(input.targetId).catch(() => undefined);
+        void settleReportedAction(input.audioEffects.removeAllFromTarget(input.targetId));
       },
     },
     {
@@ -1297,9 +1298,10 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     if (!processor || processor.targetId !== props.selectedFXTarget) return;
     const playbackIntent = props.captureStructuralPlaybackIntent?.();
     props.acceptance?.ui("ui-device-remove", () => instanceId);
-    void deleteLocalExternalProcessor(projectId, instanceId)
-      .then(() => untrack(() => props.onMixedReorderCommitted?.(playbackIntent)))
-      .catch(() => undefined);
+    void settleReportedAction(deleteLocalExternalProcessor(projectId, instanceId))
+      .then((outcome) => {
+        if (outcome.ok) untrack(() => props.onMixedReorderCommitted?.(playbackIntent));
+      });
   };
 
   const applyExternalProcessorCommit = (
@@ -1322,11 +1324,10 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     const projectId = props.projectId;
 
     if (!projectId || !isLocalId("project", projectId) || !canWriteCurrentTargetEffects()) return;
-    void mergeLocalExternalProcessorParameterOverride(projectId, instanceId, parameterId, value)
-      .then((commit) => {
-        if (commit) applyExternalProcessorCommit(commit);
-      })
-      .catch(() => undefined);
+    void settleReportedAction(mergeLocalExternalProcessorParameterOverride(projectId, instanceId, parameterId, value))
+      .then((outcome) => {
+        if (outcome.ok && outcome.value) applyExternalProcessorCommit(outcome.value);
+      });
   };
 
   const updateExternalProcessorBypass = (instanceId: string, bypassed: boolean) => {
@@ -1334,11 +1335,10 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
 
     if (!projectId || !isLocalId("project", projectId) || !canWriteCurrentTargetEffects()) return;
     const playbackIntent = props.captureStructuralPlaybackIntent?.();
-    void setLocalExternalProcessorBypassed(projectId, instanceId, bypassed)
-      .then((commit) => {
-        if (commit) applyExternalProcessorCommit(commit, playbackIntent);
-      })
-      .catch(() => undefined);
+    void settleReportedAction(setLocalExternalProcessorBypassed(projectId, instanceId, bypassed))
+      .then((outcome) => {
+        if (outcome.ok && outcome.value) applyExternalProcessorCommit(outcome.value, playbackIntent);
+      });
   };
 
   const reorderMixed = (order: readonly MixedEffectOrderItem[]) => {
@@ -1347,9 +1347,10 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     if (!projectId || !isLocalId("project", projectId) || !canWriteCurrentTargetEffects()) return;
     const targetId = props.selectedFXTarget;
     const playbackIntent = props.captureStructuralPlaybackIntent?.();
-    void reorderLocalMixedEffects(projectId, targetId, order)
-      .then(() => untrack(() => props.onMixedReorderCommitted?.(playbackIntent)))
-      .catch(() => undefined);
+    void settleReportedAction(reorderLocalMixedEffects(projectId, targetId, order))
+      .then((outcome) => {
+        if (outcome.ok) untrack(() => props.onMixedReorderCommitted?.(playbackIntent));
+      });
   };
 
   const panelContextMenuItems = () => createEffectsPanelContextMenuItems({

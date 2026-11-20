@@ -1,7 +1,4 @@
-const SIDECHAIN_EFFECT_KINDS = ['compressor', 'gate', 'spectral'] as const
-
-const isSidechainEffectKind = (kind: string) =>
-  SIDECHAIN_EFFECT_KINDS.some((candidate) => candidate === kind)
+import { isSidechainCapableKind } from './audio-effect-registry'
 
 export const sidechainEligibilityError = (input: {
   sourceTrackId: string
@@ -23,7 +20,7 @@ export const sidechainTargetEligibilityError = (input: {
 }) => {
   if (
     input.effectTargetTrackId !== input.targetTrackId
-    || !isSidechainEffectKind(input.effectKind)
+    || !isSidechainCapableKind(input.effectKind)
     || !input.effectInstanceId
   ) return 'Sidechain target must identify exactly one compressor, gate, or spectral instance.'
 

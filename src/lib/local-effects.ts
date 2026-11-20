@@ -1,6 +1,6 @@
 import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectEntityRow, type LocalProjectStoredValue } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { INSTRUMENT_CONTRACTS, audioEffectOrderItemId, audioEffectOrderItemKind, automationTargetMatchesEffectInstance, createAudioEffectInstanceId, createInstrumentInstanceId, isJsonObject, isJsonString, type AudioEffectKind, type AudioEffectOrderItem, type JsonValue, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
+import { INSTRUMENT_CONTRACTS, audioEffectOrderItemId, audioEffectOrderItemKind, automationTargetMatchesEffectInstance, createAudioEffectInstanceId, createInstrumentInstanceId, isJsonObject, isJsonString, isSidechainCapableKind, type AudioEffectKind, type AudioEffectOrderItem, type JsonValue, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { readInstrumentParamsFromEffectRow } from '~/lib/effect-row-instrument-params'
 import { structuredCloneJsonValue } from '~/lib/structured-clone-json'
 import { compareAudioEffectOrderEntries } from '~/lib/audio-effect-order-rows'
@@ -287,7 +287,7 @@ export const deleteLocalEffectInstance = async (
 
     const automationRows = await tx.store.index('by-kind').getAll('automation-envelope')
 
-    const sidechainRows = effect === 'compressor' || effect === 'gate' || effect === 'spectral'
+    const sidechainRows = isSidechainCapableKind(effect)
       ? await tx.store.index('by-kind').getAll(SIDECHAIN_KIND)
       : []
 

@@ -1,19 +1,14 @@
 import type { AudioEffectRuntimeInstance } from './runtime-instance'
 import { PROCESSOR_RESOURCE_LIMITS } from './processor-release-contract'
-import type { StaticWorkletKind } from './static-worklet-chain'
+import { isOwnedProcessorKind } from '@daw-browser/shared'
 
 type LiveWorkletTransaction = {
   owner: string
   id: number
 }
 
-export const isStaticWorkletKind = (kind: AudioEffectRuntimeInstance['kind']): kind is StaticWorkletKind =>
-  kind === 'utility' || kind === 'autofilter' || kind === 'gate' || kind === 'limiter' || kind === 'lofi' ||
-  kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble' ||
-  kind === 'spectral'
-
 export const countStaticWorklets = (instances: readonly AudioEffectRuntimeInstance[]) =>
-  instances.filter((instance) => isStaticWorkletKind(instance.kind)).length
+  instances.filter((instance) => isOwnedProcessorKind(instance.kind)).length
 
 export function createLiveWorkletBudget(limit: number = PROCESSOR_RESOURCE_LIMITS.liveOwnedWorklets) {
   const committed = new Map<string, number>()

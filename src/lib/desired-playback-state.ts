@@ -7,6 +7,7 @@ import {
   type JsonValue,
   arpeggiatorParamsSchema,
   isDspAudioEffectKind,
+  isOwnedProcessorKind,
   isJsonObject,
   normalizeArpeggiatorParams,
   normalizeAutoFilterParamsEnvelope,
@@ -29,6 +30,7 @@ import {
   normalizeTrackInstrumentParams,
   normalizeUtilityParamsEnvelope,
   parseJsonValue,
+  type OwnedProcessorKind,
 } from '@daw-browser/shared'
 import type { convexApi } from '~/lib/convex'
 import { audioEffectKindFromLocalEffect, type LocalEffectRow } from '~/lib/local-effects'
@@ -345,7 +347,7 @@ const applyTrackFxPatch = (trackFx: TrackFxMap, trackId: string, patch: TrackFxP
 const createOwnedExportEffectRow = (
   targetId: string,
   id: string,
-  kind: 'utility' | 'autofilter' | 'gate' | 'limiter' | 'lofi' | 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' | 'spectral',
+  kind: OwnedProcessorKind,
   params: OwnedExportEffectParams,
   index?: number,
 ): ExportEffectInstanceRow => {
@@ -481,8 +483,7 @@ export const applyLocalEffectRowsToFx = (fx: ExportFx, rows: readonly LocalEffec
 
       if (kind === 'reverb') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: AUDIO_EFFECT_CONTRACTS.reverb.normalizeParams(params) })
 
-      if (kind === 'utility' || kind === 'autofilter' || kind === 'gate' || kind === 'limiter' || kind === 'lofi' ||
-        kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble' || kind === 'spectral') {
+      if (isOwnedProcessorKind(kind)) {
         instanceRows.push(createOwnedExportEffectRow(row.targetId, id, kind, row.params, row.index))
       }
     }
@@ -527,8 +528,7 @@ export const applyRoomEffectRowsToFx = (fx: ExportFx, rows: readonly RoomEffectR
 
         if (row.type === 'reverb') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeReverbParams(row.params) })
 
-        if (row.type === 'utility' || row.type === 'autofilter' || row.type === 'gate' || row.type === 'limiter' || row.type === 'lofi' ||
-          row.type === 'chorus' || row.type === 'flanger' || row.type === 'phaser' || row.type === 'tremolo' || row.type === 'autopan' || row.type === 'ensemble' || row.type === 'spectral') {
+        if (isOwnedProcessorKind(row.type)) {
           instanceRows.push(createOwnedExportEffectRow(targetId, id, row.type, row.params, row.index))
         }
       }

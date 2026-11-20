@@ -4,7 +4,7 @@ import {
   type LocalProjectEntityRow,
   type LocalProjectStoredValue,
 } from '~/lib/local-project-db'
-import { audioWarpEqual, canonicalTrackCreation, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, hasValidReturnTrackPartition, isLocalProjectAssetKey, midiClipEquals, normalizeAudioWarp, normalizeLegacyMidiClip, normalizeMidiClip, normalizeTrackRouting, sanitizeAudioSourceKind } from '@daw-browser/shared'
+import { audioWarpEqual, canonicalTrackCreation, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, hasValidReturnTrackPartition, isLocalProjectAssetKey, isSidechainCapableKind, midiClipEquals, normalizeAudioWarp, normalizeLegacyMidiClip, normalizeMidiClip, normalizeTrackRouting, sanitizeAudioSourceKind } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { flushRegisteredLocalProjectWrites } from '~/lib/local-project-write-flushers'
 import {
@@ -1078,13 +1078,13 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
 
       const matchingEffects = route.targetTrackId === input.group.id
         ? input.effects.filter((effect) => (
-            (effect.effect === 'compressor' || effect.effect === 'gate' || effect.effect === 'spectral')
+            isSidechainCapableKind(effect.effect)
             && effect.instanceId === route.effectInstanceId
           ))
         : effectRows.filter((row) => (
             isLocalProjectStoredObject(row.value)
             && row.value.targetId === route.targetTrackId
-            && (row.value.effect === 'compressor' || row.value.effect === 'gate' || row.value.effect === 'spectral')
+            && isSidechainCapableKind(row.value.effect)
             && row.value.instanceId === route.effectInstanceId
           ))
 
@@ -1208,7 +1208,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     const matchingEffects = effectRows.filter((row) => (
       isLocalProjectStoredObject(row.value)
       && row.value.targetId === route.targetTrackId
-      && (row.value.effect === 'compressor' || row.value.effect === 'gate' || row.value.effect === 'spectral')
+      && isSidechainCapableKind(row.value.effect)
       && row.value.instanceId === route.effectInstanceId
     ))
 

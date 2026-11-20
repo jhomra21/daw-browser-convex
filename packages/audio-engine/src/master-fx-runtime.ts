@@ -1,3 +1,4 @@
+import { isOwnedProcessorKind } from '@daw-browser/shared'
 import { connectFxChain, createGainTransitionOwner, disconnectAudioNodes, type FxChainStageConfig, type GainTransitionOwner, type GainTransitionScheduler } from './effects/chain'
 import type { CompressorChainState } from './effects/compressor-chain-state'
 import type { EqChainState } from './effects/eq-chain-state'
@@ -12,7 +13,7 @@ import { normalizeAudioEffectRuntimeInstances, type AudioEffectRuntimeInstance }
 import type { ResolveMixerGraphOptions } from './mixer/types'
 import { disconnectStaticWorkletNodeChain, resolveStaticWorkletAutomationBinding, subscribeStaticGateMeter, type GateMeterListener, type StaticWorkletNodeChain } from './effects/static-worklet-chain'
 import { observeResource, type ResourceObserver } from './runtime-diagnostics'
-import { countStaticWorklets, isStaticWorkletKind, type LiveWorkletBudget } from './effects/live-worklet-budget'
+import { countStaticWorklets, type LiveWorkletBudget } from './effects/live-worklet-budget'
 import { getEffectChainTiming } from './effects/timing'
 import { createChainAdmission } from './chain-admission'
 import { closeResources, createEffectChainTransaction, type EffectChainOutcome, type InstanceResources } from './effect-chain-transaction'
@@ -164,7 +165,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     saturatorChain: instance.kind === 'saturator' ? resources.saturators.get(instance.id)?.chain() : undefined,
     delayChain: instance.kind === 'delay' ? resources.delays.get(instance.id)?.chain() : undefined,
     reverbChain: instance.kind === 'reverb' ? resources.reverbs.get(instance.id)?.chain() : undefined,
-    staticWorkletChain: isStaticWorkletKind(instance.kind) ? resources.staticWorklets.get(instance.id) : undefined,
+    staticWorkletChain: isOwnedProcessorKind(instance.kind) ? resources.staticWorklets.get(instance.id) : undefined,
   }))
 
   const rebuildRouting = (

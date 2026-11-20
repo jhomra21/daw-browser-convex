@@ -2,6 +2,7 @@ import {
   isJsonNumber,
   isJsonObject,
   isJsonString,
+  isModulationGroupKind,
   OWNED_PROCESSOR_PARAMETER_IDS,
   type JsonValue,
   type OwnedProcessorKind,
@@ -32,9 +33,6 @@ export type StaticWorkletNodeChain = {
   gateMeterListeners: Set<GateMeterListener>
 }
 
-const isModulationKind = (kind: StaticWorkletKind) =>
-  kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble'
-
 const manifest = (kind: StaticWorkletKind) => kind === 'utility' ? utilityWorklet : kind === 'autofilter' ? autoFilterWorklet : kind === 'gate' ? gateWorklet : kind === 'limiter' ? limiterWorklet : kind === 'lofi' ? loFiWorklet : kind === 'spectral' ? spectralWorklet : modulationWorklet
 
 type StaticWorkletParams = Parameters<typeof normalizeOwnedProcessorAudioState>[1]
@@ -64,7 +62,7 @@ export async function createStaticWorkletNodeChain(
     channelCount: 2,
     channelCountMode: 'explicit',
     channelInterpretation: 'speakers',
-    processorOptions: isModulationKind(kind)
+    processorOptions: isModulationGroupKind(kind)
       ? { processorKind: kind }
       : kind === 'spectral'
         ? {
@@ -143,7 +141,7 @@ export function applyStaticWorkletNodeParams(
     type: 'configure',
     version: 1,
     revision: chain.revision,
-    processorKind: isModulationKind(chain.kind) ? chain.kind : undefined,
+    processorKind: isModulationGroupKind(chain.kind) ? chain.kind : undefined,
     state: normalizedState,
   })
 

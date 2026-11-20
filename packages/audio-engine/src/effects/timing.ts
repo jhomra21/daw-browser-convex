@@ -5,6 +5,7 @@ import {
   type CompressorParamsLite,
   type DelayParamsLite,
   type EqParamsLite,
+  type OwnedProcessorKind,
   type ReverbParamsLite,
   type SaturatorParamsLite,
 } from '@daw-browser/shared'
@@ -17,8 +18,7 @@ type EffectTiming = {
 }
 
 export type EffectTimingInput =
-  | Extract<AudioEffectRuntimeInstance, { kind: 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' }>
-  | Extract<AudioEffectRuntimeInstance, { kind: 'utility' | 'autofilter' | 'gate' | 'limiter' | 'lofi' | 'spectral' }>
+  | Extract<AudioEffectRuntimeInstance, { kind: OwnedProcessorKind }>
   | { kind: 'eq'; params: EqParamsLite }
   | { kind: 'compressor'; params: CompressorParamsLite }
   | { kind: 'saturator'; params: SaturatorParamsLite }

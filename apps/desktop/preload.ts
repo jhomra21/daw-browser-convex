@@ -135,6 +135,7 @@ import type {
 } from "@daw-browser/plugin-host-protocol"
 import { isExportAudioFormat, type ExportAudioFormat } from "@daw-browser/shared"
 import { z } from "zod"
+/* oxlint-disable eslint/no-restricted-imports -- the bridge types stay in src/types until the batch that owns the certification-pinned playback files moves it */
 import type {
   DesktopBridge,
   DesktopVstEditorCapturedState,
@@ -142,6 +143,7 @@ import type {
   NativeDeliveryReply,
   NativeProcessorPatchReply,
 } from "../../src/types/desktop-bridge"
+/* oxlint-enable eslint/no-restricted-imports */
 import { createRequestQueue, type PreloadHostRequest, type PreloadHostResponse } from "./request-queue"
 import { offlinePcmMessageSchema } from "./offline-pcm-protocol"
 import { deliverOfflinePcmChunk } from "./offline-pcm-ack"

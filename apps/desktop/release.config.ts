@@ -10,7 +10,9 @@ import {
   type NativeReleaseArtifact,
 } from "./native-release-artifacts"
 import { nativeVst3WorkerArtifactId } from "@daw-browser/plugin-host-protocol"
+/* oxlint-disable eslint/no-restricted-imports -- jobLimit is the one worker limit shared with tools/certification and the native build scripts */
 import { jobLimit } from "../../tools/jobs"
+/* oxlint-enable eslint/no-restricted-imports */
 
 export const defaultNotaryProfile = "DAW_NOTARY_PROFILE"
 

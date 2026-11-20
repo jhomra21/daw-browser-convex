@@ -9,7 +9,9 @@ import {
 import type { AudioEngine, EngineDisposition, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import type { convexApi } from "~/lib/convex";
 import type { LocalEffectRow } from "~/lib/local-effects";
+/* oxlint-disable eslint/no-restricted-imports -- create-local-effects-view stays in components until the batch that owns the certification-pinned playback files moves it */
 import type { LocalEffectsViewSource } from "~/components/timeline/create-local-effects-view";
+/* oxlint-enable eslint/no-restricted-imports */
 import type { ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
 import { indexInstrumentEffectRows } from "~/lib/effect-row-index";
 import type { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";

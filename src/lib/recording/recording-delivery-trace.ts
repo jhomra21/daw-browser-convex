@@ -122,4 +122,3 @@ export const createRecordingDeliveryTrace = (enabled: boolean, generation: numbe
   }
 }
 
-export type RecordingDeliveryDump = ReturnType<ReturnType<typeof createRecordingDeliveryTrace>["dump"]>

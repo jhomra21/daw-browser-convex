@@ -18,11 +18,11 @@ export type NativeVst3CatalogSelection = {
   pluginClass: DesktopPluginCatalogEntry["classes"][number]
 }
 
-export type NativeVst3InsertionAvailability =
+type NativeVst3InsertionAvailability =
   | { enabled: true; message: string }
   | { enabled: false; code: NativeVst3InsertionFailureCode; message: string }
 
-export type NativeVst3InsertionResult =
+type NativeVst3InsertionResult =
   | { ok: true; processor: ExternalProcessor }
   | Extract<NativeVst3InsertionPreflightResult, { ok: false }>
 

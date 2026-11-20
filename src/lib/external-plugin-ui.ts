@@ -1,6 +1,6 @@
 import type { ExternalProcessor } from "@daw-browser/external-plugins";
 
-export type Vst3ScanHealth = "filesystem-only" | "scanned" | "scan-failed";
+type Vst3ScanHealth = "filesystem-only" | "scanned" | "scan-failed";
 
 export const vst3TrustDisclosure = {
   title: "VST3 plug-ins are native software",
@@ -10,7 +10,7 @@ export const vst3TrustDisclosure = {
 
 export const vst3TrustAcknowledgementStorageKey = "daw:vst3-trust-acknowledged";
 
-export type NativeVst3PlaybackFaultKind = "launch-authorization-required";
+type NativeVst3PlaybackFaultKind = "launch-authorization-required";
 
 export const nativeVst3LaunchAuthorizationRequiredMessage =
   "A native VST3 attachment is stale or no longer trusted.";

@@ -20,7 +20,7 @@ export class SharedTimelineOperationRejectedError extends Error {
   }
 }
 
-export type EffectsOperationResult =
+type EffectsOperationResult =
   | { status: 'invalid' }
   | {
     status: 'applied'

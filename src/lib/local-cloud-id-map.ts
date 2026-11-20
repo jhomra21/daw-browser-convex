@@ -1,9 +1,9 @@
 import type { LocalProjectStoredValue, LocalProjectSyncStateRow } from '~/lib/local-project-db'
 import { isJsonNumber, isJsonObject, isJsonString, parseJsonValue, type JsonValue } from '@daw-browser/shared'
 
-export type CloudMappedEntityKind = 'track' | 'clip' | 'asset'
+type CloudMappedEntityKind = 'track' | 'clip' | 'asset'
 
-export type CloudIdMapping = {
+type CloudIdMapping = {
   kind: CloudMappedEntityKind
   localId: string
   cloudId: string

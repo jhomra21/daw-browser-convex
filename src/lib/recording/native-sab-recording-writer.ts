@@ -25,7 +25,7 @@ const deferred = <T>() => {
   return { promise, resolve, reject }
 }
 
-export type NativeSabRecordingWriterInput = {
+type NativeSabRecordingWriterInput = {
   generation: number
   sessionId: string
   sampleRate: number

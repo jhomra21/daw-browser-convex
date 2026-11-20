@@ -1,7 +1,7 @@
 import { serializeNativeVstParameterEvents } from "@daw-browser/audio-engine/native-host-wire"
 import { maxVst3WorkerEventsPerBlock } from "@daw-browser/plugin-host-protocol"
 
-export type NativeSessionReply = { ok: true } | { ok: false; error: string }
+type NativeSessionReply = { ok: true } | { ok: false; error: string }
 
 export type NativeVstParameterEvent = {
   instanceId: string
@@ -9,7 +9,7 @@ export type NativeVstParameterEvent = {
   value: number
 }
 
-export type NativeVstParameterSender = (bytes: Uint8Array) => Promise<NativeSessionReply>
+type NativeVstParameterSender = (bytes: Uint8Array) => Promise<NativeSessionReply>
 
 export type NativeVstParameterQueueResult = "delivered" | "superseded" | "rejected"
 

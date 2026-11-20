@@ -20,7 +20,7 @@ export type TimelineTrackLayout = {
   returnHeightPx: number
 }
 
-export type TimelineTrackLaneHitRegion = 'clip' | 'automation'
+type TimelineTrackLaneHitRegion = 'clip' | 'automation'
 
 export const timelineTrackLaneHitRegion = (
   row: Pick<TimelineTrackLayoutRow, 'heightPx' | 'clipLaneHeightPx' | 'automationHeightPx'>,

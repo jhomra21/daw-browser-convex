@@ -83,7 +83,7 @@ type ExternalProcessorArtifactStore = {
   delete: (key: string) => void
 }
 
-export type LocalExternalProcessorDeletionPlan = {
+type LocalExternalProcessorDeletionPlan = {
   entityKeys: readonly [string, string][]
   artifactIds: readonly string[]
   retainedRows: readonly LocalProjectEntityRow[]
@@ -181,7 +181,7 @@ const parseExternalProcessor = (value: ExternalPluginJsonValue, rowId: string): 
   throw new Error(`External plugin row "${rowId}" is incompatible or corrupt: ${parsed.error.issues[0]?.message ?? 'invalid processor data'}.`)
 }
 
-export type LocalExternalProcessorCommit = {
+type LocalExternalProcessorCommit = {
   previous: ExternalProcessor
   current: ExternalProcessor
 }

@@ -420,4 +420,3 @@ export const projectRetainedWaveformData = (input: {
   return projected
 }
 
-export type { WaveformSourceData }

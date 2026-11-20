@@ -6,7 +6,7 @@ import {
   type AutomationEnvelope,
 } from '@daw-browser/shared'
 
-export type NativeVstAutomationProjectionInput = Readonly<{
+type NativeVstAutomationProjectionInput = Readonly<{
   automationEnvelopes: readonly AutomationEnvelope[]
   externalAttachments?: NativeExternalAttachmentPlan
   sampleRateHz: number

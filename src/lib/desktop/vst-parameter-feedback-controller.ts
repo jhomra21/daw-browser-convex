@@ -13,7 +13,7 @@ type VstParameterFeedbackControllerInput = {
   reportFault?: (message: string) => void
 }
 
-export type VstParameterFeedbackController = {
+type VstParameterFeedbackController = {
   dispose: () => void
 }
 

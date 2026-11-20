@@ -15,7 +15,7 @@ type ActivePointer = {
   value: number;
 };
 
-export type MixerVolumeSliderProps = {
+type MixerVolumeSliderProps = {
   value: number;
   disabled: boolean;
   automated: boolean;

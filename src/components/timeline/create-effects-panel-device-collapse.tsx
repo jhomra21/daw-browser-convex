@@ -98,7 +98,7 @@ export function createEffectsPanelDeviceCollapse(projectId: Accessor<string | un
   };
 }
 
-export type DeviceCollapseContextValue = {
+type DeviceCollapseContextValue = {
   collapsed: Accessor<boolean>;
   toggle: () => void;
   contentId: Accessor<string>;
@@ -143,7 +143,7 @@ export type DeviceCollapseGesture =
   }
   | undefined;
 
-export type DeviceCollapseGestureResult = {
+type DeviceCollapseGestureResult = {
   next: DeviceCollapseGesture;
   recognized: boolean;
 };

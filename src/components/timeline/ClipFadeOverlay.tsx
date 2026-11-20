@@ -12,7 +12,7 @@ import {
   updateFadeDraftForKeyboard,
 } from './clip-fade-interaction'
 
-export type ClipFadeOverlayClip = {
+type ClipFadeOverlayClip = {
   duration: number
   fades?: ClipFades
   midi?: unknown

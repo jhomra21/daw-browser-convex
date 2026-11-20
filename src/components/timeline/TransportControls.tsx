@@ -23,7 +23,7 @@ import { TracksMenu } from "./menus/tracks-menu";
 import { ViewMenu } from "./menus/view-menu";
 import { gridDenominators } from "./grid-options";
 
-export type TransportBarController = {
+type TransportBarController = {
   isRecording: boolean;
   isRecordingPending?: boolean;
   onToggleRecord: () => void;

@@ -17,6 +17,7 @@ import {
 import { getTrackWriteAccess, requireTrackOwnerForWrite } from "./trackWrites";
 import { getClipWriteAccess } from "./clipWrites";
 import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
+import { literalUnion } from "./effectKindValidators";
 import { runSharedOperationOnce } from "./sharedOperationResults";
 import { advanceProjectRevision, withProjectEdit, type ProjectEdit } from "./projectRows";
 import { effectiveControlMixerBoolean } from "./controlEffectiveValues";
@@ -25,7 +26,7 @@ import {
   deriveTrackUngroupAfterStatesV1,
   type NormalizedTrackControlStateV1,
 } from "@daw-browser/control-core";
-import { automationTargetKey, canonicalTrackCreation, collectTrackDescendantIds, createDefaultSynthParams, createInstrumentInstanceId, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, normalizeClipColor, normalizeMixerVolume, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, normalizeTrackColor, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sidechainEligibilityError, sidechainTargetEligibilityError, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
+import { AUDIO_EFFECT_KINDS, automationTargetKey, canonicalTrackCreation, collectTrackDescendantIds, createDefaultSynthParams, createInstrumentInstanceId, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, isSidechainCapableKind, normalizeClipColor, normalizeMixerVolume, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, normalizeTrackColor, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sidechainEligibilityError, sidechainTargetEligibilityError, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
 
 type DeleteOwnedTrackOptions = {
   onlyIfEmpty?: boolean
@@ -1797,29 +1798,7 @@ export const serverRestoreUngroup = mutation({
     }),
     children: v.array(v.object({ trackId: v.string(), outputTargetId: v.optional(v.string()), outputToGroup: v.boolean() })),
     effects: v.array(v.object({
-      type: v.union(
-        v.literal("utility"),
-        v.literal("eq"),
-        v.literal("autofilter"),
-        v.literal("gate"),
-        v.literal("compressor"),
-        v.literal("saturator"),
-        v.literal("limiter"),
-        v.literal("lofi"),
-        v.literal("chorus"),
-        v.literal("flanger"),
-        v.literal("phaser"),
-        v.literal("tremolo"),
-        v.literal("autopan"),
-        v.literal("ensemble"),
-        v.literal("delay"),
-        v.literal("reverb"),
-        v.literal("spectral"),
-        v.literal("spectrum"),
-        v.literal("instrument"),
-        v.literal("synth"),
-        v.literal("arpeggiator"),
-      ),
+      type: literalUnion([...AUDIO_EFFECT_KINDS, "instrument", "synth", "arpeggiator"]),
       instanceId: v.optional(v.string()),
       index: v.optional(v.number()),
       params: v.any(),
@@ -1925,7 +1904,7 @@ export const serverRestoreUngroup = mutation({
 
           if (!route.targetTrackId) {
             const matchingEffects = effects.filter((effect) => (
-              (effect.type === "compressor" || effect.type === "gate" || effect.type === "spectral")
+              isSidechainCapableKind(effect.type)
               && effect.instanceId === route.effectInstanceId
             ));
 
@@ -1939,7 +1918,7 @@ export const serverRestoreUngroup = mutation({
           const targetEffects = await ctx.db.query("effects").withIndex("by_track", (q: any) => q.eq("trackId", targetTrack._id)).collect();
 
           const matchingEffects = targetEffects.filter((effect: any) => (
-            (effect.type === "compressor" || effect.type === "gate" || effect.type === "spectral")
+            isSidechainCapableKind(effect.type)
             && effect.instanceId === route.effectInstanceId
           ));
 

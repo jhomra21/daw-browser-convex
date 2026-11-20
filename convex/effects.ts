@@ -6,6 +6,7 @@ import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProject
 import { getTrackWriteAccess } from "./trackWrites";
 import { runSharedOperationOnce } from "./sharedOperationResults";
 import { withProjectEdit, type ProjectEdit } from "./projectRows";
+import { literalUnion } from "./effectKindValidators";
 import { legacySynthParamsValidator, synthParamsValidator, trackInstrumentValidator } from "./synthValidators";
 import {
   normalizeEqParamsForUpdate,
@@ -18,6 +19,8 @@ import {
   normalizeArpeggiatorParams,
   normalizeAudioEffectParamsForUpdate,
   AUDIO_EFFECT_CONTRACTS,
+  AUDIO_EFFECT_KINDS,
+  audioEffectKindsWithOperation,
   audioEffectOrderItemId,
   audioEffectOrderItemKind,
   mergeOwnedProcessorParams,
@@ -30,8 +33,10 @@ import {
   parseGranularAutomationKey,
   parseInstrumentAutomationKey,
   parseSynthAutomationKey,
+  isAudioEffectKind,
   isJsonObject,
   isJsonString,
+  type AudioEffectKind,
   type JsonValue,
 } from "@daw-browser/shared";
 
@@ -128,16 +133,14 @@ const delayParamsValidator = v.object({
 })
 
 const processorEnvelopeValidator = v.object({ version: v.literal(1), state: v.any() })
-const processorEffectValidator = v.union(v.literal("utility"), v.literal("gate"), v.literal("limiter"), v.literal("spectral"))
-const modulationEffectValidator = v.union(v.literal("autofilter"), v.literal("chorus"), v.literal("flanger"), v.literal("phaser"), v.literal("tremolo"), v.literal("autopan"), v.literal("ensemble"), v.literal("lofi"), v.literal("spectrum"))
-const canonicalAudioEffectKindValidator = v.union(v.literal("utility"), v.literal("eq"), v.literal("autofilter"), v.literal("gate"), v.literal("compressor"), v.literal("saturator"), v.literal("limiter"), v.literal("lofi"), v.literal("chorus"), v.literal("flanger"), v.literal("phaser"), v.literal("tremolo"), v.literal("autopan"), v.literal("ensemble"), v.literal("delay"), v.literal("reverb"), v.literal("spectral"), v.literal("spectrum"))
+const processorEffectValidator = literalUnion(audioEffectKindsWithOperation("processor"))
+const modulationEffectValidator = literalUnion(audioEffectKindsWithOperation("modulation"))
+const canonicalAudioEffectKindValidator = literalUnion(AUDIO_EFFECT_KINDS)
 
 const audioEffectOrderItemValidator = v.union(
   canonicalAudioEffectKindValidator,
   v.object({ id: v.string(), kind: canonicalAudioEffectKindValidator }),
 )
-
-type AudioEffectKind = 'utility' | 'eq' | 'autofilter' | 'gate' | 'compressor' | 'saturator' | 'limiter' | 'lofi' | 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' | 'delay' | 'reverb' | 'spectral' | 'spectrum'
 
 type TrackAudioEffectType = 'instrument' | 'synth' | 'arpeggiator' | AudioEffectKind
 
@@ -169,12 +172,6 @@ type EffectRowReorderResult = {
 type ReorderRowsResult =
   | { changed: false }
   | { changed: true; revision: number }
-
-const isCanonicalAudioEffectKind = (type: string): type is AudioEffectKind => (
-  type === 'utility' || type === 'eq' || type === 'autofilter' || type === 'gate' || type === 'compressor' || type === 'saturator' || type === 'limiter'
-  || type === 'lofi' || type === 'chorus' || type === 'flanger' || type === 'phaser' || type === 'tremolo' || type === 'autopan' || type === 'ensemble'
-  || type === 'delay' || type === 'reverb' || type === 'spectral' || type === 'spectrum'
-)
 
 const audioEffectPersistenceDescriptors = {
   utility: {
@@ -335,7 +332,7 @@ export const upsertTrackEffectRow = async (
     ))
 
   if (input.instanceId) {
-    const audioRows = existing.filter((entry: EffectOrderRow) => entry.targetType === 'track' && isCanonicalAudioEffectKind(entry.type))
+    const audioRows = existing.filter((entry: EffectOrderRow) => entry.targetType === 'track' && isAudioEffectKind(entry.type))
     validateAudioEffectInstanceId(audioRows, input.instanceId, input.type)
   }
 
@@ -459,7 +456,7 @@ export const upsertMasterEffectRow = async (
   const existing = await ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect()
 
   if (input.instanceId) {
-    const audioRows = existing.filter((entry: EffectOrderRow) => isCanonicalAudioEffectKind(entry.type))
+    const audioRows = existing.filter((entry: EffectOrderRow) => isAudioEffectKind(entry.type))
     validateAudioEffectInstanceId(audioRows, input.instanceId, input.type)
   }
 
@@ -595,7 +592,7 @@ const reorderRows = async (
   const revision = edit.revision;
 
   const audioRows = rows
-    .filter((row) => isCanonicalAudioEffectKind(row.type))
+    .filter((row) => isAudioEffectKind(row.type))
     .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
 
   const requestedIds = new Set<string>()
@@ -1280,7 +1277,7 @@ const sameRestoreChainState = async (
   const existing = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()
 
   const existingAudio = existing
-    .filter((effect: any) => effect.targetType === 'track' && isCanonicalAudioEffectKind(effect.type))
+    .filter((effect: any) => effect.targetType === 'track' && isAudioEffectKind(effect.type))
     .sort((left: any, right: any) => left.index - right.index)
 
   const expectedAudio = input.audioEffects.map((effect, index) => ({
@@ -1374,7 +1371,7 @@ export const serverRestoreChain = mutation({
         })) return { status: 'noop' as const }
 
         const removedAudioInstanceIds = new Set(existing.flatMap((effect: any) => (
-          effect.targetType === 'track' && isCanonicalAudioEffectKind(effect.type) && effect.instanceId
+          effect.targetType === 'track' && isAudioEffectKind(effect.type) && effect.instanceId
             ? [effect.instanceId]
             : []
         )))
@@ -1400,7 +1397,7 @@ export const serverRestoreChain = mutation({
           }
 
           for (const effect of existing) {
-            if (effect.targetType === 'track' && (isCanonicalAudioEffectKind(effect.type) || effect.type === 'instrument' || effect.type === 'synth' || effect.type === 'arpeggiator')) {
+            if (effect.targetType === 'track' && (isAudioEffectKind(effect.type) || effect.type === 'instrument' || effect.type === 'synth' || effect.type === 'arpeggiator')) {
               await ctx.db.delete(effect._id)
             }
           }

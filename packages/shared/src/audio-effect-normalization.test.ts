@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_KINDS, areAudioEffectParamsEqual, normalizeAudioEffect, normalizeAudioEffectRow } from './index'
+import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_KINDS, areAudioEffectParamsEqual, normalizeAudioEffect, serializeAudioEffectParams, normalizeAudioEffectRow } from './index'
 
 describe('audio effect normalization', () => {
   for (const kind of AUDIO_EFFECT_KINDS) {
@@ -26,6 +26,14 @@ describe('audio effect normalization', () => {
 
       expect(areAudioEffectParamsEqual(kind, defaults, {})).toBe(true)
       expect(areAudioEffectParamsEqual(kind, defaults, JSON.parse(JSON.stringify(defaults)))).toBe(true)
+    })
+  }
+
+  for (const kind of AUDIO_EFFECT_KINDS) {
+    test(`${kind} serializes the same defaults after a JSON round trip`, () => {
+      const params = AUDIO_EFFECT_CONTRACTS[kind].createDefaultParams()
+
+      expect(serializeAudioEffectParams(kind, normalizeAudioEffect(kind, JSON.parse(JSON.stringify(params))).params)).toBe(serializeAudioEffectParams(kind, params))
     })
   }
 })

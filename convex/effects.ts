@@ -9,31 +9,19 @@ import { withProjectEdit, type ProjectEdit } from "./projectRows";
 import { literalUnion } from "./effectKindValidators";
 import { legacySynthParamsValidator, synthParamsValidator, trackInstrumentValidator } from "./synthValidators";
 import {
-  normalizeEqParamsForUpdate,
-  normalizeCompressorParamsForUpdate,
-  normalizeDelayParamsForUpdate,
-  normalizeReverbParamsForUpdate,
-  normalizeSaturatorParamsForUpdate,
   normalizeSynthParams,
   normalizeTrackInstrumentParams,
   normalizeArpeggiatorParams,
   normalizeAudioEffectParamsForUpdate,
-  AUDIO_EFFECT_CONTRACTS,
   AUDIO_EFFECT_KINDS,
   audioEffectKindsWithOperation,
   audioEffectOrderItemId,
   audioEffectOrderItemKind,
-  mergeOwnedProcessorParams,
-  mergeSpectrumParamsEnvelope,
-  serializeCompressorParams,
-  serializeDelayParams,
-  serializeEqParams,
-  serializeReverbParams,
-  serializeSaturatorParams,
   parseGranularAutomationKey,
   parseInstrumentAutomationKey,
   parseSynthAutomationKey,
   isAudioEffectKind,
+  serializeAudioEffectParams,
   isJsonObject,
   isJsonString,
   type AudioEffectKind,
@@ -174,59 +162,6 @@ type ReorderRowsResult =
   | { changed: false }
   | { changed: true; revision: number }
 
-const audioEffectPersistenceDescriptors = {
-  utility: {
-    normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('utility', params, existing),
-    serializeParams: AUDIO_EFFECT_CONTRACTS.utility.serializeParams,
-  },
-  eq: {
-    normalizeParamsForUpdate: normalizeEqParamsForUpdate,
-    serializeParams: serializeEqParams,
-  },
-  autofilter: {
-    normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('autofilter', params, existing),
-    serializeParams: AUDIO_EFFECT_CONTRACTS.autofilter.serializeParams,
-  },
-  gate: {
-    normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('gate', params, existing),
-    serializeParams: AUDIO_EFFECT_CONTRACTS.gate.serializeParams,
-  },
-  limiter: {
-    normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('limiter', params, existing),
-    serializeParams: AUDIO_EFFECT_CONTRACTS.limiter.serializeParams,
-  },
-  lofi: {
-    normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('lofi', params, existing),
-    serializeParams: AUDIO_EFFECT_CONTRACTS.lofi.serializeParams,
-  },
-  compressor: {
-    normalizeParamsForUpdate: normalizeCompressorParamsForUpdate,
-    serializeParams: serializeCompressorParams,
-  },
-  saturator: {
-    normalizeParamsForUpdate: normalizeSaturatorParamsForUpdate,
-    serializeParams: serializeSaturatorParams,
-  },
-  delay: {
-    normalizeParamsForUpdate: normalizeDelayParamsForUpdate,
-    serializeParams: serializeDelayParams,
-  },
-  reverb: {
-    normalizeParamsForUpdate: normalizeReverbParamsForUpdate,
-    serializeParams: serializeReverbParams,
-  },
-  chorus: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('chorus', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.chorus.serializeParams },
-  flanger: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('flanger', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.flanger.serializeParams },
-  phaser: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('phaser', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.phaser.serializeParams },
-  tremolo: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('tremolo', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.tremolo.serializeParams },
-  autopan: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('autopan', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.autopan.serializeParams },
-  ensemble: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('ensemble', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.ensemble.serializeParams },
-  spectral: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('spectral', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.spectral.serializeParams },
-  spectrum: { normalizeParamsForUpdate: mergeSpectrumParamsEnvelope, serializeParams: AUDIO_EFFECT_CONTRACTS.spectrum.serializeParams },
-}
-
-type AudioEffectPersistenceType = keyof typeof audioEffectPersistenceDescriptors
-
 const deletedStatus = () => ({ status: 'deleted' })
 const notFoundStatus = () => ({ status: 'not-found' })
 
@@ -264,9 +199,7 @@ const sanitizeArpParams = (params: {
   hold: boolean
 }) => normalizeArpeggiatorParams(params)
 
-const isAudioEffectPersistenceType = (type: SharedAudioEffectType): type is AudioEffectPersistenceType => (
-  type !== 'instrument' && type !== 'synth' && type !== 'arpeggiator'
-)
+const isAudioEffectPersistenceType = (type: SharedAudioEffectType): type is AudioEffectKind => isAudioEffectKind(type)
 
 const normalizeEffectParamsForUpdate = (
   type: SharedAudioEffectType,
@@ -296,10 +229,8 @@ const areEffectParamsEqual = (
   if (stableEffectParams(current) === stableEffectParams(next)) return true
 
   if (isAudioEffectPersistenceType(type)) {
-    const descriptor = audioEffectPersistenceDescriptors[type]
-
-    return descriptor.serializeParams(normalizeEffectParamsForUpdate(type, current))
-      === descriptor.serializeParams(normalizeEffectParamsForUpdate(type, next))
+    return serializeAudioEffectParams(type, normalizeEffectParamsForUpdate(type, current))
+      === serializeAudioEffectParams(type, normalizeEffectParamsForUpdate(type, next))
   }
 
   if (type === 'instrument') {

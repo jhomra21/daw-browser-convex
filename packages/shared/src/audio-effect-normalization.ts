@@ -78,6 +78,10 @@ const SERIALIZERS: AudioEffectSerializers = {
   spectrum: AUDIO_EFFECT_CONTRACTS.spectrum.serializeParams,
 }
 
+export const serializeAudioEffectParams = <Kind extends AudioEffectKind>(kind: Kind, params: AudioEffectParamsByKind[Kind]): string => (
+  SERIALIZERS[kind](params)
+)
+
 // Two stored params are the same effect state when they serialize identically once normalized.
 export const areAudioEffectParamsEqual = <Kind extends AudioEffectKind>(kind: Kind, previous: JsonValue, next: JsonValue): boolean => (
   SERIALIZERS[kind](NORMALIZERS[kind](previous)) === SERIALIZERS[kind](NORMALIZERS[kind](next))

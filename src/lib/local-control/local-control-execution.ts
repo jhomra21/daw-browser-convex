@@ -114,7 +114,7 @@ export const rewriteLocalControlActionReferences = (
   return controlActionSchemaV1.parse(rewrite(actionValue))
 }
 
-const isRecoverable = (action: ControlActionV1) => (
+export const isRecoverableAction = (action: ControlActionV1) => (
   action.kind === 'track.delete'
   || action.kind === 'track.ungroup'
   || action.kind === 'clip.delete'
@@ -587,7 +587,7 @@ export const executeLocalControlRequestInTransactionV1 = (
       }
     }
 
-    if (entry.changed && isRecoverable(action)) {
+    if (entry.changed && isRecoverableAction(action)) {
       const payload = captureLocalRecoveryPayload({
         projectId: request.projectId,
         actorSubject,

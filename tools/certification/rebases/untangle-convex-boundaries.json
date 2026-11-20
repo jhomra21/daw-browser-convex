@@ -1,0 +1,44 @@
+{
+ "name": "untangle-convex-boundaries",
+ "sequence": 94,
+ "createdAt": "2026-11-20T22:33:21.312Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "src/components/timeline/create-effects-panel-state.ts",
+   "from": "16781450318ed8e5a409200a8ab83d85fec2f2a4acc3d2091d0a4947a14bc8dc",
+   "to": "aa4a50c8388d8adb19a7799dcb4ac4d9a8073421ac0f61b54c94bd2be10fcc42"
+  }
+ ],
+ "changes": [],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "402a67b3980d7a4b9d67c4bd217e36dd2e37a8bc",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "a285abc414e205146e87c4706ed8438ffb68d64b25895feb81167e0ce9dfc09a",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "a285abc414e205146e87c4706ed8438ffb68d64b25895feb81167e0ce9dfc09a",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b7-bless/live",
+   "resultSha256": "0dec7d5303110b3bedc4aa9de46de42f3b9c9044edfc68da7ff44711714d8b16",
+   "seconds": 1302.407208417,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

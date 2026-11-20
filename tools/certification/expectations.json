@@ -2903,7 +2903,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 432,
+     "pass": 435,
      "skip": 3,
      "fail": 0
     },

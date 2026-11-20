@@ -162,57 +162,6 @@ export const pluginHealthSchema = z.object({
 
 export type PluginHealth = z.infer<typeof pluginHealthSchema>
 
-const controlEnvelopeSchema = z.object({
-  version: z.literal(1),
-  compatibility: compatibilitySchema,
-  requestId: requestIdSchema,
-}).strict()
-
-const instanceReferenceSchema = z.object({
-  instanceId: uuidSchema,
-  identity: pluginIdentitySchema,
-}).strict()
-
-const pluginHostRequestSchema = z.discriminatedUnion('type', [
-  controlEnvelopeSchema.extend({ type: z.literal('scan'), paths: z.array(z.string().min(1).max(4096)).max(16) }).strict(),
-  controlEnvelopeSchema.extend({ type: z.literal('instantiate'), instance: instanceReferenceSchema }).strict(),
-  controlEnvelopeSchema.extend({ type: z.literal('dispose'), instanceId: uuidSchema }).strict(),
-  controlEnvelopeSchema.extend({ type: z.literal('set-parameters'), instanceId: uuidSchema, values: z.array(z.object({ id: z.number().int().nonnegative().max(0xffff_ffff), value: finiteNumber }).strict()).min(1).max(512) }).strict(),
-  controlEnvelopeSchema.extend({ type: z.literal('editor'), instanceId: uuidSchema, action: z.enum(['open', 'close', 'focus']) }).strict(),
-  controlEnvelopeSchema.extend({ type: z.literal('state'), instanceId: uuidSchema, action: z.enum(['save', 'load']), metadata: opaquePluginStateMetadataSchema.optional() }).strict().superRefine((value, context) => {
-    if (value.action === 'load' && !value.metadata) context.addIssue({ code: 'custom', message: 'Loading state requires metadata, not state bytes.' })
-  }),
-])
-
-export type PluginHostRequest = z.infer<typeof pluginHostRequestSchema>
-
-const pluginHostResponseSchema = z.discriminatedUnion('type', [
-  controlEnvelopeSchema.extend({ type: z.literal('ok'), instanceId: uuidSchema.optional(), manifest: pluginManifestSchema.optional(), state: opaquePluginStateMetadataSchema.optional() }).strict(),
-  controlEnvelopeSchema.extend({ type: z.literal('error'), code: z.enum(['invalid-request', 'unsupported', 'not-found', 'timeout', 'faulted', 'unavailable']), message: z.string().min(1).max(512) }).strict(),
-])
-
-export type PluginHostResponse = z.infer<typeof pluginHostResponseSchema>
-
-export const parsePluginHostControlFrame = (raw: string): PluginHostRequest => {
-  if (new TextEncoder().encode(raw).byteLength > maxPluginHostControlFrameBytes) {
-    throw new Error('Plugin host control frame exceeds the maximum size.')
-  }
-
-  const request = pluginHostRequestSchema.parse(JSON.parse(raw))
-  const compatibility = request.compatibility
-
-  if (
-    request.version < compatibility.minimum
-    || request.version > compatibility.maximum
-    || compatibility.maximum < pluginHostProtocolCompatibility.minimum
-    || compatibility.minimum > pluginHostProtocolCompatibility.maximum
-  ) {
-    throw new Error('Plugin host control frame has incompatible protocol compatibility.')
-  }
-
-  return request
-}
-
 export const nativeVst3WorkerFaultOrigins = Object.freeze({
   unknown: 0,
   childExit: 1,

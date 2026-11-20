@@ -23,19 +23,13 @@ import {
   desktopProtocolVersion,
   desktopProtocolVersionV2,
   desktopRegistrationSchemaV1,
-  desktopRendererRequestSchemaV1,
-  desktopTrustedRendererRequestSchemaV1,
   projectIdSchemaV1,
   hostError,
   hostErrorSchemaV1,
   hostErrorV2,
-  isDesktopControlOperation,
   recordingSpoolMaximumReadBytes,
-  type DesktopFrameV1,
   type DesktopOperationV1,
   type DesktopProtocolVersion,
-  type DesktopRendererRequestV1,
-  type DesktopTrustedRendererRequestV1,
 } from "@daw-browser/desktop-protocol"
 import type { DesktopApplicationMenuMessage } from "@daw-browser/desktop-protocol/application-menu"
 import {
@@ -172,10 +166,8 @@ import { createNativeVstProjectBindings } from "./native-vst-project-bindings"
 import { createApplicationMenuController } from "./application-menu"
 import { createAe08Evidence, ae08ControlCommitReceived, ae08StartTrace, ae08StopTrace } from "./ae08-evidence"
 import { ae08RendererMarkChannel, ae08RendererMarkSchema } from "@daw-browser/desktop-protocol/acceptance-marks"
-import { deliverToRenderer } from "./renderer-delivery"
-import { createRendererLifecycleOwner } from "./renderer-lifecycle"
 import { createOfflinePcmAckTracker } from "./offline-pcm-ack"
-import { createDiagnosticsTrace } from "./diagnostics-trace"
+import { createRendererSession, type RendererRequestInput } from "./renderer-session"
 import { benchmarkSabHeaders } from "./benchmark-sab-headers"
 import {
   createBenchmarkRecordingTelemetry,
@@ -258,10 +250,6 @@ const nativeConfigurationEnvelopeSchema = nativeSessionEnvelopeSchema(nativeSess
 const pluginDirectorySchema = z.object({ directory: z.string() }).passthrough()
 const closePreparationResultSchema = z.object({ flushed: z.literal(true) }).passthrough()
 
-const diagnosticsTraceEnabled = desktopEnv.diagnosticsV2Trace()
-const diagnosticsTrace = createDiagnosticsTrace(diagnosticsTraceEnabled, console.error)
-const diagnosticsStarts = new Map<string, number>()
-
 const diagnosticsTraceMessageSchema = z.object({
   stage: z.enum(["preload-received", "preload-handler", "controller-before-native", "controller-after-native", "controller-parsed", "preload-reply", "preload-reply-sent", "preload-reply-invalid", "preload-reply-invalid-path"]),
   elapsedMs: z.number().int().nonnegative().max(60_000),
@@ -288,22 +276,7 @@ const externalUrl = (url: string) => {
 
 const sameAppOrigin = createTrustedDesktopOriginPolicy(MAIN_WINDOW_VITE_DEV_SERVER_URL)
 
-type PendingRendererRequest = {
-  generation: number
-  resolve: (frame: Extract<DesktopFrameV1, { type: "reply" }>) => void
-  reject: (error: Error) => void
-}
-
-type RendererRequestInput = Parameters<typeof desktopRendererRequestSchemaV1.parse>[0]
-
-let window_: BrowserWindow | undefined
-let finishingQuit = false
 let quitCleanupStarted = false
-
-const pendingEditorStateAcks = new Map<string, {
-  resolve: () => void
-  reject: (error: Error) => void
-}>()
 
 const evidenceDirectory = desktopEnv.ae08EvidenceDirectory()
 const ae08Evidence = createAe08Evidence(evidenceDirectory)
@@ -312,17 +285,7 @@ const ae08WorkerEnvironment: NodeJS.ProcessEnv = evidenceDirectory
   ? { DAW_AE08_EVIDENCE_DIR: evidenceDirectory }
   : {}
 
-const sendRendererMessage = (channel: string, ...args: unknown[]) => {
-  ae08Evidence?.rendererSend()
-
-  return deliverToRenderer({
-    getTarget: () => window_?.webContents,
-    channel,
-    args,
-    sameOrigin: sameAppOrigin,
-    isFinishingQuit: () => finishingQuit,
-  })
-}
+const rendererSession = createRendererSession({ sameAppOrigin, ae08Evidence })
 
 const applicationMenuController = createApplicationMenuController<Menu>({
   platform: process.platform === "darwin"
@@ -331,13 +294,10 @@ const applicationMenuController = createApplicationMenuController<Menu>({
       ? "win32"
       : "linux",
   sendCommand: (command: DesktopApplicationMenuMessage) => {
-    sendRendererMessage(applicationMenuCommandChannel, command)
+    rendererSession.send(applicationMenuCommandChannel, command)
   },
 })
 
-const rendererLifecycle = createRendererLifecycleOwner()
-let generation = rendererLifecycle.generation()
-const rendererPending = new Map<string, PendingRendererRequest>()
 const preparationRegistry = createPreparationRegistry()
 const exportScopes = new Map<string, { requestId: string; rendererGeneration: number }>()
 const importScopes = new Map<string, { requestId: string; rendererGeneration: number }>()
@@ -417,10 +377,10 @@ const nativeFileCapabilityHelper = createNativeFileCapabilityHelper()
 const recordingSessionOwner = createRecordingSessionOwner({
   diagnostic: recordingStartDiagnostic,
   captureInhibited,
-  currentRendererGeneration: () => generation,
+  currentRendererGeneration: () => rendererSession.generation(),
   userData: () => app.getPath("userData"),
   verifyDirectory: nativeFileCapabilityHelper.statDirectory,
-  sendToRenderer: (channel, value) => sendRendererMessage(channel, value),
+  sendToRenderer: (channel, value) => rendererSession.send(channel, value),
   statusChannel: recordingStatusChannel,
   failureChannel: recordingFailureChannel,
 })
@@ -442,7 +402,7 @@ const settleCapabilityRevocation = (operation: Promise<void>) => {
 const availableDesktopOperations = () => desktopOperations(nativeMediaAvailable)
 
 const publishAudioLifecycle = () => {
-  sendRendererMessage(lifecycleChannel, audioLifecycle)
+  rendererSession.send(lifecycleChannel, audioLifecycle)
 }
 
 const recoverAudioHost = (recoveryGeneration: number) => {
@@ -506,20 +466,13 @@ const writeSocketFailure = (
   }))
 }
 
-const cancelRendererRequest = (id: string, requestGeneration: number) => {
-  sendRendererMessage(hostRequestChannel, {
-    generation: requestGeneration,
-    frame: { version: desktopProtocolVersion, type: "cancel", id },
-  })
-}
-
 const cancelPreparedRendererExport = (id: string) => {
   const mode = preparedExportModes.get(id)
 
   if (!mode) return
   preparedExportModes.delete(id)
-  sendRendererMessage(hostRequestChannel, {
-    generation,
+  rendererSession.send(hostRequestChannel, {
+    generation: rendererSession.generation(),
     frame: {
       version: desktopProtocolVersion,
       type: "request",
@@ -530,22 +483,8 @@ const cancelPreparedRendererExport = (id: string) => {
   })
 }
 
-const rejectRendererPending = (message: string) => {
-  for (const [id, pending] of rendererPending) {
-    cancelRendererRequest(id, pending.generation)
-    pending.reject(new Error(message))
-  }
-
-  rendererPending.clear()
-}
-
-const rejectEditorStateAcks = (message: string) => {
-  for (const pending of pendingEditorStateAcks.values()) pending.reject(new Error(message))
-  pendingEditorStateAcks.clear()
-}
-
 const invalidateRendererGeneration = (message: string) => {
-  const invalidation = rendererLifecycle.invalidateActiveDocument()
+  const invalidation = rendererSession.lifecycle.invalidateActiveDocument()
 
   if (!invalidation) return
   applyRendererInvalidation(invalidation, message)
@@ -556,7 +495,7 @@ const applyRendererInvalidation = (
   message: string,
 ) => {
   const previousGeneration = invalidation.previousGeneration
-  generation = invalidation.generation
+  rendererSession.advanceGeneration(invalidation.generation)
   recordingSessionOwner.invalidateRenderer()
 
   for (const scope of importScopes.values()) settleCapabilityRevocation(fileCapabilities.revokeRequest(scope))
@@ -565,7 +504,7 @@ const applyRendererInvalidation = (
   importScopes.clear()
   importCandidates.clear()
   terminalImportsAwaitingScope.clear()
-  rejectEditorStateAcks(message)
+  rendererSession.rejectEditorStateAcks(message)
   abortOfflineRenderJobs()
   applicationMenuController.reset()
   preparationRegistry.abortAll()
@@ -582,75 +521,8 @@ const applyRendererInvalidation = (
     }
   }
 
-  rejectRendererPending(message)
+  rendererSession.rejectAllPending(message)
   settleCapabilityRevocation(audioHostSupervisor?.invalidateManualTransaction() ?? Promise.resolve())
-}
-
-const rejectRendererRequest = (id: string, message: string) => {
-  const pending = rendererPending.get(id)
-
-  if (!pending) return
-  rendererPending.delete(id)
-  cancelRendererRequest(id, pending.generation)
-  pending.reject(new Error(message))
-}
-
-const sendToRenderer = (
-  request: DesktopRendererRequestV1 | DesktopTrustedRendererRequestV1,
-  trustedActorSubject?: string,
-) => new Promise<Extract<DesktopFrameV1, { type: "reply" }>>((resolve, reject) => {
-  if (rendererPending.has(request.id)) {
-    reject(new Error("Duplicate request ID."))
-
-    return
-  }
-
-  const expectedGeneration = generation
-  rendererPending.set(request.id, { generation: expectedGeneration, resolve, reject })
-
-  if (request.operation === "diagnostics.snapshot.v2") diagnosticsTrace.mark(diagnosticsStarts.get(request.id) ?? diagnosticsTrace.start(), "renderer-dispatched")
-
-  if (!sendRendererMessage(hostRequestChannel, {
-    generation: expectedGeneration,
-    frame: request,
-    trustedActorSubject,
-    diagnosticsTrace: diagnosticsTraceEnabled && request.operation === "diagnostics.snapshot.v2",
-  })) {
-    rendererPending.delete(request.id)
-    reject(new Error("Renderer unavailable."))
-  }
-})
-
-const renderRequest = async (operation: DesktopOperationV1 | "lifecycle.prepareToClose", input: RendererRequestInput, id: string, deadlineMs = 10_000, actorSubject?: string) => {
-  const request = { version: desktopProtocolVersion, type: "request" as const, id, operation, input, deadlineMs }
-
-  const parsed = operation !== "lifecycle.prepareToClose" && isDesktopControlOperation(operation)
-    ? desktopTrustedRendererRequestSchemaV1.parse({ ...request, actorSubject })
-    : desktopRendererRequestSchemaV1.parse(request)
-
-  // This is a bounded deadline guard for a renderer IPC round trip; it is always cleared on completion.
-  let timeout: ReturnType<typeof setTimeout> | undefined
-  let deadlineElapsed = false
-
-  try {
-    return await Promise.race([
-      sendToRenderer(parsed, actorSubject),
-      new Promise<Extract<DesktopFrameV1, { type: "reply" }>>((_resolve, reject) => {
-        timeout = setTimeout(() => {
-          deadlineElapsed = true
-
-          if (operation === "diagnostics.snapshot.v2") diagnosticsTrace.mark(diagnosticsStarts.get(id) ?? diagnosticsTrace.start(), "renderer-deadline")
-          reject(new Error("Renderer deadline exceeded."))
-        }, deadlineMs)
-      }),
-    ])
-  } finally {
-    if (timeout) clearTimeout(timeout)
-    const pending = rendererPending.get(id)
-
-    if (deadlineElapsed && pending) cancelRendererRequest(id, pending.generation)
-    rendererPending.delete(id)
-  }
 }
 
 const prepareRendererInput = async (
@@ -699,7 +571,7 @@ const prepareRendererInput = async (
       ? { kind: "capability-file", token: "0".repeat(64), basename: `preflight.${extension}` }
       : { kind: "capability-directory", token: "0".repeat(64), basename: "preflight" }
 
-    const preflight = await renderRequest("host.export.run", desktopRendererExportInputSchemaV1.parse({
+    const preflight = await rendererSession.request("host.export.run", desktopRendererExportInputSchemaV1.parse({
       ...request,
       canceled: false,
       preflightOnly: true,
@@ -834,7 +706,7 @@ const handleSocket = (socket: Socket) => {
       cancelPreparedRendererExport(rendererId)
 
       if (!finalExportCandidates.has(rendererId) && !finalImportCandidates.has(rendererId)) {
-        rejectRendererRequest(rendererId, "Desktop host connection closed.")
+        rendererSession.reject(rendererId, "Desktop host connection closed.")
       }
     }
 
@@ -843,8 +715,8 @@ const handleSocket = (socket: Socket) => {
     for (const rendererId of rendererIds) {
       if (finalExportCandidates.has(rendererId)
         || finalImportCandidates.has(rendererId)
-        || importScopesHasScope({ requestId: rendererId, rendererGeneration: generation })) continue
-      settleCapabilityRevocation(fileCapabilities.revokeRequest({ requestId: rendererId, rendererGeneration: generation }))
+        || importScopesHasScope({ requestId: rendererId, rendererGeneration: rendererSession.generation() })) continue
+      settleCapabilityRevocation(fileCapabilities.revokeRequest({ requestId: rendererId, rendererGeneration: rendererSession.generation() }))
     }
   }
 
@@ -903,9 +775,9 @@ const handleSocket = (socket: Socket) => {
 
         if (controller) preparationRegistry.delete(controller)
         preparationControllers.delete(rendererId)
-        const canceledScope = { requestId: rendererId, rendererGeneration: generation }
+        const canceledScope = { requestId: rendererId, rendererGeneration: rendererSession.generation() }
         settleCapabilityRevocation(fileCapabilities.revokeRequest(canceledScope).finally(() => {
-          rejectRendererRequest(rendererId, "Desktop host request cancelled.")
+          rendererSession.reject(rendererId, "Desktop host request cancelled.")
         }))
       }
 
@@ -927,16 +799,16 @@ const handleSocket = (socket: Socket) => {
     const rendererId = correlation.create(frame.id)
     ae08ControlCommitReceived(ae08Evidence, frame)
 
-    if (diagnosticsTraceEnabled && frame.operation === "diagnostics.snapshot.v2") {
-      const start = diagnosticsTrace.start()
-      diagnosticsStarts.set(rendererId, start)
-      diagnosticsTrace.mark(start, "socket-received")
+    if (rendererSession.diagnostics.enabled && frame.operation === "diagnostics.snapshot.v2") {
+      const start = rendererSession.diagnostics.trace.start()
+      rendererSession.diagnostics.starts.set(rendererId, start)
+      rendererSession.diagnostics.trace.mark(start, "socket-received")
     }
 
     const preparation = new AbortController()
     preparationRegistry.add(preparation)
     preparationControllers.set(rendererId, preparation)
-    const scope = { requestId: rendererId, rendererGeneration: generation }
+    const scope = { requestId: rendererId, rendererGeneration: rendererSession.generation() }
     void prepareRendererInput(frame.operation, frame.input, scope, preparation.signal)
       .then((input) => {
         preparation.signal.throwIfAborted()
@@ -956,7 +828,7 @@ const handleSocket = (socket: Socket) => {
           }
         }
 
-        return renderRequest(frame.operation, input, rendererId, frame.deadlineMs, actorSubject)
+        return rendererSession.request(frame.operation, input, rendererId, frame.deadlineMs, actorSubject)
       }).then(async (reply) => {
       preparationControllers.delete(rendererId)
       preparationRegistry.delete(preparation)
@@ -964,7 +836,7 @@ const handleSocket = (socket: Socket) => {
       finalImportCandidates.delete(rendererId)
       importCandidates.delete(rendererId)
 
-      if (scope.rendererGeneration !== generation) {
+      if (scope.rendererGeneration !== rendererSession.generation()) {
         await fileCapabilities.revokeRequest(scope)
 
         return
@@ -1046,12 +918,12 @@ const handleSocket = (socket: Socket) => {
           socket.write(encodeDesktopFrame(outbound))
         }
 
-        if (frame.operation === "diagnostics.snapshot.v2") diagnosticsTrace.mark(diagnosticsStarts.get(rendererId) ?? diagnosticsTrace.start(), "socket-reply")
+        if (frame.operation === "diagnostics.snapshot.v2") rendererSession.diagnostics.trace.mark(rendererSession.diagnostics.starts.get(rendererId) ?? rendererSession.diagnostics.trace.start(), "socket-reply")
       } catch {
         writeSocketFailure(socket, sessionProtocolVersion, frame.operation, externalId, "internal", "The desktop response could not be serialized.")
       }
 
-      diagnosticsStarts.delete(rendererId)
+      rendererSession.diagnostics.starts.delete(rendererId)
     }).catch(async (error) => {
       preparationControllers.delete(rendererId)
       preparationRegistry.delete(preparation)
@@ -1073,8 +945,8 @@ const handleSocket = (socket: Socket) => {
 
       writeSocketFailure(socket, sessionProtocolVersion, frame.operation, externalId, failure.code, failure.message)
 
-      if (frame.operation === "diagnostics.snapshot.v2") diagnosticsTrace.mark(diagnosticsStarts.get(rendererId) ?? diagnosticsTrace.start(), "socket-error-reply")
-      diagnosticsStarts.delete(rendererId)
+      if (frame.operation === "diagnostics.snapshot.v2") rendererSession.diagnostics.trace.mark(rendererSession.diagnostics.starts.get(rendererId) ?? rendererSession.diagnostics.trace.start(), "socket-error-reply")
+      rendererSession.diagnostics.starts.delete(rendererId)
     })
   })
 
@@ -1091,9 +963,9 @@ const handleSocket = (socket: Socket) => {
 
 const registerIpc = () => {
   const senderAllowed = (event: RendererSenderEvent, options: { privileged: boolean; mainFrameOnly: boolean }) => rendererSenderAllowed(event, {
-    rendererId: window_?.webContents.id,
+    rendererId: rendererSession.window()?.webContents.id,
     sameAppOrigin,
-    privileged: { required: options.privileged, accepted: rendererLifecycle.acceptsPrivilegedRequests() },
+    privileged: { required: options.privileged, accepted: rendererSession.lifecycle.acceptsPrivilegedRequests() },
     mainFrameOnly: options.mainFrameOnly,
   })
 
@@ -1108,9 +980,9 @@ const registerIpc = () => {
     ipcMain,
     allowed: applicationMenuStateAllowed,
     takePendingEditorStateAck: (requestId) => {
-      const pending = pendingEditorStateAcks.get(requestId)
+      const pending = rendererSession.editorStateAcks.get(requestId)
 
-      if (pending) pendingEditorStateAcks.delete(requestId)
+      if (pending) rendererSession.editorStateAcks.delete(requestId)
 
       return pending
     },
@@ -1152,7 +1024,7 @@ const registerIpc = () => {
     if (!senderAllowed(event, { privileged: false, mainFrameOnly: false })) return
     const parsed = rendererMessageSchema.safeParse(message)
 
-    if (!parsed.success || parsed.data.generation !== generation) return
+    if (!parsed.success || parsed.data.generation !== rendererSession.generation()) return
 
     if (parsed.data.frame.type === "export-terminal") {
       const scope = exportScopes.get(parsed.data.frame.jobId)
@@ -1179,16 +1051,16 @@ const registerIpc = () => {
     }
 
     if (parsed.data.frame.type !== "reply") return
-    const pending = rendererPending.get(parsed.data.frame.id)
+    const pending = rendererSession.pending.get(parsed.data.frame.id)
 
     if (!pending || pending.generation !== parsed.data.generation) return
-    const traceStart = diagnosticsStarts.get(parsed.data.frame.id)
+    const traceStart = rendererSession.diagnostics.starts.get(parsed.data.frame.id)
 
-    if (traceStart !== undefined) diagnosticsTrace.mark(traceStart, "renderer-reply")
+    if (traceStart !== undefined) rendererSession.diagnostics.trace.mark(traceStart, "renderer-reply")
     pending.resolve(parsed.data.frame)
   })
   ipcMain.on(diagnosticsV2TraceChannel, (event, message) => {
-    if (!diagnosticsTraceEnabled || !senderAllowed(event, { privileged: false, mainFrameOnly: false })) return
+    if (!rendererSession.diagnostics.enabled || !senderAllowed(event, { privileged: false, mainFrameOnly: false })) return
     const parsed = diagnosticsTraceMessageSchema.safeParse(message)
 
     if (parsed.success) {
@@ -1200,7 +1072,7 @@ const registerIpc = () => {
   const scopeAllowed = applicationMenuStateAllowed
 
   const scopeFor = (event: Electron.IpcMainInvokeEvent, requestId: string) => (
-    scopeAllowed(event) ? { requestId, rendererGeneration: generation } : undefined
+    scopeAllowed(event) ? { requestId, rendererGeneration: rendererSession.generation() } : undefined
   )
 
   const catalogAllowed = (event: Electron.IpcMainInvokeEvent) => (
@@ -1216,11 +1088,11 @@ const registerIpc = () => {
   )
 
   const audioHostAllowed = (event: NativeSessionEvent) => (
-    window_ !== undefined && nativeSessionRequestAllowed({
+    rendererSession.window() !== undefined && nativeSessionRequestAllowed({
       platform: process.platform,
       architecture: process.arch,
-      rendererId: window_.webContents.id,
-      acceptsPrivilegedRequests: rendererLifecycle.acceptsPrivilegedRequests(),
+      rendererId: rendererSession.window()?.webContents.id,
+      acceptsPrivilegedRequests: rendererSession.lifecycle.acceptsPrivilegedRequests(),
       event,
       sameAppOrigin,
     })
@@ -1397,7 +1269,7 @@ const registerIpc = () => {
           })
           signal.addEventListener("abort", abort, { once: true })
 
-          if (!sendRendererMessage(offlineMappedPageRequestChannel, request)) {
+          if (!rendererSession.send(offlineMappedPageRequestChannel, request)) {
             job.mappedPageRequests.delete(request.requestId)
             cleanup()
             reject(new Error("Renderer unavailable."))
@@ -1410,7 +1282,7 @@ const registerIpc = () => {
           const endFrame = chunk.startFrame + chunk.frameCount
           const acknowledgment = offlinePcmAcks.begin({ jobId, sequence, endFrame })
 
-          if (!sendRendererMessage(offlinePcmChannel, { jobId, sequence, chunk })) {
+          if (!rendererSession.send(offlinePcmChannel, { jobId, sequence, chunk })) {
             offlinePcmAcks.cancel(new Error("Renderer unavailable."))
           }
 
@@ -1616,15 +1488,15 @@ const registerIpc = () => {
     const configuredProject = event.senderFrame === event.sender.mainFrame
       ? new URL(event.senderFrame.url).searchParams.get("projectId") : null
 
-    const configuredRendererGeneration = generation
+    const configuredRendererGeneration = rendererSession.generation()
 
     try {
       await supervisor.configure(configuration, envelope.data.transactionToken)
 
-      if (configuredProject && configuredRendererGeneration === generation && audioHostAllowed(event)
+      if (configuredProject && configuredRendererGeneration === rendererSession.generation() && audioHostAllowed(event)
         && event.senderFrame === event.sender.mainFrame
         && new URL(event.senderFrame.url).searchParams.get("projectId") === configuredProject) {
-        revisionProjectOwner = { projectId: configuredProject, rendererGeneration: generation,
+        revisionProjectOwner = { projectId: configuredProject, rendererGeneration: rendererSession.generation(),
           hostGeneration: supervisor.status().generation }
       } else revisionProjectOwner = undefined
       const host = supervisor.status()
@@ -1720,7 +1592,7 @@ const registerIpc = () => {
 
         // The editor session does not read an instance playback owns, so a close of one reaches the renderer as
         // the closed event, which captures from the playback worker.
-        if (command.command === "close") sendRendererMessage(vstEditorStateChannel, { projectId, instanceId: command.instanceId, open: false })
+        if (command.command === "close") rendererSession.send(vstEditorStateChannel, { projectId, instanceId: command.instanceId, open: false })
 
         return { ok: true as const, status }
       }
@@ -1892,7 +1764,7 @@ const registerIpc = () => {
   const ownsRevisionProject = (event: Electron.IpcMainInvokeEvent, projectId: string) => {
     if (!audioHostAllowed(event) || event.senderFrame !== event.sender.mainFrame) return false
 
-    if (revisionProjectOwner?.projectId !== projectId || revisionProjectOwner.rendererGeneration !== generation
+    if (revisionProjectOwner?.projectId !== projectId || revisionProjectOwner.rendererGeneration !== rendererSession.generation()
       || revisionProjectOwner.hostGeneration !== audioHostSupervisor?.status().generation) return false
 
     try { return new URL(event.senderFrame.url).searchParams.get("projectId") === projectId }
@@ -1906,7 +1778,7 @@ const registerIpc = () => {
 
       if (!supervisor || !parsed.success || !ownsRevisionProject(event, parsed.data.projectId)
         || supervisor.transactionOpen() || !supervisor.status().running) return nativeSessionFailure()
-      const owner = supervisor.status(), rendererGeneration = generation
+      const owner = supervisor.status(), rendererGeneration = rendererSession.generation()
 
       if (operation === "inspect") ae08Evidence?.("inspect-handler-entry", { pid: owner.pid ?? null })
       const sendsAtEntry = ae08Evidence?.rendererSendCount() ?? 0
@@ -1935,7 +1807,7 @@ const registerIpc = () => {
         if (operation === "rollback") attachmentLedger.rolledBack()
         const current = supervisor.status()
 
-        if (generation !== rendererGeneration || current.generation !== owner.generation
+        if (rendererSession.generation() !== rendererGeneration || current.generation !== owner.generation
           || current.pid !== owner.pid || !ownsRevisionProject(event, parsed.data.projectId)) {
           // The command ran, but this renderer no longer owns its result: it may have been taken.
           return nativeSessionFailure(new Error("The native audio session changed owner during the request."))
@@ -1980,7 +1852,7 @@ const registerIpc = () => {
     allowed: audioHostAllowed,
     supervisor: () => audioHostSupervisor,
     owner: recordingSessionOwner,
-    rendererGeneration: () => generation,
+    rendererGeneration: () => rendererSession.generation(),
     hostGeneration: () => audioLifecycle.powerGeneration,
     fail: nativeSessionFailure,
   })
@@ -1997,7 +1869,7 @@ const registerIpc = () => {
   ipcMain.handle(recordingSpoolListChannel, async (event, value) => {
     const request = z.object({ scope: spoolScopeSchema, cursor: spoolTakeIdSchema.optional() }).strict().parse(value)
     const registry = spoolFor(event)
-    const scope = { ...request.scope, rendererGeneration: generation }
+    const scope = { ...request.scope, rendererGeneration: rendererSession.generation() }
     // Explicitly caller-declared scope, bound to the authenticated top-level
     // lifecycle. No invented cloud-project authorization is performed here.
     registry.bind(scope)
@@ -2008,11 +1880,11 @@ const registerIpc = () => {
     const request = z.object({ scope: spoolScopeSchema, takeId: spoolTakeIdSchema,
       offset: z.number().int().nonnegative().safe(), length: z.number().int().min(1).max(recordingSpoolMaximumReadBytes) }).strict().parse(value)
 
-    return spoolFor(event).read({ ...request.scope, rendererGeneration: generation }, request.takeId, request.offset, request.length)
+    return spoolFor(event).read({ ...request.scope, rendererGeneration: rendererSession.generation() }, request.takeId, request.offset, request.length)
   })
   ipcMain.handle(recordingSpoolReleaseChannel, async (event, value) => {
     const request = z.object({ scope: spoolScopeSchema, takeId: spoolTakeIdSchema, acknowledgment: recordingSpoolReleaseSchema }).strict().parse(value)
-    await spoolFor(event).release({ ...request.scope, rendererGeneration: generation }, request.takeId, request.acknowledgment)
+    await spoolFor(event).release({ ...request.scope, rendererGeneration: rendererSession.generation() }, request.takeId, request.acknowledgment)
   })
 
   const registerNativeSessionControl = (
@@ -2036,7 +1908,7 @@ const registerIpc = () => {
     const supervisor = sessionSupervisorFor(event)
 
     if (!supervisor || !nativeUndefinedEnvelopeSchema.safeParse(value).success) return nativeSessionFailure()
-    const requestGeneration = generation
+    const requestGeneration = rendererSession.generation()
     const senderId = event.sender.id
 
     try {
@@ -2044,9 +1916,8 @@ const registerIpc = () => {
       attachmentLedger.begin()
 
       if (
-        generation !== requestGeneration
-        || !window_
-        || window_.webContents.id !== senderId
+        rendererSession.generation() !== requestGeneration
+        || rendererSession.window()?.webContents.id !== senderId
         || !audioHostAllowed(event)
       ) {
         await supervisor.invalidateManualTransaction()
@@ -2071,7 +1942,7 @@ const registerIpc = () => {
 
     if (
       !transaction
-      || transaction.generation !== generation
+      || transaction.generation !== rendererSession.generation()
       || transaction.senderId !== event.sender.id
       || !audioHostAllowed(event)
     ) return nativeSessionFailure()
@@ -2099,7 +1970,7 @@ const registerIpc = () => {
 
     if (
       !transaction
-      || transaction.generation !== generation
+      || transaction.generation !== rendererSession.generation()
       || transaction.senderId !== event.sender.id
       || !audioHostAllowed(event)
     ) return nativeSessionFailure()
@@ -2175,7 +2046,7 @@ const registerIpc = () => {
   })
   ipcMain.handle(pluginCatalogChooseDirectoryChannel, async (event) => {
     const store = catalogStoreFor(event)
-    const currentWindow = window_
+    const currentWindow = rendererSession.window()
 
     if (!store || !currentWindow) return catalogFailure("The desktop plug-in catalog is unavailable.")
     const selection = await dialog.showOpenDialog(currentWindow, { properties: ["openDirectory", "createDirectory"] })
@@ -2283,7 +2154,8 @@ const createWindow = () => {
   const { workArea } = screen.getPrimaryDisplay()
   const minWidth = Math.min(1200, workArea.width)
   const minHeight = Math.min(800, workArea.height)
-  window_ = new BrowserWindow({
+
+  const mainWindow = new BrowserWindow({
     width: minWidth,
     height: minHeight,
     minWidth,
@@ -2298,49 +2170,51 @@ const createWindow = () => {
       webSecurity: true,
     },
   })
+
+  rendererSession.setWindow(mainWindow)
   // Maximize before the first paint; the minimum-size frame stays as the restore size.
-  window_.maximize()
-  window_.show()
+  mainWindow.maximize()
+  mainWindow.show()
   installBenchmarkWindowTelemetry({
     app,
-    window: window_,
-    getGeneration: () => generation,
+    window: mainWindow,
+    getGeneration: () => rendererSession.generation(),
     sameAppOrigin,
   })
-  window_?.on("closed", () => {
+  mainWindow?.on("closed", () => {
     invalidateRendererGeneration("Renderer destroyed.")
-    window_ = undefined
+    rendererSession.setWindow(undefined)
   })
-  window_.webContents.on("did-start-navigation", (details) => {
+  mainWindow.webContents.on("did-start-navigation", (details) => {
     if (details.isMainFrame && !details.isSameDocument) {
-      const invalidation = rendererLifecycle.beginMainFrameNavigation(details.url)
+      const invalidation = rendererSession.lifecycle.beginMainFrameNavigation(details.url)
 
       if (invalidation) applyRendererInvalidation(invalidation, "Renderer reloaded.")
     }
   })
-  window_.webContents.on("did-navigate", (_event, url) => {
-    rendererLifecycle.commitMainFrameNavigation(url)
+  mainWindow.webContents.on("did-navigate", (_event, url) => {
+    rendererSession.lifecycle.commitMainFrameNavigation(url)
   })
-  window_.webContents.on("did-fail-load", (_event, _errorCode, _errorDescription, validatedURL, isMainFrame) => {
+  mainWindow.webContents.on("did-fail-load", (_event, _errorCode, _errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame) return
-    rendererLifecycle.failMainFrameNavigation(validatedURL)
+    rendererSession.lifecycle.failMainFrameNavigation(validatedURL)
   })
-  window_.webContents.on("did-stop-loading", () => {
+  mainWindow.webContents.on("did-stop-loading", () => {
     // Electron 43 has no navigationId in these typings; this boundary confirms
     // a previously committed, non-ambiguous attempt before privileged IPC resumes.
-    rendererLifecycle.confirmMainFrameNavigation()
+    rendererSession.lifecycle.confirmMainFrameNavigation()
   })
-  window_.webContents.on("render-process-gone", () => {
-    const invalidation = rendererLifecycle.invalidateAfterCrash()
+  mainWindow.webContents.on("render-process-gone", () => {
+    const invalidation = rendererSession.lifecycle.invalidateAfterCrash()
 
     if (invalidation) applyRendererInvalidation(invalidation, "Renderer crashed.")
   })
-  window_.webContents.setWindowOpenHandler(({ url }) => {
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (externalUrl(url)) void shell.openExternal(url)
 
     return { action: "deny" }
   })
-  window_.webContents.on("will-navigate", (event, url) => {
+  mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!sameAppOrigin(url)) event.preventDefault()
   })
 
@@ -2357,7 +2231,7 @@ const createWindow = () => {
       const abort = new AbortController()
       const finishing = supervisor.waitForRecordingFinish().then(() => true)
 
-      const choice = dialog.showMessageBox(window_!, {
+      const choice = dialog.showMessageBox(mainWindow, {
         type: "info", message: "The recording is finishing.",
         detail: "The completed take is being saved. Keep the application open while storage finishes.",
         buttons: ["Keep Open"], defaultId: 0, cancelId: 0, signal: abort.signal,
@@ -2367,17 +2241,17 @@ const createWindow = () => {
       finally { abort.abort() }
     },
     onError: async () => {
-      await dialog.showMessageBox(window_!, { type: "error", buttons: ["Keep Open"],
+      await dialog.showMessageBox(mainWindow, { type: "error", buttons: ["Keep Open"],
         message: "The application could not finish closing safely.",
         detail: "The project remains open. Recording sources have not been discarded." })
     },
     prepareQuit,
     prepare: () => prepareForClose({
-      flushRenderer: async () => closePreparationResultSchema.safeParse((await renderRequest("lifecycle.prepareToClose", {}, randomUUID(), 10_000)).result).success,
+      flushRenderer: async () => closePreparationResultSchema.safeParse((await rendererSession.request("lifecycle.prepareToClose", {}, randomUUID(), 10_000)).result).success,
       captureEditors: async () => { await nativeVst3EditorSessionManager?.captureAll() },
     }),
     confirmDiscard: async () => {
-      const choice = await dialog.showMessageBox(window_!, {
+      const choice = await dialog.showMessageBox(mainWindow, {
         type: "warning",
         buttons: ["Cancel", "Quit and Discard"],
         defaultId: 0,
@@ -2390,18 +2264,18 @@ const createWindow = () => {
       return choice.response === 1
     },
     beginQuit: () => {
-      finishingQuit = true
+      rendererSession.beginQuit()
     },
-    destroy: () => window_?.destroy(),
+    destroy: () => rendererSession.window()?.destroy(),
     finishQuit,
   })
 
-  window_.on("close", (event) => {
-    if (window_?.isDestroyed() || finishingQuit) return
+  mainWindow.on("close", (event) => {
+    if (mainWindow.isDestroyed() || rendererSession.finishingQuit()) return
     event.preventDefault()
     void close()
   })
-  void window_.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL ?? "daw://app/")
+  void mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL ?? "daw://app/")
 }
 
 app.setName(appName)
@@ -2430,10 +2304,10 @@ const finishQuit = async () => {
   // before destruction. Headless quit uses the same prerequisite.
   await prepareQuit()
   quitCleanupStarted = true
-  finishingQuit = true
+  rendererSession.beginQuit()
   preparationRegistry.abortAll()
   invalidateRendererGeneration("Application is closing.")
-  rejectRendererPending("Application is closing.")
+  rendererSession.rejectAllPending("Application is closing.")
   activeEditorProjectBindings.clear()
   powerMonitor.removeAllListeners("suspend")
   powerMonitor.removeAllListeners("resume")
@@ -2456,8 +2330,8 @@ const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) app.quit()
 else {
   app.on("second-instance", () => {
-    window_?.show()
-    window_?.focus()
+    rendererSession.window()?.show()
+    rendererSession.window()?.focus()
   })
   app.whenReady().then(async () => {
     await ae08StartTrace(contentTracing).catch(() => console.error("[ae08] trace could not start"))
@@ -2516,7 +2390,7 @@ else {
     // Only a lost host ends the native session. One plug-in's fault, miss or restart is that instance's business.
     const publishNativeSessionLoss = (error: string) => {
       activeEditorProjectBindings.clear()
-      sendRendererMessage(lossChannel, error)
+      rendererSession.send(lossChannel, error)
     }
 
     const sendVstParameterEdit = (input: {
@@ -2526,13 +2400,13 @@ else {
       parameterId: number
       normalizedValue: number
     }) => {
-      sendRendererMessage(vstParameterEditChannel, input)
+      rendererSession.send(vstParameterEditChannel, input)
     }
 
     const hostEvents = createNativeVst3HostEventHandlers({
-      sendInstanceEvent: (event) => { sendRendererMessage(vstInstanceEventChannel, event) },
+      sendInstanceEvent: (event) => { rendererSession.send(vstInstanceEventChannel, event) },
       sendParameterEdit: (input) => sendVstParameterEdit({ ...input, source: "active-playback" }),
-      sendEditorState: (input) => { sendRendererMessage(vstEditorStateChannel, input) },
+      sendEditorState: (input) => { rendererSession.send(vstEditorStateChannel, input) },
       projectFor: (instanceId) => activeEditorProjectBindings.projectFor(instanceId),
       endSession: (error) => publishNativeSessionLoss(sanitizeNativeVst3DiagnosticError(error)),
     })
@@ -2549,25 +2423,25 @@ else {
         }),
         playbackOwns: (instanceId) => activeEditorProjectBindings.projectFor(instanceId) !== undefined,
         onEditorInteraction: () => {
-          const target = window_
+          const target = rendererSession.window()
 
-          if (!target || target.isDestroyed() || finishingQuit) return
+          if (!target || target.isDestroyed() || rendererSession.finishingQuit()) return
           target.show()
           app.focus({ steal: true })
           target.focus()
         },
         onEditorOpenState: (input) => {
-          sendRendererMessage(vstEditorStateChannel, input)
+          rendererSession.send(vstEditorStateChannel, input)
         },
         onCapturedState: (input) => new Promise<void>((resolve, reject) => {
           const requestId = randomUUID()
 
           const timeout = setTimeout(() => {
-            if (!pendingEditorStateAcks.delete(requestId)) return
+            if (!rendererSession.editorStateAcks.delete(requestId)) return
             reject(new Error("Renderer editor state persistence timed out."))
           }, 10_000)
 
-          pendingEditorStateAcks.set(requestId, {
+          rendererSession.editorStateAcks.set(requestId, {
             resolve: () => {
               clearTimeout(timeout)
               resolve()
@@ -2578,8 +2452,8 @@ else {
             },
           })
 
-          if (!sendRendererMessage(vstEditorCapturedStateChannel, { ...input, requestId })) {
-            pendingEditorStateAcks.delete(requestId)
+          if (!rendererSession.send(vstEditorCapturedStateChannel, { ...input, requestId })) {
+            rendererSession.editorStateAcks.delete(requestId)
             clearTimeout(timeout)
             reject(new Error("Renderer unavailable."))
           }
@@ -2595,7 +2469,7 @@ else {
       : undefined
 
     const handleSuspend = () => {
-      if (finishingQuit || (audioLifecycle.state === "suspended" && audioRecoveryGeneration === undefined)) return
+      if (rendererSession.finishingQuit() || (audioLifecycle.state === "suspended" && audioRecoveryGeneration === undefined)) return
       audioRecoveryGeneration = undefined
       audioLifecycle = { state: "suspended", powerGeneration: audioLifecycle.powerGeneration + 1 }
       publishAudioLifecycle()
@@ -2606,7 +2480,7 @@ else {
     }
 
     const handleResume = () => {
-      if (finishingQuit || audioLifecycle.state !== "suspended") return
+      if (rendererSession.finishingQuit() || audioLifecycle.state !== "suspended") return
       audioLifecycle = { state: "suspended", powerGeneration: audioLifecycle.powerGeneration + 1 }
       const recoveryGeneration = audioLifecycle.powerGeneration
       recoverAudioHost(recoveryGeneration)
@@ -2622,15 +2496,15 @@ else {
     })
     removeAudioHostMeterBatchListener = audioHostSupervisor?.onMeterBatch((batch: NativeHostMeterBatch) => {
       recordingBenchmark.recordTraffic("meter-batch", 32 + batch.entries.length * 24)
-      sendRendererMessage(meterBatchChannel, batch)
+      rendererSession.send(meterBatchChannel, batch)
     })
     removeAudioHostSpectrumListener = audioHostSupervisor?.onSpectrumFrame((frame) => {
       recordingBenchmark.recordTraffic("spectrum-frame", 48 + frame.data.byteLength)
-      sendRendererMessage(spectrumFrameChannel, frame)
+      rendererSession.send(spectrumFrameChannel, frame)
     })
     removeAudioHostScheduleProgressListener = audioHostSupervisor?.onScheduleProgress((progress: NativeScheduleProgress) => {
       recordingBenchmark.recordTraffic("schedule-progress", 16 + nativeAudioHostScheduleProgressBytes)
-      sendRendererMessage(scheduleProgressChannel, progress)
+      rendererSession.send(scheduleProgressChannel, progress)
     })
     protocol.handle("daw", (request) => {
       const rendererRoot = MAIN_WINDOW_VITE_DEV_SERVER_URL
@@ -2660,7 +2534,7 @@ else {
       )
       || allowsTrustedMidiPermission({
         permission,
-        trustedRendererId: window_?.webContents.id,
+        trustedRendererId: rendererSession.window()?.webContents.id,
         requestingRendererId: webContents.id,
         requestingUrl: details.requestingUrl,
         isMainFrame: details.isMainFrame,
@@ -2677,7 +2551,7 @@ else {
       )
       || allowsTrustedMidiPermission({
         permission,
-        trustedRendererId: window_?.webContents.id,
+        trustedRendererId: rendererSession.window()?.webContents.id,
         requestingRendererId: webContents?.id,
         requestingUrl: requestingOrigin,
         isMainFrame: details.isMainFrame,
@@ -2697,10 +2571,12 @@ else {
     app.quit()
   })
   app.on("before-quit", (event) => {
-    if (finishingQuit) return
+    if (rendererSession.finishingQuit()) return
     event.preventDefault()
 
-    if (window_ && !window_.isDestroyed()) window_.close()
+    const mainWindow = rendererSession.window()
+
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close()
     else void finishQuit().catch(showQuitFailure)
   })
   app.on("window-all-closed", () => void finishQuit().catch(showQuitFailure))

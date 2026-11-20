@@ -303,7 +303,7 @@ const verifyControlAccessToken = async (
   }
 };
 
-export const controlBindingMatchesClaims = (
+const controlBindingMatchesClaims = (
   binding: BindingRow,
   claims: VerifiedControlClaims,
   resource: string,

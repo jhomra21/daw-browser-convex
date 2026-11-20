@@ -159,7 +159,7 @@ const addDiagnostic = (diagnostics: PluginCatalogDiagnostic[], directory: string
 
 const displayNameForBundle = (bundlePath: string) => path.basename(bundlePath, path.extname(bundlePath))
 
-export const normalizeConfiguredDirectory = async (
+const normalizeConfiguredDirectory = async (
   candidate: string,
   fileSystem: Pick<PluginCatalogFileSystem, "realpath" | "stat"> = nodePluginCatalogFileSystem,
 ): Promise<string> => {

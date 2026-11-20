@@ -20,10 +20,9 @@ import { isPortableStretchClip } from '@daw-browser/audio-engine/portable-stretc
 import { prepareNativeStretchArtifacts, type NativePreparedStretchAsset } from '@daw-browser/audio-engine/native-stretch-preparation'
 import { createAudioStretchCache } from '@daw-browser/audio-engine/audio-stretch-cache'
 import { createPreparedStretchArtifactRepository, type PreparedStretchArtifactRepository } from '@daw-browser/audio-engine/prepared-stretch-store'
-import { createAudioPcmSourceDescriptor, getAudioBufferSessionIdentity } from '@daw-browser/audio-engine/media-pages'
 import { nativeInstrumentExportMemory, portableInstrumentExportMemory } from '~/lib/export/instrument-export-memory'
-import { createNativeTimelinePageManager, type NativeTimelinePageManager } from '~/lib/desktop/native-timeline-page-manager'
-import type { NativeHostMappedAssetPage, NativeOfflineMappedAsset } from '@daw-browser/audio-engine/native-host-wire'
+import type { NativeTimelinePageManager } from '~/lib/desktop/native-timeline-page-manager'
+import { prepareNativeMappedSources } from '~/lib/export/export-native-sources'
 import { type ExportFileCommit, type TimelineExportRequest, type StemExportSelection, type StemExportRequest, type ExportOutput, type ExportOutcome, NATIVE_EXPORT_UNAVAILABLE_MESSAGE } from '~/lib/export/export-job-types'
 import { throwIfExportAborted, filterTracksToExportRange, ensureNativeStretchBuffers, loadInstrumentExportBuffers } from '~/lib/export/export-preparation'
 import { createExportSeed, createEncodingProgressReporter, requireExportFormats, createMixdownFileName, createSaveTypes, reportFormatProgress, reportStemFormatProgress } from '~/lib/export/export-output-formats'
@@ -304,117 +303,18 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       const nativeRenderer = input.nativeOfflinePcmRenderer
 
       if (nativePlan && !nativeRenderer) throw new Error(NATIVE_EXPORT_UNAVAILABLE_MESSAGE)
-      const sourceByKey = new Map<string, NativeOfflineMappedAsset>()
 
-      const clipsBySourceKey = new Map(preloadTracks.flatMap((track) => track.clips)
-        .filter((clip) => clip.sourceAssetKey !== undefined).map((clip) => [clip.sourceAssetKey, clip]))
+      const mapped = await prepareNativeMappedSources({
+        mappedAssets: nativePlan?.mappedAssets,
+        tracks: preloadTracks,
+        instrumentSources: nativeInstrumentSources,
+        stretchRepository: nativeStretchRepository,
+        resolveAudioSource: input.resolveAudioSource,
+        signal: input.signal,
+      })
 
-      if (nativePlan?.mappedAssets && nativePlan.mappedAssets.length > 0) {
-        for (const asset of nativePlan.mappedAssets) {
-          const previous = sourceByKey.get(asset.sourceAssetKey)
-
-          if (previous && (
-            previous.frameCount !== asset.frameCount
-            || previous.sampleRateHz !== asset.sampleRateHz
-            || previous.channelCount !== asset.channelCount
-            || previous.preparedStretchArtifactId !== asset.preparedStretchArtifactId
-          )) {
-            throw new Error(`Native export mapped source "${asset.sourceAssetKey}" resolves inconsistently.`)
-          }
-
-          sourceByKey.set(asset.sourceAssetKey, asset)
-        }
-
-        const nativeSources = await Promise.all([...sourceByKey.values()].map(async (asset) => ({
-            sourceAssetKey: asset.sourceAssetKey,
-            sessionAssetId: asset.sessionAssetId,
-            frameCount: asset.frameCount,
-            sampleRateHz: asset.sampleRateHz,
-            channelCount: asset.channelCount,
-            preparedStretchArtifactId: asset.preparedStretchArtifactId,
-            artifactRepository: nativeStretchRepository,
-            descriptor: asset.preparedStretchArtifactId
-              ? undefined
-              : await (async () => {
-                const buffer = nativeInstrumentSources.get(asset.sourceAssetKey)
-
-                if (buffer) {
-                  return createAudioPcmSourceDescriptor({
-                    identity: asset.sourceAssetKey,
-                    durationSec: buffer.duration, frameCount: buffer.length,
-                    sampleRate: buffer.sampleRate, channelCount: buffer.numberOfChannels,
-                    source: buffer,
-                  })
-                }
-
-                const clip = clipsBySourceKey.get(asset.sourceAssetKey)
-
-                if (!clip) {
-                  throw new Error(`Native export source "${asset.sourceAssetKey}" is not present in the timeline.`)
-                }
-
-                if (input.resolveAudioSource) {
-                  return input.resolveAudioSource(clip, input.signal)
-                }
-
-                if (clip.buffer) {
-                  return createAudioPcmSourceDescriptor({
-                    identity: getAudioBufferSessionIdentity(clip.buffer),
-                    durationSec: clip.buffer.duration,
-                    frameCount: clip.buffer.length,
-                    sampleRate: clip.buffer.sampleRate,
-                    channelCount: clip.buffer.numberOfChannels,
-                    source: clip.buffer,
-                  })
-                }
-
-                return undefined
-              })(),
-        })))
-
-        if (nativeSources.some((source) => (
-          source.preparedStretchArtifactId === undefined
-          && source.descriptor === undefined
-        ))) {
-          throw new Error('Native export metadata-only mapped audio requires a PCM source resolver.')
-        }
-
-        nativeTimelinePageManager = createNativeTimelinePageManager({
-          sources: nativeSources,
-          writePage: async () => undefined,
-        })
-      }
-
-      const provideMappedPage = nativeTimelinePageManager
-        ? async (request: {
-          asset: NativeOfflineMappedAsset
-          startFrame: number
-          frameCount: number
-          signal: AbortSignal
-        }): Promise<NativeHostMappedAssetPage> => {
-          const registered = sourceByKey.get(request.asset.sourceAssetKey)
-
-          if (!registered || registered.sessionAssetId !== request.asset.sessionAssetId
-            || registered.frameCount !== request.asset.frameCount
-            || registered.sampleRateHz !== request.asset.sampleRateHz
-            || registered.channelCount !== request.asset.channelCount) {
-            throw new NativeOfflineRenderError('Native offline instrument/source identity changed. Reload samples and retry.')
-          }
-
-          const page = await nativeTimelinePageManager?.readPage(
-            request.asset.sourceAssetKey,
-            request.startFrame,
-            request.frameCount,
-            request.signal,
-          )
-
-          if (!page || page.sessionAssetId !== request.asset.sessionAssetId) {
-            throw new NativeOfflineRenderError('Native offline mapped page identity is invalid.')
-          }
-
-          return page
-        }
-        : undefined
+      nativeTimelinePageManager = mapped.pageManager
+      const { provideMappedPage } = mapped
 
       const spool = nativePlan
         ? await (nativeRenderer

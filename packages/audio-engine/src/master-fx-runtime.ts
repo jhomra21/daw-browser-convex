@@ -1,4 +1,4 @@
-import { isOwnedProcessorKind } from '@daw-browser/shared'
+import { isGainReductionMeterKind, isOwnedProcessorKind } from '@daw-browser/shared'
 import { connectFxChain, createGainTransitionOwner, disconnectAudioNodes, type FxChainStageConfig, type GainTransitionOwner, type GainTransitionScheduler } from './effects/chain'
 import type { CompressorChainState } from './effects/compressor-chain-state'
 import type { EqChainState } from './effects/eq-chain-state'
@@ -119,7 +119,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     gateMeterSubscriptions.delete(instanceId)
     const listeners = gateMeterListeners.get(instanceId)
 
-    if (chain.kind !== 'gate' && chain.kind !== 'limiter' || !listeners || listeners.size === 0) return
+    if (!isGainReductionMeterKind(chain.kind) || !listeners || listeners.size === 0) return
     gateMeterSubscriptions.set(instanceId, subscribeStaticGateMeter(chain, (frame) => {
       for (const listener of listeners) listener(frame)
     }))

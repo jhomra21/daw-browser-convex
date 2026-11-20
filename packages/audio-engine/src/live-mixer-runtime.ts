@@ -1,4 +1,4 @@
-import { assertDefined, isOwnedProcessorKind, isSidechainCapableKind, type AutomationEnvelope } from '@daw-browser/shared'
+import { assertDefined, isGainReductionMeterKind, isOwnedProcessorKind, isSidechainCapableKind, type AutomationEnvelope } from '@daw-browser/shared'
 import { connectFxChain, createGainTransitionOwner, disconnectAudioNodes, type FxChainStageConfig, type GainTransitionOwner, type GainTransitionScheduler } from './effects/chain'
 import type { CompressorChainState } from './effects/compressor-chain-state'
 import type { EqChainState } from './effects/eq-chain-state'
@@ -282,7 +282,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     gateMeterSubscriptions.get(trackId)?.delete(instanceId)
     const listeners = gateMeterListeners.get(trackId)?.get(instanceId)
 
-    if (chain.kind !== 'gate' && chain.kind !== 'limiter' || !listeners || listeners.size === 0) return
+    if (!isGainReductionMeterKind(chain.kind) || !listeners || listeners.size === 0) return
 
     const unsubscribe = subscribeStaticGateMeter(chain, (frame) => {
       for (const listener of listeners) listener(frame)

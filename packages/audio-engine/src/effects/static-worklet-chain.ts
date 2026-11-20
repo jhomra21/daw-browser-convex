@@ -1,4 +1,5 @@
 import {
+  isGainReductionMeterKind,
   isJsonNumber,
   isJsonObject,
   isJsonString,
@@ -203,13 +204,13 @@ function readStaticWorkletFault(data: JsonValue): string | null {
 }
 
 const publishGateMeterReset = (chain: StaticWorkletNodeChain) => {
-  if (chain.kind !== 'gate' && chain.kind !== 'limiter') return
+  if (!isGainReductionMeterKind(chain.kind)) return
 
   for (const listener of chain.gateMeterListeners) listener({ gainReductionDb: 0 })
 }
 
 export function subscribeStaticGateMeter(chain: StaticWorkletNodeChain, listener: GateMeterListener) {
-  if ((chain.kind !== 'gate' && chain.kind !== 'limiter') || chain.state !== 'active') {
+  if (!isGainReductionMeterKind(chain.kind) || chain.state !== 'active') {
     listener({ gainReductionDb: 0 })
 
     return () => {}

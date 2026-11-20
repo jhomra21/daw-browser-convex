@@ -14,31 +14,33 @@ export type AudioEffectKind = typeof AUDIO_EFFECT_KINDS[number]
 // modulationGroup: shares the modulation worklet and its timing model.
 // sidechain: accepts a sidechain input.
 // stereoWidening: decorrelates left and right, so a mono input leaves it stereo.
+// gainReductionMeter: its worklet posts gain-reduction meter frames to the engine's listeners.
 const AUDIO_EFFECTS = {
-  utility: { operation: 'processor', runtime: 'worklet', modulationGroup: false, sidechain: false, stereoWidening: false },
-  eq: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: false, stereoWidening: false },
-  autofilter: { operation: 'modulation', runtime: 'worklet', modulationGroup: false, sidechain: false, stereoWidening: false },
-  gate: { operation: 'processor', runtime: 'worklet', modulationGroup: false, sidechain: true, stereoWidening: false },
-  compressor: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: true, stereoWidening: false },
-  saturator: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: false, stereoWidening: false },
-  limiter: { operation: 'processor', runtime: 'worklet', modulationGroup: false, sidechain: false, stereoWidening: false },
-  lofi: { operation: 'modulation', runtime: 'worklet', modulationGroup: false, sidechain: false, stereoWidening: false },
-  chorus: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: true },
-  flanger: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: true },
-  phaser: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: true },
-  tremolo: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: false },
-  autopan: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: true },
-  ensemble: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: true },
-  delay: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: false, stereoWidening: false },
-  reverb: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: false, stereoWidening: false },
-  spectral: { operation: 'processor', runtime: 'worklet', modulationGroup: false, sidechain: true, stereoWidening: false },
-  spectrum: { operation: 'modulation', runtime: 'observer', modulationGroup: false, sidechain: false, stereoWidening: false },
+  utility: { operation: 'processor', runtime: 'worklet', modulationGroup: false, sidechain: false, stereoWidening: false, gainReductionMeter: false },
+  eq: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: false, stereoWidening: false, gainReductionMeter: false },
+  autofilter: { operation: 'modulation', runtime: 'worklet', modulationGroup: false, sidechain: false, stereoWidening: false, gainReductionMeter: false },
+  gate: { operation: 'processor', runtime: 'worklet', modulationGroup: false, sidechain: true, stereoWidening: false, gainReductionMeter: true },
+  compressor: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: true, stereoWidening: false, gainReductionMeter: false },
+  saturator: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: false, stereoWidening: false, gainReductionMeter: false },
+  limiter: { operation: 'processor', runtime: 'worklet', modulationGroup: false, sidechain: false, stereoWidening: false, gainReductionMeter: true },
+  lofi: { operation: 'modulation', runtime: 'worklet', modulationGroup: false, sidechain: false, stereoWidening: false, gainReductionMeter: false },
+  chorus: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: true, gainReductionMeter: false },
+  flanger: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: true, gainReductionMeter: false },
+  phaser: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: true, gainReductionMeter: false },
+  tremolo: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: false, gainReductionMeter: false },
+  autopan: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: true, gainReductionMeter: false },
+  ensemble: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: true, gainReductionMeter: false },
+  delay: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: false, stereoWidening: false, gainReductionMeter: false },
+  reverb: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: false, stereoWidening: false, gainReductionMeter: false },
+  spectral: { operation: 'processor', runtime: 'worklet', modulationGroup: false, sidechain: true, stereoWidening: false, gainReductionMeter: false },
+  spectrum: { operation: 'modulation', runtime: 'observer', modulationGroup: false, sidechain: false, stereoWidening: false, gainReductionMeter: false },
 } as const satisfies Record<AudioEffectKind, {
   operation: 'dedicated' | 'processor' | 'modulation'
   runtime: 'nodes' | 'worklet' | 'observer'
   modulationGroup: boolean
   sidechain: boolean
   stereoWidening: boolean
+  gainReductionMeter: boolean
 }>
 
 type KindsWhere<Match> = { [Kind in AudioEffectKind]: typeof AUDIO_EFFECTS[Kind] extends Match ? Kind : never }[AudioEffectKind]
@@ -52,6 +54,8 @@ export type ModulationGroupKind = KindsWhere<{ modulationGroup: true }>
 export type SidechainCapableKind = KindsWhere<{ sidechain: true }>
 
 export type StereoWideningKind = KindsWhere<{ stereoWidening: true }>
+
+export type GainReductionMeterKind = KindsWhere<{ gainReductionMeter: true }>
 
 export type ModulationOperationKind = KindsWhere<{ operation: 'modulation' }>
 
@@ -72,6 +76,9 @@ export const isSidechainCapableKind = (value: unknown): value is SidechainCapabl
 
 export const isStereoWideningKind = (value: unknown): value is StereoWideningKind =>
   isAudioEffectKind(value) && AUDIO_EFFECTS[value].stereoWidening
+
+export const isGainReductionMeterKind = (value: unknown): value is GainReductionMeterKind =>
+  isAudioEffectKind(value) && AUDIO_EFFECTS[value].gainReductionMeter
 
 type AudioEffectOperation = typeof AUDIO_EFFECTS[AudioEffectKind]['operation']
 

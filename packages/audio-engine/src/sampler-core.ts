@@ -162,7 +162,7 @@ export function getSamplerLoopBounds(zone: SamplerZone) {
 
 type CacheEntry<Value> = { value: Value; bytes: number; pins: number }
 
-export type SamplerBufferCachePin = {
+type SamplerBufferCachePin = {
   release: () => void
 }
 

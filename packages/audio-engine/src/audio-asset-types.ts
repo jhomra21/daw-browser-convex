@@ -1,5 +1,3 @@
-import type { AudioAssetRef, PlanarPcm } from '../../audio-core-contract/src/index'
-
 export type AudioAssetHandle = {
   slot: number
   generation: number
@@ -16,8 +14,3 @@ export type AudioAssetRelease =
   | { status: 'stale-generation' }
   | { status: 'asset-in-use' }
 
-export type AudioAssetRegistrationInput = {
-  asset: AudioAssetRef
-  pcm: PlanarPcm
-  projectGeneration: number
-}

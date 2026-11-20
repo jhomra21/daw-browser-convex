@@ -28,7 +28,7 @@ export type SetTrackInstrumentInput =
   | { instrument: Extract<TrackInstrumentParams, { kind: 'sampler' }>; buffers?: SamplerResolvedBuffers }
   | { instrument: Extract<TrackInstrumentParams, { kind: 'granular' }>; installedBuffer?: GranularInstalledBuffer }
 
-export type InstrumentRuntimeListeners = {
+type InstrumentRuntimeListeners = {
   onNoteMiss?: (miss: SamplerNoteMiss) => void
   onAssetUse?: (use: SamplerRegionUse) => void
   onDrumRackAssetUse?: (use: DrumRackRegionUse) => void

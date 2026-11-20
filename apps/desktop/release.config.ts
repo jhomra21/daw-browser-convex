@@ -20,7 +20,7 @@ export type NativeReleaseArtifactPaths = {
   audioHostPath: string
 }
 
-export type NativeReleaseEnvironment = NodeJS.ProcessEnv
+type NativeReleaseEnvironment = NodeJS.ProcessEnv
 
 type SecurityCommandResult = {
   status: number | null

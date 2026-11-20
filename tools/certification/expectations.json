@@ -983,7 +983,7 @@
   "/tmp/dv01-b6/rc5/tools/dv01-optA/overlay.ts": "c07a27c8390f1fbd62da9d5304fee3ca40c5acdb67571e13cbea56987b7ea774",
   "/tmp/dv01-b6/rc5/tools/dv01-p1-impl/overlay.ts": "ea1d4d35fa440fb7ccf7896c6e13db0f2a6ad54b8c3da06ef4291c6011598a95",
   "/tmp/dv01-b6/rc7/compare-b6-traces.ts": "fdbee58812f5e6b17dfe5fc145f8db47634b8134a19c635e6d4bcab934a8ad4b",
-  "/tmp/dv01-b6/rc7/mut/overlay.ts": "7510013de06156f89b4f83dc54064230dee1b5d4ef850688bfd9ad75bb069d09",
+  "/tmp/dv01-b6/rc7/mut/overlay.ts": "2f687fc038e65e1e4e802c80905962bd355f9938a80c0e8086943689c2f447c2",
   "/tmp/dv01-b6/rc7/mut/rejection-gate.ts": "2af6b827d28bdbe35e9e93961faa6ca2aecbf624a21886fbdd9c0b0236c6d730",
   "/tmp/dv01-b6/rc7/ts-513.ts": "ce7a0564bce29c2fadffe5cde698414833e828fafeaace8c1eae665ad9570410"
  },
@@ -5015,8 +5015,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-publication-transaction.ts",
-       "from": "    } catch (error) { return { status: \"failed\", error: error instanceof Error ? error : new Error(String(error)) } }\n  }\n  const inspect = (",
-       "to": "    } catch (error) {\n      if (record.kind === \"latency\") { tx.binding = undefined; await finish({ status: \"failed\", reason: \"Lost Inspect\" }, \"failed\") }\n      return { status: \"failed\", error: error instanceof Error ? error : new Error(String(error)) }\n    }\n  }\n  const inspect = ("
+       "from": "    } catch (error) { return { status: \"failed\", error: error instanceof Error ? error : new Error(String(error)) } }",
+       "to": "    } catch (error) {\n      if (record.kind === \"latency\") { tx.binding = undefined; await finish({ status: \"failed\", reason: \"Lost Inspect\" }, \"failed\") }\n      return { status: \"failed\", error: error instanceof Error ? error : new Error(String(error)) }\n    }"
       }
      ],
      "bounded": false,
@@ -7303,8 +7303,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-publication-transaction.ts",
-       "from": "    await disposePublication()\n    if (outcome.status === \"failed\" && record.kind === \"schedule\") session.logFailedAdoption(outcome.reason)",
-       "to": "    if (record.kind === \"latency\" && outcome.status === \"adopted\") {\n      const held = processorState.retirement()\n      if (held) {\n        const cleanup = await revisions.retire(held.binding)\n        if (!cleanup.ok) throw new Error(cleanup.error)\n      }\n    }\n    await disposePublication()\n    if (outcome.status === \"failed\" && record.kind === \"schedule\") session.logFailedAdoption(outcome.reason)"
+       "from": "  const finish = async (outcome: AdoptionOutcome, evidence: PublicationEvidence, reason?: PublicationRefusal) => {\n    await disposePublication()",
+       "to": "  const finish = async (outcome: AdoptionOutcome, evidence: PublicationEvidence, reason?: PublicationRefusal) => {\n    if (record.kind === \"latency\" && outcome.status === \"adopted\") {\n      const held = processorState.retirement()\n      if (held) {\n        const cleanup = await revisions.retire(held.binding)\n        if (!cleanup.ok) throw new Error(cleanup.error)\n      }\n    }\n    await disposePublication()"
       }
      ],
      "bounded": false,
@@ -8135,8 +8135,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "      const pendingPause = pendingBackendPause\n      if (pendingPause) {\n        await pendingPause.promise.catch(() => undefined)\n        // A structural edit during Pause may still owe preview invalidation.\n        // Do not compile a new start into the session that disposal is retiring.\n        await pendingNativeDispose\n      }",
-       "to": "      const pendingPause = pendingBackendPause\n      if (pendingPause) await pendingPause.promise.catch(() => undefined)"
+       "from": "\n      if (pendingPause) {\n        await pendingPause.promise.catch(() => undefined)\n        // A structural edit during Pause may still owe preview invalidation.\n        // Do not compile a new start into the session that disposal is retiring.\n        await pendingNativeDispose\n      }",
+       "to": "      if (pendingPause) await pendingPause.promise.catch(() => undefined)"
       }
      ],
      "bounded": false,
@@ -8491,7 +8491,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-publication-transaction.ts",
-       "from": "      if (tx.detached) strategy.onDetached?.()\n      return { record }",
+       "from": "      if (tx.detached) strategy.onDetached?.()\n\n      return { record }",
        "to": "      if (tx.detached) strategy.onDetached?.()\n      if (record.kind === \"schedule\") await record.terminal\n      return { record }"
       }
      ],
@@ -9712,8 +9712,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-publication-transaction.ts",
-       "from": "  } catch (error) {\n    if (!tx.sessionAlive()) { await tx.disposePublication(); return { record } }\n",
-       "to": "  } catch (error) {\n    if (!tx.sessionAlive()) {\n      await tx.rollbackLost()\n      await tx.disposePublication(); return { record }\n    }\n"
+       "from": "    if (!tx.sessionAlive()) { await tx.disposePublication();",
+       "to": "    if (!tx.sessionAlive()) {\n      await tx.rollbackLost()\n      await tx.disposePublication();"
       },
       {
        "file": "/src/lib/desktop/native-publication-transaction.ts",
@@ -13166,8 +13166,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-schedule-publication.ts",
-       "from": "            const inspection = await inspect()\n            if (!inspection?.ok || inspection.revision.status !== \"rebase-required\") throw error",
-       "to": "            const inspection = await revisions.inspect(tx.binding)\n            if (!inspection?.ok || inspection.revision.status !== \"rebase-required\") throw error"
+       "from": "          } catch (error) {\n            const inspection = await inspect()\n\n            if (!inspection?.ok || inspection.revision.status !== \"rebase-required\") throw error",
+       "to": "          } catch (error) {\n            const inspection = await revisions.inspect(tx.binding)\n            if (!inspection?.ok || inspection.revision.status !== \"rebase-required\") throw error"
       }
      ],
      "bounded": true,
@@ -13413,8 +13413,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-publication-transaction.ts",
-       "from": "      tx.classifyPublication(tx.publishReply)\n      if (prepared.hostChanged?.(status)) return { record }",
-       "to": "      if (record.kind === \"latency\") tx.classifyPublication(tx.publishReply)\n      if (prepared.hostChanged?.(status)) return { record }"
+       "from": "      const observed = tx.sequence\n      tx.classifyPublication(tx.publishReply)\n\n      if (prepared.hostChanged?.(status)) return { record }",
+       "to": "      const observed = tx.sequence\n      if (record.kind === \"latency\") tx.classifyPublication(tx.publishReply)\n      if (prepared.hostChanged?.(status)) return { record }"
       },
       {
        "file": "/src/lib/desktop/native-publication-transaction.ts",
@@ -14036,8 +14036,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-schedule-publication.ts",
-       "from": "        if (ready.revision.status === \"publish-pending\"\n          && (ready.revision.retiredRevision !== 0 || ready.revision.preparedRevision !== 0)) {\n          // Prepare's pending reply owns no bank. Resolve admission before\n          // spending a retry, then wait on completion/terminal/control facts,\n          // not ordinary frames while a latency transition is still running.\n          host.prepareAdmissionWake = notify\n          try {\n            let admission: NativeRevisionReply | undefined\n            let inspected = false\n            let completion = host.nativeLatencyCompletionGeneration\n            let settled = host.scheduleSettledEpoch\n            let applied = host.latestScheduleProgress\n            do {\n              await waitForOpportunity(observed)\n              observed = tx.sequence\n              if (inspected && completion === host.nativeLatencyCompletionGeneration && settled === host.scheduleSettledEpoch\n                && applied?.appliedProcessorSequence === host.latestScheduleProgress?.appliedProcessorSequence\n                && applied?.appliedUrgentSequence === host.latestScheduleProgress?.appliedUrgentSequence\n                && applied?.appliedTransportTransitionId === host.latestScheduleProgress?.appliedTransportTransitionId) continue\n              completion = host.nativeLatencyCompletionGeneration\n              settled = host.scheduleSettledEpoch\n              applied = host.latestScheduleProgress\n              inspected = true\n              admission = await inspect({ projectId, revision: ready.revision.requestedRevision,\n                hostGeneration: ready.hostGeneration })\n              if (admission?.ok && (admission.hostPid !== ready.hostPid || admission.hostGeneration !== ready.hostGeneration))\n                throw new NativePlaybackAbortError(\"ownership-invalidated\")\n            } while (!admission?.ok || admission.revision.status === \"publish-pending\")\n            tx.checked(admission)\n          } finally { host.prepareAdmissionWake = undefined }\n          progress = BigInt(coordinator.currentFrame())\n        } else if (ready.revision.status === \"publish-pending\") {\n          // With no retained/prepared publication, the pending admission is\n          // the ordinary queued-control opportunity, not a latency wait.\n          await waitForOpportunity(observed)\n          progress = BigInt(coordinator.currentFrame())\n        }\n",
-       "to": "        if (ready.revision.status === \"publish-pending\") {\n          await waitForOpportunity(observed)\n          progress = BigInt(coordinator.currentFrame())\n        }\n"
+       "from": "        if (ready.revision.status === \"publish-pending\"\n          && (ready.revision.retiredRevision !== 0 || ready.revision.preparedRevision !== 0)) {\n          // Prepare's pending reply owns no bank. Resolve admission before\n          // spending a retry, then wait on completion/terminal/control facts,\n          // not ordinary frames while a latency transition is still running.\n          host.prepareAdmissionWake = notify\n\n          try {\n            let admission: NativeRevisionReply | undefined\n            let inspected = false\n            let completion = host.nativeLatencyCompletionGeneration\n            let settled = host.scheduleSettledEpoch\n            let applied = host.latestScheduleProgress\n\n            do {\n              await waitForOpportunity(observed)\n              observed = tx.sequence\n\n              if (inspected && completion === host.nativeLatencyCompletionGeneration && settled === host.scheduleSettledEpoch\n                && applied?.appliedProcessorSequence === host.latestScheduleProgress?.appliedProcessorSequence\n                && applied?.appliedUrgentSequence === host.latestScheduleProgress?.appliedUrgentSequence\n                && applied?.appliedTransportTransitionId === host.latestScheduleProgress?.appliedTransportTransitionId) continue\n              completion = host.nativeLatencyCompletionGeneration\n              settled = host.scheduleSettledEpoch\n              applied = host.latestScheduleProgress\n              inspected = true\n              admission = await inspect({ projectId, revision: ready.revision.requestedRevision,\n                hostGeneration: ready.hostGeneration })\n\n              if (admission?.ok && (admission.hostPid !== ready.hostPid || admission.hostGeneration !== ready.hostGeneration))\n                throw new NativePlaybackAbortError(\"ownership-invalidated\")\n            } while (!admission?.ok || admission.revision.status === \"publish-pending\")\n\n            tx.checked(admission)\n          } finally { host.prepareAdmissionWake = undefined }\n\n          progress = BigInt(coordinator.currentFrame())\n        } else if (ready.revision.status === \"publish-pending\") {\n          // With no retained/prepared publication, the pending admission is\n          // the ordinary queued-control opportunity, not a latency wait.",
+       "to": "        if (ready.revision.status === \"publish-pending\") {"
       }
      ],
      "bounded": true,
@@ -14586,8 +14586,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "  live: { kindId: number; incarnation: number; latest?: LiveProcessorEditIdentity } | undefined,\n): ProcessorDesired | undefined => {\n  const edit = live?.latest\n  // The edit identifies the projected content only when it is that content: values are a function of the state bytes.\n  if (!edit || live.kindId !== processor.kindId || edit.target.nodeId !== nodeId\n    || edit.target.instanceId !== processor.id || edit.target.kindId !== processor.kindId\n    || edit.target.incarnation !== live.incarnation\n    || (edit.content.state !== undefined && bytesText(edit.content.state) !== bytesText(processor.state))) return undefined\n  return {\n    id: edit.id,\n    order: edit.order,",
-       "to": "  live: { kindId: number; incarnation: number; latest?: LiveProcessorEditIdentity } | undefined,\n): ProcessorDesired | undefined => {\n  const edit = live?.latest\n  if (!edit) return {\n    id: `${processor.id}:900`, order: 900,\n    target: { nodeId, instanceId: processor.id, kindId: processor.kindId, incarnation: live?.incarnation ?? 0 },\n    content: { state: processor.state }, bypassed: processor.bypassed, tailFrames: processor.tailFrames,\n    ...(processor.tailKind && { tailKind: processor.tailKind }),\n  }\n  return {\n    id: edit.id,\n    order: edit.order,"
+       "from": "\n  // The edit identifies the projected content only when it is that content: values are a function of the state bytes.\n  if (!edit || live.kindId !== processor.kindId || edit.target.nodeId !== nodeId\n    || edit.target.instanceId !== processor.id || edit.target.kindId !== processor.kindId\n    || edit.target.incarnation !== live.incarnation\n    || (edit.content.state !== undefined && bytesText(edit.content.state) !== bytesText(processor.state))) return undefined\n",
+       "to": "  if (!edit) return {\n    id: `${processor.id}:900`, order: 900,\n    target: { nodeId, instanceId: processor.id, kindId: processor.kindId, incarnation: live?.incarnation ?? 0 },\n    content: { state: processor.state }, bypassed: processor.bypassed, tailFrames: processor.tailFrames,\n    ...(processor.tailKind && { tailKind: processor.tailKind }),\n  }"
       }
      ],
      "bounded": false,
@@ -14714,18 +14714,18 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "  nodeId: string,\n  processor: GraphProcessor,\n  live: { kindId: number; incarnation: number; latest?: LiveProcessorEditIdentity } | undefined,\n): ProcessorDesired | undefined => {\n  const edit = live?.latest\n  // The edit identifies",
-       "to": "  nodeId: string,\n  processor: GraphProcessor,\n  live: { kindId: number; incarnation: number; latest?: LiveProcessorEditIdentity } | undefined,\n  sequence = 0,\n): ProcessorDesired | undefined => {\n  const edit = live?.latest\n  // The edit identifies"
+       "from": "  live: { kindId: number; incarnation: number; latest?: LiveProcessorEditIdentity } | undefined,\n): ProcessorDesired | undefined => {",
+       "to": "  live: { kindId: number; incarnation: number; latest?: LiveProcessorEditIdentity } | undefined,\n  sequence = 0,\n): ProcessorDesired | undefined => {"
       },
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "    || (edit.content.state !== undefined && bytesText(edit.content.state) !== bytesText(processor.state))) return undefined\n  return {\n    id: edit.id,\n    order: edit.order,\n    target: edit.target,",
-       "to": "    || (edit.content.state !== undefined && bytesText(edit.content.state) !== bytesText(processor.state))) return undefined\n  return {\n    id: edit.id,\n    order: sequence,\n    target: edit.target,"
+       "from": "    order: edit.order,",
+       "to": "    order: sequence,"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "  const ingestProjectedProcessors = (snapshot: LivePlaybackSnapshot) => {\n    const projected = input.getDesiredProcessorState?.(snapshot, sampleRate)\n    if (projected) for (const node of projected.graph.nodes) for (const processor of node.processorOrder) {\n      const desired = projectedProcessorDesired(node.id, processor, input.getProcessorTarget?.(node.id, processor.id))\n      if (desired) processorState.submit(desired)\n    }\n    if (projected?.instruments) for (const [nodeId, instrument] of projected.instruments) {",
-       "to": "  const ingestProjectedProcessors = (snapshot: LivePlaybackSnapshot) => {\n    const projected = input.getDesiredProcessorState?.(snapshot, sampleRate)\n    if (projected) for (const node of projected.graph.nodes) for (const processor of node.processorOrder) {\n      const desired = projectedProcessorDesired(node.id, processor, input.getProcessorTarget?.(node.id, processor.id), projected.sequence)\n      if (desired) processorState.submit(desired)\n    }\n    if (projected?.instruments) for (const [nodeId, instrument] of projected.instruments) {"
+       "from": "      const desired = projectedProcessorDesired(node.id, processor, input.getProcessorTarget?.(node.id, processor.id))\n",
+       "to": "      const desired = projectedProcessorDesired(node.id, processor, input.getProcessorTarget?.(node.id, processor.id), projected.sequence)"
       }
      ],
      "bounded": false,
@@ -14846,8 +14846,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "  const edit = live?.latest\n  // The edit identifies",
-       "to": "  const edit = live?.latest\n  if (!live) return {\n    id: `${processor.id}:900`, order: 900,\n    target: { nodeId, instanceId: processor.id, kindId: processor.kindId, incarnation: 0 },\n    content: { state: processor.state }, bypassed: processor.bypassed, tailFrames: processor.tailFrames,\n    ...(processor.tailKind && { tailKind: processor.tailKind }),\n  }\n  // The edit identifies"
+       "from": "  const edit = live?.latest\n\n  // The edit identifies the projected content only when it is that content: values are a function of the state bytes.",
+       "to": "  const edit = live?.latest\n  if (!live) return {\n    id: `${processor.id}:900`, order: 900,\n    target: { nodeId, instanceId: processor.id, kindId: processor.kindId, incarnation: 0 },\n    content: { state: processor.state }, bypassed: processor.bypassed, tailFrames: processor.tailFrames,\n    ...(processor.tailKind && { tailKind: processor.tailKind }),\n  }\n  // The edit identifies the projected content only when it is that content: values are a function of the state bytes."
       }
      ],
      "bounded": false,
@@ -14968,8 +14968,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "    if (projected?.instruments) for (const [nodeId, instrument] of projected.instruments) {\n      if (instrument.kind !== \"synth\") continue\n      const identity = input.getProcessorTarget?.(nodeId, instrument.instanceId)\n      const edit = identity?.latest\n      if (!edit || identity.kindId !== SYNTH_KIND_ID || edit.target.nodeId !== nodeId\n        || edit.target.instanceId !== instrument.instanceId || edit.target.kindId !== SYNTH_KIND_ID\n        || edit.target.incarnation !== identity.incarnation) continue\n      processorState.submit({\n        id: edit.id,\n        order: edit.order,\n        target: edit.target,\n        // Synths have no processor-state bytes; their compiled instrument is the complete native content.\n        content: { state: new Uint8Array(), instrument: { state: instrument.state, incarnation: identity.incarnation },\n          values: nativeSynthValues(instrument.state), params: edit.content.params },\n        bypassed: false, tailFrames: 0,\n      })\n    }",
-       "to": "    if (projected?.instruments) for (const [nodeId, instrument] of projected.instruments) {\n      if (instrument.kind !== \"synth\") continue\n      const identity = input.getProcessorTarget?.(nodeId, instrument.instanceId)\n      if (!identity) continue\n      const edit = identity.latest\n      processorState.submit({\n        id: edit?.id ?? `${instrument.instanceId}:${projected.sequence}`,\n        order: edit?.order ?? projected.sequence,\n        target: { nodeId, instanceId: instrument.instanceId, kindId: SYNTH_KIND_ID, incarnation: identity.incarnation },\n        // Synths have no processor-state bytes; their compiled instrument is the complete native content.\n        content: { state: new Uint8Array(), instrument: { state: instrument.state, incarnation: identity.incarnation },\n          values: nativeSynthValues(instrument.state), params: edit?.content.params },\n        bypassed: false, tailFrames: 0,\n      })\n    }"
+       "from": "      const edit = identity?.latest\n\n      if (!edit || identity.kindId !== SYNTH_KIND_ID || edit.target.nodeId !== nodeId\n        || edit.target.instanceId !== instrument.instanceId || edit.target.kindId !== SYNTH_KIND_ID\n        || edit.target.incarnation !== identity.incarnation) continue\n      processorState.submit({\n        id: edit.id,\n        order: edit.order,\n        target: edit.target,\n        // Synths have no processor-state bytes; their compiled instrument is the complete native content.\n        content: { state: new Uint8Array(), instrument: { state: instrument.state, incarnation: identity.incarnation },\n          values: nativeSynthValues(instrument.state), params: edit.content.params },",
+       "to": "      if (!identity) continue\n      const edit = identity.latest\n      processorState.submit({\n        id: edit?.id ?? `${instrument.instanceId}:${projected.sequence}`,\n        order: edit?.order ?? projected.sequence,\n        target: { nodeId, instanceId: instrument.instanceId, kindId: SYNTH_KIND_ID, incarnation: identity.incarnation },\n        // Synths have no processor-state bytes; their compiled instrument is the complete native content.\n        content: { state: new Uint8Array(), instrument: { state: instrument.state, incarnation: identity.incarnation },\n          values: nativeSynthValues(instrument.state), params: edit?.content.params },"
       }
      ],
      "bounded": false,
@@ -15098,8 +15098,8 @@
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "    const { state, timing } = edit.content\n    const match = preparedGraph && resolveGraphProcessor(preparedGraph, edit.target.instanceId)\n    return state && timing && match\n      ? patchProcessorDesired(match.processor, { edit, state, timing })\n      : undefined\n  }\n  // Registration is synchronous (A8.3): the receipt, rule 0, the carrier choice and the carrier's queueing all happen",
-       "to": "    const { state, timing } = edit.content\n    const match = preparedGraph && resolveGraphProcessor(preparedGraph, edit.target.instanceId)\n    return state && timing && match\n      ? patchProcessorDesired(match.node.id, match.processor, { order: edit.order, edit, params: edit.content.params, state, timing })\n      : undefined\n  }\n  // Registration is synchronous (A8.3): the receipt, rule 0, the carrier choice and the carrier's queueing all happen"
+       "from": "      ? patchProcessorDesired(match.processor, { edit, state, timing })",
+       "to": "      ? patchProcessorDesired(match.node.id, match.processor, { order: edit.order, edit, params: edit.content.params, state, timing })"
       }
      ],
      "bounded": false,
@@ -15366,8 +15366,8 @@
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      else sent = sendExecution({\n        instanceId: content.instanceId,\n        values: [...plan.values].map(([parameterId, value]) => ({ parameterId, value })),\n        edit: content.edit, receipt,\n      })\n    }\n    return { registration: { receipt: receiptHandle(receipt), settled: receipt.settled }, sent, receipt }",
-       "to": "      else sent = sendExecution({\n        instanceId: content.instanceId,\n        values: [...plan.values].map(([parameterId, value]) => ({ parameterId, value })),\n        ...(content.edit && { edit: content.edit }), receipt,\n      })\n    }\n    return { registration: { receipt: receiptHandle(receipt), settled: receipt.settled }, sent, receipt }"
+       "from": "        edit: content.edit, receipt,",
+       "to": "        ...(content.edit && { edit: content.edit }), receipt,"
       }
      ],
      "bounded": false,
@@ -15517,13 +15517,13 @@
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "  ): AudioCoreGraphSnapshot => ({ ...graph, nodes: graph.nodes.map((node) => {\n    let latencyFrames = 0\n    let inputLayout = node.inputLayout\n    const processorOrder = node.processorOrder.map((processor) => {\n      const outputLayout = nativeProcessorOutputLayoutForState(processor, inputLayout, processor.state)\n      const entry = ledger.get(processor.id)",
-       "to": "  ): AudioCoreGraphSnapshot => ({ ...graph, nodes: graph.nodes.map((node) => {\n    let latencyFrames = 0\n    let inputLayout = node.inputLayout\n    if (node.id === \"track\" && !node.processorOrder.some(processor => processor.id === \"utility:1\"))\n      b6RetiredState ??= ledger.get(\"utility:1\")?.content.state\n    const processorOrder = node.processorOrder.map((processor) => {\n      const outputLayout = nativeProcessorOutputLayoutForState(processor, inputLayout, processor.state)\n      const entry = ledger.get(processor.id)"
+       "from": "    let inputLayout = node.inputLayout\n\n    const processorOrder = node.processorOrder.map((processor) => {",
+       "to": "    let inputLayout = node.inputLayout\n    if (node.id === \"track\" && !node.processorOrder.some(processor => processor.id === \"utility:1\"))\n      b6RetiredState ??= ledger.get(\"utility:1\")?.content.state\n    const processorOrder = node.processorOrder.map((processor) => {"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "        winner = { ...withoutTailKind, state: desired.content.state.slice(), tailFrames: desired.tailFrames }\n        if (desired.tailKind) winner.tailKind = desired.tailKind\n      }\n      const latency = nativeProcessorLatencyForState(winner, winner.state)\n      latencyFrames += latency\n      inputLayout = outputLayout",
-       "to": "        winner = { ...withoutTailKind, state: desired.content.state.slice(), tailFrames: desired.tailFrames }\n        if (desired.tailKind) winner.tailKind = desired.tailKind\n      }\n      // MUTATION: resurrect content of the removed target in the new incarnation.\n      if (processor.id === \"utility:1\" && b6RetiredState) winner = { ...winner, state: b6RetiredState }\n      const latency = nativeProcessorLatencyForState(winner, winner.state)\n      latencyFrames += latency\n      inputLayout = outputLayout"
+       "from": "      }\n\n      const latency = nativeProcessorLatencyForState(winner, winner.state)",
+       "to": "      }\n      // MUTATION: resurrect content of the removed target in the new incarnation.\n      if (processor.id === \"utility:1\" && b6RetiredState) winner = { ...winner, state: b6RetiredState }\n      const latency = nativeProcessorLatencyForState(winner, winner.state)"
       }
      ],
      "bounded": false,
@@ -17448,8 +17448,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "            const carried = carriedValues(target, execution)\n            if (carried.size === 0) settle(execution, \"cancelled\")",
-       "to": "            const carried = execution.values\n            if (carried.size === 0) settle(execution, \"cancelled\")"
+       "from": "            const carried = carriedValues(target, execution)\n",
+       "to": "            const carried = execution.values"
       }
      ],
      "bounded": false,
@@ -17588,8 +17588,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "            const carried = carriedValues(target, execution)\n            if (carried.size === 0) settle(execution, \"cancelled\")",
-       "to": "            const carried = execution.values\n            if (carried.size === 0) settle(execution, \"cancelled\")"
+       "from": "            const carried = carriedValues(target, execution)\n",
+       "to": "            const carried = execution.values"
       }
      ],
      "bounded": false,
@@ -17731,8 +17731,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "            const carried = carriedValues(target, execution)\n            if (carried.size === 0) settle(execution, \"cancelled\")",
-       "to": "            const carried = execution.values\n            if (carried.size === 0) settle(execution, \"cancelled\")"
+       "from": "            const carried = carriedValues(target, execution)\n",
+       "to": "            const carried = execution.values"
       }
      ],
      "bounded": false,
@@ -17854,8 +17854,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "    published: (revision: number) => {\n      decide(revision)\n      for (const key of active) {\n        const target = targets.get(key)\n        for (const execution of target?.inflight.values() ?? [])\n          if (target && execution.sent && execution.strategy.kind === \"parameters\"\n            && (execution.rebound ?? execution.revision) < revision) keep(target, execution)\n      }\n    },\n",
-       "to": "    published: decide,\n"
+       "from": "    published: (revision: number) => {\n      decide(revision)\n\n      for (const key of active) {\n        const target = targets.get(key)\n\n        for (const execution of target?.inflight.values() ?? [])\n          if (target && execution.sent && execution.strategy.kind === \"parameters\"\n            && (execution.rebound ?? execution.revision) < revision) keep(target, execution)\n      }\n    },",
+       "to": "    published: decide,"
       }
      ],
      "bounded": false,
@@ -17994,8 +17994,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "    published: (revision: number) => {\n      decide(revision)\n      for (const key of active) {\n        const target = targets.get(key)\n        for (const execution of target?.inflight.values() ?? [])\n          if (target && execution.sent && execution.strategy.kind === \"parameters\"\n            && (execution.rebound ?? execution.revision) < revision) keep(target, execution)\n      }\n    },\n",
-       "to": "    published: decide,\n"
+       "from": "    published: (revision: number) => {\n      decide(revision)\n\n      for (const key of active) {\n        const target = targets.get(key)\n\n        for (const execution of target?.inflight.values() ?? [])\n          if (target && execution.sent && execution.strategy.kind === \"parameters\"\n            && (execution.rebound ?? execution.revision) < revision) keep(target, execution)\n      }\n    },",
+       "to": "    published: decide,"
       }
      ],
      "bounded": false,
@@ -18137,8 +18137,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "    published: (revision: number) => {\n      decide(revision)\n      for (const key of active) {\n        const target = targets.get(key)\n        for (const execution of target?.inflight.values() ?? [])\n          if (target && execution.sent && execution.strategy.kind === \"parameters\"\n            && (execution.rebound ?? execution.revision) < revision) keep(target, execution)\n      }\n    },\n",
-       "to": "    published: decide,\n"
+       "from": "    published: (revision: number) => {\n      decide(revision)\n\n      for (const key of active) {\n        const target = targets.get(key)\n\n        for (const execution of target?.inflight.values() ?? [])\n          if (target && execution.sent && execution.strategy.kind === \"parameters\"\n            && (execution.rebound ?? execution.revision) < revision) keep(target, execution)\n      }\n    },",
+       "to": "    published: decide,"
       }
      ],
      "bounded": false,
@@ -18664,8 +18664,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       }
      ],
      "bounded": false,
@@ -18804,8 +18804,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       }
      ],
      "bounded": false,
@@ -18932,8 +18932,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       }
      ],
      "bounded": false,
@@ -19576,7 +19576,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       }
      ],
@@ -19716,7 +19716,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       }
      ],
@@ -21503,7 +21503,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "      if (!execution || !(execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }",
+       "from": "      if (!execution || !(execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }",
        "to": "      if (execution && (execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        && evidence !== \"promoted\" && evidence !== \"uncertain\"\n        && !(evidence === \"cancelled\" && execution === target.queuedPatch)) settle(execution, \"cancelled\", false)"
       }
      ],
@@ -24375,8 +24375,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      // Acceptance can resolve in the turn a dispose retires this attempt: never run a transport it no longer owns.\n      if (cancelled()) {\n        noteOrphanedSession()\n        return \"unavailable\"\n      }\n      if (runTransport) {",
-       "to": "      if (runTransport) {"
+       "from": "      // Acceptance can resolve in the turn a dispose retires this attempt: never run a transport it no longer owns.\n      if (cancelled()) {\n        noteOrphanedSession()\n\n        return \"unavailable\"\n      }\n",
+       "to": ""
       }
      ],
      "bounded": false,
@@ -24505,8 +24505,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      // Acceptance can resolve in the turn a dispose retires this attempt: never run a transport it no longer owns.\n      if (cancelled()) {\n        noteOrphanedSession()\n        return \"unavailable\"\n      }\n      if (runTransport) {",
-       "to": "      if (runTransport) {"
+       "from": "      // Acceptance can resolve in the turn a dispose retires this attempt: never run a transport it no longer owns.\n      if (cancelled()) {\n        noteOrphanedSession()\n\n        return \"unavailable\"\n      }\n",
+       "to": ""
       }
      ],
      "bounded": false,
@@ -24627,7 +24627,7 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n",
+       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n\n          return\n        }\n",
        "to": ""
       }
      ],
@@ -24746,7 +24746,7 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n",
+       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n\n          return\n        }\n",
        "to": ""
       }
      ],
@@ -25362,13 +25362,13 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n",
+       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n\n          return\n        }\n",
        "to": ""
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.",
+       "to": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared."
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -25628,13 +25628,13 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n",
+       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n\n          return\n        }\n",
        "to": ""
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.",
+       "to": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared."
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -25767,13 +25767,13 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n",
+       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n\n          return\n        }\n",
        "to": ""
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.",
+       "to": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared."
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -25899,13 +25899,13 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n",
+       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n\n          return\n        }\n",
        "to": ""
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.",
+       "to": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared."
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -27126,8 +27126,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      const preparationRequest = instrumentPreparationRequestGeneration\n      const request = previewRequest.then(() =>\n        destroyed || preparationRequest !== instrumentPreparationRequestGeneration || projectGeneration !== resolveProjectGeneration()\n          || projectId !== input.getProjectId?.()\n",
-       "to": "      const generation = lifecycleGeneration\n      const request = previewRequest.then(() =>\n        destroyed || generation !== lifecycleGeneration || projectGeneration !== resolveProjectGeneration() || projectId !== input.getProjectId?.()\n"
+       "from": "      const preparationRequest = instrumentPreparationRequestGeneration\n\n      const request = previewRequest.then(() =>\n        destroyed || preparationRequest !== instrumentPreparationRequestGeneration || projectGeneration !== resolveProjectGeneration()\n          || projectId !== input.getProjectId?.()",
+       "to": "      const generation = lifecycleGeneration\n      const request = previewRequest.then(() =>\n        destroyed || generation !== lifecycleGeneration || projectGeneration !== resolveProjectGeneration() || projectId !== input.getProjectId?.()"
       }
      ],
      "bounded": false,
@@ -27256,8 +27256,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      const preparationRequest = instrumentPreparationRequestGeneration\n      const request = previewRequest.then(() =>\n        destroyed || preparationRequest !== instrumentPreparationRequestGeneration || projectGeneration !== resolveProjectGeneration()\n          || projectId !== input.getProjectId?.()\n",
-       "to": "      const generation = lifecycleGeneration\n      const request = previewRequest.then(() =>\n        destroyed || generation !== lifecycleGeneration || projectGeneration !== resolveProjectGeneration() || projectId !== input.getProjectId?.()\n"
+       "from": "      const preparationRequest = instrumentPreparationRequestGeneration\n\n      const request = previewRequest.then(() =>\n        destroyed || preparationRequest !== instrumentPreparationRequestGeneration || projectGeneration !== resolveProjectGeneration()\n          || projectId !== input.getProjectId?.()",
+       "to": "      const generation = lifecycleGeneration\n      const request = previewRequest.then(() =>\n        destroyed || generation !== lifecycleGeneration || projectGeneration !== resolveProjectGeneration() || projectId !== input.getProjectId?.()"
       }
      ],
      "bounded": false,
@@ -28841,8 +28841,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    if (!mounted || requestedIntentToken !== transportIntentToken) {\n      setIsPlayPending(false)\n      return\n    }\n",
-       "to": "    if (!mounted || requestedIntentToken !== transportIntentToken) return\n"
+       "from": "    if (!mounted || requestedIntentToken !== transportIntentToken) {\n      setIsPlayPending(false)\n\n      return\n    }",
+       "to": "    if (!mounted || requestedIntentToken !== transportIntentToken) return"
       }
      ],
      "bounded": false,
@@ -28957,8 +28957,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    if (!mounted || requestedIntentToken !== transportIntentToken) {\n      setIsPlayPending(false)\n      return\n    }\n",
-       "to": "    if (!mounted || requestedIntentToken !== transportIntentToken) return\n"
+       "from": "    if (!mounted || requestedIntentToken !== transportIntentToken) {\n      setIsPlayPending(false)\n\n      return\n    }",
+       "to": "    if (!mounted || requestedIntentToken !== transportIntentToken) return"
       }
      ],
      "bounded": false,
@@ -32007,8 +32007,8 @@
      "changes": [
       {
        "file": "src/components/timeline/timeline-playback-wiring.ts",
-       "from": "  if (result.accepted) return \"applied\";\n  if (result.reason === \"cancelled\" || result.reason === \"stale\") return \"superseded\";\n  if (result.reason === \"unavailable\" || result.reason === \"unprepared\") return \"dropped\";\n  if (result.reason !== \"unsupported\") throw new Error(result.error ?? \"The portable processor update failed.\");\n  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
-       "to": "  if (result.accepted) return \"applied\";\n  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n  if (result.reason === \"cancelled\" || result.reason === \"stale\") return \"superseded\";\n  if (result.reason === \"unavailable\" || result.reason === \"unprepared\") return \"dropped\";\n  if (result.reason !== \"unsupported\") throw new Error(result.error ?? \"The portable processor update failed.\");\n"
+       "from": "\n  if (result.reason === \"cancelled\" || result.reason === \"stale\") return \"superseded\";\n\n  if (result.reason === \"unavailable\" || result.reason === \"unprepared\") return \"dropped\";\n\n  if (result.reason !== \"unsupported\") throw new Error(result.error ?? \"The portable processor update failed.\");\n\n  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;",
+       "to": "  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n  if (result.reason === \"cancelled\" || result.reason === \"stale\") return \"superseded\";\n  if (result.reason === \"unavailable\" || result.reason === \"unprepared\") return \"dropped\";\n  if (result.reason !== \"unsupported\") throw new Error(result.error ?? \"The portable processor update failed.\");"
       }
      ]
     },
@@ -32070,8 +32070,8 @@
      "changes": [
       {
        "file": "src/components/timeline/timeline-playback-wiring.ts",
-       "from": "  if (result.accepted) return \"applied\";\n  if (result.reason === \"cancelled\" || result.reason === \"stale\") return \"superseded\";\n  if (result.reason === \"unavailable\" || result.reason === \"unprepared\") return \"dropped\";\n  if (result.reason !== \"unsupported\") throw new Error(result.error ?? \"The portable processor update failed.\");\n  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
-       "to": "  if (result.accepted) return \"applied\";\n  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n  if (result.reason === \"cancelled\" || result.reason === \"stale\") return \"superseded\";\n  if (result.reason === \"unavailable\" || result.reason === \"unprepared\") return \"dropped\";\n  if (result.reason !== \"unsupported\") throw new Error(result.error ?? \"The portable processor update failed.\");\n"
+       "from": "\n  if (result.reason === \"cancelled\" || result.reason === \"stale\") return \"superseded\";\n\n  if (result.reason === \"unavailable\" || result.reason === \"unprepared\") return \"dropped\";\n\n  if (result.reason !== \"unsupported\") throw new Error(result.error ?? \"The portable processor update failed.\");\n\n  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;",
+       "to": "  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n  if (result.reason === \"cancelled\" || result.reason === \"stale\") return \"superseded\";\n  if (result.reason === \"unavailable\" || result.reason === \"unprepared\") return \"dropped\";\n  if (result.reason !== \"unsupported\") throw new Error(result.error ?? \"The portable processor update failed.\");"
       }
      ]
     },
@@ -32309,8 +32309,8 @@
      "changes": [
       {
        "file": "src/components/timeline/parameter-gesture-owner.ts",
-       "from": "        gesture.queued = false;\n        if (gestures.get(gesture.key) !== gesture || !live(gesture.key, gesture.lifetime)) return;\n",
-       "to": "        if (gestures.get(gesture.key) !== gesture || !live(gesture.key, gesture.lifetime)) return;\n"
+       "from": "        gesture.queued = false;\n",
+       "to": ""
       },
       {
        "file": "src/components/timeline/parameter-gesture-owner.ts",
@@ -32435,8 +32435,8 @@
      "changes": [
       {
        "file": "src/components/timeline/parameter-gesture-owner.ts",
-       "from": "        gesture.queued = false;\n        if (gestures.get(gesture.key) !== gesture || !live(gesture.key, gesture.lifetime)) return;\n",
-       "to": "        if (gestures.get(gesture.key) !== gesture || !live(gesture.key, gesture.lifetime)) return;\n"
+       "from": "        gesture.queued = false;\n",
+       "to": ""
       }
      ]
     },
@@ -34804,8 +34804,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
-       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()",
+       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result"
       }
      ]
     },
@@ -34926,8 +34926,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
-       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()",
+       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result"
       }
      ]
     },
@@ -35155,8 +35155,8 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "    // A paused session is prepared only where it stands: another playhead seeks it in place.\n    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused && positionFrame === Math.round(transport.playheadSec * keptPaused.sampleRate)) {\n",
-       "to": "    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused) {\n"
+       "from": "    // A paused session is prepared only where it stands: another playhead seeks it in place.\n    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n\n    if (keptPaused && positionFrame === Math.round(transport.playheadSec * keptPaused.sampleRate)) {",
+       "to": "    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused) {"
       }
      ]
     },
@@ -35217,8 +35217,8 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "    // A paused session is prepared only where it stands: another playhead seeks it in place.\n    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused && positionFrame === Math.round(transport.playheadSec * keptPaused.sampleRate)) {\n",
-       "to": "    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused) {\n"
+       "from": "    // A paused session is prepared only where it stands: another playhead seeks it in place.\n    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n\n    if (keptPaused && positionFrame === Math.round(transport.playheadSec * keptPaused.sampleRate)) {",
+       "to": "    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused) {"
       }
      ]
     },
@@ -35279,8 +35279,8 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "    // A paused session is prepared only where it stands: another playhead seeks it in place.\n    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused && positionFrame === Math.round(transport.playheadSec * keptPaused.sampleRate)) {\n",
-       "to": "    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused) {\n"
+       "from": "    // A paused session is prepared only where it stands: another playhead seeks it in place.\n    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n\n    if (keptPaused && positionFrame === Math.round(transport.playheadSec * keptPaused.sampleRate)) {",
+       "to": "    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused) {"
       }
      ]
     },
@@ -35512,8 +35512,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "      const seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n",
-       "to": "      let seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence\n"
+       "from": "      const seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {",
+       "to": "      let seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence"
       }
      ]
     },
@@ -35575,8 +35575,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "      const seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n",
-       "to": "      let seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence\n"
+       "from": "      const seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {",
+       "to": "      let seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence"
       }
      ]
     },
@@ -35636,8 +35636,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "      const seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n",
-       "to": "      let seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence\n"
+       "from": "      const seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {",
+       "to": "      let seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence"
       }
      ]
     },
@@ -38150,8 +38150,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
-       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()",
+       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result"
       }
      ]
     },
@@ -38276,8 +38276,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
-       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()",
+       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result"
       }
      ]
     },
@@ -38337,8 +38337,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
-       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()",
+       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result"
       }
      ]
     },
@@ -44517,8 +44517,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "    if (isPlaying()) {\n      followPortableEdits()\n      return\n    }\n",
-       "to": "    if (isPlaying()) {\n      return\n    }\n"
+       "from": "    if (isPlaying()) {\n      followPortableEdits()\n\n      return",
+       "to": "    if (isPlaying()) {\n      return"
       }
      ]
     },
@@ -44591,8 +44591,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "    if (isPlaying()) {\n      followPortableEdits()\n      return\n    }\n",
-       "to": "    if (isPlaying()) {\n      return\n    }\n"
+       "from": "    if (isPlaying()) {\n      followPortableEdits()\n\n      return",
+       "to": "    if (isPlaying()) {\n      return"
       }
      ]
     },
@@ -44669,8 +44669,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "    if (isPlaying()) {\n      followPortableEdits()\n      return\n    }\n",
-       "to": "    if (isPlaying()) {\n      return\n    }\n"
+       "from": "    if (isPlaying()) {\n      followPortableEdits()\n\n      return",
+       "to": "    if (isPlaying()) {\n      return"
       }
      ]
     },
@@ -47568,8 +47568,8 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onKeptEffects(onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), activeSnapshot),\n        onKeptEffects(onSharedTracks(activeSnapshot, next), next)]\n      : [next, activeSnapshot]\n    if (fingerprint(",
-       "to": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onKeptEffects(onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), activeSnapshot),\n        onKeptEffects(onSharedTracks(activeSnapshot, next), next)]\n      : [next, activeSnapshot]\n    if (fingerprint && fingerprint("
+       "from": "    if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onKeptEffects(onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), activeSnapshot),\n        onKeptEffects(onSharedTracks(activeSnapshot, next), next)]\n      : [next, activeSnapshot]\n\n    if (fingerprint(withLiveContentOf(compared, activeSnapshot)) !== fingerprint(installed)) {",
+       "to": "    if (!compilation.supported || activeRevision === undefined || !activeSnapshot) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onKeptEffects(onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), activeSnapshot),\n        onKeptEffects(onSharedTracks(activeSnapshot, next), next)]\n      : [next, activeSnapshot]\n    if (fingerprint && fingerprint(withLiveContentOf(compared, activeSnapshot)) !== fingerprint(installed)) {"
       }
      ]
     },
@@ -47629,8 +47629,8 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onKeptEffects(onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), activeSnapshot),\n        onKeptEffects(onSharedTracks(activeSnapshot, next), next)]\n      : [next, activeSnapshot]\n    if (fingerprint(",
-       "to": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onKeptEffects(onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), activeSnapshot),\n        onKeptEffects(onSharedTracks(activeSnapshot, next), next)]\n      : [next, activeSnapshot]\n    if (fingerprint && fingerprint("
+       "from": "    if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onKeptEffects(onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), activeSnapshot),\n        onKeptEffects(onSharedTracks(activeSnapshot, next), next)]\n      : [next, activeSnapshot]\n\n    if (fingerprint(withLiveContentOf(compared, activeSnapshot)) !== fingerprint(installed)) {",
+       "to": "    if (!compilation.supported || activeRevision === undefined || !activeSnapshot) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onKeptEffects(onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), activeSnapshot),\n        onKeptEffects(onSharedTracks(activeSnapshot, next), next)]\n      : [next, activeSnapshot]\n    if (fingerprint && fingerprint(withLiveContentOf(compared, activeSnapshot)) !== fingerprint(installed)) {"
       }
      ]
     },
@@ -54619,8 +54619,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "            const carried = carriedValues(target, execution)\n            if (carried.size === 0) settle(execution, \"cancelled\")",
-       "to": "            const carried = execution.values\n            if (carried.size === 0) settle(execution, \"cancelled\")"
+       "from": "            const carried = carriedValues(target, execution)\n",
+       "to": "            const carried = execution.values"
       }
      ],
      "bounded": false,
@@ -54779,8 +54779,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "            const carried = carriedValues(target, execution)\n            if (carried.size === 0) settle(execution, \"cancelled\")",
-       "to": "            const carried = execution.values\n            if (carried.size === 0) settle(execution, \"cancelled\")"
+       "from": "            const carried = carriedValues(target, execution)\n",
+       "to": "            const carried = execution.values"
       },
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
@@ -54865,8 +54865,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
@@ -54943,8 +54943,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
@@ -55029,12 +55029,12 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       }
      ],
@@ -55107,8 +55107,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
@@ -55185,8 +55185,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
@@ -55263,8 +55263,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
@@ -55341,8 +55341,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts",
@@ -55419,8 +55419,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
@@ -55497,8 +55497,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
@@ -55575,8 +55575,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
@@ -55653,8 +55653,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
@@ -55731,12 +55731,12 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "      if (!execution || !(execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }",
+       "from": "      if (!execution || !(execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }",
        "to": "      if (execution && (execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        && evidence !== \"promoted\" && evidence !== \"uncertain\"\n        && !(evidence === \"cancelled\" && execution === target.queuedPatch)) settle(execution, \"cancelled\", false)"
       }
      ],
@@ -55809,8 +55809,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-state-patches.ts",
@@ -55887,8 +55887,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
@@ -55965,8 +55965,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -56043,8 +56043,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
@@ -56121,8 +56121,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -56200,8 +56200,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -56283,8 +56283,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -56361,8 +56361,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
@@ -56439,8 +56439,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
@@ -56517,8 +56517,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
@@ -56595,13 +56595,13 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      // Acceptance can resolve in the turn a dispose retires this attempt: never run a transport it no longer owns.\n      if (cancelled()) {\n        noteOrphanedSession()\n        return \"unavailable\"\n      }\n      if (runTransport) {",
-       "to": "      if (runTransport) {"
+       "from": "      // Acceptance can resolve in the turn a dispose retires this attempt: never run a transport it no longer owns.\n      if (cancelled()) {\n        noteOrphanedSession()\n\n        return \"unavailable\"\n      }\n",
+       "to": ""
       }
      ],
      "bounded": false,
@@ -56673,12 +56673,12 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n",
+       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n\n          return\n        }\n",
        "to": ""
       }
      ],
@@ -56751,8 +56751,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -56829,8 +56829,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -56909,18 +56909,18 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n",
+       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n\n          return\n        }\n",
        "to": ""
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.",
+       "to": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared."
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -56999,18 +56999,18 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n",
+       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n\n          return\n        }\n",
        "to": ""
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.",
+       "to": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared."
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -57089,18 +57089,18 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n",
+       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n\n          return\n        }\n",
        "to": ""
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.",
+       "to": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared."
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -57177,8 +57177,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -57255,8 +57255,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -57333,8 +57333,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -57411,8 +57411,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -57489,8 +57489,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
@@ -57567,13 +57567,13 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      const preparationRequest = instrumentPreparationRequestGeneration\n      const request = previewRequest.then(() =>\n        destroyed || preparationRequest !== instrumentPreparationRequestGeneration || projectGeneration !== resolveProjectGeneration()\n          || projectId !== input.getProjectId?.()\n",
-       "to": "      const generation = lifecycleGeneration\n      const request = previewRequest.then(() =>\n        destroyed || generation !== lifecycleGeneration || projectGeneration !== resolveProjectGeneration() || projectId !== input.getProjectId?.()\n"
+       "from": "      const preparationRequest = instrumentPreparationRequestGeneration\n\n      const request = previewRequest.then(() =>\n        destroyed || preparationRequest !== instrumentPreparationRequestGeneration || projectGeneration !== resolveProjectGeneration()\n          || projectId !== input.getProjectId?.()",
+       "to": "      const generation = lifecycleGeneration\n      const request = previewRequest.then(() =>\n        destroyed || generation !== lifecycleGeneration || projectGeneration !== resolveProjectGeneration() || projectId !== input.getProjectId?.()"
       }
      ],
      "bounded": false,
@@ -57645,8 +57645,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -57723,8 +57723,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -57801,8 +57801,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -57879,8 +57879,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -57957,8 +57957,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -58035,8 +58035,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -58113,13 +58113,13 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    if (!mounted || requestedIntentToken !== transportIntentToken) {\n      setIsPlayPending(false)\n      return\n    }\n",
-       "to": "    if (!mounted || requestedIntentToken !== transportIntentToken) return\n"
+       "from": "    if (!mounted || requestedIntentToken !== transportIntentToken) {\n      setIsPlayPending(false)\n\n      return\n    }",
+       "to": "    if (!mounted || requestedIntentToken !== transportIntentToken) return"
       }
      ],
      "bounded": false,
@@ -58191,8 +58191,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -58269,8 +58269,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -58347,8 +58347,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -58425,8 +58425,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -58566,8 +58566,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       }
      ],
      "bounded": false,
@@ -58702,8 +58702,8 @@
      "changes": [
       {
        "file": "/tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-       "from": "    const asset = assets.get(id)\n    if (asset) {",
-       "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
+       "from": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assets.get(id)\n\n    if (asset) {",
+       "to": "    // modelled (InstallAsset audio-host.cpp:4229-4239, ReuseAsset :1770-1775).\n    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       }
      ],
      "bounded": false,
@@ -58838,7 +58838,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       }
      ],
@@ -58911,7 +58911,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -58997,7 +58997,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -59075,7 +59075,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -59153,7 +59153,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -59231,7 +59231,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -59309,7 +59309,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -59387,7 +59387,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -59465,7 +59465,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -59543,7 +59543,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -59621,7 +59621,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -59699,12 +59699,12 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "      if (!execution || !(execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }",
+       "from": "      if (!execution || !(execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }",
        "to": "      if (execution && (execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        && evidence !== \"promoted\" && evidence !== \"uncertain\"\n        && !(evidence === \"cancelled\" && execution === target.queuedPatch)) settle(execution, \"cancelled\", false)"
       }
      ],
@@ -59785,7 +59785,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -59863,7 +59863,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -59941,7 +59941,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -60019,7 +60019,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -60097,7 +60097,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -60176,7 +60176,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -60259,7 +60259,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -60337,7 +60337,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -60415,7 +60415,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -60493,7 +60493,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -60571,13 +60571,13 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      // Acceptance can resolve in the turn a dispose retires this attempt: never run a transport it no longer owns.\n      if (cancelled()) {\n        noteOrphanedSession()\n        return \"unavailable\"\n      }\n      if (runTransport) {",
-       "to": "      if (runTransport) {"
+       "from": "      // Acceptance can resolve in the turn a dispose retires this attempt: never run a transport it no longer owns.\n      if (cancelled()) {\n        noteOrphanedSession()\n\n        return \"unavailable\"\n      }\n",
+       "to": ""
       }
      ],
      "bounded": false,
@@ -60649,12 +60649,12 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n",
+       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n\n          return\n        }\n",
        "to": ""
       }
      ],
@@ -60727,7 +60727,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -60805,7 +60805,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -60885,18 +60885,18 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n",
+       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n\n          return\n        }\n",
        "to": ""
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.",
+       "to": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared."
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -60975,18 +60975,18 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n",
+       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n\n          return\n        }\n",
        "to": ""
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.",
+       "to": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared."
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -61065,18 +61065,18 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n",
+       "from": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n\n          return\n        }\n",
        "to": ""
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.",
+       "to": "        const nativeStart = await nativePlayback.start({\n          ...transport,\n        }, compileContext)\n\n        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared."
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -61153,7 +61153,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -61231,7 +61231,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -61309,7 +61309,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -61387,7 +61387,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -61465,7 +61465,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -61543,13 +61543,13 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      const preparationRequest = instrumentPreparationRequestGeneration\n      const request = previewRequest.then(() =>\n        destroyed || preparationRequest !== instrumentPreparationRequestGeneration || projectGeneration !== resolveProjectGeneration()\n          || projectId !== input.getProjectId?.()\n",
-       "to": "      const generation = lifecycleGeneration\n      const request = previewRequest.then(() =>\n        destroyed || generation !== lifecycleGeneration || projectGeneration !== resolveProjectGeneration() || projectId !== input.getProjectId?.()\n"
+       "from": "      const preparationRequest = instrumentPreparationRequestGeneration\n\n      const request = previewRequest.then(() =>\n        destroyed || preparationRequest !== instrumentPreparationRequestGeneration || projectGeneration !== resolveProjectGeneration()\n          || projectId !== input.getProjectId?.()",
+       "to": "      const generation = lifecycleGeneration\n      const request = previewRequest.then(() =>\n        destroyed || generation !== lifecycleGeneration || projectGeneration !== resolveProjectGeneration() || projectId !== input.getProjectId?.()"
       }
      ],
      "bounded": false,
@@ -61621,7 +61621,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -61699,7 +61699,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -61777,7 +61777,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -61855,7 +61855,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -61933,7 +61933,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -62011,7 +62011,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -62089,13 +62089,13 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    if (!mounted || requestedIntentToken !== transportIntentToken) {\n      setIsPlayPending(false)\n      return\n    }\n",
-       "to": "    if (!mounted || requestedIntentToken !== transportIntentToken) return\n"
+       "from": "    if (!mounted || requestedIntentToken !== transportIntentToken) {\n      setIsPlayPending(false)\n\n      return\n    }",
+       "to": "    if (!mounted || requestedIntentToken !== transportIntentToken) return"
       }
      ],
      "bounded": false,
@@ -62167,7 +62167,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -62245,7 +62245,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -62323,7 +62323,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -62401,7 +62401,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))\n",
+       "from": "            ingestProjectedProcessors(refreshed.snapshot)\n\n            if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))",
        "to": ""
       },
       {
@@ -62607,8 +62607,8 @@
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      const preparationRequest = instrumentPreparationRequestGeneration\n      const request = previewRequest.then(() =>\n        destroyed || preparationRequest !== instrumentPreparationRequestGeneration || projectGeneration !== resolveProjectGeneration()\n          || projectId !== input.getProjectId?.()\n",
-       "to": "      const generation = lifecycleGeneration\n      const request = previewRequest.then(() =>\n        destroyed || generation !== lifecycleGeneration || projectGeneration !== resolveProjectGeneration() || projectId !== input.getProjectId?.()\n"
+       "from": "      const preparationRequest = instrumentPreparationRequestGeneration\n\n      const request = previewRequest.then(() =>\n        destroyed || preparationRequest !== instrumentPreparationRequestGeneration || projectGeneration !== resolveProjectGeneration()\n          || projectId !== input.getProjectId?.()",
+       "to": "      const generation = lifecycleGeneration\n      const request = previewRequest.then(() =>\n        destroyed || generation !== lifecycleGeneration || projectGeneration !== resolveProjectGeneration() || projectId !== input.getProjectId?.()"
       }
      ],
      "bounded": false,
@@ -63092,8 +63092,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    if (!mounted || requestedIntentToken !== transportIntentToken) {\n      setIsPlayPending(false)\n      return\n    }\n",
-       "to": "    if (!mounted || requestedIntentToken !== transportIntentToken) return\n"
+       "from": "    if (!mounted || requestedIntentToken !== transportIntentToken) {\n      setIsPlayPending(false)\n\n      return\n    }",
+       "to": "    if (!mounted || requestedIntentToken !== transportIntentToken) return"
       }
      ],
      "bounded": false,
@@ -63858,8 +63858,8 @@
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      const preparationRequest = instrumentPreparationRequestGeneration\n      const request = previewRequest.then(() =>\n        destroyed || preparationRequest !== instrumentPreparationRequestGeneration || projectGeneration !== resolveProjectGeneration()\n          || projectId !== input.getProjectId?.()\n",
-       "to": "      const generation = lifecycleGeneration\n      const request = previewRequest.then(() =>\n        destroyed || generation !== lifecycleGeneration || projectGeneration !== resolveProjectGeneration() || projectId !== input.getProjectId?.()\n"
+       "from": "      const preparationRequest = instrumentPreparationRequestGeneration\n\n      const request = previewRequest.then(() =>\n        destroyed || preparationRequest !== instrumentPreparationRequestGeneration || projectGeneration !== resolveProjectGeneration()\n          || projectId !== input.getProjectId?.()",
+       "to": "      const generation = lifecycleGeneration\n      const request = previewRequest.then(() =>\n        destroyed || generation !== lifecycleGeneration || projectGeneration !== resolveProjectGeneration() || projectId !== input.getProjectId?.()"
       }
      ],
      "bounded": false,
@@ -64439,8 +64439,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    if (!mounted || requestedIntentToken !== transportIntentToken) {\n      setIsPlayPending(false)\n      return\n    }\n",
-       "to": "    if (!mounted || requestedIntentToken !== transportIntentToken) return\n"
+       "from": "    if (!mounted || requestedIntentToken !== transportIntentToken) {\n      setIsPlayPending(false)\n\n      return\n    }",
+       "to": "    if (!mounted || requestedIntentToken !== transportIntentToken) return"
       }
      ],
      "bounded": false,

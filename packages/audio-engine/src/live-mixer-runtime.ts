@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import { assertDefined, isGainReductionMeterKind, isOwnedProcessorKind, isSidechainCapableKind, type AutomationEnvelope } from '@daw-browser/shared'
 import { connectFxChain, createGainTransitionOwner, disconnectAudioNodes, type FxChainStageConfig, type GainTransitionOwner, type GainTransitionScheduler } from './effects/chain'
 import type { CompressorChainState } from './effects/compressor-chain-state'
@@ -134,7 +135,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const compressorMeterSubscriptions = new Map<string, Map<string, () => void>>()
   const gateMeterListeners = new Map<string, Map<string, Set<GateMeterListener>>>()
   const gateMeterSubscriptions = new Map<string, Map<string, () => void>>()
-  let currentBpm = 120
+  let currentBpm = DEFAULT_BPM
   let currentTracks: RuntimeTrack[] = []
   const retiredTrackResources = new Map<string, Array<{ resources: InstanceResources; ids: Set<string> }>>()
   const unfinishedGraphPublications = new Set<string>()

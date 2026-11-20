@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import { normalizeDelayParams, serializeDelayParams, type DelayParamsLite } from '@daw-browser/shared'
 import { applyDelayNodeChainParams, createDelayNodeChain, disconnectDelayChain, type DelayNodeChain } from './chain'
 
@@ -13,7 +14,7 @@ export function createDelayChainState(): DelayChainState {
   let params: DelayParamsLite | null = null
   let signature: string | null = null
   let pingPong: boolean | null = null
-  let currentBpm = 120
+  let currentBpm = DEFAULT_BPM
 
   return {
     chain: () => delay,

@@ -1,5 +1,6 @@
 import { createContext, createEffect, createSignal, useContext, type Accessor, type ParentComponent } from "solid-js";
 import { REORDER_ACTIVATION_THRESHOLD_PX } from "~/components/timeline/device-interaction";
+import { createStoredValue } from "~/lib/stored-value";
 
 const DEVICE_COLLAPSE_STORAGE_KEY = "timeline:device-collapse";
 const DEVICE_DOUBLE_TAP_MS = 700;
@@ -16,16 +17,6 @@ export const deviceCollapseIdentity = {
   instrument: (instanceId: string): DeviceCollapseIdentity => `instrument:${instanceId}`,
   audioEffect: (instanceId: string): DeviceCollapseIdentity => `audio-effect:${instanceId}`,
   external: (instanceId: string): DeviceCollapseIdentity => `external:${instanceId}`,
-};
-
-const canUseStorage = () => {
-  if (!globalThis.window) return false;
-
-  try {
-    return Boolean(window.localStorage);
-  } catch {
-    return false;
-  }
 };
 
 export const parseCollapsedDeviceIdentities = (raw: string | null): Set<string> => {
@@ -46,7 +37,12 @@ export const serializeCollapsedDeviceIdentities = (identities: ReadonlySet<strin
   JSON.stringify(Array.from(identities).sort())
 );
 
-const deviceCollapseStorageKey = (projectId: string) => `${DEVICE_COLLAPSE_STORAGE_KEY}:${projectId}`;
+const collapsedDevices = createStoredValue<Set<string>>({
+  key: (projectId) => `${DEVICE_COLLAPSE_STORAGE_KEY}:${projectId}`,
+  fallback: () => new Set(),
+  parse: parseCollapsedDeviceIdentities,
+  serialize: serializeCollapsedDeviceIdentities,
+});
 
 export function createEffectsPanelDeviceCollapse(projectId: Accessor<string | undefined>) {
   const [collapsedIdentities, setCollapsedIdentities] = createSignal<Set<string>>(new Set());
@@ -58,17 +54,7 @@ export function createEffectsPanelDeviceCollapse(projectId: Accessor<string | un
     if (currentProjectId === loadedProjectId) return;
     loadedProjectId = currentProjectId;
 
-    if (!currentProjectId || !canUseStorage()) {
-      setCollapsedIdentities(new Set<string>());
-
-      return;
-    }
-
-    try {
-      setCollapsedIdentities(parseCollapsedDeviceIdentities(window.localStorage.getItem(deviceCollapseStorageKey(currentProjectId))));
-    } catch {
-      setCollapsedIdentities(new Set<string>());
-    }
+    setCollapsedIdentities(currentProjectId ? collapsedDevices.read(currentProjectId) : new Set<string>());
   };
 
   createEffect(reload);
@@ -82,11 +68,7 @@ export function createEffectsPanelDeviceCollapse(projectId: Accessor<string | un
     setCollapsedIdentities(next);
     const currentProjectId = projectId();
 
-    if (!currentProjectId || !canUseStorage()) return;
-
-    try {
-      window.localStorage.setItem(deviceCollapseStorageKey(currentProjectId), serializeCollapsedDeviceIdentities(next));
-    } catch {}
+    if (currentProjectId) collapsedDevices.write(currentProjectId, next);
   };
 
   const isCollapsed = (identity: DeviceCollapseIdentity) => collapsedIdentities().has(identity);

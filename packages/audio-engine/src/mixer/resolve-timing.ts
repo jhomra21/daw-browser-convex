@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import { getEffectChainTiming } from '../effects/timing'
 import type { ResolvedMixerGraph } from './types'
 
@@ -37,7 +38,7 @@ const getChannelLatency = (
 export const resolveMixerTiming = (
   graph: ResolvedMixerGraph,
   sampleRate: number,
-  bpm = 120,
+  bpm = DEFAULT_BPM,
   externalLatencyFrames: ExternalNodeLatencyFrames = new Map(),
 ): MixerTimingPlan => {
   const channelById = new Map(graph.channels.map((entry) => [entry.channel.id, entry]))

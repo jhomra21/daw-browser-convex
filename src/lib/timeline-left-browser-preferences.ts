@@ -1,5 +1,5 @@
 import type { BrowserTreeExpansionState, TimelineBrowserTab } from "~/lib/timeline-browser/browser-types";
-import { canUseLocalStorage } from "~/lib/timeline-storage";
+import { createStoredValue } from "~/lib/stored-value";
 import {
   isJsonBoolean,
   isJsonNumber,
@@ -129,70 +129,45 @@ const readTreeExpansionByTab = (value: JsonValue) => {
   } satisfies Record<TimelineBrowserTab, BrowserTreeExpansionState>;
 };
 
-export const loadTimelineLeftBrowserState = (
-  scopeId: string,
-  containerWidthPx: number,
-  rightSidebarWidthPx: number,
-) => {
-  const fallback = createDefaultTimelineLeftBrowserState();
-
-  if (!canUseLocalStorage()) {
-    return {
-      ...fallback,
-      widthPx: clampTimelineLeftBrowserWidth(fallback.widthPx, containerWidthPx, rightSidebarWidthPx),
-    };
-  }
-
-  try {
-    const raw = localStorage.getItem(`${KEY_PREFIX}${scopeId}`);
-
-    if (!raw) {
-      return {
-        ...fallback,
-        widthPx: clampTimelineLeftBrowserWidth(fallback.widthPx, containerWidthPx, rightSidebarWidthPx),
-      };
-    }
-
+const leftBrowserState = createStoredValue<PersistedTimelineLeftBrowserState>({
+  key: (scopeId) => `${KEY_PREFIX}${scopeId}`,
+  fallback: createDefaultTimelineLeftBrowserState,
+  parse: (raw) => {
     const parsed = JSON.parse(raw);
 
-    if (!isJsonObject(parsed)) {
-      return {
-        ...fallback,
-        widthPx: clampTimelineLeftBrowserWidth(fallback.widthPx, containerWidthPx, rightSidebarWidthPx),
-      };
-    }
+    if (!isJsonObject(parsed)) return undefined;
 
+    const fallback = createDefaultTimelineLeftBrowserState();
     const width = parsed.widthPx;
     const open = parsed.open;
     const activeTab = parsed.activeTab;
 
     return {
       open: isJsonBoolean(open) ? open : fallback.open,
-      widthPx: clampTimelineLeftBrowserWidth(
-        isJsonNumber(width) ? width : fallback.widthPx,
-        containerWidthPx,
-        rightSidebarWidthPx,
-      ),
+      widthPx: isJsonNumber(width) ? width : fallback.widthPx,
       activeTab: isTimelineBrowserTab(activeTab) ? activeTab : fallback.activeTab,
       searchQueryByTab: readStringRecord(parsed.searchQueryByTab ?? null),
       scrollTopByTab: readNumberRecord(parsed.scrollTopByTab ?? null),
       treeExpansionByTab: readTreeExpansionByTab(parsed.treeExpansionByTab ?? null),
     };
-  } catch {
-    return {
-      ...fallback,
-      widthPx: clampTimelineLeftBrowserWidth(fallback.widthPx, containerWidthPx, rightSidebarWidthPx),
-    };
-  }
+  },
+  serialize: JSON.stringify,
+});
+
+export const loadTimelineLeftBrowserState = (
+  scopeId: string,
+  containerWidthPx: number,
+  rightSidebarWidthPx: number,
+) => {
+  const state = leftBrowserState.read(scopeId);
+
+  return {
+    ...state,
+    widthPx: clampTimelineLeftBrowserWidth(state.widthPx, containerWidthPx, rightSidebarWidthPx),
+  };
 };
 
 export const saveTimelineLeftBrowserState = (
   scopeId: string,
   state: PersistedTimelineLeftBrowserState,
-) => {
-  if (!canUseLocalStorage()) return;
-
-  try {
-    localStorage.setItem(`${KEY_PREFIX}${scopeId}`, JSON.stringify(state));
-  } catch {}
-};
+) => leftBrowserState.write(scopeId, state);

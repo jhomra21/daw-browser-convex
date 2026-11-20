@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import { isGainReductionMeterKind, isOwnedProcessorKind } from '@daw-browser/shared'
 import { connectFxChain, createGainTransitionOwner, disconnectAudioNodes, type FxChainStageConfig, type GainTransitionOwner, type GainTransitionScheduler } from './effects/chain'
 import type { CompressorChainState } from './effects/compressor-chain-state'
@@ -59,7 +60,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   const compressorMeterSubscriptions = new Map<string, () => void>()
   const gateMeterListeners = new Map<string, Set<GateMeterListener>>()
   const gateMeterSubscriptions = new Map<string, () => void>()
-  let currentBpm = 120
+  let currentBpm = DEFAULT_BPM
   let retiredResources: Array<{ resources: InstanceResources; ids: Set<string> }> = []
   let graphPublicationPending = false
 

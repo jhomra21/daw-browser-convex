@@ -1,3 +1,5 @@
+import { clampBpm, DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
+
 export type TransportClock = {
   getBpm: () => number
   setBpm: (bpm: number) => boolean
@@ -12,7 +14,7 @@ export type TransportClock = {
 }
 
 export function createTransportClock(): TransportClock {
-  let bpm = 120
+  let bpm = DEFAULT_BPM
   let epochCtxTime = 0
   let epochTimelineSec = 0
   let running = false
@@ -20,7 +22,7 @@ export function createTransportClock(): TransportClock {
   return {
     getBpm: () => bpm,
     setBpm: (nextBpm) => {
-      const sanitized = Math.min(300, Math.max(30, Math.round(nextBpm)))
+      const sanitized = clampBpm(nextBpm)
 
       if (sanitized === bpm) return false
       bpm = sanitized

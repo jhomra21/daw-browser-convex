@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from './project-defaults'
 import { normalizeSourceBeatOffsetValue } from '@daw-browser/shared'
 import { getAudioClipTimeMap, type AudioClipTimeMap } from './audio-clip-time-map'
 import type { AudioWarp, Clip } from './types'
@@ -29,7 +30,7 @@ const consumeWarpLeadingSilence = (input: {
     return { audioWarp: input.audioWarp, consumedTimelineSec: 0, changed: false }
   }
 
-  const secondsPerBeat = 60 / Math.max(1e-6, input.projectBpm || 120)
+  const secondsPerBeat = 60 / Math.max(1e-6, input.projectBpm || DEFAULT_BPM)
   const consumedBeats = Math.min(sourceBeatOffset, input.timelineTrimSec / secondsPerBeat)
   const nextOffset = normalizeSourceBeatOffsetValue(sourceBeatOffset - consumedBeats)
 

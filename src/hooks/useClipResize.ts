@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import { onCleanup, type Accessor } from 'solid-js'
 
 import type { convexApi, convexClient } from '~/lib/convex'
@@ -307,7 +308,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
       const isMidi = !!clip.midi
 
       if (isMidi) {
-        const spb = 60 / Math.max(1, options.bpm() || 120)
+        const spb = 60 / Math.max(1, options.bpm() || DEFAULT_BPM)
         const deltaSec = newStart - resizeOrigStart
         const deltaBeats = deltaSec / spb
         const base = Math.max(0, resizeOrigMidiOffsetBeats)

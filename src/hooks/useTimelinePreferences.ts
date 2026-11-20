@@ -11,6 +11,7 @@ import {
 import { TIMELINE_SIDEBAR_MIN_WIDTH } from '~/lib/timeline-layout'
 import { clampPixelsPerSecond, DEFAULT_PIXELS_PER_SECOND } from '~/lib/timeline-view'
 import { isLocalId } from '@daw-browser/shared'
+import { clampBpm as clampBpmValue, DEFAULT_BPM, DEFAULT_GRID, DEFAULT_LOOP } from '@daw-browser/timeline-core/project-defaults'
 import { loadLocalProjectState, saveLocalProjectState } from '~/lib/local-project-state'
 import { subscribeToLocalProjectChanges } from '~/lib/local-project-changes'
 
@@ -89,8 +90,8 @@ export function useTimelinePreferences(
 
   const bpmState = useProjectPersistedState<number>({
     projectId: options.projectId,
-    createInitial: () => 120,
-    load: () => 120,
+    createInitial: () => DEFAULT_BPM,
+    load: () => DEFAULT_BPM,
     loadAsync: (projectId) => loadLocalState<number>(projectId, 'bpm'),
     subscribeToChanges: subscribeToLocalProjectChanges,
     save: () => undefined,
@@ -100,8 +101,8 @@ export function useTimelinePreferences(
 
   const gridState = useProjectPersistedState<{ enabled: boolean; denominator: number }>({
     projectId: options.projectId,
-    createInitial: () => ({ enabled: true, denominator: 4 }),
-    load: (projectId) => isLocalId('project', projectId) ? { enabled: true, denominator: 4 } : loadGridSettings(projectId),
+    createInitial: () => ({ ...DEFAULT_GRID }),
+    load: (projectId) => isLocalId('project', projectId) ? { ...DEFAULT_GRID } : loadGridSettings(projectId),
     loadAsync: (projectId) => loadLocalState<{ enabled: boolean; denominator: number }>(projectId, 'grid'),
     save: (projectId, value) => {
       if (!isLocalId('project', projectId)) saveGridSettings(projectId, value.enabled, value.denominator)
@@ -112,8 +113,8 @@ export function useTimelinePreferences(
 
   const loopState = useProjectPersistedState<{ enabled: boolean; startSec: number; endSec: number }>({
     projectId: options.projectId,
-    createInitial: () => ({ enabled: false, startSec: 0, endSec: 8 }),
-    load: () => ({ enabled: false, startSec: 0, endSec: 8 }),
+    createInitial: () => ({ ...DEFAULT_LOOP }),
+    load: () => ({ ...DEFAULT_LOOP }),
     loadAsync: (projectId) => loadLocalState<{ enabled: boolean; startSec: number; endSec: number }>(projectId, 'loop'),
     subscribeToChanges: subscribeToLocalProjectChanges,
     save: () => undefined,
@@ -144,7 +145,7 @@ export function useTimelinePreferences(
 
   const bpm = () => isLocalProject()
     ? bpmState.value()
-    : cloudTimelineSettings()?.tempoBpm ?? 120
+    : cloudTimelineSettings()?.tempoBpm ?? DEFAULT_BPM
 
   const setBpm = (value: number) => {
     if (isLocalProject()) {
@@ -163,15 +164,15 @@ export function useTimelinePreferences(
 
   const loopEnabled = () => isLocalProject()
     ? loopState.value().enabled
-    : cloudTimelineSettings()?.loopEnabled ?? false
+    : cloudTimelineSettings()?.loopEnabled ?? DEFAULT_LOOP.enabled
 
   const loopStartSec = () => isLocalProject()
     ? loopState.value().startSec
-    : cloudTimelineSettings()?.loopStartSec ?? 0
+    : cloudTimelineSettings()?.loopStartSec ?? DEFAULT_LOOP.startSec
 
   const loopEndSec = () => isLocalProject()
     ? loopState.value().endSec
-    : cloudTimelineSettings()?.loopEndSec ?? 8
+    : cloudTimelineSettings()?.loopEndSec ?? DEFAULT_LOOP.endSec
 
   const pixelsPerSecond = () => clampPixelsPerSecond(scaleState.value())
 
@@ -182,7 +183,7 @@ export function useTimelinePreferences(
   const clampBpm = (value: number) => {
     if (!Number.isFinite(value)) return bpm()
 
-    return Math.min(300, Math.max(30, Math.round(value)))
+    return clampBpmValue(value)
   }
 
   const toggleSyncMix = () => {

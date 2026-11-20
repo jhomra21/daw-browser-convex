@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import {
   getSpectralLatencyFrames,
   normalizeDelayParams,
@@ -35,7 +36,7 @@ const finite = (frames: number): EffectTiming['tail'] => ({
 export const getEffectTiming = (
   input: EffectTimingInput,
   sampleRate: number,
-  bpm = 120,
+  bpm = DEFAULT_BPM,
 ): EffectTiming => {
   const rate = Math.max(1, sampleRate)
 
@@ -124,7 +125,7 @@ export const getEffectTiming = (
 export const getEffectChainTiming = (
   instances: readonly AudioEffectRuntimeInstance[],
   sampleRate: number,
-  bpm = 120,
+  bpm = DEFAULT_BPM,
 ): EffectTiming => {
   let latencyFrames = 0
   let tailFrames = 0
@@ -149,7 +150,7 @@ export const getEffectChainTimingWithExternal = (
   instances: readonly AudioEffectRuntimeInstance[],
   external: readonly ExternalEffectTimingInput[],
   sampleRate: number,
-  bpm = 120,
+  bpm = DEFAULT_BPM,
 ): EffectTiming => {
   const timing = getEffectChainTiming(instances, sampleRate, bpm)
   let latencyFrames = timing.latencyFrames

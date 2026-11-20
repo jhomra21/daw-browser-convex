@@ -1,4 +1,5 @@
 import type { DatabaseReader, MutationCtx } from "./_generated/server";
+import { DEFAULT_BPM, DEFAULT_LOOP } from "@daw-browser/timeline-core/project-defaults";
 import { hasActiveR2DeleteRows } from "./r2Deletes";
 
 type ProjectRowReadCtx = { db: DatabaseReader };
@@ -101,12 +102,12 @@ export async function ensureOwnedProjectRow(
     createdAt: now,
     updatedAt: now,
     revision: 0,
-    tempoBpm: 120,
+    tempoBpm: DEFAULT_BPM,
     timeSignatureNumerator: 4,
     timeSignatureDenominator: 4,
-    loopEnabled: false,
-    loopStartSec: 0,
-    loopEndSec: 8,
+    loopEnabled: DEFAULT_LOOP.enabled,
+    loopStartSec: DEFAULT_LOOP.startSec,
+    loopEndSec: DEFAULT_LOOP.endSec,
   });
 
   await ctx.db.insert("ownerships", { projectId, ownerUserId: userId });

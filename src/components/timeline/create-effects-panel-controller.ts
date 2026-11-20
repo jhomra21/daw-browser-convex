@@ -7,7 +7,7 @@ import type { Clip, ExternalSidechainRoute, Track } from "@daw-browser/timeline-
 import { createEffectsPanelAudioDevice } from "~/components/timeline/create-effects-panel-audio-effects-state";
 import { indexInstrumentEffectRows } from "~/lib/effect-row-index";
 import { createEffectsPanelInstrumentDevice } from "~/components/timeline/create-effects-panel-state";
-import type { AddMidiClipOptions, TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
+import type { AddMidiClipOptions, TimelineDeviceInsertActions } from "~/lib/timeline-device-insert-actions";
 import { createLocalEffectsView } from "~/components/timeline/create-local-effects-view";
 import { createPendingWorkOwner, useEffectsPanelAudioSync } from "~/hooks/useEffectsPanelAudioSync";
 import { useEffectsPanelTarget } from "~/hooks/useEffectsPanelTarget";

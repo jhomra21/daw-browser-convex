@@ -101,8 +101,8 @@ import {
   browserDropTargetTrackId as getBrowserDropTargetTrackId,
   type BrowserDragPayload,
   type BrowserDropTarget,
-} from "./timeline/browser/browser-drag-types";
-import type { TimelineDeviceInsertActions } from "./timeline/timeline-device-insert-actions";
+} from "~/lib/timeline-browser/browser-drag-types";
+import type { TimelineDeviceInsertActions } from "~/lib/timeline-device-insert-actions";
 import type { AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";
 import type { InstrumentPreset } from "~/lib/instrument-presets";
 import { useTimelineSampleDetailController } from "~/hooks/useTimelineSampleDetailController";

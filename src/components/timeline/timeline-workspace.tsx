@@ -24,7 +24,7 @@ import {
 import TrackSidebar from "~/components/timeline/TrackSidebar";
 import AutomationLane from "~/components/timeline/automation-lane";
 import { TimelineLeftBrowser } from "~/components/timeline/browser/timeline-left-browser";
-import type { TimelineLeftBrowserModel } from "~/components/timeline/browser/browser-types";
+import type { TimelineLeftBrowserModel } from "~/lib/timeline-browser/browser-types";
 import TimelineOverlays from "~/components/timeline/timeline-overlays";
 import {
   DEFAULT_AUTOMATION_LANE_HEIGHT,

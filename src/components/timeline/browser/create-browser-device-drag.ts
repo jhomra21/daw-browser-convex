@@ -3,7 +3,7 @@ import type { Track } from "@daw-browser/timeline-core/types";
 import { useDrag } from "~/hooks/useDrag";
 import { trackLayoutDropIndexAtY, trackLayoutRowAtY, trackLayoutRowIndexAtY, type TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
 import { clientYToTimelineTrackY } from "~/lib/timeline-utils";
-import type { BrowserDragPayload, BrowserDragSession, BrowserDropTarget } from "./browser-drag-types";
+import type { BrowserDragPayload, BrowserDragSession, BrowserDropTarget } from "~/lib/timeline-browser/browser-drag-types";
 
 const DRAG_THRESHOLD_PX = 4;
 

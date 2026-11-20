@@ -4,7 +4,7 @@ import {
   browserDropTargetTrackId,
   type BrowserDragPayload,
   type BrowserDropTarget,
-} from "./browser-drag-types";
+} from "~/lib/timeline-browser/browser-drag-types";
 import {
   resolveBrowserDeviceDropTarget,
   resolveTimelineTrackTarget,

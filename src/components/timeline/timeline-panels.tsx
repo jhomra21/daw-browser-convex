@@ -19,7 +19,7 @@ import type { NativeBuiltInParameterPayload } from '~/lib/processor-edit-semanti
 import type { BpmDetectionService } from '~/lib/bpm-detection-service'
 import type { Clip, ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import type { ExternalProcessor } from '@daw-browser/external-plugins'
-import type { TimelineDeviceInsertActions } from '~/components/timeline/timeline-device-insert-actions'
+import type { TimelineDeviceInsertActions } from '~/lib/timeline-device-insert-actions'
 import type { TimelineEditIntent } from '~/hooks/timeline-playback-types'
 import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from '~/components/timeline/create-effects-panel-controller'
 import type { ExportQueue } from '~/lib/export/export-queue'

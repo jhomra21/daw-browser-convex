@@ -24,6 +24,7 @@ import type * as controlSnapshot from "../controlSnapshot.js";
 import type * as effects from "../effects.js";
 import type * as errors from "../errors.js";
 import type * as exports from "../exports.js";
+import type * as identity from "../identity.js";
 import type * as mixerChannels from "../mixerChannels.js";
 import type * as ownerships from "../ownerships.js";
 import type * as projectAccess from "../projectAccess.js";
@@ -68,6 +69,7 @@ declare const fullApi: ApiFromModules<{
   effects: typeof effects;
   errors: typeof errors;
   exports: typeof exports;
+  identity: typeof identity;
   mixerChannels: typeof mixerChannels;
   ownerships: typeof ownerships;
   projectAccess: typeof projectAccess;

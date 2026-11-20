@@ -1,7 +1,8 @@
 import { DEFAULT_MASTER_VOLUME, normalizeMasterVolume } from "@daw-browser/shared";
 import { mutation, type DatabaseReader, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { requireAuthenticatedUserId, requireMasterBusWriteAccess } from "./projectAccess";
+import { requireMasterBusWriteAccess } from "./projectAccess";
+import { requireAuthenticatedUserId } from "./identity";
 import { editProject } from "./projectRows";
 
 type ProjectMixerSettingsReadCtx = { db: DatabaseReader };

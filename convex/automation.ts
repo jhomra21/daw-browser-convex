@@ -11,7 +11,8 @@ import {
   parseGranularAutomationKey,
   parseSynthAutomationKey,
 } from "@daw-browser/shared";
-import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
+import { requireProjectRole } from "./projectAccess";
+import { requireAuthenticatedUserId } from "./identity";
 import { editProject } from "./projectRows";
 import { automationPointValidator } from "./validators";
 

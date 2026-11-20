@@ -17,7 +17,8 @@ import {
 } from "./trackRouting";
 import { getTrackWriteAccess, requireTrackOwnerForWrite } from "./trackWrites";
 import { getClipWriteAccess } from "./clipWrites";
-import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
+import { requireProjectRole } from "./projectAccess";
+import { requireAuthenticatedUserId } from "./identity";
 import { automationPointValidator, literalUnion, sendTapValidator, type SendTap } from "./validators";
 import { runSharedOperationOnce } from "./sharedOperationResults";
 import { editProject, editProjectIf, withProjectEdit, type ProjectEdit } from "./projectRows";

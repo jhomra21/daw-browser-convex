@@ -2,9 +2,8 @@ import { v } from "convex/values";
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import { fail } from "./errors";
 import { editProject, editProjectIf, requireProjectRow } from "./projectRows";
-import {
-  requireAuthenticatedUserId, requireProjectAccess, requireProjectRole,
-} from "./projectAccess";
+import { requireProjectAccess, requireProjectRole } from "./projectAccess";
+import { requireAuthenticatedUserId } from "./identity";
 import { enqueueR2DeleteRows } from "./r2Deletes";
 import { findSampleRow, moveSampleFolderRow } from "./sampleRows";
 

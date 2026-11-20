@@ -2,7 +2,8 @@ import { query, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { listProjectTracksWithMixerChannels } from "./mixerChannels";
 import { getProjectMixerSettings } from "./projectMixerSettings";
-import { requireAuthenticatedUserId, requireProjectAccess } from "./projectAccess";
+import { requireProjectAccess } from "./projectAccess";
+import { requireAuthenticatedUserId } from "./identity";
 import { requireProjectRow } from "./projectRows";
 
 const readFullTimelineView = async (

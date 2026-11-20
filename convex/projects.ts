@@ -1,7 +1,8 @@
 import { mutation, query, type DatabaseReader, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { projectR2DeletePrefixes } from "@daw-browser/shared";
-import { listAccessibleProjects, requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
+import { listAccessibleProjects, requireProjectRole } from "./projectAccess";
+import { requireAuthenticatedUserId } from "./identity";
 import { removeProjectMemberAccessAndTransferEntities } from "./projectMembership";
 import { enqueueMultipartAbortRows, enqueueR2DeleteRows } from "./r2Deletes";
 import { editProject, ensureOwnedProjectRow, getProjectRow, requireProjectRow } from "./projectRows";

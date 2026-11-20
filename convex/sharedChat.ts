@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { requireAuthenticatedUserId, requireProjectAccess } from "./projectAccess";
+import { requireProjectAccess } from "./projectAccess";
+import { requireAuthenticatedUserId } from "./identity";
 
 // List the latest N messages for a room, ordered by createdAt ascending.
 export const listLatest = query({

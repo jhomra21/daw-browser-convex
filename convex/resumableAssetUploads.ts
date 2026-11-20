@@ -5,10 +5,8 @@ import {
 } from "@daw-browser/control";
 import { fail } from "./errors";
 import { requireProjectRow, withProjectEdit } from "./projectRows";
-import {
-  requireAuthenticatedIdentity, requireAuthenticatedUserId, requireProjectRole,
-  requireWorkerIdentity,
-} from "./projectAccess";
+import { requireProjectRole } from "./projectAccess";
+import { requireAuthenticatedIdentity, requireAuthenticatedUserId, requireWorkerIdentity } from "./identity";
 import { enqueueMultipartAbortRows, enqueueR2DeleteRows, hasR2DeleteRow } from "./r2Deletes";
 import { findSampleRow, insertSampleRow } from "./sampleRows";
 import {

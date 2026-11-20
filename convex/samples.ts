@@ -1,6 +1,7 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
-import { requireAuthenticatedUserId, requireProjectAccess } from "./projectAccess";
+import { requireProjectAccess } from "./projectAccess";
+import { requireAuthenticatedUserId } from "./identity";
 
 export { moveAssetToFolder as moveToFolder } from "./assets";
 

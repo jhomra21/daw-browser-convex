@@ -6,8 +6,7 @@ import path from "node:path"
 import { z } from "zod"
 import { createCloseHandler, prepareForClose } from "./close-flow"
 import { installBenchmarkWindowTelemetry } from "./benchmark-runtime"
-import type { createNativeAudioHostSupervisor } from "./audio-host"
-import type { createNativeVst3EditorSessionManager } from "./native-vst3-editor-session"
+import type { NativeAudioSession } from "./native-audio-session"
 import type { RendererSession } from "./renderer-session"
 
 const externalUrl = (url: string) => {
@@ -27,8 +26,7 @@ export const createMainWindow = (options: {
   sameAppOrigin: (url: string) => boolean
   invalidateRendererGeneration: (message: string) => void
   applyRendererInvalidation: (invalidation: { previousGeneration: number; generation: number }, message: string) => void
-  audioHost: () => ReturnType<typeof createNativeAudioHostSupervisor> | undefined
-  editorSessions: () => ReturnType<typeof createNativeVst3EditorSessionManager> | undefined
+  audio: NativeAudioSession
   prepareQuit: () => Promise<void>
   finishQuit: () => Promise<void>
 }) => {
@@ -107,7 +105,7 @@ export const createMainWindow = (options: {
 
   const close = createCloseHandler({
     waitForRecording: async () => {
-      const supervisor = options.audioHost()
+      const supervisor = options.audio.supervisor
 
       if (!supervisor?.recordingFinalizationPending()) {
         await supervisor?.waitForRecordingFinish()
@@ -135,7 +133,7 @@ export const createMainWindow = (options: {
     prepareQuit,
     prepare: () => prepareForClose({
       flushRenderer: async () => closePreparationResultSchema.safeParse((await rendererSession.request("lifecycle.prepareToClose", {}, randomUUID(), 10_000)).result).success,
-      captureEditors: async () => { await options.editorSessions()?.captureAll() },
+      captureEditors: async () => { await options.audio.editorSessions?.captureAll() },
     }),
     confirmDiscard: async () => {
       const choice = await dialog.showMessageBox(mainWindow, {

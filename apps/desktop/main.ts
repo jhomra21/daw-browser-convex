@@ -371,8 +371,7 @@ else {
       sameAppOrigin,
       invalidateRendererGeneration,
       applyRendererInvalidation,
-      audioHost: () => audio.supervisor,
-      editorSessions: () => audio.editorSessions,
+      audio,
       prepareQuit,
       finishQuit,
     })

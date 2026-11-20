@@ -2,7 +2,7 @@ import type { AudioEffectKind } from './audio-effect-registry'
 import { AUDIO_EFFECT_CONTRACTS } from './effects-params'
 import { isJsonObject, type JsonObject, type JsonValue } from './json-value'
 
-type AudioEffectParamsByKind = {
+export type AudioEffectParamsByKind = {
   [Kind in AudioEffectKind]: ReturnType<typeof AUDIO_EFFECT_CONTRACTS[Kind]['normalizeParams']>
 }
 

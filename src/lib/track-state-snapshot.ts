@@ -1,8 +1,8 @@
 import {
   isAudioEffectKind,
   isLocalId,
-  AUDIO_EFFECT_CONTRACTS,
   normalizeArpeggiatorParams,
+  normalizeAudioEffectRow,
   normalizeSynthParams,
 } from '@daw-browser/shared'
 import { convexApi, convexClient } from '~/lib/convex'
@@ -42,37 +42,7 @@ const snapshotAudioEffectRow = (row: EffectRowSnapshotInput): TrackAudioEffectSn
   if (effect === undefined || !isAudioEffectKind(effect)) return null
   const { instanceId, index, params } = parsed.data
 
-  switch (effect) {
-    case 'utility':
-      return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.utility.normalizeParams(params) }
-    case 'eq':
-      return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.eq.normalizeParams(normalizationInput(params)) }
-    case 'autofilter':
-      return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(params) }
-    case 'gate':
-      return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.gate.normalizeParams(params) }
-    case 'compressor':
-      return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.compressor.normalizeParams(normalizationInput(params)) }
-    case 'saturator':
-      return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.saturator.normalizeParams(normalizationInput(params)) }
-    case 'limiter':
-      return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(params) }
-    case 'lofi':
-      return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(params) }
-    case 'delay':
-      return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.delay.normalizeParams(normalizationInput(params)) }
-    case 'reverb':
-      return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.reverb.normalizeParams(normalizationInput(params)) }
-    case 'spectral':
-      return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.spectral.normalizeParams(params) }
-    case 'chorus': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(params) }
-    case 'flanger': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(params) }
-    case 'phaser': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(params) }
-    case 'tremolo': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(params) }
-    case 'autopan': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(params) }
-    case 'ensemble': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(params) }
-    case 'spectrum': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(params) }
-  }
+  return { instanceId, index, ...normalizeAudioEffectRow(effect, params) }
 }
 
 const buildEffectSnapshot = (rows: EffectRowSnapshotInput[]): TrackEffectSnapshot => {

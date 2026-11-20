@@ -17,7 +17,7 @@ import { createTimelineTrackIndex, type TimelineTrackIndex } from '@daw-browser/
 import { RECORDING_TARGET_LOCKED_BADGE, type RecordingTargetLock } from '~/lib/track-recording-target'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { AutomationEnvelope } from '@daw-browser/shared'
-import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
+import type { ExternalSidechainRoute, Track, TrackChannelRole, TrackKind } from '@daw-browser/timeline-core/types'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import { buildCommittedSharedUngroupHistoryEntry, readSharedUngroupResult } from '~/lib/undo/shared-ungroup-history'
@@ -25,8 +25,8 @@ import { buildCommittedSharedUngroupHistoryEntry, readSharedUngroupResult } from
 import type { TimelineSelectionController } from '~/lib/timeline-selection'
 
 type TimelineTrackCreateOptions = {
-  kind?: 'audio' | 'instrument'
-  channelRole?: 'track' | 'return' | 'group'
+  kind?: TrackKind
+  channelRole?: TrackChannelRole
   color?: string
   index?: number
   collapsed?: boolean

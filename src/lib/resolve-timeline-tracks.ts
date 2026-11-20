@@ -2,7 +2,7 @@ import type { FunctionReturnType } from 'convex/server'
 
 import type { ClipMediaCache } from '~/lib/clip-buffer-cache'
 import type { convexApi } from '~/lib/convex'
-import { audioWarpEqual, isLocalId, isLocalProjectAssetKey, normalizeAudioWarp, normalizeLegacyMidiClip, normalizeTrackChannelRole, sanitizeAudioSourceKind } from '@daw-browser/shared'
+import { audioWarpEqual, isLocalId, isTrackKind, isLocalProjectAssetKey, normalizeAudioWarp, normalizeLegacyMidiClip, normalizeTrackChannelRole, sanitizeAudioSourceKind } from '@daw-browser/shared'
 import { resolveTrackMixView } from '~/lib/timeline-mix-authority'
 import type { PendingTrackMixState } from '~/lib/timeline-mixer-pending'
 import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
@@ -143,11 +143,7 @@ const trackSendsEqual = (
   })
 }
 
-const normalizeTrackKind = (value: string | undefined): Track['kind'] => {
-  if (value === 'audio' || value === 'instrument') return value
-
-  return undefined
-}
+const normalizeTrackKind = (value: string | undefined): Track['kind'] => isTrackKind(value) ? value : undefined
 
 const normalizeSourceKind = (value: string | undefined): Clip['sourceKind'] => {
   return sanitizeAudioSourceKind(value)

@@ -1,6 +1,6 @@
 import type { AudioSourceKind, AudioSourceMetadata } from '~/lib/audio-source'
 import type { ArpeggiatorParams, AudioEffectKind, AutomationEnvelope, AutoFilterParamsEnvelope, AutoPanParamsEnvelope, ChorusParamsEnvelope, CompressorParams, DelayParams, EnsembleParamsEnvelope, EqParams, FlangerParamsEnvelope, GateParamsEnvelope, LimiterParamsEnvelope, LoFiParamsEnvelope, PhaserParamsEnvelope, ReverbParams, SaturatorParams, SpectralParamsEnvelope, SpectrumParamsEnvelope, SynthParams, TrackInstrumentParams, TremoloParamsEnvelope, UtilityParamsEnvelope } from '@daw-browser/shared'
-import type { AudioWarp, Track, TrackChannelRole, TrackSend } from '@daw-browser/timeline-core/types'
+import type { AudioWarp, Track, TrackChannelRole, TrackKind, TrackSend } from '@daw-browser/timeline-core/types'
 import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 import type { MidiEditorNote } from '~/lib/midi-editor-grid'
 import type { LiveProcessorEditIdentity } from '~/lib/live-processor-control'
@@ -84,7 +84,7 @@ export type TrackSnapshot = {
   volume: number
   muted?: boolean
   soloed?: boolean
-  kind?: 'audio' | 'instrument'
+  kind?: TrackKind
   channelRole?: TrackChannelRole
   groupRef?: TrackRef
   collapsed?: boolean
@@ -301,13 +301,13 @@ export type HistoryEntry =
   | {
       type: 'track-create'
       projectId: string
-      data: { trackRef: TrackRef; currentTrackId?: string; name?: string; index: number; kind?: 'audio' | 'instrument'; channelRole?: TrackChannelRole; collapsed?: boolean; color?: string }
+      data: { trackRef: TrackRef; currentTrackId?: string; name?: string; index: number; kind?: TrackKind; channelRole?: TrackChannelRole; collapsed?: boolean; color?: string }
     }
   | {
       type: 'track-clip-create'
       projectId: string
       data: {
-        track: { trackRef: TrackRef; currentTrackId?: string; name?: string; index: number; kind?: 'audio' | 'instrument'; channelRole?: TrackChannelRole }
+        track: { trackRef: TrackRef; currentTrackId?: string; name?: string; index: number; kind?: TrackKind; channelRole?: TrackChannelRole }
         clip: {
           trackRef: TrackRef
           clipRef: ClipRef

@@ -15,7 +15,7 @@ import { readAudioFileMetadata } from '~/lib/media/audio-file-metadata'
 import { buildTrackClipCreateHistoryEntry } from '~/lib/undo/builders'
 import { isAbortError } from '~/lib/dom-errors'
 import type { HistoryEntry } from '~/lib/undo/types'
-import type { Clip, Track } from '@daw-browser/timeline-core/types'
+import type { Clip, Track, TrackChannelRole, TrackKind } from '@daw-browser/timeline-core/types'
 
 import type { TimelineSelectionController } from '~/lib/timeline-selection'
 import type { UploadToR2 } from '~/lib/clip-media-types'
@@ -24,7 +24,7 @@ import type { ImportFileOutcome, ImportProjectBinding, ImportSummary } from '~/l
 export type InsertSampleInput = SampleDragData
 
 type CreateTimelineTrack = (
-  options?: { kind?: 'audio' | 'instrument'; channelRole?: 'track' | 'return' | 'group' },
+  options?: { kind?: TrackKind; channelRole?: TrackChannelRole },
   behavior?: { pushHistory?: boolean; select?: boolean },
 ) => Promise<Track | null>
 

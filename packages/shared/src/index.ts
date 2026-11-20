@@ -79,6 +79,8 @@ export * from './granular-automation'
 
 export * from './shared-timeline-operations'
 
+export * from './track-kinds'
+
 export * from './track-routing-core'
 
 export * from './track-tree'

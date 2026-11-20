@@ -1,6 +1,6 @@
 import type { AudioSourceKind } from '~/lib/audio-source'
 import type { AutomationEnvelope, MidiClip } from '@daw-browser/shared'
-import type { AudioWarp, ExternalSidechainRoute, TrackChannelRole, TrackId } from '@daw-browser/timeline-core/types'
+import type { AudioWarp, ExternalSidechainRoute, TrackChannelRole, TrackId, TrackKind } from '@daw-browser/timeline-core/types'
 import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 
 export type TimelineTrackId = TrackId
@@ -17,7 +17,7 @@ export type TimelineTrackRow = {
   volume: number
   muted: boolean
   soloed: boolean
-  kind: 'audio' | 'instrument'
+  kind: TrackKind
   channelRole: TrackChannelRole
   groupId?: TimelineTrackId
   collapsed?: boolean
@@ -70,7 +70,7 @@ export type CreateTrackInput = {
   volume?: number
   muted?: boolean
   soloed?: boolean
-  kind?: 'audio' | 'instrument'
+  kind?: TrackKind
   channelRole?: TrackChannelRole
   groupId?: TimelineTrackId
   collapsed?: boolean

@@ -1,4 +1,4 @@
-export type RoutingClipKind = 'audio' | 'midi'
+import { isTrackChannelRole, type ClipKind, type TrackChannelRole } from './track-kinds'
 
 type RoutingTrackLike<TTrackId extends string = string> = {
   id: TTrackId
@@ -13,8 +13,6 @@ type RoutingSendLike<TTrackId extends string = string> = {
   tap?: 'pre-fx' | 'pre-fader' | 'post-fader'
 }
 
-type RoutingTrackChannelRole = 'track' | 'group' | 'return'
-
 type NormalizeRoutingInput<TTrackId extends string = string> = {
   track: Pick<RoutingTrackLike<TTrackId>, 'id' | 'channelRole' | 'groupId'> | null | undefined
   sends?: Array<RoutingSendLike<TTrackId>>
@@ -27,10 +25,8 @@ type NormalizedRouting<TTrackId extends string = string> = {
   outputTargetId?: TTrackId
 }
 
-export function normalizeTrackChannelRole(value: string | undefined): RoutingTrackChannelRole {
-  if (value === 'return' || value === 'group') return value
-
-  return 'track'
+export function normalizeTrackChannelRole(value: string | undefined): TrackChannelRole {
+  return isTrackChannelRole(value) ? value : 'track'
 }
 
 function normalizeTrackSendAmount(value: number | undefined) {
@@ -41,7 +37,7 @@ function normalizeTrackSendAmount(value: number | undefined) {
 
 export function getTrackAcceptedClipKind(
   track: Pick<RoutingTrackLike, 'channelRole' | 'kind'> | null | undefined,
-): RoutingClipKind | null {
+): ClipKind | null {
   if (normalizeTrackChannelRole(track?.channelRole) !== 'track') return null
 
   return (track?.kind ?? 'audio') === 'instrument' ? 'midi' : 'audio'
@@ -49,7 +45,7 @@ export function getTrackAcceptedClipKind(
 
 export function isClipKindCompatibleWithTrack(
   track: Pick<RoutingTrackLike, 'channelRole' | 'kind'> | null | undefined,
-  clipKind: RoutingClipKind,
+  clipKind: ClipKind,
 ) {
   return getTrackAcceptedClipKind(track) === clipKind
 }

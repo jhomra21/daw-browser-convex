@@ -2,14 +2,14 @@ import type { FunctionArgs } from 'convex/server'
 
 import { toCloudTrackId } from '~/lib/cloud-id-args'
 import type { convexApi } from '~/lib/convex'
-import type { TrackId } from '@daw-browser/timeline-core/types'
+import type { TrackChannelRole, TrackId, TrackKind } from '@daw-browser/timeline-core/types'
 
 export function buildTrackCreateMutationInput(input: {
   projectId: string
   name?: string
   index?: number
-  kind?: 'audio' | 'instrument'
-  channelRole?: 'track' | 'group' | 'return'
+  kind?: TrackKind
+  channelRole?: TrackChannelRole
   collapsed?: boolean
 }): FunctionArgs<typeof convexApi.tracks.create> {
   return {

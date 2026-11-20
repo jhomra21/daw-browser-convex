@@ -11,6 +11,7 @@ import type { DesktopAudioLifecycle } from "../../src/lib/desktop-audio-lifecycl
 import type { NativeHostMeterBatch, NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
 import { nativeAudioHostScheduleProgressBytes } from "@daw-browser/desktop-protocol/native-audio-host"
 import { createNativeVstProjectBindings } from "./native-vst-project-bindings"
+import { nativeSessionRequestAllowed, type NativeSessionEvent } from "./ipc/native-session-access"
 import { createBenchmarkRecordingTelemetry } from "./benchmark-runtime"
 import { sanitizeNativeVst3DiagnosticError } from "./native-vst3-diagnostic-error"
 import type { createPluginCatalogOwner } from "./plugin-catalog-owner"
@@ -22,11 +23,12 @@ import type { NativeReleaseArtifactVerification } from "./native-artifacts"
 /** The native audio host session: its supervisor, plug-in editor sessions, power lifecycle and what a project has attached to it. */
 export const createNativeAudioSession = (options: {
   rendererSession: RendererSession
+  sameAppOrigin: (url: string) => boolean
   recordingSessionOwner: ReturnType<typeof createRecordingSessionOwner>
   ae08Evidence: ReturnType<typeof createAe08Evidence>
   ae08WorkerEnvironment: NodeJS.ProcessEnv
 }) => {
-  const { rendererSession, recordingSessionOwner, ae08Evidence, ae08WorkerEnvironment } = options
+  const { rendererSession, sameAppOrigin, recordingSessionOwner, ae08Evidence, ae08WorkerEnvironment } = options
 
   let audioHostPath: string | undefined
   let audioHostSupervisor: ReturnType<typeof createNativeAudioHostSupervisor> | undefined
@@ -207,6 +209,17 @@ export const createNativeAudioSession = (options: {
     })
   }
 
+  const audioHostAllowed = (event: NativeSessionEvent) => (
+    rendererSession.window() !== undefined && nativeSessionRequestAllowed({
+      platform: process.platform,
+      architecture: process.arch,
+      rendererId: rendererSession.window()?.webContents.id,
+      acceptsPrivilegedRequests: rendererSession.lifecycle.acceptsPrivilegedRequests(),
+      event,
+      sameAppOrigin,
+    })
+  )
+
   const dispose = () => {
     powerMonitor.removeAllListeners("suspend")
     powerMonitor.removeAllListeners("resume")
@@ -221,6 +234,7 @@ export const createNativeAudioSession = (options: {
   return {
     start,
     dispose,
+    allowed: audioHostAllowed,
     publishLifecycle: publishAudioLifecycle,
     recoverHost: recoverAudioHost,
     setLifecycle: (next: DesktopAudioLifecycle) => { audioLifecycle = next },

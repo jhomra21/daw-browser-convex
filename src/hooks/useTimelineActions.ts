@@ -4,6 +4,7 @@ import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { assert, assertDefined, isLocalId, parseJsonValue, trackCreationCollapsed, trackCreationIndex } from '@daw-browser/shared'
 import { ensureRoomShareLink, getInviteShareUrl } from '~/lib/timeline-share'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
+import { createTimelineTrackStructureBackend } from '~/lib/timeline-track-structure-backend'
 import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
 import type { TimelineTrackRow } from '~/lib/timeline-repository/types'
 import { loadTrackEffectSnapshot } from '~/lib/track-state-snapshot'
@@ -147,6 +148,8 @@ export const projectLocalTrackCreation = (
 export function useTimelineActions(
   options: UseTimelineActionsOptions,
 ): UseTimelineActionsReturn {
+  const trackStructure = (projectId: string) => createTimelineTrackStructureBackend(projectId, options.creation.removeCloudTrack)
+
   async function createTimelineTrack(
     trackOptions: TimelineTrackCreateOptions = {},
     behavior: TimelineTrackCreateBehavior = {},
@@ -279,45 +282,12 @@ export function useTimelineActions(
     return refusal !== undefined
   }
 
-  const persistTrackPatch = async (
+  const persistTrackPatch = (
     projectId: string,
     trackId: Track['id'],
     patch: Pick<Track, 'groupId' | 'outputTargetId' | 'collapsed' | 'color'>,
     currentSends: Track['sends'] = [],
-  ) => {
-    const hasGroup = Object.hasOwn(patch, 'groupId')
-    const hasOutput = Object.hasOwn(patch, 'outputTargetId')
-    const hasCollapsed = Object.hasOwn(patch, 'collapsed')
-    const hasColor = Object.hasOwn(patch, 'color')
-
-    if (isLocalId('project', projectId)) {
-      await createLocalTimelineRepository(projectId).updateTrack({
-        trackId,
-        groupId: hasGroup ? patch.groupId ?? null : undefined,
-        outputTargetId: hasOutput ? patch.outputTargetId ?? null : undefined,
-        collapsed: hasCollapsed ? patch.collapsed : undefined,
-        color: hasColor ? patch.color ?? null : undefined,
-      })
-
-      return
-    }
-
-    if (hasGroup) {
-      await publishSharedTimelineOperation(projectId, { kind: 'tracks.setGroup', payload: { trackId, groupId: patch.groupId ?? null } })
-    }
-
-    if (hasOutput) {
-      await publishSharedTimelineOperation(projectId, { kind: 'tracks.setRouting', payload: { trackId, routing: { outputTargetId: patch.outputTargetId, sends: currentSends ?? [] } } })
-    }
-
-    if (hasCollapsed && patch.collapsed !== undefined) {
-      await publishSharedTimelineOperation(projectId, { kind: 'tracks.setCollapsed', payload: { trackId, collapsed: patch.collapsed } })
-    }
-
-    if (hasColor) {
-      await publishSharedTimelineOperation(projectId, { kind: 'tracks.setColor', payload: { trackId, color: patch.color } })
-    }
-  }
+  ) => trackStructure(projectId).patchTrack(trackId, patch, currentSends)
 
   const applyTrackPatch = (track: Track, patch: Pick<Track, 'groupId' | 'outputTargetId' | 'collapsed' | 'color'>) => {
     const index = options.tracks().findIndex((entry) => entry.id === track.id)
@@ -333,21 +303,9 @@ export function useTimelineActions(
   ): Promise<HistoryEntry[]> => {
     if (updates.length === 0) return []
 
-    const localTimelineRepository = isLocalId('project', projectId)
-      ? createLocalTimelineRepository(projectId)
-      : null
+    const backend = trackStructure(projectId)
 
-    await runWithConcurrency(updates, 8, async (update) => {
-      if (localTimelineRepository) {
-        const row = await localTimelineRepository.updateClip({ clipId: update.clipId, color: update.to })
-        assertDefined(row, 'Failed to assign track color to clip')
-
-        return
-      }
-
-      const result = await publishSharedTimelineOperation(projectId, { kind: 'clips.setColor', payload: { clipId: update.clipId, color: update.to } })
-      assertAppliedSharedTimelineOperationResult(result)
-    })
+    await runWithConcurrency(updates, 8, (update) => backend.setClipColor(update.clipId, update.to))
     const clipById = new Map<string, Track['clips'][number]>()
 
     for (const track of tracks) {
@@ -388,16 +346,7 @@ export function useTimelineActions(
       }
     })
 
-    if (isLocalId('project', projectId)) {
-      await createLocalTimelineRepository(projectId).reorderAndGroup(updates)
-    } else {
-      const result = await publishSharedTimelineOperation(projectId, {
-        kind: 'tracks.reorderAndGroup',
-        payload: { updates },
-      })
-
-      assertAppliedSharedTimelineOperationResult(result)
-    }
+    await trackStructure(projectId).reorderAndGroup(updates)
 
     for (const patch of plan.patches) {
       const track = trackById.get(patch.trackId)
@@ -439,8 +388,7 @@ export function useTimelineActions(
 
     // A take can start while the group track is being created; it is discarded instead of rerouting the target.
     if (refuseLockedTarget(options.recordingTargetLock?.refuseChange(plan.childUpdates))) {
-      if (isLocalId('project', projectId)) await createLocalTimelineRepository(projectId).deleteTrack(groupTrack.id)
-      else await options.creation.removeCloudTrack(groupTrack)
+      await trackStructure(projectId).discardTrack(groupTrack)
       options.creation.removeLocalTrack(groupTrack.id)
 
       return
@@ -472,16 +420,7 @@ export function useTimelineActions(
       }),
     ]
 
-    if (isLocalId('project', projectId)) {
-      await createLocalTimelineRepository(projectId).reorderAndGroup(reorderUpdates)
-    } else {
-      const result = await publishSharedTimelineOperation(projectId, {
-        kind: 'tracks.reorderAndGroup',
-        payload: { updates: reorderUpdates },
-      })
-
-      assertAppliedSharedTimelineOperationResult(result)
-    }
+    await trackStructure(projectId).reorderAndGroup(reorderUpdates)
 
     for (const update of plan.childUpdates) {
       const track = trackById.get(update.trackId)

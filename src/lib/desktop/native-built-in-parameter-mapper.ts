@@ -1,4 +1,4 @@
-import { createEqBandParameterId, normalizeDelayParams, normalizeReverbParams, parseJsonValue, type EqParams, type TrackInstrumentParams } from '@daw-browser/shared'
+import { assertNever, createEqBandParameterId, normalizeDelayParams, normalizeReverbParams, parseJsonValue, type EqParams, type TrackInstrumentParams } from '@daw-browser/shared'
 import { createAudioEffectChange } from '~/lib/audio-effect-parameter-payload'
 import type { EffectTimingInput } from '@daw-browser/audio-engine/effects/timing'
 import type { EffectParamsCommitPayload } from '~/lib/undo/types'
@@ -96,10 +96,14 @@ const nativeBuiltInTimingInput = (payload: EffectParamsCommitPayload): EffectTim
     case 'spectral':
     case 'master-spectral':
       return { id, kind: 'spectral', params: payload.to }
+    case 'spectrum':
+    case 'master-spectrum':
     case 'synth':
     case 'instrument':
     case 'arp':
       return undefined
+    default:
+      return assertNever(payload)
   }
 }
 
@@ -609,8 +613,13 @@ const mapParameterFields = (
     case 'master-limiter':
       values = mapLimiter(payload)
       break
-    default:
+    case 'spectrum':
+    case 'master-spectrum':
+    case 'synth':
+    case 'arp':
       return undefined
+    default:
+      return assertNever(payload)
   }
 
   return values
@@ -782,8 +791,14 @@ export const encodeNativeBuiltInStateCommit = (
     case 'master-spectral':
       state = encodeSpectralProcessorState(payload.to.state)
       break
-    default:
+    case 'spectrum':
+    case 'master-spectrum':
+    case 'synth':
+    case 'instrument':
+    case 'arp':
       return undefined
+    default:
+      return assertNever(payload)
   }
 
   return { instanceId, state }

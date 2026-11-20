@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test'
 import {
+  AUDIO_EFFECT_KINDS,
+  isDspAudioEffectKind,
   createDefaultAutoPanParams,
   createDefaultAutoFilterParams,
   createDefaultChorusParams,
@@ -19,6 +21,7 @@ import {
   createDefaultUtilityParams,
   createDefaultSynthParams,
 } from '@daw-browser/shared'
+import { createAudioEffectParameterPayload } from '~/lib/audio-effect-parameter-payload'
 import type { EffectParamsCommitPayload } from '~/lib/undo/types'
 import { encodeNativeBuiltInStateCommit, mapNativeBuiltInParameterCommit } from './native-built-in-parameter-mapper'
 
@@ -649,3 +652,19 @@ test('maps all default EQ bands to stable frequency, gain, and Q targets', () =>
     [{ parameterId: `eq.${firstBand.id}.gainDb`, value: firstBand.gainDb }],
   )
 })
+
+for (const kind of AUDIO_EFFECT_KINDS) {
+  test(`${kind} encodes a native state and maps an unchanged edit the same for track and master targets`, () => {
+    const dsp = isDspAudioEffectKind(kind)
+
+    for (const targetId of ['track-1', 'master']) {
+      const payload = createAudioEffectParameterPayload({ targetId, instanceId: 'fx-1', kind }, {}, {})
+      const state = encodeNativeBuiltInStateCommit(payload, 120)
+      const values = mapNativeBuiltInParameterCommit(payload, 120)
+
+      expect(state !== undefined).toBe(dsp)
+      expect(values !== undefined).toBe(dsp)
+      expect(values?.instanceId).toBe(dsp ? 'fx-1' : undefined)
+    }
+  })
+}

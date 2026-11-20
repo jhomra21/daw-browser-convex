@@ -2,7 +2,7 @@ import type { Doc } from "./_generated/dataModel";
 import { query, type DatabaseReader } from "./_generated/server";
 import type { UserIdentity } from "convex/server";
 import { v } from "convex/values";
-import { isProjectRole, type ProjectRole } from "@daw-browser/shared";
+import { convexIdentityClaims, isProjectRole, type ProjectRole } from "@daw-browser/shared";
 import { z } from "zod";
 import { fail } from "./errors";
 import { getProjectRow } from "./projectRows";
@@ -174,9 +174,9 @@ export async function requireAuthenticatedIdentity(ctx: AuthenticatedCtx) {
     subject: z.string(),
     issuer: z.string(),
     tokenIdentifier: z.string(),
-    dawControlActorIssuer: z.string().optional(),
-    dawControlActorTokenIdentifier: z.string().optional(),
-    dawWorker: z.boolean().optional(),
+    [convexIdentityClaims.actorIssuer]: z.string().optional(),
+    [convexIdentityClaims.actorTokenIdentifier]: z.string().optional(),
+    [convexIdentityClaims.worker]: z.boolean().optional(),
   }).safeParse(identity);
 
   if (!parsedIdentity.success) fail("authorization", "Authentication claims are invalid.");
@@ -185,16 +185,16 @@ export async function requireAuthenticatedIdentity(ctx: AuthenticatedCtx) {
     subject: parsedIdentity.data.subject,
     issuer: parsedIdentity.data.issuer,
     tokenIdentifier: parsedIdentity.data.tokenIdentifier,
-    dawControlActorIssuer: parsedIdentity.data.dawControlActorIssuer,
-    dawControlActorTokenIdentifier: parsedIdentity.data.dawControlActorTokenIdentifier,
-    dawWorker: parsedIdentity.data.dawWorker === true ? true : undefined,
+    dawControlActorIssuer: parsedIdentity.data[convexIdentityClaims.actorIssuer],
+    dawControlActorTokenIdentifier: parsedIdentity.data[convexIdentityClaims.actorTokenIdentifier],
+    dawWorker: parsedIdentity.data[convexIdentityClaims.worker] === true ? true : undefined,
   };
 }
 
-export async function requireWorkerIdentity(ctx: AuthenticatedCtx) {
+export async function requireWorkerIdentity(ctx: AuthenticatedCtx, deniedMessage = "Worker access required.") {
   const identity = await requireAuthenticatedIdentity(ctx);
 
-  if (!identity.dawWorker) fail("forbidden", "Worker access required.");
+  if (!identity.dawWorker) fail("forbidden", deniedMessage);
 
   return identity;
 }

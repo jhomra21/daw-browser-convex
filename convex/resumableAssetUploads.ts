@@ -1006,9 +1006,7 @@ export const abortResumableUpload = mutation({
 export const reconcileStalePending = mutation({
   args: { before: v.number(), limit: v.number() },
   handler: async (ctx, input) => {
-    const identity = await ctx.auth.getUserIdentity();
-
-    if (identity?.dawWorker !== true) throw new Error("Asset reconciliation requires worker access.");
+    await requireWorkerIdentity(ctx, "Asset reconciliation requires worker access.");
     const limit = Math.max(1, Math.min(input.limit, 100));
 
     const receipts = await ctx.db.query("assetUploadReceipts")
@@ -1057,9 +1055,7 @@ export const reconcileStalePending = mutation({
 export const expireResumableSessions = mutation({
   args: { now: v.number(), limit: v.number() },
   handler: async (ctx, input) => {
-    const identity = await ctx.auth.getUserIdentity();
-
-    if (identity?.dawWorker !== true) throw new Error("Asset reconciliation requires worker access.");
+    await requireWorkerIdentity(ctx, "Asset reconciliation requires worker access.");
 
     const expired = (await ctx.db.query("assetUploadSessions")
       .withIndex("by_status_expiresAt", (query) => query.eq("status", "uploading").lte("expiresAt", input.now))

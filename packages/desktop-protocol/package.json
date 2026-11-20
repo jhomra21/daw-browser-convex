@@ -12,7 +12,8 @@
     "./reply-chunks": "./src/reply-chunks.ts",
     "./client": "./src/client.ts",
     "./native-audio-host": "./src/native-audio-host.ts",
-    "./native-revision": "./src/native-revision.ts"
+    "./native-revision": "./src/native-revision.ts",
+    "./recording-delivery-trace": "./src/recording-delivery-trace.ts"
   },
   "scripts": {
     "check": "bun --bun tsc --noEmit"

@@ -1,4 +1,4 @@
-import { maxVst3WorkerEventsPerBlock } from "@daw-browser/plugin-host-protocol"
+import { maxVst3WorkerEventsPerBlock, maxVst3WorkerFrames, maxVst3WorkerSampleRateHz } from "@daw-browser/plugin-host-protocol"
 import { z } from "zod"
 
 const runtimeFaultSchemaV2 = z.object({
@@ -131,8 +131,8 @@ export const desktopDiagnosticsSchemaV2 = z.object({
       }).strict().nullable(),
       transportFrame: z.string().regex(/^-?(0|[1-9][0-9]*)$/).optional(),
       realtimePerformance: z.object({
-        sampleRateHz: z.number().int().nonnegative().max(384_000),
-        framesPerCallback: z.number().int().nonnegative().max(8_192),
+        sampleRateHz: z.number().int().nonnegative().max(maxVst3WorkerSampleRateHz),
+        framesPerCallback: z.number().int().nonnegative().max(maxVst3WorkerFrames),
         observationCount: z.string().regex(/^(0|[1-9][0-9]*)$/),
         processingP50Nanoseconds: z.string().regex(/^(0|[1-9][0-9]*)$/),
         processingP95Nanoseconds: z.string().regex(/^(0|[1-9][0-9]*)$/),

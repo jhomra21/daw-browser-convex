@@ -1,3 +1,4 @@
+#include "plugin-host-contract-generated.h"
 #include "vst3-editor-window.h"
 
 #include "pluginterfaces/base/funknown.h"
@@ -26,7 +27,6 @@
 namespace daw::plugin_host {
 namespace {
 
-constexpr std::uint32_t kMaximumEditorDimension = 8'192;
 constexpr std::size_t kMaximumEditorEventsPerPump = 64;
 constexpr CGFloat kEditorAnchorGap = 12.0;
 NSWindow* gEditorWindow = nil;

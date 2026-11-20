@@ -20,12 +20,7 @@ namespace daw::plugin_host {
 enum class WorkerControlCommand : std::uint32_t;
 
 constexpr std::size_t kMaximumWorkerTransportBytes = 128U * 1024U * 1024U;
-constexpr std::size_t kMaximumWorkerSlots = 8;
-constexpr std::size_t kMaximumWorkerChannels = 64;
-constexpr std::size_t kMaximumWorkerFrames = 8'192;
-constexpr std::size_t kMaximumWorkerEvents = 2'048;
 constexpr std::size_t kMaximumWorkerRestarts = 3;
-constexpr std::size_t kMaximumWorkerStateBytes = 512U * 1024U;
 constexpr std::uint32_t kMaximumWorkerTailFrames = 100'000'000U;
 constexpr std::uint32_t kInfiniteTailFrames = std::numeric_limits<std::uint32_t>::max();
 constexpr std::size_t kWorkerProcessingHistogramBuckets = 32;

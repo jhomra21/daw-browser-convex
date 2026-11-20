@@ -1,4 +1,4 @@
-import { nativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol/native-audio-host"
+import { nativeAudioHostSpoolStates, nativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeHostRecordingConfiguration } from "@daw-browser/audio-engine/native-host-wire"
 import { NativeAudioHostCommandError, NativeRecordingConfigureError, type nativeDeliveryFailureKind, type NativeAudioHostSupervisor, type NativeMainRecordingStatus } from "./audio-host"
 import { prepareRecordingSpool, type createRecordingSpoolRegistry } from "./recording-spool"
@@ -237,7 +237,7 @@ export const createRecordingSessionOwner = (input: {
         })
       }
 
-      if (current && ownsStatus(current, status) && status.spool?.state === 2 && registry) {
+      if (current && ownsStatus(current, status) && status.spool?.state === nativeAudioHostSpoolStates.complete && registry) {
         current.completion ??= registry.complete(current.takeId, status)
         void current.completion.then(() => {
           input.sendToRenderer(input.statusChannel, rendererStatus)
@@ -250,7 +250,7 @@ export const createRecordingSessionOwner = (input: {
       } else {
         input.sendToRenderer(input.statusChannel, rendererStatus)
 
-        if (current && ownsStatus(current, status) && (status.spool?.state === 3 || status.spool?.state === 4) && registry) {
+        if (current && ownsStatus(current, status) && (status.spool?.state === nativeAudioHostSpoolStates.failed || status.spool?.state === nativeAudioHostSpoolStates.cancelled) && registry) {
           void registry.resolveTerminal(current.takeId, status).catch((error) => {
             console.warn("[recording-spool] terminal source remains unresolved", error)
           })

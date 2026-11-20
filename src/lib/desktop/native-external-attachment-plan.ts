@@ -1,4 +1,5 @@
 import {
+  maxVst3WorkerFrames,
   nativeExternalAttachmentPlanSchema,
   type NativeExternalAttachmentPlan,
 } from "@daw-browser/plugin-host-protocol"
@@ -346,7 +347,7 @@ export const compileNativeExternalEditorPlan = (
     outputLayout,
   }, {
     slotCount: 2,
-    maximumFrames: 8_192,
+    maximumFrames: maxVst3WorkerFrames,
     maximumEventsPerBlock: 128,
   })
 

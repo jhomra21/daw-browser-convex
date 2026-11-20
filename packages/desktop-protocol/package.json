@@ -12,12 +12,15 @@
     "./reply-chunks": "./src/reply-chunks.ts",
     "./client": "./src/client.ts",
     "./native-audio-host": "./src/native-audio-host.ts",
+    "./wire-patterns": "./src/wire-patterns.ts",
     "./native-revision": "./src/native-revision.ts",
     "./native-instrument-budget-policy": "./src/native-instrument-budget-policy.ts",
     "./recording-delivery-trace": "./src/recording-delivery-trace.ts"
   },
   "scripts": {
-    "check": "bun --bun tsc --noEmit"
+    "check": "bun --bun tsc --noEmit",
+    "generate": "bun scripts/generate-native-contracts.ts",
+    "check:generated": "bun scripts/generate-native-contracts.ts --check"
   },
   "dependencies": {
     "@daw-browser/control": "workspace:*",

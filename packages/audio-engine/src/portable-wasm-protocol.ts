@@ -8,6 +8,7 @@ import {
   isAudioCoreGraphProcessor,
   isAudioCoreInstrumentState,
 } from '../../audio-core-contract/src/index'
+import { defaultDecodedAudioPageFrames } from '@daw-browser/shared'
 import { audioCoreWasmAbiVersion } from '../../audio-core-wasm/src/index'
 import { isPortableFrameSchedule, type PortableFrameSchedule } from './portable-frame-scheduling'
 
@@ -18,9 +19,11 @@ export const portableWasmMaxGraphNodes = 64
 export const portableWasmMaxGraphEdges = 256
 export const portableWasmMaxAssets = 64
 const portableWasmMaxScheduleEvents = 256
-export const portableWasmPagedPageFrames = 16_384
+export const portableWasmPagedPageFrames = defaultDecodedAudioPageFrames
 export const portableWasmPagedMaxChannels = 2
 export const portableWasmPagedSlotCount = 128
+export const portableWasmPagedPreparationCount = 64
+export const portableWasmMaxFramesPerBlock = 8_192
 
 export type PortableWasmParameterBlock = {
   processorInstanceId: number
@@ -211,7 +214,7 @@ const isInstrumentEvent = <Value>(value: Value): value is Value & PortableWasmIn
   && isProtocolString(value.nodeId) && value.nodeId.length > 0
   && isPositiveInteger(value.noteId)
   && isPositiveInteger(value.sequence)
-  && isProtocolNumber(value.frameOffset) && Number.isInteger(value.frameOffset) && value.frameOffset >= 0 && value.frameOffset < 8192
+  && isProtocolNumber(value.frameOffset) && Number.isInteger(value.frameOffset) && value.frameOffset >= 0 && value.frameOffset < portableWasmMaxFramesPerBlock
   && (value.type === 'note-on' || value.type === 'note-off' || value.type === 'sustain' || value.type === 'expression' || value.type === 'parameter')
   && isProtocolNumber(value.channel) && Number.isInteger(value.channel) && value.channel >= 0 && value.channel <= 15
   && isProtocolNumber(value.note) && Number.isInteger(value.note) && value.note >= 0 && value.note <= 127
@@ -280,7 +283,7 @@ const isParameterBlock = <Value>(value: Value): value is Value & PortableWasmPar
   isRecord(value)
   && isPositiveInteger(value.processorInstanceId)
   && isPositiveInteger(value.frameCount)
-  && value.frameCount <= 8192
+  && value.frameCount <= portableWasmMaxFramesPerBlock
   && Array.isArray(value.parameterTargets)
   && value.parameterTargets.length > 0
   && value.parameterTargets.length <= audioCoreMaxProcessorParameterTargets
@@ -292,7 +295,7 @@ const isProcessorEvent = <Value>(value: Value): value is Value & PortableWasmPro
   isRecord(value)
   && isPositiveInteger(value.processorInstanceId)
   && isPositiveInteger(value.parameterTarget)
-  && isProtocolNumber(value.frameOffset) && Number.isInteger(value.frameOffset) && value.frameOffset >= 0 && value.frameOffset < 8192
+  && isProtocolNumber(value.frameOffset) && Number.isInteger(value.frameOffset) && value.frameOffset >= 0 && value.frameOffset < portableWasmMaxFramesPerBlock
   && isProtocolNumber(value.value) && Number.isFinite(value.value)
 
 const isRecordingCaptureConfigure = (value: ProtocolObject): value is ProtocolObject & RecordingCaptureConfigureFields =>
@@ -843,7 +846,7 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
     && isProtocolString(value.contractHash)
     && isPositiveInteger(value.maxFramesPerBlock)
     && value.maxFramesPerBlock > 0
-    && value.maxFramesPerBlock <= 8192) {
+    && value.maxFramesPerBlock <= portableWasmMaxFramesPerBlock) {
     return {
       version: portableWasmProtocolVersion,
       type: 'initialize',

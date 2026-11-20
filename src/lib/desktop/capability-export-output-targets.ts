@@ -1,3 +1,4 @@
+import { desktopCapabilityMaximumChunkBytes } from "@daw-browser/desktop-protocol"
 import type { ExportFileSink, ExportOutputTargetFactory } from "~/lib/export/export-output-targets"
 import type { StreamTargetChunk } from "mediabunny"
 import {
@@ -20,8 +21,6 @@ type DesktopCapabilityBridge = {
   commit: (requestId: string, writerId: string) => Promise<{ basename: string; byteLength: number; mime: string }>
   abort: (requestId: string, writerId: string) => Promise<void>
 }
-
-const maximumCapabilityChunkBytes = 1024 * 1024
 
 const capabilityCommitErrorSchema = z.object({
   code: z.string().optional(),
@@ -79,8 +78,8 @@ const createSink = (bridge: DesktopCapabilityBridge, writer: CapabilityWriter): 
           const write = operation.then(async () => {
             let position = chunk.position
 
-            for (let start = 0; start < chunk.data.byteLength; start += maximumCapabilityChunkBytes) {
-              const data = chunk.data.subarray(start, Math.min(start + maximumCapabilityChunkBytes, chunk.data.byteLength))
+            for (let start = 0; start < chunk.data.byteLength; start += desktopCapabilityMaximumChunkBytes) {
+              const data = chunk.data.subarray(start, Math.min(start + desktopCapabilityMaximumChunkBytes, chunk.data.byteLength))
               const result = await bridge.writeChunk(writer.requestId, writer.writerId, position, data)
               position = result.nextOffset
             }

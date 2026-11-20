@@ -1,3 +1,4 @@
+import { maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
 import {
   type Accessor,
   type Component,
@@ -616,7 +617,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         processors,
         workerTransport: {
           slotCount: 2,
-          maximumFrames: 8_192,
+          maximumFrames: maxVst3WorkerFrames,
           maximumEventsPerBlock: 128,
         },
       });
@@ -703,7 +704,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         processors,
         workerTransport: {
           slotCount: 2,
-          maximumFrames: 8_192,
+          maximumFrames: maxVst3WorkerFrames,
           maximumEventsPerBlock: 128,
         },
       })

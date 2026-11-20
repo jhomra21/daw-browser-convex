@@ -1,15 +1,16 @@
 import { DawPortableAudioCoreHost } from '../audio-worklets/daw-portable-audio-core-host-v2.js'
 import { portableWasmCapabilityMatrix } from './daw-portable-capability-metadata-v1.js'
+import { portableProtocolConstants } from './daw-portable-protocol-constants-v1.js'
 
-const VERSION = 2
-const MAX_BLOCK = 8192
-const MAX_ASSETS = 64
-const MAX_EVENTS = 256
-const MAX_NODES = 64
-const MAX_EDGES = 256
-const MAX_PAGES = 128
-const MAX_PREPARATIONS = 64
-const PAGE_FRAMES = 16384
+const VERSION = portableProtocolConstants.version
+const MAX_BLOCK = portableProtocolConstants.maxFramesPerBlock
+const MAX_ASSETS = portableProtocolConstants.maxAssets
+const MAX_EVENTS = portableProtocolConstants.maxEvents
+const MAX_NODES = portableProtocolConstants.maxGraphNodes
+const MAX_EDGES = portableProtocolConstants.maxGraphEdges
+const MAX_PAGES = portableProtocolConstants.pageSlotCount
+const MAX_PREPARATIONS = portableProtocolConstants.preparationCount
+const PAGE_FRAMES = portableProtocolConstants.pageFrames
 const SUPPORTED_RATES = new Set(portableWasmCapabilityMatrix.sampleRatesHz)
 const SUPPORTED_PROCESSORS = new Set(portableWasmCapabilityMatrix.processorKinds)
 

@@ -1,4 +1,4 @@
-import { nativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol/native-audio-host"
+import { nativeAudioHostSpoolStates, nativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol/native-audio-host"
 import { nativeGraphNodeId } from "@daw-browser/audio-engine/native-host-wire"
 import type { NativeHostRecordingStatus } from "@daw-browser/audio-engine/native-host-wire"
 import { importNativeRecordingSpool } from "~/lib/recording/native-spool-importer"
@@ -130,7 +130,7 @@ export const createNativeRecording = (host: NativeRecordingHost) => {
     }
 
     const rejectSession = (error: Error, cause: RecordingTerminationCause, proofFailure = false) => {
-      if (session.terminal || (!proofFailure && session.latestStatus?.spool?.state === 2)) return
+      if (session.terminal || (!proofFailure && session.latestStatus?.spool?.state === nativeAudioHostSpoolStates.complete)) return
       session.terminal = true
 
       for (const waiter of session.waiters) waiter.reject(error)
@@ -152,7 +152,7 @@ export const createNativeRecording = (host: NativeRecordingHost) => {
       session.latestStatus = status
       session.onDiagnostics?.(status)
 
-      if (status.fatal || status.spool?.state === 3 || status.spool?.state === 4) {
+      if (status.fatal || status.spool?.state === nativeAudioHostSpoolStates.failed || status.spool?.state === nativeAudioHostSpoolStates.cancelled) {
         rejectSession(new Error("Native recording was interrupted; retained sources remain available."), "native-fatal")
 
         return
@@ -228,7 +228,7 @@ export const createNativeRecording = (host: NativeRecordingHost) => {
     // intentionally no drain deadline: slow fsync is not evidence of lost data.
     session.finish = Promise.resolve().then(async () => {
       try {
-        const complete = waitForStatus(session, (status) => status.spool?.state === 2)
+        const complete = waitForStatus(session, (status) => status.spool?.state === nativeAudioHostSpoolStates.complete)
         void complete.catch(() => undefined)
         assertReply(await bridge.session.stopRecording())
         const status = await complete
@@ -288,7 +288,7 @@ export const createNativeRecording = (host: NativeRecordingHost) => {
     isRecording: () => recording !== undefined,
     // The host connection is gone: a take whose native Complete proof has not arrived fails and is dropped without a Cancel.
     loseHost: (message: () => string) => {
-      if (!recording || recording.latestStatus?.spool?.state === 2) return
+      if (!recording || recording.latestStatus?.spool?.state === nativeAudioHostSpoolStates.complete) return
       recording.terminal = true
       recording.onFailure?.(new Error(message()), "controller-cleanup")
       const lostRecording = recording

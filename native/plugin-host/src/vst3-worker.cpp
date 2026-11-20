@@ -469,7 +469,7 @@ Steinberg::Vst::ProcessModes WorkerProcessModeToSteinberg(
 }
 
 bool ValidSetup(const WorkerProcessSetup& setup) {
-  return std::isfinite(setup.sampleRate) && setup.sampleRate > 0.0 && setup.sampleRate <= 384'000.0
+  return std::isfinite(setup.sampleRate) && setup.sampleRate > 0.0 && setup.sampleRate <= kMaximumWorkerSampleRateHz
     && setup.maximumBlockFrames > 0 && setup.maximumBlockFrames <= kMaximumWorkerFrames
     && setup.inputChannels <= kMaximumWorkerChannels && setup.outputChannels > 0 && setup.outputChannels <= kMaximumWorkerChannels;
 }
@@ -832,7 +832,7 @@ std::optional<WorkerManifest> Vst3Worker::PreflightManifest(
   bool supportsBypass = false;
   if (implementation_->controller) {
     const auto parameterCount = implementation_->controller->getParameterCount();
-    if (parameterCount < 0 || parameterCount > 16'384) return std::nullopt;
+    if (parameterCount < 0 || static_cast<std::size_t>(parameterCount) > kMaximumPluginParameters) return std::nullopt;
     parameters.reserve(static_cast<std::size_t>(parameterCount));
     for (Steinberg::int32 index = 0; index < parameterCount; ++index) {
       Steinberg::Vst::ParameterInfo info{};

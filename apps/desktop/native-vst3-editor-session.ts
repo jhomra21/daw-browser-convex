@@ -1,3 +1,4 @@
+import { indicatesNativeHostLoss } from "@daw-browser/desktop-protocol/native-audio-host"
 import type {
   NativeVstEditorAnchor,
   NativeVstEditorCommand,
@@ -82,15 +83,6 @@ type EditorSessionEntry = {
 const initializationCommand = (command: NativeVstEditorCommand) => (
   command === "open" || command === "focus" || command === "status"
 )
-
-const indicatesEditorHostLoss = (message: string) => {
-  const normalized = message.toLowerCase()
-
-  return normalized.includes("native audio host is unavailable")
-    || normalized.includes("native audio host stopped")
-    || normalized.includes("host connection was lost")
-    || normalized.includes("host connection closed")
-}
 
 export type NativeVst3EditorSessionManager = {
   execute(input: EditorCommandInput): Promise<NativeVstEditorStatus>
@@ -394,7 +386,7 @@ export const createNativeVst3EditorSessionManager = (
           if (
             (inputCommand.command === "open" || inputCommand.command === "focus")
             && !retriedAfterHostLoss
-            && indicatesEditorHostLoss(error instanceof Error ? error.message : "Native VST editor command failed.")
+            && indicatesNativeHostLoss(error instanceof Error ? error.message : "Native VST editor command failed.")
           ) {
             retriedAfterHostLoss = true
 

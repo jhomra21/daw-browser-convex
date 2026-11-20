@@ -1,6 +1,7 @@
 #pragma once
 
 #include "daw/audio_core.h"
+#include "daw/recording_spool_contract_generated.h"
 
 #include <atomic>
 #include <cstddef>
@@ -100,7 +101,6 @@ class RecordingSpoolFile {
   std::unique_ptr<Impl> impl_;
 };
 
-enum class SpoolState { kPreparing = 0, kReady = 1, kComplete = 2, kFailed = 3, kCancelled = 4 };
 struct SpoolSnapshot {
   SpoolState state = SpoolState::kPreparing;
   SpoolTotals written;

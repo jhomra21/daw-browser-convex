@@ -43,6 +43,7 @@ export const desktopCapabilityMaximumChunkBytes = 1024 * 1024
 export const recordingSpoolBlockHeaderBytes = 4
 export const recordingSpoolSampleBytes = 4
 export const maximumRecordingSpoolBlockFrames = 2048
+export const recordingSpoolMaximumReadBytes = 1_048_576
 
 export type DesktopJsonValue =
   | null

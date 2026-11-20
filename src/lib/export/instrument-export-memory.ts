@@ -1,3 +1,4 @@
+import { nativeAudioHostPageBytes } from '@daw-browser/desktop-protocol/native-audio-host'
 import { sampledInstrumentRetainedBytes, type SampledInstrumentBuffer } from '@daw-browser/audio-engine/sampled-instrument-region'
 import { nativeInstrumentDeviceDecodedBytes } from '@daw-browser/desktop-protocol/native-instrument-budget-policy'
 import type { SampledInstrumentRegionBudgetScope } from '~/lib/sampled-instrument-region-budget'
@@ -42,7 +43,7 @@ export const nativeInstrumentExportMemory: InstrumentExportMemoryPolicy = {
       budget.set('native-export-page-staging', 2 * 1024 ** 2, () => undefined)
 
       for (const job of jobs) {
-        budget.set(`native-export-mapping:${job.key}`, Math.ceil(job.bytes / 16_384) * 16_384, () => undefined)
+        budget.set(`native-export-mapping:${job.key}`, Math.ceil(job.bytes / nativeAudioHostPageBytes) * nativeAudioHostPageBytes, () => undefined)
       }
 
       budget.ensureCapacityFor(new Map(jobs.filter((job) => !job.existing).map((job) => [job.key, job.bytes])))

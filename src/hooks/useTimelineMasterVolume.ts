@@ -23,7 +23,7 @@ type UseTimelineMasterVolumeOptions = {
 }
 
 // 'applied' and 'rejected' settle at once; a promise is a durable write that rejects when the server refuses it.
-type MasterVolumeCommit = 'applied' | 'rejected' | Promise<unknown>
+type MasterVolumeCommit = 'applied' | 'rejected' | Promise<void>
 
 type MasterVolumeBackend = {
   committedVolume: () => number
@@ -65,7 +65,7 @@ const createCloudMasterVolumeBackend = (options: UseTimelineMasterVolumeOptions,
       userId,
       operation: { kind: 'mixer.setMasterVolume', payload: { volume } },
       queuedResult: { status: 'applied' },
-    })
+    }).then(() => undefined)
   },
 })
 

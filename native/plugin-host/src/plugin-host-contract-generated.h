@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
@@ -11,6 +12,10 @@ constexpr std::uint32_t kWorkerStartupProtocolVersion = 1;
 constexpr std::uint32_t kWorkerControlProtocolVersion = 2;
 constexpr std::string_view kWorkerArtifactId = "daw-vst3-worker";
 constexpr std::string_view kWorkerArtifactVersion = "3";
+constexpr std::size_t kMaximumControlFrameBytes = 1048576;
+constexpr std::size_t kMaximumWorkerStateBytes = 524288;
+constexpr std::size_t kMaximumWorkerFrames = 8192;
+constexpr double kMaximumWorkerSampleRateHz = 384000.0;
 
 // Fault-only values in the existing diagnostic value field; non-fault values keep their meanings.
 enum class WorkerFaultOrigin : std::uint32_t {

@@ -7,6 +7,7 @@ export const maxVst3WorkerStateBytes = 512 * 1024
 const maxVst3WorkerTransportSlots = 8
 export const maxVst3WorkerChannels = 64
 export const maxVst3WorkerFrames = 8_192
+export const maxVst3WorkerSampleRateHz = 384_000
 export const maxVst3WorkerEventsPerBlock = 2_048
 export const nativeVst3WorkerArtifactId = 'daw-vst3-worker'
 export const nativeVst3WorkerArtifactVersion = '3'
@@ -217,7 +218,7 @@ const workerInstanceSchema = z.object({
 }).strict()
 
 const workerSetupSchema = z.object({
-  sampleRate: finiteNumber.positive().max(384_000),
+  sampleRate: finiteNumber.positive().max(maxVst3WorkerSampleRateHz),
   maximumBlockFrames: z.number().int().positive().max(maxVst3WorkerFrames),
   inputChannels: z.number().int().min(0).max(maxVst3WorkerChannels),
   outputChannels: z.number().int().min(1).max(maxVst3WorkerChannels),

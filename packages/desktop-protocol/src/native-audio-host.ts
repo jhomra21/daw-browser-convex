@@ -1,6 +1,12 @@
 export const nativeAudioHostMagic = 0x44415748
 
-import { nativeExternalAttachmentPlanSchema, maxNativeExternalAttachments } from "@daw-browser/plugin-host-protocol"
+import {
+  maxNativeExternalAttachments,
+  maxVst3WorkerFrames,
+  maxVst3WorkerSampleRateHz,
+  maxVst3WorkerStateBytes,
+  nativeExternalAttachmentPlanSchema,
+} from "@daw-browser/plugin-host-protocol"
 import { z } from "zod"
 
 export const nativeAudioHostProtocolVersion = 30
@@ -20,6 +26,95 @@ export const nativeAudioHostFrameHeaderBytes = 16
 export const nativeAudioHostMaximumPayloadBytes = 1_048_576
 export const nativeAudioHostMaximumMeterEntries = 64
 export const nativeAudioHostMaximumSpectrumBins = 1024
+export const nativeAudioHostNativeGraphFrameHeaderBytes = 12
+export const nativeAudioHostMaximumSerializedPlanBytes = nativeAudioHostMaximumPayloadBytes
+export const nativeAudioHostRequiredCapabilities = 0x000003ff
+// The host's virtual-memory page on Apple Silicon: mapped asset arenas round up to it.
+export const nativeAudioHostPageBytes = 16_384
+
+/**
+ * Every table below maps a wire code to the name TS uses for it. The generator emits the same names as C++
+ * enumerators (`kebab-case` and `camelCase` become `kPascalCase`), so a code is added in exactly one place.
+ */
+export const nativeAudioHostLifecycleStates = { idle: 0, configured: 1, running: 2, faulted: 3 } as const
+
+export const nativeAudioHostReadinessReasons = {
+  ready: 0,
+  "device-not-configured": 1,
+  "graph-not-prepared": 2,
+  "transport-not-prepared": 3,
+} as const
+
+export const nativeAudioHostRejectedBlockReasons = {
+  none: 0,
+  "not-running-or-core-unavailable": 1,
+  "insufficient-channels": 2,
+  "null-channel": 3,
+  transport: 4,
+  "scratch-capacity": 5,
+  "processor-event-capacity": 6,
+  "instrument-event-capacity": 7,
+  "source-schedule": 8,
+  "core-process": 9,
+} as const
+
+export const nativeAudioHostRevisionStatusCodes = {
+  prepared: 1,
+  published: 2,
+  retired: 3,
+  "rolled-back": 4,
+  "stale-revision": 5,
+  "invalid-revision": 6,
+  "prepare-failed": 7,
+  "publish-failed": 8,
+  "retirement-not-safe": 9,
+  "retirement-capacity-exceeded": 10,
+  "publish-pending": 11,
+  "rebase-required": 12,
+  "capture-target-locked": 13,
+} as const
+
+export const nativeAudioHostRevisionContinuities = {
+  "not-evaluated": 0,
+  accepted: 1,
+  fallback: 2,
+  rejected: 3,
+} as const
+
+export const nativeAudioHostNotificationKinds = {
+  latency: 1,
+  buses: 2,
+  restart: 3,
+  fault: 4,
+  miss: 5,
+  "editor-interaction": 6,
+  "parameter-edit": 7,
+  tail: 8,
+  "editor-state": 9,
+} as const
+
+export const nativeAudioHostPatchOutcomes = { applied: 1, refused: 2, claimed: 3 } as const
+
+export const nativeAudioHostPatchRefusals = {
+  none: 0,
+  unavailable: 1,
+  preparing: 2,
+  "claim-pending": 3,
+  invalid: 4,
+  "stale-revision": 5,
+  "stage-failed": 6,
+  "not-claimed": 7,
+  "apply-failed": 8,
+} as const
+
+export const nativeAudioHostSpoolStates = { preparing: 0, ready: 1, complete: 2, failed: 3, cancelled: 4 } as const
+
+/** The name of a wire code, or undefined when the host sent a code outside the table. */
+export const nativeAudioHostCodeName = <Table extends Readonly<Record<string, number>>>(table: Table, code: number) => {
+  for (const name in table) if (table[name] === code) return name
+
+  return undefined
+}
 
 export const nativeAudioHostControlTypes = {
   hostHello: 1,
@@ -132,15 +227,11 @@ export const nativeAudioHostProcessorPatchStatusBytes = 20
  * says no audio session or core existed to take the request. ACK text is for people and is never classified.
  */
 export const nativeAudioHostAckStatus = { refused: 0, accepted: 1, unavailable: 2 } as const
-const nativeAudioHostMaximumSampleRateHz = 384_000
-const nativeAudioHostMaximumFramesPerBlock = 8_192
-
-const nativeAudioHostMaximumCapturedVstStateBytes = 512 * 1024
 
 const nativeOfflinePcmAssetSchema = z.object({
   sessionAssetId: z.number().int().positive().max(0xffff_ffff),
   frameCount: z.number().int().positive().max(nativeAudioHostMaximumAssetFrames),
-  sampleRateHz: z.number().int().positive().max(nativeAudioHostMaximumSampleRateHz),
+  sampleRateHz: z.number().int().positive().max(maxVst3WorkerSampleRateHz),
   channelCount: z.number().int().positive().max(nativeAudioHostMaximumAssetChannels),
   planarPcm: z.instanceof(Uint8Array),
   contentHashPrefix: z.instanceof(Uint8Array).refine((value) => value.byteLength === 8).optional(),
@@ -163,7 +254,7 @@ const nativeOfflineMappedAssetSchema = z.object({
   sourceKind: z.enum(["upload", "url", "recording"]).optional(),
   sampleUrl: z.string().min(1).max(4096).optional(),
   frameCount: z.number().int().positive().safe(),
-  sampleRateHz: z.number().int().positive().max(nativeAudioHostMaximumSampleRateHz),
+  sampleRateHz: z.number().int().positive().max(maxVst3WorkerSampleRateHz),
   channelCount: z.number().int().positive().max(nativeAudioHostMaximumAssetChannels),
   ranges: z.array(z.object({
     startFrame: z.number().int().nonnegative().safe(),
@@ -207,7 +298,7 @@ const nativeOfflineBinarySchema = z.instanceof(Uint8Array)
 const nativeOfflineCapturedStateSchema = z.object({
   instanceId: z.string().uuid(),
   bytes: z.instanceof(Uint8Array).refine(
-    (value) => value.byteLength <= nativeAudioHostMaximumCapturedVstStateBytes,
+    (value) => value.byteLength <= maxVst3WorkerStateBytes,
     "Captured VST state exceeds the native limit.",
   ),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -215,10 +306,10 @@ const nativeOfflineCapturedStateSchema = z.object({
 
 export const nativeOfflineRenderPlanSchema = z.object({
   version: z.literal(1),
-  sampleRateHz: z.number().int().positive().max(nativeAudioHostMaximumSampleRateHz),
+  sampleRateHz: z.number().int().positive().max(maxVst3WorkerSampleRateHz),
   channelCount: z.union([z.literal(1), z.literal(2)]),
   totalFrames: z.number().int().positive().safe(),
-  blockFrames: z.number().int().positive().max(nativeAudioHostMaximumFramesPerBlock),
+  blockFrames: z.number().int().positive().max(maxVst3WorkerFrames),
   graph: nativeOfflineBinarySchema,
   externalAttachments: nativeExternalAttachmentPlanSchema.optional(),
   instrumentStates: nativeOfflineBinarySchema.optional(),

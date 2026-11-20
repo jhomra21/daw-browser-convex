@@ -863,7 +863,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
           <div
             class={cn(
               "track-meter-strip relative shrink-0",
-              track.collapsed ? "h-6" : "h-full",
+              track.collapsed ? "h-6" : "self-stretch",
             )}
           >
             <div class="absolute inset-0 flex items-end justify-center gap-1">
@@ -871,12 +871,12 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 const meter = meters[track.id];
                 const left = displayMeterLevel(meter?.left);
                 const right = displayMeterLevel(meter?.right);
-                const leftColor = left >= 0.98 ? "bg-red-500" : "bg-green-500";
+                const leftColor = left >= 0.98 ? "bg-meter-clipping" : "bg-meter-safe";
                 const rightColor =
-                  right >= 0.98 ? "bg-red-500" : "bg-green-500";
+                  right >= 0.98 ? "bg-meter-clipping" : "bg-meter-safe";
                 return (
                   <>
-                    <div class="relative h-full w-1 overflow-hidden bg-border/60">
+                    <div class="relative h-full w-1 overflow-hidden bg-black/75">
                       <div
                         class={cn(
                           "absolute bottom-0 w-full transition-all duration-75",
@@ -885,7 +885,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                         style={{ height: `${left * 100}%` }}
                       />
                     </div>
-                    <div class="relative h-full w-1 overflow-hidden bg-border/60">
+                    <div class="relative h-full w-1 overflow-hidden bg-black/75">
                       <div
                         class={cn(
                           "absolute bottom-0 w-full transition-all duration-75",

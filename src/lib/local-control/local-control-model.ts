@@ -39,8 +39,7 @@ import {
 } from '~/lib/local-effects'
 import type { TimelineClipRow, TimelineTrackRow } from '~/lib/timeline-repository/types'
 import { parseExternalPluginJsonValue } from '~/lib/external-plugin-json'
-
-type LocalProjectStoredObject = { readonly [key: string]: LocalProjectStoredValue }
+import { AUTOMATION_ROW_KIND, CLIP_ROW_KIND, EFFECT_ROW_KIND, isLocalProjectStoredObject, SIDECHAIN_ROW_KIND, TRACK_ROW_KIND } from '~/lib/local-project-rows'
 
 const isStoredString = (value: LocalProjectStoredValue): value is string => typeof value === 'string'
 const isStoredBoolean = (value: LocalProjectStoredValue): value is boolean => typeof value === 'boolean'
@@ -48,15 +47,6 @@ const isStoredBoolean = (value: LocalProjectStoredValue): value is boolean => ty
 const isStoredFiniteNumber = (value: LocalProjectStoredValue): value is number => (
   typeof value === 'number' && Number.isFinite(value)
 )
-
-const isLocalProjectStoredObject = (
-  value: LocalProjectStoredValue,
-): value is LocalProjectStoredObject => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
-  const prototype = Object.getPrototypeOf(value)
-
-  return prototype === Object.prototype || prototype === null
-}
 
 export const parseLocalProjectStoredJsonValue = (
   value: LocalProjectStoredValue,
@@ -168,17 +158,17 @@ export const materializeLocalControlSnapshot = (
   historyRefFallbacks: ReadonlyMap<string, string> = new Map(),
   externalProcessorFallbacks: ReadonlyMap<string, ExternalProcessor> = new Map(),
 ): MaterializedLocalControlModel => {
-  const tracks = rowsByKind(model.entities, 'track')
-  const clips = rowsByKind(model.entities, 'clip')
-  const effects = rowsByKind(model.entities, 'effect')
+  const tracks = rowsByKind(model.entities, TRACK_ROW_KIND)
+  const clips = rowsByKind(model.entities, CLIP_ROW_KIND)
+  const effects = rowsByKind(model.entities, EFFECT_ROW_KIND)
   const externalProcessors = rowsByKind(model.entities, externalPluginEntityKind)
-  const automation = rowsByKind(model.entities, 'automation-envelope')
-  const sidechains = rowsByKind(model.entities, 'sidechain-route')
+  const automation = rowsByKind(model.entities, AUTOMATION_ROW_KIND)
+  const sidechains = rowsByKind(model.entities, SIDECHAIN_ROW_KIND)
 
   const canonicalIds = new Map<string, Set<string>>([
-    ['track', new Set(snapshot.tracks.map((item) => item.id))],
-    ['clip', new Set(snapshot.clips.map((item) => item.id))],
-    ['effect', new Set(snapshot.processors.flatMap((item) => {
+    [TRACK_ROW_KIND, new Set(snapshot.tracks.map((item) => item.id))],
+    [CLIP_ROW_KIND, new Set(snapshot.clips.map((item) => item.id))],
+    [EFFECT_ROW_KIND, new Set(snapshot.processors.flatMap((item) => {
       const kind = localProcessorKind(item.target, item.processor.kind)
 
       if (!kind) return []
@@ -197,13 +187,13 @@ export const materializeLocalControlSnapshot = (
     [externalPluginEntityKind, new Set(snapshot.processors.flatMap((item) => (
       item.processor.kind === 'external-vst3' ? [item.id] : []
     )))],
-    ['automation-envelope', new Set(snapshot.automation.map((item) => automationTargetKey(
+    [AUTOMATION_ROW_KIND, new Set(snapshot.automation.map((item) => automationTargetKey(
     'master' in item.target
       ? createAutomationTarget({ kind: 'master' }, item.effectInstanceId)
       : createAutomationTarget({ kind: 'track', trackId: item.target.trackId }, item.effectInstanceId),
       item.parameterId,
     )))],
-    ['sidechain-route', new Set(snapshot.sidechains.map((item) => (
+    [SIDECHAIN_ROW_KIND, new Set(snapshot.sidechains.map((item) => (
       localSidechainRouteRowId(item.targetTrackId, item.effectInstanceId)
     )))],
   ])
@@ -239,7 +229,7 @@ export const materializeLocalControlSnapshot = (
       updatedAt: timestamp,
     }
 
-    entities.push(createLocalProjectEntityRow('track', row.id, row, timestamp))
+    entities.push(createLocalProjectEntityRow(TRACK_ROW_KIND, row.id, row, timestamp))
   }
 
   for (const item of snapshot.clips) {
@@ -293,7 +283,7 @@ export const materializeLocalControlSnapshot = (
       updatedAt: timestamp,
     }
 
-    entities.push(createLocalProjectEntityRow('clip', row.id, row, timestamp))
+    entities.push(createLocalProjectEntityRow(CLIP_ROW_KIND, row.id, row, timestamp))
   }
 
   for (const item of snapshot.processors) {
@@ -359,7 +349,7 @@ export const materializeLocalControlSnapshot = (
       updatedAt: timestamp,
     }
 
-    entities.push(createLocalProjectEntityRow('effect', id, row, timestamp))
+    entities.push(createLocalProjectEntityRow(EFFECT_ROW_KIND, id, row, timestamp))
   }
 
   for (const item of snapshot.automation) {
@@ -369,7 +359,7 @@ export const materializeLocalControlSnapshot = (
 
     const id = automationTargetKey(target, item.parameterId)
     const existing = automation.get(id)?.value
-    entities.push(createLocalProjectEntityRow('automation-envelope', id, {
+    entities.push(createLocalProjectEntityRow(AUTOMATION_ROW_KIND, id, {
       ...existing,
       id,
       projectId: snapshot.project.id,
@@ -385,7 +375,7 @@ export const materializeLocalControlSnapshot = (
   for (const item of snapshot.sidechains) {
     const id = localSidechainRouteRowId(item.targetTrackId, item.effectInstanceId)
     const existing = sidechains.get(id)?.value
-    entities.push(createLocalProjectEntityRow('sidechain-route', id, {
+    entities.push(createLocalProjectEntityRow(SIDECHAIN_ROW_KIND, id, {
       ...existing,
       sourceTrackId: item.sourceTrackId,
       targetTrackId: item.targetTrackId,

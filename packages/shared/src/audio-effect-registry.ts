@@ -13,30 +13,32 @@ export type AudioEffectKind = typeof AUDIO_EFFECT_KINDS[number]
 //   processor in any audio graph.
 // modulationGroup: shares the modulation worklet and its timing model.
 // sidechain: accepts a sidechain input.
+// stereoWidening: decorrelates left and right, so a mono input leaves it stereo.
 const AUDIO_EFFECTS = {
-  utility: { operation: 'processor', runtime: 'worklet', modulationGroup: false, sidechain: false },
-  eq: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: false },
-  autofilter: { operation: 'modulation', runtime: 'worklet', modulationGroup: false, sidechain: false },
-  gate: { operation: 'processor', runtime: 'worklet', modulationGroup: false, sidechain: true },
-  compressor: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: true },
-  saturator: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: false },
-  limiter: { operation: 'processor', runtime: 'worklet', modulationGroup: false, sidechain: false },
-  lofi: { operation: 'modulation', runtime: 'worklet', modulationGroup: false, sidechain: false },
-  chorus: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false },
-  flanger: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false },
-  phaser: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false },
-  tremolo: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false },
-  autopan: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false },
-  ensemble: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false },
-  delay: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: false },
-  reverb: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: false },
-  spectral: { operation: 'processor', runtime: 'worklet', modulationGroup: false, sidechain: true },
-  spectrum: { operation: 'modulation', runtime: 'observer', modulationGroup: false, sidechain: false },
+  utility: { operation: 'processor', runtime: 'worklet', modulationGroup: false, sidechain: false, stereoWidening: false },
+  eq: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: false, stereoWidening: false },
+  autofilter: { operation: 'modulation', runtime: 'worklet', modulationGroup: false, sidechain: false, stereoWidening: false },
+  gate: { operation: 'processor', runtime: 'worklet', modulationGroup: false, sidechain: true, stereoWidening: false },
+  compressor: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: true, stereoWidening: false },
+  saturator: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: false, stereoWidening: false },
+  limiter: { operation: 'processor', runtime: 'worklet', modulationGroup: false, sidechain: false, stereoWidening: false },
+  lofi: { operation: 'modulation', runtime: 'worklet', modulationGroup: false, sidechain: false, stereoWidening: false },
+  chorus: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: true },
+  flanger: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: true },
+  phaser: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: true },
+  tremolo: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: false },
+  autopan: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: true },
+  ensemble: { operation: 'modulation', runtime: 'worklet', modulationGroup: true, sidechain: false, stereoWidening: true },
+  delay: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: false, stereoWidening: false },
+  reverb: { operation: 'dedicated', runtime: 'nodes', modulationGroup: false, sidechain: false, stereoWidening: false },
+  spectral: { operation: 'processor', runtime: 'worklet', modulationGroup: false, sidechain: true, stereoWidening: false },
+  spectrum: { operation: 'modulation', runtime: 'observer', modulationGroup: false, sidechain: false, stereoWidening: false },
 } as const satisfies Record<AudioEffectKind, {
   operation: 'dedicated' | 'processor' | 'modulation'
   runtime: 'nodes' | 'worklet' | 'observer'
   modulationGroup: boolean
   sidechain: boolean
+  stereoWidening: boolean
 }>
 
 type KindsWhere<Match> = { [Kind in AudioEffectKind]: typeof AUDIO_EFFECTS[Kind] extends Match ? Kind : never }[AudioEffectKind]
@@ -48,6 +50,8 @@ export type OwnedProcessorKind = KindsWhere<{ runtime: 'worklet' }>
 export type ModulationGroupKind = KindsWhere<{ modulationGroup: true }>
 
 export type SidechainCapableKind = KindsWhere<{ sidechain: true }>
+
+export type StereoWideningKind = KindsWhere<{ stereoWidening: true }>
 
 export type ModulationOperationKind = KindsWhere<{ operation: 'modulation' }>
 
@@ -65,6 +69,9 @@ export const isModulationGroupKind = (value: unknown): value is ModulationGroupK
 
 export const isSidechainCapableKind = (value: unknown): value is SidechainCapableKind =>
   isAudioEffectKind(value) && AUDIO_EFFECTS[value].sidechain
+
+export const isStereoWideningKind = (value: unknown): value is StereoWideningKind =>
+  isAudioEffectKind(value) && AUDIO_EFFECTS[value].stereoWidening
 
 type AudioEffectOperation = typeof AUDIO_EFFECTS[AudioEffectKind]['operation']
 

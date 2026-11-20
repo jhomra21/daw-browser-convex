@@ -7,6 +7,7 @@ import {
   isDspAudioEffectKind,
   isModulationGroupKind,
   isSidechainCapableKind,
+  isStereoWideningKind,
 } from './audio-effect-registry'
 
 test('the registry keeps the persisted and UI device order', () => {
@@ -19,6 +20,7 @@ test('the registry keeps the persisted and UI device order', () => {
 test('traits reproduce the kind lists that used to be written out by hand', () => {
   expect(AUDIO_EFFECT_KINDS.filter(isModulationGroupKind)).toEqual(['chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble'])
   expect(AUDIO_EFFECT_KINDS.filter(isSidechainCapableKind)).toEqual(['gate', 'compressor', 'spectral'])
+  expect(AUDIO_EFFECT_KINDS.filter(isStereoWideningKind)).toEqual(['chorus', 'flanger', 'phaser', 'autopan', 'ensemble'])
   expect(OWNED_PROCESSOR_KINDS).toEqual([
     'utility', 'autofilter', 'gate', 'limiter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'spectral',
   ])

@@ -16,6 +16,7 @@ import {
   nativeAudioHostMaximumSourceEvents,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
+import { isStereoWideningKind } from "@daw-browser/shared"
 import { MASTER_ROUTE_TARGET } from "./mixer/resolve-timing"
 
 const graphEnvelopeVersion = 3
@@ -350,8 +351,7 @@ const processorOutputLayout = (
 
   if (processor.kind === 'reverb' && processorStateFloat32(processor.state, 68) > 0) return 'stereo'
 
-  if (processor.kind === 'chorus' || processor.kind === 'flanger' || processor.kind === 'phaser'
-    || processor.kind === 'autopan' || processor.kind === 'ensemble') return 'stereo'
+  if (isStereoWideningKind(processor.kind)) return 'stereo'
 
   return inputLayout
 }

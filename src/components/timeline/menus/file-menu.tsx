@@ -3,6 +3,7 @@ import { type Component, Show, createMemo } from "solid-js";
 import { MenubarContent, MenubarItem, MenubarMenu, MenubarSeparator } from "~/components/ui/menubar";
 import { NativeMenuTrigger } from "../toolbar-context";
 import type { TransportControlsProps } from "~/hooks/transport-types";
+import { runUserCommand } from "~/hooks/user-commands";
 import { nativeMenuItemClass } from "./menu-action-types";
 
 export const FileMenu: Component<{ toolbar: TransportControlsProps }> = (props) => {
@@ -16,51 +17,51 @@ export const FileMenu: Component<{ toolbar: TransportControlsProps }> = (props) 
       <MenubarContent class="border-border bg-popover">
         <MenubarItem
           class={nativeMenuItemClass}
-          onSelect={() => void toolbar().projectMenu.onCreateProject()}
+          onSelect={() => runUserCommand("new-project", toolbar())}
         >
           New Project
         </MenubarItem>
         <MenubarItem
           class={nativeMenuItemClass}
-          onSelect={() => toolbar().projectMenu.onOpenDashboard("projects")}
+          onSelect={() => runUserCommand("open-projects-dashboard", toolbar())}
         >
           Open Projects Dashboard
         </MenubarItem>
         <MenubarItem
           class={nativeMenuItemClass}
-          onSelect={() => toolbar().projectMenu.onOpenDashboard("samples")}
+          onSelect={() => runUserCommand("open-samples-dashboard", toolbar())}
         >
           Open Samples Dashboard
         </MenubarItem>
         <MenubarItem
           class={nativeMenuItemClass}
-          onSelect={() => toolbar().projectMenu.onOpenDashboard("export")}
+          onSelect={() => runUserCommand("open-export-dashboard", toolbar())}
         >
           Open Export Dashboard
         </MenubarItem>
         <MenubarSeparator />
         <MenubarItem
           class={nativeMenuItemClass}
-          onSelect={toolbar().onAddAudio}
+          onSelect={() => runUserCommand("import-audio", toolbar())}
         >
           Import Audio Files...
         </MenubarItem>
         <MenubarItem
           class={nativeMenuItemClass}
-          onSelect={() => void toolbar().projectMenu.onImportArchive()}
+          onSelect={() => runUserCommand("import-archive", toolbar())}
         >
           Import .dawproject...
         </MenubarItem>
         <MenubarItem
           class={nativeMenuItemClass}
           disabled={!canExportArchive()}
-          onSelect={() => void toolbar().projectMenu.onExportArchive()}
+          onSelect={() => runUserCommand("export-archive", toolbar())}
         >
           Export .dawproject...
         </MenubarItem>
         <MenubarItem
           class={nativeMenuItemClass}
-          onSelect={toolbar().projectMenu.onOpenExport}
+          onSelect={() => runUserCommand("export-mixdown", toolbar())}
         >
           Export Mixdown...
         </MenubarItem>
@@ -68,18 +69,18 @@ export const FileMenu: Component<{ toolbar: TransportControlsProps }> = (props) 
         <Show
           when={signedIn()}
           fallback={
-            <MenubarItem class={nativeMenuItemClass} onSelect={toolbar().projectMenu.onSignIn}>
+            <MenubarItem class={nativeMenuItemClass} onSelect={() => runUserCommand("sign-in", toolbar())}>
               Sign In
             </MenubarItem>
           }
         >
           <MenubarItem
             class={nativeMenuItemClass}
-            onSelect={() => toolbar().projectMenu.onOpenDashboard("account")}
+            onSelect={() => runUserCommand("open-account-dashboard", toolbar())}
           >
             Account
           </MenubarItem>
-          <MenubarItem class={nativeMenuItemClass} onSelect={() => void toolbar().projectMenu.onLogout()}>
+          <MenubarItem class={nativeMenuItemClass} onSelect={() => runUserCommand("logout", toolbar())}>
             Logout
           </MenubarItem>
         </Show>

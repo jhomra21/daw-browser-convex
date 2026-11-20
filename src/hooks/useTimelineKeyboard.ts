@@ -44,196 +44,187 @@ type TimelineKeyboardEvent = Pick<
   | "target"
 > & { composedPath: () => EventTarget[] };
 
-export const createTimelineKeyboardHandler = (handlers: KeyboardHandlers) => (
-  e: TimelineKeyboardEvent,
-) => {
-    if (!handlers.enabled()) return;
+type ShortcutContext = {
+  e: TimelineKeyboardEvent;
+  path: EventTarget[];
+  handlers: KeyboardHandlers;
+  // On desktop macOS the native menu's key equivalent fires first, so handling its keys here would double-fire.
+  menuOwnsCommandKey: boolean;
+};
 
-    // The composed path includes editable nodes inside open shadow roots and
-    // actual portal ancestry even though this listener runs in window capture.
-    const path = e.composedPath();
+type TimelineShortcut = {
+  id: string;
+  matches: (e: TimelineKeyboardEvent) => boolean;
+  run: (context: ShortcutContext) => void;
+};
 
-    if (keyboardTargetOwner(path)) return;
+const keyIs = (e: TimelineKeyboardEvent, letter: string) => e.key === letter || e.key === letter.toUpperCase();
+const mod = (e: TimelineKeyboardEvent) => e.ctrlKey || e.metaKey;
+const bareShift = (e: TimelineKeyboardEvent) => !e.ctrlKey && !e.metaKey && e.shiftKey;
 
-    // Left to the native menu on desktop macOS: its key equivalent fires first, so handling these here would double-fire.
-    const menuOwnsCommandKey = e.metaKey && !e.ctrlKey && !e.altKey && isMacDesktop();
+const consume = (e: TimelineKeyboardEvent) => {
+  e.preventDefault();
+  e.stopPropagation();
+};
 
-    if (
+// The first matching shortcut owns the event, whether or not it acts on it. Order is part of the contract.
+const timelineShortcuts: readonly TimelineShortcut[] = [
+  {
+    id: "toggle-follow",
+    matches: (e) =>
       e.shiftKey &&
       ((e.ctrlKey && !e.metaKey && !e.altKey) || (e.altKey && !e.ctrlKey && !e.metaKey)) &&
-      (e.key === "f" || e.key === "F")
-    ) {
+      keyIs(e, "f"),
+    run: ({ e, handlers }) => {
       if (e.altKey && isMacDesktop()) return;
-      e.preventDefault();
-      e.stopPropagation();
+      consume(e);
       handlers.onToggleFollow();
-
-      return;
-    }
-
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "g" || e.key === "G")) {
-      e.preventDefault();
-      e.stopPropagation();
+    },
+  },
+  {
+    id: "group-tracks",
+    matches: (e) => mod(e) && !e.altKey && keyIs(e, "g"),
+    run: ({ e, handlers }) => {
+      consume(e);
 
       if (e.shiftKey) handlers.onUngroupSelectedTrack();
       else handlers.onGroupSelectedTracks();
-
-      return;
-    }
-
-    if (
-      (e.ctrlKey || e.metaKey) &&
-      e.altKey &&
-      !e.shiftKey &&
-      (e.key === "b" || e.key === "B")
-    ) {
-      e.preventDefault();
-      e.stopPropagation();
+    },
+  },
+  {
+    id: "extension-ctrl-alt-b",
+    matches: (e) => mod(e) && e.altKey && !e.shiftKey && keyIs(e, "b"),
+    run: ({ e, handlers }) => {
+      consume(e);
       handlers.executeExtensionShortcut(
         { mod: true, alt: true, shift: false, key: e.key },
         { editableTarget: false },
       );
-
-      return;
-    }
-
-    // Add Track
-    // Instrument: Ctrl/Cmd + Shift + T
-    if (
-      (e.ctrlKey || e.metaKey) &&
-      e.shiftKey &&
-      (e.key === "t" || e.key === "T")
-    ) {
-      e.preventDefault();
-      e.stopPropagation();
+    },
+  },
+  {
+    id: "add-instrument-track",
+    matches: (e) => mod(e) && e.shiftKey && keyIs(e, "t"),
+    run: ({ e, handlers }) => {
+      consume(e);
       handlers.onAddInstrumentTrack();
-
-      return;
-    }
-
-    // Audio: Shift + T (no Ctrl/Cmd)
-    if (
-      !e.ctrlKey &&
-      !e.metaKey &&
-      e.shiftKey &&
-      (e.key === "t" || e.key === "T")
-    ) {
-      e.preventDefault();
-      e.stopPropagation();
+    },
+  },
+  {
+    id: "add-audio-track",
+    matches: (e) => bareShift(e) && keyIs(e, "t"),
+    run: ({ e, handlers }) => {
+      consume(e);
       handlers.onAddAudioTrack();
-
-      return;
-    }
-
-    // Return: Shift + R (no Ctrl/Cmd)
-    if (
-      !e.ctrlKey &&
-      !e.metaKey &&
-      e.shiftKey &&
-      (e.key === "r" || e.key === "R")
-    ) {
-      e.preventDefault();
-      e.stopPropagation();
+    },
+  },
+  {
+    id: "add-return-track",
+    matches: (e) => bareShift(e) && keyIs(e, "r"),
+    run: ({ e, handlers }) => {
+      consume(e);
       handlers.onAddReturnTrack();
-
-      return;
-    }
-
-    // Group: Shift + G (no Ctrl/Cmd)
-    if (
-      !e.ctrlKey &&
-      !e.metaKey &&
-      e.shiftKey &&
-      (e.key === "g" || e.key === "G")
-    ) {
-      e.preventDefault();
-      e.stopPropagation();
+    },
+  },
+  {
+    id: "add-group-track",
+    matches: (e) => bareShift(e) && keyIs(e, "g"),
+    run: ({ e, handlers }) => {
+      consume(e);
       handlers.onAddGroupTrack();
-
-      return;
-    }
-
-    // Duplicate: Ctrl/Cmd + D
-    if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) {
+    },
+  },
+  {
+    id: "duplicate",
+    matches: (e) => mod(e) && keyIs(e, "d"),
+    run: ({ e, path, handlers, menuOwnsCommandKey }) => {
       if (path.some(isLocalTimelineKeyboardTarget)) return;
 
       if (menuOwnsCommandKey) return;
-      e.preventDefault();
-      e.stopPropagation();
+      consume(e);
       handlers.onDuplicate();
-
-      return;
-    }
-
-    if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
-      if (handlers.onCopy()) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-
-      return;
-    }
-
-    if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) {
-      if (handlers.onPaste()) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-
-      return;
-    }
-
+    },
+  },
+  {
+    id: "copy",
+    matches: (e) => mod(e) && keyIs(e, "c"),
+    run: ({ e, handlers }) => {
+      if (handlers.onCopy()) consume(e);
+    },
+  },
+  {
+    id: "paste",
+    matches: (e) => mod(e) && keyIs(e, "v"),
+    run: ({ e, handlers }) => {
+      if (handlers.onPaste()) consume(e);
+    },
+  },
+  {
     // Undo: Ctrl/Cmd + Z; redo: Ctrl/Cmd + Shift + Z
-    if (
-      (e.ctrlKey || e.metaKey) &&
-      (e.key === "z" || e.key === "Z")
-    ) {
+    id: "undo-redo",
+    matches: (e) => mod(e) && keyIs(e, "z"),
+    run: ({ e, handlers, menuOwnsCommandKey }) => {
       if (menuOwnsCommandKey) return;
-      e.preventDefault();
-      e.stopPropagation();
+      consume(e);
 
       if (e.shiftKey) handlers.onRedo();
       else handlers.onUndo();
-
-      return;
-    }
-
-    // Redo: Ctrl/Cmd + Y
-    if (
-      (e.ctrlKey || e.metaKey) &&
-      !e.shiftKey &&
-      (e.key === "y" || e.key === "Y")
-    ) {
-      e.preventDefault();
-      e.stopPropagation();
+    },
+  },
+  {
+    id: "redo",
+    matches: (e) => mod(e) && !e.shiftKey && keyIs(e, "y"),
+    run: ({ e, handlers }) => {
+      consume(e);
       handlers.onRedo();
-
-      return;
-    }
-
-    // Export: Ctrl/Cmd + Shift + E
-    if (
-      (e.ctrlKey || e.metaKey) &&
-      e.shiftKey &&
-      (e.key === "e" || e.key === "E")
-    ) {
-      e.preventDefault();
-      e.stopPropagation();
+    },
+  },
+  {
+    id: "export-mixdown",
+    matches: (e) => mod(e) && e.shiftKey && keyIs(e, "e"),
+    run: ({ e, handlers }) => {
+      consume(e);
       handlers.onOpenExport();
-
-      return;
-    }
-
-    if (e.code === "Space") {
-      e.preventDefault();
-      e.stopPropagation();
+    },
+  },
+  {
+    id: "play-pause",
+    matches: (e) => e.code === "Space",
+    run: ({ e, handlers }) => {
+      consume(e);
       handlers.onSpace();
-    } else if (e.key === "Delete" || e.key === "Backspace") {
+    },
+  },
+  {
+    id: "delete",
+    matches: (e) => e.key === "Delete" || e.key === "Backspace",
+    run: ({ e, path, handlers }) => {
       if (path.some(isLocalTimelineKeyboardTarget)) return;
-      e.preventDefault();
-      e.stopPropagation();
+      consume(e);
       handlers.onDelete();
-    }
+    },
+  },
+];
+
+export const createTimelineKeyboardHandler = (handlers: KeyboardHandlers) => (
+  e: TimelineKeyboardEvent,
+) => {
+  if (!handlers.enabled()) return;
+
+  // The composed path includes editable nodes inside open shadow roots and
+  // actual portal ancestry even though this listener runs in window capture.
+  const path = e.composedPath();
+
+  if (keyboardTargetOwner(path)) return;
+
+  const shortcut = timelineShortcuts.find((candidate) => candidate.matches(e));
+
+  shortcut?.run({
+    e,
+    path,
+    handlers,
+    menuOwnsCommandKey: e.metaKey && !e.ctrlKey && !e.altKey && isMacDesktop(),
+  });
 };
 
 export function useTimelineKeyboard(handlers: KeyboardHandlers) {

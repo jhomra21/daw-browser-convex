@@ -2,6 +2,7 @@ import type { Component } from "solid-js";
 import { MenubarContent, MenubarItem, MenubarMenu, MenubarSeparator, MenubarShortcut } from "~/components/ui/menubar";
 import { NativeMenuTrigger } from "../toolbar-context";
 import type { TransportControlsProps } from "~/hooks/transport-types";
+import { runUserCommand } from "~/hooks/user-commands";
 import { nativeMenuItemClass } from "./menu-action-types";
 
 export const EditMenu: Component<{ toolbar: TransportControlsProps }> = (props) => {
@@ -37,7 +38,7 @@ export const EditMenu: Component<{ toolbar: TransportControlsProps }> = (props) 
         <MenubarSeparator />
         <MenubarItem
           class={nativeMenuItemClass}
-          onSelect={() => toolbar().projectMenu.onOpenDashboard("keyboard")}
+          onSelect={() => runUserCommand("keyboard-shortcuts", toolbar())}
         >
           Keyboard Shortcuts
         </MenubarItem>

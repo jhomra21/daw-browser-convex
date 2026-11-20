@@ -93,7 +93,7 @@ export const nativeAudioHostMaximumAssetChannels = 64
 export const nativeAudioHostMaximumAssetFrames = 262_144
 export const nativeAudioHostMaximumInstalledAssets = 64
 export const nativeAudioHostMappedAssetPageHeaderBytes = 16
-export const nativeAudioHostMaximumMappedAssetRanges = 4_096
+export const nativeAudioHostMaximumMappedAssetRanges = 256
 
 export const nativeAudioHostMaximumMappedAssetPageFramesForChannels = (channelCount: number) => (
   Number.isSafeInteger(channelCount) && channelCount > 0

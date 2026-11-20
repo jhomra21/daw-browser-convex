@@ -106,7 +106,7 @@ export const WSOLA_MAX_SEARCH_FRAMES = 4_096
 export const WSOLA_MAX_SOURCE_CHUNK_FRAMES = 65_536
 const WSOLA_MAX_SCORE_SAMPLES_PER_OUTPUT_WINDOW = 4_194_304
 export const WSOLA_MAX_PIPELINE_WORKING_MEMORY_BYTES = 64 * 1024 * 1024
-export const WSOLA_MAX_MATERIALIZED_OUTPUT_BYTES = 256 * 1024 * 1024
+const WSOLA_MAX_MATERIALIZED_OUTPUT_BYTES = 256 * 1024 * 1024
 
 export type WsolaBoundedSourceConfig = Omit<WsolaStretchConfig, 'createTransaction' | 'createAsyncTransaction'> & {
   createTransaction: WsolaPcmTransactionFactory

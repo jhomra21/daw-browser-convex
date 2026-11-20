@@ -2,9 +2,9 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import type { AudioStretchReadPlan, AudioStretchReadPlanSegment } from './audio-stretch-read-plan'
 import type { AudioAssetRef } from '../../audio-core-contract/src/index'
 
-export const PREPARED_STRETCH_ARTIFACT_VERSION = 'v1'
-export const PREPARED_STRETCH_RENDERER_VERSION = 'audio-stretch-renderer:v1'
-export const PREPARED_STRETCH_ALGORITHM_VERSION = 'wsola:v1'
+const PREPARED_STRETCH_ARTIFACT_VERSION = 'v1'
+const PREPARED_STRETCH_RENDERER_VERSION = 'audio-stretch-renderer:v1'
+const PREPARED_STRETCH_ALGORITHM_VERSION = 'wsola:v1'
 
 export type PreparedStretchArtifactSegment = Pick<
   AudioStretchReadPlanSegment,

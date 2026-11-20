@@ -265,7 +265,7 @@ const shouldScheduleStretchSource = (input: {
   return input.timelineStartSec < horizonEndSec && renderEndSec > input.playheadSec
 }
 
-export const STRETCH_REPITCH_FALLBACK_IMMINENT_SEC = 1
+const STRETCH_REPITCH_FALLBACK_IMMINENT_SEC = 1
 
 export const canFallbackToRepitchStretch = (input: {
   playheadSec: number

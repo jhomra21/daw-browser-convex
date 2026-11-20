@@ -56,7 +56,7 @@ export type {
 } from "~/types/desktop-bridge"
 
 import { createDesktopCapabilityExportOutputTargetFactory, desktopExportResourceLimits } from "~/lib/desktop/capability-export-output-targets"
-import { CapabilityFile } from "~/lib/desktop/capability-file"
+import { CapabilityFile } from "~/lib/capability-file"
 import { preflightExportResources } from "~/lib/export/export-resource-preflight"
 import { collectStemTracks } from "~/lib/export/run-export-job"
 import type { PreparedStemExport, PreparedTimelineExport, TimelineExportInput, TimelineExportService } from "~/lib/export/timeline-export-service"

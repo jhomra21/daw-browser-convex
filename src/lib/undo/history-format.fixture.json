@@ -1,0 +1,951 @@
+{
+  "version": 7,
+  "undo": [
+    {
+      "type": "section-edit",
+      "projectId": "project:history-format",
+      "data": {
+        "entries": [
+          {
+            "type": "track-volume",
+            "projectId": "project:history-format",
+            "data": {
+              "trackRef": "track-1",
+              "scope": "local",
+              "from": 0.5,
+              "to": 0.9
+            }
+          },
+          {
+            "type": "clip-color",
+            "projectId": "project:history-format",
+            "data": {
+              "clipRef": "clip-1",
+              "to": "track-red"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "control-range-delete",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRefs": [
+          "track-1"
+        ],
+        "startSec": 0,
+        "endSec": 2,
+        "recoveryId": "recovery-1"
+      }
+    },
+    {
+      "type": "clip-create",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRef": "track-1",
+        "clip": {
+          "clipRef": "clip-1",
+          "startSec": 0,
+          "duration": 4,
+          "name": "Clip 1",
+          "currentId": "clip-1"
+        }
+      }
+    },
+    {
+      "type": "clip-delete",
+      "projectId": "project:history-format",
+      "data": {
+        "items": [
+          {
+            "trackRef": "track-1",
+            "clip": {
+              "clipRef": "clip-1",
+              "startSec": 0,
+              "duration": 4,
+              "name": "Clip 1",
+              "recoveryId": "recovery-1"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "clips-move",
+      "projectId": "project:history-format",
+      "data": {
+        "moves": [
+          {
+            "clipRef": "clip-1",
+            "from": {
+              "trackRef": "track-1",
+              "startSec": 0
+            },
+            "to": {
+              "trackRef": "track-2",
+              "startSec": 3
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "clip-timing",
+      "projectId": "project:history-format",
+      "data": {
+        "clipRef": "clip-1",
+        "from": {
+          "startSec": 0,
+          "duration": 4
+        },
+        "to": {
+          "startSec": 1,
+          "duration": 2,
+          "leftPadSec": 0.5,
+          "gain": 0.8
+        }
+      }
+    },
+    {
+      "type": "clip-fades",
+      "projectId": "project:history-format",
+      "data": {
+        "clipRef": "clip-1",
+        "from": {
+          "fadeInSec": 0,
+          "fadeOutSec": 1,
+          "fadeInCurve": 0,
+          "fadeOutCurve": 0
+        },
+        "to": {
+          "fadeInSec": 2,
+          "fadeOutSec": 1,
+          "fadeInCurve": 0,
+          "fadeOutCurve": 0
+        }
+      }
+    },
+    {
+      "type": "clip-audio-warp",
+      "projectId": "project:history-format",
+      "data": {
+        "clipRef": "clip-1",
+        "from": {
+          "audioWarp": {
+            "enabled": false,
+            "mode": "repitch"
+          }
+        },
+        "to": {
+          "audioWarp": {
+            "enabled": true,
+            "mode": "repitch"
+          }
+        }
+      }
+    },
+    {
+      "type": "clip-midi-notes",
+      "projectId": "project:history-format",
+      "data": {
+        "clipRef": "clip-1",
+        "changes": [
+          {
+            "id": "note-1",
+            "after": {
+              "id": "note-1",
+              "beat": 0,
+              "length": 1,
+              "pitch": 60,
+              "channel": 0,
+              "velocity": 100
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "clip-color",
+      "projectId": "project:history-format",
+      "data": {
+        "clipRef": "clip-1",
+        "from": "track-blue",
+        "to": "track-red"
+      }
+    },
+    {
+      "type": "track-create",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRef": "track-4",
+        "currentTrackId": "track-4",
+        "name": "Track 4",
+        "index": 3,
+        "kind": "audio",
+        "channelRole": "track",
+        "color": "track-blue"
+      }
+    },
+    {
+      "type": "track-clip-create",
+      "projectId": "project:history-format",
+      "data": {
+        "track": {
+          "trackRef": "track-4",
+          "index": 3,
+          "name": "Track 4"
+        },
+        "clip": {
+          "clipRef": "clip-4",
+          "startSec": 0,
+          "duration": 4,
+          "name": "Clip 1",
+          "trackRef": "track-4"
+        }
+      }
+    },
+    {
+      "type": "track-delete",
+      "projectId": "project:history-format",
+      "data": {
+        "track": {
+          "trackRef": "track-3",
+          "index": 2,
+          "name": "Track 3",
+          "volume": 0.7,
+          "muted": false,
+          "soloed": false,
+          "kind": "audio",
+          "channelRole": "track",
+          "routing": {
+            "sends": []
+          }
+        },
+        "clips": [
+          {
+            "clipRef": "clip-3",
+            "startSec": 0,
+            "duration": 4,
+            "name": "Clip 1",
+            "recoveryId": "recovery-3"
+          }
+        ],
+        "automation": [
+          {
+            "id": "automation-1",
+            "projectId": "project:history-format",
+            "target": {
+              "kind": "track",
+              "trackId": "track-1"
+            },
+            "targetKey": "track:track-1:volume",
+            "parameterId": "volume",
+            "enabled": true,
+            "points": [
+              {
+                "id": "point-1",
+                "timeSec": 0,
+                "value": 0.5,
+                "interpolation": "linear"
+              }
+            ],
+            "updatedAt": 1
+          }
+        ]
+      }
+    },
+    {
+      "type": "track-volume",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRef": "track-1",
+        "scope": "local",
+        "from": 0.5,
+        "to": 0.9
+      }
+    },
+    {
+      "type": "track-mute",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRef": "track-1",
+        "scope": "shared",
+        "from": false,
+        "to": true
+      }
+    },
+    {
+      "type": "track-solo",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRef": "track-1",
+        "scope": "local",
+        "from": true,
+        "to": false
+      }
+    },
+    {
+      "type": "track-routing",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRef": "track-1",
+        "from": {
+          "sends": []
+        },
+        "to": {
+          "sends": [
+            {
+              "targetTrackRef": "track-2",
+              "amount": 0.5,
+              "tap": "post-fader"
+            }
+          ],
+          "outputTargetRef": "track-2"
+        }
+      }
+    },
+    {
+      "type": "track-group",
+      "projectId": "project:history-format",
+      "data": {
+        "groupTrackRef": "group-1",
+        "groupTrack": {
+          "index": 0,
+          "name": "Group"
+        },
+        "childUpdates": [
+          {
+            "trackRef": "track-1",
+            "nextOutputTargetRef": "group-1"
+          }
+        ]
+      }
+    },
+    {
+      "type": "track-ungroup",
+      "projectId": "project:history-format",
+      "data": {
+        "groupTrackRef": "group-1",
+        "sourceGroupTrackId": "group-1",
+        "groupTrack": {
+          "trackRef": "group-1",
+          "index": 2,
+          "name": "Track 3",
+          "volume": 0.7,
+          "muted": false,
+          "soloed": false,
+          "kind": "audio",
+          "channelRole": "group",
+          "routing": {
+            "sends": []
+          }
+        },
+        "childSnapshots": [
+          {
+            "trackRef": "track-1",
+            "previousGroupRef": "group-1"
+          }
+        ]
+      }
+    },
+    {
+      "type": "track-color",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRef": "track-1",
+        "to": "track-green"
+      }
+    },
+    {
+      "type": "track-color-cascade",
+      "projectId": "project:history-format",
+      "data": {
+        "tracks": [
+          {
+            "trackRef": "track-1",
+            "to": "track-green"
+          }
+        ],
+        "clips": [
+          {
+            "clipRef": "clip-1",
+            "to": "track-green"
+          }
+        ]
+      }
+    },
+    {
+      "type": "track-reorder",
+      "projectId": "project:history-format",
+      "data": {
+        "patches": [
+          {
+            "trackRef": "track-1",
+            "fromIndex": 0,
+            "toIndex": 1
+          },
+          {
+            "trackRef": "track-2",
+            "fromIndex": 1,
+            "toIndex": 0
+          }
+        ]
+      }
+    },
+    {
+      "type": "effect-params",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRef": "track-1",
+        "effect": "compressor",
+        "instanceId": "compressor-1",
+        "from": {
+          "enabled": true,
+          "thresholdDb": -24,
+          "ratio": 4,
+          "attackMs": 10,
+          "releaseMs": 120,
+          "autoRelease": true,
+          "makeupDb": 0,
+          "outputDb": 0,
+          "dryWet": 1,
+          "kneeDb": 6,
+          "lookaheadMs": 0,
+          "detectorMode": "rms",
+          "dynamicsMode": "compress",
+          "envelopeCurve": "log",
+          "sidechain": {
+            "enabled": false,
+            "filterType": "highpass",
+            "frequencyHz": 120,
+            "q": 0.707
+          }
+        },
+        "to": {
+          "enabled": true,
+          "thresholdDb": -30,
+          "ratio": 4,
+          "attackMs": 10,
+          "releaseMs": 120,
+          "autoRelease": true,
+          "makeupDb": 0,
+          "outputDb": 0,
+          "dryWet": 1,
+          "kneeDb": 6,
+          "lookaheadMs": 0,
+          "detectorMode": "rms",
+          "dynamicsMode": "compress",
+          "envelopeCurve": "log",
+          "sidechain": {
+            "enabled": false,
+            "filterType": "highpass",
+            "frequencyHz": 120,
+            "q": 0.707
+          }
+        }
+      }
+    },
+    {
+      "type": "automation-envelope-change",
+      "projectId": "project:history-format",
+      "data": {
+        "before": null,
+        "after": {
+          "id": "automation-1",
+          "projectId": "project:history-format",
+          "target": {
+            "kind": "track",
+            "trackId": "track-1"
+          },
+          "targetKey": "track:track-1:volume",
+          "parameterId": "volume",
+          "enabled": true,
+          "points": [
+            {
+              "id": "point-1",
+              "timeSec": 0,
+              "value": 0.5,
+              "interpolation": "linear"
+            }
+          ],
+          "updatedAt": 1
+        }
+      }
+    }
+  ],
+  "redo": [
+    {
+      "type": "automation-envelope-change",
+      "projectId": "project:history-format",
+      "data": {
+        "before": null,
+        "after": {
+          "id": "automation-1",
+          "projectId": "project:history-format",
+          "target": {
+            "kind": "track",
+            "trackId": "track-1"
+          },
+          "targetKey": "track:track-1:volume",
+          "parameterId": "volume",
+          "enabled": true,
+          "points": [
+            {
+              "id": "point-1",
+              "timeSec": 0,
+              "value": 0.5,
+              "interpolation": "linear"
+            }
+          ],
+          "updatedAt": 1
+        }
+      }
+    },
+    {
+      "type": "effect-params",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRef": "track-1",
+        "effect": "compressor",
+        "instanceId": "compressor-1",
+        "from": {
+          "enabled": true,
+          "thresholdDb": -24,
+          "ratio": 4,
+          "attackMs": 10,
+          "releaseMs": 120,
+          "autoRelease": true,
+          "makeupDb": 0,
+          "outputDb": 0,
+          "dryWet": 1,
+          "kneeDb": 6,
+          "lookaheadMs": 0,
+          "detectorMode": "rms",
+          "dynamicsMode": "compress",
+          "envelopeCurve": "log",
+          "sidechain": {
+            "enabled": false,
+            "filterType": "highpass",
+            "frequencyHz": 120,
+            "q": 0.707
+          }
+        },
+        "to": {
+          "enabled": true,
+          "thresholdDb": -30,
+          "ratio": 4,
+          "attackMs": 10,
+          "releaseMs": 120,
+          "autoRelease": true,
+          "makeupDb": 0,
+          "outputDb": 0,
+          "dryWet": 1,
+          "kneeDb": 6,
+          "lookaheadMs": 0,
+          "detectorMode": "rms",
+          "dynamicsMode": "compress",
+          "envelopeCurve": "log",
+          "sidechain": {
+            "enabled": false,
+            "filterType": "highpass",
+            "frequencyHz": 120,
+            "q": 0.707
+          }
+        }
+      }
+    },
+    {
+      "type": "track-reorder",
+      "projectId": "project:history-format",
+      "data": {
+        "patches": [
+          {
+            "trackRef": "track-1",
+            "fromIndex": 0,
+            "toIndex": 1
+          },
+          {
+            "trackRef": "track-2",
+            "fromIndex": 1,
+            "toIndex": 0
+          }
+        ]
+      }
+    },
+    {
+      "type": "track-color-cascade",
+      "projectId": "project:history-format",
+      "data": {
+        "tracks": [
+          {
+            "trackRef": "track-1",
+            "to": "track-green"
+          }
+        ],
+        "clips": [
+          {
+            "clipRef": "clip-1",
+            "to": "track-green"
+          }
+        ]
+      }
+    },
+    {
+      "type": "track-color",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRef": "track-1",
+        "to": "track-green"
+      }
+    },
+    {
+      "type": "track-ungroup",
+      "projectId": "project:history-format",
+      "data": {
+        "groupTrackRef": "group-1",
+        "sourceGroupTrackId": "group-1",
+        "groupTrack": {
+          "trackRef": "group-1",
+          "index": 2,
+          "name": "Track 3",
+          "volume": 0.7,
+          "muted": false,
+          "soloed": false,
+          "kind": "audio",
+          "channelRole": "group",
+          "routing": {
+            "sends": []
+          }
+        },
+        "childSnapshots": [
+          {
+            "trackRef": "track-1",
+            "previousGroupRef": "group-1"
+          }
+        ]
+      }
+    },
+    {
+      "type": "track-group",
+      "projectId": "project:history-format",
+      "data": {
+        "groupTrackRef": "group-1",
+        "groupTrack": {
+          "index": 0,
+          "name": "Group"
+        },
+        "childUpdates": [
+          {
+            "trackRef": "track-1",
+            "nextOutputTargetRef": "group-1"
+          }
+        ]
+      }
+    },
+    {
+      "type": "track-routing",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRef": "track-1",
+        "from": {
+          "sends": []
+        },
+        "to": {
+          "sends": [
+            {
+              "targetTrackRef": "track-2",
+              "amount": 0.5,
+              "tap": "post-fader"
+            }
+          ],
+          "outputTargetRef": "track-2"
+        }
+      }
+    },
+    {
+      "type": "track-solo",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRef": "track-1",
+        "scope": "local",
+        "from": true,
+        "to": false
+      }
+    },
+    {
+      "type": "track-mute",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRef": "track-1",
+        "scope": "shared",
+        "from": false,
+        "to": true
+      }
+    },
+    {
+      "type": "track-volume",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRef": "track-1",
+        "scope": "local",
+        "from": 0.5,
+        "to": 0.9
+      }
+    },
+    {
+      "type": "track-delete",
+      "projectId": "project:history-format",
+      "data": {
+        "track": {
+          "trackRef": "track-3",
+          "index": 2,
+          "name": "Track 3",
+          "volume": 0.7,
+          "muted": false,
+          "soloed": false,
+          "kind": "audio",
+          "channelRole": "track",
+          "routing": {
+            "sends": []
+          }
+        },
+        "clips": [
+          {
+            "clipRef": "clip-3",
+            "startSec": 0,
+            "duration": 4,
+            "name": "Clip 1",
+            "recoveryId": "recovery-3"
+          }
+        ],
+        "automation": [
+          {
+            "id": "automation-1",
+            "projectId": "project:history-format",
+            "target": {
+              "kind": "track",
+              "trackId": "track-1"
+            },
+            "targetKey": "track:track-1:volume",
+            "parameterId": "volume",
+            "enabled": true,
+            "points": [
+              {
+                "id": "point-1",
+                "timeSec": 0,
+                "value": 0.5,
+                "interpolation": "linear"
+              }
+            ],
+            "updatedAt": 1
+          }
+        ]
+      }
+    },
+    {
+      "type": "track-clip-create",
+      "projectId": "project:history-format",
+      "data": {
+        "track": {
+          "trackRef": "track-4",
+          "index": 3,
+          "name": "Track 4"
+        },
+        "clip": {
+          "clipRef": "clip-4",
+          "startSec": 0,
+          "duration": 4,
+          "name": "Clip 1",
+          "trackRef": "track-4"
+        }
+      }
+    },
+    {
+      "type": "track-create",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRef": "track-4",
+        "currentTrackId": "track-4",
+        "name": "Track 4",
+        "index": 3,
+        "kind": "audio",
+        "channelRole": "track",
+        "color": "track-blue"
+      }
+    },
+    {
+      "type": "clip-color",
+      "projectId": "project:history-format",
+      "data": {
+        "clipRef": "clip-1",
+        "from": "track-blue",
+        "to": "track-red"
+      }
+    },
+    {
+      "type": "clip-midi-notes",
+      "projectId": "project:history-format",
+      "data": {
+        "clipRef": "clip-1",
+        "changes": [
+          {
+            "id": "note-1",
+            "after": {
+              "id": "note-1",
+              "beat": 0,
+              "length": 1,
+              "pitch": 60,
+              "channel": 0,
+              "velocity": 100
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "clip-audio-warp",
+      "projectId": "project:history-format",
+      "data": {
+        "clipRef": "clip-1",
+        "from": {
+          "audioWarp": {
+            "enabled": false,
+            "mode": "repitch"
+          }
+        },
+        "to": {
+          "audioWarp": {
+            "enabled": true,
+            "mode": "repitch"
+          }
+        }
+      }
+    },
+    {
+      "type": "clip-fades",
+      "projectId": "project:history-format",
+      "data": {
+        "clipRef": "clip-1",
+        "from": {
+          "fadeInSec": 0,
+          "fadeOutSec": 1,
+          "fadeInCurve": 0,
+          "fadeOutCurve": 0
+        },
+        "to": {
+          "fadeInSec": 2,
+          "fadeOutSec": 1,
+          "fadeInCurve": 0,
+          "fadeOutCurve": 0
+        }
+      }
+    },
+    {
+      "type": "clip-timing",
+      "projectId": "project:history-format",
+      "data": {
+        "clipRef": "clip-1",
+        "from": {
+          "startSec": 0,
+          "duration": 4
+        },
+        "to": {
+          "startSec": 1,
+          "duration": 2,
+          "leftPadSec": 0.5,
+          "gain": 0.8
+        }
+      }
+    },
+    {
+      "type": "clips-move",
+      "projectId": "project:history-format",
+      "data": {
+        "moves": [
+          {
+            "clipRef": "clip-1",
+            "from": {
+              "trackRef": "track-1",
+              "startSec": 0
+            },
+            "to": {
+              "trackRef": "track-2",
+              "startSec": 3
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "clip-delete",
+      "projectId": "project:history-format",
+      "data": {
+        "items": [
+          {
+            "trackRef": "track-1",
+            "clip": {
+              "clipRef": "clip-1",
+              "startSec": 0,
+              "duration": 4,
+              "name": "Clip 1",
+              "recoveryId": "recovery-1"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "clip-create",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRef": "track-1",
+        "clip": {
+          "clipRef": "clip-1",
+          "startSec": 0,
+          "duration": 4,
+          "name": "Clip 1",
+          "currentId": "clip-1"
+        }
+      }
+    },
+    {
+      "type": "control-range-delete",
+      "projectId": "project:history-format",
+      "data": {
+        "trackRefs": [
+          "track-1"
+        ],
+        "startSec": 0,
+        "endSec": 2,
+        "recoveryId": "recovery-1"
+      }
+    },
+    {
+      "type": "section-edit",
+      "projectId": "project:history-format",
+      "data": {
+        "entries": [
+          {
+            "type": "track-volume",
+            "projectId": "project:history-format",
+            "data": {
+              "trackRef": "track-1",
+              "scope": "local",
+              "from": 0.5,
+              "to": 0.9
+            }
+          },
+          {
+            "type": "clip-color",
+            "projectId": "project:history-format",
+            "data": {
+              "clipRef": "clip-1",
+              "to": "track-red"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

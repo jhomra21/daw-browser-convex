@@ -34,9 +34,9 @@ import {
   timelineRangeRecoveryAutomationDigestV2,
   timelineRangeRecoveryClipDigestV2,
   type ControlActionV1 as CanonicalControlActionV1,
-  ProjectSnapshotV1 as CanonicalProjectSnapshotV1,
-  ProjectSnapshotV2 as CanonicalProjectSnapshotV2,
-  RecoveryPayload,
+  type ProjectSnapshotV1 as CanonicalProjectSnapshotV1,
+  type ProjectSnapshotV2 as CanonicalProjectSnapshotV2,
+  type RecoveryPayload,
 } from '@daw-browser/control'
 import { ControlMidiResolutionError, resolveControlMidiActionV1 } from './midi'
 import { collectDeletedTrackIdsV1, collectTrackDeletionAffectedIdsV1 } from './trackDeletion'

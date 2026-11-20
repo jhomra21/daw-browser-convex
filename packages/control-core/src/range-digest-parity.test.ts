@@ -1,22 +1,28 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { expect, test } from "bun:test";
 
+import { isJsonObject, type JsonValue } from "@daw-browser/shared";
+
 import {
   timelineRangeRecoveryAutomationDigestV2,
   timelineRangeRecoveryClipDigestV2,
 } from "@daw-browser/control";
 
 // The planner's former private canonicalizer, kept as the oracle the shared digest must match.
-const legacyCanonical = (value: unknown): string => {
+const legacyCanonical = (value: JsonValue | undefined): string => {
   if (value === undefined) return "undefined";
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
+
   if (Array.isArray(value)) return `[${value.map(legacyCanonical).join(",")}]`;
 
-  return `{${Object.entries(value)
-    .filter(([, entry]) => entry !== undefined)
-    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
-    .map(([key, entry]) => `${JSON.stringify(key)}:${legacyCanonical(entry)}`)
-    .join(",")}}`;
+  if (isJsonObject(value)) {
+    return `{${Object.entries(value)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([key, entry]) => `${JSON.stringify(key)}:${legacyCanonical(entry)}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value);
 };
 
 const legacySha = (value: string) => Array.from(sha256(new TextEncoder().encode(value)), (byte) => byte.toString(16).padStart(2, "0")).join("");

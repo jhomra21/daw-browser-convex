@@ -217,9 +217,9 @@ export type ControlOperationMap = {
 
 type ControlOperationCatalog = typeof controlOperationCatalog
 
-export type ControlSdkGroup = ControlOperationSurfaces['sdk']['group']
+type ControlSdkGroup = ControlOperationSurfaces['sdk']['group']
 
-export type ControlSdkOperations<Group extends ControlSdkGroup> = {
+type ControlSdkOperations<Group extends ControlSdkGroup> = {
   readonly [Id in ControlOperationId as ControlOperationCatalog[Id]['surfaces']['sdk']['group'] extends Group
     ? ControlOperationCatalog[Id]['surfaces']['sdk']['method']
     : never]: Id
@@ -229,7 +229,7 @@ export type ControlCliCommand = {
   [Id in ControlOperationId]: ControlOperationCatalog[Id]['surfaces']['cli'][number]
 }[ControlOperationId]
 
-export type ControlCliOperations = {
+type ControlCliOperations = {
   readonly [Command in ControlCliCommand]: {
     [Id in ControlOperationId]: Command extends ControlOperationCatalog[Id]['surfaces']['cli'][number] ? Id : never
   }[ControlOperationId]

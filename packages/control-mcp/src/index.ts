@@ -390,6 +390,7 @@ export const createControlMcpServer = (
   const toolName = (operationId: ControlOperationId) => controlOperationCatalog[operationId].surfaces.mcp
 
   const controlToolHandlers = new Map<string, (input: McpToolInput) => Promise<CallToolResult>>()
+
   const controlTool = <Handler extends (input: McpToolInput) => Promise<CallToolResult>>(name: string, handler: Handler): Handler => {
     controlToolHandlers.set(name, handler)
 

@@ -235,7 +235,8 @@ export const updateRecordingCalibrations = (
 export const normalizeAppPreferences = (value: JsonValue): AppPreferences => {
   if (!isJsonObject(value)) return defaultAppPreferences
 
-  const version = isJsonNumber(value.version) ? APP_PREFERENCES_VERSION_ROWS[value.version] : undefined
+  const version = isJsonNumber(value.version) ? APP_PREFERENCES_VERSION_ROWS.get(value.version) : undefined
+
   if (!version) return defaultAppPreferences
 
   const appearance = isJsonObject(value.appearance) ? value.appearance : {}

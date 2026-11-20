@@ -71,6 +71,286 @@
       "rules": {
         "eslint/no-use-before-define": "error"
       }
+    },
+    {
+      "files": [
+        "packages/**"
+      ],
+      "excludeFiles": [
+        "**/*.test.ts"
+      ],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "~",
+                  "~/**",
+                  "../../src/**",
+                  "../../apps/**",
+                  "../../convex/**",
+                  "../../api/**",
+                  "../../tools/**",
+                  "../../../src/**",
+                  "../../../apps/**",
+                  "../../../convex/**",
+                  "../../../api/**",
+                  "../../../tools/**",
+                  "../../../../src/**",
+                  "../../../../apps/**",
+                  "../../../../convex/**",
+                  "../../../../api/**",
+                  "../../../../tools/**",
+                  "../../../../../src/**",
+                  "../../../../../apps/**",
+                  "../../../../../convex/**",
+                  "../../../../../api/**",
+                  "../../../../../tools/**"
+                ],
+                "message": "packages are the lowest layer: they must not import src, apps, convex or api."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "convex/**",
+        "api/**"
+      ],
+      "excludeFiles": [
+        "**/*.test.ts",
+        "convex/_generated/**"
+      ],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "~",
+                  "~/**",
+                  "../src/**",
+                  "../apps/**",
+                  "../../src/**",
+                  "../../apps/**",
+                  "../../../src/**",
+                  "../../../apps/**"
+                ],
+                "message": "convex and api may import packages only, not src or apps."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "apps/desktop/**"
+      ],
+      "excludeFiles": [
+        "**/*.test.ts"
+      ],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "~",
+                  "~/**",
+                  "../src/**",
+                  "../tools/**",
+                  "../../src/**",
+                  "../../tools/**",
+                  "../../../src/**",
+                  "../../../tools/**"
+                ],
+                "message": "apps/desktop may import packages only; shared renderer/main code belongs in packages/*."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/lib/**"
+      ],
+      "excludeFiles": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.browser-test.ts",
+        "**/*.browser-test.tsx"
+      ],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "~/components",
+                  "~/components/**",
+                  "~/hooks",
+                  "~/hooks/**",
+                  "~/context",
+                  "~/context/**",
+                  "~/routes",
+                  "~/routes/**",
+                  "../components/**",
+                  "../hooks/**",
+                  "../context/**",
+                  "../routes/**",
+                  "../../components/**",
+                  "../../hooks/**",
+                  "../../context/**",
+                  "../../routes/**",
+                  "../../../components/**",
+                  "../../../hooks/**",
+                  "../../../context/**",
+                  "../../../routes/**",
+                  "../../../../components/**",
+                  "../../../../hooks/**",
+                  "../../../../context/**",
+                  "../../../../routes/**"
+                ],
+                "message": "src/lib is below hooks, context, components and routes: move the shared type or model down into src/lib."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/lib/**"
+      ],
+      "excludeFiles": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.browser-test.ts",
+        "**/*.browser-test.tsx",
+        "src/lib/desktop/**",
+        "src/lib/export/**"
+      ],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "~/components",
+                  "~/components/**",
+                  "~/hooks",
+                  "~/hooks/**",
+                  "~/context",
+                  "~/context/**",
+                  "~/routes",
+                  "~/routes/**",
+                  "../components/**",
+                  "../hooks/**",
+                  "../context/**",
+                  "../routes/**",
+                  "../../components/**",
+                  "../../hooks/**",
+                  "../../context/**",
+                  "../../routes/**",
+                  "../../../components/**",
+                  "../../../hooks/**",
+                  "../../../context/**",
+                  "../../../routes/**",
+                  "../../../../components/**",
+                  "../../../../hooks/**",
+                  "../../../../context/**",
+                  "../../../../routes/**",
+                  "~/lib/desktop",
+                  "~/lib/desktop/**",
+                  "./desktop/**",
+                  "../desktop/**",
+                  "../../desktop/**"
+                ],
+                "message": "Browser-side src/lib modules must not import src/lib/desktop, which is desktop-only; only the desktop composition path (src/lib/desktop, src/lib/export) may."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/hooks/**",
+        "src/context/**"
+      ],
+      "excludeFiles": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.browser-test.ts",
+        "**/*.browser-test.tsx"
+      ],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "~/components",
+                  "~/components/**",
+                  "~/routes",
+                  "~/routes/**",
+                  "../components/**",
+                  "../routes/**",
+                  "../../components/**",
+                  "../../routes/**",
+                  "../../../components/**",
+                  "../../../routes/**",
+                  "../../../../components/**",
+                  "../../../../routes/**"
+                ],
+                "message": "hooks and context are below components and routes: move the shared type or model down into src/lib or src/hooks."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/components/**"
+      ],
+      "excludeFiles": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.browser-test.ts",
+        "**/*.browser-test.tsx"
+      ],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "~/routes",
+                  "~/routes/**",
+                  "../routes/**",
+                  "../../routes/**",
+                  "../../../routes/**",
+                  "../../../../routes/**"
+                ],
+                "message": "components are below routes."
+              }
+            ]
+          }
+        ]
+      }
     }
   ],
   "rules": {

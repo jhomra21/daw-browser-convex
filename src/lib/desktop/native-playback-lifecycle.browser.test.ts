@@ -8,7 +8,7 @@ import { createDefaultSpectralParams } from '@daw-browser/shared'
 
 const root = new URL('../../../', import.meta.url).pathname.replace(/\/$/u, '')
 const evidence = process.env.DAW_INSTRUMENT_EVIDENCE ?? `/tmp/daw-native-lifecycle-evidence-${crypto.randomUUID()}`
-const runtime = `${root}/src/lib/desktop/native-playback-lifecycle.browser-runtime.ts`
+const runtime = `${root}/src/test-support/native-playback-lifecycle.browser-runtime.ts`
 
 const stateSchema = z.object({
   isPlaying: z.boolean(), prepared: z.boolean(), preparing: z.boolean(), active: z.boolean(),

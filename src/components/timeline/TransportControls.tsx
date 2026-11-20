@@ -13,7 +13,7 @@ import { useTransportTempoController } from "~/hooks/useTransportTempoController
 import { formatBarsBeatsSixteenths } from "~/lib/musical-time-format";
 import { cn } from "~/lib/utils";
 import { nativeMenuTriggerClass } from "./toolbar-context";
-import type { TransportControlsProps } from "./transport-types";
+import type { TransportControlsProps } from "~/hooks/transport-types";
 import { useProjectSaveStatus } from "~/hooks/useProjectSaveStatus";
 import { useSharedOutboxFailure } from "~/hooks/useSharedOutboxFailure";
 import { EditMenu } from "./menus/edit-menu";

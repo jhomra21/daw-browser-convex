@@ -28,7 +28,7 @@ import { buildCommittedSharedUngroupHistoryEntry, readSharedUngroupResult } from
 import type { HistoryEntry, TrackAutomationSnapshot, TrackEffectSnapshot } from '~/lib/undo/types'
 import { z } from 'zod'
 import { ResumableAudioUploadHttpError, uploadAudioFile } from './resumable-audio-uploader'
-import { isCapabilityFile } from '~/lib/desktop/capability-file'
+import { isCapabilityFile } from '~/lib/capability-file'
 import { materializeLocalRetryFile, readLocalRetryFile, removeLocalRetryFile } from '~/lib/local-assets'
 
 type SharedOutboxStatus = 'pending' | 'failed' | 'dead-letter' | 'completed'

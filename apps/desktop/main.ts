@@ -145,10 +145,12 @@ import {
   type NativeVstEditorCommand,
 } from "./audio-host"
 import { createNativeVst3EditorSessionManager } from "./native-vst3-editor-session"
+/* oxlint-disable eslint/no-restricted-imports -- desktop-audio-lifecycle needs the bridge types, which stay in src/types until the batch that owns the certification-pinned playback files moves it */
 import {
   completeDesktopAudioRecovery,
   type DesktopAudioLifecycle,
 } from "../../src/lib/desktop-audio-lifecycle"
+/* oxlint-enable eslint/no-restricted-imports */
 import {
   nativeReleaseArtifactManifestName,
   verifyPackagedNativeReleaseArtifacts,

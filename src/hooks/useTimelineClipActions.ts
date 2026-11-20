@@ -32,7 +32,7 @@ import type { Clip, ExternalSidechainRoute, SelectedClip, Track } from '@daw-bro
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { convexApi, convexClient } from '~/lib/convex'
 
-import type { TimelineSelectionController } from './useTimelineSelectionState'
+import type { TimelineSelectionController } from '~/lib/timeline-selection'
 
 type ConvexClientType = typeof convexClient
 

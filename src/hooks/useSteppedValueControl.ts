@@ -1,6 +1,8 @@
 import { createSignal } from 'solid-js'
 import { useDrag } from '~/hooks/useDrag'
+/* oxlint-disable eslint/no-restricted-imports -- effect-parameter-interaction stays in components until the batch that owns the certification-pinned playback files moves it */
 import { useParameterGesture } from '~/components/effects/effect-parameter-interaction'
+/* oxlint-enable eslint/no-restricted-imports */
 import { WHEEL_IDLE_MS } from '~/lib/wheel-idle'
 
 type Point = { x: number, y: number }

@@ -1,4 +1,4 @@
-import type { BrowserTreeExpansionState, TimelineBrowserTab } from "~/components/timeline/browser/browser-types";
+import type { BrowserTreeExpansionState, TimelineBrowserTab } from "~/lib/timeline-browser/browser-types";
 import { canUseLocalStorage } from "~/lib/timeline-storage";
 import {
   isJsonBoolean,

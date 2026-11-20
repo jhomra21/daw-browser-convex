@@ -1,5 +1,5 @@
 import { createSignal, onCleanup, onMount } from "solid-js";
-import { parseDashboardView, type DashboardView } from "~/components/dashboard/types";
+import { parseDashboardView, type DashboardView } from "~/lib/dashboard-view";
 import { readLocationSearchParam, writeLocationSearchParam } from "~/lib/location-search-param";
 
 const writeDashboardRouteParam = (view: DashboardView | null) => {

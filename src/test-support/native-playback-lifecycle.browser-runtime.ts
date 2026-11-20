@@ -7,13 +7,13 @@ import type { NativeExternalAttachmentPlan } from '@daw-browser/plugin-host-prot
 import type { NativeGraphRevisionStatus, NativeRevisionReply, NativeRevisionSession } from '@daw-browser/desktop-protocol/native-revision'
 import { nativeAudioHostMappedAssetPageHeaderBytes } from '@daw-browser/desktop-protocol/native-audio-host'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
-import { createNativePlaybackController, nativePlaybackFaultText } from './native-playback-controller'
+import { createNativePlaybackController, nativePlaybackFaultText } from '~/lib/desktop/native-playback-controller'
 import { createEffectsPanelController } from '~/components/timeline/create-effects-panel-controller'
 import { nativeGraphNodeId } from '@daw-browser/audio-engine/native-host-wire'
 import { createDefaultSamplerParams, createDefaultGranularParams, createDefaultDrumRackParams, type JsonValue, type TrackInstrumentParams, type SamplerZone } from '@daw-browser/shared'
 import { sampledInstrumentRegionIdentity } from '@daw-browser/audio-engine/sampled-instrument-region'
 import { createSampledInstrumentRegionBudget } from '~/lib/sampled-instrument-region-budget'
-import { nativeInstrumentBudgetPolicy } from './native-instrument-budget-policy'
+import { nativeInstrumentBudgetPolicy } from '@daw-browser/desktop-protocol/native-instrument-budget-policy'
 
 // This file is bundled only by the isolated Chromium E2E. No product debug API.
 const trace: { sequence: number; event: string; owner: number; detail?: number | string }[] = []

@@ -1,4 +1,4 @@
-import type { ImportSummary } from "~/hooks/useTimelineClipImport"
+import type { ImportSummary } from "~/lib/import-summary"
 
 export type ImportJobStatus = {
   id: string

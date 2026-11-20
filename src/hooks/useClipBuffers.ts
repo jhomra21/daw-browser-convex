@@ -13,24 +13,13 @@ import {
   createAudioPcmSourceResolver,
 } from '~/lib/audio-pcm-source-resolver'
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
+import type { CapturedClipBufferLoadResult, CapturedClipMediaReference, UploadToR2 } from '~/lib/clip-media-types'
 import { ResumableAudioUploadHttpError, uploadAudioFile } from '~/lib/resumable-audio-uploader'
 
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
 
 type ClipMediaStatus = NonNullable<Track['clips'][number]['mediaStatus']>
-
-export type CapturedClipMediaReference = {
-  projectId?: string
-  sampleUrl?: string
-  sourceAssetKey?: string
-  targetSampleRate?: number
-}
-
-export type CapturedClipBufferLoadResult =
-  | { status: 'ready'; buffer: AudioBuffer }
-  | { status: 'missing' }
-  | { status: 'permission-denied' }
 
 type CapturedClipMediaLoaderDependencies = {
   readAsset: (projectId: string, sourceAssetKey: string) => ReturnType<typeof readLocalOrCloudAssetFile>
@@ -134,16 +123,6 @@ export const createCapturedClipMediaLoader = (dependencies: CapturedClipMediaLoa
 
   return { load, clear: () => loads.clear() }
 }
-
-export type UploadToR2Result = { assetKey: string; url: string } | null
-
-export type UploadToR2 = (
-  projectId: string,
-  assetKey: string,
-  file: File,
-  durationSec?: number,
-  signal?: AbortSignal,
-) => Promise<UploadToR2Result>
 
 type ClipBufferOptions = {
   audioEngine: AudioEngine

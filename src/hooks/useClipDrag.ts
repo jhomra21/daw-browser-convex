@@ -29,7 +29,7 @@ import type { TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 import type { Track, Clip, TrackId } from '@daw-browser/timeline-core/types'
 import type { HistoryEntry } from '~/lib/undo/types'
 
-import type { TimelineSelectionController } from './useTimelineSelectionState'
+import type { TimelineSelectionController } from '~/lib/timeline-selection'
 
 type ClipDragHandlers = {
   onClipPointerDown: (trackId: Track['id'], clipId: string, event: PointerEvent) => void

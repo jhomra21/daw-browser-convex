@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 
 import { readAudioFileMetadata } from './audio-file-metadata'
-import { CapabilityFile } from '~/lib/desktop/capability-file'
+import { CapabilityFile } from '~/lib/capability-file'
 
 const writeAscii = (bytes: Uint8Array, offset: number, value: string) => {
   bytes.set(new TextEncoder().encode(value), offset)

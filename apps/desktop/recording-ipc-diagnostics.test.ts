@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from "bun:test"
 import { createRecordingIpcDiagnostics, createRendererTrafficDiagnostics } from "./recording-ipc-diagnostics"
-import { createRecordingDeliveryTrace } from "../../src/lib/recording/recording-delivery-trace"
+import { createRecordingDeliveryTrace } from "@daw-browser/desktop-protocol/recording-delivery-trace"
 import { createBenchmarkRecordingTelemetry } from "./benchmark-runtime"
 
 test("terminal benchmark evidence is logged once without mutating the status", () => {

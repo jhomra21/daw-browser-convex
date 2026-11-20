@@ -9,7 +9,10 @@ import {
   type SampledInstrumentRegionBudget,
 } from '~/lib/sampled-instrument-region-budget'
 import type { SampledInstrumentRegionLoaderOptions } from '~/lib/sampled-instrument-region-loader'
-import type { NativeInstrumentBudgetPolicy, NativeInstrumentPreparation } from '~/lib/desktop/native-instrument-budget-policy'
+import type { NativeInstrumentBudgetPolicy } from '@daw-browser/desktop-protocol/native-instrument-budget-policy'
+/* oxlint-disable eslint/no-restricted-imports -- NativeInstrumentPreparation stays next to the desktop budget policy until the batch that owns the certification-pinned playback files moves it */
+import type { NativeInstrumentPreparation } from '~/lib/desktop/native-instrument-budget-policy'
+/* oxlint-enable eslint/no-restricted-imports */
 
 export type SampledInstrumentSession = {
   aggregateBudget: SampledInstrumentRegionBudget

@@ -6,7 +6,7 @@ import {
 } from "@daw-browser/desktop-protocol/application-menu";
 import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
 import { isLocalId } from "@daw-browser/shared";
-import type { TransportControlsProps } from "~/components/timeline/transport-types";
+import type { TransportControlsProps } from "~/hooks/transport-types";
 import { keyboardTargetOwner } from "~/lib/keyboard-event-target";
 
 const gridDenominatorForState = (

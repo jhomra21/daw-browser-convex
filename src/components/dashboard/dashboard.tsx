@@ -1,6 +1,7 @@
 import { For, Match, Show, Switch } from "solid-js";
 import { Dialog, DialogContent } from "~/components/ui/dialog";
-import type { DashboardTimelineModel, DashboardView } from "./types";
+import type { DashboardTimelineModel } from "./types";
+import type { DashboardView } from "~/lib/dashboard-view";
 import { DashboardSidebarItem } from "./dashboard-sidebar";
 import { DashboardGeneralView } from "./general-view";
 import { DashboardAccountView } from "./account-view";

@@ -161,7 +161,7 @@ import { createVstParameterFeedbackController } from "~/lib/desktop/vst-paramete
 import { createExportQueue } from "~/lib/export/export-queue";
 import { createImportJobQueue } from "~/lib/desktop/import-job-queue";
 import { createTimelineExportService } from "~/lib/export/timeline-export-service";
-import { createExportRenderStateSnapshot } from "~/lib/export/run-export-job";
+import { createExportRenderStateSnapshot } from "~/lib/export/export-render-state"
 import { resolveDesiredPlaybackFx, type ExportAutomationPatch } from "~/lib/desired-playback-state";
 import { createDesktopNativeOfflinePcmRenderer } from "~/lib/export/desktop-native-offline-pcm-renderer";
 import { compileDesiredNativeProcessorState, compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackTransport } from "~/lib/live-playback-snapshot";

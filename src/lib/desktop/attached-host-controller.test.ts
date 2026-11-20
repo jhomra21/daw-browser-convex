@@ -32,7 +32,7 @@ import type {
   TimelineExportJobStatus,
   TimelineExportService,
 } from "~/lib/export/timeline-export-service"
-import type { ExportOutcome } from "~/lib/export/run-export-job"
+import type { ExportOutcome } from "~/lib/export/export-job-types"
 
 const token = "0".repeat(64)
 

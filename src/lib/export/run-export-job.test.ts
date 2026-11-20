@@ -26,7 +26,8 @@ import { sampledInstrumentRegion, sampledInstrumentRegionBytes, sampledInstrumen
 
 import { createLocalProject, deleteLocalProject } from "~/lib/local-project-db"
 import { createLocalAsset, deleteLocalAsset } from "~/lib/local-assets"
-import { loadInstrumentExportBuffers, runStemExport, runTimelineExport } from "~/lib/export/run-export-job"
+import { loadInstrumentExportBuffers } from "~/lib/export/export-preparation"
+import { runStemExport, runTimelineExport } from "~/lib/export/run-export-job"
 import { nativeInstrumentExportMemory } from "~/lib/export/instrument-export-memory"
 import { NativeOfflineRenderError } from "~/lib/export/desktop-native-offline-pcm-renderer"
 import type { ExportOutputTargetFactory } from "~/lib/export/export-output-targets"

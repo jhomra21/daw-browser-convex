@@ -1,7 +1,7 @@
 import { createContext, createSignal, onCleanup, type Accessor, type JSX, untrack, useContext } from 'solid-js'
 
 import { assertDefined } from '@daw-browser/shared'
-import type { ExportOutcome, ExportProgress } from '~/lib/export/run-export-job'
+import type { ExportOutcome, ExportProgress } from '~/lib/export/export-job-types'
 import type { ExportQueue } from '~/lib/export/export-queue'
 import { createBrowserExportOutputTargetFactory } from '~/lib/export/browser-export-output-targets'
 import { createDesktopRendererExportOutputTargetFactory } from '~/lib/desktop/capability-export-output-targets'

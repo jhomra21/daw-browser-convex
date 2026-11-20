@@ -33,7 +33,7 @@ import type { HistoryEntry } from "~/lib/undo/types";
 import { createLocalProject, openLocalProjectDb } from "~/lib/local-project-db";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { convexApi, convexClient } from "~/lib/convex";
-import { createExportRenderStateSnapshot } from "~/lib/export/run-export-job";
+import { createExportRenderStateSnapshot } from "~/lib/export/export-render-state"
 import { resolveDesiredPlaybackFx } from "~/lib/desired-playback-state";
 import { mountStep5Playback, settleStep5Playback } from "../../tools/acceptance/b5c-playback-witness-support";
 

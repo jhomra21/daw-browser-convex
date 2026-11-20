@@ -6,7 +6,7 @@ import { getExportRangeDuration, type ExportRange } from '@daw-browser/audio-eng
 import { getExportAudioBitrate, getExportAudioFormatMetadata, type ExportAudioFormat } from '@daw-browser/shared'
 import { getCachedSupportedExportAudioFormats, probeSupportedExportAudioFormats } from '~/lib/export-format-support'
 import { useExportContext } from '~/context/export'
-import type { ExportOutput } from '~/lib/export/run-export-job'
+import type { ExportOutput } from '~/lib/export/export-job-types'
 import ExportProgressStatus from '~/components/export/ExportProgressStatus'
 import { createCustomExportRange, type ExportSampleRate, loadPersistedExportSettings, savePersistedExportSettings } from '~/lib/export/export-settings'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'

@@ -4,7 +4,7 @@ import { projectR2DeletePrefixes } from "@daw-browser/shared";
 import { listAccessibleProjects, requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
 import { removeProjectMemberAccessAndTransferEntities } from "./projectMembership";
 import { enqueueMultipartAbortRows, enqueueR2DeleteRows } from "./r2Deletes";
-import { advanceProjectRevision, ensureOwnedProjectRow, getProjectRow, requireProjectRow } from "./projectRows";
+import { editProject, ensureOwnedProjectRow, getProjectRow, requireProjectRow } from "./projectRows";
 
 type RowOperationResult<State extends object> =
   | { changed: false; value: State & { status: "noop" } }
@@ -342,9 +342,7 @@ export const setName = mutation({
   handler: async (ctx, { projectId, name }) => {
     const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, projectId, userId, ["owner"]);
-    const result = await setProjectNameRow(ctx, projectId, name);
-
-    if (result.changed) await advanceProjectRevision(ctx, projectId);
+    await editProject(ctx, projectId, () => setProjectNameRow(ctx, projectId, name));
 
     return null;
   },
@@ -366,9 +364,7 @@ export const setTimelineSettings = mutation({
     const project = await findOwnedProject(ctx, input.projectId, userId);
 
     if (!project) throw new Error("Only project owners can update project settings.");
-    const result = await setProjectTimelineSettingsRow(ctx, input.projectId, input);
-
-    if (result.changed) await advanceProjectRevision(ctx, input.projectId);
+    await editProject(ctx, input.projectId, () => setProjectTimelineSettingsRow(ctx, input.projectId, input));
 
     return null;
   },

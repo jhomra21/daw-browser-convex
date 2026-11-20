@@ -19,7 +19,7 @@ import { getClipWriteAccess } from "./clipWrites";
 import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
 import { automationPointValidator, literalUnion, sendTapValidator, type SendTap } from "./validators";
 import { runSharedOperationOnce } from "./sharedOperationResults";
-import { advanceProjectRevision, withProjectEdit, type ProjectEdit } from "./projectRows";
+import { editProject, editProjectIf, withProjectEdit, type ProjectEdit } from "./projectRows";
 import { effectiveControlMixerBoolean } from "./controlEffectiveValues";
 import {
   deriveTrackDeletionAfterStatesV1,
@@ -817,9 +817,7 @@ export const setVolume = mutation({
   handler: async (ctx, { trackId, volume }) => {
     const userId = await requireAuthenticatedUserId(ctx);
     const { track } = await requireTrackOwnerForWrite(ctx, trackId, userId);
-    const result = await setTrackVolumeRow(ctx, { projectId: track.projectId, trackId, volume });
-
-    if (result.changed) await advanceProjectRevision(ctx, track.projectId);
+    await editProject(ctx, track.projectId, () => setTrackVolumeRow(ctx, { projectId: track.projectId, trackId, volume }));
   },
 });
 
@@ -832,13 +830,11 @@ export const serverSetVolume = mutation({
     if (!normalizedTrackId) throw new Error("Track not found.");
     const { track } = await requireTrackOwnerForWrite(ctx, normalizedTrackId, userId);
 
-    const result = await setTrackVolumeRow(ctx, {
+    await editProject(ctx, track.projectId, () => setTrackVolumeRow(ctx, {
       projectId: track.projectId,
       trackId: normalizedTrackId,
       volume,
-    });
-
-    if (result.changed) await advanceProjectRevision(ctx, track.projectId);
+    }));
   },
 });
 
@@ -855,14 +851,12 @@ export const setMix = mutation({
         : { status: "not-found" as const };
     }
 
-    const result = await setTrackMixRow(ctx, {
+    const result = await editProject(ctx, access.track.projectId, () => setTrackMixRow(ctx, {
       projectId: access.track.projectId,
       trackId,
       muted,
       soloed,
-    });
-
-    if (result.changed) await advanceProjectRevision(ctx, access.track.projectId);
+    }));
 
     return { status: result.status };
   },
@@ -880,14 +874,12 @@ export const serverSetMix = mutation({
 
     if (!access) return { status: "access-denied" as const };
 
-    const result = await setTrackMixRow(ctx, {
+    const result = await editProject(ctx, access.track.projectId, () => setTrackMixRow(ctx, {
       projectId: access.track.projectId,
       trackId: normalizedTrackId,
       muted,
       soloed,
-    });
-
-    if (result.changed) await advanceProjectRevision(ctx, access.track.projectId);
+    }));
 
     return { status: result.status };
   },
@@ -908,14 +900,12 @@ export const setRouting = mutation({
     const { track } = await requireTrackOwnerForWrite(ctx, trackId, userId);
     await requireTrackNotLockedByOther(ctx, track, userId);
 
-    const result = await setTrackRoutingRow(ctx, {
+    await editProject(ctx, track.projectId, () => setTrackRoutingRow(ctx, {
       projectId: track.projectId,
       trackId,
       outputTargetId,
       sends,
-    });
-
-    if (result.changed) await advanceProjectRevision(ctx, track.projectId);
+    }));
   },
 });
 
@@ -956,14 +946,12 @@ export const serverSetRouting = mutation({
     const { track } = await requireTrackOwnerForWrite(ctx, normalizedTrackId, userId);
     await requireTrackNotLockedByOther(ctx, track, userId);
 
-    const result = await setTrackRoutingRow(ctx, {
+    await editProject(ctx, track.projectId, () => setTrackRoutingRow(ctx, {
       projectId: track.projectId,
       trackId: normalizedTrackId,
       outputTargetId: normalizedOutputTargetId,
       sends: normalizedSends,
-    });
-
-    if (result.changed) await advanceProjectRevision(ctx, track.projectId);
+    }));
   },
 });
 
@@ -1052,9 +1040,7 @@ export const serverSetSidechainRoute = mutation({
       throw new Error("Sidechain source or target track not found.");
     }
 
-    const result = await setSidechainRouteRow(ctx, { ...input, sourceTrackId, targetTrackId });
-
-    if (result.changed) await advanceProjectRevision(ctx, input.projectId);
+    await editProject(ctx, input.projectId, () => setSidechainRouteRow(ctx, { ...input, sourceTrackId, targetTrackId }));
   },
 });
 
@@ -1103,9 +1089,7 @@ export const serverRemoveSidechainRoute = mutation({
 
     if (!targetTrackId) throw new Error("Sidechain target track not found.");
     await requireProjectRole(ctx, input.projectId, userId, ["owner", "editor"]);
-    const result = await removeSidechainRouteRow(ctx, { ...input, targetTrackId });
-
-    if (result.changed) await advanceProjectRevision(ctx, input.projectId);
+    await editProject(ctx, input.projectId, () => removeSidechainRouteRow(ctx, { ...input, targetTrackId }));
   },
 });
 
@@ -1115,9 +1099,7 @@ export const setGroup = mutation({
     const userId = await requireAuthenticatedUserId(ctx);
     const { track } = await requireTrackOwnerForWrite(ctx, trackId, userId);
     await requireTrackNotLockedByOther(ctx, track, userId);
-    const result = await setTrackGroupRow(ctx, { projectId: track.projectId, trackId, groupId });
-
-    if (result.changed) await advanceProjectRevision(ctx, track.projectId);
+    await editProject(ctx, track.projectId, () => setTrackGroupRow(ctx, { projectId: track.projectId, trackId, groupId }));
   },
 });
 
@@ -1137,13 +1119,11 @@ export const serverSetGroup = mutation({
     const { track } = await requireTrackOwnerForWrite(ctx, normalizedTrackId, userId);
     await requireTrackNotLockedByOther(ctx, track, userId);
 
-    const result = await setTrackGroupRow(ctx, {
+    await editProject(ctx, track.projectId, () => setTrackGroupRow(ctx, {
       projectId: track.projectId,
       trackId: normalizedTrackId,
       groupId: normalizedGroupId,
-    });
-
-    if (result.changed) await advanceProjectRevision(ctx, track.projectId);
+    }));
   },
 });
 
@@ -1286,7 +1266,7 @@ export const serverReorderAndGroup = mutation({
     const userId = await requireAuthenticatedUserId(ctx);
 
     if (updates.length === 0) return { status: "noop" as const };
-    const normalizedUpdates = [];
+    const normalizedUpdates: TrackReorderUpdate[] = [];
 
     for (const update of updates) {
       const trackId = ctx.db.normalizeId("tracks", update.trackId);
@@ -1316,9 +1296,7 @@ export const serverReorderAndGroup = mutation({
     const projectId = firstAccess.track.projectId;
 
     if (accesses.some((access) => access?.track.projectId !== projectId)) return { status: "rejected" };
-    const result = await reorderAndGroupTrackRows(ctx, { projectId, updates: normalizedUpdates });
-
-    if (result.changed) await advanceProjectRevision(ctx, projectId);
+    const result = await editProject(ctx, projectId, () => reorderAndGroupTrackRows(ctx, { projectId, updates: normalizedUpdates }));
 
     return { status: result.status };
   },
@@ -1332,9 +1310,9 @@ export const serverSetCollapsed = mutation({
 
     if (!normalizedTrackId) throw new Error("Track not found.");
     const track = await ctx.db.get(normalizedTrackId);
-    const result = await setTrackCollapsedForUser(ctx, { trackId: normalizedTrackId, userId, collapsed });
 
-    if (result?.changed && track) await advanceProjectRevision(ctx, track.projectId);
+    if (track) await editProject(ctx, track.projectId, async () => (await setTrackCollapsedForUser(ctx, { trackId: normalizedTrackId, userId, collapsed })) ?? { changed: false });
+    else await setTrackCollapsedForUser(ctx, { trackId: normalizedTrackId, userId, collapsed });
   },
 });
 
@@ -1346,9 +1324,9 @@ export const serverSetColor = mutation({
 
     if (!normalizedTrackId) throw new Error("Track not found.");
     const track = await ctx.db.get(normalizedTrackId);
-    const result = await setTrackColorForUser(ctx, { trackId: normalizedTrackId, userId, color });
 
-    if (result?.changed && track) await advanceProjectRevision(ctx, track.projectId);
+    if (track) await editProject(ctx, track.projectId, async () => (await setTrackColorForUser(ctx, { trackId: normalizedTrackId, userId, color })) ?? { changed: false });
+    else await setTrackColorForUser(ctx, { trackId: normalizedTrackId, userId, color });
   },
 });
 
@@ -1765,11 +1743,7 @@ export const serverUngroup = mutation({
         && (value.status === "applied" || value.status === "rejected")
       ),
       run: async () => {
-        const result = await ungroupTrackForUser(ctx, userId, projectId, groupId);
-
-        if (result.status === "applied") await advanceProjectRevision(ctx, projectId);
-
-        return result;
+        return await editProjectIf(ctx, projectId, () => ungroupTrackForUser(ctx, userId, projectId, groupId), (result) => result.status === "applied");
       },
     });
   },
@@ -2061,11 +2035,12 @@ export const serverSetColorCascade = mutation({
       clipUpdates: targetClips.map((clip) => ({ clipId: String(clip._id), color: clipColor ?? clip.color ?? "" })),
     };
 
-    const updates = await applyColorBatchForUser(ctx, userId, colorUpdates);
-
-    if (updates && (updates.trackUpdates.some((update) => update.from !== update.to) || updates.clipUpdates.some((update) => update.from !== update.to))) {
-      await advanceProjectRevision(ctx, rootAccess.track.projectId);
-    }
+    const updates = await editProjectIf(
+      ctx,
+      rootAccess.track.projectId,
+      () => applyColorBatchForUser(ctx, userId, colorUpdates),
+      (applied) => applied !== null && applied !== undefined && (applied.trackUpdates.some((update) => update.from !== update.to) || applied.clipUpdates.some((update) => update.from !== update.to)),
+    );
 
     return updates
       ? { status: "applied" as const, ...updates }
@@ -2099,9 +2074,7 @@ export const setName = mutation({
   handler: async (ctx, { trackId, name }) => {
     const userId = await requireAuthenticatedUserId(ctx);
     const { track } = await requireTrackOwnerForWrite(ctx, trackId, userId);
-    const result = await setTrackNameRow(ctx, { projectId: track.projectId, trackId, name });
-
-    if (result.changed) await advanceProjectRevision(ctx, track.projectId);
+    await editProject(ctx, track.projectId, () => setTrackNameRow(ctx, { projectId: track.projectId, trackId, name }));
   },
 });
 
@@ -2190,13 +2163,12 @@ export const remove = mutation({
       preflights.push(preflight);
     }
 
-    const result = await deleteTrackRows(ctx, {
+    const result = await editProject(ctx, rootPreflight.track.projectId, () => deleteTrackRows(ctx, {
       projectId: rootPreflight.track.projectId,
       trackIds: preflights.map((preflight) => preflight.track._id),
-    });
+    }));
 
     if (!result.changed) return { status: "access-denied" as const };
-    await advanceProjectRevision(ctx, rootPreflight.track.projectId);
 
     return { status: "deleted" as const };
   },

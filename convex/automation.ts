@@ -12,7 +12,7 @@ import {
   parseSynthAutomationKey,
 } from "@daw-browser/shared";
 import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
-import { advanceProjectRevision } from "./projectRows";
+import { editProject } from "./projectRows";
 import { automationPointValidator } from "./validators";
 
 type InstrumentEffectRow = {
@@ -265,9 +265,7 @@ export const serverSetEnvelope = mutation({
       ? await resolveAutomationTrackId(ctx, input.projectId, input.trackId)
       : undefined;
 
-    const result = await setAutomationEnvelopeRow(ctx, { ...input, trackId });
-
-    if (result.changed) await advanceProjectRevision(ctx, input.projectId);
+    const result = await editProject(ctx, input.projectId, () => setAutomationEnvelopeRow(ctx, { ...input, trackId }));
 
     return result.envelopeId;
   },
@@ -289,9 +287,7 @@ export const serverDeleteEnvelope = mutation({
       ? await resolveAutomationTrackId(ctx, input.projectId, input.trackId)
       : undefined;
 
-    const result = await deleteAutomationEnvelopeRow(ctx, { ...input, trackId });
-
-    if (result.changed) await advanceProjectRevision(ctx, input.projectId);
+    const result = await editProject(ctx, input.projectId, () => deleteAutomationEnvelopeRow(ctx, { ...input, trackId }));
 
     return result.envelopeId ?? null;
   },

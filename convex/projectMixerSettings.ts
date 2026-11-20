@@ -2,7 +2,7 @@ import { DEFAULT_MASTER_VOLUME, normalizeMasterVolume } from "@daw-browser/share
 import { mutation, type DatabaseReader, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAuthenticatedUserId, requireMasterBusWriteAccess } from "./projectAccess";
-import { advanceProjectRevision } from "./projectRows";
+import { editProject } from "./projectRows";
 
 type ProjectMixerSettingsReadCtx = { db: DatabaseReader };
 
@@ -73,9 +73,7 @@ export const setMasterVolume = mutation({
   handler: async (ctx, { projectId, volume }) => {
     const userId = await requireAuthenticatedUserId(ctx);
     await requireMasterBusWriteAccess(ctx, projectId, userId);
-    const result = await setProjectMasterVolumeRow(ctx, projectId, volume);
-
-    if (result.changed) await advanceProjectRevision(ctx, projectId);
+    const result = await editProject(ctx, projectId, () => setProjectMasterVolumeRow(ctx, projectId, volume));
 
     return { status: result.value.status };
   },

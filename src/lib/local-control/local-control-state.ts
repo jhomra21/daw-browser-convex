@@ -20,7 +20,7 @@ import {
   type LocalProjectStoredValue,
   type LocalProjectSyncStateRow,
 } from '~/lib/local-project-db'
-import { isJsonNumber, isJsonObject, isJsonString } from '@daw-browser/shared'
+import { isJsonNumber, isJsonObject, isJsonString, bestEffort } from '@daw-browser/shared'
 import { projectLocalControlSnapshotV1, projectLocalControlSnapshotV2 } from './local-control-projector'
 import { parseLocalProjectStoredJsonValue } from './local-control-model'
 
@@ -161,7 +161,7 @@ type LocalControlTransactionOptions = {
 
 const abortLocalControlTransaction = (tx: { abort: () => void; done: Promise<unknown> }) => {
   tx.abort()
-  void tx.done.catch(() => undefined)
+  bestEffort(tx.done, 'the transaction is being aborted, so done rejects by design')
 }
 
 type ThenableCallbackArgument<Value> = [Value] extends [never]

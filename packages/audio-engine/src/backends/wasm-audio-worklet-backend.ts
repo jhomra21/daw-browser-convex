@@ -39,6 +39,7 @@ import {
 } from '../worklet-manifest'
 import { portableWasmCapabilityMatrix } from './portable-wasm-capabilities'
 import { encodePortableGraphEnvelope } from '../native-host-wire'
+import { safeDisconnect } from '../safe-disconnect'
 
 export type PortableWasmPagedCapabilities = {
   pagedAbi: number
@@ -384,10 +385,7 @@ const disposePortableWorkletNode = (node: PortableWorkletNode, output?: AudioNod
     node.port.postMessage({ version: portableWasmProtocolVersion, type: 'dispose' })
   } catch {}
 
-  try {
-    if (output) node.disconnect(output)
-    else node.disconnect()
-  } catch {}
+  safeDisconnect(node, output)
 
   try {
     node.port.close()

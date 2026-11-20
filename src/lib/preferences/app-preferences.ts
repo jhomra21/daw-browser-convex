@@ -1,6 +1,6 @@
 import { makePersisted, type PersistenceSyncAPI } from "@solid-primitives/storage"
 import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
-import { canUseLocalStorage } from "~/lib/timeline-storage"
+import { canUseLocalStorage, createStoredValue } from "~/lib/stored-value"
 import {
   APP_PREFERENCES_STORAGE_KEY,
   defaultAppPreferences,
@@ -20,19 +20,14 @@ const sameOriginLocalStorageSync: PersistenceSyncAPI = [
   () => {}
 ]
 
-export const loadInitialAppPreferences = (): AppPreferences => {
-  if (!canUseLocalStorage()) return defaultAppPreferences
+const storedAppPreferences = createStoredValue<AppPreferences>({
+  key: () => APP_PREFERENCES_STORAGE_KEY,
+  fallback: () => defaultAppPreferences,
+  parse: (raw) => normalizeAppPreferences(JSON.parse(raw)),
+  serialize: JSON.stringify,
+})
 
-  try {
-    const stored = localStorage.getItem(APP_PREFERENCES_STORAGE_KEY)
-
-    if (stored) return normalizeAppPreferences(JSON.parse(stored))
-  } catch {
-    return defaultAppPreferences
-  }
-
-  return defaultAppPreferences
-}
+export const loadInitialAppPreferences = (): AppPreferences => storedAppPreferences.read("")
 
 export const createPersistedAppPreferencesWithInitial = (
   initialPreferences: AppPreferences

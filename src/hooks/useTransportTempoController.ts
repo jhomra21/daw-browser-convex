@@ -1,5 +1,7 @@
 import { createEffect, createSignal, on, untrack, type Accessor } from 'solid-js'
 
+import { clampBpm } from '@daw-browser/timeline-core/project-defaults'
+
 type UseTransportTempoControllerOptions = {
   bpm: Accessor<number>
   onChangeBpm: (next: number) => void
@@ -34,7 +36,7 @@ export function useTransportTempoController(
   const sanitizeTempo = (value: number) => {
     if (!Number.isFinite(value)) return options.bpm()
 
-    return Math.min(300, Math.max(30, Math.round(value)))
+    return clampBpm(value)
   }
 
   const commitTempo = () => {

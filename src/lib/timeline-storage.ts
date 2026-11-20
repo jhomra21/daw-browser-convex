@@ -1,14 +1,10 @@
 import { normalizePersistedHistory, serializePersistedHistory } from '~/lib/undo/persisted-history'
 import type { PersistedHistory } from '~/lib/undo/types'
 import type { TrackId, TrackSend } from '@daw-browser/timeline-core/types'
+import { DEFAULT_GRID } from '@daw-browser/timeline-core/project-defaults'
 import { clampPixelsPerSecond, DEFAULT_PIXELS_PER_SECOND } from '~/lib/timeline-view'
+import { createStoredValue } from '~/lib/stored-value'
 import { isJsonBoolean, isJsonNumber, isJsonObject } from '@daw-browser/shared'
-
-const MIX_KEY_PREFIX = 'mb:mix:'
-const MIX_SYNC_KEY_PREFIX = 'mb:mix-sync:'
-const GRID_KEY_PREFIX = 'mb:grid:'
-const TIMELINE_SCALE_KEY_PREFIX = 'mb:timeline-scale:'
-const HISTORY_KEY_PREFIX = 'mb:history:'
 
 export type LocalMixPatch = Partial<{
   muted: boolean
@@ -25,38 +21,17 @@ type HistoryStorageScope = {
   userId?: string
 }
 
-export const canUseLocalStorage = () => {
-  if (globalThis.window === undefined) return false
+const localMixMap = createStoredValue<LocalMixMap>({
+  key: (rid) => `mb:mix:${rid}`,
+  fallback: () => ({}),
+  parse: (raw) => JSON.parse(raw),
+  serialize: JSON.stringify,
+})
 
-  try {
-    const storage = window.localStorage
-
-    return Boolean(storage)
-  } catch {
-    return false
-  }
-}
-
-export const loadLocalMixMap = (rid?: string): LocalMixMap => {
-  if (!rid) return {}
-
-  if (!canUseLocalStorage()) return {}
-
-  try {
-    return JSON.parse(localStorage.getItem(`${MIX_KEY_PREFIX}${rid}`) || '{}')
-  } catch {
-    return {}
-  }
-}
+export const loadLocalMixMap = (rid?: string): LocalMixMap => rid ? localMixMap.read(rid) : {}
 
 export const saveLocalMixMap = (rid: string | undefined, map: LocalMixMap) => {
-  if (!rid) return
-
-  if (!canUseLocalStorage()) return
-
-  try {
-    localStorage.setItem(`${MIX_KEY_PREFIX}${rid}`, JSON.stringify(map))
-  } catch {}
+  if (rid) localMixMap.write(rid, map)
 }
 
 export const stripSharedTrackLocalOverrides = (
@@ -92,26 +67,17 @@ export const stripSharedTrackLocalOverrides = (
   return next ?? map
 }
 
-export const loadMixSyncFlag = (rid?: string): boolean => {
-  if (!rid) return false
+const mixSyncFlag = createStoredValue<boolean>({
+  key: (rid) => `mb:mix-sync:${rid}`,
+  fallback: () => false,
+  parse: (raw) => raw === '1',
+  serialize: (value) => value ? '1' : '0',
+})
 
-  if (!canUseLocalStorage()) return false
-
-  try {
-    return localStorage.getItem(`${MIX_SYNC_KEY_PREFIX}${rid}`) === '1'
-  } catch {
-    return false
-  }
-}
+export const loadMixSyncFlag = (rid?: string): boolean => rid ? mixSyncFlag.read(rid) : false
 
 export const saveMixSyncFlag = (rid: string | undefined, value: boolean) => {
-  if (!rid) return
-
-  if (!canUseLocalStorage()) return
-
-  try {
-    localStorage.setItem(`${MIX_SYNC_KEY_PREFIX}${rid}`, value ? '1' : '0')
-  } catch {}
+  if (rid) mixSyncFlag.write(rid, value)
 }
 
 type GridSettings = {
@@ -119,62 +85,47 @@ type GridSettings = {
   denominator: number
 }
 
-export const loadGridSettings = (rid?: string): GridSettings => {
-  if (!rid) return { enabled: true, denominator: 4 }
-
-  if (!canUseLocalStorage()) return { enabled: true, denominator: 4 }
-
-  try {
-    const raw = localStorage.getItem(`${GRID_KEY_PREFIX}${rid}`)
-
-    if (!raw) return { enabled: true, denominator: 4 }
+const gridSettings = createStoredValue<GridSettings>({
+  key: (rid) => `mb:grid:${rid}`,
+  fallback: () => ({ ...DEFAULT_GRID }),
+  parse: (raw) => {
     const parsed = JSON.parse(raw)
 
-    if (!isJsonObject(parsed)) return { enabled: true, denominator: 4 }
+    if (!isJsonObject(parsed)) return undefined
 
     return {
-      enabled: isJsonBoolean(parsed.enabled) ? parsed.enabled : true,
-      denominator: isJsonNumber(parsed.denominator) ? parsed.denominator : 4,
+      enabled: isJsonBoolean(parsed.enabled) ? parsed.enabled : DEFAULT_GRID.enabled,
+      denominator: isJsonNumber(parsed.denominator) ? parsed.denominator : DEFAULT_GRID.denominator,
     }
-  } catch {
-    return { enabled: true, denominator: 4 }
-  }
-}
+  },
+  serialize: JSON.stringify,
+})
+
+export const loadGridSettings = (rid?: string): GridSettings => rid ? gridSettings.read(rid) : { ...DEFAULT_GRID }
 
 export const saveGridSettings = (rid: string | undefined, enabled: boolean, denominator: number) => {
-  if (!rid) return
-
-  if (!canUseLocalStorage()) return
-
-  try {
-    localStorage.setItem(`${GRID_KEY_PREFIX}${rid}`, JSON.stringify({ enabled, denominator }))
-  } catch {}
+  if (rid) gridSettings.write(rid, { enabled, denominator })
 }
 
-export const loadTimelineScale = (rid?: string): number => {
-  if (!rid || !canUseLocalStorage()) return DEFAULT_PIXELS_PER_SECOND
+const timelineScale = createStoredValue<number>({
+  key: (rid) => `mb:timeline-scale:${rid}`,
+  fallback: () => DEFAULT_PIXELS_PER_SECOND,
+  parse: (raw) => clampPixelsPerSecond(Number(raw)),
+  serialize: String,
+})
 
-  try {
-    const raw = localStorage.getItem(`${TIMELINE_SCALE_KEY_PREFIX}${rid}`)
-
-    if (raw === null) return DEFAULT_PIXELS_PER_SECOND
-
-    return clampPixelsPerSecond(Number(raw))
-  } catch {
-    return DEFAULT_PIXELS_PER_SECOND
-  }
-}
+export const loadTimelineScale = (rid?: string): number => rid ? timelineScale.read(rid) : DEFAULT_PIXELS_PER_SECOND
 
 export const saveTimelineScale = (rid: string | undefined, value: number) => {
-  if (!rid || !canUseLocalStorage() || !Number.isFinite(value)) return
-
-  try {
-    localStorage.setItem(
-      `${TIMELINE_SCALE_KEY_PREFIX}${rid}`,
-      String(clampPixelsPerSecond(value)),
-    )
-  } catch {}
+  if (rid && Number.isFinite(value)) timelineScale.write(rid, clampPixelsPerSecond(value))
 }
+
+const history = createStoredValue<PersistedHistory>({
+  key: (storageKey) => `mb:history:${storageKey}`,
+  fallback: () => ({ undo: [], redo: [] }),
+  parse: (raw) => normalizePersistedHistory(JSON.parse(raw)),
+  serialize: (value) => JSON.stringify(serializePersistedHistory(value)),
+})
 
 const toHistoryStorageKey = (scope: HistoryStorageScope) => {
   if (!scope.projectId) return null
@@ -182,35 +133,14 @@ const toHistoryStorageKey = (scope: HistoryStorageScope) => {
   return scope.userId ? `${scope.projectId}:${scope.userId}` : scope.projectId
 }
 
-const toHistoryLocalStorageKey = (storageKey: string) => `${HISTORY_KEY_PREFIX}${storageKey}`
-
-const readStoredHistory = (storageKey: string) => {
-  const raw = localStorage.getItem(toHistoryLocalStorageKey(storageKey))
-
-  if (!raw) return null
-
-  return JSON.parse(raw)
-}
-
 export const loadHistory = (scope: HistoryStorageScope): PersistedHistory => {
-  if (!scope.projectId || !canUseLocalStorage()) return { undo: [], redo: [] }
+  const storageKey = toHistoryStorageKey(scope)
 
-  try {
-    const scopedKey = scope.userId ? `${scope.projectId}:${scope.userId}` : scope.projectId
-    const scopedHistory = readStoredHistory(scopedKey)
-
-    return scopedHistory === null ? { undo: [], redo: [] } : normalizePersistedHistory(scopedHistory)
-  } catch {
-    return { undo: [], redo: [] }
-  }
+  return storageKey ? history.read(storageKey) : { undo: [], redo: [] }
 }
 
 export const saveHistory = (scope: HistoryStorageScope, value: PersistedHistory) => {
   const storageKey = toHistoryStorageKey(scope)
 
-  if (!storageKey || !canUseLocalStorage()) return
-
-  try {
-    localStorage.setItem(toHistoryLocalStorageKey(storageKey), JSON.stringify(serializePersistedHistory(value)))
-  } catch {}
+  if (storageKey) history.write(storageKey, value)
 }

@@ -3,6 +3,7 @@ import path from "node:path"
 import type { ContentTracing } from "electron"
 import { z } from "zod"
 import type { DesktopRequestV2 } from "@daw-browser/desktop-protocol"
+import { desktopEnv } from "./env"
 
 export type HostEvidence = (event: string, fields?: Record<string, string | number | boolean | null>) => void
 
@@ -37,7 +38,7 @@ export const createAe08Evidence = (directory: string | undefined): AppEvidence |
 let tracing: ContentTracing | undefined
 
 export const ae08StartTrace = async (contentTracing: ContentTracing) => {
-  if (!process.env.DAW_AE08_EVIDENCE_DIR || process.env.DAW_AE08_TRACE !== "1") return
+  if (!desktopEnv.ae08EvidenceDirectory() || !desktopEnv.ae08Trace()) return
   tracing = contentTracing
   await contentTracing.startRecording({
     included_categories: ["devtools.timeline", "disabled-by-default-devtools.timeline", "v8", "v8.execute", "blink", "toplevel", "ipc",
@@ -49,7 +50,7 @@ export const ae08StartTrace = async (contentTracing: ContentTracing) => {
 
 // Runs before the renderer is destroyed, because a renderer that has exited cannot flush its buffered events.
 export const ae08StopTrace = async () => {
-  const directory = process.env.DAW_AE08_EVIDENCE_DIR
+  const directory = desktopEnv.ae08EvidenceDirectory()
   const tracer = tracing
 
   if (!directory || !tracer) return

@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import { MAX_MIDI_PERFORMANCE_EVENTS, type MidiClip } from '@daw-browser/shared'
 import type { MidiInputEvent } from './midi-input'
 
@@ -192,7 +193,7 @@ export const createMidiRecordingSession = (
     },
     close: settle,
     snapshot: (bpm, endTimelineSec) => {
-      const safeBpm = Number.isFinite(bpm) && bpm > 0 ? bpm : 120
+      const safeBpm = Number.isFinite(bpm) && bpm > 0 ? bpm : DEFAULT_BPM
       const end = normalizeTime(endTimelineSec)
       const beat = (time: number) => secondsToBeats(Math.max(0, time - startTimelineSec), safeBpm)
 

@@ -13,6 +13,7 @@ import { DashboardKeyboardView } from "./keyboard-view";
 import { DashboardExportView } from "./export-view";
 import { DashboardAudioView } from "./audio-view";
 import { DashboardPluginsView } from "./plugins-view";
+import { desktopBridge } from "~/lib/runtime";
 
 const items: readonly { view: DashboardView; label: string }[] = [
   { view: "general", label: "General" },
@@ -35,7 +36,7 @@ type DashboardProps = {
 
 export function Dashboard(props: DashboardProps) {
   const selectedView = () => props.view;
-  const desktopPluginCatalog = () => window.dawDesktop?.pluginCatalog;
+  const desktopPluginCatalog = () => desktopBridge()?.pluginCatalog;
   const canClose = () => props.canClose !== false;
 
   const close = () => {

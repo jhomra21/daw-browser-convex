@@ -3,6 +3,7 @@ import type { DesktopVstParameterEditPayload } from "@daw-browser/desktop-protoc
 import { maxVst3WorkerEventsPerBlock } from "@daw-browser/plugin-host-protocol"
 import type { NativeVstParameterQueue } from "./native-vst-parameter-queue"
 import { mergeLocalExternalProcessorParameterOverrides } from "~/lib/external-plugins"
+import { desktopBridge } from "~/lib/runtime"
 
 type VstParameterFeedbackControllerInput = {
   projectId: () => string
@@ -20,7 +21,7 @@ type VstParameterFeedbackController = {
 export const createVstParameterFeedbackController = (
   input: VstParameterFeedbackControllerInput,
 ): VstParameterFeedbackController | undefined => {
-  const subscription = window.dawDesktop?.audioHost?.session.onVstParameterEdit
+  const subscription = desktopBridge()?.audioHost?.session.onVstParameterEdit
 
   if (!subscription) return undefined
   let disposed = false

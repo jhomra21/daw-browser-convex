@@ -2,6 +2,7 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { z } from 'zod'
 import { controlLimitsV1, resumableUploadMaximumBytes } from '@daw-browser/control'
 import { isCapabilityFile } from '~/lib/capability-file'
+import { abortableSleep } from '~/lib/abortable-sleep'
 
 const startResponseSchema = z.object({
   assetKey: z.string(),
@@ -57,15 +58,7 @@ const retryDelay = async (response: Response, attempt: number, signal?: AbortSig
   const retryAfter = Number(response.headers.get('retry-after'))
   const serverDelay = Number.isFinite(retryAfter) && retryAfter >= 0 ? retryAfter * 1_000 : 0
   const delay = Math.min(retryMaxDelayMs, Math.max(serverDelay, retryBaseDelayMs * 2 ** attempt))
-  await new Promise<void>((resolve, reject) => {
-    throwIfAborted(signal)
-    // Verification polling is bounded and always cancelled by the caller's signal.
-    const timer = setTimeout(resolve, delay)
-    signal?.addEventListener('abort', () => {
-      clearTimeout(timer)
-      reject(signal.reason)
-    }, { once: true })
-  })
+  await abortableSleep(delay, signal)
 }
 
 type PersistedUploadSession = {

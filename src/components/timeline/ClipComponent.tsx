@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from "@daw-browser/timeline-core/project-defaults";
 import {
   type Component,
   createEffect,
@@ -366,7 +367,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     const midi = props.clip.midi;
 
     if (midi && Array.isArray(midi.notes) && midi.notes.length > 0) {
-      const spb = 60 / Math.max(1, props.bpm || 120);
+      const spb = 60 / Math.max(1, props.bpm || DEFAULT_BPM);
 
       const midiOffsetBeats = Math.max(
         0,

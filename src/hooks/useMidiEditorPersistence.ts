@@ -1,6 +1,6 @@
 import { createEffect, createSignal, onCleanup } from 'solid-js'
 
-import { isLocalId, type NormalizedLegacyMidiClip } from '@daw-browser/shared'
+import { isLocalId, type NormalizedLegacyMidiClip, bestEffort } from '@daw-browser/shared'
 import type { Clip } from '@daw-browser/timeline-core/types'
 import {
   createMidiEditorPersistence,
@@ -117,14 +117,14 @@ export function useMidiEditorPersistence(options: MidiEditorPersistenceOptions) 
 
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = window.setTimeout(() => {
-      void flush().catch(() => undefined)
+      bestEffort(flush(), 'a failed save is reported through the persistence error signal')
     }, 200)
   }
 
   onCleanup(() => {
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = null
-    void flush().catch(() => undefined)
+    bestEffort(flush(), 'a failed save is reported through the persistence error signal')
   })
 
   return {

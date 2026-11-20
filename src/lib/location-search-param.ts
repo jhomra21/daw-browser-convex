@@ -33,3 +33,40 @@ export const writeLocationSearchParams = (
     history.replaceState(null, '', url.toString())
   }
 }
+
+const listeners = new Set<() => void>()
+
+// Runs the listener on browser history navigation and after publishLocationSearchParams.
+export const subscribeLocationSearch = (listener: () => void) => {
+  window.addEventListener('popstate', listener)
+  listeners.add(listener)
+
+  return () => {
+    window.removeEventListener('popstate', listener)
+    listeners.delete(listener)
+  }
+}
+
+export const publishLocationSearchParams = (
+  updates: readonly { name: string; value: string | null }[],
+  mode: 'push' | 'replace' = 'replace',
+) => {
+  writeLocationSearchParams(updates, mode)
+
+  for (const listener of listeners) listener()
+}
+
+export const writeRoomLocation = (projectId: string, mode: 'push' | 'replace') => {
+  try {
+    writeLocationSearchParams([
+      { name: 'projectId', value: projectId },
+      { name: 'roomId', value: null },
+    ], mode)
+  } catch {}
+}
+
+export const clearShareTokenFromLocation = () => {
+  try {
+    writeLocationSearchParams([{ name: 'shareToken', value: null }])
+  } catch {}
+}

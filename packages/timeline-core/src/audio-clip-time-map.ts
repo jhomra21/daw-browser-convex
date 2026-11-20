@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from './project-defaults'
 import { mapSourceBeatToTimelineBeat, mapTimelineBeatToSourceBeat } from '@daw-browser/shared'
 import type { Clip } from './types'
 
@@ -50,7 +51,7 @@ export function getAudioClipTimeMap(input: AudioClipTimeMapInput): AudioClipTime
   const audioStart = clipStart + leftPad
   const bufferDuration = Math.max(0, input.bufferDurationSec)
   const bufferOffset = Math.min(bufferDuration, bufferOffsetRaw)
-  const projectBpm = resolveWarpBpm(input.projectBpm, 120)
+  const projectBpm = resolveWarpBpm(input.projectBpm, DEFAULT_BPM)
   const sourceBpm = resolveWarpBpm(input.clip.audioWarp?.sourceBpm, projectBpm)
   const warpEnabled = input.clip.audioWarp?.enabled === true
 
@@ -162,7 +163,7 @@ export function getMarkerWarpTimelineSegments(input: {
   if (input.map.mode !== 'stretch') return []
   const markers = input.clip.audioWarp?.markers ?? []
   const audioStartSec = input.clip.startSec + Math.max(0, input.clip.leftPadSec ?? 0)
-  const secondsPerBeat = 60 / resolveWarpBpm(input.projectBpm, 120)
+  const secondsPerBeat = 60 / resolveWarpBpm(input.projectBpm, DEFAULT_BPM)
 
   const markerBoundaries = markers
     .map((marker) => audioStartSec + marker.timelineBeat * secondsPerBeat)

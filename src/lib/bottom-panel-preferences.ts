@@ -1,4 +1,4 @@
-import { canUseLocalStorage } from '~/lib/timeline-storage'
+import { createStoredValue } from '~/lib/stored-value'
 import { FX_PANEL_HEIGHT_PX } from '~/lib/timeline-utils'
 
 const BOTTOM_PANEL_MIN_HEIGHT_PX = FX_PANEL_HEIGHT_PX
@@ -12,27 +12,21 @@ export const clampBottomPanelHeight = (heightPx: number, viewportHeightPx: numbe
   return Math.min(maxHeight, Math.max(BOTTOM_PANEL_MIN_HEIGHT_PX, Math.round(safeHeightPx)))
 }
 
-export const loadBottomPanelHeight = (scopeId: string, viewportHeightPx: number) => {
-  if (!canUseLocalStorage()) return clampBottomPanelHeight(BOTTOM_PANEL_DEFAULT_HEIGHT_PX, viewportHeightPx)
+const bottomPanelHeight = createStoredValue<number>({
+  key: (scopeId) => `${BOTTOM_PANEL_HEIGHT_KEY_PREFIX}${scopeId}`,
+  fallback: () => BOTTOM_PANEL_DEFAULT_HEIGHT_PX,
+  parse: Number,
+  serialize: String,
+})
 
-  try {
-    const stored = localStorage.getItem(`${BOTTOM_PANEL_HEIGHT_KEY_PREFIX}${scopeId}`)
-    const parsed = stored === null ? BOTTOM_PANEL_DEFAULT_HEIGHT_PX : Number(stored)
-
-    return clampBottomPanelHeight(parsed, viewportHeightPx)
-  } catch {
-    return clampBottomPanelHeight(BOTTOM_PANEL_DEFAULT_HEIGHT_PX, viewportHeightPx)
-  }
-}
+export const loadBottomPanelHeight = (scopeId: string, viewportHeightPx: number) => (
+  clampBottomPanelHeight(bottomPanelHeight.read(scopeId), viewportHeightPx)
+)
 
 export const saveBottomPanelHeight = (scopeId: string, heightPx: number, viewportHeightPx: number) => {
   const clamped = clampBottomPanelHeight(heightPx, viewportHeightPx)
 
-  if (!canUseLocalStorage()) return clamped
-
-  try {
-    localStorage.setItem(`${BOTTOM_PANEL_HEIGHT_KEY_PREFIX}${scopeId}`, String(clamped))
-  } catch {}
+  bottomPanelHeight.write(scopeId, clamped)
 
   return clamped
 }

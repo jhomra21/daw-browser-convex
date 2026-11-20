@@ -10,8 +10,9 @@ import { queryClient } from '~/lib/query-client'
 import { AppPreferencesProvider } from '~/context/app-preferences'
 import { MidiAccessProvider } from '~/context/midi-access'
 import { loadInitialAppPreferences } from '~/lib/preferences/app-preferences'
+import { isDesktopRenderer } from '~/lib/runtime'
 
-if (import.meta.env.PROD && !import.meta.env.VITE_DESKTOP) {
+if (import.meta.env.PROD && !isDesktopRenderer()) {
   registerSW({ immediate: true })
 }
 

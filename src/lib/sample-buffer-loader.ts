@@ -1,5 +1,6 @@
 import { resolveSamplePlaybackUrlForRuntime } from '~/lib/renderer-api-url'
 import { readLocalAssetBytes, type LocalAssetBytesResult } from '~/lib/local-assets'
+import { abortableSleep } from '~/lib/abortable-sleep'
 
 type SampleLoadState =
   | { status: 'pending'; promise: Promise<AudioBuffer | null> }
@@ -71,34 +72,6 @@ function computeRetryDelayMs(attempts: number, error?: string) {
   return Math.min(30_000, 1_000 * Math.pow(2, Math.max(0, attempts - 1)))
 }
 
-const waitForRetry = async (ms: number, signal?: AbortSignal) => {
-  if (!signal) {
-    await new Promise((resolve) => setTimeout(resolve, ms))
-
-    return
-  }
-
-  signal.throwIfAborted()
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', abort)
-      resolve()
-    }, ms)
-
-    const abort = () => {
-      clearTimeout(timer)
-
-      try {
-        signal.throwIfAborted()
-      } catch (error) {
-        reject(error)
-      }
-    }
-
-    signal.addEventListener('abort', abort, { once: true })
-  })
-}
-
 async function fetchArrayBufferWithRetry(fetchImpl: SampleFetch, url: string, signal?: AbortSignal) {
   let lastError: Error | null = null
 
@@ -115,7 +88,7 @@ async function fetchArrayBufferWithRetry(fetchImpl: SampleFetch, url: string, si
     }
 
     if (attempt < 2) {
-      await waitForRetry(200 * Math.pow(2, attempt), signal)
+      await abortableSleep(200 * Math.pow(2, attempt), signal)
     }
   }
 

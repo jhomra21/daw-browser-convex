@@ -8,6 +8,7 @@
     "./audio-timeline-trim": "./src/audio-timeline-trim.ts",
     "./clip-fades": "./src/clip-fades.ts",
     "./clip-placement": "./src/clip-placement.ts",
+    "./project-defaults": "./src/project-defaults.ts",
     "./track-index": "./src/track-index.ts",
     "./track-routing": "./src/track-routing.ts",
     "./types": "./src/types.ts"

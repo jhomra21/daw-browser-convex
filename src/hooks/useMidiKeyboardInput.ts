@@ -1,7 +1,7 @@
 import { createEffect, createSignal, on, onCleanup } from 'solid-js'
 
 import { isEditableKeyboardTarget } from '~/lib/keyboard-event-target'
-import { canUseLocalStorage } from '~/lib/timeline-storage'
+import { createStoredValue } from '~/lib/stored-value'
 import { DEFAULT_NOTE_VELOCITY } from '~/lib/midi-editor-grid'
 
 const BASE_C4 = 60
@@ -49,42 +49,33 @@ export const midiKeyboardCodeToSemitone = (code: string): number | undefined => 
 export const clampMidiKeyboardOctave = (value: number) => Math.max(-4, Math.min(4, value))
 export const clampMidiKeyboardVelocity = (value: number) => Math.max(0.1, Math.min(1, value))
 
+const storedOctave = createStoredValue<number>({
+  key: (scope) => `mb:midi_kb_oct:${scope}`,
+  fallback: () => 0,
+  parse: (raw) => {
+    const value = Number.parseInt(raw, 10)
+
+    return Number.isFinite(value) ? clampMidiKeyboardOctave(value) : undefined
+  },
+  serialize: String,
+})
+
+const storedVelocity = createStoredValue<number>({
+  key: (scope) => `mb:midi_kb_vel:${scope}`,
+  fallback: () => DEFAULT_NOTE_VELOCITY,
+  parse: (raw) => {
+    const value = Number.parseFloat(raw)
+
+    return Number.isFinite(value) ? clampMidiKeyboardVelocity(value) : undefined
+  },
+  serialize: (value) => value.toFixed(2),
+})
+
 export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
-  const octaveKey = () => `mb:midi_kb_oct:${options.projectId() || 'default'}`
-  const velocityKey = () => `mb:midi_kb_vel:${options.projectId() || 'default'}`
+  const storageScope = () => options.projectId() || 'default'
 
-  const readStoredOctave = () => {
-    if (!canUseLocalStorage()) return 0
-
-    try {
-      const raw = window.localStorage.getItem(octaveKey())
-
-      if (raw === null) return 0
-      const value = Number.parseInt(raw, 10)
-
-      return Number.isFinite(value) ? clampMidiKeyboardOctave(value) : 0
-    } catch {
-      return 0
-    }
-  }
-
-  const readStoredVelocity = () => {
-    if (!canUseLocalStorage()) return DEFAULT_NOTE_VELOCITY
-
-    try {
-      const raw = window.localStorage.getItem(velocityKey())
-
-      if (raw === null) return DEFAULT_NOTE_VELOCITY
-      const value = Number.parseFloat(raw)
-
-      return Number.isFinite(value) ? clampMidiKeyboardVelocity(value) : DEFAULT_NOTE_VELOCITY
-    } catch {
-      return DEFAULT_NOTE_VELOCITY
-    }
-  }
-
-  const [octave, setOctave] = createSignal(readStoredOctave())
-  const [velocity, setVelocity] = createSignal(readStoredVelocity())
+  const [octave, setOctave] = createSignal(storedOctave.read(storageScope()))
+  const [velocity, setVelocity] = createSignal(storedVelocity.read(storageScope()))
   const [activeRows, setActiveRows] = createSignal<Set<number>>(new Set(), { equals: false })
   const pressed = new Map<string, number>()
 
@@ -175,27 +166,15 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
     () => options.projectId(),
     () => {
       stopPressedNotes()
-      setOctave(readStoredOctave())
-      setVelocity(readStoredVelocity())
+      setOctave(storedOctave.read(storageScope()))
+      setVelocity(storedVelocity.read(storageScope()))
     },
     { defer: true },
   ))
 
-  createEffect(() => {
-    if (!canUseLocalStorage()) return
+  createEffect(() => storedOctave.write(storageScope(), octave()))
 
-    try {
-      window.localStorage.setItem(octaveKey(), String(octave()))
-    } catch {}
-  })
-
-  createEffect(() => {
-    if (!canUseLocalStorage()) return
-
-    try {
-      window.localStorage.setItem(velocityKey(), velocity().toFixed(2))
-    } catch {}
-  })
+  createEffect(() => storedVelocity.write(storageScope(), velocity()))
 
   createEffect(() => {
     if (!options.enabled()) {

@@ -18,6 +18,7 @@ import {
   createRendererTrafficDiagnostics,
 } from "./recording-ipc-diagnostics"
 import { createRecordingDeliveryTrace } from "@daw-browser/desktop-protocol/recording-delivery-trace"
+import { desktopEnv } from "./env"
 
 type AllowedBenchmarkEvent = (event: IpcMainEvent | IpcMainInvokeEvent) => boolean
 
@@ -26,7 +27,7 @@ export const installBenchmarkHeartbeat = (input: {
   ipcMain: IpcMain
   allowed: AllowedBenchmarkEvent
 }) => {
-  if (process.env.DAW_BENCHMARK_HEARTBEAT !== "1") return
+  if (!desktopEnv.benchmarkHeartbeat()) return
   input.ipcMain.handle(benchmarkHeartbeatChannel, (event) => (
     input.allowed(event) ? { mainEpochMs: Date.now(), mainMonotonicEpochMs: performance.timeOrigin + performance.now() } : null
   ))
@@ -64,18 +65,18 @@ export const installBenchmarkWindowTelemetry = (input: {
 }) => {
   const contents = input.window.webContents
 
-  if (process.env.DAW_BENCHMARK_STARTUP_TRACE === "1") {
+  if (desktopEnv.benchmarkStartupTraceEnabled()) {
     contents.on("did-fail-load", (_event, code, _description, url) =>
-      benchmarkLoadFailure(process.env.DAW_BENCHMARK_STARTUP_TRACE, code, url, console.error))
+      benchmarkLoadFailure(desktopEnv.benchmarkStartupTrace(), code, url, console.error))
     contents.on("did-finish-load", () =>
       benchmarkStartupStage(
-        process.env.DAW_BENCHMARK_STARTUP_TRACE,
+        desktopEnv.benchmarkStartupTrace(),
         input.sameAppOrigin(contents.getURL()) ? "window-loaded" : "unexpected-window-loaded",
         console.error,
       ))
   }
 
-  if (process.env.DAW_BENCHMARK_QUIET_CAPTURE !== "1") return
+  if (!desktopEnv.benchmarkQuietCapture()) return
   contents.on("console-message", (_event, _level, message) => {
     if (message.startsWith("[quiet-renderer-block-cost] ") && message.length < 256) console.error(message)
   })
@@ -101,7 +102,7 @@ export const installBenchmarkWindowTelemetry = (input: {
   contents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
     if (isMainFrame) health("did-navigate-in-page", url)
   })
-  const metricIntervalMs = process.env.DAW_BENCHMARK_ZOOM_PROFILE === "1" ? 250 : 1_000
+  const metricIntervalMs = desktopEnv.benchmarkZoomProfile() ? 250 : 1_000
 
   const metricTimer = setInterval(() => {
     for (const metric of input.app.getAppMetrics()) {
@@ -134,10 +135,10 @@ export const installBenchmarkWindowTelemetry = (input: {
 
 export const createBenchmarkStartupReporter = () => (
   stage: Parameters<typeof benchmarkStartupStage>[1],
-) => benchmarkStartupStage(process.env.DAW_BENCHMARK_STARTUP_TRACE, stage, console.error)
+) => benchmarkStartupStage(desktopEnv.benchmarkStartupTrace(), stage, console.error)
 
 export const createBenchmarkRecordingTelemetry = (
-  enabled = process.env.DAW_BENCHMARK_HEARTBEAT === "1",
+  enabled = desktopEnv.benchmarkHeartbeat(),
 ) => {
   let recording: ReturnType<typeof createRecordingIpcDiagnostics> | null = null
   let traffic: ReturnType<typeof createRendererTrafficDiagnostics> | null = null

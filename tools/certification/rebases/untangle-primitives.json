@@ -1,0 +1,78 @@
+{
+ "name": "untangle-primitives",
+ "sequence": 92,
+ "createdAt": "2026-11-20T20:51:48.905Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "apps/desktop/audio-host.ts",
+   "from": "fc4faa70afec01e523cb29f122286a1bf52ed4940cda9c66f660d0623ba65e2f",
+   "to": "4f903e5e2a888f14d244af645d94181f95d1b2a6a32f3aecfc55744251aa6909"
+  },
+  {
+   "file": "packages/audio-engine/src/backends/wasm-audio-worklet-backend.ts",
+   "from": "5df7d18c1641a2c54076cba9f810a2f96f81113ca6f87df47e772fe44b779901",
+   "to": "7cc174ea208770d24101e6aac31ae18694b5e8f648cbd28fa60b22cca7a2a193"
+  },
+  {
+   "file": "src/components/Timeline.tsx",
+   "from": "e679117bae956c5eca082c504b0d016bafe7712b1077592947822fd57cd56aa4",
+   "to": "27b6aa0f78806ad6b07e0d9a6e3859cda1c4acc2da464402999fc6cfa649316e"
+  },
+  {
+   "file": "src/lib/desktop/native-recording-session.ts",
+   "from": "f1128d68417d66e5b0adc4c3c1446abcd0762baaed036798db830340fce67c19",
+   "to": "26c5c2ae59c353d3e3a0d2c0d94a28c03911ee7985eefd5f9f0f4f87ea4c5786"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "dd77ff7b0ef85b3631db46164b9c00e3a59c4313181918a8940c98b1a29df2a9",
+   "new": "198706dee4a492f22882fc9fa93ec536f5f90d2823ef17b38cfcea969b983fa6"
+  },
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "a9e26f99de9d9d6f6bca3b64b1a1fb2c076b95585c29dd3599a3731a9fb9bf0e",
+   "new": "8813a14ae4ec8a477c3697ee38fff354fb7b52b7aa98cfbe4ca6df014486ea78"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "a44781aa6f591c5b43951571e5e1f7d63331dc72",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "6b76ee7c566c91814aeb24ae054505f61446f6b18d63959036c53a835d54f643",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "6b76ee7c566c91814aeb24ae054505f61446f6b18d63959036c53a835d54f643",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b5-bless/live",
+   "resultSha256": "53de9bd49fa2f0e221418a7fff26abeb994a5296406e42e86f4d34d0122f6c05",
+   "seconds": 1338.779233791,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

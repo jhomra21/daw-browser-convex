@@ -541,6 +541,7 @@ export type AudioHostHello = NativeAudioHostParkingLimits & {
 export type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
 
 import type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
+import { bestEffort } from "@daw-browser/shared"
 
 type NativeWorkerNotificationBase = {
   graphRevision: number
@@ -2830,7 +2831,7 @@ export const createNativeAudioHostSupervisor = (
       let resolve: (status: NativeHostRecordingStatus) => void = () => {}
       let reject: (error: Error) => void = () => {}
       const promise = new Promise<NativeHostRecordingStatus>((yes, no) => { resolve = yes; reject = no })
-      void promise.catch(() => undefined)
+      bestEffort(promise, 'the awaiting caller observes this rejection')
       recordingReady = { promise, resolve, reject }
 
       try {
@@ -2861,7 +2862,7 @@ export const createNativeAudioHostSupervisor = (
       let resolve: () => void = () => {}
       let reject: (error: Error) => void = () => {}
       const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no })
-      void promise.catch(() => undefined)
+      bestEffort(promise, 'the awaiting caller observes this rejection')
       const finish = { pending: true, dispatched: false, promise, resolve, reject }
       recordingFinish = finish
       let payload: Buffer | undefined

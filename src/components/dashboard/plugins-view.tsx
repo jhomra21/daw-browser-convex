@@ -8,6 +8,7 @@ import {
 } from "~/lib/external-plugin-ui"
 import { autoHealStaleVst3Catalog } from "~/lib/desktop/vst3-catalog-auto-heal"
 import { DashboardRow, DashboardScrollView, DashboardSection } from "./dashboard-shared"
+import { desktopBridge } from "~/lib/runtime"
 
 const initialCatalog: DesktopPluginCatalog = {
   version: 3,
@@ -34,7 +35,7 @@ export function DashboardPluginsView() {
     hasVst3TrustAcknowledgement(localStorage),
   )
 
-  const bridge = window.dawDesktop?.pluginCatalog
+  const bridge = desktopBridge()?.pluginCatalog
   let activeUpdate: Promise<void> | undefined
   let activeScan: Promise<void> | undefined
 

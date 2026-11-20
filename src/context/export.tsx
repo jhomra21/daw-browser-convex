@@ -6,6 +6,7 @@ import type { ExportQueue } from '~/lib/export/export-queue'
 import { createBrowserExportOutputTargetFactory } from '~/lib/export/browser-export-output-targets'
 import { createDesktopRendererExportOutputTargetFactory } from '~/lib/desktop/capability-export-output-targets'
 import type { TimelineExportInput, TimelineExportService, TimelineStemExportInput } from '~/lib/export/timeline-export-service'
+import { desktopBridge, isDesktopRenderer } from '~/lib/runtime'
 
 type ExportJob = {
   id: string
@@ -36,8 +37,10 @@ export function ExportProvider(props: ExportProviderProps) {
   const [activeJob, setActiveJob] = createSignal<ExportJob | undefined>()
   const unsubscribe = untrack(() => props.queue.subscribe(setActiveJob))
 
-  const outputTargets = import.meta.env.VITE_DESKTOP === 'true' && window.dawDesktop
-    ? createDesktopRendererExportOutputTargetFactory(window.dawDesktop)
+  const bridge = isDesktopRenderer() ? desktopBridge() : undefined
+
+  const outputTargets = bridge
+    ? createDesktopRendererExportOutputTargetFactory(bridge)
     : createBrowserExportOutputTargetFactory()
 
   const enqueueTimelineExport = (request: EnqueueTimelineExportRequest): Promise<ExportOutcome> => (

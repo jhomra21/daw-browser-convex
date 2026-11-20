@@ -5,11 +5,12 @@ import {
   nativeVst3ScannerArtifactName,
   writeNativeReleaseArtifactManifest,
 } from "./native-release-artifacts"
+import { desktopEnv } from "./env"
 
-const scannerPath = process.env.DAW_VST3_SCANNER_PATH
-const workerPath = process.env.DAW_VST3_WORKER_PATH
-const audioHostPath = process.env.DAW_AUDIO_HOST_PATH
-const manifestPath = process.env.DAW_NATIVE_ARTIFACT_MANIFEST_PATH
+const scannerPath = desktopEnv.vst3ScannerPath()
+const workerPath = desktopEnv.vst3WorkerPath()
+const audioHostPath = desktopEnv.audioHostPath()
+const manifestPath = desktopEnv.nativeArtifactManifestPath()
 
 if (!scannerPath || !workerPath || !audioHostPath || !manifestPath) {
   throw new Error(

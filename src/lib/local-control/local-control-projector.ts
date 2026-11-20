@@ -1,3 +1,4 @@
+import { DEFAULT_BPM, DEFAULT_LOOP } from '@daw-browser/timeline-core/project-defaults'
 import {
   assetSnapshotSchemaV1,
   assetSnapshotSchemaV2,
@@ -230,12 +231,12 @@ const projectLocalControlSnapshot = <Snapshot>(
       projectId: input.projectId,
       name: metadata.name,
       revision: input.revision,
-      tempoBpm: isJsonNumber(parsedBpm) ? parsedBpm : 120,
+      tempoBpm: isJsonNumber(parsedBpm) ? parsedBpm : DEFAULT_BPM,
       timeSignatureNumerator: metadata.timeSignature.numerator,
       timeSignatureDenominator: metadata.timeSignature.denominator,
       loopEnabled: isJsonObject(parsedLoop) && parsedLoop.enabled === true,
-      loopStartSec: isJsonObject(parsedLoop) && isJsonNumber(parsedLoop.startSec) ? parsedLoop.startSec : 0,
-      loopEndSec: isJsonObject(parsedLoop) && isJsonNumber(parsedLoop.endSec) ? parsedLoop.endSec : 8,
+      loopStartSec: isJsonObject(parsedLoop) && isJsonNumber(parsedLoop.startSec) ? parsedLoop.startSec : DEFAULT_LOOP.startSec,
+      loopEndSec: isJsonObject(parsedLoop) && isJsonNumber(parsedLoop.endSec) ? parsedLoop.endSec : DEFAULT_LOOP.endSec,
       updatedAt: metadata.updatedAt,
     },
     tracks: valueOfKind(input.entities, 'track', isTrack).map((track) => ({

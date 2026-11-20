@@ -22,27 +22,69 @@ type UseTimelineMasterVolumeOptions = {
   }
 }
 
-export function useTimelineMasterVolume(options: UseTimelineMasterVolumeOptions) {
-  const [pendingMasterVolume, setPendingMasterVolume] = createSignal<number | undefined>()
+// 'applied' and 'rejected' settle at once; a promise is a durable write that rejects when the server refuses it.
+type MasterVolumeCommit = 'applied' | 'rejected' | Promise<unknown>
 
-  const committedVolume = createMemo(() => {
-    const projectId = options.projectId()
+type MasterVolumeBackend = {
+  committedVolume: () => number
+  canEdit: () => boolean
+  // Cloud only: the server's master volume replaces the local mix state.
+  serverVolume?: () => number | undefined
+  commit: (volume: number) => MasterVolumeCommit
+}
 
-    if (isLocalId('project', projectId)) return options.projectMix.state().masterVolume
+// A local project keeps its master volume in the local mix state and always accepts the edit.
+const createLocalMasterVolumeBackend = (options: UseTimelineMasterVolumeOptions): MasterVolumeBackend => ({
+  committedVolume: () => options.projectMix.state().masterVolume,
+  canEdit: () => true,
+  commit: (volume) => {
+    options.projectMix.setMasterVolume(volume)
 
-    return normalizeMasterVolume(options.fullViewData()?.mixerSettings.masterVolume ?? options.projectMix.state().masterVolume)
-  })
+    return 'applied'
+  },
+})
 
-  const volume = createMemo(() => pendingMasterVolume() ?? committedVolume())
-
-  const canEdit = createMemo(() => {
-    const projectId = options.projectId()
-
-    if (isLocalId('project', projectId)) return true
+// A cloud project reads the volume from the full view, and an owner or editor commits it through the shared outbox.
+const createCloudMasterVolumeBackend = (options: UseTimelineMasterVolumeOptions, projectId: string): MasterVolumeBackend => ({
+  committedVolume: () => normalizeMasterVolume(options.fullViewData()?.mixerSettings.masterVolume ?? options.projectMix.state().masterVolume),
+  canEdit: () => {
     const role = options.currentProjectRole()
 
     return role === 'owner' || role === 'editor'
+  },
+  serverVolume: () => options.fullViewData()?.mixerSettings.masterVolume,
+  commit: (volume) => {
+    const userId = options.userId()
+    const role = options.currentProjectRole()
+
+    if (!projectId || !userId || (role !== 'owner' && role !== 'editor')) return 'rejected'
+    options.projectMix.setMasterVolume(volume)
+
+    return publishDurableSharedTimelineOperation({
+      projectId,
+      userId,
+      operation: { kind: 'mixer.setMasterVolume', payload: { volume } },
+      queuedResult: { status: 'applied' },
+    })
+  },
+})
+
+export function useTimelineMasterVolume(options: UseTimelineMasterVolumeOptions) {
+  const [pendingMasterVolume, setPendingMasterVolume] = createSignal<number | undefined>()
+
+  const backend = createMemo(() => {
+    const projectId = options.projectId()
+
+    return isLocalId('project', projectId)
+      ? createLocalMasterVolumeBackend(options)
+      : createCloudMasterVolumeBackend(options, projectId)
   })
+
+  const committedVolume = () => backend().committedVolume()
+
+  const volume = createMemo(() => pendingMasterVolume() ?? committedVolume())
+
+  const canEdit = () => backend().canEdit()
 
   const previewVolume = (nextVolume: number) => {
     if (!canEdit()) return
@@ -55,11 +97,10 @@ export function useTimelineMasterVolume(options: UseTimelineMasterVolumeOptions)
   })
 
   createEffect(() => {
-    const projectId = options.projectId()
-    const mixerSettings = options.fullViewData()?.mixerSettings
+    const serverVolume = backend().serverVolume?.()
 
-    if (!projectId || isLocalId('project', projectId) || !mixerSettings || pendingMasterVolume() !== undefined) return
-    options.projectMix.setMasterVolume(mixerSettings.masterVolume)
+    if (!options.projectId() || serverVolume === undefined || pendingMasterVolume() !== undefined) return
+    options.projectMix.setMasterVolume(serverVolume)
   })
 
   createEffect(() => {
@@ -76,31 +117,22 @@ export function useTimelineMasterVolume(options: UseTimelineMasterVolumeOptions)
     if (nextVolume === volume()) return
     setPendingMasterVolume(nextVolume)
     options.audioEngine.setMasterVolume(nextVolume)
-    const projectId = options.projectId()
+    const outcome = backend().commit(nextVolume)
 
-    if (isLocalId('project', projectId)) {
-      options.projectMix.setMasterVolume(nextVolume)
+    if (outcome === 'applied') {
       setPendingMasterVolume(undefined)
 
       return
     }
 
-    const userId = options.userId()
-
-    if (!projectId || !userId || (options.currentProjectRole() !== 'owner' && options.currentProjectRole() !== 'editor')) {
+    if (outcome === 'rejected') {
       setPendingMasterVolume(undefined)
       options.audioEngine.setMasterVolume(committedVolume())
 
       return
     }
 
-    options.projectMix.setMasterVolume(nextVolume)
-    void publishDurableSharedTimelineOperation({
-      projectId,
-      userId,
-      operation: { kind: 'mixer.setMasterVolume', payload: { volume: nextVolume } },
-      queuedResult: { status: 'applied' },
-    }).catch(() => {
+    void outcome.catch(() => {
       if (untrack(() => pendingMasterVolume()) !== nextVolume) return
       setPendingMasterVolume(undefined)
       const committed = untrack(committedVolume)

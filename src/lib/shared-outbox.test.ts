@@ -6,16 +6,18 @@ import { openLocalProjectDb } from './local-project-db'
 import * as outbox from './shared-outbox'
 import type { SharedTimelineOperation } from './shared-timeline-operations-api'
 import {
-  attachClipDeletionRecoveriesToHistory,
-  flushPendingSharedOutboxHistoryUpdates,
   flushSharedOutbox,
   flushSharedOutboxOperation,
   publishDurableSharedTimelineOperation,
   recoverStaleSharedOutboxClaims,
-  registerSharedOutboxHistoryHandler,
   SharedOutboxUnavailableError,
   setSharedOutboxRuntimeForTesting,
 } from './shared-outbox'
+import {
+  attachClipDeletionRecoveriesToHistory,
+  flushPendingSharedOutboxHistoryUpdates,
+  registerSharedOutboxHistoryHandler,
+} from './shared-outbox-history'
 
 const parseRequestBody = (init: RequestInit | undefined): JsonValue => (
   JSON.parse(init?.body?.toString() ?? 'null')

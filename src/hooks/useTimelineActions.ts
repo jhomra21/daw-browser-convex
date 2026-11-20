@@ -2,6 +2,7 @@ import type { Accessor } from 'solid-js'
 
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { assert, assertDefined, isLocalId, parseJsonValue, trackCreationCollapsed, trackCreationIndex } from '@daw-browser/shared'
+import { createViewerShareInvite } from '~/lib/cloud-projects-api'
 import { ensureRoomShareLink, getInviteShareUrl } from '~/lib/timeline-share'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { createTimelineTrackStructureBackend } from '~/lib/timeline-track-structure-backend'
@@ -262,18 +263,9 @@ export function useTimelineActions(
 
     if (!projectId || !userId) return undefined
 
-    const response = await fetch('/api/share-invites', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId, role: 'viewer' }),
-    })
+    const token = await createViewerShareInvite(projectId)
 
-    if (!response.ok) throw new Error('Failed to create share invite.')
-    const result: unknown = await response.json()
-
-    return isSharedOperationPayload(result) && isString(result.token)
-      ? getInviteShareUrl(projectId, result.token)
-      : undefined
+    return token === undefined ? undefined : getInviteShareUrl(projectId, token)
   }
 
   const refuseLockedTarget = (refusal: string | undefined) => {

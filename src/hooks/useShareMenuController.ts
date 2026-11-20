@@ -1,35 +1,16 @@
 import { type Accessor, createSignal } from "solid-js";
-import { isJsonObject, isJsonString, parseJsonValue, type JsonValueInput } from "@daw-browser/shared";
 import { copyText } from "~/lib/clipboard";
-
-type ProjectMember = {
-  userId: string;
-  role: "editor" | "viewer";
-};
+import { listProjectMembers, revokeProjectMember } from "~/lib/cloud-projects-api";
 
 type UseShareMenuControllerOptions = {
   onShare?: () => string | void | Promise<string | void>;
   projectId: Accessor<string>;
 };
 
-const readProjectMembers = (value: JsonValueInput) => {
-  const parsed = parseJsonValue(value);
-
-  if (!isJsonObject(parsed) || !Array.isArray(parsed.members)) return null;
-
-  return parsed.members.flatMap((member): ProjectMember[] => {
-    if (!isJsonObject(member) || !isJsonString(member.userId)) return [];
-
-    if (member.role !== "editor" && member.role !== "viewer") return [];
-
-    return [{ userId: member.userId, role: member.role }];
-  });
-};
-
 export function useShareMenuController(options: UseShareMenuControllerOptions) {
   const [shareUrl, setShareUrl] = createSignal("");
   const [shareError, setShareError] = createSignal("");
-  const [members, setMembers] = createSignal<ProjectMember[]>([]);
+  const [members, setMembers] = createSignal<Awaited<ReturnType<typeof listProjectMembers>>>([]);
   const [membersLoading, setMembersLoading] = createSignal(false);
   const [membersError, setMembersError] = createSignal("");
   const [revokingMemberId, setRevokingMemberId] = createSignal("");
@@ -60,10 +41,7 @@ export function useShareMenuController(options: UseShareMenuControllerOptions) {
     setMembersError("");
 
     try {
-      const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/members`);
-      const nextMembers = readProjectMembers(await response.json().catch(() => null));
-
-      if (!response.ok || !nextMembers) throw new Error("Members could not be loaded.");
+      const nextMembers = await listProjectMembers(projectId);
 
       if (options.projectId() !== projectId) return;
       setMembers(nextMembers);
@@ -96,12 +74,7 @@ export function useShareMenuController(options: UseShareMenuControllerOptions) {
     setRevokingMemberId(targetUserId);
 
     try {
-      const response = await fetch(
-        `/api/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(targetUserId)}`,
-        { method: "DELETE" },
-      );
-
-      if (!response.ok) throw new Error("Member could not be removed.");
+      await revokeProjectMember(projectId, targetUserId);
 
       if (!isCurrentProject()) return;
       setMembers((current) => {

@@ -13,30 +13,41 @@ import { seedRecord, seedRecords, type SeedRecord } from "./seed-judge"
 //   B3 refuse a run that did not complete, did not pass, or whose source freeze failed: `unfinished`.
 //   B4 bind evidence to its scope and provenance, and pair every live observation with a reverted one: `provenanceProblems`, `unpaired`.
 export const provenance = z.object({ scope: z.array(z.string()), head: z.string(), gitStatusSha256: z.string(), expectationsSha256: z.string(), overlaySha256: z.string().nullable() })
+
 export type Provenance = z.infer<typeof provenance>
+
 export const measurement = z.object({
   reverting: z.boolean(), verdict: z.string(), failing: z.array(z.string()), provenance,
   hashes: z.record(z.string(), z.string().nullable()),
   jobs: z.array(z.object({ id: z.string(), reaches: z.boolean(), observed: z.array(z.object({ path: z.array(z.string()), value: z.json() })) })),
 })
+
 export type Measurement = z.infer<typeof measurement>
+
 export const runResult = z.object({ verdict: z.string(), wallSeconds: z.number(), freeze: z.object({ filesUnchanged: z.boolean(), gitStatusUnchanged: z.boolean() }) })
+
 export type RunResult = z.infer<typeof runResult>
 
 const record = z.record(z.string(), z.json())
 const strings = (value: JsonValue | undefined) => z.array(z.string()).safeParse(value).data ?? []
 const tally = (value: JsonValue | undefined) => z.object({ pass: z.number(), skip: z.number(), fail: z.number() }).safeParse(value).data
+
 type Tally = NonNullable<ReturnType<typeof tally>>
+
 const sum = (counts: Tally) => counts.pass + counts.skip + counts.fail
 const invariants = (fuzz: JsonValue | undefined) => ({ status: record.safeParse(fuzz).data?.status ?? null, failures: (z.array(record).safeParse(record.safeParse(fuzz).data?.failures).data ?? []).map((failure) => failure.invariant ?? null) })
 const rejectionSeeds = (value: JsonValue | undefined) => z.array(z.array(z.number())).safeParse(value).data?.map(([seed]) => seed) ?? null
+
 // Entries of `now` beyond what `was` holds, counting repeats (diagnostic lists are multisets).
 const added = (was: string[], now: string[]) => {
   const left = [...was]
+
   return now.filter((entry) => {
     const at = left.indexOf(entry)
+
     if (at < 0) return true
     left.splice(at, 1)
+
     return false
   })
 }
@@ -44,35 +55,45 @@ const added = (was: string[], now: string[]) => {
 // A ruled test removal (`--allow-removal <manifest>`): the parent ruled these tests out in `ruling`, and the bless may record the
 // count drop they cause.
 export const removalManifest = z.object({ ruling: z.string(), removed: z.array(z.object({ file: z.string(), test: z.string() })) })
+
 export type RemovalManifest = z.infer<typeof removalManifest>
+
 // The evidence is identity, not a count: the paired runs' logs (reverted before, live after) are diffed test by test, and every passing
 // test the live log lost must be a manifest entry of that file. The command line decides nothing.
 const removedKey = (entry: RemovalManifest["removed"][number]) => `${entry.file}\t${entry.test}`
+
 // A manifest name is a qualified name (`suite > test`) or a bare one; a bare name matches a log identity by its leaf.
 const named = (identity: string, test: string) => identity === test || (!test.includes(" > ") && leafName(identity) === test)
+
 type KillerSource = { mutations: { arms: { expect: { fails: string[] | null } }[] }, gates: { judge: { kind: string, fails?: string[] } }[] }
+
 // Refused outright, whatever the scope: a duplicate entry, a file that no longer exists (a deleted test file is not admissible, per
 // PARENT-RULING-ALLOW-REMOVAL-V2.md: a whole-file deletion is proven by a direct audit instead), or a removed test that is a killer (an
 // arm's `expect.fails` or a gate's `judge.fails` names it). Killers and entries are compared by leaf name, as failures are measured.
 export const manifestProblems = (manifest: RemovalManifest, exp: KillerSource, exists: (file: string) => boolean) => {
   const killers = new Set([...exp.mutations.arms.flatMap((arm) => arm.expect.fails ?? []), ...exp.gates.flatMap((gate) => gate.judge.fails ?? [])].map(leafName))
+
   return manifest.removed.flatMap((entry, index) => [
     ...(manifest.removed.findIndex((other) => removedKey(other) === removedKey(entry)) < index ? [`${entry.file}: "${entry.test}" is listed twice`] : []),
     ...(exists(entry.file) ? [] : [`${entry.file}: the removed test file does not exist; a deleted test file is not admissible through --allow-removal (PARENT-RULING-ALLOW-REMOVAL-V2.md)`]),
     ...(killers.has(leafName(entry.test)) ? [`${entry.file}: removed test "${entry.test}" is a killer a gate or arm expects to fail`] : []),
   ])
 }
+
 // The identity diff of one paired job: the passing tests the live log (`after`) lost from the reverted log (`before`). A lost test is
 // claimed by one manifest entry of its file, and `claimed` counts the claimed tests by file. `problems` refuse the job: a lost test no
 // entry names, a lost test whose leaf is new in another file (a move, which is not admissible), a bare name that matches several lost
 // tests in one file, and a log whose `(pass)` lines do not reconcile with its measured pass count. Leaves are matched only to diagnose a
 // move, never to claim a loss.
 export type Removal = { claimed: Record<string, number>, problems: string[] }
+
 const reconciles = (label: string, log: string, tests: Map<string, string[]>) => {
   const parsed = [...tests.values()].reduce((total, names) => total + names.length, 0)
   const measured = testCounts(log).pass
+
   return parsed === measured ? [] : [`${label} log parse does not reconcile: ${parsed} passing tests parsed, ${measured} measured`]
 }
+
 export const removalOf = (before: string, after: string, removed: RemovalManifest["removed"]): Removal => {
   const was = passedTests(before)
   const now = passedTests(after)
@@ -83,9 +104,11 @@ export const removalOf = (before: string, after: string, removed: RemovalManifes
   const unclaimed = [...removed]
   const claimed: Record<string, number> = {}
   const problems = [...reconciles("reverted", before, was), ...reconciles("live", after, now)]
+
   for (const { file, identity } of lost) {
     const moved = gained.find((next) => next.file !== file && leafName(next.identity) === leafName(identity))
     const at = unclaimed.findIndex((entry) => entry.file === file && named(identity, entry.test))
+
     if (moved) problems.push(`test moved from ${file} to ${moved.file}; moves are not admissible, record them separately: "${identity}"`)
     else if (at < 0) problems.push(`${file}: "${identity}" was lost and the manifest does not name it`)
     else {
@@ -93,28 +116,37 @@ export const removalOf = (before: string, after: string, removed: RemovalManifes
       claimed[file] = (claimed[file] ?? 0) + 1
     }
   }
+
   const ambiguous = removed.flatMap((entry) => {
     const matches = lost.filter((next) => next.file === entry.file && named(next.identity, entry.test))
+
     return !entry.test.includes(" > ") && matches.length > 1
       ? [`${entry.file}: "${entry.test}" is ambiguous: it names ${matches.length} lost tests (${matches.map((next) => `"${next.identity}"`).join(", ")}); name it qualified`]
       : []
   })
+
   return { claimed, problems: [...problems, ...ambiguous] }
 }
+
 // A known-red test that now passes (`--allow-now-passing <file>::<test name>`), ruled in PARENT-RULING-P8-BLESS-BLOCKERS.md (addendum 2).
 // It is admitted for one observation only when the test is named, the observation recorded it failing, and its live log passes it in
 // that file; `weakened` then holds every other recorded failure, the pass and skip counts, and the exit to the recorded values.
 export type NowPassing = { file: string, test: string }
+
 export const parseNowPassing = (spec: string): NowPassing | undefined => {
   const at = spec.indexOf("::")
+
   return at > 0 && at + 2 < spec.length ? { file: spec.slice(0, at), test: spec.slice(at + 2) } : undefined
 }
+
 export const nowPassingOf = (old: JsonValue | undefined, log: string, names: NowPassing[]) => {
   const recorded = strings(record.safeParse(old).data?.fails)
   const passed = passedTests(log)
   const failed = failedTestsByFile(log)
+
   return names.flatMap(({ file, test }) => recorded.includes(leafName(test)) && (passed.get(file) ?? []).some((identity) => named(identity, test)) && !(failed.get(file) ?? []).some((identity) => named(identity, test)) ? [leafName(test)] : [])
 }
+
 const withinRemoval = (removal: Removal) => Object.values(removal.claimed).reduce((total, count) => total + count, 0)
 
 // B2: a test or defect count may not fall, a skip may not appear, and no verdict field (exit, failing set, status) may move.
@@ -125,12 +157,16 @@ const lostWitnesses = (was: JsonValue | undefined, now: JsonValue | undefined, w
   const recorded = tally(was)
   const before = recorded && { ...recorded, pass: recorded.pass + passing, fail: recorded.fail - passing }
   const after = tally(now)
+
   if (!before) return []
+
   if (!after) return [`${what} counts disappeared`]
   const gained = mutant ? Math.max(0, after.fail - before.fail) : 0
   const ruled = before.pass - after.pass <= claimed + gained && (mutant ? after.fail >= before.fail : after.fail === before.fail) && after.skip === before.skip
+
   return [...(sum(after) < sum(before) && !ruled ? [`${what}: tests were removed (${sum(before)} -> ${sum(after)})`] : []), ...(after.skip > before.skip ? [`${what}: tests were skipped`] : [])]
 }
+
 export const weakened = (at: string[], old: JsonValue | undefined, next: JsonValue, role: string | undefined, removal?: Removal, passing: string[] = []) => {
   const was = record.safeParse(old).data ?? {}
   const now = record.safeParse(next).data ?? {}
@@ -141,23 +177,31 @@ export const weakened = (at: string[], old: JsonValue | undefined, next: JsonVal
   // An admitted pass lets a control's or gate's exit 1 -> 0 only with nothing left failing; a mutant's exit may not move, so one left
   // with nothing failing and its exit moved is no longer killed.
   const cleared = passing.length > 0 && role !== "mutant" && was.exit === 1 && now.exit === 0 && remaining.length === 0
+
   if (!sameJson(was.exit, now.exit) && !cleared) problems.push(passing.length > 0 && role === "mutant" && remaining.length === 0 ? "mutant no longer killed" : "exit moved")
+
   // A mutant arm's failing set may grow and never shrink; every other observation's failing set may not move.
   if (was.kind === "tests" && role !== "mutant" && !sameJson(wasFails, now.fails)) problems.push("failing tests moved")
   problems.push(...lostWitnesses(was.counts, now.counts, "counts", removal && withinRemoval(removal), role === "mutant", passing.length))
   const floor = (field: string) => ({ was: z.number().safeParse(was[field]).data, now: z.number().safeParse(now[field]).data })
   const rejected = floor("rejected")
+
   if (rejected.was !== undefined && !(rejected.now !== undefined && rejected.now >= rejected.was)) problems.push("fewer rejected defects")
   const total = floor("total")
+
   if (total.was !== undefined && !(total.now !== undefined && total.now >= total.was)) problems.push("fewer native tests")
+
   if (was.kind === "lint" || was.kind === "tsc") {
     const key = was.kind === "lint" ? "signature" : "diagnostics"
     const flat = (value: JsonValue | undefined) => (Array.isArray(value) ? value : []).map((entry) => JSON.stringify(entry))
+
     if (added(flat(was[key]), flat(now[key])).length > 0) problems.push(`new ${was.kind} diagnostics`)
   }
+
   if (was.kind === "engine") {
     const before = record.safeParse(was.files).data ?? {}
     const after = record.safeParse(now.files).data ?? {}
+
     for (const [file, counts] of Object.entries(before)) {
       if (!(file in after)) problems.push(`engine file ${file} no longer runs`)
       else {
@@ -166,16 +210,23 @@ export const weakened = (at: string[], old: JsonValue | undefined, next: JsonVal
       }
     }
   }
+
   if (at[0] !== "mutations") return problems
+
   for (const key of ["applied", "tsErrors"]) if (!sameJson(was[key], now[key])) problems.push(`${key} moved`)
+
   // A rejection record is a position in the event stream: its seeds and its count may not move, its ids follow the stream.
   if (!sameJson(rejectionSeeds(was.rejection), rejectionSeeds(now.rejection))) problems.push("rejection seeds or count moved")
+
   if (!sameJson(invariants(was.fuzz), invariants(now.fuzz))) problems.push("fuzz status or invariants moved")
   const lost = strings(wasFails).filter((test) => !remaining.includes(test))
+
   if (role === "mutant" ? lost.length > 0 : !sameJson(wasFails, now.fails)) problems.push("recorded failures moved")
   const oracle = record.safeParse(was.oracle).data
+
   if (oracle && (record.safeParse(now.oracle).data?.message !== oracle.message || strings(oracle.unrejected).some((defect) => !strings(record.safeParse(now.oracle).data?.unrejected).includes(defect))))
     problems.push("oracle moved or rejects a recorded defect")
+
   return problems
 }
 
@@ -185,6 +236,7 @@ export const weakened = (at: string[], old: JsonValue | undefined, next: JsonVal
 // schedule compiles, which cross no native boundary and cost no Inspect, dispatch or publication, so a rise is ruled by being listed.
 // Every other ceiling (`candidate:<status>` and any native count a fuzzer adds later) is held to the contract.
 const rendererCosts = new Set(["compileCount"])
+
 // A rejection may be added or removed only when the bless names it (`--allow-rejection <fixture>:<seed>:<name|classification|domain>`;
 // `allowRejection` holds this seed's named entries), the seed passes with no failure before and after, and the rejection is one
 // the fuzz gate never counts: a `cancelled` settlement carries no failure class (the hooks' checkRejections record it with
@@ -193,43 +245,58 @@ const rendererCosts = new Set(["compileCount"])
 const rejectionProblems = (was: SeedRecord, now: SeedRecord, allowRejection: string[]) =>
   [...added(was.rejections, now.rejections), ...added(now.rejections, was.rejections)].flatMap((entry) => {
     if (!allowRejection.includes(entry)) return [`rejection ${entry} moved; it needs --allow-rejection`]
+
     return [
       ...(was.status === "pass" && now.status === "pass" && was.failures.length === 0 && now.failures.length === 0 ? [] : [`rejection ${entry} moved on a seed that does not pass cleanly`]),
       ...(entry.split("|")[1] === "cancelled" ? [] : [`rejection ${entry} is not a cancelled settlement; its class is a violation at B6`]),
     ]
   })
+
 // A seed may stop exercising an invariant only when the bless names it (`--allow-unexercised <fixture>:<seed>:<invariant>`; `named` holds
 // this seed's invariants), the seed passes with no failure before and after, and the campaign-wide count of seeds exercising that
 // invariant does not fall (`fallen` holds the invariants whose count did, see exercisedFalls), ruled in PARENT-RULING-P8-BLESS-BLOCKERS.md (addendum 3).
 export const parseUnexercised = (spec: string) => {
   const match = /^(controller|hook):(\d+):(.+)$/.exec(spec)
+
   return match ? { fixture: match[1] ?? "", seed: Number(match[2]), invariant: match[3] ?? "" } : undefined
 }
+
 export const exercisedFalls = (baseline: JsonValue | undefined, observed: { path: string[]; value: JsonValue }[]) => {
   const was = seedRecords.safeParse(baseline).data
+
   if (!was) return []
   const now = { controller: [...was.controller], hook: [...was.hook] }
+
   for (const { path: at, value } of observed) {
     const live = seedRecord.safeParse(value).data
     const index = Number(at[2]?.slice(1))
+
     if (live && (at[1] === "controller" || at[1] === "hook") && index in now[at[1]]) now[at[1]][index] = live
   }
+
   const count = (records: typeof now, invariant: string) => [...records.controller, ...records.hook].filter((record) => record.exercised.includes(invariant)).length
+
   return [...new Set([...was.controller, ...was.hook].flatMap((record) => record.exercised))].filter((invariant) => count(now, invariant) < count(was, invariant))
 }
+
 type Unexercised = { named: string[]; fallen: string[] }
+
 const unexercisedProblems = (was: SeedRecord, now: SeedRecord, { named, fallen }: Unexercised) =>
   was.exercised.filter((invariant) => !now.exercised.includes(invariant)).flatMap((invariant) => {
     if (!named.includes(invariant)) return [`${invariant} is no longer exercised; it needs --allow-unexercised`]
+
     return [
       ...(was.status === "pass" && now.status === "pass" && was.failures.length === 0 && now.failures.length === 0 ? [] : [`${invariant} was lost on a seed that does not pass cleanly`]),
       ...(fallen.includes(invariant) ? [`${invariant} is no longer exercised and the campaign-wide count of seeds exercising it fell`] : []),
     ]
   })
+
 export const seedRecordProblems = (old: JsonValue | undefined, next: JsonValue, allowRise: string[], allowRejection: string[] = [], unexercised: Unexercised = { named: [], fallen: [] }) => {
   const was = seedRecord.safeParse(old).data
   const now = seedRecord.safeParse(next).data
+
   if (!was || !now) return ["seed record is missing or malformed"]
+
   return [
     ...(was.status === now.status ? [] : [`status moved ${was.status} -> ${now.status}`]),
     ...(sameJson(was.failures, now.failures) ? [] : ["failures moved"]),
@@ -250,17 +317,22 @@ export const unfinished = (label: string, child: number | null | undefined, meas
 ]
 
 const provenanceFields: (keyof Provenance)[] = ["scope", "head", "gitStatusSha256", "expectationsSha256", "overlaySha256"]
+
 // B4: a measurement stands only for the scope, bytes, overlay and expectations it was taken on.
 export const provenanceProblems = (label: string, measured: Measurement, want: Provenance, reverting: boolean, current: (file: string) => string | null) => [
   ...(measured.reverting === reverting ? [] : [`the ${label} measurement is ${measured.reverting ? "" : "not "}a reverted run`]),
   ...provenanceFields.flatMap((key) => sameJson(measured.provenance[key], want[key]) ? [] : [`the ${label} measurement was taken on another ${key}`]),
   ...Object.entries(measured.hashes).flatMap(([file, hash]) => current(file) === hash ? [] : [`the ${label} measurement was taken on other bytes of ${file}`]),
 ]
+
 type Observed = { job: string; path: string[] }
+
 const key = (entry: Observed) => `${entry.job}\t${entry.path.join(" / ")}`
+
 // Every live observation needs a reverted one at the same job and path; an absent one is not a reproduction.
 export const unpaired = (live: Observed[], reverted: Observed[]) => {
   const paired = new Set(reverted.map(key))
+
   return live.flatMap((entry) => paired.has(key(entry)) ? [] : [key(entry)])
 }
 
@@ -271,7 +343,11 @@ if (import.meta.main) {
   const current = (file: string) => file === "a.ts" ? "x" : null
   const exp = expectationsSchema.parse(JSON.parse(readFileSync(expectationsFile, "utf8")))
   const dir = mkdtempSync(path.join(tmpdir(), "bless-rules-"))
-  const throws = (call: () => void) => { try { call() } catch { return true } return false }
+
+  const throws = (call: () => void) => { try { call() } catch { return true }
+
+ return false }
+
   const fuzzArm = exp.mutations.arms.find((arm) => arm.expect.fuzz !== null)
   const oracleArm = exp.mutations.arms.find((arm) => arm.expect.oracle !== null)
   const seed = { status: "pass", failures: [], rejections: [], exercised: ["I1", "I2"], ceilings: { compileCount: 17, "candidate:accepted": 2 } }
@@ -281,20 +357,27 @@ if (import.meta.main) {
   // A `bun test` log: a header per file, a `(pass)` line per test, then the summary the counts are read from.
   const fixture = (files: Record<string, string[]>) => `${Object.entries(files).map(([file, names]) => `${file}:\n${names.map((name) => `(pass) ${name} [0.10ms]`).join("\n")}\n`).join("\n")}\n ${Object.values(files).flat().length} pass\n 0 fail\n`
   const entry = (file: string, test: string) => ({ file, test })
+
   const judged = (before: string, after: string, removed: RemovalManifest["removed"]) => {
     const removal = removalOf(before, after, removed)
+
     return [...removal.problems, ...weakened(["gates"], { kind: "tests", exit: 0, counts: testCounts(before), fails: [] }, { kind: "tests", exit: 0, counts: testCounts(after), fails: [] }, undefined, removal)]
   }
+
   const killers = (arms: string[], gates: string[]) => ({ mutations: { arms: arms.map((fail) => ({ expect: { fails: [fail] } })) }, gates: gates.map((fail) => ({ judge: { kind: "tests", fails: [fail] } })) })
   const problemsOf = (before: string, after: string, removed: RemovalManifest["removed"]) => removalOf(before, after, removed).problems
+
   // Real `bun test` output (bun 1.4.2): a `(pass)` line may carry no duration, a `(fail)` line follows its error, and the summary is last.
   const bunLog = ["bun test v1.4.2 (744846f84)", "", "a.test.ts:", "(pass) t1 [0.01ms]", "(pass) suite > t2", "(skip) suite > t3", "", "sub/b.test.ts:", "(pass) u1",
     "error: expect(received).toBe(expected)", "", "Expected: 1", "Received: 2", "", "(fail) t1 [0.07ms]", "", " 3 pass", " 1 skip", " 1 fail", " 4 expect() calls", "Ran 5 tests across 2 files. [2.00ms]"].join("\n")
+
   // `--allow-now-passing`: a recorded failing test (a control's or gate's, or a mutant's kill) that the live log now passes.
   const failing = (exit: number, pass: number, fail: number, fails: string[]) => ({ kind: "tests", exit, counts: { pass, skip: 0, fail }, fails })
   const nowLog = (passing: string[], failed: string[] = []) => `f.test.ts:\n${passing.map((name) => `(pass) ${name}`).join("\n")}\n${failed.map((name) => `(fail) ${name}`).join("\n")}\n`
+
   const admit = (old: JsonValue, log: string, names: string[], next: JsonValue, role: string | undefined) =>
     weakened(["gates"], old, next, role, undefined, nowPassingOf(old, log, names.map((test) => ({ file: "f.test.ts", test }))))
+
   const nowPassingCases = (): [string, boolean][] => [
     ["B2 now passing: a named recorded failure that passes now is admitted in a control, its exit 1 -> 0 with nothing left failing", admit(failing(1, 5, 1, ["a"]), nowLog(["a"]), ["a"], failing(0, 6, 0, []), "control").length === 0],
     ["B2 now passing: the same in a gate", admit(failing(1, 5, 1, ["a"]), nowLog(["a"]), ["a"], failing(0, 6, 0, []), undefined).length === 0],
@@ -315,10 +398,12 @@ if (import.meta.main) {
     ["B2 now passing: a bad spec names no file and test", parseNowPassing("f.test.ts") === undefined && parseNowPassing("::t") === undefined && parseNowPassing("f.test.ts::") === undefined],
     ["B2 now passing: a spec splits at its first ::", JSON.stringify(parseNowPassing("f.test.ts::a > b::c")) === JSON.stringify({ file: "f.test.ts", test: "a > b::c" })],
   ]
+
   // `--allow-unexercised`: a seed that stops exercising a named invariant, while the campaign-wide count of seeds exercising it holds.
   const lost = { ...seed, exercised: ["I1"] }
   const hold = { named: ["I2"], fallen: [] }
   const campaign = (...exercised: string[][]) => ({ controller: [], hook: exercised.map((list) => ({ ...seed, exercised: list })) })
+
   const unexercisedCases = (): [string, boolean][] => [
     ["B2 unexercised: a named loss on a clean seed whose campaign count holds is admitted", seedRecordProblems(seed, lost, [], [], hold).length === 0],
     ["B2 unexercised: an unnamed loss is refused", seedRecordProblems(seed, lost, [], [], { named: [], fallen: [] }).length > 0],
@@ -333,6 +418,7 @@ if (import.meta.main) {
     ["B2 unexercised: a bad spec names no fixture, seed and invariant", parseUnexercised("hook:321") === undefined && parseUnexercised("hook:x:I9") === undefined && parseUnexercised("other:3:I9") === undefined],
     ["B2 unexercised: a spec splits fixture, seed and invariant", JSON.stringify(parseUnexercised("hook:321:I9")) === JSON.stringify({ fixture: "hook", seed: 321, invariant: "I9" })],
   ]
+
   const cases: [string, boolean][] = [
     ["B1 a missing seed summary is not measured", fuzzArm !== undefined && throws(() => { measureArm(fuzzArm, { exit: 1, text: "", log: "" }, dir, null) })],
     ["B1 a missing oracle failure is not measured", oracleArm !== undefined && throws(() => { measureArm(oracleArm, { exit: 1, text: "", log: "" }, dir, null) })],
@@ -419,6 +505,7 @@ if (import.meta.main) {
     ["B4 an unpaired live observation", unpaired([{ job: "j", path: ["a"] }], [{ job: "j", path: ["b"] }]).length > 0],
     ["B4 passes bound evidence", provenanceProblems("live", clean, same, false, current).length === 0 && unpaired([{ job: "j", path: ["a"] }], [{ job: "j", path: ["a"] }]).length === 0],
   ]
+
   for (const [name, ok] of cases) console.log(`${ok ? "ok  " : "FAIL"} ${name}`)
   process.exit(cases.every(([, ok]) => ok) ? 0 : 1)
 }

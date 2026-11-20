@@ -11,11 +11,14 @@ const selected = new Set<string>()
 
 const reachesPath = (file: string) => [...paths].some((candidate) => candidate === file || file.startsWith(`${candidate}/`))
 const fixtureOf = (argv: string[]) => argv.includes("--fixture") ? argv[argv.indexOf("--fixture") + 1] : undefined
+
 const armFiles = (arm: typeof arms[number]) => {
   const fixture = fixtureOf(arm.command.argv)
+
   const fuzzSources = fixture === "hook" ? expectations.fuzzSources.hook
     : fixture === "controller" ? expectations.fuzzSources.controller
       : {}
+
   return [
     ...arm.targets,
     ...arm.witnesses,
@@ -23,6 +26,7 @@ const armFiles = (arm: typeof arms[number]) => {
     ...Object.keys(fuzzSources),
   ]
 }
+
 const rowKey = (arm: typeof arms[number]) => `${arm.family === "search" ? "rc2" : arm.family}:${arm.row}`
 
 for (const arm of arms) {
@@ -31,9 +35,11 @@ for (const arm of arms) {
   if (!armFiles(arm).some(reachesPath)) continue
 
   const row = rowKey(arm)
+
   for (const sibling of arms) {
     if (!retired.has(sibling.id) && rowKey(sibling) === row) selected.add(sibling.id)
   }
+
   if (arm.control !== null && !retired.has(arm.control)) selected.add(arm.control)
 }
 

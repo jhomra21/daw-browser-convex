@@ -1,3 +1,5 @@
+import { isDesktopRenderer } from '~/lib/runtime'
+
 const LOCAL_WORKER_ORIGIN = 'http://localhost:3000'
 
 export type RendererApiRuntime = {
@@ -126,7 +128,7 @@ export const rendererApiRuntime = (): RendererApiRuntime => {
   const location = globalThis.location
 
   return {
-    isDesktop: import.meta.env.VITE_DESKTOP === 'true',
+    isDesktop: isDesktopRenderer(),
     isDawProtocol: location?.protocol === 'daw:',
     browserOrigin: location?.origin ?? '',
   }

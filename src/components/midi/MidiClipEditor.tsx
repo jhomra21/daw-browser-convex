@@ -21,6 +21,7 @@ import {
   type MidiMapping,
 } from '@daw-browser/shared'
 import type { Clip } from '@daw-browser/timeline-core/types'
+import { isMacDesktop } from '~/lib/runtime'
 
 type MidiClipEditorProps = {
   clipId: string
@@ -219,7 +220,7 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
       && !event.altKey
       && !event.shiftKey
       && event.key.toLowerCase() === 'd'
-      && !(event.metaKey && window.dawDesktop && /Macintosh/.test(navigator.userAgent))
+      && !(event.metaKey && isMacDesktop())
     ) {
       event.preventDefault()
       event.stopPropagation()

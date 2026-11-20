@@ -8,6 +8,7 @@ import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from
 import { isLocalId } from "@daw-browser/shared";
 import type { TransportControlsProps } from "~/hooks/transport-types";
 import { keyboardTargetOwner } from "~/lib/keyboard-event-target";
+import { desktopBridge } from "~/lib/runtime";
 
 const gridDenominatorForState = (
   value: number,
@@ -274,7 +275,7 @@ export const useDesktopApplicationMenu = (
     subscribe: (listener: () => void) => () => void
   }>,
 ) => {
-  const bridge = window.dawDesktop?.applicationMenu;
+  const bridge = desktopBridge()?.applicationMenu;
 
   if (!bridge) return;
   const [extensionVersion, setExtensionVersion] = createSignal(0);

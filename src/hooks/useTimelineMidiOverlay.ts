@@ -17,6 +17,7 @@ import { createAuditionReleaseTimerOwnership } from '~/lib/audition-release-time
 
 import type { TimelineSelectionController } from '~/lib/timeline-selection'
 import type { NativeLiveMidiNoteHandle } from '~/lib/desktop/native-live-midi'
+import { desktopBridge } from '~/lib/runtime'
 
 type UseTimelineMidiOverlayOptions = {
   audioEngine: AudioEngine
@@ -140,7 +141,7 @@ export function useTimelineMidiOverlay(
   }
 
   const midiKeyboardTarget = createMemo(resolveTargetTrack)
-  const audioHostBridge = globalThis.window?.dawDesktop?.audioHost
+  const audioHostBridge = desktopBridge()?.audioHost
   const hasAudioLifecycle = audioHostBridge !== undefined
   const lifecycleBridge = audioHostBridge
   let midiSuspended = false

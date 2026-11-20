@@ -5,10 +5,9 @@ import {
   keyboardTargetOwner,
 } from "~/lib/keyboard-event-target";
 import type { ShortcutChord, ShortcutResolutionContext } from "~/lib/extensions";
+import { isMacDesktop } from "~/lib/runtime";
 
 // On desktop macOS the Edit menu owns bare Cmd+Z, Cmd+Shift+Z and Cmd+D as key equivalents.
-const isDesktopMacApp = () => Boolean(globalThis.window?.dawDesktop) && /Macintosh/.test(navigator.userAgent);
-
 type KeyboardHandlers = {
   enabled: Accessor<boolean>;
   onSpace: () => void;
@@ -57,14 +56,14 @@ export const createTimelineKeyboardHandler = (handlers: KeyboardHandlers) => (
     if (keyboardTargetOwner(path)) return;
 
     // Left to the native menu on desktop macOS: its key equivalent fires first, so handling these here would double-fire.
-    const menuOwnsCommandKey = e.metaKey && !e.ctrlKey && !e.altKey && isDesktopMacApp();
+    const menuOwnsCommandKey = e.metaKey && !e.ctrlKey && !e.altKey && isMacDesktop();
 
     if (
       e.shiftKey &&
       ((e.ctrlKey && !e.metaKey && !e.altKey) || (e.altKey && !e.ctrlKey && !e.metaKey)) &&
       (e.key === "f" || e.key === "F")
     ) {
-      if (e.altKey && isDesktopMacApp()) return;
+      if (e.altKey && isMacDesktop()) return;
       e.preventDefault();
       e.stopPropagation();
       handlers.onToggleFollow();

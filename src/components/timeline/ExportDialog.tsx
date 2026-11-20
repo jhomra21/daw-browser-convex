@@ -12,6 +12,7 @@ import { createCustomExportRange, type ExportSampleRate, loadPersistedExportSett
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import type { WavEncodingSettings } from '@daw-browser/audio-engine/export-fidelity'
 import type { StemMode } from '@daw-browser/audio-engine/export-mixdown'
+import { isDesktopRenderer } from '~/lib/runtime'
 
 type ExportSource = 'mixdown' | 'all-stems' | 'selected-stems'
 
@@ -116,7 +117,7 @@ const ExportFormatOption: Component<{
 const roundExportTime = (value: number): number => Math.round(value * 100) / 100
 
 const ExportDialog: Component<Props> = (props) => {
-  const nativeDesktop = import.meta.env.VITE_DESKTOP === 'true'
+  const nativeDesktop = isDesktopRenderer()
   const persisted = loadPersistedExportSettings()
   const initialDuration = () => getExportRangeDuration(props.getTracks(), { mode: 'whole' })
 

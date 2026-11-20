@@ -36,6 +36,7 @@ import { hasVst3TrustAcknowledgement, vst3ScanHealthLabel } from "~/lib/external
 import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import { autoHealStaleVst3Catalog } from "~/lib/desktop/vst3-catalog-auto-heal";
 import type { TimelineEditIntent } from "./timeline-playback-types";
+import { desktopBridge } from "~/lib/runtime";
 
 type Options = {
   acceptance?: PlaybackAcceptanceObserver;
@@ -195,7 +196,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   const [externalPluginStatusById, setExternalPluginStatusById] = createSignal<Record<string, string>>({});
 
   const refreshDesktopPluginCatalog = async () => {
-    const bridge = window.dawDesktop?.pluginCatalog
+    const bridge = desktopBridge()?.pluginCatalog
 
     if (!bridge) return
 
@@ -225,7 +226,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   }
 
   onMount(() => {
-    if (!window.dawDesktop?.pluginCatalog) return
+    if (!desktopBridge()?.pluginCatalog) return
     void refreshDesktopPluginCatalog()
     const listener = () => void refreshDesktopPluginCatalog()
     window.addEventListener("daw-plugin-catalog-changed", listener)
@@ -404,7 +405,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       targetId,
       targetTrack: options.tracks().find((track) => track.id === targetId),
       canWrite: options.deviceInsertActions()?.canWrite === true,
-      bridgeAvailable: window.dawDesktop?.pluginCatalog !== undefined,
+      bridgeAvailable: desktopBridge()?.pluginCatalog !== undefined,
       busy: insertingExternalPluginId() !== undefined,
     });
 
@@ -810,17 +811,19 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     const targetTrack = options.tracks().find((track) => track.id === targetId);
     const actions = options.deviceInsertActions();
 
+    const pluginCatalog = desktopBridge()?.pluginCatalog;
+
     const availability = nativeVst3InsertionAvailability({
       selection,
       projectId,
       targetId,
       targetTrack,
       canWrite: actions?.canWrite === true,
-      bridgeAvailable: window.dawDesktop?.pluginCatalog !== undefined,
+      bridgeAvailable: pluginCatalog !== undefined,
       busy: insertingExternalPluginId() !== undefined,
     });
 
-    if (!availability.enabled || !window.dawDesktop?.pluginCatalog) {
+    if (!availability.enabled || !pluginCatalog) {
       options.onExternalPluginInsertionResult?.("VST3 insertion unavailable", availability.message);
 
       return;
@@ -835,7 +838,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         targetId,
         targetTrack,
         selection,
-        bridge: window.dawDesktop.pluginCatalog,
+        bridge: pluginCatalog,
         validateBeforePersist: () => (
           options.projectId() === projectId
           && options.currentEffectsTargetId() === targetId

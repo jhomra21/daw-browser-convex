@@ -7,6 +7,7 @@ import { parseAudioLatencyMode, parseAudioSampleRate } from "~/lib/preferences/a
 import { findExactCalibration, replaceExactCalibration, resolveCalibrationPlatformIdentity } from "~/lib/recording/recording-calibration"
 import { getRecordingDiagnostics, subscribeRecordingDiagnostics } from "~/lib/recording/recording-diagnostics"
 import { DashboardRow, DashboardScrollView, DashboardSection } from "./dashboard-shared"
+import { desktopBridge, isDesktopRenderer } from "~/lib/runtime"
 
 const formatLatency = (seconds: number | null) => seconds === null ? "Unavailable" : `${(seconds * 1000).toFixed(1)} ms`
 const formatFrames = (frames: number | null) => frames === null ? "unavailable" : String(frames)
@@ -40,7 +41,7 @@ function NativeDeviceSelect(props: {
 
 export function DashboardAudioView() {
   const preferences = useAppPreferences()
-  const requiresNativeAudio = import.meta.env.VITE_DESKTOP === "true"
+  const requiresNativeAudio = isDesktopRenderer()
   const [nativeDevices, setNativeDevices] = createSignal<NativeAudioDevice[]>([])
   const nativeInputs = createMemo(() => nativeDevices().filter((device) => device.available && device.inputChannelCount > 0))
   const nativeOutputs = createMemo(() => nativeDevices().filter((device) => device.available && device.outputChannelCount > 0))
@@ -99,7 +100,7 @@ export function DashboardAudioView() {
   }
 
   const refreshNativeDevices = async () => {
-    const reply = await globalThis.window?.dawDesktop?.audioHost?.listDevices()
+    const reply = await desktopBridge()?.audioHost?.listDevices()
 
     if (reply?.ok) {
       setNativeDevices(reply.devices)

@@ -1,14 +1,15 @@
 import { createSourceAutomationScope, createStemRenderPlan } from "@daw-browser/audio-engine/export-stem-plan"
 import { getExportRangeBounds, type ExportRange } from '@daw-browser/audio-engine/export-range'
 import { getExportTailMaximumSec } from '@daw-browser/audio-engine/export-fidelity'
-import { getExportAudioFormatMetadata, isLocalId, isLossyExportAudioFormat } from '@daw-browser/shared'
+import { getExportAudioFormatMetadata, isLocalId } from '@daw-browser/shared'
 import { isAbortError } from '~/lib/dom-errors'
 import { createUniqueStemFileName } from '~/lib/export/stem-file-names'
 import { saveLocalExportMetadataBatch, type LocalExportMetadataInput } from '~/lib/local-export-metadata'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { isRenderableExportTrack } from '~/lib/export/export-settings'
 import { processNativeOfflinePcmSpool } from '~/lib/export/process-native-offline-pcm-spool'
-import { createNativeOfflinePcmSpool } from '~/lib/export/native-offline-pcm-spool'
+import { createPortableSpoolWriter } from '~/lib/export/export-render'
+import { encodeProcessedPcm } from '~/lib/export/export-encode'
 import type { ExportOutputTargetFactory } from '~/lib/export/export-output-targets'
 import { preflightExportResources } from '~/lib/export/export-resource-preflight'
 import { cloneAutomationEnvelope, cloneExportFx } from '~/lib/desired-playback-state'
@@ -243,7 +244,16 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     })
     throwIfExportAborted(input.signal)
     input.onProgress?.({ phase: 'rendering' })
-    let portableSpool: NativeOfflinePcmSpoolSession | undefined
+
+    const portableWriter = createPortableSpoolWriter({
+      sessionPrefix: 'portable',
+      sampleRate: input.render.sampleRate,
+      channelCount: input.render.numberOfChannels,
+      onCreate: (session) => {
+        nativeSpool = session
+        nativeSpoolRemoved = false
+      },
+    })
 
     if (!nativePlan && mayRenderPortableTimeline) {
       if (!globalThis.indexedDB || !globalThis.navigator?.locks) {
@@ -266,40 +276,14 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         preparedStretchRepository: portableRepository,
         projectGeneration: input.projectGeneration,
         signal: input.signal,
-      }, async (index, startFrame, pcm, totalFrames) => {
-        if (!portableSpool) {
-          const spools = createNativeOfflinePcmSpool()
-
-          const session = await spools.createSession({
-            sessionId: `portable-${crypto.randomUUID()}`,
-            sampleRate: input.render.sampleRate,
-            channelCount: input.render.numberOfChannels,
-            totalFrames,
-          })
-
-          portableSpool = session
-          nativeSpool = portableSpool
-          nativeSpoolRemoved = false
-        }
-
-        const spool = portableSpool
-
-        if (!spool) throw new Error('Portable export PCM spool was not created.')
-        await spool.append({
-          startFrame,
-          frameCount: pcm.frameCount,
-          channelCount: pcm.planes.length,
-          planes: pcm.planes,
-        })
-        void index
-      })
+      }, portableWriter.write)
 
       if (!portableMixdown) throw new Error('Portable timeline export is unavailable for this project.')
       portableWorkerCleanup = portableMixdown.cleanup
       latencyFrames = portableMixdown.latencyFrames
     }
 
-    if (nativePlan || portableSpool) {
+    if (nativePlan || portableWriter.session()) {
       const nativeRenderer = input.nativeOfflinePcmRenderer
 
       if (nativePlan && !nativeRenderer) throw new Error(NATIVE_EXPORT_UNAVAILABLE_MESSAGE)
@@ -322,7 +306,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
           input.onProgress?.({ phase: 'rendering', renderedFrames, totalRenderFrames: totalFrames })
             }, provideMappedPage)
           : Promise.reject<NativeOfflinePcmSpoolSession>(new Error(NATIVE_EXPORT_UNAVAILABLE_MESSAGE)))
-        : portableSpool
+        : portableWriter.session()
 
       if (!spool) throw new Error('Portable export did not produce a PCM spool.')
 
@@ -363,14 +347,8 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
             reportFormatProgress(input, 'encoding', format, completedFormats, formats.length, sizeBytes)
           })
 
-          const enc = await exportMixdown.encodeAudioChunks(processed.replay(), {
-            format,
-            bitrate: isLossyExportAudioFormat(format) ? input.encoding.bitrateByFormat[format] : undefined,
-            target: fileSink?.target ?? { mode: 'buffer' },
-            signal: input.signal,
-            onWrite: reportEncodingProgress,
-            wav: input.encoding.wav,
-            ditherSeed,
+          const enc = await encodeProcessedPcm({
+            exportMixdown, processed, format, fileSink, request: input, ditherSeed, onWrite: reportEncodingProgress,
           })
 
           throwIfExportAborted(input.signal)
@@ -613,6 +591,12 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
 
       let processedSpool: Awaited<ReturnType<typeof processNativeOfflinePcmSpool>> | undefined
 
+      const stemWriter = createPortableSpoolWriter({
+        sessionPrefix: 'portable-stem',
+        sampleRate: input.render.sampleRate,
+        onCreate: (session) => { stemSpool = session },
+      })
+
       if (mayRenderPortableStems) {
         const stemTrackIds = new Set([...plan.sourceTrackIds, ...plan.detectorOnlyTrackIds])
 
@@ -632,25 +616,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
           mixerGraph: plan.graph,
           trackIds: stemTrackIds,
           signal: input.signal,
-        }, async (index, startFrame, pcm, totalFrames) => {
-          if (!stemSpool) {
-            const spools = createNativeOfflinePcmSpool()
-            stemSpool = await spools.createSession({
-              sessionId: `portable-stem-${crypto.randomUUID()}`,
-              sampleRate: input.render.sampleRate,
-              channelCount: pcm.planes.length,
-              totalFrames,
-            })
-          }
-
-          await stemSpool.append({
-            startFrame,
-            frameCount: pcm.frameCount,
-            channelCount: pcm.planes.length,
-            planes: pcm.planes,
-          })
-          void index
-        })
+        }, stemWriter.write)
 
         if (!portable) throw new Error('Portable stem export is unavailable for this project.')
         await portable.cleanup()
@@ -690,14 +656,8 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
             reportStemFormatProgress(input, 'encoding', format, track, completedStems, stemTracks.length, completedFormats, formats.length, sizeBytes)
           })
 
-          const encoded = await exportMixdown.encodeAudioChunks(processed.replay(), {
-            format,
-            bitrate: isLossyExportAudioFormat(format) ? input.encoding.bitrateByFormat[format] : undefined,
-            target: fileSink.target,
-            signal: input.signal,
-            onWrite: reportEncodingProgress,
-            wav: input.encoding.wav,
-            ditherSeed: createExportSeed(),
+          const encoded = await encodeProcessedPcm({
+            exportMixdown, processed, format, fileSink, request: input, ditherSeed: createExportSeed(), onWrite: reportEncodingProgress,
           })
 
           encodedSizeBytes = encoded.sizeBytes

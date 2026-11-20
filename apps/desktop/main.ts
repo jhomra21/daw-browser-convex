@@ -1,11 +1,6 @@
-import { app, BrowserWindow, contentTracing, dialog, ipcMain, Menu, net as electronNet, powerMonitor, protocol, screen, session, shell } from "electron"
-
-import { totalmem } from "node:os"
-
-import { existsSync } from "node:fs"
+import { app, BrowserWindow, contentTracing, dialog, ipcMain, Menu, powerMonitor, protocol } from "electron"
 import { createHash, randomUUID } from "node:crypto"
 import path from "node:path"
-import { pathToFileURL } from "node:url"
 import { z } from "zod"
 import { nativeEditorCommandSchema, nativeSessionEnvelopeSchema } from "./native-session-schemas"
 import { nativeSessionOperations, type nativeSessionAssetSchema } from "./ipc/native-session-operations"
@@ -69,7 +64,6 @@ import {
   vstParameterEditChannel,
 } from "@daw-browser/desktop-protocol/ipc-channels"
 
-import { createCloseHandler, prepareForClose } from "./close-flow"
 import { initializeRecordingSpoolRegistry, recordingSpoolReleaseSchema } from "./recording-spool"
 import { createRecordingSessionOwner } from "./recording-session-owner"
 import { createRecordingSpoolOrderEvidence } from "./recording-spool-evidence"
@@ -82,11 +76,8 @@ import { registerNativeSessionRecordingIpc } from "./ipc/native-session-recordin
 import { nativeSessionRequestAllowed, type NativeSessionEvent } from "./ipc/native-session-access"
 import { rendererSenderAllowed, type RendererSenderEvent } from "./ipc/renderer-sender"
 import { createNativeFileCapabilityHelper } from "./native-file-capability-helper"
-
 import { createPreparationRegistry } from "./preparation-registry"
-
 import { desktopOperations } from "./desktop-operations"
-import { createContentSecurityPolicy } from "./content-security-policy"
 import { canonicalVst3SearchPaths, createPluginCatalogStore } from "./plugin-catalog"
 import { createVst3ScannerSupervisor } from "./vst3-scanner"
 import { catalogViewForRenderer } from "./vst3-attachment"
@@ -142,26 +133,23 @@ import {
   nativeOfflineRenderPlanSchema,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import {
-  allowsTrustedAudioCapturePermission,
-  allowsTrustedMidiPermission,
   createTrustedDesktopOriginPolicy,
 } from "./permission-policy"
-import { packagedRendererRoot, rendererAssetPath } from "./renderer-path"
+
 import { createNativeVstProjectBindings } from "./native-vst-project-bindings"
 import { createApplicationMenuController } from "./application-menu"
 import { createAe08Evidence, ae08StartTrace, ae08StopTrace } from "./ae08-evidence"
 import { ae08RendererMarkChannel, ae08RendererMarkSchema } from "@daw-browser/desktop-protocol/acceptance-marks"
 import { createOfflinePcmAckTracker } from "./offline-pcm-ack"
-import { benchmarkSabHeaders } from "./benchmark-sab-headers"
+import { createMainWindow } from "./main-window"
+import { installRendererContent } from "./renderer-content"
 import { createControlSocket } from "./control-socket"
 import { createRequestScopes } from "./request-scopes"
 import { createRendererSession } from "./renderer-session"
-
 import {
   createBenchmarkRecordingTelemetry,
   createBenchmarkStartupReporter,
   installBenchmarkHeartbeat,
-  installBenchmarkWindowTelemetry,
 } from "./benchmark-runtime"
 import { offlinePcmAckSchema } from "./offline-pcm-protocol"
 import { createRecordingStartDiagnostic } from "./recording-start-diagnostic"
@@ -235,7 +223,7 @@ const nativeEditorEnvelopeSchema = nativeSessionEnvelopeSchema(nativeEditorComma
 const nativeAttachmentEnvelopeSchema = nativeSessionEnvelopeSchema(nativeAttachmentCoordinationSchema)
 const nativeConfigurationEnvelopeSchema = nativeSessionEnvelopeSchema(nativeSessionConfigurationSchema)
 const pluginDirectorySchema = z.object({ directory: z.string() }).passthrough()
-const closePreparationResultSchema = z.object({ flushed: z.literal(true) }).passthrough()
+
 
 const diagnosticsTraceMessageSchema = z.object({
   stage: z.enum(["preload-received", "preload-handler", "controller-before-native", "controller-after-native", "controller-parsed", "preload-reply", "preload-reply-sent", "preload-reply-invalid", "preload-reply-invalid-path"]),
@@ -249,16 +237,6 @@ const sanitizeNativeVst3DiagnosticError = (error: Error | undefined) => {
   const message = error?.message ?? "The native VST editor session is unavailable."
 
   return message.replace(/(?:[A-Za-z]:[\\/]|\/)[^\s]*/g, "<path>").slice(0, 256)
-}
-
-const preloadPath = path.join(import.meta.dirname, "preload.js")
-
-const externalUrl = (url: string) => {
-  try {
-    return new URL(url).protocol === "https:"
-  } catch {
-    return false
-  }
 }
 
 const sameAppOrigin = createTrustedDesktopOriginPolicy(MAIN_WINDOW_VITE_DEV_SERVER_URL)
@@ -1604,138 +1582,6 @@ const registerIpc = () => {
   })
 }
 
-const createWindow = () => {
-  if (!MAIN_WINDOW_VITE_DEV_SERVER_URL && !existsSync(preloadPath)) {
-    throw new Error(`Desktop preload bundle is missing: ${preloadPath}`)
-  }
-
-  const { workArea } = screen.getPrimaryDisplay()
-  const minWidth = Math.min(1200, workArea.width)
-  const minHeight = Math.min(800, workArea.height)
-
-  const mainWindow = new BrowserWindow({
-    width: minWidth,
-    height: minHeight,
-    minWidth,
-    minHeight,
-    show: false,
-    webPreferences: {
-      preload: preloadPath,
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      additionalArguments: [`--daw-total-memory-bytes=${totalmem()}`],
-      webSecurity: true,
-    },
-  })
-
-  rendererSession.setWindow(mainWindow)
-  // Maximize before the first paint; the minimum-size frame stays as the restore size.
-  mainWindow.maximize()
-  mainWindow.show()
-  installBenchmarkWindowTelemetry({
-    app,
-    window: mainWindow,
-    getGeneration: () => rendererSession.generation(),
-    sameAppOrigin,
-  })
-  mainWindow?.on("closed", () => {
-    invalidateRendererGeneration("Renderer destroyed.")
-    rendererSession.setWindow(undefined)
-  })
-  mainWindow.webContents.on("did-start-navigation", (details) => {
-    if (details.isMainFrame && !details.isSameDocument) {
-      const invalidation = rendererSession.lifecycle.beginMainFrameNavigation(details.url)
-
-      if (invalidation) applyRendererInvalidation(invalidation, "Renderer reloaded.")
-    }
-  })
-  mainWindow.webContents.on("did-navigate", (_event, url) => {
-    rendererSession.lifecycle.commitMainFrameNavigation(url)
-  })
-  mainWindow.webContents.on("did-fail-load", (_event, _errorCode, _errorDescription, validatedURL, isMainFrame) => {
-    if (!isMainFrame) return
-    rendererSession.lifecycle.failMainFrameNavigation(validatedURL)
-  })
-  mainWindow.webContents.on("did-stop-loading", () => {
-    // Electron 43 has no navigationId in these typings; this boundary confirms
-    // a previously committed, non-ambiguous attempt before privileged IPC resumes.
-    rendererSession.lifecycle.confirmMainFrameNavigation()
-  })
-  mainWindow.webContents.on("render-process-gone", () => {
-    const invalidation = rendererSession.lifecycle.invalidateAfterCrash()
-
-    if (invalidation) applyRendererInvalidation(invalidation, "Renderer crashed.")
-  })
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (externalUrl(url)) void shell.openExternal(url)
-
-    return { action: "deny" }
-  })
-  mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (!sameAppOrigin(url)) event.preventDefault()
-  })
-
-  const close = createCloseHandler({
-    waitForRecording: async () => {
-      const supervisor = audioHostSupervisor
-
-      if (!supervisor?.recordingFinalizationPending()) {
-        await supervisor?.waitForRecordingFinish()
-
-        return true
-      }
-
-      const abort = new AbortController()
-      const finishing = supervisor.waitForRecordingFinish().then(() => true)
-
-      const choice = dialog.showMessageBox(mainWindow, {
-        type: "info", message: "The recording is finishing.",
-        detail: "The completed take is being saved. Keep the application open while storage finishes.",
-        buttons: ["Keep Open"], defaultId: 0, cancelId: 0, signal: abort.signal,
-      }).then(() => false)
-
-      try { return await Promise.race([finishing, choice]) }
-      finally { abort.abort() }
-    },
-    onError: async () => {
-      await dialog.showMessageBox(mainWindow, { type: "error", buttons: ["Keep Open"],
-        message: "The application could not finish closing safely.",
-        detail: "The project remains open. Recording sources have not been discarded." })
-    },
-    prepareQuit,
-    prepare: () => prepareForClose({
-      flushRenderer: async () => closePreparationResultSchema.safeParse((await rendererSession.request("lifecycle.prepareToClose", {}, randomUUID(), 10_000)).result).success,
-      captureEditors: async () => { await nativeVst3EditorSessionManager?.captureAll() },
-    }),
-    confirmDiscard: async () => {
-      const choice = await dialog.showMessageBox(mainWindow, {
-        type: "warning",
-        buttons: ["Cancel", "Quit and Discard"],
-        defaultId: 0,
-        cancelId: 0,
-        message: "The project could not finish saving before closing.",
-        detail: "Cancel keeps the project open. Quit and Discard discards unsaved project changes, never an accepted recording Finish.",
-        noLink: true,
-      })
-
-      return choice.response === 1
-    },
-    beginQuit: () => {
-      rendererSession.beginQuit()
-    },
-    destroy: () => rendererSession.window()?.destroy(),
-    finishQuit,
-  })
-
-  mainWindow.on("close", (event) => {
-    if (mainWindow.isDestroyed() || rendererSession.finishingQuit()) return
-    event.preventDefault()
-    void close()
-  })
-  void mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL ?? "daw://app/")
-}
-
 app.setName(appName)
 
 let quitCleanupPrepared = false
@@ -1964,56 +1810,7 @@ else {
       recordingBenchmark.recordTraffic("schedule-progress", 16 + nativeAudioHostScheduleProgressBytes)
       rendererSession.send(scheduleProgressChannel, progress)
     })
-    protocol.handle("daw", (request) => {
-      const rendererRoot = MAIN_WINDOW_VITE_DEV_SERVER_URL
-        ? path.join(import.meta.dirname, "../renderer/main_window")
-        : packagedRendererRoot(app.getAppPath())
-
-      const safePath = rendererAssetPath(rendererRoot, request.url)
-
-      if (!safePath || !existsSync(safePath)) return new Response("Not found", { status: 404 })
-
-      return electronNet.fetch(pathToFileURL(safePath).toString())
-    })
-    session.defaultSession.webRequest.onHeadersReceived((details, callback) => callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        "Content-Security-Policy": [createContentSecurityPolicy(Boolean(MAIN_WINDOW_VITE_DEV_SERVER_URL))],
-        ...benchmarkSabHeaders(details.url, desktopEnv.benchmarkSabRecording()),
-      },
-    }))
-    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => callback(
-      (
-        allowsTrustedAudioCapturePermission({
-          permission,
-          requestingUrl: details.requestingUrl,
-          mediaTypes: "mediaTypes" in details ? details.mediaTypes : undefined,
-        }, sameAppOrigin)
-      )
-      || allowsTrustedMidiPermission({
-        permission,
-        trustedRendererId: rendererSession.window()?.webContents.id,
-        requestingRendererId: webContents.id,
-        requestingUrl: details.requestingUrl,
-        isMainFrame: details.isMainFrame,
-      }, sameAppOrigin),
-    ))
-    session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) =>
-      (
-        webContents !== null
-        && allowsTrustedAudioCapturePermission({
-          permission,
-          requestingUrl: requestingOrigin,
-          mediaTypes: details.mediaType === "audio" ? ["audio"] : undefined,
-        }, sameAppOrigin)
-      )
-      || allowsTrustedMidiPermission({
-        permission,
-        trustedRendererId: rendererSession.window()?.webContents.id,
-        requestingRendererId: webContents?.id,
-        requestingUrl: requestingOrigin,
-        isMainFrame: details.isMainFrame,
-      }, sameAppOrigin))
+    installRendererContent(rendererSession, sameAppOrigin)
     registerIpc()
     applicationMenuController.install({
       buildFromTemplate: (template) => Menu.buildFromTemplate(template),
@@ -2022,7 +1819,16 @@ else {
     stage("before-socket")
     await controlSocket.start()
     stage("after-socket")
-    createWindow()
+    createMainWindow({
+      rendererSession,
+      sameAppOrigin,
+      invalidateRendererGeneration,
+      applyRendererInvalidation,
+      audioHost: () => audioHostSupervisor,
+      editorSessions: () => nativeVst3EditorSessionManager,
+      prepareQuit,
+      finishQuit,
+    })
     stage("window-created")
   }).catch((error) => {
     console.error("[desktop] startup failed", error)

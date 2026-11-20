@@ -6,7 +6,7 @@ if ! command -v cmake >/dev/null 2>&1; then
   exit 127
 fi
 
-bun native/audio-core/scripts/generate-cross-language-contracts.ts --check
+bun run --filter @daw-browser/desktop-protocol check:generated
 bun native/audio-core/scripts/generate-compiled-processors.ts --check
 sh native/audio-core/scripts/build-native.sh
 

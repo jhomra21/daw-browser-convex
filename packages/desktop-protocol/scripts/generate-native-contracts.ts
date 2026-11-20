@@ -4,7 +4,7 @@ import {
   maximumRecordingSpoolBlockFrames,
   recordingSpoolBlockHeaderBytes,
   recordingSpoolSampleBytes,
-} from "../../../packages/desktop-protocol/src/index"
+} from "../src/index"
 import {
   nativeVst3PluginFaultOrigins,
   nativeVst3WorkerArtifactId,
@@ -15,7 +15,7 @@ import {
   nativeVst3WorkerStartupProtocolVersion,
   nativeVst3WorkerTransportAbiVersion,
   nativeVst3ZeroDiagnosticFaultOrigin,
-} from "../../../packages/plugin-host-protocol/src/index"
+} from "@daw-browser/plugin-host-protocol"
 
 const root = resolve(import.meta.dir, "../../..")
 const faultOrigins = Object.entries(nativeVst3WorkerFaultOrigins)
@@ -84,7 +84,7 @@ const generated = [
 if (process.argv.includes("--check")) {
   for (const file of generated) {
     if (existsSync(file.path) && readFileSync(file.path, "utf8") === file.contents) continue
-    console.error(`${file.path} is stale. Run: bun native/audio-core/scripts/generate-cross-language-contracts.ts`)
+    console.error(`${file.path} is stale. Run: bun run --filter @daw-browser/desktop-protocol generate`)
     process.exitCode = 1
   }
 } else {

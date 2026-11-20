@@ -17,7 +17,9 @@
     "./recording-delivery-trace": "./src/recording-delivery-trace.ts"
   },
   "scripts": {
-    "check": "bun --bun tsc --noEmit"
+    "check": "bun --bun tsc --noEmit",
+    "generate": "bun scripts/generate-native-contracts.ts",
+    "check:generated": "bun scripts/generate-native-contracts.ts --check"
   },
   "dependencies": {
     "@daw-browser/control": "workspace:*",

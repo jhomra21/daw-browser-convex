@@ -12,11 +12,11 @@ import {
   type OpfsWritable,
 } from "~/lib/opfs-session-store"
 
-const RECORDING_DIRECTORY = "recording-sessions"
+export const RECORDING_DIRECTORY = "recording-sessions"
 const SESSION_METADATA_FILE = "session.json"
 const SESSION_CREATED_AT_FILE = "created-at"
-const PCM_FILE = "capture.pcm"
-const BLOCK_HEADER_BYTES = Uint32Array.BYTES_PER_ELEMENT
+export const PCM_FILE = "capture.pcm"
+export const BLOCK_HEADER_BYTES = Uint32Array.BYTES_PER_ELEMENT
 const STALE_AFTER_MS = 24 * 60 * 60 * 1000
 
 type RecordingTempStorageFailure =

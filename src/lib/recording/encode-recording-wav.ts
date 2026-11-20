@@ -1,4 +1,5 @@
 import { encodePlanarFloat32Wav } from '@daw-browser/audio-engine/recording-encode-wav'
+import { BLOCK_HEADER_BYTES, PCM_FILE, RECORDING_DIRECTORY } from './recording-temp-storage'
 
 type RecordingPcmDescriptor = {
   sessionId: string
@@ -15,10 +16,7 @@ type EncodedRecordingWav = {
   remove: () => Promise<void>
 }
 
-const RECORDING_DIRECTORY = 'recording-sessions'
-const PCM_FILE = 'capture.pcm'
 const WAV_FILE = 'capture.wav'
-const BLOCK_HEADER_BYTES = Uint32Array.BYTES_PER_ELEMENT
 
 export const readPlanarFloat32Channels = (
   payload: Uint8Array,

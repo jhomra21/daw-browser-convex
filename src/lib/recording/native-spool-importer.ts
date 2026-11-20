@@ -1,12 +1,12 @@
-import { createRecordingTempStorage, decodePlanarPcmBlocks } from "./recording-temp-storage"
+import { createRecordingTempStorage, decodePlanarPcmBlocks, PCM_FILE, RECORDING_DIRECTORY } from "./recording-temp-storage"
 import type { NativeRecordingScope, NativeRecordingSpoolBridge, NativeRecordingTake, NativeRecordingImportedTake } from "~/types/desktop-bridge"
 
 const verifyCanonicalFileSize = async (sessionId: string) => {
   const root = await navigator.storage.getDirectory()
-  const recordings = await root.getDirectoryHandle("recording-sessions")
+  const recordings = await root.getDirectoryHandle(RECORDING_DIRECTORY)
   const session = await recordings.getDirectoryHandle(sessionId)
 
-  return (await (await session.getFileHandle("capture.pcm")).getFile()).size
+  return (await (await session.getFileHandle(PCM_FILE)).getFile()).size
 }
 
 // The native layout is the existing OPFS block format, including tightly packed

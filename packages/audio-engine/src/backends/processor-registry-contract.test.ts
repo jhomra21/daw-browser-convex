@@ -9,7 +9,9 @@ test('the native processor registry names every effect kind except the observer-
 })
 
 test('the wire ids and the portable capability list are the registry ids and names', () => {
-  expect(Object.entries(processorIds)).toEqual(processorRegistry.map((processor) => [processor.name, processor.id]))
+  const idsByName: Record<string, number> = processorIds
+
+  expect(Object.entries(idsByName)).toEqual(processorRegistry.map((processor): [string, number] => [processor.name, processor.id]))
   expect(portableWasmCapabilityMatrix.processorKinds).toEqual(processorRegistry.map((processor) => processor.name))
 })
 

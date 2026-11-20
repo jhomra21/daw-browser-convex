@@ -18,6 +18,7 @@ import {
 import { maxVst3WorkerStateBytes, type OpaquePluginStateMetadata } from '@daw-browser/plugin-host-protocol'
 import { z } from 'zod'
 import { createKeyedLock } from '~/lib/keyed-lock'
+import { bestEffort } from '@daw-browser/shared'
 
 const externalProcessorRowId = (instanceId: string) => `external-plugin:${instanceId}`
 const externalProjectWriteLock = createKeyedLock()
@@ -74,7 +75,7 @@ const abortExternalProcessorTransaction = (tx: { abort: () => void; done: Promis
     tx.abort()
   } catch {}
 
-  void tx.done.catch(() => undefined)
+  bestEffort(tx.done, 'the transaction is being aborted, so done rejects by design')
 }
 
 export const planLocalExternalProcessorDeletion = (input: {

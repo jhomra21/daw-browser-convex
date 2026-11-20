@@ -5,7 +5,7 @@ import { createStoredValue } from '~/lib/stored-value'
 import { DEFAULT_NOTE_VELOCITY } from '~/lib/midi-editor-grid'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { Track } from '@daw-browser/timeline-core/types'
-import { automationTargetKey, compileMidiMappingSourceIndex, isClipKindCompatibleWithTrack, midiMappingValue, normalizeLegacyMidiClip, type MidiMappingSourceEvent } from '@daw-browser/shared'
+import { automationTargetKey, compileMidiMappingSourceIndex, isClipKindCompatibleWithTrack, midiMappingValue, normalizeLegacyMidiClip, type MidiMappingSourceEvent, bestEffort } from '@daw-browser/shared'
 import { useMidiKeyboardInput } from './useMidiKeyboardInput'
 import { useMidiAccess } from '~/context/midi-access'
 import { createLiveMidiRouter } from '~/lib/midi/live-midi-router'
@@ -212,7 +212,7 @@ export function useTimelineMidiOverlay(
       }
 
       options.audioEngine.ensureAudio()
-      void options.audioEngine.resume().catch(() => undefined)
+      bestEffort(options.audioEngine.resume(), 'the note starts without waiting for the context to resume')
 
       const handle = options.audioEngine.startLiveMidiNote({
         ...note,
@@ -302,7 +302,7 @@ export function useTimelineMidiOverlay(
           }
 
           options.audioEngine.ensureAudio()
-          void options.audioEngine.resume().catch(() => undefined)
+          bestEffort(options.audioEngine.resume(), 'the note starts without waiting for the context to resume')
 
           const handle = options.audioEngine.startLiveMidiNote({
             ...note,
@@ -344,7 +344,7 @@ export function useTimelineMidiOverlay(
       }
 
       options.audioEngine.ensureAudio()
-      void options.audioEngine.resume().catch(() => undefined)
+      bestEffort(options.audioEngine.resume(), 'the note starts without waiting for the context to resume')
       const sourceId = auditionArpeggiator.noteOn(pitch, velocity)
 
       if (sourceId !== undefined) {

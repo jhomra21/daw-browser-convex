@@ -133,7 +133,7 @@ import type {
   NativeVst3InsertionPreflightRequest,
   NativeVst3InsertionPreflightResult,
 } from "@daw-browser/plugin-host-protocol"
-import { isExportAudioFormat, type ExportAudioFormat } from "@daw-browser/shared"
+import { isExportAudioFormat, type ExportAudioFormat, bestEffort } from "@daw-browser/shared"
 import { z } from "zod"
 /* oxlint-disable eslint/no-restricted-imports -- the bridge types stay in src/types until the batch that owns the certification-pinned playback files moves it */
 import type {
@@ -581,7 +581,7 @@ const desktopBridge = {
             const parsed = offlinePcmMessageSchema.safeParse(value)
 
             if (!parsed.success) {
-              void ipcRenderer.invoke(offlineCancelChannel, jobId).catch(() => undefined)
+              bestEffort(ipcRenderer.invoke(offlineCancelChannel, jobId), 'the job is already failing')
 
               return
             }
@@ -596,7 +596,7 @@ const desktopBridge = {
               listener,
               (ack) => ipcRenderer.send(offlinePcmAckChannel, ack),
             ).catch(() => {
-              void ipcRenderer.invoke(offlineCancelChannel, jobId).catch(() => undefined)
+              bestEffort(ipcRenderer.invoke(offlineCancelChannel, jobId), 'the job is already failing')
             })
           })
 

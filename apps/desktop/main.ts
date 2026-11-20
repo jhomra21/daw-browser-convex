@@ -205,6 +205,7 @@ import {
 import { offlinePcmAckSchema } from "./offline-pcm-protocol"
 import { createRecordingStartDiagnostic } from "./recording-start-diagnostic"
 import { desktopEnv } from "./env"
+import { bestEffort } from "@daw-browser/shared"
 
 protocol.registerSchemesAsPrivileged([{ scheme: "daw", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
@@ -486,7 +487,7 @@ const fileCapabilities = createFileCapabilityManager({
 })
 
 const settleCapabilityRevocation = (operation: Promise<void>) => {
-  void operation.catch(() => undefined)
+  bestEffort(operation, 'revocation runs during invalidation and has no caller to report a failure to')
 }
 
 const availableDesktopOperations = () => desktopOperations(nativeMediaAvailable)

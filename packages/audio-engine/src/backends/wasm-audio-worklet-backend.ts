@@ -19,6 +19,7 @@ import {
   portableWasmProtocolVersion,
   portableWasmPagedMaxChannels,
   portableWasmPagedPageFrames,
+  portableWasmPagedPreparationCount,
   portableWasmPagedSlotCount,
   readPortableWasmGraphContinuityMessage,
   readPortableWasmRecordingStatusMessage,
@@ -47,7 +48,7 @@ export type PortableWasmPagedCapabilities = {
   preparationCount: number
 }
 
-export const portableWasmPagedPreparationCount = 64
+export { portableWasmPagedPreparationCount } from '../portable-wasm-protocol'
 
 export type PortableProjectSupport = {
   processorKinds: readonly string[]

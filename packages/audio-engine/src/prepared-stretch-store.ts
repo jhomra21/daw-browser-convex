@@ -1,3 +1,4 @@
+import { defaultDecodedAudioPageFrames } from '@daw-browser/shared'
 import { nativeAudioHostMaximumMappedAssetPageFramesForChannels } from '@daw-browser/desktop-protocol/native-audio-host'
 import {
   preparedStretchArtifactCanonicalJson,
@@ -75,7 +76,7 @@ export type PreparedStretchArtifactWriteTransaction = {
 
 const DB_NAME = 'daw-browser-prepared-stretch-artifacts'
 const DB_VERSION = 5
-const DEFAULT_PAGE_FRAMES = 16_384
+const DEFAULT_PAGE_FRAMES = defaultDecodedAudioPageFrames
 const MAX_SWEEP_BATCH = 64
 const LEASE_MS = 30_000
 const WRITE_TTL_MS = 60_000

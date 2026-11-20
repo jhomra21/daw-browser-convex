@@ -1,4 +1,5 @@
-import { createRecordingTempStorage, decodePlanarPcmBlocks, PCM_FILE, RECORDING_DIRECTORY } from "./recording-temp-storage"
+import { createRecordingTempStorage, decodePlanarPcmBlocks } from "./recording-temp-storage"
+import { PCM_FILE, RECORDING_DIRECTORY } from "./recording-session-layout"
 import type { NativeRecordingScope, NativeRecordingSpoolBridge, NativeRecordingTake, NativeRecordingImportedTake } from "~/types/desktop-bridge"
 
 const verifyCanonicalFileSize = async (sessionId: string) => {

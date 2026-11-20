@@ -1,5 +1,5 @@
 import { encodePlanarFloat32Wav } from '@daw-browser/audio-engine/recording-encode-wav'
-import { BLOCK_HEADER_BYTES, PCM_FILE, RECORDING_DIRECTORY } from './recording-temp-storage'
+import { BLOCK_HEADER_BYTES, PCM_FILE, RECORDING_DIRECTORY } from './recording-session-layout'
 
 type RecordingPcmDescriptor = {
   sessionId: string

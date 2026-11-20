@@ -1,4 +1,5 @@
 import {
+  desktopApplicationMenuCommands,
   desktopApplicationMenuExtensionCommandSchema,
   type DesktopApplicationMenuExtensionContribution,
   type DesktopApplicationMenuMessage,
@@ -36,7 +37,9 @@ const dispatchApplicationMenuCommand = (
     return;
   }
 
-  if (typeof command === "string") runUserCommand(command, transportProps());
+  const userCommand = desktopApplicationMenuCommands.find((candidate) => candidate === command);
+
+  if (userCommand) runUserCommand(userCommand, transportProps());
 };
 
 // transportProps rebuilds on every playhead publish, so the memo re-runs; equal state keeps the IPC send from following it.

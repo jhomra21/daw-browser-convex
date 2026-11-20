@@ -17,9 +17,11 @@ const press = (chord: Chord, options: { copyHandled?: boolean } = {}) => {
   Reflect.set(globalThis, "Element", TestElement);
   Reflect.set(globalThis, "HTMLElement", TestElement);
   const calls: string[] = [];
+
   const record = (name: string) => () => {
     calls.push(name);
   };
+
   const handled = (name: string, result: boolean) => () => {
     calls.push(name);
 

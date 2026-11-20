@@ -1,7 +1,7 @@
-import {
-  type DesktopApplicationMenuCommand,
-  type DesktopApplicationMenuMessage,
-  type DesktopApplicationMenuState,
+import type {
+  DesktopApplicationMenuCommand,
+  DesktopApplicationMenuMessage,
+  DesktopApplicationMenuState,
 } from "@daw-browser/desktop-protocol/application-menu"
 
 type DesktopApplicationMenuPlatform = "darwin" | "win32" | "linux"
@@ -390,8 +390,11 @@ const applyState = (
     const item = menu.getMenuItemById(spec.id)
 
     if (!item) continue
+
     item.enabled = state.ready && (spec.enabled?.(state) ?? true)
+
     if (spec.checked) item.checked = spec.checked(state)
+
     if (spec.visible) item.visible = spec.visible(state)
   }
 

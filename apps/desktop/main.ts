@@ -109,10 +109,9 @@ import { prepareDesktopReply } from "./renderer-reply"
 import { desktopOperations } from "./desktop-operations"
 import { createContentSecurityPolicy } from "./content-security-policy"
 import { canonicalVst3SearchPaths, createPluginCatalogStore } from "./plugin-catalog"
-import { createVst3ScannerSupervisor, packagedVst3ScannerPath } from "./vst3-scanner"
+import { createVst3ScannerSupervisor } from "./vst3-scanner"
 import { catalogViewForRenderer } from "./vst3-attachment"
 import { preflightVst3Insertion } from "./vst3-insertion-preflight"
-import { packagedVst3WorkerPath } from "./vst3-preflight"
 import {
   coordinateNativeVst3Attachments,
   createNativeVst3SessionLedger,
@@ -128,7 +127,6 @@ import {
   nativeProcessorPatchReply,
   nativeSessionFailure,
   nativeVstEditorOwnershipProbe,
-  packagedAudioHostPath,
   type NativeVstEditorAnchor,
   type NativeVstEditorCommand,
 } from "./audio-host"
@@ -139,10 +137,7 @@ import {
   type DesktopAudioLifecycle,
 } from "../../src/lib/desktop-audio-lifecycle"
 /* oxlint-enable eslint/no-restricted-imports */
-import {
-  nativeReleaseArtifactManifestName,
-  verifyPackagedNativeReleaseArtifacts,
-} from "./native-release-artifacts"
+import { resolveNativeArtifacts, type NativeReleaseArtifactVerification } from "./native-artifacts"
 import type {
   NativeAudioDevice,
   NativeHostDeviceConfiguration,
@@ -406,9 +401,7 @@ let audioSuspendPromise: Promise<void> | undefined
 let audioRecoveryGeneration: number | undefined
 let vst3ScannerSupervisor: ReturnType<typeof createVst3ScannerSupervisor> | undefined
 
-let nativeReleaseArtifactVerification:
-  | { status: "disabled" | "development" | "verified" }
-  | { status: "failed"; reason: string } = { status: "disabled" }
+let nativeReleaseArtifactVerification: NativeReleaseArtifactVerification = { status: "disabled" }
 
 let removeAudioHostLossListener: (() => void) | undefined
 let removeAudioHostRecordingStatusListener: (() => void) | undefined
@@ -2472,31 +2465,11 @@ else {
     stage("before-native-helper")
     nativeMediaAvailable = await nativeFileCapabilityHelper.selfTest()
     stage("after-native-helper")
-    let scannerPath: string | undefined
-
-    if (process.platform === "darwin" && app.isPackaged) {
-      const manifestPath = path.join(process.resourcesPath, nativeReleaseArtifactManifestName)
-
-      if (existsSync(manifestPath)) {
-        try {
-          const artifacts = await verifyPackagedNativeReleaseArtifacts(process.resourcesPath)
-          scannerPath = artifacts.scannerPath
-          vst3WorkerPath = artifacts.workerPath
-          audioHostPath = artifacts.audioHostPath
-          nativeReleaseArtifactVerification = { status: "verified" }
-        } catch (error) {
-          nativeReleaseArtifactVerification = {
-            status: "failed",
-            reason: error instanceof Error ? error.message : "Native release artifact verification failed.",
-          }
-        }
-      }
-    } else if (process.platform === "darwin") {
-      scannerPath = packagedVst3ScannerPath(process.resourcesPath, false, desktopEnv.vst3ScannerPath())
-      vst3WorkerPath = packagedVst3WorkerPath(process.resourcesPath, false, desktopEnv.vst3WorkerPath())
-      audioHostPath = packagedAudioHostPath(process.resourcesPath, false, desktopEnv.audioHostPath())
-      nativeReleaseArtifactVerification = { status: "development" }
-    }
+    const artifacts = await resolveNativeArtifacts()
+    const scannerPath = artifacts.scannerPath
+    vst3WorkerPath = artifacts.vst3WorkerPath
+    audioHostPath = artifacts.audioHostPath
+    nativeReleaseArtifactVerification = artifacts.verification
 
     vst3ScannerSupervisor = scannerPath ? createVst3ScannerSupervisor({
       platform: process.platform,

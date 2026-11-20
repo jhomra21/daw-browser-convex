@@ -7,7 +7,7 @@ import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import type { convexApi, convexClient } from '~/lib/convex'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import {
-  AUDIO_EFFECT_ORDER,
+  AUDIO_EFFECT_KINDS,
   assert,
   assertDefined,
   isJsonObject,
@@ -459,7 +459,7 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
 }
 
 const MASTER_EFFECT_TYPES: ReadonlySet<EffectType> = new Set(
-  AUDIO_EFFECT_ORDER.map((effect): EffectType => `master-${effect}`),
+  AUDIO_EFFECT_KINDS.map((effect): EffectType => `master-${effect}`),
 )
 
 async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, direction: HistoryDirection) {

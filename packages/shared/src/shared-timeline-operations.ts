@@ -1,7 +1,6 @@
 import { isJsonBoolean, isJsonNumber, isJsonObject, isJsonString, type JsonObject, type JsonValue } from './json-value'
 import type {
   ArpeggiatorParams,
-  AudioEffectKind,
   AudioEffectOrderItem,
   AutoFilterParamsEnvelope,
   AutoPanParamsEnvelope,
@@ -24,10 +23,10 @@ import type {
   TremoloParamsEnvelope,
   UtilityParamsEnvelope,
 } from './effects-params'
+import { isAudioEffectKind, type AudioEffectKind } from './audio-effect-registry'
 import { parseStrictSynthParams, type SynthParams } from './synth-params'
 import { normalizeLegacyMidiClip, normalizeMidiClip, type LegacyMidiClip, type MidiClip } from './midi'
 import {
-  isAudioEffectKind,
   isAudioEffectInstance,
   isCompressorDetectorMode,
   isCompressorDynamicsMode,

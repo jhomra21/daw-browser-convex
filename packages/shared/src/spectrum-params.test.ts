@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   AUDIO_EFFECT_CONTRACTS,
-  AUDIO_EFFECT_ORDER,
+  AUDIO_EFFECT_KINDS,
   audioEffectAddPayloadSchema,
   isDspAudioEffectKind,
   mergeSpectrumParamsEnvelope,
@@ -26,10 +26,10 @@ describe('Spectrum device params', () => {
   })
 
   test('is an orderable chain device but never a DSP kind', () => {
-    expect(AUDIO_EFFECT_ORDER).toContain('spectrum')
+    expect(AUDIO_EFFECT_KINDS).toContain('spectrum')
     expect(isDspAudioEffectKind('spectrum')).toBe(false)
     expect(isDspAudioEffectKind('reverb')).toBe(true)
-    expect(AUDIO_EFFECT_ORDER.filter(isDspAudioEffectKind)).toHaveLength(AUDIO_EFFECT_ORDER.length - 1)
+    expect(AUDIO_EFFECT_KINDS.filter(isDspAudioEffectKind)).toHaveLength(AUDIO_EFFECT_KINDS.length - 1)
   })
 
   test('is accepted as an effect insertion payload', () => {

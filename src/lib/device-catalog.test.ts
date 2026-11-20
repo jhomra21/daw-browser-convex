@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  AUDIO_EFFECT_ORDER,
+  AUDIO_EFFECT_KINDS,
   INSTRUMENT_CONTRACTS,
   isInstrumentKind,
   OWNED_PROCESSOR_DESCRIPTORS,
@@ -24,9 +24,9 @@ const supportedInstrumentKinds = Object.keys(INSTRUMENT_CONTRACTS).filter(isInst
 
 describe("device catalog completeness", () => {
   test("covers every supported runtime and persistence audio effect kind", () => {
-    expect(AUDIO_EFFECT_DEVICE_CATALOG.map((entry) => entry.kind)).toEqual(AUDIO_EFFECT_ORDER);
-    expect(BROWSER_AUDIO_EFFECT_CATALOG.map((entry) => entry.kind)).toEqual(AUDIO_EFFECT_ORDER);
-    expect(CONTEXT_MENU_AUDIO_EFFECT_CATALOG.map((entry) => entry.kind)).toEqual(AUDIO_EFFECT_ORDER);
+    expect(AUDIO_EFFECT_DEVICE_CATALOG.map((entry) => entry.kind)).toEqual([...AUDIO_EFFECT_KINDS]);
+    expect(BROWSER_AUDIO_EFFECT_CATALOG.map((entry) => entry.kind)).toEqual([...AUDIO_EFFECT_KINDS]);
+    expect(CONTEXT_MENU_AUDIO_EFFECT_CATALOG.map((entry) => entry.kind)).toEqual([...AUDIO_EFFECT_KINDS]);
   });
 
   test("covers every supported runtime and persistence instrument kind", () => {

@@ -4,6 +4,8 @@ export * from './automation'
 
 export * from './automation-parameters'
 
+export * from './audio-effect-registry'
+
 export * from './audio-warp'
 
 export * from './audio-source-metadata'

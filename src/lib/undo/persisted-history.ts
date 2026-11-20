@@ -1,5 +1,5 @@
 import {
-  AUDIO_EFFECT_ORDER,
+  AUDIO_EFFECT_KINDS,
   isAudioEffectKind,
   isJsonBoolean,
   isJsonNumber,
@@ -23,11 +23,11 @@ type PersistedHistoryEnvelope = {
 }
 
 const EFFECT_TYPES: ReadonlySet<string> = new Set([
-  ...AUDIO_EFFECT_ORDER,
+  ...AUDIO_EFFECT_KINDS,
   'synth',
   'instrument',
   'arp',
-  ...AUDIO_EFFECT_ORDER.map((effect): EffectType => `master-${effect}`),
+  ...AUDIO_EFFECT_KINDS.map((effect): EffectType => `master-${effect}`),
 ])
 
 const isEffectType = (value: JsonValue): value is EffectType => isJsonString(value) && EFFECT_TYPES.has(value)

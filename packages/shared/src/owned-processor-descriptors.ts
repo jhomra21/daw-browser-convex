@@ -1,3 +1,4 @@
+import { AUDIO_EFFECT_KINDS, isOwnedProcessorKind, type OwnedProcessorKind } from './audio-effect-registry'
 import {
   normalizeAutoFilterParamsEnvelope,
   normalizeAutoPanParamsEnvelope,
@@ -14,22 +15,7 @@ import {
 import { isJsonObject, parseJsonValue, type JsonObject, type JsonValue, type JsonValueInput } from './json-value'
 import { normalizeSpectralParamsEnvelope } from './spectral-params'
 
-export const OWNED_PROCESSOR_KINDS = [
-  'utility',
-  'autofilter',
-  'gate',
-  'limiter',
-  'lofi',
-  'chorus',
-  'flanger',
-  'phaser',
-  'tremolo',
-  'autopan',
-  'ensemble',
-  'spectral',
-] as const
-
-export type OwnedProcessorKind = typeof OWNED_PROCESSOR_KINDS[number]
+export const OWNED_PROCESSOR_KINDS = AUDIO_EFFECT_KINDS.filter(isOwnedProcessorKind)
 
 export const OWNED_PROCESSOR_PARAMETER_IDS = {
   utility: ['utility.gainDb', 'utility.pan', 'utility.balance', 'utility.width'],
@@ -70,9 +56,6 @@ export const OWNED_PROCESSOR_DESCRIPTORS = {
   ensemble: descriptor(normalizeEnsembleParamsEnvelope),
   spectral: descriptor(normalizeSpectralParamsEnvelope),
 } satisfies Record<OwnedProcessorKind, ReturnType<typeof descriptor>>
-
-export const isOwnedProcessorKind = (value: JsonValueInput): value is OwnedProcessorKind =>
-  OWNED_PROCESSOR_KINDS.some((kind) => value === kind)
 
 export const normalizeOwnedProcessorParams = (kind: OwnedProcessorKind, value: JsonValueInput) =>
   OWNED_PROCESSOR_DESCRIPTORS[kind].normalizeParams(parseJsonValue(value) ?? null)

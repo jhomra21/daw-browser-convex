@@ -22,8 +22,6 @@ import {
   REVERB_STEREO_WIDTH_MIN,
   REVERB_WET_MAX,
   REVERB_WET_MIN,
-  type AudioEffectKind,
-  type DspAudioEffectKind,
   SATURATOR_COLOR_FREQUENCY_HZ_MAX,
   SATURATOR_COLOR_FREQUENCY_HZ_MIN,
   SATURATOR_DRIVE_DB_MAX,
@@ -33,6 +31,7 @@ import {
   SATURATOR_OUTPUT_DB_MAX,
   SATURATOR_OUTPUT_DB_MIN,
 } from './effects-params'
+import type { AudioEffectKind, DspAudioEffectKind } from './audio-effect-registry'
 import { instrumentAutomationKey, parseInstrumentAutomationKey, SAMPLER_AUTOMATION_DESCRIPTORS, SAMPLER_AUTOMATION_PARAMETER_IDS } from './sampler-automation'
 import { GRANULAR_AUTOMATION_DESCRIPTORS, GRANULAR_AUTOMATION_PARAMETER_IDS, granularAutomationKey, parseGranularAutomationKey } from './granular-automation'
 import { parseSynthAutomationKey, SYNTH_AUTOMATION_DESCRIPTORS, SYNTH_AUTOMATION_PARAMETER_IDS, synthAutomationKey } from './synth-automation'

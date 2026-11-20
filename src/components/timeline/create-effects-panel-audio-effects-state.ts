@@ -4,7 +4,7 @@ import type { FunctionReturnType } from "convex/server";
 import type { AudioEffectRuntimeInstance, AudioEngine, EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
 import {
   AUDIO_EFFECT_CONTRACTS,
-  AUDIO_EFFECT_ORDER,
+  AUDIO_EFFECT_KINDS,
   areAudioEffectInstanceOrdersEqual,
   normalizeAudioEffectInstanceOrder,
   normalizeCompressorParams,
@@ -368,7 +368,7 @@ export function createEffectsPanelAudioDevice(
   const normalizedPersistedAudioEffectRows = createMemo<AudioEffectPanelRow[]>(() => {
     if (isLocalProject()) {
       return (localEffectsView.view()?.rows ?? []).flatMap((row) => {
-        const kind = AUDIO_EFFECT_ORDER.find((entry) => row.effect === entry || row.effect === AUDIO_EFFECT_CONTRACTS[entry].masterKind);
+        const kind = AUDIO_EFFECT_KINDS.find((entry) => row.effect === entry || row.effect === AUDIO_EFFECT_CONTRACTS[entry].masterKind);
 
         return kind && row.params && row.instanceId ? [{
           targetId: row.targetId,
@@ -385,7 +385,7 @@ export function createEffectsPanelAudioDevice(
       const targetId = row.targetType === "master" ? "master" : row.trackId;
 
       if (!targetId) return [];
-      const kind = AUDIO_EFFECT_ORDER.find((entry) => row.type === entry);
+      const kind = AUDIO_EFFECT_KINDS.find((entry) => row.type === entry);
 
       return kind && row.params && row.instanceId ? [{
         targetId,

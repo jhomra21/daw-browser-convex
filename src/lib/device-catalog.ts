@@ -1,6 +1,6 @@
 import {
   AUDIO_EFFECT_CONTRACTS,
-  AUDIO_EFFECT_ORDER,
+  AUDIO_EFFECT_KINDS,
   INSTRUMENT_CONTRACTS,
   isInstrumentKind,
   isOwnedProcessorKind,
@@ -163,7 +163,7 @@ const createInstrumentEntry = (kind: InstrumentKind): InstrumentDeviceCatalogEnt
 };
 
 export const AUDIO_EFFECT_DEVICE_CATALOG: readonly AudioEffectDeviceCatalogEntry[] =
-  AUDIO_EFFECT_ORDER.map(createAudioEffectEntry);
+  AUDIO_EFFECT_KINDS.map(createAudioEffectEntry);
 
 const MIDI_EFFECT_DEVICE_CATALOG: readonly MidiEffectDeviceCatalogEntry[] = [
   createMidiEffectEntry(),

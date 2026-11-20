@@ -67,9 +67,8 @@ bool LockInstrumentMemory(void* address, const std::size_t bytes) {
   return mlock(address, bytes) == 0;
 }
 
-constexpr std::uint32_t kFrameMagic = 0x44415748U;  // DAWH
 constexpr std::size_t kMaximumNativeVstAttachments = 64;
-constexpr std::uint32_t kMaximumNativeVstFrames = 8'192;
+constexpr std::uint32_t kMaximumNativeVstFrames = daw::plugin_host::kMaximumWorkerFrames;
 constexpr std::uint32_t kMaximumNativeVstChannels = 64;
 constexpr std::uint32_t kMaximumNativeVstSlots = 8;
 constexpr std::size_t kGranularStateWireBytes = 60;

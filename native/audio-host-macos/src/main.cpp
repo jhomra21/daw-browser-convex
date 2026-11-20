@@ -24,7 +24,6 @@
 
 namespace {
 
-constexpr std::uint32_t kCapabilities = 0x000003ffU;
 
 bool ShouldLogReceivedControl(const daw::audio_host_macos::ControlType type) {
   using Type = daw::audio_host_macos::ControlType;
@@ -882,11 +881,11 @@ int main() {
       if (!payload.empty()) return EXIT_FAILURE;
       std::vector<std::uint8_t> response;
       WriteU32(response, daw::audio_host_macos::kControlProtocolVersion);
-      WriteU32(response, kCapabilities);
+      WriteU32(response, daw::audio_host_macos::kHostCapabilities);
       WriteU32(response, DAW_AUDIO_CORE_ABI_VERSION);
       WriteString(response, DAW_AUDIO_CORE_PROCESSOR_CONTRACT_HASH);
       WriteString(response, DAW_AUDIO_CORE_PORTABLE_GRAPH_CONTRACT_HASH);
-      WriteString(response, "daw-audio-host-macos/v10");
+      WriteString(response, daw::audio_host_macos::kArtifactId);
       WriteU32(response, static_cast<std::uint32_t>(host->diagnostics().state));
       WriteU32(response, static_cast<std::uint32_t>(host->readinessReason()));
       WriteU32(response, daw::audio_host_macos::kMaximumParkedNativeVsts);

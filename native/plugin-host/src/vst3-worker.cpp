@@ -469,7 +469,7 @@ Steinberg::Vst::ProcessModes WorkerProcessModeToSteinberg(
 }
 
 bool ValidSetup(const WorkerProcessSetup& setup) {
-  return std::isfinite(setup.sampleRate) && setup.sampleRate > 0.0 && setup.sampleRate <= 384'000.0
+  return std::isfinite(setup.sampleRate) && setup.sampleRate > 0.0 && setup.sampleRate <= kMaximumWorkerSampleRateHz
     && setup.maximumBlockFrames > 0 && setup.maximumBlockFrames <= kMaximumWorkerFrames
     && setup.inputChannels <= kMaximumWorkerChannels && setup.outputChannels > 0 && setup.outputChannels <= kMaximumWorkerChannels;
 }

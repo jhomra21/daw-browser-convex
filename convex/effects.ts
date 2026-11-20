@@ -37,6 +37,7 @@ import {
   isJsonObject,
   isJsonString,
   type AudioEffectKind,
+  type InstrumentKind,
   type JsonValue,
 } from "@daw-browser/shared";
 
@@ -417,7 +418,7 @@ export const setTrackInstrumentRow = async (
   input: {
     projectId: string
     trackId: Id<'tracks'>
-    instrument: { kind: 'synth' | 'drum-rack' | 'sampler' | 'granular'; instanceId?: string; params: any }
+    instrument: { kind: InstrumentKind; instanceId?: string; params: any }
   },
 ): Promise<EffectRowWriteResult> => {
   const params = normalizeTrackInstrumentParams(input.instrument)
@@ -515,7 +516,7 @@ const setTrackInstrumentForUser = async (
     projectId: string
     userId: string
     trackId: any
-    instrument: { kind: 'synth' | 'drum-rack' | 'sampler' | 'granular'; instanceId?: string; params: any }
+    instrument: { kind: InstrumentKind; instanceId?: string; params: any }
   },
 ) => {
   const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
@@ -1270,7 +1271,7 @@ const sameRestoreChainState = async (
     projectId: string
     trackId: any
     audioEffects: Array<{ id: string; kind: AudioEffectKind; params: any }>
-    instrument?: { kind: 'synth' | 'drum-rack' | 'sampler' | 'granular'; instanceId?: string; params: any }
+    instrument?: { kind: InstrumentKind; instanceId?: string; params: any }
     arpeggiator?: ReturnType<typeof sanitizeArpParams>
   },
 ) => {

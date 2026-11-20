@@ -7,7 +7,7 @@ import {
   validateSampledInstrumentBuffer,
   type SampledInstrumentBuffer,
 } from '@daw-browser/audio-engine/sampled-instrument-region'
-import { serializeSamplerParams, type GranularParams, type SamplerParams, type SamplerZone, type TrackInstrumentParams } from '@daw-browser/shared'
+import { serializeSamplerParams, type GranularParams, type SamplerParams, type SampledInstrumentKind, type SamplerZone, type TrackInstrumentParams } from '@daw-browser/shared'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { loadSampledInstrumentRegion, type SampledInstrumentRegionLoaderOptions } from '~/lib/sampled-instrument-region-loader'
 import {
@@ -197,7 +197,7 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
 
   const handleCacheEviction = (
     trackId: Track['id'],
-    kind: 'sampler' | 'granular',
+    kind: SampledInstrumentKind,
     key: string,
     releaseAggregate: boolean,
   ) => {
@@ -235,7 +235,7 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
   const getCache = (
     trackId: Track['id'],
     maxBytes: number,
-    kind: 'sampler' | 'granular',
+    kind: SampledInstrumentKind,
   ) => {
     const caches = kind === 'sampler' ? samplerCaches : granularCaches
     const projectKey = `${kind}\u0000${trackId}`
@@ -265,7 +265,7 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
     return cache
   }
 
-  const getCached = (trackId: Track['id'], key: string, kind: 'sampler' | 'granular') => {
+  const getCached = (trackId: Track['id'], key: string, kind: SampledInstrumentKind) => {
     const cache = (kind === 'sampler' ? samplerCaches : granularCaches).get(trackId)
     const value = cache?.get(key)
 
@@ -307,7 +307,7 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
     }
   }
 
-  const releaseCache = (trackId: Track['id'], kind: 'sampler' | 'granular') => {
+  const releaseCache = (trackId: Track['id'], kind: SampledInstrumentKind) => {
     const caches = kind === 'sampler' ? samplerCaches : granularCaches
 
     for (const key of caches.get(trackId)?.keys() ?? []) aggregate.release(`${kind}\u0000${trackId}\u0000${key}`)
@@ -352,7 +352,7 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
     trackId: Track['id'],
     region: RegionSpec,
     maxBytes: number,
-    kind: 'sampler' | 'granular',
+    kind: SampledInstrumentKind,
     force = false,
     retain?: () => void,
   ) => {
@@ -472,7 +472,7 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
     trackId: Track['id'],
     regions: readonly RegionSpec[],
     maxBytes: number,
-    kind: 'sampler' | 'granular',
+    kind: SampledInstrumentKind,
   ) => {
     maxBytes = decodedLimit(maxBytes)
     const cache = getCache(trackId, maxBytes, kind)
@@ -967,7 +967,7 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
     clearTrack,
     syncTrack,
     syncGranularTrack,
-    hydrationInputs: (instrument: Extract<TrackInstrumentParams, { kind: 'sampler' | 'granular' }>) => ({
+    hydrationInputs: (instrument: Extract<TrackInstrumentParams, { kind: SampledInstrumentKind }>) => ({
       kind: instrument.kind,
       instanceId: instrument.instanceId,
       maxDecodedBytes: decodedLimit(instrument.params.maxDecodedBytes),
@@ -975,7 +975,7 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
         : instrument.params.zone ? [instrument.params.zone] : [])
         .map(zone => [zone.id, regionForZone(zone).key]),
     }),
-    loadBuffers: (trackId: Track['id'], instrument: Extract<TrackInstrumentParams, { kind: 'sampler' | 'granular' }>) => untilNotSuperseded(async () => {
+    loadBuffers: (trackId: Track['id'], instrument: Extract<TrackInstrumentParams, { kind: SampledInstrumentKind }>) => untilNotSuperseded(async () => {
       if (!abortControllers.get(trackId) || abortControllers.get(trackId)?.signal.aborted) {
         abortControllers.set(trackId, new AbortController())
       }

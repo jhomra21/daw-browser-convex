@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   AUDIO_EFFECT_KINDS,
+  INSTRUMENT_KINDS,
   audioEffectAddPayloadSchema,
   arpeggiatorParamsSchema,
   instrumentAddPayloadSchema,
@@ -396,7 +397,7 @@ const effectReorderActionSchema = z.object({
 const instrumentSetActionSchema = z.object({
   kind: z.literal('instrument.set'),
   target: trackProcessorTargetSchemaV1,
-  instrumentKind: z.enum(['synth', 'drum-rack', 'sampler', 'granular']),
+  instrumentKind: z.enum(INSTRUMENT_KINDS),
   params: z.unknown().optional(),
 }).strict().superRefine((action, context) => {
   const result = instrumentAddPayloadSchema.safeParse({

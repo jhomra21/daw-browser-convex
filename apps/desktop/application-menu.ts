@@ -1,4 +1,5 @@
 import type {
+  DesktopApplicationMenuCommand,
   DesktopApplicationMenuMessage,
   DesktopApplicationMenuState,
 } from "@daw-browser/desktop-protocol/application-menu"
@@ -126,14 +127,71 @@ const initialState: DesktopApplicationMenuState = {
   extensionContributions: [],
 }
 
+type MenuCommandSpec = {
+  id: string
+  label: string
+  // Availability beyond `ready`; omitted means always available once the renderer is ready.
+  enabled?: (state: DesktopApplicationMenuState) => boolean
+  checked?: (state: DesktopApplicationMenuState) => boolean
+  visible?: (state: DesktopApplicationMenuState) => boolean
+}
+
+const gridResolution = (denominator: DesktopApplicationMenuState["gridDenominator"]) =>
+  (state: DesktopApplicationMenuState) => state.gridDenominator === denominator
+
+// Every renderer command once: its menu item id, label, and how menu state enables, checks and shows it.
+const menuCommands: Readonly<Record<DesktopApplicationMenuCommand, MenuCommandSpec>> = {
+  "new-project": { id: menuIds.newProject, label: "New Project" },
+  "open-projects-dashboard": { id: menuIds.openProjectsDashboard, label: "Open Projects Dashboard" },
+  "open-samples-dashboard": { id: menuIds.openSamplesDashboard, label: "Open Samples Dashboard" },
+  "open-export-dashboard": { id: menuIds.openExportDashboard, label: "Open Export Dashboard" },
+  "import-audio": { id: menuIds.importAudio, label: "Import Audio Files…" },
+  "import-archive": { id: menuIds.importArchive, label: "Import .dawproject…" },
+  "export-archive": { id: menuIds.exportArchive, label: "Export .dawproject…", enabled: (state) => state.canExportArchive },
+  "export-mixdown": { id: menuIds.exportMixdown, label: "Export Mixdown…" },
+  "sign-in": { id: menuIds.signIn, label: "Sign In", visible: (state) => !state.signedIn },
+  "open-account-dashboard": { id: menuIds.account, label: "Account", visible: (state) => state.signedIn },
+  logout: { id: menuIds.logout, label: "Logout", visible: (state) => state.signedIn },
+  undo: { id: menuIds.undo, label: "Undo", enabled: (state) => state.canUndo },
+  redo: { id: menuIds.redo, label: "Redo", enabled: (state) => state.canRedo },
+  copy: { id: menuIds.copy, label: "Copy", enabled: (state) => state.canCopy },
+  paste: { id: menuIds.paste, label: "Paste", enabled: (state) => state.canPaste },
+  "select-all": { id: menuIds.selectAll, label: "Select All", enabled: (state) => state.canSelectAll },
+  duplicate: { id: menuIds.duplicate, label: "Duplicate", enabled: (state) => state.canDuplicateSelection },
+  delete: { id: menuIds.delete, label: "Delete", enabled: (state) => state.canDeleteSelection },
+  "keyboard-shortcuts": { id: menuIds.keyboardShortcuts, label: "Keyboard Shortcuts" },
+  "open-assets-browser": { id: menuIds.assetsBrowser, label: "Assets Browser" },
+  "open-effects-browser": { id: menuIds.effectsBrowser, label: "Effects Browser" },
+  "open-midi-instruments-browser": { id: menuIds.midiInstrumentsBrowser, label: "MIDI Instruments Browser" },
+  "toggle-metronome": { id: menuIds.metronome, label: "Metronome", checked: (state) => state.metronomeEnabled },
+  "toggle-loop": { id: menuIds.loop, label: "Loop", checked: (state) => state.loopEnabled },
+  "toggle-grid": { id: menuIds.grid, label: "Grid", checked: (state) => state.gridEnabled },
+  "toggle-follow": { id: menuIds.follow, label: "Follow", checked: (state) => state.followEnabled },
+  "zoom-in": { id: menuIds.zoomIn, label: "Zoom In" },
+  "zoom-out": { id: menuIds.zoomOut, label: "Zoom Out" },
+  "zoom-to-fit": { id: menuIds.zoomToFit, label: "Zoom to Fit" },
+  "set-grid-denominator-2": { id: menuIds.grid2, label: "1/2", checked: gridResolution(2) },
+  "set-grid-denominator-4": { id: menuIds.grid4, label: "1/4", checked: gridResolution(4) },
+  "set-grid-denominator-8": { id: menuIds.grid8, label: "1/8", checked: gridResolution(8) },
+  "set-grid-denominator-12": { id: menuIds.grid12, label: "1/12", checked: gridResolution(12) },
+  "set-grid-denominator-16": { id: menuIds.grid16, label: "1/16", checked: gridResolution(16) },
+  "open-general-settings": { id: menuIds.generalSettings, label: "Dashboard settings" },
+  "open-timeline-settings": { id: menuIds.timelineSettings, label: "Timeline / DAW dashboard" },
+  "open-audio-settings": { id: menuIds.audioSettings, label: "Audio settings" },
+  about: { id: menuIds.about, label: "About daw-browser" },
+  "toggle-sync-mix": { id: menuIds.syncMix, label: "Sync Mix", checked: (state) => state.syncMix },
+  "add-audio-track": { id: menuIds.addAudioTrack, label: "Add Audio Track" },
+  "add-return-track": { id: menuIds.addReturnTrack, label: "Add Return Track" },
+  "add-group-track": { id: menuIds.addGroupTrack, label: "Add Group Track" },
+  "add-instrument-track": { id: menuIds.addInstrumentTrack, label: "Add Instrument Track" },
+}
+
 const commandItem = (
-  id: string,
-  label: string,
-  command: DesktopApplicationMenuMessage,
+  command: DesktopApplicationMenuCommand,
   sendCommand: (command: DesktopApplicationMenuMessage) => void,
 ): ApplicationMenuTemplate => ({
-  id,
-  label,
+  id: menuCommands[command].id,
+  label: menuCommands[command].label,
   click: () => sendCommand(command),
 })
 
@@ -148,19 +206,19 @@ export const createApplicationMenuTemplate = (
   const fileMenu: ApplicationMenuTemplate = {
     label: "File",
     submenu: [
-      commandItem(menuIds.newProject, "New Project", "new-project", sendCommand),
-      commandItem(menuIds.openProjectsDashboard, "Open Projects Dashboard", "open-projects-dashboard", sendCommand),
-      commandItem(menuIds.openSamplesDashboard, "Open Samples Dashboard", "open-samples-dashboard", sendCommand),
-      commandItem(menuIds.openExportDashboard, "Open Export Dashboard", "open-export-dashboard", sendCommand),
+      commandItem("new-project", sendCommand),
+      commandItem("open-projects-dashboard", sendCommand),
+      commandItem("open-samples-dashboard", sendCommand),
+      commandItem("open-export-dashboard", sendCommand),
       separator(),
-      commandItem(menuIds.importAudio, "Import Audio Files…", "import-audio", sendCommand),
-      commandItem(menuIds.importArchive, "Import .dawproject…", "import-archive", sendCommand),
-      commandItem(menuIds.exportArchive, "Export .dawproject…", "export-archive", sendCommand),
-      commandItem(menuIds.exportMixdown, "Export Mixdown…", "export-mixdown", sendCommand),
+      commandItem("import-audio", sendCommand),
+      commandItem("import-archive", sendCommand),
+      commandItem("export-archive", sendCommand),
+      commandItem("export-mixdown", sendCommand),
       separator(),
-      commandItem(menuIds.signIn, "Sign In", "sign-in", sendCommand),
-      commandItem(menuIds.account, "Account", "open-account-dashboard", sendCommand),
-      commandItem(menuIds.logout, "Logout", "logout", sendCommand),
+      commandItem("sign-in", sendCommand),
+      commandItem("open-account-dashboard", sendCommand),
+      commandItem("logout", sendCommand),
       separator(),
       platform === "darwin" ? { role: "close" } : { role: "quit" },
     ],
@@ -177,50 +235,50 @@ export const createApplicationMenuTemplate = (
   const editMenu: ApplicationMenuTemplate = {
     label: "Edit",
     submenu: [
-      { ...commandItem(menuIds.undo, "Undo", "undo", sendCommand), ...menuShortcut("CmdOrCtrl+Z", { macOwnsKey: true }) },
-      { ...commandItem(menuIds.redo, "Redo", "redo", sendCommand), ...menuShortcut("CmdOrCtrl+Shift+Z", { macOwnsKey: true }) },
+      { ...commandItem("undo", sendCommand), ...menuShortcut("CmdOrCtrl+Z", { macOwnsKey: true }) },
+      { ...commandItem("redo", sendCommand), ...menuShortcut("CmdOrCtrl+Shift+Z", { macOwnsKey: true }) },
       separator(),
       // Cut has no timeline action, so its click is set in applyState and always targets the focused field.
       { id: menuIds.cut, label: "Cut", ...menuShortcut("CmdOrCtrl+X", { macOwnsKey: true }) },
-      { ...commandItem(menuIds.copy, "Copy", "copy", sendCommand), ...menuShortcut("CmdOrCtrl+C", { macOwnsKey: true }) },
-      { ...commandItem(menuIds.paste, "Paste", "paste", sendCommand), ...menuShortcut("CmdOrCtrl+V", { macOwnsKey: true }) },
-      { ...commandItem(menuIds.selectAll, "Select All", "select-all", sendCommand), ...menuShortcut("CmdOrCtrl+A", { macOwnsKey: true }) },
+      { ...commandItem("copy", sendCommand), ...menuShortcut("CmdOrCtrl+C", { macOwnsKey: true }) },
+      { ...commandItem("paste", sendCommand), ...menuShortcut("CmdOrCtrl+V", { macOwnsKey: true }) },
+      { ...commandItem("select-all", sendCommand), ...menuShortcut("CmdOrCtrl+A", { macOwnsKey: true }) },
       separator(),
-      { ...commandItem(menuIds.duplicate, "Duplicate", "duplicate", sendCommand), ...menuShortcut("CmdOrCtrl+D", { macOwnsKey: true }) },
-      { ...commandItem(menuIds.delete, "Delete", "delete", sendCommand), ...menuShortcut("Delete", { macOwnsKey: false }) },
+      { ...commandItem("duplicate", sendCommand), ...menuShortcut("CmdOrCtrl+D", { macOwnsKey: true }) },
+      { ...commandItem("delete", sendCommand), ...menuShortcut("Delete", { macOwnsKey: false }) },
       separator(),
-      commandItem(menuIds.keyboardShortcuts, "Keyboard Shortcuts", "keyboard-shortcuts", sendCommand),
+      commandItem("keyboard-shortcuts", sendCommand),
     ],
   }
 
   const viewMenu: ApplicationMenuTemplate = {
     label: "View",
     submenu: [
-      commandItem(menuIds.assetsBrowser, "Assets Browser", "open-assets-browser", sendCommand),
-      commandItem(menuIds.effectsBrowser, "Effects Browser", "open-effects-browser", sendCommand),
-      commandItem(menuIds.midiInstrumentsBrowser, "MIDI Instruments Browser", "open-midi-instruments-browser", sendCommand),
+      commandItem("open-assets-browser", sendCommand),
+      commandItem("open-effects-browser", sendCommand),
+      commandItem("open-midi-instruments-browser", sendCommand),
       separator(),
-      { ...commandItem(menuIds.metronome, "Metronome", "toggle-metronome", sendCommand), type: "checkbox" },
-      { ...commandItem(menuIds.loop, "Loop", "toggle-loop", sendCommand), type: "checkbox" },
-      { ...commandItem(menuIds.grid, "Grid", "toggle-grid", sendCommand), type: "checkbox" },
+      { ...commandItem("toggle-metronome", sendCommand), type: "checkbox" },
+      { ...commandItem("toggle-loop", sendCommand), type: "checkbox" },
+      { ...commandItem("toggle-grid", sendCommand), type: "checkbox" },
       {
-        ...commandItem(menuIds.follow, "Follow", "toggle-follow", sendCommand),
+        ...commandItem("toggle-follow", sendCommand),
         type: "checkbox",
         ...menuShortcut(platform === "darwin" ? "Alt+Shift+F" : "CmdOrCtrl+Shift+F", { macOwnsKey: true }),
       },
       separator(),
-      commandItem(menuIds.zoomIn, "Zoom In", "zoom-in", sendCommand),
-      commandItem(menuIds.zoomOut, "Zoom Out", "zoom-out", sendCommand),
-      commandItem(menuIds.zoomToFit, "Zoom to Fit", "zoom-to-fit", sendCommand),
+      commandItem("zoom-in", sendCommand),
+      commandItem("zoom-out", sendCommand),
+      commandItem("zoom-to-fit", sendCommand),
       separator(),
       {
         label: "Grid Resolution",
         submenu: [
-          { ...commandItem(menuIds.grid2, "1/2", "set-grid-denominator-2", sendCommand), type: "radio" },
-          { ...commandItem(menuIds.grid4, "1/4", "set-grid-denominator-4", sendCommand), type: "radio" },
-          { ...commandItem(menuIds.grid8, "1/8", "set-grid-denominator-8", sendCommand), type: "radio" },
-          { ...commandItem(menuIds.grid12, "1/12", "set-grid-denominator-12", sendCommand), type: "radio" },
-          { ...commandItem(menuIds.grid16, "1/16", "set-grid-denominator-16", sendCommand), type: "radio" },
+          { ...commandItem("set-grid-denominator-2", sendCommand), type: "radio" },
+          { ...commandItem("set-grid-denominator-4", sendCommand), type: "radio" },
+          { ...commandItem("set-grid-denominator-8", sendCommand), type: "radio" },
+          { ...commandItem("set-grid-denominator-12", sendCommand), type: "radio" },
+          { ...commandItem("set-grid-denominator-16", sendCommand), type: "radio" },
         ],
       },
       {
@@ -240,21 +298,21 @@ export const createApplicationMenuTemplate = (
   const settingsMenu: ApplicationMenuTemplate = {
     label: "Settings",
     submenu: [
-      commandItem(menuIds.generalSettings, "Dashboard settings", "open-general-settings", sendCommand),
-      commandItem(menuIds.timelineSettings, "Timeline / DAW dashboard", "open-timeline-settings", sendCommand),
-      commandItem(menuIds.audioSettings, "Audio settings", "open-audio-settings", sendCommand),
+      commandItem("open-general-settings", sendCommand),
+      commandItem("open-timeline-settings", sendCommand),
+      commandItem("open-audio-settings", sendCommand),
     ],
   }
 
   const tracksMenu: ApplicationMenuTemplate = {
     label: "Tracks",
     submenu: [
-      { ...commandItem(menuIds.syncMix, "Sync Mix", "toggle-sync-mix", sendCommand), type: "checkbox" },
+      { ...commandItem("toggle-sync-mix", sendCommand), type: "checkbox" },
       separator(),
-      commandItem(menuIds.addAudioTrack, "Add Audio Track", "add-audio-track", sendCommand),
-      commandItem(menuIds.addReturnTrack, "Add Return Track", "add-return-track", sendCommand),
-      commandItem(menuIds.addGroupTrack, "Add Group Track", "add-group-track", sendCommand),
-      commandItem(menuIds.addInstrumentTrack, "Add Instrument Track", "add-instrument-track", sendCommand),
+      commandItem("add-audio-track", sendCommand),
+      commandItem("add-return-track", sendCommand),
+      commandItem("add-group-track", sendCommand),
+      commandItem("add-instrument-track", sendCommand),
     ],
   }
 
@@ -272,13 +330,14 @@ export const createApplicationMenuTemplate = (
   const macApplicationMenu: ApplicationMenuTemplate = {
     label: "daw-browser",
     submenu: [
-      { id: menuIds.about, label: "About daw-browser", click: () => sendCommand("about") },
+      commandItem("about", sendCommand),
       {
-        ...commandItem(menuIds.generalSettings, "Settings…", "open-general-settings", sendCommand),
+        ...commandItem("open-general-settings", sendCommand),
+        label: "Settings…",
         accelerator: "Command+,",
       },
-      commandItem(menuIds.timelineSettings, "Timeline / DAW Settings", "open-timeline-settings", sendCommand),
-      commandItem(menuIds.audioSettings, "Audio Settings", "open-audio-settings", sendCommand),
+      { ...commandItem("open-timeline-settings", sendCommand), label: "Timeline / DAW Settings" },
+      { ...commandItem("open-audio-settings", sendCommand), label: "Audio Settings" },
       separator(),
       { role: "services" },
       separator(),
@@ -294,7 +353,7 @@ export const createApplicationMenuTemplate = (
     label: "Help",
     role: "help",
     submenu: [
-      { id: menuIds.about, label: "About daw-browser", click: () => sendCommand("about") },
+      commandItem("about", sendCommand),
     ],
   }
 
@@ -302,35 +361,6 @@ export const createApplicationMenuTemplate = (
     ? [macApplicationMenu, fileMenu, editMenu, viewMenu, tracksMenu, windowMenu]
     : [fileMenu, editMenu, viewMenu, settingsMenu, tracksMenu, windowMenu, helpMenu]
 }
-
-const statefulIds = [
-  menuIds.newProject,
-  menuIds.openProjectsDashboard,
-  menuIds.openSamplesDashboard,
-  menuIds.openExportDashboard,
-  menuIds.importAudio,
-  menuIds.importArchive,
-  menuIds.exportMixdown,
-  menuIds.keyboardShortcuts,
-  menuIds.assetsBrowser,
-  menuIds.effectsBrowser,
-  menuIds.midiInstrumentsBrowser,
-  menuIds.metronome,
-  menuIds.loop,
-  menuIds.grid,
-  menuIds.follow,
-  menuIds.zoomIn,
-  menuIds.zoomOut,
-  menuIds.zoomToFit,
-  menuIds.generalSettings,
-  menuIds.timelineSettings,
-  menuIds.audioSettings,
-  menuIds.about,
-  menuIds.addAudioTrack,
-  menuIds.addReturnTrack,
-  menuIds.addGroupTrack,
-  menuIds.addInstrumentTrack,
-] as const
 
 type EditingWebContents = {
   cut: () => void
@@ -356,27 +386,16 @@ const applyState = (
   state: DesktopApplicationMenuState,
   sendCommand: (command: DesktopApplicationMenuMessage) => void,
 ) => {
-  for (const id of statefulIds) {
-    const item = menu.getMenuItemById(id)
+  for (const spec of Object.values(menuCommands)) {
+    const item = menu.getMenuItemById(spec.id)
 
-    if (item) item.enabled = state.ready
-  }
+    if (!item) continue
 
-  const archive = menu.getMenuItemById(menuIds.exportArchive)
+    item.enabled = state.ready && (spec.enabled?.(state) ?? true)
 
-  if (archive) archive.enabled = state.ready && state.canExportArchive
+    if (spec.checked) item.checked = spec.checked(state)
 
-  const availability: ReadonlyArray<readonly [string, boolean]> = [
-    [menuIds.undo, state.canUndo],
-    [menuIds.redo, state.canRedo],
-    [menuIds.duplicate, state.canDuplicateSelection],
-    [menuIds.delete, state.canDeleteSelection],
-  ]
-
-  for (const [id, available] of availability) {
-    const item = menu.getMenuItemById(id)
-
-    if (item) item.enabled = state.ready && available
+    if (spec.visible) item.visible = spec.visible(state)
   }
 
   const editing: ReadonlyArray<readonly [string, boolean, keyof EditingWebContents, DesktopApplicationMenuMessage | null]> = [
@@ -392,63 +411,6 @@ const applyState = (
     if (!item) continue
     item.enabled = state.ready && available
     item.click = editingClick(state, sendCommand, native, command)
-  }
-
-  const signIn = menu.getMenuItemById(menuIds.signIn)
-
-  if (signIn) {
-    signIn.enabled = state.ready
-    signIn.visible = !state.signedIn
-  }
-
-  const account = menu.getMenuItemById(menuIds.account)
-
-  if (account) {
-    account.enabled = state.ready
-    account.visible = state.signedIn
-  }
-
-  const logout = menu.getMenuItemById(menuIds.logout)
-
-  if (logout) {
-    logout.enabled = state.ready
-    logout.visible = state.signedIn
-  }
-
-  const metronome = menu.getMenuItemById(menuIds.metronome)
-
-  if (metronome) metronome.checked = state.metronomeEnabled
-  const loop = menu.getMenuItemById(menuIds.loop)
-
-  if (loop) loop.checked = state.loopEnabled
-  const grid = menu.getMenuItemById(menuIds.grid)
-
-  if (grid) grid.checked = state.gridEnabled
-  const follow = menu.getMenuItemById(menuIds.follow)
-
-  if (follow) follow.checked = state.followEnabled
-  const syncMix = menu.getMenuItemById(menuIds.syncMix)
-
-  if (syncMix) {
-    syncMix.enabled = state.ready
-    syncMix.checked = state.syncMix
-  }
-
-  const gridItems = new Map([
-    [2, menuIds.grid2],
-    [4, menuIds.grid4],
-    [8, menuIds.grid8],
-    [12, menuIds.grid12],
-    [16, menuIds.grid16],
-  ] as const)
-
-  for (const [denominator, id] of gridItems) {
-    const item = menu.getMenuItemById(id)
-
-    if (item) {
-      item.enabled = state.ready
-      item.checked = state.gridDenominator === denominator
-    }
   }
 
   const contributions = [...(state.extensionContributions ?? [])]

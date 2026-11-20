@@ -96,7 +96,7 @@ export const desktopSeekInputSchemaV1 = z.object({ seconds: finiteSeconds }).str
 const desktopHostVstCursorSchemaV1 = z.string().min(1).max(String(0xffff_ffff).length).regex(/^(0|[1-9][0-9]*)$/)
   .refine((value) => Number(value) <= 0xffff_ffff)
 
-export const desktopOperationSchemaV1 = z.enum([
+const desktopHostOperationSchemaV1 = z.enum([
   "host.status",
   "host.vst.instances",
   "host.vst.parameters",
@@ -113,26 +113,20 @@ export const desktopOperationSchemaV1 = z.enum([
   "transport.seek",
   "diagnostics.snapshot",
   "diagnostics.snapshot.v2",
-  "control.capabilities",
-  "control.snapshot",
-  "control.preview",
-  "control.commit",
-  "control.requestApproval",
-  "control.history",
-  "control.recoveries",
+])
+
+// Same members as the `control.*` catalog ids; the order is the published wire order, which differs from the catalog's.
+export const desktopControlOperationSchemaV1 = z.enum([
+  "control.capabilities", "control.snapshot", "control.preview", "control.commit",
+  "control.requestApproval", "control.history", "control.recoveries",
+])
+
+export const desktopOperationSchemaV1 = z.enum([
+  ...desktopHostOperationSchemaV1.options,
+  ...desktopControlOperationSchemaV1.options,
 ])
 
 export type DesktopOperationV1 = z.infer<typeof desktopOperationSchemaV1>
-
-const desktopHostOperationSchemaV1 = desktopOperationSchemaV1.exclude([
-  "control.capabilities",
-  "control.snapshot",
-  "control.preview",
-  "control.commit",
-  "control.requestApproval",
-  "control.history",
-  "control.recoveries",
-])
 
 export type DesktopHostOperationV1 = z.infer<typeof desktopHostOperationSchemaV1>
 
@@ -673,7 +667,7 @@ const rendererRequest = z.object({
   version,
   type: z.literal("request"),
   id: correlationId,
-  operation: desktopOperationSchemaV1.exclude(["control.capabilities", "control.snapshot", "control.preview", "control.commit", "control.requestApproval", "control.history", "control.recoveries"]),
+  operation: desktopHostOperationSchemaV1,
   input: desktopJsonValueSchema,
   deadlineMs: z.number().int().positive().max(maxDeadlineMs).optional(),
 }).strict().superRefine((value, context) => {
@@ -691,11 +685,6 @@ const rendererRequest = z.object({
 export const desktopRendererRequestSchemaV1 = z.union([rendererRequest, lifecyclePrepareToCloseRequest])
 
 export type DesktopRendererRequestV1 = z.infer<typeof desktopRendererRequestSchemaV1>
-
-export const desktopControlOperationSchemaV1 = z.enum([
-  "control.capabilities", "control.snapshot", "control.preview", "control.commit",
-  "control.requestApproval", "control.history", "control.recoveries",
-])
 
 export type DesktopControlOperationV1 = z.infer<typeof desktopControlOperationSchemaV1>
 

@@ -68,27 +68,12 @@ import {
   sessionCancelRecordingChannel,
   sessionCommitTransactionChannel,
   sessionConfigureChannel,
-  sessionConfigureInstrumentStatesChannel,
   sessionConfigureRecordingChannel,
   sessionCoordinateVstAttachmentsChannel,
-  sessionCreateMappedAssetChannel,
-  sessionDetachVstChannel,
   sessionEditorChannel,
   sessionGetVstStateChannel,
-  sessionInstallAssetChannel,
-  sessionPrepareMappedAssetRangeChannel,
-  sessionPublishGraphChannel,
   sessionPrepareGraphRevisionChannel, sessionPublishGraphRevisionChannel, sessionInspectGraphRevisionChannel,
   sessionRollbackGraphRevisionChannel, sessionRetireGraphRevisionChannel,
-  sessionQueueInstrumentEventsChannel,
-  sessionQueueParameterEventsChannel,
-  sessionQueueProcessorStatePatchChannel,
-  sessionQueueScheduleWindowChannel,
-  sessionQueueSourceEventsChannel,
-  sessionQueueVstParameterEventsChannel,
-  sessionReenableVstScheduleAutomationChannel,
-  sessionReleaseAssetChannel,
-  sessionReleaseMappedAssetChannel,
   sessionRollbackTransactionChannel,
   sessionSetSpectrumNodeChannel,
   sessionSetTransportChannel,
@@ -97,7 +82,6 @@ import {
   sessionStopChannel,
   sessionStopRecordingChannel,
   sessionTeardownChannel,
-  sessionWriteMappedAssetPageChannel,
   spectrumFrameChannel,
   vstEditorCapturedStateAckChannel,
   vstEditorCapturedStateChannel,
@@ -150,6 +134,7 @@ import { deliverOfflinePcmChunk } from "./offline-pcm-ack"
 import { diagnosticValidationPaths } from "./diagnostics-trace"
 import { safePreloadReply } from "./preload-reply"
 import { desktopEnv } from "./env"
+import { nativeSessionOperations } from "./ipc/native-session-operations"
 
 if (desktopEnv.benchmarkHeartbeat()) {
   ipcRenderer.on(benchmarkRendererPingChannel, (_event, sequence) => {
@@ -255,7 +240,7 @@ const invokeNativeDelivery = (channel: string, value: Uint8Array, transactionTok
   ipcRenderer.invoke(channel, { value, transactionToken })
 
 const invokeNativePatch = (value: Uint8Array, transactionToken?: string): Promise<NativeProcessorPatchReply> =>
-  ipcRenderer.invoke(sessionQueueProcessorStatePatchChannel, { value, transactionToken })
+  ipcRenderer.invoke(nativeSessionOperations.queueProcessorStatePatch.channel, { value, transactionToken })
 
 const invokeNativeTransaction = (): Promise<NativeTransactionReply> =>
   ipcRenderer.invoke(sessionBeginTransactionChannel, { value: undefined, transactionToken: undefined })
@@ -461,24 +446,24 @@ const desktopBridge = {
         beginTransaction: invokeNativeTransaction,
         commitTransaction: (transactionToken: string) => invokeNativeSession(sessionCommitTransactionChannel, undefined, transactionToken),
         rollbackTransaction: (transactionToken: string) => invokeNativeSession(sessionRollbackTransactionChannel, undefined, transactionToken),
-        detachVst: (instanceId: string, transactionToken?: string) => invokeNativeSession(sessionDetachVstChannel, instanceId, transactionToken),
+        detachVst: (instanceId: string, transactionToken?: string) => invokeNativeSession(nativeSessionOperations.detachVst.channel, instanceId, transactionToken),
         captureVstState: (instanceId: string) => ipcRenderer.invoke(sessionGetVstStateChannel, instanceId),
         editor: (input: NativeVstEditorCommand): Promise<NativeVstEditorReply> => invokeNativeEditor(input, input.transactionToken),
-        installAsset: (input: NativeHostPcmAsset, transactionToken?: string) => invokeNativeSession(sessionInstallAssetChannel, input, transactionToken),
-        releaseAsset: (sessionAssetId: number, transactionToken?: string) => invokeNativeSession(sessionReleaseAssetChannel, sessionAssetId, transactionToken),
-        createMappedAsset: (input: NativeHostMappedAsset, transactionToken?: string) => invokeNativeSession(sessionCreateMappedAssetChannel, input, transactionToken),
-        writeMappedAssetPage: (input: NativeHostMappedAssetPage, transactionToken?: string) => invokeNativeSession(sessionWriteMappedAssetPageChannel, input, transactionToken),
-        prepareMappedAssetRange: (sessionAssetId: number, startFrame: number, frameCount: number, transactionToken?: string) => invokeNativeSession(sessionPrepareMappedAssetRangeChannel, { sessionAssetId, startFrame, frameCount }, transactionToken),
-        releaseMappedAsset: (sessionAssetId: number, transactionToken?: string) => invokeNativeSession(sessionReleaseMappedAssetChannel, sessionAssetId, transactionToken),
-        publishGraph: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(sessionPublishGraphChannel, bytes, transactionToken),
-        configureInstrumentStates: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(sessionConfigureInstrumentStatesChannel, bytes, transactionToken),
-        queueParameterEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeDelivery(sessionQueueParameterEventsChannel, bytes, transactionToken),
+        installAsset: (input: NativeHostPcmAsset, transactionToken?: string) => invokeNativeSession(nativeSessionOperations.installAsset.channel, input, transactionToken),
+        releaseAsset: (sessionAssetId: number, transactionToken?: string) => invokeNativeSession(nativeSessionOperations.releaseAsset.channel, sessionAssetId, transactionToken),
+        createMappedAsset: (input: NativeHostMappedAsset, transactionToken?: string) => invokeNativeSession(nativeSessionOperations.createMappedAsset.channel, input, transactionToken),
+        writeMappedAssetPage: (input: NativeHostMappedAssetPage, transactionToken?: string) => invokeNativeSession(nativeSessionOperations.writeMappedAssetPage.channel, input, transactionToken),
+        prepareMappedAssetRange: (sessionAssetId: number, startFrame: number, frameCount: number, transactionToken?: string) => invokeNativeSession(nativeSessionOperations.prepareMappedAssetRange.channel, { sessionAssetId, startFrame, frameCount }, transactionToken),
+        releaseMappedAsset: (sessionAssetId: number, transactionToken?: string) => invokeNativeSession(nativeSessionOperations.releaseMappedAsset.channel, sessionAssetId, transactionToken),
+        publishGraph: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(nativeSessionOperations.publishGraph.channel, bytes, transactionToken),
+        configureInstrumentStates: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(nativeSessionOperations.configureInstrumentStates.channel, bytes, transactionToken),
+        queueParameterEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeDelivery(nativeSessionOperations.queueParameterEvents.channel, bytes, transactionToken),
         queueProcessorStatePatch: (bytes: Uint8Array, transactionToken?: string) => invokeNativePatch(bytes, transactionToken),
-        queueVstParameterEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(sessionQueueVstParameterEventsChannel, bytes, transactionToken),
-        queueInstrumentEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeDelivery(sessionQueueInstrumentEventsChannel, bytes, transactionToken),
-        queueScheduleWindow: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(sessionQueueScheduleWindowChannel, bytes, transactionToken),
-        reenableVstScheduleAutomation: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(sessionReenableVstScheduleAutomationChannel, bytes, transactionToken),
-        queueSourceEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(sessionQueueSourceEventsChannel, bytes, transactionToken),
+        queueVstParameterEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(nativeSessionOperations.queueVstParameterEvents.channel, bytes, transactionToken),
+        queueInstrumentEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeDelivery(nativeSessionOperations.queueInstrumentEvents.channel, bytes, transactionToken),
+        queueScheduleWindow: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(nativeSessionOperations.queueScheduleWindow.channel, bytes, transactionToken),
+        reenableVstScheduleAutomation: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(nativeSessionOperations.reenableVstScheduleAutomation.channel, bytes, transactionToken),
+        queueSourceEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(nativeSessionOperations.queueSourceEvents.channel, bytes, transactionToken),
         coordinateVstAttachments: (input: NativeVstAttachmentCoordinationInput, transactionToken?: string) => invokeNativeSession(sessionCoordinateVstAttachmentsChannel, input, transactionToken),
         setTransport: (input: NativeHostTransport, transactionToken?: string) => invokeNativeSession(sessionSetTransportChannel, input, transactionToken),
         configureRecording: (input: NativeHostRecordingConfiguration & { spoolImportVersion: NativeRecordingSpoolImportVersion }): ReturnType<DeclaredAudioHostBridge["session"]["configureRecording"]> =>

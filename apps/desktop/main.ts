@@ -8,7 +8,8 @@ import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { z } from "zod"
 import { nativeEditorCommandSchema, nativeSessionEnvelopeSchema } from "./native-session-schemas"
-import { requestIdSchema, sha256HexPattern, sha256HexSchema, unsigned32Schema, unsigned64Max, uuidSchema } from "@daw-browser/desktop-protocol/wire-patterns"
+import { nativeSessionOperations, type nativeSessionAssetSchema } from "./ipc/native-session-operations"
+import { requestIdSchema, sha256HexPattern, sha256HexSchema, unsigned32Schema, uuidSchema } from "@daw-browser/desktop-protocol/wire-patterns"
 import {
   desktopFrameSchemaV1,
   desktopHelloSchemaV1,
@@ -72,31 +73,15 @@ import {
   sessionCancelRecordingChannel,
   sessionCommitTransactionChannel,
   sessionConfigureChannel,
-  sessionConfigureInstrumentStatesChannel,
   sessionCoordinateVstAttachmentsChannel,
-  sessionCreateMappedAssetChannel,
-  sessionDetachVstChannel,
   sessionEditorChannel,
   sessionGetVstStateChannel,
-  sessionInstallAssetChannel,
-  sessionPrepareMappedAssetRangeChannel,
-  sessionPublishGraphChannel,
   sessionPrepareGraphRevisionChannel, sessionPublishGraphRevisionChannel, sessionInspectGraphRevisionChannel,
   sessionRollbackGraphRevisionChannel, sessionRetireGraphRevisionChannel,
-  sessionQueueInstrumentEventsChannel,
-  sessionQueueParameterEventsChannel,
-  sessionQueueProcessorStatePatchChannel,
-  sessionQueueScheduleWindowChannel,
-  sessionQueueSourceEventsChannel,
-  sessionQueueVstParameterEventsChannel,
-  sessionReenableVstScheduleAutomationChannel,
-  sessionReleaseAssetChannel,
-  sessionReleaseMappedAssetChannel,
   sessionRollbackTransactionChannel,
   sessionStartChannel,
   sessionStopChannel,
   sessionTeardownChannel,
-  sessionWriteMappedAssetPageChannel,
   spectrumFrameChannel,
   vstEditorCapturedStateChannel,
   vstEditorStateChannel,
@@ -259,15 +244,6 @@ const nativeSessionConfigurationSchema = z.object({
   revision: unsigned32Schema,
 }).passthrough()
 
-const nativeSessionAssetSchema = z.object({
-  sessionAssetId: unsigned32Schema,
-  frameCount: unsigned32Schema,
-  sampleRateHz: unsigned32Schema,
-  channelCount: unsigned32Schema,
-  planarPcm: z.instanceof(Uint8Array),
-  contentHashPrefix: z.instanceof(Uint8Array).optional(),
-}).strict()
-
 const nativeAttachmentCoordinationSchema = z.object({
   projectId: projectIdSchemaV1,
   serializedPlan: z.string().refine((value) => Buffer.byteLength(value, "utf8") <= nativeAudioHostMaximumSerializedPlanBytes),
@@ -280,31 +256,10 @@ const nativeAttachmentCoordinationSchema = z.object({
   }).strict()).max(64).optional(),
 }).passthrough()
 
-const nativeBytesEnvelopeSchema = nativeSessionEnvelopeSchema(z.instanceof(Uint8Array))
 const nativeUndefinedEnvelopeSchema = nativeSessionEnvelopeSchema(z.undefined())
 const nativeEditorEnvelopeSchema = nativeSessionEnvelopeSchema(nativeEditorCommandSchema)
 const nativeAttachmentEnvelopeSchema = nativeSessionEnvelopeSchema(nativeAttachmentCoordinationSchema)
 const nativeConfigurationEnvelopeSchema = nativeSessionEnvelopeSchema(nativeSessionConfigurationSchema)
-const nativeAssetEnvelopeSchema = nativeSessionEnvelopeSchema(nativeSessionAssetSchema)
-const nativeAssetIdEnvelopeSchema = nativeSessionEnvelopeSchema(positiveUnsigned32Schema)
-
-const nativeMappedAssetEnvelopeSchema = nativeSessionEnvelopeSchema(z.object({
-  sessionAssetId: positiveUnsigned32Schema,
-  frameCount: z.number().int().positive().safe(),
-  sampleRateHz: positiveUnsigned32Schema,
-  channelCount: positiveUnsigned32Schema.max(64),
-  contentHashPrefix: z.bigint().nonnegative().max(unsigned64Max).optional(),
-  preparedStretchArtifactId: z.string().min(1).max(512).optional(),
-}).strict())
-
-const nativeMappedAssetPageEnvelopeSchema = nativeSessionEnvelopeSchema(z.object({
-  sessionAssetId: positiveUnsigned32Schema,
-  startFrame: z.number().int().nonnegative().safe(),
-  frameCount: positiveUnsigned32Schema,
-  planarPcm: z.instanceof(Uint8Array).refine((value) => value.byteLength > 0 && value.byteLength <= nativeAudioHostMaximumMappedAssetPageBytes),
-}).strict())
-
-const nativeInstanceEnvelopeSchema = nativeSessionEnvelopeSchema(uuidSchema)
 const pluginDirectorySchema = z.object({ directory: z.string() }).passthrough()
 const closePreparationResultSchema = z.object({ flushed: z.literal(true) }).passthrough()
 
@@ -1588,6 +1543,25 @@ const registerIpc = () => {
     audioHostAllowed(event) ? audioHostSupervisor : undefined
   )
 
+  // One handler shape for the envelope operations: authorize the sender, parse the request, run, reply ok or the failure.
+  const registerNativeSessionOperation = <Value>(
+    operation: { channel: string; request: z.ZodType<{ value: Value; transactionToken?: string | undefined }> },
+    run: (supervisor: NonNullable<typeof audioHostSupervisor>, value: Value, transactionToken?: string) => Promise<void>,
+  ) => ipcMain.handle(operation.channel, async (event, value) => {
+    const supervisor = sessionSupervisorFor(event)
+    const envelope = operation.request.safeParse(value)
+
+    if (!supervisor || !envelope.success) return nativeSessionFailure()
+
+    try {
+      await run(supervisor, envelope.data.value, envelope.data.transactionToken)
+
+      return { ok: true as const }
+    } catch (error) {
+      return nativeSessionFailure(error)
+    }
+  })
+
   const nativeSessionConfiguration = (
     value: z.infer<typeof nativeSessionConfigurationSchema>,
   ): NativeHostDeviceConfiguration => {
@@ -1674,115 +1648,17 @@ const registerIpc = () => {
       return nativeSessionFailure(error)
     }
   })
-  ipcMain.handle(sessionInstallAssetChannel, async (event, value) => {
-    const supervisor = sessionSupervisorFor(event)
-    const envelope = nativeAssetEnvelopeSchema.safeParse(value)
-
-    if (!supervisor || !envelope.success) return nativeSessionFailure()
-    const asset = nativeSessionAsset(envelope.data.value)
-
-    try {
-      await supervisor.installAsset(asset, envelope.data.transactionToken)
-
-      return { ok: true as const }
-    } catch (error) {
-      return nativeSessionFailure(error)
-    }
-  })
-  ipcMain.handle(sessionReleaseAssetChannel, async (event, value) => {
-    const supervisor = sessionSupervisorFor(event)
-    const envelope = nativeAssetIdEnvelopeSchema.safeParse(value)
-
-    if (!supervisor || !envelope.success) return nativeSessionFailure()
-
-    try {
-      await supervisor.releaseAsset(envelope.data.value, envelope.data.transactionToken)
-
-      return { ok: true as const }
-    } catch (error) {
-      return nativeSessionFailure(error)
-    }
-  })
-  ipcMain.handle(sessionCreateMappedAssetChannel, async (event, value) => {
-    const supervisor = sessionSupervisorFor(event)
-    const envelope = nativeMappedAssetEnvelopeSchema.safeParse(value)
-
-    if (!supervisor || !envelope.success) return nativeSessionFailure()
-
-    try {
-      await supervisor.createMappedAsset(envelope.data.value, envelope.data.transactionToken)
-
-      return { ok: true as const }
-    } catch (error) {
-      return nativeSessionFailure(error)
-    }
-  })
-  ipcMain.handle(sessionWriteMappedAssetPageChannel, async (event, value) => {
-    const supervisor = sessionSupervisorFor(event)
-    const envelope = nativeMappedAssetPageEnvelopeSchema.safeParse(value)
-
-    if (!supervisor || !envelope.success) return nativeSessionFailure()
-
-    try {
-      await supervisor.writeMappedAssetPage(envelope.data.value, envelope.data.transactionToken)
-
-      return { ok: true as const }
-    } catch (error) {
-      return nativeSessionFailure(error)
-    }
-  })
-  ipcMain.handle(sessionPrepareMappedAssetRangeChannel, async (event, value) => {
-    const supervisor = sessionSupervisorFor(event)
-
-    const envelope = nativeSessionEnvelopeSchema(z.object({
-      sessionAssetId: positiveUnsigned32Schema,
-      startFrame: z.number().int().nonnegative().safe(),
-      frameCount: z.number().int().positive().safe(),
-    }).strict()).safeParse(value)
-
-    if (!supervisor || !envelope.success) return nativeSessionFailure()
-
-    try {
-      await supervisor.prepareMappedAssetRange(
-        envelope.data.value.sessionAssetId,
-        envelope.data.value.startFrame,
-        envelope.data.value.frameCount,
-        envelope.data.transactionToken,
-      )
-
-      return { ok: true as const }
-    } catch (error) {
-      return nativeSessionFailure(error)
-    }
-  })
-  ipcMain.handle(sessionReleaseMappedAssetChannel, async (event, value) => {
-    const supervisor = sessionSupervisorFor(event)
-    const envelope = nativeAssetIdEnvelopeSchema.safeParse(value)
-
-    if (!supervisor || !envelope.success) return nativeSessionFailure()
-
-    try {
-      await supervisor.releaseMappedAsset(envelope.data.value, envelope.data.transactionToken)
-
-      return { ok: true as const }
-    } catch (error) {
-      return nativeSessionFailure(error)
-    }
-  })
-  ipcMain.handle(sessionDetachVstChannel, async (event, value) => {
-    const supervisor = sessionSupervisorFor(event)
-    const envelope = nativeInstanceEnvelopeSchema.safeParse(value)
-
-    if (!supervisor || !envelope.success) return nativeSessionFailure()
-
-    try {
-      await supervisor.detachVst(envelope.data.value, envelope.data.transactionToken)
-      activeEditorProjectBindings.remove(envelope.data.value, envelope.data.transactionToken)
-
-      return { ok: true as const }
-    } catch (error) {
-      return nativeSessionFailure(error)
-    }
+  registerNativeSessionOperation(nativeSessionOperations.installAsset, (supervisor, asset, token) => supervisor.installAsset(nativeSessionAsset(asset), token))
+  registerNativeSessionOperation(nativeSessionOperations.releaseAsset, (supervisor, sessionAssetId, token) => supervisor.releaseAsset(sessionAssetId, token))
+  registerNativeSessionOperation(nativeSessionOperations.createMappedAsset, (supervisor, asset, token) => supervisor.createMappedAsset(asset, token))
+  registerNativeSessionOperation(nativeSessionOperations.writeMappedAssetPage, (supervisor, page, token) => supervisor.writeMappedAssetPage(page, token))
+  registerNativeSessionOperation(nativeSessionOperations.prepareMappedAssetRange, (supervisor, range, token) => (
+    supervisor.prepareMappedAssetRange(range.sessionAssetId, range.startFrame, range.frameCount, token)
+  ))
+  registerNativeSessionOperation(nativeSessionOperations.releaseMappedAsset, (supervisor, sessionAssetId, token) => supervisor.releaseMappedAsset(sessionAssetId, token))
+  registerNativeSessionOperation(nativeSessionOperations.detachVst, async (supervisor, instanceId, token) => {
+    await supervisor.detachVst(instanceId, token)
+    activeEditorProjectBindings.remove(instanceId, token)
   })
   ipcMain.handle(sessionGetVstStateChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
@@ -1998,24 +1874,6 @@ const registerIpc = () => {
     }
   })
 
-  const registerNativeSessionBytes = (
-    channel: string,
-    operation: (supervisor: NonNullable<typeof audioHostSupervisor>, bytes: Uint8Array, transactionToken?: string) => Promise<void>,
-  ) => ipcMain.handle(channel, async (event, value) => {
-    const supervisor = sessionSupervisorFor(event)
-    const envelope = nativeBytesEnvelopeSchema.safeParse(value)
-
-    if (!supervisor || !envelope.success) return nativeSessionFailure()
-
-    try {
-      await operation(supervisor, envelope.data.value, envelope.data.transactionToken)
-
-      return { ok: true as const }
-    } catch (error) {
-      return nativeSessionFailure(error)
-    }
-  })
-
   // Internal session-only revision lifecycle, never a desktop protocol operation.
   // The authenticated main frame must still own the mounted project at reply.
   const revisionChannels = {
@@ -2098,12 +1956,12 @@ const registerIpc = () => {
     })
   }
 
-  registerNativeSessionBytes(sessionPublishGraphChannel, (supervisor, bytes, transactionToken) => supervisor.publishGraph(bytes, transactionToken))
-  registerNativeSessionBytes(sessionConfigureInstrumentStatesChannel, (supervisor, bytes, transactionToken) => supervisor.configureInstrumentStates(bytes, transactionToken))
-  registerNativeSessionBytes(sessionQueueParameterEventsChannel, (supervisor, bytes, transactionToken) => supervisor.queueParameterEvents(bytes, transactionToken))
-  ipcMain.handle(sessionQueueProcessorStatePatchChannel, async (event, value) => {
+  registerNativeSessionOperation(nativeSessionOperations.publishGraph, (supervisor, bytes, token) => supervisor.publishGraph(bytes, token))
+  registerNativeSessionOperation(nativeSessionOperations.configureInstrumentStates, (supervisor, bytes, token) => supervisor.configureInstrumentStates(bytes, token))
+  registerNativeSessionOperation(nativeSessionOperations.queueParameterEvents, (supervisor, bytes, token) => supervisor.queueParameterEvents(bytes, token))
+  ipcMain.handle(nativeSessionOperations.queueProcessorStatePatch.channel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
-    const envelope = nativeBytesEnvelopeSchema.safeParse(value)
+    const envelope = nativeSessionOperations.queueProcessorStatePatch.request.safeParse(value)
 
     if (!supervisor || !envelope.success) return nativeSessionFailure()
 
@@ -2113,11 +1971,11 @@ const registerIpc = () => {
       return nativeSessionFailure(error)
     }
   })
-  registerNativeSessionBytes(sessionQueueVstParameterEventsChannel, (supervisor, bytes, transactionToken) => supervisor.queueVstParameterEvents(bytes, transactionToken))
-  registerNativeSessionBytes(sessionQueueInstrumentEventsChannel, (supervisor, bytes, transactionToken) => supervisor.queueInstrumentEvents(bytes, transactionToken))
-  registerNativeSessionBytes(sessionQueueScheduleWindowChannel, (supervisor, bytes, transactionToken) => supervisor.queueScheduleWindow(bytes, transactionToken))
-  registerNativeSessionBytes(sessionReenableVstScheduleAutomationChannel, (supervisor, bytes, transactionToken) => supervisor.reenableVstScheduleAutomation(bytes, transactionToken))
-  registerNativeSessionBytes(sessionQueueSourceEventsChannel, (supervisor, bytes, transactionToken) => supervisor.queueSourceEvents(bytes, transactionToken))
+  registerNativeSessionOperation(nativeSessionOperations.queueVstParameterEvents, (supervisor, bytes, token) => supervisor.queueVstParameterEvents(bytes, token))
+  registerNativeSessionOperation(nativeSessionOperations.queueInstrumentEvents, (supervisor, bytes, token) => supervisor.queueInstrumentEvents(bytes, token))
+  registerNativeSessionOperation(nativeSessionOperations.queueScheduleWindow, (supervisor, bytes, token) => supervisor.queueScheduleWindow(bytes, token))
+  registerNativeSessionOperation(nativeSessionOperations.reenableVstScheduleAutomation, (supervisor, bytes, token) => supervisor.reenableVstScheduleAutomation(bytes, token))
+  registerNativeSessionOperation(nativeSessionOperations.queueSourceEvents, (supervisor, bytes, token) => supervisor.queueSourceEvents(bytes, token))
   registerNativeSessionTransportIpc({
     ipcMain,
     allowed: audioHostAllowed,

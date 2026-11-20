@@ -1,15 +1,14 @@
 import {
   canonicalJson,
   controlApprovalRequestSchemaV1,
+  controlCliOperations,
   controlCommitRequestSchemaV1,
   controlHistoryQuerySchemaV1,
   controlPreviewRequestSchemaV1,
   controlRecoveriesQuerySchemaV1,
   controlSnapshotQuerySchemaV1,
+  type ControlCliCommand,
 } from "@daw-browser/control"
-import type {
-  desktopControlOperationDescriptorsV1,
-} from "@daw-browser/desktop-protocol"
 import { cloudCanonicalControlMethods, cloudClient } from "./cli-auth"
 import { jsonRequest, option, type CliIo } from "./input"
 import { requestHostControl, requestHostControlV2 } from "./cli-host"
@@ -23,19 +22,9 @@ import { cliDesktopControlOptions } from "./desktop-options"
 
 type ControlTarget = "cloud" | "host"
 
-export const canonicalControlOperations = {
-  capabilities: "control.capabilities",
-  "capabilities-v2": "control.capabilities",
-  snapshot: "control.snapshot",
-  "snapshot-v2": "control.snapshot",
-  preview: "control.preview",
-  approval: "control.requestApproval",
-  commit: "control.commit",
-  history: "control.history",
-  recoveries: "control.recoveries",
-} satisfies Record<string, keyof typeof desktopControlOperationDescriptorsV1>
+export const canonicalControlOperations = controlCliOperations()
 
-type CanonicalCommand = keyof typeof canonicalControlOperations
+type CanonicalCommand = ControlCliCommand
 
 export const isCanonicalCommand = (command: string): command is CanonicalCommand => Object.hasOwn(canonicalControlOperations, command)
 

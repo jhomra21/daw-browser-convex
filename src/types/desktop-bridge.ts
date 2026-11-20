@@ -36,7 +36,7 @@ import type { ExportAudioFormat } from "@daw-browser/shared"
 
 import type { NativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeRevisionSession } from "@daw-browser/desktop-protocol/native-revision"
-import type { NativeInstrumentBudgetPolicy } from "../lib/desktop/native-instrument-budget-policy"
+import type { NativeInstrumentBudgetPolicy } from "@daw-browser/desktop-protocol/native-instrument-budget-policy"
 
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
 

@@ -20,7 +20,8 @@ import {
   SampledInstrumentSyncSupersededError,
   untilNotSuperseded,
 } from '~/lib/sampled-instrument-sync-error'
-import { nativeInstrumentDeviceDecodedBytes, type NativeInstrumentPreparation } from '~/lib/desktop/native-instrument-budget-policy'
+import { nativeInstrumentDeviceDecodedBytes } from '@daw-browser/desktop-protocol/native-instrument-budget-policy'
+import type { NativeInstrumentPreparation } from '~/lib/desktop/native-instrument-budget-policy'
 
 export const DEFAULT_SAMPLED_INSTRUMENT_AGGREGATE_BYTES = 256 * 1024 * 1024
 

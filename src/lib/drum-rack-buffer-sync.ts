@@ -30,7 +30,8 @@ import {
   type SampledInstrumentRegionPin,
 } from '~/lib/sampled-instrument-region-budget'
 import { createSamplerBufferCache } from '@daw-browser/audio-engine/audio-engine'
-import { nativeInstrumentDeviceDecodedBytes, type NativeInstrumentPreparation } from '~/lib/desktop/native-instrument-budget-policy'
+import { nativeInstrumentDeviceDecodedBytes } from '@daw-browser/desktop-protocol/native-instrument-budget-policy'
+import type { NativeInstrumentPreparation } from '~/lib/desktop/native-instrument-budget-policy'
 
 type DrumRackBufferSyncOptions = SampledInstrumentRegionLoaderOptions & {
   isCurrentProject?: () => boolean

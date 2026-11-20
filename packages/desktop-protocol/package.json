@@ -13,6 +13,7 @@
     "./client": "./src/client.ts",
     "./native-audio-host": "./src/native-audio-host.ts",
     "./native-revision": "./src/native-revision.ts",
+    "./native-instrument-budget-policy": "./src/native-instrument-budget-policy.ts",
     "./recording-delivery-trace": "./src/recording-delivery-trace.ts"
   },
   "scripts": {

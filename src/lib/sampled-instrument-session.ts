@@ -9,7 +9,8 @@ import {
   type SampledInstrumentRegionBudget,
 } from '~/lib/sampled-instrument-region-budget'
 import type { SampledInstrumentRegionLoaderOptions } from '~/lib/sampled-instrument-region-loader'
-import type { NativeInstrumentBudgetPolicy, NativeInstrumentPreparation } from '~/lib/desktop/native-instrument-budget-policy'
+import type { NativeInstrumentBudgetPolicy } from '@daw-browser/desktop-protocol/native-instrument-budget-policy'
+import type { NativeInstrumentPreparation } from '~/lib/desktop/native-instrument-budget-policy'
 
 export type SampledInstrumentSession = {
   aggregateBudget: SampledInstrumentRegionBudget

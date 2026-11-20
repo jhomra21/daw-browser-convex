@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron"
-import { nativeInstrumentBudgetPolicy } from "../../src/lib/desktop/native-instrument-budget-policy"
+import { nativeInstrumentBudgetPolicy } from "@daw-browser/desktop-protocol/native-instrument-budget-policy"
 import {
   desktopCancelSchemaV1,
   desktopExportTerminalSchemaV1,

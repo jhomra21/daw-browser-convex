@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { createSampledInstrumentRegionBudget } from './sampled-instrument-region-budget'
-import { nativeInstrumentBudgetPolicy } from './desktop/native-instrument-budget-policy'
+import { nativeInstrumentBudgetPolicy } from '@daw-browser/desktop-protocol/native-instrument-budget-policy'
 
 test('native policy matches the host fraction and accounts resident, renderer, export and replacement ownership', () => {
   const policy = nativeInstrumentBudgetPolicy(18 * 1024 ** 3)

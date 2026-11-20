@@ -455,9 +455,13 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
             "minmax(76px, 1fr) minmax(96px, 1.2fr) 101px",
         }}
       >
-        {/* Like Ableton's track headers, only the name cell carries the track color; the controls stay on the neutral row. */}
+        {/* Like Ableton's track headers, only the name cell carries the track color; the controls stay on the neutral row.
+            Negative margins take the cell to the row's top and left edges and down to its divider. */}
         <div
-          class="flex min-w-0 items-start gap-1 self-stretch overflow-hidden pr-1"
+          class={cn(
+            "-ml-1 flex min-w-0 items-start gap-1 self-stretch overflow-hidden pl-1 pr-1",
+            track.collapsed ? "-mb-[3px] -mt-1 pt-1" : "-mb-[7px] -mt-2 pt-2",
+          )}
           style={{
             background: trackColor()
               ? `color-mix(in srgb, ${trackColor()} ${isSelected() ? 55 : 35}%, transparent)`

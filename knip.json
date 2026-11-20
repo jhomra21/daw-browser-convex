@@ -3,8 +3,8 @@
   "workspaces": {
     ".": {
       "entry": [
-        "src/components/timeline/ClipComponent.browser-test.ts",
-        "src/components/timeline/TimelineRuler.browser-test.ts",
+        "src/**/*.browser-test.ts",
+        "src/**/*.browser-runtime.{ts,tsx}",
         "tools/performance/30-track/generate-fixture.ts",
         "tools/performance/30-track/generator-runtime.ts",
         "tools/performance/30-track/run.ts",

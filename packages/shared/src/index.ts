@@ -6,6 +6,10 @@ export * from './automation-parameters'
 
 export * from './audio-effect-registry'
 
+export * from './audio-effect-normalization'
+
+export * from './effect-params-operation'
+
 export * from './audio-warp'
 
 export * from './audio-source-metadata'

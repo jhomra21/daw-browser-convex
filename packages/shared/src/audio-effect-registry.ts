@@ -49,6 +49,8 @@ export type ModulationGroupKind = KindsWhere<{ modulationGroup: true }>
 
 export type SidechainCapableKind = KindsWhere<{ sidechain: true }>
 
+export type ModulationOperationKind = KindsWhere<{ operation: 'modulation' }>
+
 export const isAudioEffectKind = (value: unknown): value is AudioEffectKind =>
   typeof value === 'string' && Object.hasOwn(AUDIO_EFFECTS, value)
 
@@ -65,6 +67,9 @@ export const isSidechainCapableKind = (value: unknown): value is SidechainCapabl
   isAudioEffectKind(value) && AUDIO_EFFECTS[value].sidechain
 
 type AudioEffectOperation = typeof AUDIO_EFFECTS[AudioEffectKind]['operation']
+
+export const isModulationOperationKind = (kind: AudioEffectKind): kind is ModulationOperationKind =>
+  AUDIO_EFFECTS[kind].operation === 'modulation'
 
 export const audioEffectKindsWithOperation = <Operation extends AudioEffectOperation>(
   operation: Operation,

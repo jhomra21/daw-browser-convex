@@ -62,9 +62,9 @@
    "public/audio-worklets/daw-portable-graph-envelope-v3.js": "12e03002e9d602d0da33fba4489b54cfd8cb9147616e6e3722a9ae5d43812741",
    "public/audio-worklets/daw-portable-audio-core-host-v2.js": "69cc2407f39f06d21457a3230d9890250237f30e30a816d78f92e96bb2e6faaa",
    "public/audio-worklets/daw-portable-audio-core-processor-v2.js": "d9fcd6ba60a590b54670e02d4124fc9a823759efbdbb463f2c9027ea505f6635",
-   "packages/audio-engine/src/portable-wasm-protocol.ts": "46113f63a2ebcb97bf7691695c8eef5e71393b7ad4936ee47e5037aa47ab8b63",
+   "packages/audio-engine/src/portable-wasm-protocol.ts": "2f2b08a68f34d15dadccc614c44557efa47d8a9b0d32d3c831c7b693db03b5d5",
    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.ts": "7617aeacab29ee4d8dcc5dffa38e293c8fac923ff1435271b09ff11c6df48938",
-   "packages/audio-engine/src/native-host-wire.ts": "26da7cdf259cc811d9d524b122bf82ca2f6de45eb5a59fcc4b482850ebc8f0b5",
+   "packages/audio-engine/src/native-host-wire.ts": "38d7c6f68799e5102f942702c53ee54eac51ef5971b563997939e19a0a5ad6c4",
    "packages/audio-engine/src/native-host-wire.test.ts": "9b6ce8571eb84fa04530229541ef4c74829378a64fdee8e772a484d22a0e466c",
    "packages/audio-engine/src/portable-wasm-host.test.ts": "e80d61b1e91b289547f81d16083dba98a27adfb25ce08e928f5fe1efc5cd5a14",
    "packages/audio-engine/src/portable-wasm-protocol.test.ts": "9998fa922f095ea35aefc936c2f625f8415429f56b6091a39e24dfd7cd5b6183",
@@ -133,8 +133,8 @@
    "src/lib/live-processor-control.ts": "3fdfa747f55ddd77895e6f26956d754d102507f24dad85055aaef93be4fa2c61",
    "src/components/timeline/create-processor-edit-registry.ts": "42fae08a8e2b62759fc9a9a35fa95c352ad80f744ca9bee1bb7a8452ff16df5b",
    "src/lib/live-playback-snapshot.ts": "0884622a3c6eacb11ec1ac4042042d944fb6914e794e4b26843475b3515d4e56",
-   "packages/audio-engine/src/native-host-wire.ts": "26da7cdf259cc811d9d524b122bf82ca2f6de45eb5a59fcc4b482850ebc8f0b5",
-   "apps/desktop/audio-host.ts": "f2996f85a976e653f1282762c060ba433cae66ca1403fb4b65911c571f495486",
+   "packages/audio-engine/src/native-host-wire.ts": "38d7c6f68799e5102f942702c53ee54eac51ef5971b563997939e19a0a5ad6c4",
+   "apps/desktop/audio-host.ts": "dfbb52c0d57f48ee23147308c00854d63aac27c56cecd80084c2fa3af65b0697",
    "native/audio-host-macos/src/audio-host.cpp": "99d21402d9c5d9da62b062f84559c231b2ad96c9557406b17617dc04ab586e4c",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "849ccfc235ee28b37c9cf5b4604d4910f402e6df03f4c292c27eb7ddfe776bdf",
    "tools/acceptance/ae-08-processor-state-fuzz-oracle.ts": "bee93fb827ac390ce4185a1010d3771d6b6566acf306fac8ee12c8eb10229a7b",
@@ -2820,7 +2820,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 146,
+     "pass": 145,
      "skip": 3,
      "fail": 0
     },
@@ -2957,7 +2957,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 449,
+     "pass": 448,
      "skip": 1,
      "fail": 0
     },
@@ -4168,7 +4168,7 @@
  ],
  "traces": {
   "controller": {
-   "treeSha256": "8bacb7a8acc39d72df2660528061d1b722c8f2cad6bd64b24cefe5d7e3af42bb",
+   "treeSha256": "21c7461e9bd7452cd5971189722f9904ec5f81f7d52e72c05bdb9a234897dd50",
    "files": 701,
    "a": "trace-controller-a",
    "b": "trace-controller-b"

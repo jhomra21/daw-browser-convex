@@ -1,0 +1,6 @@
+{
+ "ruling": "acceptance-reports/untangle-2/RULING-B1-TEST-REMOVAL.md",
+ "removed": [
+  { "file": "apps/desktop/audio-host.test.ts", "test": "reports an unavailable CoreAudio host without launching a device" }
+ ]
+}

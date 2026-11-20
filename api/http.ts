@@ -32,7 +32,7 @@ export const readBearerToken = (authorization: string | null | undefined) => {
   return scheme === 'Bearer' && token && !extra ? token : null
 }
 
-export type BoundedJson = { value: JsonValue } | { failure: 'too-large' | 'malformed' }
+type BoundedJson = { value: JsonValue } | { failure: 'too-large' | 'malformed' }
 
 /** Reads a request body as JSON without trusting content-length, refusing anything over the control body limit. */
 export const readBoundedJson = async (request: Request): Promise<BoundedJson> => {

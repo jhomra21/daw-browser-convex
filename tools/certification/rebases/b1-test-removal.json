@@ -1,0 +1,142 @@
+{
+ "name": "b1-test-removal",
+ "sequence": 89,
+ "createdAt": "2026-11-20T18:10:37.445Z",
+ "revert": [
+  {
+   "file": "apps/desktop/audio-host.ts",
+   "entryCopy": "/tmp/fast-cert/entry-b1/audio-host.ts",
+   "entrySha256": "f2996f85a976e653f1282762c060ba433cae66ca1403fb4b65911c571f495486",
+   "liveSha256": "dfbb52c0d57f48ee23147308c00854d63aac27c56cecd80084c2fa3af65b0697"
+  },
+  {
+   "file": "apps/desktop/audio-host.test.ts",
+   "entryCopy": "/tmp/fast-cert/entry-b1/audio-host.test.ts",
+   "entrySha256": "0b094af106da6df4ef5dfd517891aa8338ad940e61b4d1287c61307509b28e3f",
+   "liveSha256": "817f78d6ab615abb9fd234535b43e85e58583b67bc821fc2563956a7c9052436"
+  },
+  {
+   "file": "packages/audio-engine/src/native-host-wire.ts",
+   "entryCopy": "/tmp/fast-cert/entry-b1/native-host-wire.ts",
+   "entrySha256": "26da7cdf259cc811d9d524b122bf82ca2f6de45eb5a59fcc4b482850ebc8f0b5",
+   "liveSha256": "38d7c6f68799e5102f942702c53ee54eac51ef5971b563997939e19a0a5ad6c4"
+  },
+  {
+   "file": "packages/audio-engine/src/portable-wasm-protocol.ts",
+   "entryCopy": "/tmp/fast-cert/entry-b1/portable-wasm-protocol.ts",
+   "entrySha256": "46113f63a2ebcb97bf7691695c8eef5e71393b7ad4936ee47e5037aa47ab8b63",
+   "liveSha256": "2f2b08a68f34d15dadccc614c44557efa47d8a9b0d32d3c831c7b693db03b5d5"
+  }
+ ],
+ "watched": [
+  {
+   "file": "apps/desktop/audio-host.ts",
+   "from": "f2996f85a976e653f1282762c060ba433cae66ca1403fb4b65911c571f495486",
+   "to": "dfbb52c0d57f48ee23147308c00854d63aac27c56cecd80084c2fa3af65b0697"
+  },
+  {
+   "file": "packages/audio-engine/src/native-host-wire.ts",
+   "from": "26da7cdf259cc811d9d524b122bf82ca2f6de45eb5a59fcc4b482850ebc8f0b5",
+   "to": "38d7c6f68799e5102f942702c53ee54eac51ef5971b563997939e19a0a5ad6c4"
+  },
+  {
+   "file": "packages/audio-engine/src/portable-wasm-protocol.ts",
+   "from": "46113f63a2ebcb97bf7691695c8eef5e71393b7ad4936ee47e5037aa47ab8b63",
+   "to": "2f2b08a68f34d15dadccc614c44557efa47d8a9b0d32d3c831c7b693db03b5d5"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=rc1-g-panel-audiohost",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 146,
+   "new": 145
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-i6-desktop",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 449,
+   "new": 448
+  },
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "8bacb7a8acc39d72df2660528061d1b722c8f2cad6bd64b24cefe5d7e3af42bb",
+   "new": "21c7461e9bd7452cd5971189722f9904ec5f81f7d52e72c05bdb9a234897dd50"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "rebase",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": {
+   "manifest": "tools/certification/removals/b1-test-removal.json",
+   "manifestSha256": "08fdff2dc2db227f4ae3e14324621257de15af207a8c98df774400a30c2c3619",
+   "ruling": "acceptance-reports/untangle-2/RULING-B1-TEST-REMOVAL.md",
+   "rulingSha256": "35b7157c8f08927f02be0f78e6ddc3ccc4fb9caab923bb0b7358f5c095272864",
+   "tests": 1
+  },
+  "scope": "--allow-removal /tmp/fast-cert/entry-b1/removal.json --full",
+  "provenance": {
+   "scope": [
+    "--allow-removal",
+    "/tmp/fast-cert/entry-b1/removal.json",
+    "--full"
+   ],
+   "head": "d16c56360c485b5aefa7586ca7ccd5bce4f8e4cd",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "89f289feb184e6208ed8e387310ba8131a36197aacfb98e16fba89a607187aa4",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "89f289feb184e6208ed8e387310ba8131a36197aacfb98e16fba89a607187aa4",
+  "revertRun": {
+   "dir": "/tmp/fast-cert/b1-rebase/revert",
+   "resultSha256": "e006529c1b66ccfdbdc3fd9e8ca3d6167d0fc6c0cdffaef5c4fa4e776320d833",
+   "seconds": 1210.2896541250002,
+   "observationsEqualToExpectations": 3084
+  },
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b1-rebase/live",
+   "resultSha256": "7be98e4031ad8efae27cea68706f9e1d90a03ad628cbc873dd243b854735205c",
+   "seconds": 1207.7510377499998,
+   "observations": 3084
+  },
+  "unreachedByOverlay": [
+   "gate:g-typecheck",
+   "gate:g-build",
+   "gate:g-lint",
+   "gate:g-tools-typecheck",
+   "gate:rc1-i9-scoped-lint",
+   "gate:g-c0fg-oxlint",
+   "gate:x-b6f5-scoped-lint",
+   "gate:g-c0-oxlint",
+   "arm:search:124-settled-call-sites",
+   "arm:search:124-deletion-search",
+   "arm:search:258-deletion-search",
+   "arm:search:430-anchor-search-0",
+   "arm:search:258-anchor-search",
+   "arm:search:431-anchor-search-0",
+   "gate:x-validate-wasm",
+   "gate:x-test-native",
+   "gate:x-host-ctest"
+  ]
+ }
+}

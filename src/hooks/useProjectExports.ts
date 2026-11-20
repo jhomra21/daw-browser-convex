@@ -36,6 +36,8 @@ export function useProjectExports(options: UseProjectExportsArgs): UseProjectExp
   const [localLoading, setLocalLoading] = createSignal(false)
   const [localError, setLocalError] = createSignal<unknown>(null)
   const [localRetry, setLocalRetry] = createSignal(0)
+  // A local project lists its export metadata from IndexedDB; a cloud project lists them through a Convex query.
+  const isLocalProject = createMemo(() => isLocalId('project', projectId()))
 
   createEffect(() => {
     localRetry()
@@ -49,7 +51,7 @@ export function useProjectExports(options: UseProjectExportsArgs): UseProjectExp
 
     const rid = projectId()
 
-    if (!rid || !isLocalId('project', rid)) {
+    if (!rid || !isLocalProject()) {
       return
     }
 
@@ -85,7 +87,7 @@ export function useProjectExports(options: UseProjectExportsArgs): UseProjectExp
       if (enabled && !enabled()) return null
       const rid = projectId()
 
-      if (isLocalId('project', rid)) return null
+      if (isLocalProject()) return null
       const uid = userId()
 
       return rid && uid ? ({ projectId: rid }) : null
@@ -94,9 +96,7 @@ export function useProjectExports(options: UseProjectExportsArgs): UseProjectExp
   )
 
   const list = createMemo<ProjectExportItem[]>(() => {
-    const rid = projectId()
-
-    if (isLocalId('project', rid)) return localExports()
+    if (isLocalProject()) return localExports()
 
     return Array.isArray(raw.data) ? raw.data : []
   })
@@ -104,16 +104,16 @@ export function useProjectExports(options: UseProjectExportsArgs): UseProjectExp
   const cloudQueryEnabled = () => Boolean(
     (!enabled || enabled())
     && projectId()
-    && !isLocalId('project', projectId())
+    && !isLocalProject()
     && userId(),
   )
 
   return {
     exports: list,
-    loading: () => isLocalId('project', projectId()) ? localLoading() : cloudQueryEnabled() && raw.isLoading,
-    error: () => isLocalId('project', projectId()) ? localError() : cloudQueryEnabled() ? raw.error : null,
+    loading: () => isLocalProject() ? localLoading() : cloudQueryEnabled() && raw.isLoading,
+    error: () => isLocalProject() ? localError() : cloudQueryEnabled() ? raw.error : null,
     retry: () => {
-      if (isLocalId('project', projectId())) setLocalRetry((version) => version + 1)
+      if (isLocalProject()) setLocalRetry((version) => version + 1)
       else void raw.refetch()
     },
   }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { automationTargetKey, createDefaultDelayParams, createDefaultDrumRackParams, createDefaultSaturatorParams, type AutomationEnvelope } from '@daw-browser/shared'
+import { automationTargetKey, createDefaultDelayParams, createDefaultDrumRackParams, createDefaultLoFiParams, createDefaultSaturatorParams, createDefaultSpectralParams, type AutomationEnvelope } from '@daw-browser/shared'
 import { createPortableOutputBuffer, createSourceAutomationScope, createStemRenderPlan, downmixStereoBufferToMono, encodeAudioBuffer, getAudioBufferPeak, isAutomationEnvelopeInSourceScope, normalizeAudioBufferInPlace, readPortableDescriptorPage, renderMixdown, resolveExportMixerGraph, type ExportFx } from './export-mixdown'
 import type { ResolvedMixerChannel, ResolvedMixerGraph } from './mixer/types'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
@@ -191,6 +191,24 @@ describe('explicit stem render plans', () => {
     })
 
     expect(plan.metadata.recombinesToMaster).toBe(false)
+  })
+
+  test('treats lofi and spectral master processing as nonlinear', () => {
+    const instances: AudioEffectRuntimeInstance[] = [
+      { id: 'master-lofi', kind: 'lofi', params: { version: 1, state: { ...createDefaultLoFiParams(), enabled: true } } },
+      { id: 'master-spectral', kind: 'spectral', params: { version: 1, state: { ...createDefaultSpectralParams(), enabled: true } } },
+    ]
+
+    for (const instance of instances) {
+      const plan = createStemRenderPlan({ ...graph, master: { ...master, instances: [instance] } }, {
+        id: 'source',
+        name: 'Source',
+        mode: 'full-master-contribution',
+        targetTrackId: 'source',
+      })
+
+      expect(plan.metadata.recombinesToMaster).toBe(false)
+    }
   })
 })
 

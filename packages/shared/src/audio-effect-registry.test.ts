@@ -7,6 +7,7 @@ import {
   isDspAudioEffectKind,
   isGainReductionMeterKind,
   isModulationGroupKind,
+  isNonlinearKind,
   isSidechainCapableKind,
   isStereoWideningKind,
 } from './audio-effect-registry'
@@ -23,6 +24,7 @@ test('traits reproduce the kind lists that used to be written out by hand', () =
   expect(AUDIO_EFFECT_KINDS.filter(isSidechainCapableKind)).toEqual(['gate', 'compressor', 'spectral'])
   expect(AUDIO_EFFECT_KINDS.filter(isStereoWideningKind)).toEqual(['chorus', 'flanger', 'phaser', 'autopan', 'ensemble'])
   expect(AUDIO_EFFECT_KINDS.filter(isGainReductionMeterKind)).toEqual(['gate', 'limiter'])
+  expect(AUDIO_EFFECT_KINDS.filter(isNonlinearKind)).toEqual(['gate', 'compressor', 'saturator', 'limiter', 'lofi', 'spectral'])
   expect(OWNED_PROCESSOR_KINDS).toEqual([
     'utility', 'autofilter', 'gate', 'limiter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'spectral',
   ])

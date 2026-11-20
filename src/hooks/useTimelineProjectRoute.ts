@@ -1,6 +1,6 @@
 import { batch, createSignal, onCleanup, onMount } from 'solid-js'
 import { isLocalId } from '@daw-browser/shared'
-import { readLocationSearchParam } from '~/lib/location-search-param'
+import { readLocationSearchParam, subscribeLocationSearch, writeRoomLocation } from '~/lib/location-search-param'
 
 type UseTimelineProjectRouteOptions = {
   onLocalProjectOpened: (projectId: string) => void
@@ -55,28 +55,6 @@ export const createProjectFromDashboard = async <Outcome extends { status: 'succ
   return outcome
 }
 
-const updateRoomUrl = (projectId: string, mode: 'push' | 'replace') => {
-  try {
-    const url = new URL(window.location.href)
-    url.searchParams.set('projectId', projectId)
-    url.searchParams.delete('roomId')
-
-    if (mode === 'replace') {
-      history.replaceState(null, '', url.toString())
-    } else {
-      history.pushState(null, '', url.toString())
-    }
-  } catch {}
-}
-
-export const clearShareTokenFromUrl = () => {
-  try {
-    const url = new URL(window.location.href)
-    url.searchParams.delete('shareToken')
-    history.replaceState(null, '', url.toString())
-  } catch {}
-}
-
 export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions) => {
   const [projectId, setProjectIdState] = createSignal<string>('')
   const [mountedProjectGeneration, setMountedProjectGeneration] = createSignal(0)
@@ -99,7 +77,7 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
     },
   ) => {
     if (routeOptions?.history) {
-      updateRoomUrl(nextProjectId, routeOptions.history)
+      writeRoomLocation(nextProjectId, routeOptions.history)
     }
 
     batch(() => {
@@ -144,7 +122,7 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
           nextProjectId,
           settle: settleBeforeRoomChange,
           resolve: () => { resolved = true },
-          restore: () => updateRoomUrl(projectId(), 'replace'),
+          restore: () => writeRoomLocation(projectId(), 'replace'),
         })
 
         if (!resolved || transition !== historyTransition) return
@@ -172,10 +150,7 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
     void syncLocationState()
     const syncRoomFromHistory = () => { void syncLocationState(true) }
 
-    window.addEventListener('popstate', syncRoomFromHistory)
-    onCleanup(() => {
-      window.removeEventListener('popstate', syncRoomFromHistory)
-    })
+    onCleanup(subscribeLocationSearch(syncRoomFromHistory))
   })
 
   return {

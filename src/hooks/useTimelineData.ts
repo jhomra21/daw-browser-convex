@@ -22,7 +22,8 @@ import {
 import { subscribeToLocalProjectChanges } from '~/lib/local-project-changes'
 import { useSessionQuery } from '~/lib/session'
 import { cacheRemoteTimelineSnapshot } from '~/lib/remote-timeline-cache'
-import { clearShareTokenFromUrl, useTimelineProjectRoute } from './useTimelineProjectRoute'
+import { useTimelineProjectRoute } from './useTimelineProjectRoute'
+import { clearShareTokenFromLocation } from '~/lib/location-search-param'
 
 export type TimelineProject = {
   projectId: string
@@ -264,13 +265,13 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
       })
       .then((result) => {
         setAcceptingShareToken(null)
-        clearShareTokenFromUrl()
+        clearShareTokenFromLocation()
 
         if (result?.projectId) void replaceRoom(result.projectId)
       })
       .catch(() => {
         setAcceptingShareToken(null)
-        clearShareTokenFromUrl()
+        clearShareTokenFromLocation()
         input.notify('Share link failed', 'This share link could not be accepted.')
       })
   })

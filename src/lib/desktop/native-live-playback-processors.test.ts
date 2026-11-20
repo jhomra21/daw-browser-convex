@@ -48,12 +48,14 @@ const processor = (instanceId: string): ExternalProcessor => externalProcessorSc
 
 test("keeps the insertion seed when the committed row read briefly lags", async () => {
   const inserted = processor("11111111-1111-4111-8111-111111111111")
+
   const result = await resolveNativeLivePlaybackProcessors({
     projectId: "project",
     persisted: [],
     seed: { projectId: "project", processor: inserted },
     readPersisted: async () => undefined,
   })
+
   expect(result).toEqual([inserted])
 })
 
@@ -75,6 +77,7 @@ test("uses persisted state when visible and excludes rolled-back seeds", async (
 
 test("compiles the bound processor beside a long metadata-backed clip", async () => {
   const inserted = processor("44444444-4444-4444-8444-444444444444")
+
   const playback = compileLivePlaybackSnapshot({
     revision: 1,
     bpm: 120,
@@ -99,20 +102,26 @@ test("compiles the bound processor beside a long metadata-backed clip", async ()
     renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
     sidechainRoutes: [],
   })
+
   expect(playback.supported).toBeTrue()
+
   if (!playback.supported) return
+
   const processors = await resolveNativeLivePlaybackProcessors({
     projectId: "project",
     persisted: [],
     seed: { projectId: "project", processor: inserted },
     readPersisted: async () => undefined,
   })
+
   const plan = compileNativeExternalAttachmentPlan({
     target: "native",
     graph: playback.snapshot.mixer.graph,
     processors,
     workerTransport: { slotCount: 2, maximumFrames: 8_192, maximumEventsPerBlock: 128 },
   })
+
   expect(plan.supported).toBeTrue()
+
   if (plan.supported) expect(plan.plan.attachments[0]?.instanceId).toBe(inserted.instanceId)
 })

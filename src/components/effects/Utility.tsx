@@ -21,6 +21,7 @@ export default function Utility(props: UtilityProps) {
     props.onManualAutomationOverride?.(id)
     props.onChange(updates)
   }
+
   return (
     <EffectShell title="Utility" typeLabel="Audio" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="w-[360px] min-w-[360px]">
       <div class="grid min-h-0 flex-1 grid-rows-[1fr_auto] gap-3 px-3 py-3">

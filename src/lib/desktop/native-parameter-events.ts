@@ -29,6 +29,7 @@ type NativeParameterEventsHost = {
 
 export const createNativeParameterEvents = (host: NativeParameterEventsHost) => {
   const { processorState } = host
+
   return async (request: {
     instanceId: string
     values: readonly { parameterId: string; value: number }[]
@@ -40,41 +41,57 @@ export const createNativeParameterEvents = (host: NativeParameterEventsHost) => 
     execution?: DispatchExecution
   }): Promise<ParameterReply> => {
     const bridge = host.bridge
+
     if (!bridge) return { ok: false, kind: "not-sent", reason: "unavailable" }
     const { prepared, graph, snapshot, transportEpoch } = host.state()
+
     if (!prepared || !graph) return { ok: false, kind: "not-sent", reason: "unavailable" }
+
     const instrumentEntry = Object.entries(snapshot?.mixer.fx.trackFx ?? {})
       .find(([, fx]) => fx.instrument?.instanceId === request.instanceId)
+
     if (instrumentEntry) {
       const node = graph.nodes.find((entry) => entry.id === instrumentEntry[0])
+
       if (node?.instrument?.kind !== "synth") return { ok: false, kind: "not-sent", reason: "unsupported" }
       const targets = new Map(node.instrument.parameterTargets.map((entry) => [entry.id, entry.target]))
       const parameters: { target: number; value: number }[] = []
+
       for (const value of request.values) {
         const target = targets.get(value.parameterId)
+
         if (target === undefined || !Number.isFinite(value.value)) return { ok: false, kind: "not-sent", reason: "unsupported" }
         parameters.push({ target, value: value.value })
       }
+
       try {
         if (parameters.length === 0) return { ok: true }
+
         const events: NativeInstrumentEvent[] = parameters.map(({ target, value }) => ({
           nodeId: node.id, type: "parameter", noteId: 1, sequence: host.nextEventSequence(), frameOffset: 0, channel: 0, note: target, value,
         }))
+
         if (request.execution && !processorState.send(request.execution, request.execution.sequence, host.lastEventSequence()))
           return { ok: false, kind: "not-sent", reason: "stale" }
+
         return await host.observeControl(bridge.session.queueInstrumentEvents(serializeNativeInstrumentEvents(transportEpoch, events)))
       } catch (error) {
         return { ok: false, kind: "unconfirmed", error: String(error) }
       }
     }
+
     const processor = resolveGraphProcessor(graph, request.instanceId)
+
     if (!processor) return { ok: false, kind: "not-sent", reason: "unsupported" }
     const events = []
+
     for (const value of request.values) {
       const parameterTarget = processor.parameterTargets.get(value.parameterId)
+
       if (parameterTarget === undefined || !Number.isFinite(value.value)) {
         return { ok: false, kind: "not-sent", reason: "unsupported" }
       }
+
       events.push({
         processorInstanceId: processor.processor.instanceId,
         parameterTarget,
@@ -82,10 +99,14 @@ export const createNativeParameterEvents = (host: NativeParameterEventsHost) => 
         value: value.value,
       })
     }
+
     if (events.length === 0) return { ok: true }
+
     try {
       const { sequence } = request
+
       if (request.execution && sequence !== undefined && !processorState.send(request.execution, sequence)) return { ok: false, kind: "not-sent", reason: "stale" }
+
       const batch = request.revision === undefined || request.epoch === undefined || sequence === undefined
         ? undefined
         : {
@@ -93,10 +114,12 @@ export const createNativeParameterEvents = (host: NativeParameterEventsHost) => 
             epoch: request.epoch,
             sequence,
           }
+
       if (request.execution && batch) {
         const { key, editId, attempt } = request.execution
         host.observer?.processorDispatch?.({ key, editId, attempt, sequence: BigInt(batch.sequence) })
       }
+
       return await host.observeControl(bridge.session.queueParameterEvents(serializeNativeProcessorEvents(events, batch)))
     } catch (error) {
       // A thrown or lost reply says nothing about whether native took the batch.

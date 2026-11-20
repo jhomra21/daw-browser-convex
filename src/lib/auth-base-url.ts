@@ -5,5 +5,6 @@ export const resolveAuthBaseUrl = (
   runtime: RendererApiRuntime,
 ): string | undefined => {
   const origin = resolveApiBaseOrigin(configuredBaseUrl, runtime)
+
   return origin === '' ? runtime.browserOrigin : origin ?? undefined
 }

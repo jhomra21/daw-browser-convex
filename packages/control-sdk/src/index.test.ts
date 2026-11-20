@@ -65,26 +65,32 @@ const request: ControlPreviewRequestV1 = {
 const createOperationHandlers = (calls: string[]) => ({
   "project.list": () => {
     calls.push("project.list")
+
     return { projects: [{ projectId: "project-1", name: "Project" }] }
   },
   "project.current": () => {
     calls.push("project.current")
+
     return { status: "present", project: { projectId: "project-1", name: "Project" } }
   },
   "control.capabilities": () => {
     calls.push("control.capabilities")
+
     return canonicalControlCapabilities
   },
   "control.snapshot": () => {
     calls.push("control.snapshot")
+
     return { ...snapshot, version: "v2" }
   },
   "control.preview": () => {
     calls.push("control.preview")
+
     return preview
   },
   "control.requestApproval": () => {
     calls.push("control.requestApproval")
+
     return {
       version: "v1",
       approvalToken: "a".repeat(32),
@@ -96,6 +102,7 @@ const createOperationHandlers = (calls: string[]) => ({
   },
   "control.commit": () => {
     calls.push("control.commit")
+
     return {
       ...preview,
       idempotencyReplay: false,
@@ -105,10 +112,12 @@ const createOperationHandlers = (calls: string[]) => ({
   },
   "control.history": () => {
     calls.push("control.history")
+
     return { entries: [], continueCursor: "next", isDone: true }
   },
   "control.recoveries": () => {
     calls.push("control.recoveries")
+
     return { entries: [], continueCursor: "next", isDone: true }
   },
 } satisfies ControlOperationHandlers<"desktop">)
@@ -119,6 +128,7 @@ describe("control SDK", () => {
       ...Object.values(canonicalControlClientOperationMap.projects),
       ...Object.values(canonicalControlClientOperationMap.control),
     ]
+
     expect(operationIds).toHaveLength(Object.keys(controlOperationCatalog).length)
     expect(new Set(operationIds).size).toBe(operationIds.length)
     expect(operationIds.every((operationId) => Object.hasOwn(controlOperationCatalog, operationId))).toBeTrue()
@@ -126,10 +136,12 @@ describe("control SDK", () => {
 
   test("invokes each canonical client method once and preserves target boundaries", async () => {
     const calls: string[] = []
+
     const invoker = createDirectControlInvoker({
       handlers: createOperationHandlers(calls),
       context: { target: "desktop" },
     })
+
     const client = createCanonicalControlClient(invoker)
 
     await client.projects.list({})
@@ -150,19 +162,23 @@ describe("control SDK", () => {
 
   test("propagates synchronous throws and asynchronous rejections unchanged", async () => {
     const syncError = new Error("sync")
+
     const syncClient = createCanonicalControlClient({
       target: "desktop",
       invoke: () => {
         throw syncError
       },
     })
+
     expect(() => syncClient.projects.list({})).toThrow(syncError)
 
     const asyncError = new Error("async")
+
     const asyncClient = createCanonicalControlClient({
       target: "desktop",
       invoke: () => Promise.reject(asyncError),
     })
+
     await expect(asyncClient.projects.list({})).rejects.toBe(asyncError)
   })
 
@@ -189,10 +205,12 @@ describe("control SDK", () => {
       "control.history": () => ({ entries: [], continueCursor: "next", isDone: true }),
       "control.recoveries": () => ({ entries: [], continueCursor: "next", isDone: true }),
     } satisfies ControlOperationHandlers<"cloud">
+
     const client = createCanonicalControlClient(createDirectControlInvoker({
       handlers,
       context: { target: "cloud" },
     }))
+
     expect(Object.hasOwn(client.projects, "current")).toBeFalse()
   })
 
@@ -201,22 +219,29 @@ describe("control SDK", () => {
     const authorizations: string[] = []
     const bodies: string[] = []
     let calls = 0
+
     const client = createControlClient({
       baseUrl: "https://control.example",
       accessToken: () => `access-${++calls}`,
       fetch: async (input, init) => {
         urls.push(String(input))
         authorizations.push(new Headers(init?.headers).get("authorization") ?? "")
+
         if (init?.body !== undefined) bodies.push(String(init.body))
+
         if (urls.at(-1)?.endsWith("/capabilities")) return Response.json(controlCapabilitiesV1)
+
         if (urls.at(-1)?.endsWith("/snapshot")) return Response.json(snapshot)
+
         if (urls.at(-1)?.endsWith("/preview")) return Response.json(preview)
+
         if (urls.at(-1)?.endsWith("/commit")) return Response.json({
           ...preview,
           idempotencyReplay: false,
           recoveries: [],
           restored: [],
         })
+
         return Response.json({ entries: [], continueCursor: "next", isDone: true })
       },
     })
@@ -250,19 +275,25 @@ describe("control SDK", () => {
   test("exports consumer types and normalizes each valid base origin once", async () => {
     const resolver: ControlAccessTokenResolver = () => "fixture-access"
     const accessToken: ControlAccessToken = resolver
+
     const fetchTransport: ControlFetch = async (input) => {
       expect(String(input)).toBe("https://control.example/api/control/v1/capabilities")
+
       return Response.json(controlCapabilitiesV1)
     }
+
     let baseUrlReads = 0
+
     const options: ControlClientOptions = {
       get baseUrl() {
         baseUrlReads += 1
+
         return "https://control.example/"
       },
       accessToken,
       fetch: fetchTransport,
     }
+
     const client: ControlClient = createControlClient(options)
 
     await client.capabilities()
@@ -277,6 +308,7 @@ describe("control SDK", () => {
 
   test("rejects hostile base origins before requests can expose a bearer", () => {
     let fetches = 0
+
     for (const baseUrl of [
       "http://control.example",
       "http://[::2]",
@@ -291,25 +323,30 @@ describe("control SDK", () => {
         accessToken: "fixture-access",
         fetch: async () => {
           fetches += 1
+
           return Response.json(controlCapabilitiesV1)
         },
       })).toThrow("Control base URL")
     }
+
     expect(fetches).toBe(0)
   })
 
   test("uses a fixed project path and does not retry failures", async () => {
     let calls = 0
     let url = ""
+
     const client = createControlClient({
       baseUrl: "https://control.example",
       accessToken: "fixture-access",
       fetch: async (input) => {
         calls += 1
         url = String(input)
+
         return Response.json({ version: "v1", code: "revision-conflict", message: "Retry manually." }, { status: 409 })
       },
     })
+
     await expect(client.commit({ ...request, idempotencyKey: "request-1" })).rejects.toMatchObject({
       name: "ControlApiError",
       status: 409,
@@ -325,28 +362,34 @@ describe("control SDK", () => {
   test("double-encodes accepted opaque project IDs without normalizing their routes", async () => {
     let requestedProjectId = ""
     const urls: URL[] = []
+
     const client = createControlClient({
       baseUrl: "https://control.example",
       accessToken: "fixture-access",
       fetch: async (input) => {
         urls.push(new URL(String(input)))
+
         return Response.json({
           ...snapshot,
           project: { ...snapshot.project, id: requestedProjectId },
         })
       },
     })
+
     const projectIds = ["project-1", "project%20name", "project%2Esegment", "project:opaque_~id"]
+
     for (const projectId of projectIds) {
       requestedProjectId = projectId
       await expect(client.snapshot(projectId)).resolves.toMatchObject({
         project: { id: projectId },
       })
       const url = urls.at(-1)
+
       if (url === undefined) throw new Error("Expected a captured request URL.")
       expect(url.pathname).toBe(`/api/control/v1/projects/${encodeURIComponent(projectId)}/snapshot`)
       expect(decodeURIComponent(url.pathname)).toBe(`/api/control/v1/projects/${projectId}/snapshot`)
     }
+
     expect(urls).toHaveLength(projectIds.length)
   })
 
@@ -356,6 +399,7 @@ describe("control SDK", () => {
       accessToken: "fixture-access",
       fetch: async () => new Response("{", { headers: { "Content-Type": "application/json" } }),
     })
+
     await expect(client.capabilities()).rejects.toBeInstanceOf(ControlTransportError)
 
     const apiError = new ControlApiError(400, {
@@ -363,19 +407,23 @@ describe("control SDK", () => {
       code: "invalid-request",
       message: "Invalid request.",
     })
+
     expect(apiError.message).not.toContain("fixture-access")
   })
 
   test("rejects invalid outgoing requests before fetching", async () => {
     let calls = 0
+
     const client = createControlClient({
       baseUrl: "https://control.example",
       accessToken: "fixture-access",
       fetch: async () => {
         calls += 1
+
         return Response.json(controlCapabilitiesV1)
       },
     })
+
     for (const projectId of [
       "", ".", "..", "project/id", "project\\id", "project%2fid", "project%5Cid",
       "project?id", "project#id", "project%3fid", "project%23id", "project%00id",
@@ -386,6 +434,7 @@ describe("control SDK", () => {
       expect(() => client.commit({ ...request, projectId, idempotencyKey: "request-1" })).toThrow()
       expect(() => client.history({ projectId, limit: 1 })).toThrow()
     }
+
     expect(calls).toBe(0)
   })
 
@@ -401,11 +450,13 @@ describe("control SDK", () => {
         actionIndex: 2,
       }, { status: 422 }),
     })
+
     try {
       await client.preview(request)
       throw new Error("Expected the client to reject.")
     } catch (error) {
       expect(error).toBeInstanceOf(ControlApiError)
+
       if (!(error instanceof ControlApiError)) throw error
       expect(error.status).toBe(422)
       expect(error.data).toEqual({

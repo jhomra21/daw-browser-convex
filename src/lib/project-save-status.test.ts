@@ -8,6 +8,7 @@ describe("project save status", () => {
       userId: "user",
       sharedOutboxStatus: null,
     });
+
     expect(status.label).toContain("unknown");
     expect(status.shortLabel).not.toBe("Cloud saved");
   });

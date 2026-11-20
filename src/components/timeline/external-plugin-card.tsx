@@ -35,17 +35,22 @@ type ExternalPluginParametersProps = {
 const ExternalPluginParameters: Component<ExternalPluginParametersProps> = (props) => {
   const visibleParameters = () => props.processor.manifest.parameters.filter((parameter) => !parameter.hidden);
   const [expanded, setExpanded] = createSignal(visibleParameters().length <= 8);
+
   const normalizedValue = (parameter: PluginParameterDescriptor) => {
     const value = props.processor.parameterOverrides[String(parameter.id)];
+
     return value !== undefined && Number.isFinite(value)
       ? Math.min(1, Math.max(0, value))
       : Math.min(1, Math.max(0, parameter.defaultValue));
   };
+
   const displayValue = (parameter: PluginParameterDescriptor, normalized: number) => {
     const value = parameter.minimum + normalized * (parameter.maximum - parameter.minimum);
     const formatted = Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+
     return parameter.unit ? `${formatted} ${parameter.unit}` : formatted;
   };
+
   const updateParameter = (parameter: PluginParameterDescriptor, value: number) => {
     if (!props.canWrite || parameter.readOnly) return;
     const parameterId = externalAutomationParameterId(props.processor.instanceId, parameter.id);
@@ -58,6 +63,7 @@ const ExternalPluginParameters: Component<ExternalPluginParametersProps> = (prop
     });
     props.onParameterChange(parameter.id, normalized);
   };
+
   return (
     <Show when={visibleParameters().length > 0}>
       <div class="border-t border-border pt-2">
@@ -73,14 +79,17 @@ const ExternalPluginParameters: Component<ExternalPluginParametersProps> = (prop
             <For each={visibleParameters()}>
               {(parameter) => {
                 const parameterId = externalAutomationParameterId(props.processor.instanceId, parameter.id);
+
                 const targetKey = automationTargetKey(
                   props.targetId === "master"
                     ? { kind: "master", effectInstanceId: props.processor.instanceId }
                     : { kind: "track", trackId: props.targetId, effectInstanceId: props.processor.instanceId },
                   parameterId,
                 );
+
                 const evaluated = () => props.evaluatedValuesByTargetKey?.get(targetKey);
                 const value = () => evaluated() ?? normalizedValue(parameter);
+
                 return (
                   <div class="grid grid-cols-[minmax(8rem,1fr)_minmax(7rem,1fr)_auto] items-center gap-2">
                     <div class="min-w-0">
@@ -148,8 +157,10 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
     const message = cause instanceof Error
       ? cause.message
       : "The native VST3 editor session could not be started.";
+
     return message.replace(/(?:[A-Za-z]:[\\/]|\/)[^\s]*/g, "<path>").slice(0, 256);
   };
+
   const [editorOpen, setEditorOpen] = createSignal(false);
   const [editorMessage, setEditorMessage] = createSignal<string>();
   const [liveEditorSupported, setLiveEditorSupported] = createSignal<boolean>();
@@ -158,13 +169,16 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
   let editorInstanceId: string | undefined;
   const failed = () => vstInstanceFailed(props.processor.instanceId);
   const editorBridgeAvailable = () => Boolean(window.dawDesktop?.audioHost?.session.editor);
+
   const editorAvailable = () => nativeEditorCommandAvailable(
     editorBridgeAvailable(),
     props.processor.manifest.supportsEditor,
     liveEditorSupported(),
   );
+
   createEffect(() => {
     const instanceId = props.processor.instanceId;
+
     if (!instanceId || instanceId === editorInstanceId) return;
     editorInstanceId = instanceId;
     setAutoOpenStarted(false);
@@ -177,38 +191,51 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
     const instanceId = props.processor.instanceId;
     const projectId = props.projectId;
     const subscribe = window.dawDesktop?.audioHost?.onVstEditorState;
+
     if (!subscribe || !projectId) return;
+
     const unsubscribe = subscribe((state) => {
       if (state.projectId === projectId && state.instanceId === instanceId) setEditorOpen(state.open);
     });
+
     onCleanup(unsubscribe);
   });
+
   const updateBypass = (bypassed: boolean) => {
     if (!props.canWrite) return;
     props.onBypassChange(bypassed);
   };
+
   const editor = async (command: "open" | "close" | "focus"): Promise<boolean> => {
     const bridge = window.dawDesktop?.audioHost;
+
     if (!bridge || !editorAvailable() || !props.projectId) return false;
+
     try {
       let serializedPlan: string | undefined;
+
       const initialState = command === "open" || command === "focus"
         ? await readLocalExternalProcessorState(
           props.projectId,
           props.processor,
         )
         : undefined;
+
       if (command !== "close") {
         const compilation = compileNativeExternalEditorPlan({
           processor: props.processor,
           targetId: props.targetId,
         });
+
         if (!compilation.supported) {
           setEditorMessage(compilation.reasons.join(" "));
+
           return false;
         }
+
         serializedPlan = encodeNativeExternalAttachmentPlan(compilation.plan);
       }
+
       const result = await bridge.session.editor(nativeEditorCommand({
         projectId: props.projectId,
         instanceId: props.processor.instanceId,
@@ -221,14 +248,18 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
         captureState: props.processor.manifest.supportsState,
         anchor: command === "open" || command === "focus" ? props.editorAnchor?.() : undefined,
       }));
+
       if (!result.ok) {
         setEditorMessage(result.error);
+
         return false;
       }
+
       // A close response intentionally reports a closed, unsupported status;
       // it is not a capability probe and must not hide Open UI.
       if (command !== "close") setLiveEditorSupported(result.status.supported);
       setEditorOpen(result.status.open);
+
       if (command === "close" && result.status.capturedState) {
         await persistLocalExternalProcessorState(
           props.projectId,
@@ -236,15 +267,21 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
           result.status.capturedState,
         )
       }
+
       if (!result.status.success) {
         if (result.status.supported) setEditorMessage("The native editor command was rejected.");
+
         return false;
       }
+
       if (command === "close" && result.status.closeError) {
         setEditorMessage(`The native VST editor closed with an error: ${result.status.closeError}`);
+
         return false;
       }
+
       setEditorMessage();
+
       return true;
     } catch (error) {
       if (command === "open" && props.autoOpen) {
@@ -252,20 +289,26 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
           error: sanitizeNativeVst3DiagnosticError(error),
         });
       }
+
       setEditorMessage("The native VST editor session could not be started.");
+
       return false;
     }
   };
+
   createEffect(() => {
     if (!props.autoOpen) {
       autoOpenFailed = false;
+
       return;
     }
+
     const available = nativeEditorCommandAvailable(
       editorBridgeAvailable(),
       props.processor.manifest.supportsEditor,
       liveEditorSupported(),
     );
+
     if (autoOpenStarted() || autoOpenFailed || !available) return;
     setAutoOpenStarted(true);
     void editor("open").then((opened) => {
@@ -273,13 +316,16 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
         // The insertion request is consumed only after the native session
         // confirms that the editor is open.
         untrack(() => props.onAutoOpenHandled?.(props.processor.instanceId));
+
         return;
       }
+
       autoOpenFailed = true;
       setAutoOpenStarted(false);
       console.error("[native-vst3] editor auto-open result failure", { opened });
     });
   });
+
   return (
     <EffectShell
       class={failed() ? "opacity-60" : undefined}

@@ -4,9 +4,11 @@ type DesktopAudioHostBridge = Pick<
   NonNullable<DesktopBridge["audioHost"]>,
   "getLifecycle" | "onLifecycle"
 >
+
 export type { DesktopAudioLifecycle }
 
 export type DesktopAudioRecoveryResult = "ready" | "failed"
+
 type DesktopAudioRecoveryCompletion = {
   accepted: boolean
   lifecycle: DesktopAudioLifecycle
@@ -30,6 +32,7 @@ export const completeDesktopAudioRecovery = (
   if (lifecycle.state !== "recovering" || lifecycle.powerGeneration !== generation) {
     return { accepted: false, lifecycle }
   }
+
   return {
     accepted: true,
     lifecycle: {
@@ -45,9 +48,11 @@ export const createDesktopAudioLifecycleReconciler = (
 ) => {
   let latestGeneration = -1
   let latestState: DesktopAudioLifecycle["state"] | undefined
+
   const stateRank = (state: DesktopAudioLifecycle["state"]) => (
     state === "suspended" ? 0 : state === "recovering" ? 1 : 2
   )
+
   const apply = (next: DesktopAudioLifecycle) => {
     if (
       next.powerGeneration < latestGeneration
@@ -61,7 +66,9 @@ export const createDesktopAudioLifecycleReconciler = (
     latestState = next.state
     onLifecycle(next)
   }
+
   const remove = bridge.onLifecycle(apply)
   void bridge.getLifecycle().then(apply).catch(() => undefined)
+
   return remove
 }

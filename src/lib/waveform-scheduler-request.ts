@@ -23,6 +23,7 @@ export const requestWaveformData = (input: {
   },
   source: async (signal) => {
     signal.throwIfAborted()
+
     return input.source
   },
   sourceStartFrame: input.sourceStartFrame,

@@ -7,25 +7,33 @@ import { z } from 'zod'
 test('dense-track resize keeps its bounds and does not rescan clips per move', async () => {
   const directory = `/tmp/daw-clip-resize-${crypto.randomUUID()}`
   const session = `daw-clip-resize-${crypto.randomUUID()}`
+
   const browser = async (...args: string[]) => {
     const env = { ...process.env }
     delete env.AGENT_BROWSER_CDP
     delete env.AGENT_BROWSER_SESSION
+
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], {
       env,
       stdout: 'pipe',
       stderr: 'pipe',
     })
+
     const [stdout, stderr] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
     ])
+
     if (await child.exited !== 0) throw new Error(stderr || stdout)
+
     return stdout.trim()
   }
+
   await mkdir(directory, { recursive: true })
+
   try {
     const repositoryRoot = new URL('../../', import.meta.url).pathname
+
     const result = await build({
       root: repositoryRoot,
       configFile: false,
@@ -42,7 +50,9 @@ test('dense-track resize keeps its bounds and does not rescan clips per move', a
         },
       },
     })
+
     const output = Array.isArray(result) ? result[0] : result
+
     if (!output || !('output' in output)) throw new Error('Expected a single clip resize fixture bundle.')
     const bundle = output.output.find((chunk) => chunk.type === 'chunk')?.code
     expect(bundle).toBeDefined()
@@ -50,6 +60,7 @@ test('dense-track resize keeps its bounds and does not rescan clips per move', a
     await browser('open', `file://${directory}/index.html`)
     await browser('wait', '--fn', '!!window.__clipResizeDenseResult')
     const resultOutput = await browser('eval', 'JSON.stringify(window.__clipResizeDenseResult)')
+
     const actual = z.object({
       constraintComputations: z.number(),
       noDraftConstraintComputations: z.number(),
@@ -72,6 +83,7 @@ test('dense-track resize keeps its bounds and does not rescan clips per move', a
       removedTrackEndsResize: z.boolean(),
       leftResizeWithRemoteNeighborStartSec: z.number(),
     }).parse(JSON.parse(JSON.parse(resultOutput)))
+
     expect(actual.constraintComputations).toBe(4)
     expect(actual.noDraftConstraintComputations).toBe(0)
     expect(actual.projectionUpdates).toBeGreaterThan(1)

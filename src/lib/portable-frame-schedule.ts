@@ -71,10 +71,12 @@ type PendingEvent = {
 
 const stableNoteId = (trackId: string, clipId: string, identity: string) => {
   let hash = 0x811c9dc5
+
   for (const character of `${trackId}:${clipId}:${identity}`) {
     hash ^= character.charCodeAt(0)
     hash = Math.imul(hash, 0x01000193)
   }
+
   return (hash >>> 0) || 1
 }
 
@@ -117,8 +119,10 @@ const eventWithFrame = (
   identity: Pick<PortableFrameSchedule, 'sampleRateHz' | 'timeOrigin'>,
 ): PortableFrameScheduleEvent => {
   const frame = portableFrameAtTimelineTime(identity, timelineSec)
+
   if (event.type === 'parameter-ramp') {
     const startFrame = frame
+
     return {
       endFrame: portableFrameAtTimelineTime(identity, event.endTimelineSec),
       endValue: event.endValue,
@@ -131,6 +135,7 @@ const eventWithFrame = (
       type: event.type,
     }
   }
+
   return { ...event, frame, sequence: 0 }
 }
 
@@ -141,7 +146,9 @@ const eventPriorityAtFrame = (event: PortableFrameScheduleEvent) => (
 type PreparedMidiClip = {
   notes: Array<ReturnType<typeof getScheduledMidiEvents>[number] & { noteId: number }>
 }
+
 type ScheduledMidiNote = ReturnType<typeof getScheduledMidiEvents>[number] & { noteId?: number }
+
 type PreparedMidiSchedule = {
   clips: ReadonlyMap<RuntimeTrack['clips'][number], PreparedMidiClip>
   expressionTracks: ReadonlySet<RuntimeTrack>
@@ -159,10 +166,12 @@ const compileSinglePortableFrameSchedule = (
   const pending: PendingEvent[] = []
   let ordinal = 0
   let nextNoteId = 1
+
   const append = (timelineSec: number, event: PendingEvent['event']) => {
     pending.push({ timelineSec, ordinal, event })
     ordinal += 1
   }
+
   const window = {
     playheadSec: input.timeOrigin.timelineSec,
     startLimitSec: input.eventRangeStartSec ?? input.timeOrigin.timelineSec,
@@ -173,9 +182,11 @@ const compileSinglePortableFrameSchedule = (
     if (!envelope.enabled) continue
     const fallback = getAutomationParameterDescriptor(envelope.parameterId)?.defaultValue ?? 0
     const plan = getAutomationEnvelopeSchedulePlan(envelope, window, fallback)
+
     for (let index = 0; index < plan.length; index += 1) {
       const point = plan[index]
       const previous = plan[index - 1]
+
       if (point.kind === 'ramp' && previous) {
         append(previous.timeSec, {
           type: 'parameter-ramp',
@@ -186,6 +197,7 @@ const compileSinglePortableFrameSchedule = (
         })
         continue
       }
+
       append(point.timeSec, {
         type: 'parameter-set',
         target: parameterTarget(envelope),
@@ -204,6 +216,7 @@ const compileSinglePortableFrameSchedule = (
       rangeStartSec: input.eventRangeStartSec ?? input.timeOrigin.timelineSec,
       rangeEndSec: input.rangeEndSec,
     })
+
     for (const expression of expressions) {
       append(expression.timeSec, {
         type: expression.phase === 'restore' ? 'parameter-restore' : 'parameter-set',
@@ -211,9 +224,11 @@ const compileSinglePortableFrameSchedule = (
         value: expression.value,
       })
     }
+
     for (const clip of track.clips) {
       if (!clip.midi) continue
       const preparedClip = prepared?.clips.get(clip)
+
       const notes: ScheduledMidiNote[] = preparedClip
         ? preparedClip.notes
           .filter((note) => note.startSec < input.rangeEndSec
@@ -227,10 +242,12 @@ const compileSinglePortableFrameSchedule = (
           rangeEndSec: input.rangeEndSec,
           arp: input.arpeggiators.get(track.id),
         })
+
       for (const note of notes) {
         const noteId = input.stableNoteIds
           ? note.noteId ?? stableNoteId(track.id, clip.id, noteIdentity(input, note.identity))
           : nextNoteId
+
         if (
           input.clipSpanningNoteOn === true
           && note.startSec < input.timeOrigin.timelineSec
@@ -244,6 +261,7 @@ const compileSinglePortableFrameSchedule = (
             velocity: note.velocity ?? 1,
           })
         }
+
         nextNoteId += 1
         append(note.startSec, {
           type: 'note-on',
@@ -269,9 +287,11 @@ const compileSinglePortableFrameSchedule = (
     bpm: input.bpm,
     timeOrigin: input.timeOrigin,
   }
+
   const events = pending
     .flatMap((pendingEvent) => {
       const event = eventWithFrame(pendingEvent.event, pendingEvent.timelineSec, identity)
+
       return input.eventRangeStartSec === undefined
         || event.frame >= input.timeOrigin.frame
         && event.frame < portableFrameAtTimelineTime(identity, input.rangeEndSec)
@@ -279,6 +299,7 @@ const compileSinglePortableFrameSchedule = (
     })
     .sort((left, right) => left.event.frame - right.event.frame || left.ordinal - right.ordinal)
     .map(({ event }, index) => ({ ...event, sequence: index + 1 }))
+
   return assertPortableFrameSchedule({ ...identity, events })
 }
 
@@ -290,13 +311,17 @@ export const compilePortableFrameSchedule = (
     loopStartSec: 0,
     loopEndSec: 0,
   }, input.sampleRateHz)
+
   if (!loop) return compileSinglePortableFrameSchedule(input)
   const startFrame = input.timeOrigin.frame
+
   const endFrame = portableFrameAtTimelineTime(
     { sampleRateHz: input.sampleRateHz, timeOrigin: input.timeOrigin },
     input.rangeEndSec,
   )
+
   const slices = splitLoopScheduleRange(startFrame, endFrame, loop)
+
   const schedules = slices.map((slice) => {
     const schedule = compileSinglePortableFrameSchedule({
     ...input,
@@ -313,12 +338,17 @@ export const compilePortableFrameSchedule = (
       + (slice.arrangementStartFrame - startFrame) / input.sampleRateHz,
     stableNoteIds: true,
     })
+
     const activeNotes = new Map<number, Extract<PortableFrameScheduleEvent, { type: 'note-on' }>>()
+
     for (const event of schedule.events) {
       if (event.type === 'note-on') activeNotes.set(event.noteId, event)
+
       if (event.type === 'note-off') activeNotes.delete(event.noteId)
     }
+
     if (activeNotes.size === 0) return schedule
+
     const boundaryEvents: PortableFrameScheduleEvent[] = [...activeNotes.values()].map((event, index) => ({
       type: 'note-off',
       target: event.target,
@@ -327,17 +357,21 @@ export const compilePortableFrameSchedule = (
       frame: slice.nativeEndFrame,
       sequence: schedule.events.length + index + 1,
     }))
+
     return assertPortableFrameSchedule({
       ...schedule,
       events: [...schedule.events, ...boundaryEvents],
     })
   })
+
   const events = schedules.flatMap((schedule) => schedule.events)
     .sort((left, right) => left.frame - right.frame
       || eventPriorityAtFrame(left) - eventPriorityAtFrame(right)
       || left.sequence - right.sequence)
     .map((event, index) => ({ ...event, sequence: index + 1 }))
+
   const base = schedules[0] ?? compileSinglePortableFrameSchedule(input)
+
   return assertPortableFrameSchedule({
     ...base,
     events,
@@ -354,9 +388,12 @@ export const compilePortableFrameScheduleWindow = (
     || !Number.isSafeInteger(input.rangeEndFrame) || input.rangeEndFrame <= input.rangeStartFrame) {
     throw new Error('Portable frame schedule window bounds are invalid.')
   }
+
   const startSec = input.timeOrigin.timelineSec
     + (input.rangeStartFrame - input.timeOrigin.frame) / input.sampleRateHz
+
   const endSec = startSec + (input.rangeEndFrame - input.rangeStartFrame) / input.sampleRateHz
+
   return compilePortableFrameSchedule({
     ...input,
     timeOrigin: {
@@ -380,9 +417,11 @@ export const createPortableFrameScheduleWindowCompiler = (
 ) => {
   const clips = new Map<RuntimeTrack['clips'][number], PreparedMidiClip>()
   const expressionTracks = new Set<RuntimeTrack>()
+
   for (const track of input.tracks) {
     for (const clip of track.clips) {
       if (!clip.midi) continue
+
       // Preserve MIDI schema validation even on tracks without mappings.
       if (normalizeLegacyMidiClip(clip.midi).mappings.length > 0) expressionTracks.add(track)
       clips.set(clip, {
@@ -393,6 +432,7 @@ export const createPortableFrameScheduleWindowCompiler = (
       })
     }
   }
+
   return (window: {
     timeOrigin: PortableFrameScheduleAdapterInput['timeOrigin']
     rangeStartFrame: number
@@ -402,9 +442,12 @@ export const createPortableFrameScheduleWindowCompiler = (
       || !Number.isSafeInteger(window.rangeEndFrame) || window.rangeEndFrame <= window.rangeStartFrame) {
       throw new Error('Portable frame schedule window bounds are invalid.')
     }
+
     const startSec = window.timeOrigin.timelineSec
       + (window.rangeStartFrame - window.timeOrigin.frame) / input.sampleRateHz
+
     const endSec = startSec + (window.rangeEndFrame - window.rangeStartFrame) / input.sampleRateHz
+
     return compileSinglePortableFrameSchedule({
       ...input, timeOrigin: { timelineSec: startSec, frame: window.rangeStartFrame },
       rangeEndSec: endSec, eventRangeStartSec: startSec, noteScheduleStartSec: 0,

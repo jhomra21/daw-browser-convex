@@ -27,6 +27,7 @@ describe('runtime channel layouts', () => {
       channels: [channel('mono'), channel('mixed')],
       sourceChannelCounts: { mono: [1, 1], mixed: [1, 2] },
     })
+
     expect(graph.channels[0]?.sourceLayout).toBe('mono')
     expect(graph.channels[0]?.inputLayout).toBe('stereo')
     expect(graph.channels[0]?.outputLayout).toBe('stereo')
@@ -42,11 +43,13 @@ describe('runtime channel layouts', () => {
         { id: 'saturator', kind: 'saturator', params: createDefaultSaturatorParams() },
       ],
     }
+
     const mono = resolveMixerGraph({
       channels: [channel('mono')],
       sourceChannelCounts: { mono: [1] },
       trackFx: { mono: baseFx },
     })
+
     expect(mono.channels[0]?.inputLayout).toBe('stereo')
     expect(mono.channels[0]?.outputLayout).toBe('stereo')
 
@@ -61,6 +64,7 @@ describe('runtime channel layouts', () => {
         },
       },
     })
+
     expect(monoEq.channels[0]?.inputLayout).toBe('stereo')
     expect(monoEq.channels[0]?.outputLayout).toBe('mono')
 
@@ -76,6 +80,7 @@ describe('runtime channel layouts', () => {
         },
       },
     })
+
     expect(delay.channels[0]?.inputLayout).toBe('stereo')
     expect(delay.channels[0]?.outputLayout).toBe('stereo')
 
@@ -90,6 +95,7 @@ describe('runtime channel layouts', () => {
         },
       },
     })
+
     expect(reverb.channels[0]?.outputLayout).toBe('stereo')
   })
 
@@ -97,6 +103,7 @@ describe('runtime channel layouts', () => {
     const source = channel('source')
     source.outputTargetId = 'group'
     source.sends = [{ targetId: 'return', amount: 1 }]
+
     const graph = resolveMixerGraph({
       channels: [source, channel('group', 'group'), channel('return', 'return')],
       sourceChannelCounts: { source: [1] },
@@ -104,6 +111,7 @@ describe('runtime channel layouts', () => {
         source: { instances: [{ id: 'delay', kind: 'delay', params: { ...createDefaultDelayParams(), enabled: true, pingPong: true } }] },
       },
     })
+
     expect(graph.channels.map((entry) => entry.outputLayout)).toEqual(['stereo', 'stereo', 'stereo'])
     expect(graph.master.inputLayout).toBe('stereo')
     expect(graph.master.outputLayout).toBe('stereo')
@@ -117,6 +125,7 @@ describe('runtime channel layouts', () => {
     stereo.outputTargetId = 'inner'
     const inner = channel('inner', 'group')
     inner.outputTargetId = 'outer'
+
     const graph = resolveMixerGraph({
       channels: [mono, stereo, inner, channel('outer', 'group'), channel('return', 'return')],
       sourceChannelCounts: { mono: [1], stereo: [2] },

@@ -47,9 +47,11 @@ const createBuffer = (channels: number, frames: number, sampleRate: number): Aud
 
 const createSourceBuffer = (frames: number, sampleRate: number) => {
   const channel = createFloat32Array(frames)
+
   for (let index = 0; index < frames; index++) {
     channel[index] = Math.sin((2 * Math.PI * index) / 128) * 0.5
   }
+
   return new TestAudioBuffer([channel], sampleRate)
 }
 
@@ -57,6 +59,7 @@ describe('renderStretchedAudio marker warp rendering', () => {
   test('uses canonical marker-warp timeline segments for rendered duration', async () => {
     const sampleRate = 1_000
     const sourceBuffer = createSourceBuffer(sampleRate * 4, sampleRate)
+
     const clip: Clip<AudioBuffer> = {
       id: 'clip-marker-warp',
       name: 'Marker warp',
@@ -78,7 +81,9 @@ describe('renderStretchedAudio marker warp rendering', () => {
       },
       buffer: sourceBuffer,
     }
+
     const projectBpm = 120
+
     const map = getAudioClipTimeMap({
       clip,
       bufferDurationSec: sourceBuffer.duration,
@@ -88,6 +93,7 @@ describe('renderStretchedAudio marker warp rendering', () => {
     })
 
     expect(map?.mode).toBe('stretch')
+
     if (!map) throw new Error('Expected marker warp map')
 
     const expectedFrameCount = getMarkerWarpTimelineSegments({
@@ -99,6 +105,7 @@ describe('renderStretchedAudio marker warp rendering', () => {
       (total, segment) => total + Math.max(1, Math.round((segment.timelineEndSec - segment.timelineStartSec) * sampleRate)),
       0,
     )
+
     const source = createAudioPcmSourceDescriptor({
       identity: 'marker-source',
       durationSec: sourceBuffer.duration,
@@ -107,6 +114,7 @@ describe('renderStretchedAudio marker warp rendering', () => {
       channelCount: sourceBuffer.numberOfChannels,
       source: sourceBuffer,
     })
+
     const rendered = await renderStretchedAudioFromSource({
       clip,
       source,
@@ -122,6 +130,7 @@ describe('renderStretchedAudio marker warp rendering', () => {
   test('renders directly into a committed prepared artifact without an AudioBuffer', async () => {
     const sampleRate = 100
     const sourceBuffer = createSourceBuffer(sampleRate, sampleRate)
+
     const clip: Clip<AudioBuffer> = {
       id: 'clip-artifact',
       name: 'Artifact',
@@ -131,6 +140,7 @@ describe('renderStretchedAudio marker warp rendering', () => {
       audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
       buffer: sourceBuffer,
     }
+
     const source = createAudioPcmSourceDescriptor({
       identity: 'artifact-source',
       contentHash: 'b'.repeat(64),
@@ -141,12 +151,14 @@ describe('renderStretchedAudio marker warp rendering', () => {
       channelCount: 1,
       source: sourceBuffer,
     })
+
     const result = await renderStretchedAudioToArtifact({
       clip,
       source,
       projectBpm: 120,
       repository: createPreparedStretchArtifactRepository({ lockManager: preparedStretchTestLockManager }),
     })
+
     expect(result.binding.artifactId).toMatch(/^stretch:v1:[0-9a-f]{64}$/)
     expect(result.manifest.frameCount).toBeGreaterThan(0)
   })
@@ -154,6 +166,7 @@ describe('renderStretchedAudio marker warp rendering', () => {
   test('keeps session-only artifact output readable through the supplied repository', async () => {
     const sampleRate = 100
     const sourceBuffer = createSourceBuffer(sampleRate, sampleRate)
+
     const clip: Clip<AudioBuffer> = {
       id: 'clip-session-artifact',
       name: 'Session artifact',
@@ -163,6 +176,7 @@ describe('renderStretchedAudio marker warp rendering', () => {
       audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
       buffer: sourceBuffer,
     }
+
     const source = createAudioPcmSourceDescriptor({
       identity: 'unverified-session-source',
       persistable: false,
@@ -172,14 +186,18 @@ describe('renderStretchedAudio marker warp rendering', () => {
       channelCount: 1,
       source: sourceBuffer,
     })
+
     const repository = createPreparedStretchArtifactRepository({ sessionId: 'session-artifact-test', lockManager: preparedStretchTestLockManager })
+
     const result = await renderStretchedAudioToArtifact({
       clip,
       source,
       projectBpm: 120,
       repository,
     })
+
     const pages = []
+
     for await (const page of repository.read(result.binding.artifactId)) pages.push(page)
     expect(pages.reduce((total, page) => total + page.frameCount, 0)).toBe(result.manifest.frameCount)
     await repository.dispose?.()

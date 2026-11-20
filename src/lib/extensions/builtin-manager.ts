@@ -37,7 +37,9 @@ export const createBuiltinExtensionManager = (
 
   const definitionFor = (extensionId: string) => {
     const definition = byId.get(extensionId);
+
     if (!definition) throw new Error(`Unknown built-in extension ${extensionId}.`);
+
     return definition;
   };
 
@@ -56,8 +58,10 @@ export const createBuiltinExtensionManager = (
   const reload = async (extensionId: string) => {
     if (!enabled.has(extensionId)) {
       await enable(extensionId);
+
       return;
     }
+
     await kernel.reload(definitionFor(extensionId));
   };
 

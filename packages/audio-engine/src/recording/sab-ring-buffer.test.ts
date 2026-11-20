@@ -11,6 +11,7 @@ describe('recorder SAB ring buffer', () => {
     const buffers = createRecorderSabRingBuffers()
     const producer = createRecorderSabRingProducer(buffers)
     const consumer = createRecorderSabRingConsumer(buffers, 1)
+
     for (let sequence = 0; sequence < RECORDER_POOL_BLOCKS * 3; sequence += 1) {
       expect(producer.push([Float32Array.of(sequence)], 1)).toBe(true)
       expect(consumer.pop()).toMatchObject({
@@ -19,6 +20,7 @@ describe('recorder SAB ring buffer', () => {
         channels: [Float32Array.of(sequence)],
       })
     }
+
     expect(consumer.pop()).toBeNull()
   })
 
@@ -26,9 +28,11 @@ describe('recorder SAB ring buffer', () => {
     const buffers = createRecorderSabRingBuffers()
     const producer = createRecorderSabRingProducer(buffers)
     const consumer = createRecorderSabRingConsumer(buffers, 1)
+
     for (let sequence = 0; sequence < RECORDER_POOL_BLOCKS; sequence += 1) {
       expect(producer.push([Float32Array.of(sequence)], 1)).toBe(true)
     }
+
     expect(producer.push([Float32Array.of(999)], 1)).toBe(false)
     expect(producer.stats()).toMatchObject({ droppedFrames: 1, droppedBlocks: 1 })
     expect(Array.from({ length: RECORDER_POOL_BLOCKS }, () => consumer.pop()?.channels[0]?.[0]))
@@ -39,9 +43,11 @@ describe('recorder SAB ring buffer', () => {
     const buffers = createRecorderSabRingBuffers()
     const producer = createRecorderSabRingProducer(buffers, 8)
     const consumer = createRecorderSabRingConsumer(buffers, 1)
+
     for (let index = 0; index < 8; index += 1) {
       expect(producer.push([Float32Array.of(index)], 1)).toBe(true)
     }
+
     expect(producer.stats().peakOccupancy).toBe(8)
     expect(producer.push([Float32Array.of(8)], 1)).toBe(false)
     expect(producer.stats()).toMatchObject({ droppedBlocks: 1, peakOccupancy: 8 })

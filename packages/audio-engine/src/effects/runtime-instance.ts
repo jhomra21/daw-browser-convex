@@ -107,8 +107,10 @@ export function normalizeAudioEffectRuntimeInstances(
   const regular = instances.filter((instance): instance is Exclude<AudioEffectRuntimeInstance, SpectralAudioEffectRuntimeInstance> => instance.kind !== 'spectral')
   const normalizedRegular = normalizeAudioEffectInstanceOrder(regular, regular)
   const ordered = [...normalizedRegular, ...instances.filter((instance) => instance.kind === 'spectral')]
+
   return ordered.flatMap((entry) => {
     const instance = byKey.get(runtimeInstanceKey(entry))
+
     return instance ? [instance] : []
   })
 }

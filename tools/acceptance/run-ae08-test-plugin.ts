@@ -14,6 +14,7 @@ const hostTest = path.join(buildDirectory, "audio-host-macos/daw-audio-host-maco
 const run = async (argv: string[], env: Record<string, string> = {}) => {
   const child = Bun.spawn(argv, { env: { ...process.env, ...env }, stdout: "inherit", stderr: "inherit" })
   const exit = await child.exited
+
   if (exit !== 0) throw new Error(`${argv.join(" ")} exited ${exit}`)
 }
 
@@ -21,14 +22,19 @@ const run = async (argv: string[], env: Record<string, string> = {}) => {
 await run(["cmake", "-S", path.join(root, "native"), "-B", buildDirectory, "-DCMAKE_BUILD_TYPE=Release",
   "-DCMAKE_CXX_FLAGS_RELEASE=-O2", `-DVST3_SDK_PATH=${sdk}`, "-DBUILD_TESTING=ON", "-DDAW_AUDIO_CORE_BUILD_WASM=OFF",
   "-DDAW_BUILD_AUDIO_HOST_MACOS=ON", "-DDAW_BUILD_PLUGIN_HOST=ON", "-DDAW_BUILD_AE08_TEST_PLUGIN=ON"])
+
 await run(["cmake", "--build", buildDirectory, "--target", "ae08-test-effect", "daw-vst3-worker", "daw-audio-host-macos-test", "-j", "4"])
+
 await run(["codesign", "--force", "--sign", "-", bundle])
+
 await run(["codesign", "--verify", "--strict", bundle])
 
 const binary = new Bun.CryptoHasher("sha256").update(await Bun.file(path.join(bundle, "Contents/MacOS/ae08-test-effect")).bytes()).digest("hex")
+
 await run([hostTest, "--real-plugin"], {
   DAW_AE08_TEST_PLUGIN_BUNDLE: bundle,
   DAW_AE08_TEST_PLUGIN_BUNDLE_FINGERPRINT: await fingerprintVst3Bundle(bundle),
   DAW_AE08_TEST_PLUGIN_BINARY_FINGERPRINT: binary,
 })
+
 console.log("ae08 test plug-in host tests passed")

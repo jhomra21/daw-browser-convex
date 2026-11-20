@@ -21,6 +21,7 @@ const LOCAL_AUTH_ORIGINS = new Set([
   'http://localhost:5173',
   'http://localhost:8787',
 ])
+
 const DEFAULT_LOCAL_AUTH_ORIGIN = 'http://localhost:5173'
 
 type ConfiguredAuthOrigins = {
@@ -50,6 +51,7 @@ const getConfiguredAuthOrigins = (raw: string | undefined) => {
     origins: new Set(origins),
     firstOrigin: origins[0],
   }
+
   return configuredAuthOriginsCache
 }
 
@@ -57,7 +59,9 @@ const getAllowedRequestAuthOrigin = (origin: string, env: ApiBindings['Bindings'
   if (LOCAL_AUTH_ORIGINS.has(origin)) return origin
 
   const configuredOrigins = getConfiguredAuthOrigins(env.AUTH_CORS_ORIGINS)
+
   if (configuredOrigins.origins.has(origin)) return origin
+
   if (env.BETTER_AUTH_URL === origin) return origin
 
   return undefined
@@ -65,11 +69,13 @@ const getAllowedRequestAuthOrigin = (origin: string, env: ApiBindings['Bindings'
 
 const getDefaultAuthOrigin = (env: ApiBindings['Bindings']) => {
   const configuredOrigins = getConfiguredAuthOrigins(env.AUTH_CORS_ORIGINS)
+
   return env.BETTER_AUTH_URL || configuredOrigins.firstOrigin || DEFAULT_LOCAL_AUTH_ORIGIN
 }
 
 const getAuthCorsOrigin = (origin: string | undefined, env: ApiBindings['Bindings']) => {
   if (!origin) return getDefaultAuthOrigin(env)
+
   return getAllowedRequestAuthOrigin(origin, env) || getDefaultAuthOrigin(env)
 }
 
@@ -84,8 +90,11 @@ app.use('/api/auth/*', cors({
 }));
 
 registerPublicSampleRoutes(app)
+
 registerControlOAuthRoutes(app, createAuth)
+
 registerControlRoutes(app)
+
 registerControlMcpRoutes(app)
 
 // Session middleware - adds user and session to context
@@ -118,6 +127,7 @@ app.use('*', async (c, next) => {
 // Better Auth routes - use on() method as recommended
 app.on(['POST', 'GET'], '/api/auth/*', async (c) => {
   const auth = createAuth(c.env);
+
   return auth.handler(c.req.raw);
 });
 
@@ -135,7 +145,9 @@ app.get('/api/session', (c) => {
 
 
 registerShareInviteRoutes(app)
+
 registerConvexAuthRoutes(app)
+
 // Protected route example
 app.get('/api/protected', (c) => {
   const user = c.get('user');
@@ -149,10 +161,15 @@ app.get('/api/protected', (c) => {
 
 
 registerSampleRoutes(app)
+
 registerCloudBackupRoutes(app)
+
 registerExportRoutes(app)
+
 registerMaintenanceRoutes(app)
+
 registerTimelineOperationRoutes(app)
+
 registerResumableUploadRoutes(app)
 
 export default app

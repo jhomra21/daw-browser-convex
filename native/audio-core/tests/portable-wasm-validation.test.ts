@@ -15,6 +15,7 @@ const runValidator = (artifactPath: string, manifestPath: string) => {
     stdout: 'pipe',
     stderr: 'pipe',
   })
+
   return {
     exitCode: result.exitCode,
     stderr: new TextDecoder().decode(result.stderr),
@@ -27,6 +28,7 @@ const createFixture = async () => {
   const manifestPath = path.join(directory, 'daw-audio-core.manifest.json')
   await copyFile(publicArtifactPath, artifactPath)
   await copyFile(publicManifestPath, manifestPath)
+
   return { directory, artifactPath, manifestPath }
 }
 
@@ -39,6 +41,7 @@ test('validates the tracked production Wasm assets', () => {
 
 test('rejects a missing production Wasm manifest', async () => {
   const fixture = await createFixture()
+
   try {
     await rm(fixture.manifestPath)
     const result = runValidator(fixture.artifactPath, fixture.manifestPath)
@@ -52,6 +55,7 @@ test('rejects a missing production Wasm manifest', async () => {
 
 test('rejects a missing production Wasm artifact', async () => {
   const fixture = await createFixture()
+
   try {
     await rm(fixture.artifactPath)
     const result = runValidator(fixture.artifactPath, fixture.manifestPath)
@@ -65,6 +69,7 @@ test('rejects a missing production Wasm artifact', async () => {
 
 test('rejects a stale production Wasm source hash', async () => {
   const fixture = await createFixture()
+
   try {
     const manifest = await readFile(fixture.manifestPath, 'utf8')
     await writeFile(
@@ -82,6 +87,7 @@ test('rejects a stale production Wasm source hash', async () => {
 
 test('rejects a production Wasm hash mismatch', async () => {
   const fixture = await createFixture()
+
   try {
     const bytes = await readFile(fixture.artifactPath)
     bytes[0] = bytes[0] ^ 1
@@ -97,6 +103,7 @@ test('rejects a production Wasm hash mismatch', async () => {
 
 test('rejects a production Wasm artifact with the wrong ABI version', async () => {
   const fixture = await createFixture()
+
   try {
     const manifest = await readFile(fixture.manifestPath, 'utf8')
     await writeFile(fixture.manifestPath, manifest.replace('"abiVersion":4', '"abiVersion":3'))
@@ -111,6 +118,7 @@ test('rejects a production Wasm artifact with the wrong ABI version', async () =
 
 test('rejects a production Wasm manifest with the wrong release version', async () => {
   const fixture = await createFixture()
+
   try {
     const manifest = await readFile(fixture.manifestPath, 'utf8')
     await writeFile(fixture.manifestPath, manifest.replace('"version":4', '"version":3'))

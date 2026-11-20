@@ -52,9 +52,11 @@ type AudioBufferSessionIdentityOwner = {
 
 export const getAudioBufferSessionIdentity = (buffer: AudioBufferSessionIdentityOwner) => {
   const existing = audioBufferSessionIds.get(buffer)
+
   if (existing) return existing
   const identity = `buffer-session:${crypto.randomUUID()}`
   audioBufferSessionIds.set(buffer, identity)
+
   return identity
 }
 
@@ -63,10 +65,14 @@ export const validateAudioPcmSourceMetadata = (metadata: Pick<
   'durationSec' | 'frameCount' | 'sampleRate' | 'channelCount'
 >) => {
   if (!Number.isFinite(metadata.durationSec) || metadata.durationSec < 0) throw new Error('Audio source duration is invalid.')
+
   if (!Number.isSafeInteger(metadata.frameCount) || metadata.frameCount < 0) throw new Error('Audio source frame count is invalid.')
+
   if (!Number.isFinite(metadata.sampleRate) || metadata.sampleRate <= 0) throw new Error('Audio source sample rate is invalid.')
+
   if (!Number.isSafeInteger(metadata.channelCount) || metadata.channelCount <= 0) throw new Error('Audio source channel count is invalid.')
   const expectedDuration = metadata.frameCount / metadata.sampleRate
+
   if (Math.abs(metadata.durationSec - expectedDuration) > 0.5 / metadata.sampleRate) {
     throw new Error('Audio source duration does not match its frame metadata.')
   }
@@ -75,9 +81,11 @@ export const validateAudioPcmSourceMetadata = (metadata: Pick<
 export const clampPcmRange = (startFrame: number, endFrame: number, frameCount: number) => {
   const start = Math.max(0, startFrame)
   const end = Math.min(frameCount, endFrame)
+
   if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end < start) {
     throw new Error('Audio source frame range is invalid.')
   }
+
   return { startFrame: start, endFrame: end }
 }
 
@@ -89,6 +97,7 @@ export const requirePcmRange = (startFrame: number, endFrame: number, frameCount
     || endFrame < startFrame
     || endFrame > frameCount
   ) throw new Error('Audio source frame range is invalid.')
+
   return { startFrame, endFrame }
 }
 
@@ -109,11 +118,14 @@ export const createAudioBufferPcmSourceDescriptor = (input: {
     sampleRate: input.sampleRate,
     channelCount: input.numberOfChannels,
   }
+
   validateAudioPcmSourceMetadata(metadata)
   const pageFrames = input.pageFrames ?? defaultDecodedAudioPageFrames
+
   if (!Number.isSafeInteger(pageFrames) || pageFrames <= 0 || pageFrames > defaultDecodedAudioPageFrames) {
     throw new Error(`Audio source page size must be at most ${defaultDecodedAudioPageFrames} frames.`)
   }
+
   return {
     identity: input.identity,
     contentHash: input.contentHash,
@@ -126,15 +138,20 @@ export const createAudioBufferPcmSourceDescriptor = (input: {
         options.endFrame ?? Math.ceil((options.endSec ?? metadata.durationSec) * metadata.sampleRate),
         metadata.frameCount,
       )
+
       options.signal?.throwIfAborted()
+
       for (let frame = range.startFrame; frame < range.endFrame; frame += pageFrames) {
         options.signal?.throwIfAborted()
         const frameCount = Math.min(pageFrames, range.endFrame - frame)
+
         const planes = Array.from({ length: metadata.channelCount }, (_, channelIndex) => {
           const plane = new Float32Array(frameCount)
           input.copyFromChannel(plane, channelIndex, frame)
+
           return plane
         })
+
         yield { startFrame: frame, frameCount, sampleRate: metadata.sampleRate, channelCount: metadata.channelCount, planes }
       }
     },

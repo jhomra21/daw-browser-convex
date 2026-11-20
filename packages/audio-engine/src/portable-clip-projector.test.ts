@@ -106,6 +106,7 @@ test('projects curved fades with canonical fields and preserves full anchors whe
       fadeOutCurvePosition: 0.8,
     },
   })
+
   expect(project([curved])).toMatchObject({
     supported: true,
     events: [{
@@ -147,6 +148,7 @@ test('projects curved fades with canonical fields and preserves full anchors whe
 
 test('keeps source events invariant under mixer and routing changes', () => {
   const baseline = project([clip()])
+
   const mixed = project([clip()], {
     volume: 0.5,
     muted: true,
@@ -255,6 +257,7 @@ test('assigns unique monotonic sequences across loop slices', () => {
   })
 
   expect(result.supported).toBe(true)
+
   if (!result.supported) throw new Error('Expected loop projection to be supported.')
   expect(result.events.map((event) => event.sequence)).toEqual([20, 21, 22])
   expect(result.events.map((event) => event.startFrame)).toEqual([0, 48_000, 96_000])
@@ -320,6 +323,7 @@ test('projects only exact pre-rendered Stretch metadata through the existing tim
 
 test('rejects pre-rendered Stretch PCM that would require portable resampling', () => {
   const plane = new Float32Array(176_400)
+
   const mismatched: PortablePreparedStretchAsset = {
     ...preparedStretch,
     asset: {
@@ -330,6 +334,7 @@ test('rejects pre-rendered Stretch PCM that would require portable resampling', 
     pcm: { frameCount: plane.length, planes: [plane] },
     transferables: [plane.buffer],
   }
+
   expect(projectPortableClipEvents({
     tracks: [{
       id: 'track-1',

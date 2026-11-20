@@ -22,19 +22,24 @@ const BLOCK = 512
 const LEAD_MIN_BLOCKS = 2
 const LEAD_MAX_BLOCKS = 3
 const PLAIN_LIMITS_MS = { p99: 60, max: 70 }
+
 // Preparation time: from prepare to the armed Publish, the last publish request before the publication (PARENT-RULING-LAT1-PREP-OVERHEAD.md, Correction).
 const PREP_P50_MS = 8
 const ASSET_LIMIT_MS = 100
 const COMPLETE_BASE_FRAMES = 2048
 
 type HostEvent = z.infer<typeof hostEventSchema>
+
 type Edit = z.infer<typeof editsSchema>["edits"][number]
+
 type Publication = {
   row: string; revision: number; publicationFrame: number; asset: boolean
   leadBlocks: number; prepareToPublishMs: number; prepMs: number; blockPhaseMs: number; rebaseRequests: number; resentRequests: number
   blocksBeforeBind: number; raise: boolean; completeFrames: number | undefined; allowedCompleteFrames: number
 }
+
 type Verdict = { target: string; status: "PASS" | "FAIL" | "SKIP" | "INFO"; detail: string }
+
 type Analysis = { publications: Publication[]; errors: string[]; verdicts: Verdict[] }
 
 const hostEventSchema = z.object({
@@ -43,6 +48,7 @@ const hostEventSchema = z.object({
   publicationFrame: z.number().default(0), transportEpoch: z.number().default(0), sampleRate: z.number().default(0),
   blockSize: z.number().default(0),
 })
+
 const editsSchema = z.object({ edits: z.array(z.object({
   wallMs: z.number(), fromLatencyFrames: z.number(), toLatencyFrames: z.number() })).default([]) })
 
@@ -50,9 +56,11 @@ const continuitySchema = z.object({ assetPublicationFrame: z.number().optional()
 
 const readHost = async (file: string): Promise<HostEvent[]> => (await readFile(file, "utf8")).split("\n")
   .filter((line) => line.trim()).map((line) => hostEventSchema.parse(JSON.parse(line)))
+
 // Rows without an edits file (phase 5) have no latency edits.
 const readEdits = async (file: string): Promise<Edit[]> => {
   const text = await readFile(file, "utf8").catch(() => undefined)
+
   return text === undefined ? [] : editsSchema.parse(JSON.parse(text)).edits
 }
 
@@ -60,15 +68,19 @@ const percentile = (values: readonly number[], fraction: number) => {
   const sorted = [...values].sort((a, b) => a - b)
   const position = (sorted.length - 1) * fraction
   const low = Math.floor(position), high = Math.ceil(position)
+
   return (sorted[low] ?? 0) + ((sorted[high] ?? 0) - (sorted[low] ?? 0)) * (position - low)
 }
+
 const statsOf = (values: readonly number[]) => ({ p50: percentile(values, 0.5), p99: percentile(values, 0.99), max: Math.max(...values) })
 
 const findLast = (events: readonly HostEvent[], before: number, match: (event: HostEvent) => boolean) => {
   for (let index = before - 1; index >= 0; index--) {
     const event = events[index]
+
     if (event && match(event)) return { event, index }
   }
+
   return undefined
 }
 
@@ -79,19 +91,26 @@ const analyzeRow = (row: string, events: readonly HostEvent[], edits: readonly E
   events.forEach((publish, index) => {
     if (publish.event !== "graph-publish" || publish.cause !== "block-boundary" || publish.publicationFrame === 0) return
     const revision = publish.revision
+
     const prepare = findLast(events, index, (event) => event.event === "graph-prepare" && event.pid === publish.pid
       && event.requestedRevision === revision)
+
     const requests = prepare ? events.slice(prepare.index + 1, index).filter((event) =>
       event.event === "graph-publish-request" && event.pid === publish.pid && event.requestedRevision === revision) : []
+
     const bind = requests[0]
+
     if (!prepare || !bind) return void errors.push(`${row}: revision ${revision} has no prepare or publish request before its publication`)
     const session = findLast(events, index, (event) => event.event === "device-session")?.event
+
     if (session?.sampleRate !== SAMPLE_RATE || session.blockSize !== BLOCK)
       return void errors.push(`${row}: revision ${revision} runs at ${session?.sampleRate}/${session?.blockSize}, not ${SAMPLE_RATE}/${BLOCK}`)
     const rebased = requests.slice(1).filter((request) => publish.publicationFrame - request.frame > LEAD_MAX_BLOCKS * BLOCK)
     const blocksBeforeBind = Math.max(1, Math.round((bind.frame - prepare.event.frame) / BLOCK))
+
     const complete = events.slice(index + 1).find((event) => event.event === "latency-move-complete" && event.pid === publish.pid
       && event.revision === revision && event.transportEpoch === publish.transportEpoch && event.frame >= publish.publicationFrame)
+
     const blockMs = (session.blockSize * 1000) / session.sampleRate
     const armed = requests[requests.length - 1] ?? bind
     const leadBlocks = (publish.publicationFrame - bind.frame) / BLOCK
@@ -110,18 +129,23 @@ const analyzeRow = (row: string, events: readonly HostEvent[], edits: readonly E
   })
   // A publication carries every edit made since the previous one: the first publication at or after the edit's wall time.
   const netMove = publications.map(() => 0)
+
   for (const edit of edits) {
     const owner = wallMsByPublication.findIndex((wallMs) => wallMs >= edit.wallMs)
+
     if (owner >= 0) netMove[owner] = (netMove[owner] ?? 0) + edit.toLatencyFrames - edit.fromLatencyFrames
   }
+
   return { publications: publications.map((publication, index) => ({ ...publication, raise: (netMove[index] ?? 0) > 0 })), errors }
 }
 
 // Phase 4 rows have no continuity analysis, so they carry no asset expectation.
 const readContinuity = async (file: string) => {
   const text = await readFile(file, "utf8").catch(() => undefined)
+
   return text === undefined ? undefined : continuitySchema.parse(JSON.parse(text))
 }
+
 // The publication at the continuity analysis's asset frame must carry asset-install, and no other publication may.
 const assetEvidenceErrors = (row: string, assetFrame: number | undefined, publications: readonly Publication[]): string[] => [
   ...(assetFrame !== undefined && !publications.some((publication) => publication.publicationFrame === assetFrame)
@@ -135,6 +159,7 @@ const assetEvidenceErrors = (row: string, assetFrame: number | undefined, public
 const judge = (publications: readonly Publication[], errors: readonly string[]): Verdict[] => {
   const verdict = (target: string, failures: readonly string[], detail: string): Verdict =>
     ({ target, status: failures.length ? "FAIL" : "PASS", detail: failures.length ? `${failures.join("; ")} (${detail})` : detail })
+
   const skip = (target: string, detail: string): Verdict => ({ target, status: "SKIP", detail })
   const info = (target: string, detail: string): Verdict => ({ target, status: "INFO", detail })
   const name = (publication: Publication) => `${publication.row} rev ${publication.revision}`
@@ -148,12 +173,14 @@ const judge = (publications: readonly Publication[], errors: readonly string[]):
   const plainStats = plainMs.length ? statsOf(plainMs) : undefined
   const prepStats = plainPrepMs.length ? statsOf(plainPrepMs) : undefined
   const blockPhaseStats = plainBlockPhaseMs.length ? statsOf(plainBlockPhaseMs) : undefined
+
   const verdicts: Verdict[] = [
     verdict("inputs", [...errors, ...(publications.length ? [] : ["no seam publications found"])], `${publications.length} publications`),
     verdict("bound-lead", publications.flatMap((publication) => publication.leadBlocks < LEAD_MIN_BLOCKS || publication.leadBlocks > LEAD_MAX_BLOCKS
       ? [`${name(publication)} lead ${publication.leadBlocks} blocks`] : []),
     leads.length ? `${Math.min(...leads)}..${Math.max(...leads)} blocks, want ${LEAD_MIN_BLOCKS}..${LEAD_MAX_BLOCKS}` : "no publications"),
   ]
+
   verdicts.push(!plainStats ? skip("prepare-to-publish", "no non-asset publications") : verdict("prepare-to-publish",
     [...(plainStats.p99 > PLAIN_LIMITS_MS.p99 ? [`p99 ${plainStats.p99} > ${PLAIN_LIMITS_MS.p99} ms`] : []),
       ...(plainStats.max > PLAIN_LIMITS_MS.max ? [`max ${plainStats.max} > ${PLAIN_LIMITS_MS.max} ms`] : [])],
@@ -174,21 +201,28 @@ const judge = (publications: readonly Publication[], errors: readonly string[]):
     raises.flatMap((publication) => publication.completeFrames === undefined || publication.completeFrames > publication.allowedCompleteFrames
       ? [`${name(publication)} ${publication.completeFrames ?? "no completion"} > ${publication.allowedCompleteFrames} frames`] : []),
     `n=${raises.length} max ${Math.max(...raises.map((publication) => publication.completeFrames ?? 0))} frames`))
+
   return verdicts
 }
 
 const analyzeRun = async (run: string, phase: number): Promise<Analysis> => {
   const rows = (await readdir(run, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
+
   const analyses = await Promise.all(rows.map(async (row) => {
     const host = await readHost(join(run, row, "host.jsonl")).catch(() => undefined)
+
     if (!host) return undefined
     const analysis = analyzeRow(row, host, await readEdits(join(run, row, `phase${phase}-edits.json`)))
     const continuity = await readContinuity(join(run, row, "analysis.json"))
+
     if (continuity) analysis.errors.push(...assetEvidenceErrors(row, continuity.assetPublicationFrame, analysis.publications))
+
     return analysis
   }))
+
   const publications = analyses.flatMap((analysis) => analysis?.publications ?? [])
   const errors = analyses.flatMap((analysis) => analysis?.errors ?? [])
+
   return { publications, errors, verdicts: judge(publications, errors) }
 }
 
@@ -198,6 +232,7 @@ type SyntheticSpec = {
   prepMs?: number; totalMs?: number; bindLeadBlocks?: number; blocksBeforeBind?: number; armed?: boolean
   resend?: boolean; rebase?: boolean; completeFrames?: number; install?: boolean
 }
+
 const syntheticRow = (specs: readonly SyntheticSpec[], raise: boolean) => {
   const base = { cause: "", pid: 1, transportEpoch: 5 }
   const lines: object[] = [{ event: "device-session", pid: 1, wallMs: 0, sampleRate: SAMPLE_RATE, blockSize: BLOCK }]
@@ -212,16 +247,22 @@ const syntheticRow = (specs: readonly SyntheticSpec[], raise: boolean) => {
     frames.push(publicationFrame)
     lines.push({ ...base, event: "graph-prepare", wallMs: wall, frame: prepareFrame, revision: revision - 1, requestedRevision: revision },
       request(bindFrame, wall + 1))
+
     if (spec.install) lines.push({ ...base, event: "asset-install", wallMs: wall + 5 })
+
     if (spec.armed !== false) lines.push(request(armedFrame, wall + (spec.prepMs ?? 4)))
+
     if (spec.resend) lines.push(request(publicationFrame - BLOCK, wall + 18))
+
     if (spec.rebase) lines.push(request(armedFrame + BLOCK * 8, wall + 20), request(armedFrame + BLOCK * 9, wall + 22))
     lines.push({ ...base, event: "graph-publish", cause: "block-boundary", wallMs: wall + (spec.totalMs ?? 30), frame: publicationFrame,
       publicationFrame, revision, requestedRevision: 0 })
     lines.push({ ...base, event: "latency-move-complete", wallMs: wall + 100, frame: publicationFrame + (spec.completeFrames ?? COMPLETE_BASE_FRAMES + BLOCK * (spec.blocksBeforeBind ?? 1)),
       publicationFrame, revision, requestedRevision: 0 })
+
     if (raise) edits.push({ wallMs: wall - 5, fromLatencyFrames: 512, toLatencyFrames: 4096 })
   })
+
   return { host: lines.map((line) => JSON.stringify(line)).join("\n"), edits: JSON.stringify({ edits }), frames }
 }
 
@@ -230,6 +271,7 @@ const selfTest = async () => {
   const assetClean: readonly SyntheticSpec[] = [{ totalMs: 90, install: true }]
   // An import during playback: a track-only publication, then the asset's.
   const trackThenAsset: readonly SyntheticSpec[] = [{ totalMs: 40 }, { totalMs: 90, install: true }]
+
   // `delivered` is the index of the asset row's publication that delivers the asset (the continuity analysis's asset frame).
   const cases: { name: string; rows: [readonly SyntheticSpec[], readonly SyntheticSpec[]]; fails: string[]; delivered?: number }[] = [
     { name: "clean LAT1 shape (single, merged k=3 and asset add)", rows: [clean, assetClean], fails: [] },
@@ -259,47 +301,62 @@ const selfTest = async () => {
     { name: "real seam-miss rebase", rows: [[...clean, { rebase: true }], assetClean], fails: ["bound-lead", "rebases"] },
     { name: "single raise completes 3584 frames after publication", rows: [[...clean, { completeFrames: 3584 }], assetClean], fails: ["raise-move-complete"] },
   ]
+
   const root = await mkdtemp(join(tmpdir(), "lat1-timing-"))
   let failed = 0
+
   try {
     for (const [index, testCase] of cases.entries()) {
       const run = join(root, `case-${index}`, "phase4")
       const [plain, asset] = testCase.rows
       const rows: [string, readonly SyntheticSpec[], boolean][] = [["two-tone", plain, true], ["add-paged-asset", asset, false]]
+
       for (const [row, specs, raise] of rows) {
         const synthetic = syntheticRow(specs, raise)
         await mkdir(join(run, row), { recursive: true })
         await writeFile(join(run, row, "host.jsonl"), synthetic.host)
         await writeFile(join(run, row, "phase4-edits.json"), synthetic.edits)
+
         if (testCase.delivered !== undefined && row === "add-paged-asset")
           await writeFile(join(run, row, "analysis.json"), JSON.stringify({ assetPublicationFrame: synthetic.frames[testCase.delivered] }))
       }
+
       const analysis = await analyzeRun(run, 4)
       const actual = analysis.verdicts.filter((entry) => entry.status === "FAIL").map((entry) => entry.target)
       const ok = actual.join() === testCase.fails.join()
+
       if (!ok) failed++
       console.log(`${ok ? "ok  " : "BAD "} ${testCase.name}: expected FAIL [${testCase.fails}], got [${actual}]`)
     }
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+
   console.log(failed ? `self-test FAILED (${failed}/${cases.length})` : `self-test passed (${cases.length}/${cases.length})`)
+
   return failed === 0
 }
 
 const main = async () => {
   const args = process.argv.slice(2)
-  const option = (flag: string) => { const at = args.indexOf(flag); return at >= 0 ? args[at + 1] : undefined }
+
+  const option = (flag: string) => { const at = args.indexOf(flag);
+
+ return at >= 0 ? args[at + 1] : undefined }
+
   if (args.includes("--self-test")) return process.exit(await selfTest() ? 0 : 1)
   const run = option("--run")
+
   if (!run) throw new Error("usage: analyze-lat1-timing.ts --run <phaseDir> [--phase 4|5] [--out <file>] | --self-test")
   const phase = Number(option("--phase") ?? /phase([45])\/?$/.exec(run)?.[1])
+
   if (phase !== 4 && phase !== 5) throw new Error("--phase must be 4 or 5 (or the run directory must end in phase4/phase5)")
   const analysis = await analyzeRun(run, phase)
   const out = option("--out") ?? join(run, "lat1-timing.json")
   await mkdir(dirname(out), { recursive: true })
   const pass = analysis.verdicts.every((entry) => entry.status !== "FAIL")
   await writeFile(out, `${JSON.stringify({ run, phase, sampleRate: SAMPLE_RATE, blockSize: BLOCK, verdict: pass ? "PASS" : "FAIL", ...analysis }, null, 2)}\n`)
+
   for (const entry of analysis.verdicts) console.log(`${entry.status} ${entry.target}: ${entry.detail}`)
   console.log(`${pass ? "PASS" : "FAIL"} LAT1 timing, phase ${phase}: ${analysis.publications.length} publications -> ${out}`)
   process.exit(pass ? 0 : 1)

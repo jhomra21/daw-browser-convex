@@ -27,6 +27,7 @@ import {
   type GranularParams,
   type GranularParamsInput,
 } from './granular-params'
+
 export type InstrumentKind = 'synth' | 'drum-rack' | 'sampler' | 'granular'
 
 export type TrackInstrumentParams =
@@ -112,16 +113,21 @@ export function isInstrumentKind(value: JsonValue): value is InstrumentKind {
 export function normalizeTrackInstrumentParams(value: JsonValue): TrackInstrumentParams | undefined {
   if (!isJsonObject(value) || !isInstrumentKind(value.kind)) return undefined
   const instanceId = isJsonString(value.instanceId) && value.instanceId ? value.instanceId : undefined
+
   if (!instanceId) return undefined
+
   if (value.kind === 'synth') {
     return { kind: value.kind, instanceId, params: normalizeSynthParams(value.params) }
   }
+
   if (value.kind === 'sampler') {
     return { kind: value.kind, instanceId, params: normalizeSamplerParams(isJsonObject(value.params) ? value.params : {}) }
   }
+
   if (value.kind === 'granular') {
     return { kind: value.kind, instanceId, params: normalizeGranularParams(isJsonObject(value.params) ? value.params : {}) }
   }
+
   return {
     kind: value.kind,
     instanceId,
@@ -135,8 +141,10 @@ export const normalizePersistedInstrumentParams = (
   params: JsonValue,
 ): TrackInstrumentParams | undefined => {
   if (kind === 'instrument') return normalizeTrackInstrumentParams(params)
+
   if (kind === 'synth') {
     return normalizeTrackInstrumentParams({ kind: 'synth', instanceId, params })
   }
+
   return undefined
 }

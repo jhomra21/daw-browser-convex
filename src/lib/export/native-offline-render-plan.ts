@@ -45,33 +45,41 @@ export const nativeExternalLatencyFrames = (
   attachments: NativeExternalAttachmentPlan | undefined,
 ) => {
   const latencyByNode = new Map<string, number>()
+
   for (const attachment of attachments?.attachments ?? []) {
     if (attachment.bypassed) continue
     const latency = attachment.declaredLatencyFrames + attachment.workerTransport.maximumFrames
     const previous = latencyByNode.get(attachment.graphNodeId) ?? 0
+
     if (!Number.isSafeInteger(previous + latency)) {
       throw new Error(`Native VST3 latency exceeds the supported graph range for "${attachment.graphNodeId}".`)
     }
+
     latencyByNode.set(attachment.graphNodeId, previous + latency)
   }
+
   return latencyByNode
 }
 
 const planarBytes = (planes: readonly Float32Array[]) => {
   const output = new Uint8Array(planes.reduce((total, plane) => total + plane.byteLength, 0))
   let offset = 0
+
   for (const plane of planes) {
     output.set(new Uint8Array(plane.buffer, plane.byteOffset, plane.byteLength), offset)
     offset += plane.byteLength
   }
+
   return output
 }
 
 const mappedSourceCoverage = (sourceStart: number, sourceFrameCount: number, frameCount: number) => {
   const coverage = nativeMappedSourceCoverage(sourceStart, sourceFrameCount, frameCount)
+
   if (!coverage) {
     throw new Error('Native export mapped source exceeds its source bounds.')
   }
+
   return coverage
 }
 
@@ -81,14 +89,20 @@ const nativeAssets = (snapshot: Extract<PortableExportSnapshot, { supported: tru
   const assets: NativeHostPcmAsset[] = []
   const mappedAssets: NativeOfflineMappedAsset[] = []
   const eventsByAssetId = Map.groupBy(snapshot.events, (event) => event.assetId)
+
   const instrumentAssetIds = new Set(snapshot.graph.nodes.flatMap((node) => {
     const state = node.instrument
+
     if (!state || state.kind === 'synth') return []
+
     return state.kind === 'granular' ? [state.assetId] : state.zones.map((zone) => zone.assetId)
   }))
+
   for (const { asset, sessionAssetId } of sessionAssets) {
     const entry = byAssetId.get(asset.assetId)
+
     if (!entry) throw new Error(`Native export asset "${asset.assetId}" is missing.`)
+
     if (entry.pcm && !instrumentAssetIds.has(asset.assetId)) {
       assets.push({
         sessionAssetId,
@@ -99,11 +113,15 @@ const nativeAssets = (snapshot: Extract<PortableExportSnapshot, { supported: tru
       })
       continue
     }
+
     const sourceAssetKey = entry.sourceAssetKey
+
     if (!sourceAssetKey) throw new Error(`Native export mapped asset "${asset.assetId}" is missing its source identity.`)
+
     const ranges = (eventsByAssetId.get(asset.assetId) ?? [])
       .map((event) => {
         const sourceOffsetFraction = event.sourceOffsetFraction ?? 0
+
         if (
           !Number.isSafeInteger(event.sourceOffsetFrame)
           || event.sourceOffsetFrame < 0
@@ -115,13 +133,16 @@ const nativeAssets = (snapshot: Extract<PortableExportSnapshot, { supported: tru
         ) {
           throw new Error(`Native export mapped source "${asset.assetId}" has invalid interpolation bounds.`)
         }
+
         const sourceStart = event.sourceOffsetFrame + sourceOffsetFraction
+
         if (
           !Number.isFinite(sourceStart)
           || sourceStart < 0
         ) {
           throw new Error(`Native export mapped source "${asset.assetId}" exceeds its source bounds.`)
         }
+
         return mappedSourceCoverage(sourceStart, event.sourceFrameCount, asset.frameCount)
       })
       .concat(instrumentAssetIds.has(asset.assetId) ? [{ startFrame: 0, frameCount: asset.frameCount }] : [])
@@ -129,6 +150,7 @@ const nativeAssets = (snapshot: Extract<PortableExportSnapshot, { supported: tru
       .toSorted((left, right) => left.startFrame - right.startFrame)
       .reduce<{ startFrame: number; frameCount: number }[]>((merged, range) => {
         const previous = merged.at(-1)
+
         if (previous && range.startFrame <= previous.startFrame + previous.frameCount) {
           previous.frameCount = Math.max(
             previous.frameCount,
@@ -137,11 +159,14 @@ const nativeAssets = (snapshot: Extract<PortableExportSnapshot, { supported: tru
         } else {
           merged.push({ ...range })
         }
+
         return merged
       }, [])
+
     if (ranges.length > nativeAudioHostMaximumMappedAssetRanges) {
       throw new Error(`Native export mapped source "${asset.assetId}" exceeds the bounded source range count.`)
     }
+
     mappedAssets.push({
       sessionAssetId,
       sourceAssetKey,
@@ -152,6 +177,7 @@ const nativeAssets = (snapshot: Extract<PortableExportSnapshot, { supported: tru
       preparedStretchArtifactId: entry.preparedStretchArtifactId,
     })
   }
+
   return { sessionAssets, assets, mappedAssets }
 }
 
@@ -159,6 +185,7 @@ const transferableBuffer = (plane: Float32Array) => {
   if (!(plane.buffer instanceof ArrayBuffer)) {
     throw new Error('Native export PCM must be backed by transferable ArrayBuffers.')
   }
+
   return plane.buffer
 }
 
@@ -181,28 +208,39 @@ const assertNativeVstEventCapacity = (input: Readonly<{
   totalFrames: number
 }>) => {
   if (!input.attachments || input.automationSegments.length === 0) return
+
   for (const attachment of input.attachments.attachments) {
     if (attachment.bypassed) continue
+
     const automationSegments = input.automationSegments.filter((segment) => (
       segment.instanceId === attachment.instanceId
     ))
+
     if (automationSegments.length === 0) continue
+
     if (automationSegments.length > nativeAudioHostMaximumScheduleAutomationSegments) {
       throw new Error(
         `Native VST3 export exceeds the retained automation segment capacity for "${attachment.instanceId}".`,
       )
     }
+
     const midiEvents = input.instrumentEvents.filter((event) => event.nodeId === attachment.graphNodeId)
+
     for (let startFrame = 0; startFrame < input.totalFrames; startFrame += input.blockFrames) {
       const endFrame = Math.min(input.totalFrames, startFrame + input.blockFrames)
+
       const midiCount = midiEvents.filter((event) => (
         event.frameOffset >= startFrame && event.frameOffset < endFrame
       )).length
+
       const automationCount = automationSegments.reduce((count, segment) => {
         const overlaps = segment.startFrame < endFrame && segment.endFrame > startFrame
+
         if (!overlaps) return count
+
         return count + 1 + (segment.interpolation === 'linear' && segment.endFrame < endFrame ? 1 : 0)
       }, 0)
+
       if (midiCount + automationCount > attachment.workerTransport.maximumEventsPerBlock) {
         throw new Error(
           `Native VST3 export exceeds the callback event capacity for "${attachment.instanceId}" at frame ${startFrame}.`,
@@ -235,23 +273,30 @@ export const compileNativeOfflineRenderPlan = (input: {
   }[]
 }) => {
   const sourceBounds = getExportRangeBounds(input.tracks, input.range)
+
   const renderRange: ExportRange = {
     mode: 'custom',
     startSec: sourceBounds.startSec,
     endSec: sourceBounds.endSec + input.tailFrames / input.sampleRateHz,
   }
+
   const externalAttachments = input.externalAttachments
     ? nativeExternalAttachmentPlanSchema.parse(input.externalAttachments)
     : undefined
+
   const unsupported: string[] = []
+
   if (input.sidechainRoutes.length > 0) unsupported.push('Native Phase A export does not support sidechain routing.')
+
   for (const track of input.tracks) {
     if (input.fx.trackFx?.[track.id]?.arp?.enabled) {
       unsupported.push(`${track.id}: Native Phase A export does not support arpeggiators.`)
     }
   }
+
   if (unsupported.length > 0) throw new Error(unsupported.join(' '))
   const externalLatencyFrames = nativeExternalLatencyFrames(externalAttachments)
+
   const snapshot = compilePortableExportSnapshot({
     tracks: input.tracks,
     bpm: input.bpm,
@@ -281,12 +326,15 @@ export const compileNativeOfflineRenderPlan = (input: {
         }]
     ))),
   })
+
   if (!snapshot.supported) throw new Error(snapshot.reasons.join(' '))
   input.onInstrumentRegionSources?.(snapshot.instrumentRegionSources ?? [])
   const instrumentSourceKeys = new Set(snapshot.instrumentRegionSources?.map((source) => source.sourceAssetKey))
+
   const instrumentAssetIds = new Set(snapshot.assets.flatMap((entry) => (
     entry.sourceAssetKey && instrumentSourceKeys.has(entry.sourceAssetKey) ? [entry.asset.assetId] : []
   )))
+
   const schedule = compilePortableFrameSchedule({
     revision: 1,
     transportEpoch: 1,
@@ -298,27 +346,33 @@ export const compileNativeOfflineRenderPlan = (input: {
     automationEnvelopes: input.automationEnvelopes,
     arpeggiators: new Map(Object.keys(input.fx.trackFx ?? {}).map((trackId) => {
       const arp = input.fx.trackFx?.[trackId]?.arp
+
       return [trackId, arp?.enabled ? arp : undefined]
     })),
     stableNoteIds: true,
     eventRangeStartSec: sourceBounds.startSec,
     noteScheduleStartSec: sourceBounds.startSec,
   })
+
   if (schedule.events.some((event) => event.type === 'parameter-restore' && event.target.parameterId !== 'mixer.gain')) {
     throw new Error('Native Phase A export contains unsupported transient MIDI expression.')
   }
+
   const chunked = chunkNativePcmProjection({
     graph: snapshot.graph,
     assets: snapshot.assets.flatMap(({ asset, pcm }) => pcm && !instrumentAssetIds.has(asset.assetId) ? [{ asset, pcm }] : []),
     events: snapshot.events,
     firstSequence: 1,
   })
+
   if ('supported' in chunked && !chunked.supported) {
     throw new Error(chunked.reason)
   }
+
   if ('supported' in chunked) {
     throw new Error('Native PCM chunk projection result is invalid.')
   }
+
   const nativeSnapshot: Extract<PortableExportSnapshot, { supported: true }> = {
     ...snapshot,
     graph: {
@@ -339,11 +393,14 @@ export const compileNativeOfflineRenderPlan = (input: {
     ],
     events: chunked.events,
   }
+
   const { sessionAssets, assets, mappedAssets } = nativeAssets(nativeSnapshot)
+
   const sourceMetadata = new Map<string, {
     sourceKind: typeof input.tracks[number]['clips'][number]['sourceKind']
     sampleUrl: string | undefined
   }>()
+
   for (const track of input.tracks) {
     for (const clip of track.clips) {
       if (clip.sourceAssetKey) {
@@ -354,8 +411,10 @@ export const compileNativeOfflineRenderPlan = (input: {
       }
     }
   }
+
   const hydratedMappedAssets = mappedAssets.map((asset) => {
     const metadata = sourceMetadata.get(asset.sourceAssetKey)
+
     return {
       ...asset,
       projectId: input.projectId,
@@ -363,6 +422,7 @@ export const compileNativeOfflineRenderPlan = (input: {
       sampleUrl: metadata?.sampleUrl,
     }
   })
+
   if (
     assets.length + hydratedMappedAssets.length > nativeAudioHostMaximumInstalledAssets
     || assets.some((asset) => asset.channelCount > nativeAudioHostMaximumAssetChannels
@@ -370,16 +430,20 @@ export const compileNativeOfflineRenderPlan = (input: {
   ) {
     throw new Error('Native Phase A export exceeds the offline asset capacity.')
   }
+
   const latencyFrames = snapshot.graphLatencyFrames
   const totalFrames = Math.ceil((renderRange.endSec - renderRange.startSec) * input.sampleRateHz) + latencyFrames
   const blockFrames = nativeOfflineBlockFrames(totalFrames, externalAttachments)
+
   const processorAutomationEvents = nativeProcessorAutomationEventsWithRampEnds(
     nativeProcessorAutomationEventsForSchedule(snapshot.graph, schedule.events),
     totalFrames,
   )
+
   const noteEvents = schedule.events.filter((event): event is Extract<typeof event, { type: 'note-on' | 'note-off' }> => (
     event.type === 'note-on' || event.type === 'note-off'
   ))
+
   const instrumentEvents = noteEvents.map((event) => ({
     nodeId: event.target.trackId,
     noteId: event.noteId,
@@ -390,18 +454,22 @@ export const compileNativeOfflineRenderPlan = (input: {
     note: event.pitch,
     value: event.type === 'note-on' ? event.velocity : 0,
   }))
+
   const sampleSourceEvents = nativeSnapshot.events.filter((event) => event.startFrame < totalFrames)
   const scheduleWindows: Array<Uint8Array> = []
   const automationSegments: NativeVstAutomationSegment[] = []
+
   const sortedInstrumentEvents = [...instrumentEvents].sort((left, right) => (
     left.frameOffset - right.frameOffset || left.sequence - right.sequence
   ))
+
   const sortedSourceEvents = [...sampleSourceEvents].sort((left, right) => (
     left.startFrame - right.startFrame || left.sequence - right.sequence
   )).map((event, index) => ({
     ...event,
     sequence: index + 1,
   }))
+
   const automationForWindow = (startFrame: number, endFrame: number) => (
     projectNativeVstAutomationSegments({
       automationEnvelopes: input.automationEnvelopes,
@@ -412,40 +480,52 @@ export const compileNativeOfflineRenderPlan = (input: {
       endFrame,
     })
   )
+
   let windowStart = 0
   let instrumentOffset = 0
   let sourceOffset = 0
+
   while (windowStart < totalFrames) {
     let windowEnd = totalFrames
     let nextInstrumentOffset = instrumentOffset
     let nextSourceOffset = sourceOffset
     let windowAutomation = automationForWindow(windowStart, windowEnd)
     let windowProcessorAutomation = sliceNativeProcessorAutomationEvents(processorAutomationEvents, windowStart, windowEnd)
+
     for (;;) {
       nextInstrumentOffset = instrumentOffset
+
       while (sortedInstrumentEvents[nextInstrumentOffset]?.frameOffset < windowEnd) {
         nextInstrumentOffset += 1
       }
+
       nextSourceOffset = sourceOffset
+
       while (sortedSourceEvents[nextSourceOffset]?.startFrame < windowEnd) {
         nextSourceOffset += 1
       }
+
       const instrumentCount = nextInstrumentOffset - instrumentOffset
       const sourceCount = nextSourceOffset - sourceOffset
       windowAutomation = automationForWindow(windowStart, windowEnd)
       windowProcessorAutomation = sliceNativeProcessorAutomationEvents(processorAutomationEvents, windowStart, windowEnd)
+
       const fits = instrumentCount <= nativeAudioHostMaximumInstrumentEvents
         && sourceCount <= nativeAudioHostMaximumSourceEvents
         && windowAutomation.length <= nativeAudioHostMaximumScheduleAutomationSegments
         && windowProcessorAutomation.length <= nativeAudioHostMaximumScheduleAutomationSegments
         && instrumentCount + sourceCount + windowAutomation.length + windowProcessorAutomation.length
           <= nativeAudioHostMaximumScheduleRecords
+
       if (fits) break
+
       if (windowEnd <= windowStart + 1) {
         throw new Error('Native Phase A export contains too many scheduled events at one frame.')
       }
+
       windowEnd = windowStart + Math.max(1, Math.floor((windowEnd - windowStart) / 2))
     }
+
     automationSegments.push(...windowAutomation)
     scheduleWindows.push(serializeNativeScheduleWindow({
       revision: 1,
@@ -464,6 +544,7 @@ export const compileNativeOfflineRenderPlan = (input: {
     sourceOffset = nextSourceOffset
     windowStart = windowEnd
   }
+
   assertNativeVstEventCapacity({
     attachments: externalAttachments,
     instrumentEvents,
@@ -472,12 +553,15 @@ export const compileNativeOfflineRenderPlan = (input: {
     totalFrames,
   })
   const scheduleBytes = scheduleWindows[0]
+
   if (!scheduleBytes) throw new Error('Native Phase A export did not produce a schedule.')
+
   const instrumentStates = nativeSnapshot.graph.nodes.flatMap((node) => (
     node.kind === 'instrument' && node.instrument
       ? [{ nodeId: node.id, state: node.instrument }]
       : []
   ))
+
   const plan: NativeOfflineRenderPlan = {
     version: 1,
     sampleRateHz: input.sampleRateHz,
@@ -502,6 +586,7 @@ export const compileNativeOfflineRenderPlan = (input: {
     schedule: scheduleBytes,
     scheduleWindows: scheduleWindows.length > 1 ? scheduleWindows : undefined,
   }
+
   // The plan renders `latencyFrames` past the range; the caller drops them so the file starts on the timeline.
   return { plan, latencyFrames }
 }

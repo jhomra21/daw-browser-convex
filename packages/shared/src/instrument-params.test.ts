@@ -20,6 +20,7 @@ describe('instrument identity', () => {
       instanceId: 'instrument:original',
       params: createDefaultSamplerParams(),
     })
+
     if (!original) throw new Error('Expected sampler instrument')
     const duplicate = duplicateTrackInstrumentParams(original)
 
@@ -56,6 +57,7 @@ describe('instrument identity', () => {
         chokeGroup: 0,
       },
     }
+
     const first = normalizeTrackInstrumentParams({ kind: 'granular', instanceId: 'instrument:granular', params })
     const second = normalizeTrackInstrumentParams({ kind: 'granular', instanceId: 'instrument:granular', params })
     expect(first).toEqual(second)
@@ -91,6 +93,7 @@ describe('instrument identity', () => {
       crossfadeSec: 0,
       chokeGroup: 0,
     }
+
     expect(applySamplerZoneEdit(zone, { keyLow: 90 })).toMatchObject({ keyLow: 60, keyHigh: 60 })
     expect(applySamplerZoneEdit(zone, { keyHigh: 10 })).toMatchObject({ keyLow: 40, keyHigh: 40 })
     expect(applySamplerZoneEdit(zone, { velocityLow: 127 })).toMatchObject({ velocityLow: 100, velocityHigh: 100 })

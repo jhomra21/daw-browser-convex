@@ -20,15 +20,18 @@ describe('waveform request planning', () => {
     encoding: 'float32' | 'signed-u8' = 'float32',
   ): WaveformSourceData => {
     const intervalCount = Math.ceil(samples.length / framesPerInterval)
+
     const values = Array.from({ length: intervalCount }, (_, interval) => {
       const start = interval * framesPerInterval
       const end = Math.min(samples.length, start + framesPerInterval)
       const intervalSamples = samples.slice(start, end)
+
       return [
         Math.min(...intervalSamples),
         Math.max(...intervalSamples),
       ]
     }).flat()
+
     if (encoding === 'signed-u8') {
       return {
         kind: 'intervals',
@@ -41,6 +44,7 @@ describe('waveform request planning', () => {
         intervalCount,
       }
     }
+
     return {
       kind: 'intervals',
       encoding,
@@ -85,6 +89,7 @@ describe('waveform request planning', () => {
         }
       },
     }
+
     const plan = createWaveformRequestPlans({
       sampleRate: source.sampleRate,
       sourceFrameCount: source.frameCount,
@@ -98,7 +103,9 @@ describe('waveform request planning', () => {
         canvasEndSec: source.durationSec,
       }],
     })
+
     expect(plan.requests[0]?.sourceEndFrame).toBe(27)
+
     const result = await loadWaveformSourceData({
       assetKey: '27-frame-source',
       source,
@@ -106,6 +113,7 @@ describe('waveform request planning', () => {
       sourceEndFrame: plan.requests[0]?.sourceEndFrame ?? -1,
       framesPerInterval: 1,
     })
+
     expect(result?.kind).toBe('samples')
     expect(result?.kind === 'samples' ? result.channels[0]?.length : 0).toBe(27)
   })
@@ -119,6 +127,7 @@ describe('waveform request planning', () => {
         { drawCols: 400, sourceStartSec: 0, sourceEndSec: 1, startPx: 0, endPx: 400, canvasStartSec: 0, canvasEndSec: 1 },
       ],
     })
+
     expect(plan.requests).toHaveLength(1)
     expect(plan.segments).toHaveLength(2)
   })
@@ -139,6 +148,7 @@ describe('waveform request planning', () => {
         canvasEndSec: 1,
       }],
     }
+
     expect(createWaveformRequestPlans(input)).toEqual(createWaveformRequestPlans(input))
   })
 
@@ -152,16 +162,19 @@ describe('waveform request planning', () => {
       canvasStartSec: 0,
       canvasEndSec: 3600,
     }
+
     const at48k = createWaveformRequestPlans({
       sampleRate: 48_000,
       sourceFrameCount: 172_800_000,
       segments: [segment],
     })
+
     const at44k = createWaveformRequestPlans({
       sampleRate: 44_100,
       sourceFrameCount: 158_760_000,
       segments: [segment],
     })
+
     expect(at48k.requests[0]?.framesPerInterval).toBeGreaterThanOrEqual(128)
     expect(at44k.requests[0]?.framesPerInterval).toBeGreaterThanOrEqual(128)
     expect(at48k.requests[0]?.framesPerInterval).toBe(16_384)
@@ -178,6 +191,7 @@ describe('waveform request planning', () => {
         { drawCols: 100, sourceStartSec: 2, sourceEndSec: 3, startPx: 100, endPx: 200, canvasStartSec: 2, canvasEndSec: 3 },
       ],
     })
+
     expect(plan.requests[0]?.priority).toBeGreaterThan(plan.requests[1]?.priority ?? 0)
   })
 
@@ -191,6 +205,7 @@ describe('waveform request planning', () => {
         { drawCols: 100, sourceStartSec: 0, sourceEndSec: 1, startPx: 100, endPx: 200, canvasStartSec: 1.5, canvasEndSec: 2.5 },
       ],
     })
+
     expect(plan.requests).toHaveLength(1)
     expect(plan.requests[0]?.priority).toBe(0)
   })
@@ -209,6 +224,7 @@ describe('waveform request planning', () => {
         canvasEndSec: 1,
       }],
     })
+
     const detailPlan = createWaveformRequestPlans({
       sampleRate: 48_000,
       sourceFrameCount: 48_000,
@@ -223,6 +239,7 @@ describe('waveform request planning', () => {
         canvasEndSec: 1,
       }],
     })
+
     expect(intervalPlan.requests[0]?.framesPerInterval).toBe(2)
     expect(detailPlan.requests[0]?.framesPerInterval).toBe(1)
   })
@@ -241,6 +258,7 @@ describe('waveform request planning', () => {
         canvasEndSec: 1,
       }],
     })
+
     expect(plan.requests[0]?.framesPerInterval).toBe(1)
   })
 
@@ -254,21 +272,25 @@ describe('waveform request planning', () => {
       canvasStartSec: 0,
       canvasEndSec: 1,
     }
+
     expect(createWaveformRequestPlans({
       sampleRate: 48_000,
       sourceFrameCount: 48_000,
       segments: [segment],
     }).requests[0]?.framesPerInterval).toBe(8)
+
     const first = createWaveformRequestPlans({
       sampleRate: 48_000,
       sourceFrameCount: 48_000,
       segments: [segment],
     })
+
     const second = createWaveformRequestPlans({
       sampleRate: 48_000,
       sourceFrameCount: 48_000,
       segments: [segment],
     })
+
     expect(second.requests[0]?.framesPerInterval).toBe(first.requests[0]?.framesPerInterval)
   })
 
@@ -281,6 +303,7 @@ describe('waveform request planning', () => {
         (_, index) => {
           const interval = Math.floor(index / 2)
           const base = Math.floor(interval * framesPerInterval / 16) % 2 === 0 ? -0.5 : 0.25
+
           return index % 2 === 0 ? base : base + 0.5
         },
       )],
@@ -290,6 +313,7 @@ describe('waveform request planning', () => {
       framesPerInterval,
       intervalCount: 128 / framesPerInterval,
     })
+
     const aggregate = (framesPerInterval: number) => aggregateWaveformDataToBackingPixels({
       data: makeData(framesPerInterval),
       sourceStartFrame: 0,
@@ -297,10 +321,12 @@ describe('waveform request planning', () => {
       cssWidthPx: 8,
       backingPixelsPerCssPixel: 2,
     })
+
     const fine = aggregate(8)
     const coarse = aggregate(16)
     expect(fine).toEqual(coarse)
     expect(fine.kind).toBe('intervals')
+
     if (fine.kind !== 'intervals') return
     expect(fine.framesPerInterval).toBe(8)
     expect([...fine.channels[0] ?? []]).toEqual(Array.from(
@@ -319,11 +345,13 @@ describe('waveform request planning', () => {
       sampleRate: 48_000,
       sourceFrameCount: 4,
     }
+
     const peaks = intervalDataFor(
       [-0.75, 0.25, 0.5, -0.125],
       1,
       'signed-u8',
     )
+
     const aggregate = (data: WaveformSourceData) => aggregateWaveformDataToBackingPixels({
       data,
       sourceStartFrame: 0,
@@ -331,14 +359,17 @@ describe('waveform request planning', () => {
       cssWidthPx: 2,
       backingPixelsPerCssPixel: 1,
     })
+
     const sampleAggregate = aggregate(samples)
     const peakAggregate = aggregate(peaks)
     expect(sampleAggregate.kind).toBe('intervals')
     expect(peakAggregate.kind).toBe('intervals')
+
     if (sampleAggregate.kind !== 'intervals' || peakAggregate.kind !== 'intervals') return
     expect(sampleAggregate.framesPerInterval).toBe(2)
     expect([...sampleAggregate.channels[0] ?? []]).toEqual([-0.75, 0.25, -0.125, 0.5])
     expect([...peakAggregate.channels[0] ?? []]).toHaveLength(4)
+
     for (const [index, value] of (peakAggregate.channels[0] ?? []).entries()) {
       expect(value).toBeCloseTo([
         decodePeakByte(encodePeakByte(-0.75)),
@@ -347,6 +378,7 @@ describe('waveform request planning', () => {
         decodePeakByte(encodePeakByte(0.5)),
       ][index] ?? value)
     }
+
     expect(peakAggregate.channels[0]?.every((value, index) => (
       Math.abs(value - (sampleAggregate.channels[0]?.[index] ?? value)) <= 1 / 127
     ))).toBe(true)
@@ -359,10 +391,13 @@ describe('waveform request planning', () => {
       Array.from({ length: 1_024 }, (_, index) => Math.abs(Math.sin(index / 23)) * 0.8),
       Array.from({ length: 1_024 }, (_, index) => -Math.abs(Math.sin(index / 23)) * 0.8),
     ]
+
     const widths = [16, 32, 64]
+
     for (const samples of waveforms) {
       const forward = widths.map((width) => aggregateSamples(samples, 8, width, 1))
       const reverse = [...widths].reverse().map((width) => aggregateSamples(samples, 16, width, 1))
+
       for (let index = 0; index < widths.length; index += 1) {
         expect(forward[index]).toEqual(reverse[widths.length - 1 - index])
       }
@@ -373,15 +408,18 @@ describe('waveform request planning', () => {
     const samples = Array.from({ length: 1_024 }, (_, index) => (
       Math.floor(index / 64) % 2 === 0 ? -0.75 : 0.5
     ))
+
     const fine = aggregateSamples(samples, 32, 32, 1)
     const coarse = aggregateSamples(samples, 64, 32, 1)
     expect(fine).toEqual(coarse)
+
     if (fine.kind !== 'intervals') return
     const values = fine.channels[0]
     expect(values).toBeDefined()
     expect(fine.firstFrame).toBe(0)
     expect(fine.intervalCount).toBe(32)
     expect(fine.framesPerInterval).toBe(32)
+
     for (let index = 0; index < fine.intervalCount; index += 1) {
       const startFrame = fine.firstFrame + index * fine.framesPerInterval
       expect(startFrame / fine.framesPerInterval).toBeCloseTo(index)
@@ -391,6 +429,7 @@ describe('waveform request planning', () => {
       expect(Math.abs(minimum)).toBeLessThanOrEqual(1)
       expect(Math.abs(maximum)).toBeLessThanOrEqual(1)
     }
+
     const encoded = samples.map(encodePeakByte)
     expect(Math.max(...encoded.map((value, index) => (
       Math.abs(decodePeakByte(value) - samples[index]!)
@@ -405,6 +444,7 @@ describe('waveform request planning', () => {
       duration: 1,
       color: '#fff',
     }
+
     const map = getAudioClipTimeMap({
       clip,
       bufferDurationSec: 1,
@@ -412,7 +452,9 @@ describe('waveform request planning', () => {
       rangeStartSec: 0,
       rangeEndSec: 1,
     })
+
     if (!map) throw new Error('Expected parity time map')
+
     const cases = [
       { name: 'zero', baseWidth: 6, expectedTier: 64, sampleValue: 0 },
       { name: 'narrow', baseWidth: 6, expectedTier: 64, sampleValue: 0.001 },
@@ -429,6 +471,7 @@ describe('waveform request planning', () => {
           const sampleValue = 'sampleValue' in item ? item.sampleValue : undefined
           const deviceThickness = 'deviceThickness' in item ? item.deviceThickness : undefined
           const width = Math.max(1, Math.round(item.baseWidth / backingPixelsPerCssPixel))
+
           const segment = {
             drawCols: width,
             sourceStartSec: 0,
@@ -438,12 +481,14 @@ describe('waveform request planning', () => {
             canvasStartSec: 0,
             canvasEndSec: 1,
           }
+
           const input = {
             sampleRate: 48_000,
           sourceFrameCount: 48_000,
             backingPixelsPerCssPixel,
             segments: [segment],
           }
+
           const arrangement = createWaveformRequestPlans(input)
           const sampleDetail = createWaveformRequestPlans(input)
           expect(arrangement.requests).toEqual(sampleDetail.requests)
@@ -461,6 +506,7 @@ describe('waveform request planning', () => {
           expect(arrangement.requests[0]?.framesPerInterval).toBe(item.expectedTier)
           const framesPerInterval = item.expectedTier
           const sampleCount = 4_800
+
           const data: WaveformSourceData = framesPerInterval === 1
             ? {
               kind: 'samples',
@@ -494,13 +540,16 @@ describe('waveform request planning', () => {
               framesPerInterval,
               intervalCount: Math.ceil(sampleCount / framesPerInterval),
             }
+
           const render = (plans: ReturnType<typeof createWaveformRequestPlans>) => {
             const projected = projectRetainedWaveformData({
               retainedByKey: new Map([[plans.requests[0]?.key ?? '', retainWaveformData(data)]]),
               segments: plans.segments,
               map,
             })
+
             const commands: string[] = []
+
             const ctx = {
               fillStyle: '',
               beginPath: () => commands.push('beginPath'),
@@ -509,6 +558,7 @@ describe('waveform request planning', () => {
               fill: () => commands.push('fill'),
               arc: (x: number, y: number, radius: number) => commands.push(`arc:${x}:${y}:${radius}`),
             }
+
             for (const segment of projected) {
               drawWaveformSignal(ctx, {
                 data: segment.data,
@@ -525,8 +575,10 @@ describe('waveform request planning', () => {
                 }),
               })
             }
+
             return { projected, commands }
           }
+
           const arrangementRender = render(arrangement)
           const sampleDetailRender = render(sampleDetail)
           expect(arrangementRender.projected.map((value) => ({

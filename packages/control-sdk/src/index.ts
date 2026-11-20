@@ -162,11 +162,15 @@ export {
   maxJsonRpcIdLength,
   processJsonlLines,
 } from "./jsonl"
+
 export type { JsonlRpcAdapter } from "./jsonl"
+
 export type { JsonlLine } from "./jsonl"
 
 export type ControlAccessTokenResolver = () => string | Promise<string>
+
 export type ControlAccessToken = string | ControlAccessTokenResolver
+
 export type ControlFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
 export type ControlClientOptions = {
@@ -239,19 +243,24 @@ const readToken = async (accessToken: ControlAccessToken) => (
 
 export const normalizeControlOrigin = (value: string) => {
   let url: URL
+
   try {
     url = new URL(value)
   } catch {
     throw new Error("Control base URL must be a valid origin.")
   }
+
   if (url.username || url.password || url.pathname !== "/" || url.search || url.hash || value.includes("?") || value.includes("#")) {
     throw new Error("Control base URL must be an origin.")
   }
+
   const loopbackHttp = url.protocol === "http:"
     && (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]")
+
   if (url.protocol !== "https:" && !loopbackHttp) {
     throw new Error("Control base URL must use HTTPS except for loopback HTTP.")
   }
+
   return url.origin
 }
 
@@ -261,6 +270,7 @@ const controlUrl = (origin: string, pathname: string, version = "v1") => {
   root.pathname = `${root.pathname.replace(/\/$/, "")}/api/control/${version}${routePath}`
   root.search = search === undefined ? "" : `?${search}`
   root.hash = ""
+
   return root
 }
 
@@ -277,17 +287,22 @@ const response = async <Value>(
   schema: { parse: (value: Awaited<ReturnType<Response["json"]>>) => Value },
 ): Promise<Value> => {
   let received: Response
+
   try {
     received = await request()
   } catch {
     throw new ControlTransportError("Control request failed.")
   }
+
   const body = await parseResponseBody(received)
+
   if (!received.ok) {
     const error = controlErrorSchemaV1.safeParse(body)
+
     if (error.success) throw new ControlApiError(received.status, error.data)
     throw new ControlTransportError("Control service returned an invalid error response.")
   }
+
   try {
     return schema.parse(body)
   } catch {
@@ -298,6 +313,7 @@ const response = async <Value>(
 export const createControlClient = (options: ControlClientOptions): ControlClient => {
   const baseUrl = normalizeControlOrigin(options.baseUrl)
   const requestFetch = options.fetch ?? globalThis.fetch
+
   if (!requestFetch) throw new ControlTransportError("A fetch implementation is required.")
 
   const request = async <Value>(
@@ -307,9 +323,12 @@ export const createControlClient = (options: ControlClientOptions): ControlClien
     version = "v1",
   ) => {
     const token = await readToken(options.accessToken)
+
     if (!token) throw new ControlTransportError("An access token is required.")
     const headers = new Headers({ Authorization: `Bearer ${token}` })
+
     if (init?.body !== undefined) headers.set("Content-Type", "application/json")
+
     return response(
       () => requestFetch(controlUrl(baseUrl, pathname, version), {
         method: init?.method ?? "GET",
@@ -331,16 +350,19 @@ export const createControlClient = (options: ControlClientOptions): ControlClien
     ),
     snapshot: (projectId: string): Promise<ProjectSnapshotV1> => {
       const query = parseControlSnapshotQueryV1({ projectId })
+
       return request(`/projects/${encodeURIComponent(query.projectId)}/snapshot`, projectSnapshotSchemaV1)
     },
     snapshotV2: (projectId: string): Promise<ProjectSnapshotV2> => {
       const query = parseControlSnapshotQueryV1({ projectId })
+
       return request(`/projects/${encodeURIComponent(query.projectId)}/snapshot`, projectSnapshotSchemaV2, undefined, "v2")
     },
     preview: (input: ControlPreviewRequestV1): Promise<ControlPreviewResultV1> => {
       const requestBody = controlPreviewRequestSchemaV1.parse(
         parseControlPreviewRequestV1(JSON.parse(JSON.stringify(input))),
       )
+
       return request(
         `/projects/${encodeURIComponent(requestBody.projectId)}/preview`,
         controlPreviewResultSchemaV1,
@@ -351,6 +373,7 @@ export const createControlClient = (options: ControlClientOptions): ControlClien
       const requestBody = controlCommitRequestSchemaV1.parse(
         parseControlCommitRequestV1(JSON.parse(JSON.stringify(input))),
       )
+
       return request(
         `/projects/${encodeURIComponent(requestBody.projectId)}/commit`,
         controlCommitResultSchemaV1,
@@ -361,6 +384,7 @@ export const createControlClient = (options: ControlClientOptions): ControlClien
       const requestBody = controlApprovalRequestSchemaV1.parse(
         parseControlApprovalRequestV1(JSON.parse(JSON.stringify(input))),
       )
+
       return request(
         `/projects/${encodeURIComponent(requestBody.projectId)}/approvals`,
         controlApprovalResultSchemaV1,
@@ -370,15 +394,19 @@ export const createControlClient = (options: ControlClientOptions): ControlClien
     history: (input: ControlHistoryQueryV1): Promise<ControlHistoryResultV1> => {
       const query = parseControlHistoryQueryV1(input)
       const search = new URLSearchParams({ limit: String(query.limit) })
+
       if (query.cursor !== undefined) search.set("cursor", query.cursor)
       const url = `/projects/${encodeURIComponent(query.projectId)}/history?${search.toString()}`
+
       return request(url, controlHistoryResultSchemaV1)
     },
     recoveries: (input: ControlRecoveriesQueryV1): Promise<ControlRecoveriesResultV1> => {
       const query = parseControlRecoveriesQueryV1(input)
       const search = new URLSearchParams({ limit: String(query.limit) })
+
       if (query.cursor !== undefined) search.set("cursor", query.cursor)
       const url = `/projects/${encodeURIComponent(query.projectId)}/recoveries?${search.toString()}`
+
       return request(url, controlRecoveriesResultSchemaV1)
     },
   }

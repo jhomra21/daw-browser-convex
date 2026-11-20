@@ -84,18 +84,25 @@ export const mergeOwnedProcessorParams = (
 ) => {
   const descriptor = OWNED_PROCESSOR_DESCRIPTORS[kind]
   const currentEnvelope = parseJsonValue(descriptor.normalizeParams(parseJsonValue(existing) ?? null))
+
   const currentState = isJsonObject(currentEnvelope) && isJsonObject(currentEnvelope.state)
     ? currentEnvelope.state
     : {}
+
   const parsedParams = parseJsonValue(params)
+
   const update = isJsonObject(parsedParams) && isJsonObject(parsedParams.state)
     ? parsedParams.state
     : {}
+
   const mergedNested = descriptor.nestedStateKeys.flatMap((key): [string, JsonObject][] => {
     const currentValue = currentState[key]
     const updateValue = update[key]
+
     return isJsonObject(currentValue) && isJsonObject(updateValue) ? [[key, { ...currentValue, ...updateValue }]] : []
   })
+
   const state: JsonObject = { ...currentState, ...update, ...Object.fromEntries(mergedNested) }
+
   return descriptor.normalizeParams({ version: 1, state })
 }

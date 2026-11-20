@@ -22,12 +22,15 @@ export const deliverToRenderer = ({
   isFinishingQuit = () => false,
 }: RendererDeliveryOptions) => {
   const target = getTarget()
+
   if (!target || isFinishingQuit()) return false
 
   try {
     if (target.isDestroyed() || !sameOrigin(target.getURL())) return false
+
     if (getTarget() !== target || isFinishingQuit() || target.isDestroyed() || !sameOrigin(target.getURL())) return false
     target.send(channel, ...args)
+
     return true
   } catch (error) {
     if (error instanceof Error && isElectronDestroyedError(error)) return false

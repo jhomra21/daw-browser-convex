@@ -56,10 +56,12 @@ const GAIN_MIN = EQ_GAIN_DB_MIN
 const GAIN_MAX = EQ_GAIN_DB_MAX
 const Q_MIN = EQ_Q_MIN
 const Q_MAX = EQ_Q_MAX
+
 const EQ_CHANNEL_MODE_OPTIONS: { value: EqChannelMode; label: string }[] = [
   { value: 'mono', label: 'Mono' },
   { value: 'stereo', label: 'Stereo' },
 ]
+
 const SPECTRUM_DECAY_GRACE_MS = 90
 const SPECTRUM_DECAY_PER_SECOND = 0.04
 const SPECTRUM_SILENCE_THRESHOLD = 0.003
@@ -77,6 +79,7 @@ const hasAudibleSpectrum = (data: Float32Array) => {
   for (let i = 0; i < data.length; i++) {
     if (data[i] > SPECTRUM_SILENCE_THRESHOLD) return true
   }
+
   return false
 }
 
@@ -143,14 +146,17 @@ export default function Eq(props: EqProps) {
     // Initialize size based on container (very compact)
     const update = () => {
       const el = containerRef
+
       if (!el) return
       const rect = el.getBoundingClientRect()
       const width = Math.floor(rect.width)
       const height = Math.max(120, Math.floor(rect.height))
       setCanvasSize((current) => current.width === width && current.height === height ? current : { width, height })
     }
+
     update()
     resizeObs = new ResizeObserver(() => update())
+
     if (containerRef) resizeObs.observe(containerRef)
     const responseContext = new OfflineAudioContext(1, 1, 44100)
     responseFilter = responseContext.createBiquadFilter()
@@ -162,8 +168,11 @@ export default function Eq(props: EqProps) {
 
   onCleanup(() => {
     try { resizeObs?.disconnect() } catch {}
+
     if (spectrumDecayFrame !== null) cancelAnimationFrame(spectrumDecayFrame)
+
     if (initialDrawFrame !== null) cancelAnimationFrame(initialDrawFrame)
+
     if (drawFrame !== null) cancelAnimationFrame(drawFrame)
     responseFilter = undefined
   })
@@ -175,6 +184,7 @@ export default function Eq(props: EqProps) {
   const runSpectrumDecay = (time: number) => {
     spectrumDecayFrame = null
     const data = displayedSpectrum
+
     if (!data || untrack(collapsed)) return
 
     const elapsedSinceFresh = time - lastFreshSpectrumAt
@@ -183,6 +193,7 @@ export default function Eq(props: EqProps) {
 
     if (elapsedSinceFresh > SPECTRUM_DECAY_GRACE_MS) {
       const decay = Math.pow(SPECTRUM_DECAY_PER_SECOND, elapsed)
+
       for (let index = 0; index < data.length; index++) data[index] *= decay
       setSpectrumTick((tick) => tick + 1)
     }
@@ -209,14 +220,17 @@ export default function Eq(props: EqProps) {
   createEffect(() => {
     const frame = props.spectrumData
     const data = frame?.data
+
     if (!data || data.length === 0) {
       startSpectrumDecay()
+
       return
     }
 
     if (!displayedSpectrum || displayedSpectrum.length !== data.length) {
       displayedSpectrum = new Float32Array(data.length)
     }
+
     displayedSpectrum.set(data)
     displayedSpectrumSampleRate = frame.sampleRate
     lastFreshSpectrumAt = performance.now()
@@ -231,8 +245,10 @@ export default function Eq(props: EqProps) {
     const { width } = canvasSize()
     const L = 6, R = 6
     const inner = Math.max(1, width - (L + R))
+
     return L + ((logf - min) / (max - min)) * inner
   }
+
   const xToFreq = (x: number) => {
     const { width } = canvasSize()
     const L = 6, R = 6
@@ -240,29 +256,38 @@ export default function Eq(props: EqProps) {
     const clamped = Math.min(Math.max(x, L), width - R)
     const t = (clamped - L) / inner
     const logf = Math.log10(FREQ_MIN) + t * (Math.log10(FREQ_MAX) - Math.log10(FREQ_MIN))
+
     return Math.pow(10, logf)
   }
+
   const gainToY = (g: number) => {
     const { height } = canvasSize()
     const top = 18, bottom = 18
     const h = Math.max(1, height - (top + bottom))
     const t = (GAIN_MAX - Math.max(GAIN_MIN, Math.min(GAIN_MAX, g))) / (GAIN_MAX - GAIN_MIN)
+
     return top + t * h
   }
+
   const yToGain = (y: number) => {
     const { height } = canvasSize()
     const top = 18, bottom = 18
     const h = Math.max(1, height - (top + bottom))
     const clamped = Math.min(Math.max(y, top), height - bottom)
     const t = (clamped - top) / h
+
     return GAIN_MAX - t * (GAIN_MAX - GAIN_MIN)
   }
 
   const ensureResponseBuffers = (length: number) => {
     if (!responseFrequencies || responseFrequencies.length !== length) responseFrequencies = new Float32Array(length)
+
     if (!responseMagnitudes || responseMagnitudes.length !== length) responseMagnitudes = new Float32Array(length)
+
     if (!responsePhases || responsePhases.length !== length) responsePhases = new Float32Array(length)
+
     if (!responseDb || responseDb.length !== length) responseDb = new Float32Array(length)
+
     return {
       frequencies: responseFrequencies,
       magnitudes: responseMagnitudes,
@@ -274,11 +299,14 @@ export default function Eq(props: EqProps) {
   // Drawing
   const draw = () => {
     const cvs = canvasRef
+
     if (!cvs) return
     const ctx = cvs.getContext('2d')
+
     if (!ctx) return
 
     const { width, height } = canvasSize()
+
     if (cvs.width !== width || cvs.height !== height) {
       cvs.width = width
       cvs.height = height
@@ -320,6 +348,7 @@ export default function Eq(props: EqProps) {
 
     // Vertical log freqs
     const marks = [20, 100, 200, 500, 1000, 2000, 5000, 10000]
+
     for (const f of marks) {
       const x = freqToX(f)
       ctx.beginPath()
@@ -343,6 +372,7 @@ export default function Eq(props: EqProps) {
 
     // Live spectrum (if available)
     const spec = displayedSpectrum
+
     if (spec && spec.length > 0) {
       const grad = ctx.createLinearGradient(6, 0, width - 6, 0)
       grad.addColorStop(0, meterSafe)
@@ -351,10 +381,13 @@ export default function Eq(props: EqProps) {
       const inner = Math.max(1, width - (L + R))
       const nyquist = Math.max(1, displayedSpectrumSampleRate / 2)
       const sampleCount = Math.max(1, width - R - L + 1)
+
       if (!spectrumYBuf || spectrumYBuf.length !== sampleCount) spectrumYBuf = new Float32Array(sampleCount)
+
       if (!smoothedYBuf || smoothedYBuf.length !== sampleCount) smoothedYBuf = new Float32Array(sampleCount)
       const spectrumY = spectrumYBuf
       const smoothedSpectrumY = smoothedYBuf
+
       for (let index = 0; index < sampleCount; index++) {
         const x = L + index
         const t = (x - L) / inner
@@ -363,12 +396,15 @@ export default function Eq(props: EqProps) {
         const scaled = Math.pow(mag, 0.7)
         spectrumY[index] = height - (scaled * height * 0.5)
       }
+
       smoothSpectrumLinear(spectrumY, smoothedSpectrumY, SPECTRUM_SMOOTHING_RADIUS)
       let previousX = L
       let previousY = height
+
       for (let index = 0; index < sampleCount; index++) {
         const x = L + index
         const y = smoothedSpectrumY[index]
+
         if (x === L) {
           ctx.beginPath()
           ctx.moveTo(L, height)
@@ -376,9 +412,11 @@ export default function Eq(props: EqProps) {
         } else {
           ctx.quadraticCurveTo(previousX, previousY, (previousX + x) / 2, (previousY + y) / 2)
         }
+
         previousX = x
         previousY = y
       }
+
       ctx.lineTo(width - R, height)
       ctx.closePath()
       ctx.globalAlpha = 0.3
@@ -396,42 +434,52 @@ export default function Eq(props: EqProps) {
       const L = 6, R = 6
       const inner = Math.max(1, width - (L + R))
       let pointCount = 0
+
       for (let x = L; x <= width - R; x += 2) pointCount++
       const { frequencies, magnitudes, phases, dbValues } = ensureResponseBuffers(pointCount)
       const filter = responseFilter
       let nextResponseCacheKey = `${width}x${height}:${props.enabled}:`
+
       for (const band of props.bands) {
         nextResponseCacheKey += `${band.id}:${band.enabled}:${band.type}:${band.frequency}:${band.gainDb}:${band.q}|`
       }
+
       if (filter && responseCacheKey !== nextResponseCacheKey) {
         responseCacheKey = nextResponseCacheKey
         let pointIndex = 0
+
         for (let x = L; x <= width - R; x += 2) {
           const t = (x - L) / inner
           frequencies[pointIndex] = FREQ_MIN * Math.pow(FREQ_MAX / FREQ_MIN, t)
           dbValues[pointIndex] = 0
           pointIndex++
         }
+
         for (const band of props.bands) {
           if (!band.enabled) continue
           applyEqResponseBandParams(filter, band)
           filter.getFrequencyResponse(frequencies, magnitudes, phases)
+
           for (let index = 0; index < pointCount; index++) {
             dbValues[index] += 20 * Math.log10(Math.max(0.000001, magnitudes[index] ?? 1))
           }
         }
 
       }
+
       if (filter && responseDb) {
         ctx.strokeStyle = meterSafe
         ctx.lineWidth = 2.5
         ctx.beginPath()
         let pointIndex = 0
+
         for (let x = L; x <= width - R; x += 2) {
           const y = gainToY(dbValues[pointIndex] ?? 0)
+
           if (x === L) ctx.moveTo(x, y); else ctx.lineTo(x, y)
           pointIndex++
         }
+
         ctx.stroke()
       }
     }
@@ -440,8 +488,10 @@ export default function Eq(props: EqProps) {
     ctx.font = 'bold 9px ui-monospace, SFMono-Regular, Menlo, monospace'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
+
     for (let index = 0; index < props.bands.length; index++) {
       const b = props.bands[index]
+
       if (!b.enabled) continue
       const x = freqToX(b.frequency)
       const y = gainToY(supportsGain(b.type) ? b.gainDb : 0)
@@ -469,6 +519,7 @@ export default function Eq(props: EqProps) {
       void band.enabled
       void band.type
     }
+
     void props.enabled
     void selectedId()
     void canvasSize()
@@ -479,16 +530,20 @@ export default function Eq(props: EqProps) {
 
   createEffect(() => {
     const current = selectedId()
+
     if (props.bands.some((band) => band.id === current)) return
     const next = props.bands[0]?.id ?? ''
+
     if (current !== next) setSelectedId(next)
   })
 
   // Interaction: drag nodes to set freq/gain
   const gesture = useParameterGesture({ onClosed: () => canvasDrag.cancelDrag() })
+
   const canvasDrag = useDrag({
     onDragStart: ({ x, y }) => {
       const id = draggedId()
+
       if (!id || !canvasRef) return
       const rect = canvasRef.getBoundingClientRect()
       gesture.open()
@@ -496,6 +551,7 @@ export default function Eq(props: EqProps) {
     },
     onDragMove: ({ x, y }) => {
       const id = draggedId()
+
       if (!id || !canvasRef) return
       const rect = canvasRef.getBoundingClientRect()
       gesture.tick(() => applyBandPointerValue(id, x - rect.left, y - rect.top))
@@ -518,14 +574,18 @@ export default function Eq(props: EqProps) {
     const x = event.clientX - rect.left
     const y = event.clientY - rect.top
     let closest: { id: string; distance: number } | undefined
+
     for (const band of props.bands) {
       if (!band.enabled) continue
+
       const distance = Math.hypot(
         x - freqToX(band.frequency),
         y - gainToY(supportsGain(band.type) ? band.gainDb : 0),
       )
+
       if (distance < 24 && (!closest || distance < closest.distance)) closest = { id: band.id, distance }
     }
+
     if (!closest) return
     setSelectedId(closest.id)
     setDraggedId(closest.id)
@@ -539,11 +599,14 @@ export default function Eq(props: EqProps) {
   const applyBandPointerValue = (id: string, x: number, y: number) => {
     const nf = Math.max(FREQ_MIN, Math.min(FREQ_MAX, xToFreq(x)))
     const band = props.bands.find(b => b.id === id)
+
     if (!band) return
+
     if (supportsGain(band.type)) {
       const ng = Math.max(GAIN_MIN, Math.min(GAIN_MAX, yToGain(y)))
       const gainDb = Math.round(ng * 10) / 10
       const frequency = Math.round(nf)
+
       if (band.gainDb !== gainDb || band.frequency !== frequency) {
         overrideAutomation(id, 'frequencyHz')
         overrideAutomation(id, 'gainDb')
@@ -551,6 +614,7 @@ export default function Eq(props: EqProps) {
       }
     } else {
       const frequency = Math.round(nf)
+
       if (band.frequency !== frequency) {
         overrideAutomation(id, 'frequencyHz')
         props.onBandChange(id, { frequency })
@@ -561,14 +625,18 @@ export default function Eq(props: EqProps) {
   // UI helpers
   const selectedBandState = createMemo(() => {
     const index = props.bands.findIndex((band) => band.id === selectedId())
+
     return {
       band: index === -1 ? undefined : props.bands[index],
       index,
     }
   })
+
   const selectedBand = () => selectedBandState().band
+
   const defaultSelectedBand = createMemo(() => {
     const index = selectedBandState().index
+
     return index === -1 ? DEFAULT_EQ_PARAMS.bands[0] : (DEFAULT_EQ_PARAMS.bands[index] ?? createDefaultEqBand(index))
   })
 
@@ -578,27 +646,37 @@ export default function Eq(props: EqProps) {
     const band = selectedBand()
     const gain = band?.gainDb ?? 0
     const gainDisabled = band ? !supportsGain(band.type) : false
+
     return gainDisabled ? '-' : formatDb(gain)
   }
 
   const selectedQLabel = () => formatQ(selectedBand()?.q ?? 0)
+
   const selectedBandAutomationRange = (property: 'frequencyHz' | 'gainDb' | 'q') => {
     const band = selectedBand()
+
     if (!band) return undefined
+
     return props.automationRangesByParameterId?.get(createEqBandParameterId(band.id, property))
   }
+
   const selectedBandParameterId = (property: 'frequencyHz' | 'gainDb' | 'q') => {
     const band = selectedBand()
+
     return band ? createEqBandParameterId(band.id, property) : undefined
   }
+
   const updateKnob = (property: 'frequency' | 'gainDb' | 'q', value: number) => {
     const band = selectedBand()
+
     if (!band) return
+
     const updates: Partial<EqBandParams> = property === 'frequency'
       ? { frequency: value }
       : property === 'gainDb'
         ? { gainDb: value }
         : { q: value }
+
     overrideAutomation(band.id, property === 'frequency' ? 'frequencyHz' : property)
     props.onBandChange(band.id, updates)
   }
@@ -636,6 +714,7 @@ export default function Eq(props: EqProps) {
             automated={!!selectedBandAutomationRange('frequencyHz')}
             onAutomationSelect={() => {
               const parameterId = selectedBandParameterId('frequencyHz')
+
               if (parameterId) props.onAutomationParameterTouch?.(parameterId)
             }}
             onValueChange={(v) => updateKnob('frequency', v)}
@@ -657,6 +736,7 @@ export default function Eq(props: EqProps) {
             automated={!!selectedBandAutomationRange('gainDb')}
             onAutomationSelect={() => {
               const parameterId = selectedBandParameterId('gainDb')
+
               if (parameterId) props.onAutomationParameterTouch?.(parameterId)
             }}
             onValueChange={(v) => updateKnob('gainDb', v)}
@@ -676,6 +756,7 @@ export default function Eq(props: EqProps) {
             automated={!!selectedBandAutomationRange('q')}
             onAutomationSelect={() => {
               const parameterId = selectedBandParameterId('q')
+
               if (parameterId) props.onAutomationParameterTouch?.(parameterId)
             }}
             onValueChange={(v) => updateKnob('q', v)}

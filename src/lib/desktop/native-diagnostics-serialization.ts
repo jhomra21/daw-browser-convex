@@ -5,6 +5,7 @@ export const serializeNativeDiagnostics = <T extends Pick<NativeHostDiagnostics,
   | "transportFrame" | "realtimePerformance" | "vstWorkerPerformance">>(diagnostics: T) => {
   const { workerAutomation, renderEpoch, lastRejectedCallback, lastRejectedRenderEpoch,
     transportFrame, realtimePerformance, vstWorkerPerformance, ...rest } = diagnostics
+
   return {
     ...rest,
     workerAutomation: workerAutomation === null ? null : {

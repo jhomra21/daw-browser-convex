@@ -91,6 +91,7 @@ window.saveFixture = {
   dashboardLabel: () => document.body.innerText.includes('Some changes could not be saved'),
 }
 `
+
   const result = await build({
     root: repositoryRoot,
     configFile: false,
@@ -103,27 +104,35 @@ window.saveFixture = {
         enforce: 'pre',
         resolveId: (id) => {
           if (id.endsWith(fixtureId)) return `\0${fixtureId}.tsx`
+
           if (id.endsWith('hooks/useShareMenuController')) return '\0stub:share.ts'
+
           if (/menus\/(file|edit|view|settings|tracks)-menu$/.test(id)) return '\0stub:menus.ts'
+
           if (id.endsWith('lib/shared-outbox')) return '\0stub:outbox.ts'
+
           return undefined
         },
         load: (id) => {
           if (id === `\0${fixtureId}.tsx`) return source
+
           if (id === '\0stub:share.ts') return `export const useShareMenuController = () => ({
             members: () => [], membersLoading: () => false, membersError: () => null,
             shareError: () => null, revokingMemberId: () => null, reset: () => {},
             loadMembers: async () => {}, createShareUrl: async () => {}, copy: async () => false,
             revokeMember: async () => false,
           })`
+
           if (id === '\0stub:outbox.ts') return `export const readSharedOutboxRetryState = async () => ({
             failure: { reason: 'Project was archived', permanent: true },
           })`
+
           if (id === '\0stub:menus.ts') return `export const FileMenu = () => null
             export const EditMenu = () => null
             export const ViewMenu = () => null
             export const SettingsMenu = () => null
             export const TracksMenu = () => null`
+
           return undefined
         },
       },
@@ -131,11 +140,15 @@ window.saveFixture = {
     resolve: { alias: { '~': `${repositoryRoot}src` } },
     build: { write: false, minify: false, lib: { entry: fixtureId, formats: ['iife'], name: 'projectSaveStatusFixture' } },
   })
+
   const output = Array.isArray(result) ? result[0] : result
+
   if (!output || !('output' in output)) throw new Error('Expected one save status bundle.')
+
   const styles = output.output.flatMap((chunk) => (
     chunk.type === 'asset' && chunk.fileName.endsWith('.css') ? [String(chunk.source)] : []
   ))
+
   return `<!doctype html><head><style>${styles.join('\n')}</style></head><body style="margin:0"><script>${output.output[0].code}</script>`
 }
 
@@ -150,16 +163,22 @@ test('project save status surfaces share queued IndexedDB write state', async ()
   const env = { ...process.env }
   delete env.AGENT_BROWSER_CDP
   delete env.AGENT_BROWSER_SESSION
+
   const run = async (...args: string[]) => {
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
     const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
+
     if (await child.exited !== 0) throw new Error(stderr || stdout)
+
     return stdout.trim()
   }
+
   const readLabels = async () => labelsSchema.parse(JSON.parse(JSON.parse(
     await run('eval', `(async () => JSON.stringify(saveFixture.labels()))()`),
   )))
+
   await run('open', `file://${directory}/index.html`)
+
   try {
     await run('eval', 'saveFixture.mount()')
     expect(await readLabels()).toEqual(['Saved locally on this device', 'Saved locally on this device'])

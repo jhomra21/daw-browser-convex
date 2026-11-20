@@ -9,18 +9,22 @@ const withAssetLock = async <Value>(
     if (!navigator.locks) {
       throw new Error('Web Locks are required for browser project asset mutations.')
     }
+
     return navigator.locks.request(name, { mode: 'exclusive' }, callback)
   }
+
   const previous = chains.get(name) ?? Promise.resolve()
   let release: () => void = () => undefined
   const current = new Promise<void>((resolve) => { release = resolve })
   const next = previous.then(() => current, () => current)
   chains.set(name, next)
   await previous
+
   try {
     return await callback()
   } finally {
     release()
+
     if (chains.get(name) === next) chains.delete(name)
   }
 }
@@ -48,10 +52,13 @@ const withAssetLockIfAvailable = async (
         await callback()
       }
     })
+
     return acquired
   }
+
   if (chains.has(name)) return false
   await withAssetLock(name, callback)
+
   return true
 }
 

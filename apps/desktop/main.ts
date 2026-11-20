@@ -201,6 +201,7 @@ import { createRecordingStartDiagnostic } from "./recording-start-diagnostic"
 protocol.registerSchemesAsPrivileged([{ scheme: "daw", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
 const captureInhibited = process.env.DAW_RECORDING_START_DIAGNOSTIC === "1"
+
 const recordingStartDiagnostic = createRecordingStartDiagnostic(
   process.env.DAW_RECORDING_START_DIAGNOSTIC === "1" || process.env.DAW_RECORDING_START_EVIDENCE === "1",
   (event) => console.log("[recording-start-diagnostic]", JSON.stringify(event)),
@@ -208,18 +209,22 @@ const recordingStartDiagnostic = createRecordingStartDiagnostic(
 
 const positiveUnsigned32Schema = unsigned32Schema.min(1)
 const requestIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/)
+
 const recoveryCompletionSchema = z.object({
   powerGeneration: z.number().int().safe(),
   result: z.enum(["ready", "failed"]),
 }).passthrough()
+
 const rendererMessageSchema = z.object({
   generation: z.number().int().safe(),
   frame: desktopFrameSchemaV1,
 }).passthrough()
+
 const offlineRenderRequestSchema = z.object({
   jobId: z.string().min(1).max(128),
   plan: nativeOfflineRenderPlanSchema,
 }).passthrough()
+
 const offlineMappedPageResponseSchema = z.object({
   jobId: z.string().min(1).max(128),
   requestId: requestIdSchema,
@@ -234,7 +239,9 @@ const offlineMappedPageResponseSchema = z.object({
   }).strict().optional(),
   error: z.string().max(256).optional(),
 }).strict().refine((value) => (value.page !== undefined) !== (value.error !== undefined))
+
 const optionalDeviceIdSchema = z.string().optional()
+
 const nativeSessionConfigurationSchema = z.object({
   deviceId: z.string(),
   sampleRateHz: unsigned32Schema,
@@ -242,6 +249,7 @@ const nativeSessionConfigurationSchema = z.object({
   channelCount: unsigned32Schema,
   revision: unsigned32Schema,
 }).passthrough()
+
 const nativeSessionAssetSchema = z.object({
   sessionAssetId: unsigned32Schema,
   frameCount: unsigned32Schema,
@@ -250,6 +258,7 @@ const nativeSessionAssetSchema = z.object({
   planarPcm: z.instanceof(Uint8Array),
   contentHashPrefix: z.instanceof(Uint8Array).optional(),
 }).strict()
+
 const nativeAttachmentCoordinationSchema = z.object({
   projectId: projectIdSchemaV1,
   serializedPlan: z.string().refine((value) => Buffer.byteLength(value, "utf8") <= 1_048_576),
@@ -261,6 +270,7 @@ const nativeAttachmentCoordinationSchema = z.object({
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
   }).strict()).max(64).optional(),
 }).passthrough()
+
 const nativeBytesEnvelopeSchema = nativeSessionEnvelopeSchema(z.instanceof(Uint8Array))
 const nativeUndefinedEnvelopeSchema = nativeSessionEnvelopeSchema(z.undefined())
 const nativeEditorEnvelopeSchema = nativeSessionEnvelopeSchema(nativeEditorCommandSchema)
@@ -268,6 +278,7 @@ const nativeAttachmentEnvelopeSchema = nativeSessionEnvelopeSchema(nativeAttachm
 const nativeConfigurationEnvelopeSchema = nativeSessionEnvelopeSchema(nativeSessionConfigurationSchema)
 const nativeAssetEnvelopeSchema = nativeSessionEnvelopeSchema(nativeSessionAssetSchema)
 const nativeAssetIdEnvelopeSchema = nativeSessionEnvelopeSchema(positiveUnsigned32Schema)
+
 const nativeMappedAssetEnvelopeSchema = nativeSessionEnvelopeSchema(z.object({
   sessionAssetId: positiveUnsigned32Schema,
   frameCount: z.number().int().positive().safe(),
@@ -276,12 +287,14 @@ const nativeMappedAssetEnvelopeSchema = nativeSessionEnvelopeSchema(z.object({
   contentHashPrefix: z.bigint().nonnegative().max(0xffff_ffff_ffff_ffffn).optional(),
   preparedStretchArtifactId: z.string().min(1).max(512).optional(),
 }).strict())
+
 const nativeMappedAssetPageEnvelopeSchema = nativeSessionEnvelopeSchema(z.object({
   sessionAssetId: positiveUnsigned32Schema,
   startFrame: z.number().int().nonnegative().safe(),
   frameCount: positiveUnsigned32Schema,
   planarPcm: z.instanceof(Uint8Array).refine((value) => value.byteLength > 0 && value.byteLength <= 1_048_560),
 }).strict())
+
 const nativeInstanceEnvelopeSchema = nativeSessionEnvelopeSchema(uuidSchema)
 const pluginDirectorySchema = z.object({ directory: z.string() }).passthrough()
 const closePreparationResultSchema = z.object({ flushed: z.literal(true) }).passthrough()
@@ -289,17 +302,23 @@ const closePreparationResultSchema = z.object({ flushed: z.literal(true) }).pass
 const diagnosticsTraceEnabled = process.env.DAW_DIAGNOSTICS_V2_TRACE === "1"
 const diagnosticsTrace = createDiagnosticsTrace(diagnosticsTraceEnabled, console.error)
 const diagnosticsStarts = new Map<string, number>()
+
 const diagnosticsTraceMessageSchema = z.object({
   stage: z.enum(["preload-received", "preload-handler", "controller-before-native", "controller-after-native", "controller-parsed", "preload-reply", "preload-reply-sent", "preload-reply-invalid", "preload-reply-invalid-path"]),
   elapsedMs: z.number().int().nonnegative().max(60_000),
   paths: z.string().max(512).regex(/^[a-z.,]*$/).optional(),
 }).strict()
+
 const appName = "daw-browser"
+
 const sanitizeNativeVst3DiagnosticError = (error: Error | undefined) => {
   const message = error?.message ?? "The native VST editor session is unavailable."
+
   return message.replace(/(?:[A-Za-z]:[\\/]|\/)[^\s]*/g, "<path>").slice(0, 256)
 }
+
 const preloadPath = path.join(import.meta.dirname, "preload.js")
+
 const externalUrl = (url: string) => {
   try {
     return new URL(url).protocol === "https:"
@@ -307,27 +326,36 @@ const externalUrl = (url: string) => {
     return false
   }
 }
+
 const sameAppOrigin = createTrustedDesktopOriginPolicy(MAIN_WINDOW_VITE_DEV_SERVER_URL)
+
 type PendingRendererRequest = {
   generation: number
   resolve: (frame: Extract<DesktopFrameV1, { type: "reply" }>) => void
   reject: (error: Error) => void
 }
+
 type RendererRequestInput = Parameters<typeof desktopRendererRequestSchemaV1.parse>[0]
+
 let window_: BrowserWindow | undefined
 let finishingQuit = false
 let quitCleanupStarted = false
+
 const pendingEditorStateAcks = new Map<string, {
   resolve: () => void
   reject: (error: Error) => void
 }>()
+
 const evidenceDirectory = process.env.DAW_AE08_EVIDENCE_DIR
 const ae08Evidence = createAe08Evidence(evidenceDirectory)
+
 const ae08WorkerEnvironment: NodeJS.ProcessEnv = evidenceDirectory
   ? { DAW_AE08_EVIDENCE_DIR: evidenceDirectory }
   : {}
+
 const sendRendererMessage = (channel: string, ...args: unknown[]) => {
   ae08Evidence?.rendererSend()
+
   return deliverToRenderer({
     getTarget: () => window_?.webContents,
     channel,
@@ -336,6 +364,7 @@ const sendRendererMessage = (channel: string, ...args: unknown[]) => {
     isFinishingQuit: () => finishingQuit,
   })
 }
+
 const applicationMenuController = createApplicationMenuController<Menu>({
   platform: process.platform === "darwin"
     ? "darwin"
@@ -346,6 +375,7 @@ const applicationMenuController = createApplicationMenuController<Menu>({
     sendRendererMessage(applicationMenuCommandChannel, command)
   },
 })
+
 const rendererLifecycle = createRendererLifecycleOwner()
 let generation = rendererLifecycle.generation()
 const rendererPending = new Map<string, PendingRendererRequest>()
@@ -356,18 +386,21 @@ const importCandidates = new Map<string, { requestId: string; rendererGeneration
 const preparedExportModes = new Map<string, "mixdown" | "stems">()
 const terminalExportsAwaitingScope = new Set<string>()
 const terminalImportsAwaitingScope = new Set<string>()
+
 const exportScopesHasScope = (scope: { requestId: string; rendererGeneration: number }) => (
   [...exportScopes.values()].some((exportScope) => (
     exportScope.requestId === scope.requestId
     && exportScope.rendererGeneration === scope.rendererGeneration
   ))
 )
+
 const importScopesHasScope = (scope: { requestId: string; rendererGeneration: number }) => (
   [...importScopes.values()].some((importScope) => (
     importScope.requestId === scope.requestId
     && importScope.rendererGeneration === scope.rendererGeneration
   ))
 )
+
 const instanceId = randomBytes(16).toString("hex")
 const secret = randomBytes(32).toString("hex")
 let registrationPath = ""
@@ -379,6 +412,7 @@ let pluginCatalogStore: ReturnType<typeof createPluginCatalogStore> | undefined
 let audioHostPath: string | undefined
 let vst3WorkerPath: string | undefined
 let audioHostSupervisor: ReturnType<typeof createNativeAudioHostSupervisor> | undefined
+
 let offlineRenderJob: {
   jobId: string
   controller: AbortController
@@ -393,20 +427,25 @@ let offlineRenderJob: {
     cleanup: () => void
   }>
 } | undefined
+
 const maximumPendingOfflineMappedPageRequests = 4
 const offlinePcmAcks = createOfflinePcmAckTracker()
+
 const abortOfflineRenderJobs = () => {
   offlinePcmAcks.cancel(new DOMException("Native offline rendering canceled.", "AbortError"))
   offlineRenderJob?.controller.abort()
 }
+
 let nativeVst3EditorSessionManager: ReturnType<typeof createNativeVst3EditorSessionManager> | undefined
 let audioLifecycle: DesktopAudioLifecycle = { state: "ready", powerGeneration: 0 }
 let audioSuspendPromise: Promise<void> | undefined
 let audioRecoveryGeneration: number | undefined
 let vst3ScannerSupervisor: ReturnType<typeof createVst3ScannerSupervisor> | undefined
+
 let nativeReleaseArtifactVerification:
   | { status: "disabled" | "development" | "verified" }
   | { status: "failed"; reason: string } = { status: "disabled" }
+
 let removeAudioHostLossListener: (() => void) | undefined
 let removeAudioHostRecordingStatusListener: (() => void) | undefined
 let removeAudioHostMeterBatchListener: (() => void) | undefined
@@ -417,6 +456,7 @@ const activeEditorProjectBindings = createNativeVstProjectBindings()
 const attachmentLedger = createNativeVst3SessionLedger()
 const activeRendererTransactions = new Map<string, { generation: number; senderId: number }>()
 const nativeFileCapabilityHelper = createNativeFileCapabilityHelper()
+
 const recordingSessionOwner = createRecordingSessionOwner({
   diagnostic: recordingStartDiagnostic,
   captureInhibited,
@@ -427,6 +467,7 @@ const recordingSessionOwner = createRecordingSessionOwner({
   statusChannel: recordingStatusChannel,
   failureChannel: recordingFailureChannel,
 })
+
 const fileCapabilities = createFileCapabilityManager({
   dialog: {
     showOpenDialog: (options) => dialog.showOpenDialog(options),
@@ -436,22 +477,28 @@ const fileCapabilities = createFileCapabilityManager({
   nativeOutputEnabled: () => nativeMediaAvailable,
   privateTempDirectory: () => path.join(app.getPath("userData"), "output-temp"),
 })
+
 const settleCapabilityRevocation = (operation: Promise<void>) => {
   void operation.catch(() => undefined)
 }
+
 const availableDesktopOperations = () => desktopOperations(nativeMediaAvailable)
+
 const publishAudioLifecycle = () => {
   sendRendererMessage(lifecycleChannel, audioLifecycle)
 }
+
 const recoverAudioHost = (recoveryGeneration: number) => {
   if (audioRecoveryGeneration === recoveryGeneration) return
   audioRecoveryGeneration = recoveryGeneration
   void (async () => {
     try {
       await audioSuspendPromise
+
       if (audioLifecycle.state !== "suspended" || audioLifecycle.powerGeneration !== recoveryGeneration) return
       await audioHostSupervisor?.resume()
       await audioHostSupervisor?.start()
+
       if (audioLifecycle.state !== "suspended" || audioLifecycle.powerGeneration !== recoveryGeneration) return
       audioLifecycle = { state: "recovering", powerGeneration: recoveryGeneration }
       publishAudioLifecycle()
@@ -464,14 +511,17 @@ const recoverAudioHost = (recoveryGeneration: number) => {
     }
   })()
 }
+
 const operationFailure = (_operation: DesktopOperationV1, code: Parameters<typeof hostError>[0], message: string) => hostError(code, message)
 const operationFailureV2 = (_operation: DesktopOperationV1, code: Parameters<typeof hostError>[0], message: string) => hostErrorV2(code, message)
+
 // A refusal the renderer gave while a request was being prepared; the client gets its code and message.
 class RendererRefusal extends Error {
   constructor(readonly code: Parameters<typeof hostError>[0], message: string) {
     super(message)
   }
 }
+
 const writeSocketFailure = (
   socket: Socket,
   protocolVersion: DesktopProtocolVersion,
@@ -487,8 +537,10 @@ const writeSocketFailure = (
       id,
       error: operationFailureV2(operation, code, message),
     }))
+
     return
   }
+
   socket.write(encodeDesktopFrame({
     version: desktopProtocolVersion,
     type: "reply",
@@ -506,6 +558,7 @@ const cancelRendererRequest = (id: string, requestGeneration: number) => {
 
 const cancelPreparedRendererExport = (id: string) => {
   const mode = preparedExportModes.get(id)
+
   if (!mode) return
   preparedExportModes.delete(id)
   sendRendererMessage(hostRequestChannel, {
@@ -525,17 +578,22 @@ const rejectRendererPending = (message: string) => {
     cancelRendererRequest(id, pending.generation)
     pending.reject(new Error(message))
   }
+
   rendererPending.clear()
 }
+
 const rejectEditorStateAcks = (message: string) => {
   for (const pending of pendingEditorStateAcks.values()) pending.reject(new Error(message))
   pendingEditorStateAcks.clear()
 }
+
 const invalidateRendererGeneration = (message: string) => {
   const invalidation = rendererLifecycle.invalidateActiveDocument()
+
   if (!invalidation) return
   applyRendererInvalidation(invalidation, message)
 }
+
 const applyRendererInvalidation = (
   invalidation: { previousGeneration: number; generation: number },
   message: string,
@@ -543,7 +601,9 @@ const applyRendererInvalidation = (
   const previousGeneration = invalidation.previousGeneration
   generation = invalidation.generation
   recordingSessionOwner.invalidateRenderer()
+
   for (const scope of importScopes.values()) settleCapabilityRevocation(fileCapabilities.revokeRequest(scope))
+
   for (const scope of importCandidates.values()) settleCapabilityRevocation(fileCapabilities.revokeRequest(scope))
   importScopes.clear()
   importCandidates.clear()
@@ -553,20 +613,25 @@ const applyRendererInvalidation = (
   applicationMenuController.reset()
   preparationRegistry.abortAll()
   settleCapabilityRevocation(fileCapabilities.revokeRendererGeneration(previousGeneration))
+
   for (const [token, transaction] of activeRendererTransactions) {
     if (transaction.generation !== previousGeneration) continue
     activeRendererTransactions.delete(token)
+
     try {
       activeEditorProjectBindings.rollback(token)
     } catch {
       // A newer staged transaction owns the binding registry.
     }
   }
+
   rejectRendererPending(message)
   settleCapabilityRevocation(audioHostSupervisor?.invalidateManualTransaction() ?? Promise.resolve())
 }
+
 const rejectRendererRequest = (id: string, message: string) => {
   const pending = rendererPending.get(id)
+
   if (!pending) return
   rendererPending.delete(id)
   cancelRendererRequest(id, pending.generation)
@@ -579,11 +644,15 @@ const sendToRenderer = (
 ) => new Promise<Extract<DesktopFrameV1, { type: "reply" }>>((resolve, reject) => {
   if (rendererPending.has(request.id)) {
     reject(new Error("Duplicate request ID."))
+
     return
   }
+
   const expectedGeneration = generation
   rendererPending.set(request.id, { generation: expectedGeneration, resolve, reject })
+
   if (request.operation === "diagnostics.snapshot.v2") diagnosticsTrace.mark(diagnosticsStarts.get(request.id) ?? diagnosticsTrace.start(), "renderer-dispatched")
+
   if (!sendRendererMessage(hostRequestChannel, {
     generation: expectedGeneration,
     frame: request,
@@ -597,18 +666,22 @@ const sendToRenderer = (
 
 const renderRequest = async (operation: DesktopOperationV1 | "lifecycle.prepareToClose", input: RendererRequestInput, id: string, deadlineMs = 10_000, actorSubject?: string) => {
   const request = { version: desktopProtocolVersion, type: "request" as const, id, operation, input, deadlineMs }
+
   const parsed = operation !== "lifecycle.prepareToClose" && isDesktopControlOperation(operation)
     ? desktopTrustedRendererRequestSchemaV1.parse({ ...request, actorSubject })
     : desktopRendererRequestSchemaV1.parse(request)
+
   // This is a bounded deadline guard for a renderer IPC round trip; it is always cleared on completion.
   let timeout: ReturnType<typeof setTimeout> | undefined
   let deadlineElapsed = false
+
   try {
     return await Promise.race([
       sendToRenderer(parsed, actorSubject),
       new Promise<Extract<DesktopFrameV1, { type: "reply" }>>((_resolve, reject) => {
         timeout = setTimeout(() => {
           deadlineElapsed = true
+
           if (operation === "diagnostics.snapshot.v2") diagnosticsTrace.mark(diagnosticsStarts.get(id) ?? diagnosticsTrace.start(), "renderer-deadline")
           reject(new Error("Renderer deadline exceeded."))
         }, deadlineMs)
@@ -617,6 +690,7 @@ const renderRequest = async (operation: DesktopOperationV1 | "lifecycle.prepareT
   } finally {
     if (timeout) clearTimeout(timeout)
     const pending = rendererPending.get(id)
+
     if (deadlineElapsed && pending) cancelRendererRequest(id, pending.generation)
     rendererPending.delete(id)
   }
@@ -629,12 +703,16 @@ const prepareRendererInput = async (
   signal: AbortSignal,
 ) => {
   signal.throwIfAborted()
+
   if (operation === "host.import.audio") {
     const request = desktopHostImportInputSchemaV1.parse(input)
+
     const selection = request.source.kind === "picker"
       ? await fileCapabilities.pickReadFiles(scope)
       : { canceled: false as const, files: [await fileCapabilities.grantReadFile(scope, request.source.path)] }
+
     signal.throwIfAborted()
+
     return desktopRendererImportInputSchemaV1.parse(
       selection.canceled
         ? { canceled: true }
@@ -644,11 +722,14 @@ const prepareRendererInput = async (
         },
     )
   }
+
   if (operation === "host.export.run") {
     const request = desktopHostExportRunInputSchemaV1.parse(input)
+
     const extension = request.mode === "mixdown"
       ? request.format === "ogg-opus" ? "ogg" : request.format
       : undefined
+
     const placeholderDestination: {
       kind: "capability-file"
       token: string
@@ -660,33 +741,45 @@ const prepareRendererInput = async (
     } = request.mode === "mixdown"
       ? { kind: "capability-file", token: "0".repeat(64), basename: `preflight.${extension}` }
       : { kind: "capability-directory", token: "0".repeat(64), basename: "preflight" }
+
     const preflight = await renderRequest("host.export.run", desktopRendererExportInputSchemaV1.parse({
       ...request,
       canceled: false,
       preflightOnly: true,
       destination: placeholderDestination,
     }), scope.requestId)
+
     if (preflight.error) {
       const refusal = hostErrorSchemaV1.safeParse(preflight.error)
       throw new RendererRefusal(refusal.success ? refusal.data.code : "internal", preflight.error.message)
     }
+
     preparedExportModes.set(scope.requestId, request.mode)
+
     try {
       signal.throwIfAborted()
       const destination = request.destination
+
       if (destination.kind === "file" || destination.kind === "file-picker") {
         const selected = destination.kind === "file-picker"
           ? await fileCapabilities.pickOutputFile(scope, request.mode === "mixdown" ? request.format : undefined)
           : { canceled: false as const, file: await fileCapabilities.grantOutputFile(scope, destination.path) }
+
         signal.throwIfAborted()
+
         if (selected.canceled) return desktopRendererExportInputSchemaV1.parse({ canceled: true, mode: "mixdown" })
+
         return desktopRendererExportInputSchemaV1.parse({ ...request, destination: { kind: "capability-file", token: selected.file.token, basename: selected.file.basename }, canceled: false })
       }
+
       const selected = destination.kind === "directory-picker"
         ? await fileCapabilities.pickDirectory(scope)
         : { canceled: false as const, directory: await fileCapabilities.grantDirectory(scope, destination.path) }
+
       signal.throwIfAborted()
+
       if (selected.canceled) return desktopRendererExportInputSchemaV1.parse({ canceled: true, mode: "stems" })
+
       return desktopRendererExportInputSchemaV1.parse({ ...request, destination: { kind: "capability-directory", token: selected.directory.token, basename: selected.directory.basename }, canceled: false })
     } catch (error) {
       cancelPreparedRendererExport(scope.requestId)
@@ -695,6 +788,7 @@ const prepareRendererInput = async (
       preparedExportModes.delete(scope.requestId)
     }
   }
+
   return input
 }
 
@@ -703,11 +797,14 @@ const closeSocket = async () => {
   acceptedSockets.clear()
   await new Promise<void>((resolve) => socketServer?.close(() => resolve()) ?? resolve())
   socketServer = undefined
+
   if (socketPath) await rm(socketPath, { force: true }).catch(() => undefined)
+
   if (registrationPath) await rm(registrationPath, { force: true }).catch(() => undefined)
 }
 
 const registrationDirectory = () => path.join(app.getPath("userData"), "host")
+
 const localSocketAddress = () => process.platform === "win32"
   ? `\\\\.\\pipe\\${appName}-${instanceId}`
   : path.join(registrationDirectory(), `${instanceId}.sock`)
@@ -715,22 +812,28 @@ const localSocketAddress = () => process.platform === "win32"
 const authenticate = (value: string) => {
   const supplied = Buffer.from(value, "hex")
   const expected = Buffer.from(secret, "hex")
+
   return supplied.byteLength === expected.byteLength && timingSafeEqual(supplied, expected)
 }
 
 const startSocket = async () => {
   const directory = registrationDirectory()
+
   if (process.platform === "win32") await mkdir(directory, { recursive: true })
   else {
     await mkdir(directory, { recursive: true, mode: 0o700 })
     await chmod(directory, 0o700)
   }
+
   socketPath = localSocketAddress()
+
   if (process.platform !== "win32") await rm(socketPath, { force: true })
   socketServer = createServer((socket) => handleSocket(socket))
   await new Promise<void>((resolve, reject) => socketServer?.once("error", reject).listen(socketPath, resolve))
+
   if (process.platform !== "win32") await chmod(socketPath, 0o600)
   registrationPath = path.join(directory, "registration-v1.json")
+
   const registration = desktopRegistrationSchemaV1.parse({
     version: desktopProtocolVersion,
     instanceId,
@@ -739,7 +842,9 @@ const startSocket = async () => {
     address: socketPath,
     secret,
   })
+
   await writeFile(registrationPath, JSON.stringify(registration), process.platform === "win32" ? undefined : { mode: 0o600 })
+
   if (process.platform !== "win32") await chmod(registrationPath, 0o600)
 }
 
@@ -754,23 +859,30 @@ const handleSocket = (socket: Socket) => {
   const sessionId = randomBytes(16).toString("hex")
   acceptedSockets.add(socket)
   let closed = false
+
   const close = () => {
     if (closed) return
     closed = true
     acceptedSockets.delete(socket)
+
     for (const controller of preparationControllers.values()) {
       controller.abort()
       preparationRegistry.delete(controller)
     }
+
     preparationControllers.clear()
     const rendererIds = [...correlation.internalIds()]
+
     for (const rendererId of rendererIds) {
       cancelPreparedRendererExport(rendererId)
+
       if (!finalExportCandidates.has(rendererId) && !finalImportCandidates.has(rendererId)) {
         rejectRendererRequest(rendererId, "Desktop host connection closed.")
       }
     }
+
     correlation.clear()
+
     for (const rendererId of rendererIds) {
       if (finalExportCandidates.has(rendererId)
         || finalImportCandidates.has(rendererId)
@@ -778,15 +890,19 @@ const handleSocket = (socket: Socket) => {
       settleCapabilityRevocation(fileCapabilities.revokeRequest({ requestId: rendererId, rendererGeneration: generation }))
     }
   }
+
   const decoder = createDesktopFrameDecoder((frame) => {
     if (!authenticated) {
       const hello = desktopHelloSchemaV1.safeParse(frame).success
         ? desktopHelloSchemaV1.safeParse(frame)
         : desktopHelloSchemaV2.safeParse(frame)
+
       if (!hello.success || !authenticate(hello.data.secret)) {
         socket.destroy()
+
         return
       }
+
       authenticated = true
       protocolVersion = hello.data.version
       actorSubject = `local:${hello.data.actorId}`
@@ -795,23 +911,31 @@ const handleSocket = (socket: Socket) => {
           ? { version: desktopProtocolVersionV2, type: "helloAck", selectedVersion: desktopProtocolVersionV2, sessionId, capabilities: availableDesktopOperations() }
           : { version: desktopProtocolVersion, type: "helloAck", sessionId, capabilities: availableDesktopOperations() },
       ))
+
       return
     }
+
     const sessionProtocolVersion = protocolVersion
+
     if (
       sessionProtocolVersion === "v1"
       && frame.version === desktopProtocolVersionV2
       && frame.type === "request"
     ) {
       writeSocketFailure(socket, sessionProtocolVersion, frame.operation, frame.id, "unsupported-version", "Protocol version v2 is not available in this session.")
+
       return
     }
+
     if (sessionProtocolVersion === undefined || frame.version !== sessionProtocolVersion) {
       socket.destroy()
+
       return
     }
+
     if (frame.type === "cancel") {
       const rendererId = correlation.removeExternal(frame.id)
+
       if (rendererId) {
         finalExportCandidates.delete(rendererId)
         finalImportCandidates.delete(rendererId)
@@ -819,6 +943,7 @@ const handleSocket = (socket: Socket) => {
         cancelPreparedRendererExport(rendererId)
         const controller = preparationControllers.get(rendererId)
         controller?.abort()
+
         if (controller) preparationRegistry.delete(controller)
         preparationControllers.delete(rendererId)
         const canceledScope = { requestId: rendererId, rendererGeneration: generation }
@@ -826,23 +951,31 @@ const handleSocket = (socket: Socket) => {
           rejectRendererRequest(rendererId, "Desktop host request cancelled.")
         }))
       }
+
       return
     }
+
     if (frame.type !== "request" || correlation.getInternal(frame.id)) {
       socket.destroy()
+
       return
     }
+
     if (!availableDesktopOperations().includes(frame.operation)) {
       writeSocketFailure(socket, sessionProtocolVersion, frame.operation, frame.id, "unavailable", "The requested desktop operation is unavailable on this platform.")
+
       return
     }
+
     const rendererId = correlation.create(frame.id)
     ae08ControlCommitReceived(ae08Evidence, frame)
+
     if (diagnosticsTraceEnabled && frame.operation === "diagnostics.snapshot.v2") {
       const start = diagnosticsTrace.start()
       diagnosticsStarts.set(rendererId, start)
       diagnosticsTrace.mark(start, "socket-received")
     }
+
     const preparation = new AbortController()
     preparationRegistry.add(preparation)
     preparationControllers.set(rendererId, preparation)
@@ -850,17 +983,22 @@ const handleSocket = (socket: Socket) => {
     void prepareRendererInput(frame.operation, frame.input, scope, preparation.signal)
       .then((input) => {
         preparation.signal.throwIfAborted()
+
         if (frame.operation === "host.export.run") {
           const parsed = desktopRendererExportInputSchemaV1.parse(input)
+
           if (!parsed.canceled && !parsed.preflightOnly) finalExportCandidates.add(rendererId)
         }
+
         if (frame.operation === "host.import.audio") {
           const parsed = desktopRendererImportInputSchemaV1.parse(input)
+
           if (!parsed.canceled) {
             finalImportCandidates.add(rendererId)
             importCandidates.set(rendererId, scope)
           }
         }
+
         return renderRequest(frame.operation, input, rendererId, frame.deadlineMs, actorSubject)
       }).then(async (reply) => {
       preparationControllers.delete(rendererId)
@@ -868,31 +1006,41 @@ const handleSocket = (socket: Socket) => {
       finalExportCandidates.delete(rendererId)
       finalImportCandidates.delete(rendererId)
       importCandidates.delete(rendererId)
+
       if (scope.rendererGeneration !== generation) {
         await fileCapabilities.revokeRequest(scope)
+
         return
       }
+
       if (frame.operation === "host.export.run" && !reply.error) {
         const result = desktopHostExportRunResultSchemaV1.safeParse(reply.result)
+
         if (result.success && result.data.status === "queued" && result.data.jobId) {
           exportScopes.set(result.data.jobId, scope)
+
           if (terminalExportsAwaitingScope.delete(result.data.jobId)) {
             exportScopes.delete(result.data.jobId)
             await fileCapabilities.revokeRequest(scope)
           }
         }
       }
+
       if (frame.operation === "host.import.audio" && !reply.error) {
         const result = desktopHostImportResultSchemaV1.safeParse(reply.result)
+
         if (result.success && result.data.status === "queued" && result.data.jobId) {
           importScopes.set(result.data.jobId, scope)
+
           if (terminalImportsAwaitingScope.delete(result.data.jobId)) {
             importScopes.delete(result.data.jobId)
             await fileCapabilities.revokeRequest(scope)
           }
         }
       }
+
       const externalId = correlation.getExternal(rendererId)
+
       if (!externalId) {
         if (
           (frame.operation !== "host.export.run" || !exportScopesHasScope(scope))
@@ -900,9 +1048,12 @@ const handleSocket = (socket: Socket) => {
         ) {
           await fileCapabilities.revokeRequest(scope)
         }
+
         return
       }
+
       correlation.removeExternal(externalId)
+
       if (socket.destroyed) {
         if (
           (frame.operation !== "host.export.run" || !exportScopesHasScope(scope))
@@ -910,14 +1061,17 @@ const handleSocket = (socket: Socket) => {
         ) {
           await fileCapabilities.revokeRequest(scope)
         }
+
         return
       }
+
       if (
         (frame.operation === "host.import.audio" && !importScopesHasScope(scope))
         || (frame.operation === "host.export.run" && !exportScopesHasScope(scope))
       ) {
         await fileCapabilities.revokeRequest(scope)
       }
+
       try {
         const outboundReply = prepareDesktopReply(
           frame.operation,
@@ -925,6 +1079,7 @@ const handleSocket = (socket: Socket) => {
           externalId,
           sessionProtocolVersion,
         )
+
         for (const outbound of serializeDesktopReply(
           frame.operation,
           frame.input,
@@ -933,10 +1088,12 @@ const handleSocket = (socket: Socket) => {
         )) {
           socket.write(encodeDesktopFrame(outbound))
         }
+
         if (frame.operation === "diagnostics.snapshot.v2") diagnosticsTrace.mark(diagnosticsStarts.get(rendererId) ?? diagnosticsTrace.start(), "socket-reply")
       } catch {
         writeSocketFailure(socket, sessionProtocolVersion, frame.operation, externalId, "internal", "The desktop response could not be serialized.")
       }
+
       diagnosticsStarts.delete(rendererId)
     }).catch(async (error) => {
       preparationControllers.delete(rendererId)
@@ -946,19 +1103,24 @@ const handleSocket = (socket: Socket) => {
       importCandidates.delete(rendererId)
       await fileCapabilities.revokeRequest(scope)
       const externalId = correlation.getExternal(rendererId)
+
       if (!externalId) return
       correlation.removeExternal(externalId)
+
       // Renderer refusals and file capability errors carry messages written for the user (an existing output
       // path, a stem mode the native renderer cannot produce); anything else stays an opaque failure.
       const failure = error instanceof RendererRefusal ? hostError(error.code, error.message)
         : error instanceof FileCapabilityError ? hostError("invalid-request", error.message)
         : error instanceof Error && error.message === "Renderer deadline exceeded." ? hostError("deadline-exceeded", "The request deadline elapsed.")
         : hostError("unavailable", "The renderer is unavailable.")
+
       writeSocketFailure(socket, sessionProtocolVersion, frame.operation, externalId, failure.code, failure.message)
+
       if (frame.operation === "diagnostics.snapshot.v2") diagnosticsTrace.mark(diagnosticsStarts.get(rendererId) ?? diagnosticsTrace.start(), "socket-error-reply")
       diagnosticsStarts.delete(rendererId)
     })
   })
+
   socket.on("data", (chunk: Buffer) => {
     try {
       decoder(chunk)
@@ -979,6 +1141,7 @@ const registerIpc = () => {
     && event.senderFrame === event.sender.mainFrame
     && sameAppOrigin(event.senderFrame.url)
   )
+
   registerApplicationMenuIpc({
     ipcMain,
     applicationMenuStateAllowed,
@@ -989,26 +1152,33 @@ const registerIpc = () => {
     allowed: applicationMenuStateAllowed,
     takePendingEditorStateAck: (requestId) => {
       const pending = pendingEditorStateAcks.get(requestId)
+
       if (pending) pendingEditorStateAcks.delete(requestId)
+
       return pending
     },
   })
   ipcMain.handle(lifecycleChannel, (event) => {
     if (!audioHostAllowed(event)) return { state: "failed" as const, powerGeneration: audioLifecycle.powerGeneration }
+
     return audioLifecycle
   })
   ipcMain.handle(recoveryCompleteChannel, (event, value) => {
     if (!audioHostAllowed(event)) return { accepted: false }
     const completionRequest = recoveryCompletionSchema.safeParse(value)
+
     if (!completionRequest.success) return { accepted: false }
+
     const completion = completeDesktopAudioRecovery(
       audioLifecycle,
       completionRequest.data.powerGeneration,
       completionRequest.data.result,
     )
+
     if (!completion.accepted) return { accepted: false }
     audioLifecycle = completion.lifecycle
     publishAudioLifecycle()
+
     return { accepted: true }
   })
   ipcMain.handle(recoveryRetryChannel, (event) => {
@@ -1018,45 +1188,58 @@ const registerIpc = () => {
       powerGeneration: audioLifecycle.powerGeneration + 1,
     }
     recoverAudioHost(audioLifecycle.powerGeneration)
+
     return { accepted: true }
   })
   ipcMain.on(hostResponseChannel, (event, message) => {
     if (!window_ || event.sender.id !== window_.webContents.id || !event.senderFrame || !sameAppOrigin(event.senderFrame.url)) return
     const parsed = rendererMessageSchema.safeParse(message)
+
     if (!parsed.success || parsed.data.generation !== generation) return
+
     if (parsed.data.frame.type === "export-terminal") {
       const scope = exportScopes.get(parsed.data.frame.jobId)
+
       if (scope) {
         exportScopes.delete(parsed.data.frame.jobId)
         settleCapabilityRevocation(fileCapabilities.revokeRequest(scope))
       } else if (terminalExportsAwaitingScope.size < 1024) terminalExportsAwaitingScope.add(parsed.data.frame.jobId)
+
       return
     }
+
     if (parsed.data.frame.type === "import-terminal") {
       const scope = importScopes.get(parsed.data.frame.jobId)
+
       if (scope) {
         importScopes.delete(parsed.data.frame.jobId)
         settleCapabilityRevocation(fileCapabilities.revokeRequest(scope))
       } else if (terminalImportsAwaitingScope.size < 1024) {
         terminalImportsAwaitingScope.add(parsed.data.frame.jobId)
       }
+
       return
     }
+
     if (parsed.data.frame.type !== "reply") return
     const pending = rendererPending.get(parsed.data.frame.id)
+
     if (!pending || pending.generation !== parsed.data.generation) return
     const traceStart = diagnosticsStarts.get(parsed.data.frame.id)
+
     if (traceStart !== undefined) diagnosticsTrace.mark(traceStart, "renderer-reply")
     pending.resolve(parsed.data.frame)
   })
   ipcMain.on(diagnosticsV2TraceChannel, (event, message) => {
     if (!diagnosticsTraceEnabled || !window_ || event.sender.id !== window_.webContents.id || !event.senderFrame || !sameAppOrigin(event.senderFrame.url)) return
     const parsed = diagnosticsTraceMessageSchema.safeParse(message)
+
     if (parsed.success) {
       if (parsed.data.stage === "preload-reply-invalid-path" && parsed.data.paths) console.error(`[diagnostics-v2-validation] paths=${parsed.data.paths}`)
       else console.error(`[diagnostics-v2-boundary] operation=diagnostics.snapshot.v2 stage=${parsed.data.stage} elapsedMs=${parsed.data.elapsedMs}`)
     }
   })
+
   const scopeAllowed = (event: Electron.IpcMainInvokeEvent) => (
     window_ !== undefined
     && rendererLifecycle.acceptsPrivilegedRequests()
@@ -1065,9 +1248,11 @@ const registerIpc = () => {
     && event.senderFrame === event.sender.mainFrame
     && sameAppOrigin(event.senderFrame.url)
   )
+
   const scopeFor = (event: Electron.IpcMainInvokeEvent, requestId: string) => (
     scopeAllowed(event) ? { requestId, rendererGeneration: generation } : undefined
   )
+
   const catalogAllowed = (event: Electron.IpcMainInvokeEvent) => (
     process.platform === "darwin"
     && window_ !== undefined
@@ -1077,10 +1262,13 @@ const registerIpc = () => {
     && sameAppOrigin(event.senderFrame.url)
     && pluginCatalogStore !== undefined
   )
+
   const catalogFailure = (message: string) => ({ ok: false as const, error: message })
+
   const catalogStoreFor = (event: Electron.IpcMainInvokeEvent) => (
     catalogAllowed(event) ? pluginCatalogStore : undefined
   )
+
   const audioHostAllowed = (event: NativeSessionEvent) => (
     window_ !== undefined && nativeSessionRequestAllowed({
       platform: process.platform,
@@ -1091,8 +1279,10 @@ const registerIpc = () => {
       sameAppOrigin,
     })
   )
+
   if (ae08Evidence) ipcMain.on(ae08RendererMarkChannel, (event, message) => {
     const mark = ae08RendererMarkSchema.safeParse(message)
+
     if (mark.success && audioHostAllowed(event)) ae08Evidence(mark.data[0], { key: mark.data[1] })
   })
   installBenchmarkHeartbeat({
@@ -1103,20 +1293,27 @@ const registerIpc = () => {
   ipcMain.on(offlinePcmAckChannel, (event, value) => {
     if (!audioHostAllowed(event)) return
     const parsed = offlinePcmAckSchema.safeParse(value)
+
     if (!parsed.success) {
       offlinePcmAcks.cancel(new Error("The native offline PCM acknowledgement is invalid."))
+
       return
     }
+
     offlinePcmAcks.acknowledge(parsed.data)
   })
   ipcMain.handle(offlineMappedPageResponseChannel, (event, value) => {
     if (!audioHostAllowed(event)) return { accepted: false }
     const parsed = offlineMappedPageResponseSchema.safeParse(value)
+
     if (!parsed.success || !offlineRenderJob || parsed.data.jobId !== offlineRenderJob.jobId) {
       return { accepted: false }
     }
+
     const pending = offlineRenderJob.mappedPageRequests.get(parsed.data.requestId)
+
     if (!pending) return { accepted: false }
+
     if (parsed.data.page && (
       parsed.data.page.sessionAssetId !== pending.sessionAssetId
       || parsed.data.page.startFrame !== pending.startFrame
@@ -1127,43 +1324,58 @@ const registerIpc = () => {
       offlineRenderJob.mappedPageRequests.delete(parsed.data.requestId)
       pending.cleanup()
       pending.reject(new Error("The native offline mapped page response does not match its request."))
+
       return { accepted: false }
     }
+
     offlineRenderJob.mappedPageRequests.delete(parsed.data.requestId)
     pending.cleanup()
+
     if (parsed.data.error) pending.reject(new Error(parsed.data.error))
     else if (parsed.data.page) pending.resolve(parsed.data.page)
     else pending.reject(new Error("The offline mapped page response is invalid."))
+
     return { accepted: true }
   })
+
   const offlinePlan = (value: NativeOfflineRenderPlan): NativeOfflineRenderPlan | undefined => {
     for (const state of value.capturedVstStates ?? []) {
       if (createHash("sha256").update(state.bytes).digest("hex") !== state.sha256) return undefined
     }
+
     return value
   }
+
   ipcMain.handle(offlineRenderChannel, async (event, value) => {
     if (!audioHostAllowed(event) || !audioHostPath) {
       return { ok: false as const, error: "The native offline renderer is unavailable." }
     }
+
     const request = offlineRenderRequestSchema.safeParse(value)
+
     if (!request.success) {
       return { ok: false as const, error: "The native offline renderer is unavailable." }
     }
+
     const jobId = request.data.jobId
     const plan = offlinePlan(request.data.plan)
+
     if (!plan) {
       return { ok: false as const, error: "The native offline render plan is invalid." }
     }
+
     if (offlineRenderJob?.jobId === jobId) {
       return { ok: false as const, error: "An offline render with this job ID is already active." }
     }
+
     if (offlineRenderJob) {
       return { ok: false as const, error: "Only one native offline render may be active at a time." }
     }
+
     const controller = new AbortController()
     const cancelOnDestroy = () => controller.abort()
     event.sender.once("destroyed", cancelOnDestroy)
+
     const job = {
       jobId,
       controller,
@@ -1178,13 +1390,17 @@ const registerIpc = () => {
         cleanup: () => void
       }>(),
     }
+
     offlineRenderJob = job
+
     try {
       let vstAttachments: Awaited<ReturnType<typeof resolveNativeVst3AttachmentPlan>> | undefined
+
       if (plan.externalAttachments) {
         if (!pluginCatalogStore || !vst3WorkerPath) {
           throw new Error("The trusted native VST3 catalog or worker is unavailable.")
         }
+
         vstAttachments = await resolveNativeVst3AttachmentPlan({
           plan: plan.externalAttachments,
           sampleRateHz: plan.sampleRateHz,
@@ -1196,6 +1412,7 @@ const registerIpc = () => {
           signal: controller.signal,
         })
       }
+
       await renderNativeOffline({
         hostPath: audioHostPath,
         jobId,
@@ -1205,18 +1422,24 @@ const registerIpc = () => {
         onMappedPage: (request, signal) => new Promise((resolve, reject) => {
           if (job.mappedPageRequests.size >= maximumPendingOfflineMappedPageRequests) {
             reject(new Error("Too many native offline mapped page requests are pending."))
+
             return
           }
+
           if (job.mappedPageRequests.has(request.requestId)) {
             reject(new Error("The native offline mapped page request ID is duplicated."))
+
             return
           }
+
           const cleanup = () => signal.removeEventListener("abort", abort)
+
           const abort = () => {
             if (job.mappedPageRequests.get(request.requestId)?.cleanup !== cleanup) return
             job.mappedPageRequests.delete(request.requestId)
             reject(new DOMException("Native offline mapped page request canceled.", "AbortError"))
           }
+
           job.mappedPageRequests.set(request.requestId, {
             sessionAssetId: request.asset.sessionAssetId,
             startFrame: request.startFrame,
@@ -1227,6 +1450,7 @@ const registerIpc = () => {
             cleanup,
           })
           signal.addEventListener("abort", abort, { once: true })
+
           if (!sendRendererMessage(offlineMappedPageRequestChannel, request)) {
             job.mappedPageRequests.delete(request.requestId)
             cleanup()
@@ -1239,12 +1463,15 @@ const registerIpc = () => {
           job.nextSequence += 1
           const endFrame = chunk.startFrame + chunk.frameCount
           const acknowledgment = offlinePcmAcks.begin({ jobId, sequence, endFrame })
+
           if (!sendRendererMessage(offlinePcmChannel, { jobId, sequence, chunk })) {
             offlinePcmAcks.cancel(new Error("Renderer unavailable."))
           }
+
           return acknowledgment
         },
       })
+
       return { ok: true as const }
     } catch (error) {
       return { ok: false as const, error: error instanceof Error ? error.message : "Native offline rendering failed." }
@@ -1253,25 +1480,33 @@ const registerIpc = () => {
         pending.cleanup()
         pending.reject(new Error("The native offline render is no longer active."))
       }
+
       job.mappedPageRequests.clear()
       offlinePcmAcks.cancel(new Error("The native offline render is no longer active."))
       event.sender.removeListener("destroyed", cancelOnDestroy)
+
       if (offlineRenderJob === job) offlineRenderJob = undefined
     }
   })
   ipcMain.handle(offlineCancelChannel, (event, value) => {
     if (!audioHostAllowed(event)) return { accepted: false }
     const jobId = z.string().min(1).max(128).safeParse(value)
+
     if (!jobId.success) return { accepted: false }
+
     if (!offlineRenderJob || offlineRenderJob.jobId !== jobId.data) return { accepted: false }
     offlineRenderJob.controller.abort()
+
     return { accepted: true }
   })
   let configuredHost: { pid: number; generation: number; configurationGeneration: number } | undefined
+
   const configurationGenerationFor = (host: { pid?: number; generation: number }) => {
     configuredHost = nativeHostConfigurationIdentityFor(configuredHost, host)
+
     return configuredHost?.configurationGeneration
   }
+
   ipcMain.handle(diagnosticsChannel, async (event) => {
     if (!audioHostAllowed(event) || !audioHostSupervisor) {
       return {
@@ -1280,12 +1515,15 @@ const registerIpc = () => {
         artifactVerification: nativeReleaseArtifactVerification,
       }
     }
+
     try {
       const hello = await audioHostSupervisor.start()
       const diagnostics = await audioHostSupervisor.diagnostics()
       const status = audioHostSupervisor.status()
       const configurationGeneration = configurationGenerationFor(status)
+
       if (configurationGeneration === undefined) throw new Error("The native audio host identity is unavailable.")
+
       return {
         ok: true,
         hello,
@@ -1306,10 +1544,13 @@ const registerIpc = () => {
     if (!audioHostAllowed(event) || !audioHostSupervisor) {
       return { ok: false as const, error: "The native audio host is unavailable." }
     }
+
     const deviceId = optionalDeviceIdSchema.safeParse(value)
+
     if (!deviceId.success) {
       return { ok: false as const, error: "The native audio host is unavailable." }
     }
+
     try {
       return { ok: true as const, device: await audioHostSupervisor.resolveOutputDevice(deviceId.data) }
     } catch {
@@ -1320,10 +1561,13 @@ const registerIpc = () => {
     if (!audioHostAllowed(event) || !audioHostSupervisor) {
       return { ok: false as const, error: "The native audio host is unavailable." }
     }
+
     const deviceId = optionalDeviceIdSchema.safeParse(value)
+
     if (!deviceId.success) {
       return { ok: false as const, error: "The native audio host is unavailable." }
     }
+
     try {
       return { ok: true as const, device: await audioHostSupervisor.resolveInputDevice(deviceId.data) }
     } catch {
@@ -1334,15 +1578,18 @@ const registerIpc = () => {
     if (!audioHostAllowed(event) || !audioHostSupervisor) {
       return { ok: false, error: "The native audio host is unavailable." }
     }
+
     try {
       return { ok: true, devices: await audioHostSupervisor.listDevices() }
     } catch {
       return { ok: false, error: "The native audio host is unavailable." }
     }
   })
+
   const sessionSupervisorFor = (event: Electron.IpcMainInvokeEvent) => (
     audioHostAllowed(event) ? audioHostSupervisor : undefined
   )
+
   const nativeSessionConfiguration = (
     value: z.infer<typeof nativeSessionConfigurationSchema>,
   ): NativeHostDeviceConfiguration => {
@@ -1354,6 +1601,7 @@ const registerIpc = () => {
       revision: value.revision,
     }
   }
+
   const nativeSessionAsset = (
     value: z.infer<typeof nativeSessionAssetSchema>,
   ): NativeHostPcmAsset => {
@@ -1366,17 +1614,20 @@ const registerIpc = () => {
       contentHashPrefix: value.contentHashPrefix,
     }
   }
+
   const nativeEditorAnchor = (
     event: Electron.IpcMainInvokeEvent,
     value: z.infer<typeof nativeEditorCommandSchema>,
   ): NativeVstEditorAnchor | null | undefined => {
     if (!value.anchor) return undefined
     const ownerWindow = BrowserWindow.fromWebContents(event.sender)
+
     if (!ownerWindow) return null
     const contentBounds = ownerWindow.getContentBounds()
     const zoomFactor = event.sender.getZoomFactor()
     const x = Math.round(contentBounds.x + value.anchor.x * zoomFactor)
     const y = Math.round(contentBounds.y + value.anchor.y * zoomFactor)
+
     if (
       !Number.isSafeInteger(x)
       || !Number.isSafeInteger(y)
@@ -1385,19 +1636,26 @@ const registerIpc = () => {
       || y < -0x8000_0000
       || y > 0x7fff_ffff
     ) return null
+
     return { x, y }
   }
+
   let revisionProjectOwner: { projectId: string; rendererGeneration: number; hostGeneration: number } | undefined
   ipcMain.handle(sessionConfigureChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeConfigurationEnvelopeSchema.safeParse(value)
+
     if (!supervisor || !envelope.success) return nativeSessionFailure()
     const configuration = nativeSessionConfiguration(envelope.data.value)
+
     const configuredProject = event.senderFrame === event.sender.mainFrame
       ? new URL(event.senderFrame.url).searchParams.get("projectId") : null
+
     const configuredRendererGeneration = generation
+
     try {
       await supervisor.configure(configuration, envelope.data.transactionToken)
+
       if (configuredProject && configuredRendererGeneration === generation && audioHostAllowed(event)
         && event.senderFrame === event.sender.mainFrame
         && new URL(event.senderFrame.url).searchParams.get("projectId") === configuredProject) {
@@ -1405,11 +1663,14 @@ const registerIpc = () => {
           hostGeneration: supervisor.status().generation }
       } else revisionProjectOwner = undefined
       const host = supervisor.status()
+
       if (host.pid === undefined) return nativeSessionFailure()
       const currentGeneration = configurationGenerationFor(host)
+
       if (currentGeneration === undefined) return nativeSessionFailure()
       const configurationGeneration = currentGeneration + 1
       configuredHost = { pid: host.pid, generation: host.generation, configurationGeneration }
+
       return { ok: true, hostIdentity: { pid: host.pid, generation: host.generation, configurationGeneration } }
     } catch (error) {
       return nativeSessionFailure(error)
@@ -1418,10 +1679,13 @@ const registerIpc = () => {
   ipcMain.handle(sessionInstallAssetChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeAssetEnvelopeSchema.safeParse(value)
+
     if (!supervisor || !envelope.success) return nativeSessionFailure()
     const asset = nativeSessionAsset(envelope.data.value)
+
     try {
       await supervisor.installAsset(asset, envelope.data.transactionToken)
+
       return { ok: true as const }
     } catch (error) {
       return nativeSessionFailure(error)
@@ -1430,9 +1694,12 @@ const registerIpc = () => {
   ipcMain.handle(sessionReleaseAssetChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeAssetIdEnvelopeSchema.safeParse(value)
+
     if (!supervisor || !envelope.success) return nativeSessionFailure()
+
     try {
       await supervisor.releaseAsset(envelope.data.value, envelope.data.transactionToken)
+
       return { ok: true as const }
     } catch (error) {
       return nativeSessionFailure(error)
@@ -1441,9 +1708,12 @@ const registerIpc = () => {
   ipcMain.handle(sessionCreateMappedAssetChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeMappedAssetEnvelopeSchema.safeParse(value)
+
     if (!supervisor || !envelope.success) return nativeSessionFailure()
+
     try {
       await supervisor.createMappedAsset(envelope.data.value, envelope.data.transactionToken)
+
       return { ok: true as const }
     } catch (error) {
       return nativeSessionFailure(error)
@@ -1452,9 +1722,12 @@ const registerIpc = () => {
   ipcMain.handle(sessionWriteMappedAssetPageChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeMappedAssetPageEnvelopeSchema.safeParse(value)
+
     if (!supervisor || !envelope.success) return nativeSessionFailure()
+
     try {
       await supervisor.writeMappedAssetPage(envelope.data.value, envelope.data.transactionToken)
+
       return { ok: true as const }
     } catch (error) {
       return nativeSessionFailure(error)
@@ -1462,12 +1735,15 @@ const registerIpc = () => {
   })
   ipcMain.handle(sessionPrepareMappedAssetRangeChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
+
     const envelope = nativeSessionEnvelopeSchema(z.object({
       sessionAssetId: positiveUnsigned32Schema,
       startFrame: z.number().int().nonnegative().safe(),
       frameCount: z.number().int().positive().safe(),
     }).strict()).safeParse(value)
+
     if (!supervisor || !envelope.success) return nativeSessionFailure()
+
     try {
       await supervisor.prepareMappedAssetRange(
         envelope.data.value.sessionAssetId,
@@ -1475,6 +1751,7 @@ const registerIpc = () => {
         envelope.data.value.frameCount,
         envelope.data.transactionToken,
       )
+
       return { ok: true as const }
     } catch (error) {
       return nativeSessionFailure(error)
@@ -1483,9 +1760,12 @@ const registerIpc = () => {
   ipcMain.handle(sessionReleaseMappedAssetChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeAssetIdEnvelopeSchema.safeParse(value)
+
     if (!supervisor || !envelope.success) return nativeSessionFailure()
+
     try {
       await supervisor.releaseMappedAsset(envelope.data.value, envelope.data.transactionToken)
+
       return { ok: true as const }
     } catch (error) {
       return nativeSessionFailure(error)
@@ -1494,10 +1774,13 @@ const registerIpc = () => {
   ipcMain.handle(sessionDetachVstChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeInstanceEnvelopeSchema.safeParse(value)
+
     if (!supervisor || !envelope.success) return nativeSessionFailure()
+
     try {
       await supervisor.detachVst(envelope.data.value, envelope.data.transactionToken)
       activeEditorProjectBindings.remove(envelope.data.value, envelope.data.transactionToken)
+
       return { ok: true as const }
     } catch (error) {
       return nativeSessionFailure(error)
@@ -1506,15 +1789,19 @@ const registerIpc = () => {
   ipcMain.handle(sessionGetVstStateChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const instanceId = uuidSchema.safeParse(value)
+
     if (!supervisor || !instanceId.success) return { ok: false as const, error: "The native VST state request is invalid." }
+
     try {
       const state = await supervisor.getVstState(instanceId.data)
+
       if (
         state.bytes.byteLength > 512 * 1024
         || !/^[a-f0-9]{64}$/.test(state.sha256)
         || createHash("sha256").update(state.bytes).digest("hex") !== state.sha256
       ) return { ok: false as const, error: "The native VST state response is invalid." }
       attachmentLedger.capturedFromLive(instanceId.data, state.sha256)
+
       return { ok: true as const, bytes: state.bytes, sha256: state.sha256 }
     } catch (error) {
       return nativeSessionFailure(error)
@@ -1523,21 +1810,28 @@ const registerIpc = () => {
   ipcMain.handle(sessionEditorChannel, async (event, rawValue) => {
     const envelope = nativeEditorEnvelopeSchema.safeParse(rawValue)
     const allowed = audioHostAllowed(event)
+
     const activeHostCandidate = allowed && audioHostSupervisor?.status().running
       ? audioHostSupervisor
       : undefined
+
     const manager = allowed ? nativeVst3EditorSessionManager : undefined
+
     if ((!manager && !activeHostCandidate) || !envelope.success) {
       return { ok: false as const, error: "The native VST editor command is invalid." }
     }
+
     const value = envelope.data.value
     const anchor = nativeEditorAnchor(event, value)
+
     if (anchor === null) {
       return { ok: false as const, error: "The native VST editor command is invalid." }
     }
+
     try {
       const editorCommand: NativeVstEditorCommand = value.command
       const projectId = value.projectId
+
       const command = {
         projectId,
         instanceId: value.instanceId,
@@ -1550,31 +1844,41 @@ const registerIpc = () => {
         height: value.height,
         anchor,
       }
+
       // Prefer the isolated editor host. A plug-in editor can allocate UI or
       // runtime state outside the realtime graph, so its failure should remain
       // independent from playback whenever the isolated manager is available.
       if (manager) {
         const status = await manager.execute(command)
+
         // The editor session does not read an instance playback owns, so a close of one reaches the renderer as
         // the closed event, which captures from the playback worker.
         if (command.command === "close") sendRendererMessage(vstEditorStateChannel, { projectId, instanceId: command.instanceId, open: false })
+
         return { ok: true as const, status }
       }
+
       if (activeHostCandidate) {
         try {
           if (activeHostCandidate.transactionOpen() && !envelope.data.transactionToken) {
             throw new Error("The native audio host transaction token is required.")
           }
+
           const boundProjectId = activeEditorProjectBindings.projectFor(command.instanceId)
+
           if (boundProjectId !== undefined && boundProjectId !== projectId) {
             throw new Error("The active native VST editor project binding changed.")
           }
+
           if (boundProjectId === undefined) throw new Error("The active native VST editor is not owned by a committed project binding.")
+
           const ownership = await activeHostCandidate.executeVstEditorCommand(
             nativeVstEditorOwnershipProbe(command.instanceId),
             envelope.data.transactionToken,
           )
+
           if (!ownership.owned) throw new Error("The active native VST editor is not owned by the committed project binding.")
+
           const {
             projectId: _projectId,
             initialState: _initialState,
@@ -1582,12 +1886,15 @@ const registerIpc = () => {
             captureState: _captureState,
             ...nativeCommand
           } = command
+
           const capturedState = command.command === "close"
             ? await activeHostCandidate.getVstState(command.instanceId)
             : undefined
+
           let status = command.command === "status"
             ? ownership
             : undefined
+
           if (status === undefined) {
             try {
               status = await activeHostCandidate.executeVstEditorCommand(nativeCommand, envelope.data.transactionToken)
@@ -1601,7 +1908,9 @@ const registerIpc = () => {
               }
             }
           }
+
           if (command.command !== "close") return { ok: true as const, status }
+
           return { ok: true as const, status: { ...status, capturedState } }
         } catch (error) {
           console.error("[native-vst3] editor active route failed", {
@@ -1610,11 +1919,13 @@ const registerIpc = () => {
           throw error
         }
       }
+
       return { ok: false as const, error: "The native VST editor session is unavailable." }
     } catch (error) {
       console.error("[native-vst3] editor command failed", {
         error: sanitizeNativeVst3DiagnosticError(error instanceof Error ? error : undefined),
       })
+
       return {
         ok: false as const,
         error: sanitizeNativeVst3DiagnosticError(error instanceof Error ? error : undefined),
@@ -1627,6 +1938,7 @@ const registerIpc = () => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeAttachmentEnvelopeSchema.safeParse(value)
     const workerPath = vst3WorkerPath
+
     if (
       !supervisor
       || !pluginCatalogStore
@@ -1636,8 +1948,10 @@ const registerIpc = () => {
     const sessionValue = envelope.data.value
     let result: Awaited<ReturnType<typeof coordinateNativeVst3Attachments>>
     const hostHello = supervisor.status().hello
+
     if (!hostHello) return nativeSessionFailure()
     const ledger = attachmentLedger.forHost(supervisor, hostHello)
+
     try {
       result = await coordinateNativeVst3Attachments({
         serializedPlan: sessionValue.serializedPlan,
@@ -1656,12 +1970,16 @@ const registerIpc = () => {
       })
     } catch (error) {
       activeEditorProjectBindings.rollback(envelope.data.transactionToken)
+
       return nativeSessionFailure(error)
     }
+
     if (!result.ok) {
       activeEditorProjectBindings.rollback(envelope.data.transactionToken)
+
       return nativeVst3CoordinationFailureReply(result)
     }
+
     try {
       const plan = decodeNativeExternalAttachmentPlan(sessionValue.serializedPlan)
       const projectId = projectIdSchemaV1.parse(sessionValue.projectId)
@@ -1670,28 +1988,36 @@ const registerIpc = () => {
         projectId,
         envelope.data.transactionToken,
       )
+
       // A live plan has no transaction to commit it: the project owns these instances from now.
       if (envelope.data.transactionToken === undefined) activeEditorProjectBindings.commit()
+
       return { ok: true as const }
     } catch {
       activeEditorProjectBindings.rollback(envelope.data.transactionToken)
+
       return nativeSessionFailure()
     }
   })
+
   const registerNativeSessionBytes = (
     channel: string,
     operation: (supervisor: NonNullable<typeof audioHostSupervisor>, bytes: Uint8Array, transactionToken?: string) => Promise<void>,
   ) => ipcMain.handle(channel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeBytesEnvelopeSchema.safeParse(value)
+
     if (!supervisor || !envelope.success) return nativeSessionFailure()
+
     try {
       await operation(supervisor, envelope.data.value, envelope.data.transactionToken)
+
       return { ok: true as const }
     } catch (error) {
       return nativeSessionFailure(error)
     }
   })
+
   // Internal session-only revision lifecycle, never a desktop protocol operation.
   // The authenticated main frame must still own the mounted project at reply.
   const revisionChannels = {
@@ -1699,35 +2025,46 @@ const registerIpc = () => {
     inspect: sessionInspectGraphRevisionChannel, rollback: sessionRollbackGraphRevisionChannel,
     retire: sessionRetireGraphRevisionChannel,
   }
+
   const revisionBinding = z.object({ projectId: projectIdSchemaV1 })
+
   const revisionRequest = revisionBinding.extend({
     revision: positiveUnsigned32Schema,
     hostGeneration: unsigned32Schema,
     requestedPublicationFrame: z.bigint().nonnegative().max(0x7fff_ffff_ffff_ffffn).optional(),
   }).strict()
+
   const revisionPrepare = revisionBinding.extend({
     bytes: z.instanceof(Uint8Array).refine((bytes) => bytes.byteLength >= 36 && bytes.byteLength <= 1_048_576),
     projectRevision: z.number().int().nonnegative().safe(),
     requestedPublicationFrame: z.bigint().nonnegative().max(0x7fff_ffff_ffff_ffffn).optional(),
   }).strict()
+
   const ownsRevisionProject = (event: Electron.IpcMainInvokeEvent, projectId: string) => {
     if (!audioHostAllowed(event) || event.senderFrame !== event.sender.mainFrame) return false
+
     if (revisionProjectOwner?.projectId !== projectId || revisionProjectOwner.rendererGeneration !== generation
       || revisionProjectOwner.hostGeneration !== audioHostSupervisor?.status().generation) return false
+
     try { return new URL(event.senderFrame.url).searchParams.get("projectId") === projectId }
     catch { return false }
   }
+
   for (const [operation, channel] of Object.entries(revisionChannels)) {
     ipcMain.handle(channel, async (event, raw) => {
       const supervisor = sessionSupervisorFor(event)
       const parsed = (operation === "prepare" ? revisionPrepare : revisionRequest).safeParse(raw)
+
       if (!supervisor || !parsed.success || !ownsRevisionProject(event, parsed.data.projectId)
         || supervisor.transactionOpen() || !supervisor.status().running) return nativeSessionFailure()
       const owner = supervisor.status(), rendererGeneration = generation
+
       if (operation === "inspect") ae08Evidence?.("inspect-handler-entry", { pid: owner.pid ?? null })
       const sendsAtEntry = ae08Evidence?.rendererSendCount() ?? 0
+
       try {
         let result
+
         if ("bytes" in parsed.data) {
           const revision = supervisor.allocateRuntimeRevision()
           ae08Evidence?.("revision-allocate", { pid: owner.pid ?? null, lifecycleGeneration: owner.generation,
@@ -1743,27 +2080,35 @@ const registerIpc = () => {
             : operation === "rollback" ? await supervisor.rollbackGraphRevision(revision)
             : await supervisor.retireGraphRevision(revision)
         }
+
         if (result.status === "published") attachmentLedger.published()
+
         if (operation === "rollback") attachmentLedger.rolledBack()
         const current = supervisor.status()
+
         if (generation !== rendererGeneration || current.generation !== owner.generation
           || current.pid !== owner.pid || !ownsRevisionProject(event, parsed.data.projectId)) {
           // The command ran, but this renderer no longer owns its result: it may have been taken.
           return nativeSessionFailure(new Error("The native audio session changed owner during the request."))
         }
+
         if (operation === "inspect") ae08Evidence?.("inspect-handler-return", { pid: current.pid ?? null,
           rendererSends: (ae08Evidence?.rendererSendCount() ?? 0) - sendsAtEntry })
+
         return { ok: true, revision: result, hostGeneration: current.generation, hostPid: current.pid }
       } catch (error) { return nativeSessionFailure(error) }
     })
   }
+
   registerNativeSessionBytes(sessionPublishGraphChannel, (supervisor, bytes, transactionToken) => supervisor.publishGraph(bytes, transactionToken))
   registerNativeSessionBytes(sessionConfigureInstrumentStatesChannel, (supervisor, bytes, transactionToken) => supervisor.configureInstrumentStates(bytes, transactionToken))
   registerNativeSessionBytes(sessionQueueParameterEventsChannel, (supervisor, bytes, transactionToken) => supervisor.queueParameterEvents(bytes, transactionToken))
   ipcMain.handle(sessionQueueProcessorStatePatchChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeBytesEnvelopeSchema.safeParse(value)
+
     if (!supervisor || !envelope.success) return nativeSessionFailure()
+
     try {
       return nativeProcessorPatchReply(await supervisor.queueProcessorStatePatch(envelope.data.value, envelope.data.transactionToken))
     } catch (error) {
@@ -1792,11 +2137,14 @@ const registerIpc = () => {
   })
   const spoolScopeSchema = z.object({ projectId: projectIdSchemaV1, projectGeneration: unsigned32Schema }).strict()
   const spoolTakeIdSchema = z.string().uuid()
+
   const spoolFor = (event: Electron.IpcMainInvokeEvent) => {
     if (!audioHostAllowed(event) || event.senderFrame !== event.sender.mainFrame)
       throw new Error("Recording spool is unavailable.")
+
     return recordingSessionOwner.spool()
   }
+
   ipcMain.handle(recordingSpoolListChannel, async (event, value) => {
     const request = z.object({ scope: spoolScopeSchema, cursor: spoolTakeIdSchema.optional() }).strict().parse(value)
     const registry = spoolFor(event)
@@ -1804,38 +2152,48 @@ const registerIpc = () => {
     // Explicitly caller-declared scope, bound to the authenticated top-level
     // lifecycle. No invented cloud-project authorization is performed here.
     registry.bind(scope)
+
     return registry.list(scope, request.cursor)
   })
   ipcMain.handle(recordingSpoolReadChannel, async (event, value) => {
     const request = z.object({ scope: spoolScopeSchema, takeId: spoolTakeIdSchema,
       offset: z.number().int().nonnegative().safe(), length: z.number().int().min(1).max(1048576) }).strict().parse(value)
+
     return spoolFor(event).read({ ...request.scope, rendererGeneration: generation }, request.takeId, request.offset, request.length)
   })
   ipcMain.handle(recordingSpoolReleaseChannel, async (event, value) => {
     const request = z.object({ scope: spoolScopeSchema, takeId: spoolTakeIdSchema, acknowledgment: recordingSpoolReleaseSchema }).strict().parse(value)
     await spoolFor(event).release({ ...request.scope, rendererGeneration: generation }, request.takeId, request.acknowledgment)
   })
+
   const registerNativeSessionControl = (
     channel: string,
     operation: (supervisor: NonNullable<typeof audioHostSupervisor>) => Promise<void>,
   ) => ipcMain.handle(channel, async (event) => {
     const supervisor = sessionSupervisorFor(event)
+
     if (!supervisor) return nativeSessionFailure()
+
     try {
       await operation(supervisor)
+
       return { ok: true as const }
     } catch (error) {
       return nativeSessionFailure(error)
     }
   })
+
   ipcMain.handle(sessionBeginTransactionChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
+
     if (!supervisor || !nativeUndefinedEnvelopeSchema.safeParse(value).success) return nativeSessionFailure()
     const requestGeneration = generation
     const senderId = event.sender.id
+
     try {
       const transactionToken = await supervisor.beginTransaction()
       attachmentLedger.begin()
+
       if (
         generation !== requestGeneration
         || !window_
@@ -1843,10 +2201,13 @@ const registerIpc = () => {
         || !audioHostAllowed(event)
       ) {
         await supervisor.invalidateManualTransaction()
+
         return nativeSessionFailure()
       }
+
       activeEditorProjectBindings.stageEmpty(transactionToken)
       activeRendererTransactions.set(transactionToken, { generation: requestGeneration, senderId })
+
       return { ok: true as const, transactionToken }
     } catch (error) {
       return nativeSessionFailure(error)
@@ -1855,40 +2216,49 @@ const registerIpc = () => {
   ipcMain.handle(sessionCommitTransactionChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeUndefinedEnvelopeSchema.safeParse(value)
+
     if (!supervisor || !envelope.success || !envelope.data.transactionToken) return nativeSessionFailure()
     const transaction = activeRendererTransactions.get(envelope.data.transactionToken)
+
     if (
       !transaction
       || transaction.generation !== generation
       || transaction.senderId !== event.sender.id
       || !audioHostAllowed(event)
     ) return nativeSessionFailure()
+
     try {
       await supervisor.commitTransaction(envelope.data.transactionToken)
       activeRendererTransactions.delete(envelope.data.transactionToken)
       activeEditorProjectBindings.commit(envelope.data.transactionToken)
       attachmentLedger.published()
+
       return { ok: true as const }
     } catch (error) {
       activeRendererTransactions.delete(envelope.data.transactionToken)
       activeEditorProjectBindings.rollback(envelope.data.transactionToken)
+
       return nativeSessionFailure(error)
     }
   })
   ipcMain.handle(sessionRollbackTransactionChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeUndefinedEnvelopeSchema.safeParse(value)
+
     if (!supervisor || !envelope.success || !envelope.data.transactionToken) return nativeSessionFailure()
     const transaction = activeRendererTransactions.get(envelope.data.transactionToken)
+
     if (
       !transaction
       || transaction.generation !== generation
       || transaction.senderId !== event.sender.id
       || !audioHostAllowed(event)
     ) return nativeSessionFailure()
+
     try {
       await supervisor.rollbackTransaction(envelope.data.transactionToken)
       attachmentLedger.rolledBack()
+
       return { ok: true as const }
     } catch (error) {
       return nativeSessionFailure(error)
@@ -1900,9 +2270,12 @@ const registerIpc = () => {
   registerNativeSessionControl(sessionStartChannel, (supervisor) => supervisor.startAudio())
   ipcMain.handle(sessionStopChannel, async (event, rawReason) => {
     const supervisor = sessionSupervisorFor(event)
+
     const envelope = nativeSessionEnvelopeSchema(z.string().trim().min(1).max(120)
       .refine((reason) => Buffer.byteLength(reason, "utf8") <= 120)).safeParse(rawReason)
+
     if (!supervisor || !envelope.success || envelope.data.transactionToken !== undefined) return nativeSessionFailure()
+
     try {
       console.info("[native-audio-session-stop]", JSON.stringify({
         reason: envelope.data.value,
@@ -1911,6 +2284,7 @@ const registerIpc = () => {
         pid: supervisor.status().pid ?? null,
       }))
       await supervisor.stopAudio(envelope.data.value)
+
       return { ok: true as const }
     } catch (error) {
       return nativeSessionFailure(error)
@@ -1920,7 +2294,9 @@ const registerIpc = () => {
   ipcMain.handle(sessionTeardownChannel, async (event, rawReason) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeSessionEnvelopeSchema(z.string().trim().min(1).max(120)).safeParse(rawReason)
+
     if (!supervisor || !envelope.success || envelope.data.transactionToken !== undefined) return nativeSessionFailure()
+
     try {
       console.info("[native-audio-session-teardown]", JSON.stringify({
         reason: envelope.data.value,
@@ -1929,15 +2305,19 @@ const registerIpc = () => {
       }))
       await supervisor.teardownSession()
       activeEditorProjectBindings.clear()
+
       return { ok: true as const }
     } catch (error) {
       activeEditorProjectBindings.clear()
+
       return nativeSessionFailure(error)
     }
   })
   ipcMain.handle(pluginCatalogReadChannel, async (event) => {
     const store = catalogStoreFor(event)
+
     if (!store) return catalogFailure("The desktop plug-in catalog is unavailable.")
+
     try {
       return { ok: true, catalog: catalogViewForRenderer(await store.load()) }
     } catch {
@@ -1947,9 +2327,12 @@ const registerIpc = () => {
   ipcMain.handle(pluginCatalogChooseDirectoryChannel, async (event) => {
     const store = catalogStoreFor(event)
     const currentWindow = window_
+
     if (!store || !currentWindow) return catalogFailure("The desktop plug-in catalog is unavailable.")
     const selection = await dialog.showOpenDialog(currentWindow, { properties: ["openDirectory", "createDirectory"] })
+
     if (selection.canceled || selection.filePaths.length !== 1) return { ok: true, canceled: true }
+
     try {
       return { ok: true, canceled: false, catalog: catalogViewForRenderer(await store.addDirectory(selection.filePaths[0])) }
     } catch {
@@ -1958,9 +2341,12 @@ const registerIpc = () => {
   })
   ipcMain.handle(pluginCatalogRemoveDirectoryChannel, async (event, value) => {
     const store = catalogStoreFor(event)
+
     if (!store) return catalogFailure("The desktop plug-in catalog is unavailable.")
     const request = pluginDirectorySchema.safeParse(value)
+
     if (!request.success) return catalogFailure("A plug-in directory is required.")
+
     try {
       return { ok: true, catalog: catalogViewForRenderer(await store.removeDirectory(request.data.directory)) }
     } catch {
@@ -1970,7 +2356,9 @@ const registerIpc = () => {
   ipcMain.handle(pluginCatalogScanChannel, async (event) => {
     const store = catalogStoreFor(event)
     const scanner = vst3ScannerSupervisor
+
     if (!store || !scanner) return catalogFailure("The desktop plug-in catalog is unavailable.")
+
     try {
       return { ok: true, catalog: catalogViewForRenderer(await store.scan((entry, directories) => scanner.scan(entry, directories))) }
     } catch {
@@ -1981,21 +2369,28 @@ const registerIpc = () => {
     const store = catalogStoreFor(event)
     const request = nativeVst3InsertionPreflightRequestSchema.safeParse(value)
     const workerPath = vst3WorkerPath
+
     if (!store || !request.success) {
       return { ok: false as const, code: "untrusted-catalog" as const, message: "The native VST3 insertion request is invalid." }
     }
+
     if (!audioHostAllowed(event) || !audioHostPath || !workerPath) {
       return { ok: false as const, code: "host-unavailable" as const, message: "The native VST3 host is unavailable." }
     }
+
     const scanner = vst3ScannerSupervisor
+
     if (!scanner) {
       return { ok: false as const, code: "host-unavailable" as const, message: "The native VST3 scanner is unavailable." }
     }
+
     try {
       const device = await probeNativeAudioOutputDevice(audioHostPath)
+
       if (!device?.available) {
         return { ok: false as const, code: "host-unavailable" as const, message: "No native audio output device is available." }
       }
+
       const preflightInput: Parameters<typeof preflightVst3Insertion>[0] = {
         request: request.data,
         catalog: await store.load(),
@@ -2008,9 +2403,12 @@ const registerIpc = () => {
           attachmentLedger.rememberVerdict(attachment, device.nominalSampleRateHz, result)
         },
       }
+
       const first = await preflightVst3Insertion(preflightInput)
+
       if (first.ok || first.code !== "stale-catalog") return first
       await store.revalidate((entry, directories) => scanner.scan(entry, directories))
+
       return preflightVst3Insertion({
         ...preflightInput,
         catalog: await store.load(),
@@ -2032,6 +2430,7 @@ const createWindow = () => {
   if (!MAIN_WINDOW_VITE_DEV_SERVER_URL && !existsSync(preloadPath)) {
     throw new Error(`Desktop preload bundle is missing: ${preloadPath}`)
   }
+
   const { workArea } = screen.getPrimaryDisplay()
   const minWidth = Math.min(1200, workArea.width)
   const minHeight = Math.min(800, workArea.height)
@@ -2066,6 +2465,7 @@ const createWindow = () => {
   window_.webContents.on("did-start-navigation", (details) => {
     if (details.isMainFrame && !details.isSameDocument) {
       const invalidation = rendererLifecycle.beginMainFrameNavigation(details.url)
+
       if (invalidation) applyRendererInvalidation(invalidation, "Renderer reloaded.")
     }
   })
@@ -2083,29 +2483,37 @@ const createWindow = () => {
   })
   window_.webContents.on("render-process-gone", () => {
     const invalidation = rendererLifecycle.invalidateAfterCrash()
+
     if (invalidation) applyRendererInvalidation(invalidation, "Renderer crashed.")
   })
   window_.webContents.setWindowOpenHandler(({ url }) => {
     if (externalUrl(url)) void shell.openExternal(url)
+
     return { action: "deny" }
   })
   window_.webContents.on("will-navigate", (event, url) => {
     if (!sameAppOrigin(url)) event.preventDefault()
   })
+
   const close = createCloseHandler({
     waitForRecording: async () => {
       const supervisor = audioHostSupervisor
+
       if (!supervisor?.recordingFinalizationPending()) {
         await supervisor?.waitForRecordingFinish()
+
         return true
       }
+
       const abort = new AbortController()
       const finishing = supervisor.waitForRecordingFinish().then(() => true)
+
       const choice = dialog.showMessageBox(window_!, {
         type: "info", message: "The recording is finishing.",
         detail: "The completed take is being saved. Keep the application open while storage finishes.",
         buttons: ["Keep Open"], defaultId: 0, cancelId: 0, signal: abort.signal,
       }).then(() => false)
+
       try { return await Promise.race([finishing, choice]) }
       finally { abort.abort() }
     },
@@ -2129,6 +2537,7 @@ const createWindow = () => {
         detail: "Cancel keeps the project open. Quit and Discard discards unsaved project changes, never an accepted recording Finish.",
         noLink: true,
       })
+
       return choice.response === 1
     },
     beginQuit: () => {
@@ -2137,6 +2546,7 @@ const createWindow = () => {
     destroy: () => window_?.destroy(),
     finishQuit,
   })
+
   window_.on("close", (event) => {
     if (window_?.isDestroyed() || finishingQuit) return
     event.preventDefault()
@@ -2146,7 +2556,9 @@ const createWindow = () => {
 }
 
 app.setName(appName)
+
 let quitCleanupPrepared = false
+
 const prepareQuit = async () => {
   if (quitCleanupPrepared) return
   // Resolve the persistence barrier before renderer invalidation or app exit.
@@ -2162,6 +2574,7 @@ const prepareQuit = async () => {
   await ae08StopTrace().catch(() => console.error("[ae08] trace could not be saved"))
   quitCleanupPrepared = true
 }
+
 const finishQuit = async () => {
   if (quitCleanupStarted) return
   // Normal window close already performed every fallible async operation
@@ -2183,11 +2596,14 @@ const finishQuit = async () => {
   removeAudioHostWorkerNotificationListener?.()
   app.exit()
 }
+
 const showQuitFailure = () => dialog.showErrorBox(
   "The application could not close safely.",
   "Recording sources have been retained. The application has not exited.",
 )
+
 const gotLock = app.requestSingleInstanceLock()
+
 if (!gotLock) app.quit()
 else {
   app.on("second-instance", () => {
@@ -2201,8 +2617,10 @@ else {
     nativeMediaAvailable = await nativeFileCapabilityHelper.selfTest()
     stage("after-native-helper")
     let scannerPath: string | undefined
+
     if (process.platform === "darwin" && app.isPackaged) {
       const manifestPath = path.join(process.resourcesPath, nativeReleaseArtifactManifestName)
+
       if (existsSync(manifestPath)) {
         try {
           const artifacts = await verifyPackagedNativeReleaseArtifacts(process.resourcesPath)
@@ -2223,6 +2641,7 @@ else {
       audioHostPath = packagedAudioHostPath(process.resourcesPath, false, process.env.DAW_AUDIO_HOST_PATH)
       nativeReleaseArtifactVerification = { status: "development" }
     }
+
     vst3ScannerSupervisor = scannerPath ? createVst3ScannerSupervisor({
       platform: process.platform,
       arch: process.arch,
@@ -2231,6 +2650,7 @@ else {
     pluginCatalogStore = createPluginCatalogStore({
       filePath: path.join(app.getPath("userData"), "plugin-catalog-v1.json"),
     })
+
     if (process.platform === "darwin") {
       const startupScanner = vst3ScannerSupervisor
       await pluginCatalogStore.initialize(
@@ -2240,28 +2660,36 @@ else {
           : undefined,
       )
     }
+
     const recordingOrderEvidence = createRecordingSpoolOrderEvidence(
       process.env.DAW_RECORDING_SPOOL_ORDER_EVIDENCE,
       (line) => { process.stdout.write(line) },
     )
+
     // Only the opt-in process uses stdout diagnostics. Keep its stream-error
     // handler for that stream's process lifetime; a closed collector is not a
     // DAW startup/release failure, just unavailable acceptance evidence.
     if (recordingOrderEvidence) process.stdout.on("error", () => undefined)
+
     const recordingStartup = await initializeRecordingSpoolRegistry({ userData: app.getPath("userData"),
       verifyDirectory: nativeFileCapabilityHelper.statDirectory, observeRelease: recordingOrderEvidence?.observeRelease })
+
     recordingSessionOwner.attachRegistry(recordingStartup.registry)
+
     if (recordingStartup.registry) recordingOrderEvidence?.ready()
+
     if (recordingStartup.error) console.error("[recording-spool] recording storage unavailable; DAW startup continues", recordingStartup.error)
     audioHostSupervisor = audioHostPath ? createNativeAudioHostSupervisor(audioHostPath, undefined, {
       evidence: ae08Evidence,
       hostEnvironment: ae08WorkerEnvironment,
     }) : undefined
+
     // Only a lost host ends the native session. One plug-in's fault, miss or restart is that instance's business.
     const publishNativeSessionLoss = (error: string) => {
       activeEditorProjectBindings.clear()
       sendRendererMessage(lossChannel, error)
     }
+
     const sendVstParameterEdit = (input: {
       projectId: string
       source: "active-playback" | "editor-session"
@@ -2271,6 +2699,7 @@ else {
     }) => {
       sendRendererMessage(vstParameterEditChannel, input)
     }
+
     const hostEvents = createNativeVst3HostEventHandlers({
       sendInstanceEvent: (event) => { sendRendererMessage(vstInstanceEventChannel, event) },
       sendParameterEdit: (input) => sendVstParameterEdit({ ...input, source: "active-playback" }),
@@ -2278,6 +2707,7 @@ else {
       projectFor: (instanceId) => activeEditorProjectBindings.projectFor(instanceId),
       endSession: (error) => publishNativeSessionLoss(sanitizeNativeVst3DiagnosticError(error)),
     })
+
     removeAudioHostWorkerNotificationListener = audioHostSupervisor?.onWorkerNotification(hostEvents.onNotification)
     const editorHostPath = audioHostPath
     nativeVst3EditorSessionManager = editorHostPath && vst3WorkerPath
@@ -2291,6 +2721,7 @@ else {
         playbackOwns: (instanceId) => activeEditorProjectBindings.projectFor(instanceId) !== undefined,
         onEditorInteraction: () => {
           const target = window_
+
           if (!target || target.isDestroyed() || finishingQuit) return
           target.show()
           app.focus({ steal: true })
@@ -2301,10 +2732,12 @@ else {
         },
         onCapturedState: (input) => new Promise<void>((resolve, reject) => {
           const requestId = randomUUID()
+
           const timeout = setTimeout(() => {
             if (!pendingEditorStateAcks.delete(requestId)) return
             reject(new Error("Renderer editor state persistence timed out."))
           }, 10_000)
+
           pendingEditorStateAcks.set(requestId, {
             resolve: () => {
               clearTimeout(timeout)
@@ -2315,6 +2748,7 @@ else {
               reject(error)
             },
           })
+
           if (!sendRendererMessage(vstEditorCapturedStateChannel, { ...input, requestId })) {
             pendingEditorStateAcks.delete(requestId)
             clearTimeout(timeout)
@@ -2330,6 +2764,7 @@ else {
         }),
       })
       : undefined
+
     const handleSuspend = () => {
       if (finishingQuit || (audioLifecycle.state === "suspended" && audioRecoveryGeneration === undefined)) return
       audioRecoveryGeneration = undefined
@@ -2340,12 +2775,14 @@ else {
         nativeVst3EditorSessionManager?.suspendAll(),
       ]).then(() => undefined)
     }
+
     const handleResume = () => {
       if (finishingQuit || audioLifecycle.state !== "suspended") return
       audioLifecycle = { state: "suspended", powerGeneration: audioLifecycle.powerGeneration + 1 }
       const recoveryGeneration = audioLifecycle.powerGeneration
       recoverAudioHost(recoveryGeneration)
     }
+
     powerMonitor.on("suspend", handleSuspend)
     powerMonitor.on("resume", handleResume)
     removeAudioHostLossListener = audioHostSupervisor?.onLoss(hostEvents.onLoss)
@@ -2370,8 +2807,11 @@ else {
       const rendererRoot = MAIN_WINDOW_VITE_DEV_SERVER_URL
         ? path.join(import.meta.dirname, "../renderer/main_window")
         : packagedRendererRoot(app.getAppPath())
+
       const safePath = rendererAssetPath(rendererRoot, request.url)
+
       if (!safePath || !existsSync(safePath)) return new Response("Not found", { status: 404 })
+
       return electronNet.fetch(pathToFileURL(safePath).toString())
     })
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => callback({
@@ -2430,6 +2870,7 @@ else {
   app.on("before-quit", (event) => {
     if (finishingQuit) return
     event.preventDefault()
+
     if (window_ && !window_.isDestroyed()) window_.close()
     else void finishQuit().catch(showQuitFailure)
   })

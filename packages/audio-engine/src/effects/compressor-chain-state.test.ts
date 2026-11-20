@@ -5,6 +5,7 @@ import { createCompressorChainState } from './compressor-chain-state'
 
 const createFakeChain = (onDisconnect: () => void = () => {}): CompressorNodeChain => {
   const node = () => Object.assign(Object.create(null), { disconnect: onDisconnect })
+
   return {
     enabled: true,
     state: 'active',
@@ -23,11 +24,14 @@ const createFakeChain = (onDisconnect: () => void = () => {}): CompressorNodeCha
 describe('compressor chain state recovery', () => {
   test('binds listeners registered before async construction and keeps them across replacement', async () => {
     const created: CompressorNodeChain[] = []
+
     const state = createCompressorChainState(async () => {
       const chain = createFakeChain()
       created.push(chain)
+
       return chain
     })
+
     const frames: number[] = []
     const unsubscribe = state.subscribeMeter((frame) => frames.push(frame.gainReductionDb))
     const context = Object.assign(Object.create(null), {})
@@ -53,11 +57,14 @@ describe('compressor chain state recovery', () => {
   test('rebuilds a faulted chain even when the parameter signature is unchanged', async () => {
     let oldDisconnects = 0
     const created: CompressorNodeChain[] = []
+
     const state = createCompressorChainState(async () => {
       const chain = createFakeChain(created.length === 0 ? () => { oldDisconnects += 1 } : undefined)
       created.push(chain)
+
       return chain
     })
+
     const context = Object.assign(Object.create(null), {})
     const params = normalizeCompressorParams({ enabled: true, thresholdDb: -18 })
 
@@ -75,11 +82,14 @@ describe('compressor chain state recovery', () => {
   test('retains the faulted dry-fallback chain when replacement construction fails', async () => {
     const original = createFakeChain()
     let attempts = 0
+
     const state = createCompressorChainState(async () => {
       attempts += 1
+
       if (attempts === 1) return original
       throw new Error('construction failed')
     })
+
     const context = Object.assign(Object.create(null), {})
     const params = normalizeCompressorParams({ enabled: true, thresholdDb: -18 })
 

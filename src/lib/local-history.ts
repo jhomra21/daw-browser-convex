@@ -8,6 +8,7 @@ const now = () => Date.now()
 export const loadLocalHistory = async (projectId: string): Promise<PersistedHistory | undefined> => {
   const db = await openLocalProjectDb(projectId)
   const row = await db.get('history', HISTORY_KEY)
+
   return row ? normalizePersistedHistory(row.value) : undefined
 }
 

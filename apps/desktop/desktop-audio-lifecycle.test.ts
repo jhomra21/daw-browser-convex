@@ -15,10 +15,12 @@ type LifecycleBridge = Pick<
 const bridgeFixture = (snapshot: DesktopAudioLifecycle) => {
   let listener: ((lifecycle: DesktopAudioLifecycle) => void) | undefined
   const calls: string[] = []
+
   const bridge: LifecycleBridge = {
     onLifecycle: (next) => {
       calls.push("subscribe")
       listener = next
+
       return () => {
         calls.push("unsubscribe")
         listener = undefined
@@ -26,9 +28,11 @@ const bridgeFixture = (snapshot: DesktopAudioLifecycle) => {
     },
     getLifecycle: async () => {
       calls.push("query")
+
       return snapshot
     },
   }
+
   return {
     bridge,
     calls,
@@ -39,6 +43,7 @@ const bridgeFixture = (snapshot: DesktopAudioLifecycle) => {
 test("subscribes before reconciling a mount snapshot while suspended", async () => {
   const fixture = bridgeFixture({ state: "suspended", powerGeneration: 7 })
   const received: DesktopAudioLifecycle[] = []
+
   const remove = createDesktopAudioLifecycleReconciler(fixture.bridge, (lifecycle) => {
     received.push(lifecycle)
   })

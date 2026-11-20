@@ -90,6 +90,7 @@ const sampleMeasurement = (
   let darkestColorDistance = 0
   let fullyCoveredBackingRows = 0
   let effectiveBackingThickness = 0
+
   for (let y = 0; y < height; y += 1) {
     const offset = (y * width + x) * 4
     const red = pixels[offset] ?? 0
@@ -108,6 +109,7 @@ const sampleMeasurement = (
             - luminance(waveform.red, waveform.green, waveform.blue)),
       ),
     )
+
     if (
       red === waveform.red
       && green === waveform.green
@@ -117,6 +119,7 @@ const sampleMeasurement = (
       fullyCoveredBackingRows += 1
     }
   }
+
   return {
     darkestLuminance,
     darkestColorDistance,
@@ -137,11 +140,14 @@ const render = (input: {
   const cssWidth = 64
   const cssHeight = 32
   const canvas = document.createElement('canvas')
+
   if (!(canvas instanceof HTMLCanvasElement)) throw new Error('Canvas element unavailable')
   canvas.width = cssWidth * input.dpr
   canvas.height = cssHeight * input.dpr
   const ctx = canvas.getContext('2d')
+
   if (!ctx) throw new Error('Canvas 2D context unavailable')
+
   if (!(ctx instanceof CanvasRenderingContext2D)) throw new Error('Canvas 2D context has the wrong type')
   ctx.setTransform(input.dpr, 0, 0, input.dpr, 0, 0)
   ctx.globalAlpha = 1
@@ -150,19 +156,23 @@ const render = (input: {
   ctx.fillRect(0, 0, cssWidth, cssHeight)
 
   const centerY = input.centerDeviceY / input.dpr
+
   if (input.kind === 'aligned') {
     if (!input.data) throw new Error('Waveform data is required for aligned rendering')
+
     const resolvedStyle = resolveWaveformPaintStyle({
       color: '#111111',
       backingScaleY: input.dpr,
       pointRadius: input.pointRadius,
     })
+
     const style = input.minimumThicknessCssPx === undefined
       ? resolvedStyle
       : {
         ...resolvedStyle,
         minimumThicknessCssPx: input.minimumThicknessCssPx,
       }
+
     drawWaveformSignal(ctx, {
       data: input.data,
       sourceStartFrame: 0,
@@ -185,6 +195,7 @@ const render = (input: {
     ctx.lineTo(8, centerY + thickness / 2)
     ctx.fill()
   }
+
   return sampleMeasurement(ctx, canvas.width, canvas.height, input.dpr)
 }
 
@@ -214,6 +225,7 @@ const renderAll = (): RasterRegressionResult => {
   const fractionalCoverage: FractionalCoverageSample[] = []
   const floorExperiments: FloorExperiment[] = []
   const geometryDiagnostics: GeometryDiagnostic[] = []
+
   for (const dpr of [1, 2, 3]) {
     for (const deviceThickness of [
       0.9, 0.999, 1, 1.001, 1.25, 1.5, 1.999, 2, 2.001, 2.01,
@@ -221,18 +233,22 @@ const renderAll = (): RasterRegressionResult => {
     ]) {
       for (const centerDeviceY of [8, 8.25, 8.5, 8.75, 8.999, 9]) {
         const amplitude = deviceThickness / (dpr * 14.4)
+
         const data = {
           ...intervalData,
           channels: [new Float32Array([-amplitude, amplitude])],
         }
+
         aligned.push(render({ dpr, deviceThickness, centerDeviceY, kind: 'aligned', data }))
         legacy.push(render({ dpr, deviceThickness, centerDeviceY, kind: 'legacy', data }))
+
         if (dpr === 2) {
           const ribbon = waveformRibbonGeometry({
             upperY: (centerDeviceY - deviceThickness / 2) / dpr,
             lowerY: (centerDeviceY + deviceThickness / 2) / dpr,
             minimumThicknessCssPx: 1 / dpr,
           })
+
           centerRelease.push({
             thickness: deviceThickness,
             center: ribbon.centerY * dpr,
@@ -241,6 +257,7 @@ const renderAll = (): RasterRegressionResult => {
         }
       }
     }
+
     for (const fraction of [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]) {
       const measurement = render({
         dpr,
@@ -249,6 +266,7 @@ const renderAll = (): RasterRegressionResult => {
         kind: 'aligned',
         data: sampleData,
       })
+
       fractionalCoverage.push({
         dpr,
         fraction,
@@ -256,6 +274,7 @@ const renderAll = (): RasterRegressionResult => {
         fullyCoveredBackingRows: measurement.fullyCoveredBackingRows,
       })
     }
+
     for (const floor of [
       { label: 'one-physical-pixel', cssPx: 1 / dpr },
       { label: '0.75-css-pixel', cssPx: 0.75 },
@@ -271,15 +290,18 @@ const renderAll = (): RasterRegressionResult => {
           data: sampleData,
           minimumThicknessCssPx: floor.cssPx,
         }))
+
       const luminances = measurements.map((measurement) => measurement.darkestLuminance)
       const effectiveThicknesses = measurements.map((measurement) => measurement.effectiveBackingThickness)
       const sortedLuminances = [...luminances].sort((a, b) => a - b)
       const sortedThicknesses = [...effectiveThicknesses].sort((a, b) => a - b)
       const middle = Math.floor(sortedLuminances.length / 2)
+
       const median = (
         (sortedLuminances[middle - 1] ?? 0)
           + (sortedLuminances[middle] ?? 0)
       ) / 2
+
       const thicknessMiddle = Math.floor(sortedThicknesses.length / 2)
       floorExperiments.push({
         dpr,
@@ -300,13 +322,16 @@ const renderAll = (): RasterRegressionResult => {
         maximumDarkestLuminance: Math.max(...luminances),
       })
     }
+
     const rawCenter = (8.25 + 8.75) / 2 / dpr
     const rawThickness = (8.75 - 8.25) / dpr
+
     const ribbon = waveformRibbonGeometry({
       upperY: 8.25 / dpr,
       lowerY: 8.75 / dpr,
       minimumThicknessCssPx: minimumWaveformThicknessCssPx(dpr),
     })
+
     geometryDiagnostics.push({
       dpr,
       zoom: 1,
@@ -321,6 +346,7 @@ const renderAll = (): RasterRegressionResult => {
       finalThickness: ribbon.thickness,
     })
   }
+
   return {
     aligned,
     legacy,

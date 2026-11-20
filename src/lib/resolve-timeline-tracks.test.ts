@@ -21,6 +21,7 @@ const trackRow = (input: Pick<TimelineTrackRow, 'id' | 'index'> & Partial<Timeli
 
 const pendingTrack = (input: Pick<TimelineTrackRow, 'id' | 'index'> & Partial<TimelineTrackRow>): Track => {
   const row = trackRow(input)
+
   return {
     id: row.id,
     historyRef: row.historyRef,
@@ -187,6 +188,7 @@ describe('resolveTimelineTracks', () => {
         updatedAt: 0,
       }],
     }
+
     const fades = { fadeInSec: 1, fadeOutSec: 2, fadeInCurve: 0.5, fadeOutCurve: -0.5 }
 
     const tracks = resolveTimelineTracks({
@@ -228,6 +230,7 @@ describe('resolveTimelineTracks', () => {
 
   test('requires every fade value to match before clearing a committed patch', () => {
     const fades = { fadeInSec: 1, fadeOutSec: 2, fadeInCurve: 0.5, fadeOutCurve: -0.5 }
+
     const serverClip = {
       trackId: 'a',
       startSec: 0,
@@ -312,6 +315,7 @@ describe('resolveTimelineTracks', () => {
       ],
       clips: [],
     }
+
     const pendingChild = pendingTrack({ id: 'a', index: 1, outputTargetId: 'g' })
 
     const tracks = resolveTimelineTracks({
@@ -368,6 +372,7 @@ describe('resolveTimelineTracks', () => {
       ],
       clips: [],
     }
+
     const pendingChild = pendingTrack({ id: 'a', index: 1 })
 
     const tracks = resolveTimelineTracks({

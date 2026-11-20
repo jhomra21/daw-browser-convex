@@ -51,6 +51,7 @@ test('Wasm directory publication restores the old asset set when the replacement
     cmd: ['mktemp', '-d', '/tmp/daw-audio-core-publish-test.XXXXXX'],
     stdout: 'pipe',
   })
+
   expect(tempResult.exitCode).toBe(0)
   const root = new TextDecoder().decode(tempResult.stdout).trim()
   const publicDir = `${root}/public/audio-core`

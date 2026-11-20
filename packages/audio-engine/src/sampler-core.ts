@@ -14,15 +14,19 @@ export function selectSamplerZone(
   roundRobin: SamplerRoundRobinState,
 ): SamplerZoneSelection {
   const matches = zones.filter((zone) => note >= zone.keyLow && note <= zone.keyHigh && velocity >= zone.velocityLow && velocity <= zone.velocityHigh)
+
   if (matches.length === 0) return { roundRobin }
   const group = matches[0]?.roundRobinGroup ?? 0
+
   const grouped = group > 0
     ? matches.filter((zone) => zone.roundRobinGroup === group).sort((a, b) => a.roundRobinIndex - b.roundRobinIndex || a.id.localeCompare(b.id))
     : matches
+
   if (group <= 0 || grouped.length === 1) return { zone: grouped[0], roundRobin }
   const cursor = roundRobin.get(group) ?? 0
   const next = new Map(roundRobin)
   next.set(group, (cursor + 1) % grouped.length)
+
   return { zone: grouped[cursor % grouped.length], roundRobin: next }
 }
 
@@ -68,6 +72,7 @@ export function createSamplerVoicePlan(input: {
   const segments: SamplerLoopSegment[] = []
   const detuneCents = (input.note - input.zone.rootNote) * 100 + input.zone.tuneCents
   const playbackRate = 2 ** (detuneCents / 1200)
+
   if (!loop) {
     segments.push({
       offsetSec: input.zone.startSec,
@@ -92,9 +97,11 @@ export function createSamplerVoicePlan(input: {
     let startTime = input.when
     let offsetSec = input.zone.startSec
     let first = true
+
     while (startTime < ampEnvelope.endTime && segments.length < 512) {
       const available = first ? introDuration : loopDuration
       const durationSec = Math.min(available, ampEnvelope.endTime - startTime)
+
       if (durationSec <= 0) break
       segments.push({
         offsetSec,
@@ -108,6 +115,7 @@ export function createSamplerVoicePlan(input: {
       first = false
     }
   }
+
   return {
     zone: input.zone,
     detuneCents,
@@ -128,6 +136,7 @@ export function createSamplerVoicePlan(input: {
 export function getSamplerEnvelopeTimes(envelope: SamplerEnvelope, startTime: number, releaseTime: number) {
   const attackEnd = startTime + envelope.attackSec
   const decayEnd = attackEnd + envelope.decaySec
+
   return {
     startTime,
     attackEnd,
@@ -141,7 +150,9 @@ export function getSamplerEnvelopeTimes(envelope: SamplerEnvelope, startTime: nu
 export function getSamplerLoopBounds(zone: SamplerZone) {
   if (zone.playbackMode === 'one-shot' || zone.loopStartSec === undefined || zone.loopEndSec === undefined) return undefined
   const length = zone.loopEndSec - zone.loopStartSec
+
   if (length <= 0) return undefined
+
   return {
     startSec: zone.loopStartSec,
     endSec: zone.loopEndSec,
@@ -164,49 +175,64 @@ export function createSamplerBufferCache<Value>(
   const pinEntries = new WeakMap<SamplerBufferCachePin, CacheEntry<Value>>()
   let byteLimit = maxBytes
   let bytes = 0
+
   const touch = (key: string, entry: CacheEntry<Value>) => {
     entries.delete(key)
     entries.set(key, entry)
   }
+
   const evict = () => {
     const evicted: [string, Value][] = []
+
     while (bytes > byteLimit) {
       const candidate = Array.from(entries).find(([, entry]) => entry.pins === 0)
+
       if (!candidate) break
       entries.delete(candidate[0])
       bytes -= candidate[1].bytes
       evicted.push([candidate[0], candidate[1].value])
     }
+
     for (const [key, value] of evicted) onEvict?.(key, value)
   }
+
   const removeRetired = (entry: CacheEntry<Value>) => {
     if (!retired.delete(entry)) return
     bytes -= entry.bytes
   }
+
   const releasePin = (pin: SamplerBufferCachePin) => {
     const entry = pinEntries.get(pin)
+
     if (!entry) return
     pinEntries.delete(pin)
+
     if (entry.pins > 0) entry.pins -= 1
+
     if (retired.has(entry) && entry.pins === 0) removeRetired(entry)
     evict()
   }
+
   const createPin = (entry: CacheEntry<Value>): SamplerBufferCachePin => {
     entry.pins += 1
     const pin: SamplerBufferCachePin = { release: () => releasePin(pin) }
     pinEntries.set(pin, entry)
+
     return pin
   }
 
   return {
     get: (key: string) => {
       const entry = entries.get(key)
+
       if (!entry) return undefined
       touch(key, entry)
+
       return entry.value
     },
     set: (key: string, value: Value, entryBytes: number) => {
       const existing = entries.get(key)
+
       if (existing?.pins) {
         entries.delete(key)
         retired.add(existing)
@@ -218,9 +244,11 @@ export function createSamplerBufferCache<Value>(
     },
     pin: (key: string) => {
       const entry = entries.get(key)
+
       if (!entry) return undefined
       const pin = createPin(entry)
       touch(key, entry)
+
       return pin
     },
     unpin: (pin: SamplerBufferCachePin) => {
@@ -228,7 +256,9 @@ export function createSamplerBufferCache<Value>(
     },
     delete: (key: string) => {
       const entry = entries.get(key)
+
       if (!entry) return
+
       if (entry.pins > 0) {
         entries.delete(key)
         retired.add(entry)

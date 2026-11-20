@@ -62,9 +62,11 @@ export const externalProcessorStatusLabel = (
 ) => {
   // A plug-in that faulted is silent until the user replaces or removes it, bypassed or not.
   if (failed) return "Plug-in failed · Muted";
+
   if (!processor.bypassed && processor.health.state === "ready") return "Enabled · Preflight passed";
   const bypass = processor.bypassed ? "Bypassed" : "Enabled";
   const health = processor.health.state.charAt(0).toUpperCase() + processor.health.state.slice(1);
+
   return `${bypass} · ${health}`;
 };
 

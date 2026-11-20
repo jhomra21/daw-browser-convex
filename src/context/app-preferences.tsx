@@ -93,14 +93,17 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
   const [preferences, setPreferences] = createPersistedAppPreferencesWithInitial(props.initialPreferences)
   const [previewThemeId, setPreviewThemeId] = createSignal<DawThemeId | null>(null)
   const [previewTheme, setPreviewTheme] = createSignal<AppTheme | null>(null)
+
   const [themeTokens, setThemeTokens] = createSignal<ResolvedThemeTokens>(
     resolveDawThemeById(preferences.appearance.themeId, colorMode())
   )
 
   const activeThemeId = () => previewThemeId() ?? preferences.appearance.themeId
   const activeTheme = () => previewTheme() ?? preferences.appearance.theme
+
   const activeThemeSelection = () => {
     const themeId = activeThemeId()
+
     return themeId === DEFAULT_DAW_THEME_ID ? activeTheme() : themeId
   }
 
@@ -110,6 +113,7 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
 
   createEffect(() => {
     const result = applyDawTheme(activeThemeId(), colorMode())
+
     if (!result.changed) return
     setThemeTokens(result.tokens)
   })
@@ -138,6 +142,7 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
         setPreviewThemeId(DEFAULT_DAW_THEME_ID)
         setPreviewTheme(selection)
       })
+
       return
     }
 
@@ -155,6 +160,7 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
       } else {
         setThemeId(selection)
       }
+
       setPreviewThemeId(null)
       setPreviewTheme(null)
     })
@@ -174,12 +180,14 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
 
   const setDefaultTrackColor = (color: string) => {
     const nextColor = parseHexColor(color, preferences.timeline.defaultTrackColor)
+
     if (preferences.timeline.defaultTrackColor === nextColor) return
     setPreferences("timeline", "defaultTrackColor", nextColor)
   }
 
   const setDefaultGroupColor = (color: string) => {
     const nextColor = parseHexColor(color, preferences.timeline.defaultGroupColor)
+
     if (preferences.timeline.defaultGroupColor === nextColor) return
     setPreferences("timeline", "defaultGroupColor", nextColor)
   }
@@ -201,7 +209,9 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
 
   const resolveDefaultTimelineColor = (color: string) => {
     if (color === TIMELINE_DEFAULT_TRACK_COLOR) return `var(--${TIMELINE_DEFAULT_TRACK_COLOR})`
+
     if (color === TIMELINE_DEFAULT_GROUP_COLOR) return `var(--${TIMELINE_DEFAULT_GROUP_COLOR})`
+
     return color
   }
 
@@ -280,5 +290,6 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
 
 export const useAppPreferences = () => {
   const context = useContext(AppPreferencesContext)
+
   return assertDefined(context, "useAppPreferences must be used within AppPreferencesProvider.")
 }

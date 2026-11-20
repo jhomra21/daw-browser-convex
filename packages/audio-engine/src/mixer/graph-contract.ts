@@ -89,19 +89,25 @@ const toPortableNodeKind = (
   if (includeInstruments && channel.kind === 'instrument' && getMixerChannelRole(channel) === 'track') {
     return 'instrument' as const
   }
+
   const role = getMixerChannelRole(channel)
+
   if (role === 'group' || role === 'return') return role
+
   return 'source' as const
 }
 
 const processorInstanceId = (id: string) => {
   let value = 2166136261
+
   for (const character of id) value = Math.imul(value ^ character.charCodeAt(0), 16777619)
+
   return (value >>> 0) || 1
 }
 
 const EQ_BAND_PARAMETER_TARGET_BASE = 45
 const EQ_BAND_PARAMETER_TARGET_STRIDE = 3
+
 const eqBandParameterTarget = (bandIndex: number, propertyOffset: number) =>
   EQ_BAND_PARAMETER_TARGET_BASE + bandIndex * EQ_BAND_PARAMETER_TARGET_STRIDE + propertyOffset
 
@@ -133,6 +139,7 @@ const filterMode = (value: 'lowpass' | 'highpass' | 'bandpass' | 'notch'): 0 | 1
 
 export const compilePortableSynthState = (input: SynthParamsInput): AudioCoreSynthState => {
   const params = normalizeSynthParams(input)
+
   return {
     version: audioCoreContractVersion,
     kind: 'synth',
@@ -183,6 +190,7 @@ const toPortableInstrument = (
   if (instrument.kind !== 'synth') {
     throw new Error(`Native instrument "${instrument.kind}" is not supported by the portable graph.`)
   }
+
   return compilePortableSynthState(instrument.params)
 }
 
@@ -191,11 +199,13 @@ export const resolvePortableDelayMs = (
   bpm: number,
 ) => {
   if (params.mode === 'time') return params.timeMs
+
   const beats = params.syncDivision === '1/16' ? 0.25
     : params.syncDivision === '1/8' ? 0.5
       : params.syncDivision === '1/4' ? 1
         : params.syncDivision === '1/2' ? 2
           : 4
+
   return Math.min(3_000, beats * 60_000 / Math.max(1, bpm))
 }
 
@@ -205,6 +215,7 @@ const toPortableProcessor = (
   bpm: number,
 ): AudioCoreGraphProcessorDto => {
   const timing = getEffectTiming(instance, sampleRate, bpm)
+
   const common: Pick<AudioCoreGraphProcessorDto, 'id' | 'instanceId' | 'stateVersion' | 'latencyFrames' | 'tailFrames' | 'tailKind'> = {
     id: instance.id,
     instanceId: processorInstanceId(instance.id),
@@ -213,6 +224,7 @@ const toPortableProcessor = (
     tailFrames: timing.tail.kind === 'finite' ? timing.tail.frames : 0,
     tailKind: timing.tail.kind === 'unbounded' ? 'unbounded' : undefined,
   }
+
   if (instance.kind === 'utility') {
     return {
       ...common,
@@ -228,8 +240,10 @@ const toPortableProcessor = (
       bypassed: !instance.params.state.enabled,
     }
   }
+
   if (instance.kind === 'autofilter') {
     const params = instance.params.state
+
     return {
       ...common, kind: 'autofilter', kindId: 16, state: encodeAutoFilterProcessorState(params),
       parameterTargets: [
@@ -248,6 +262,7 @@ const toPortableProcessor = (
       bypassed: !params.enabled,
     }
   }
+
   if (instance.kind === 'saturator') {
     return {
       ...common,
@@ -264,6 +279,7 @@ const toPortableProcessor = (
       bypassed: !instance.params.enabled,
     }
   }
+
   if (instance.kind === 'eq') {
     return {
       ...common,
@@ -288,8 +304,10 @@ const toPortableProcessor = (
       bypassed: !instance.params.enabled,
     }
   }
+
   if (instance.kind === 'chorus' || instance.kind === 'flanger') {
     const kindId = instance.kind === 'chorus' ? 4 : 5
+
     return {
       ...common,
       kind: instance.kind,
@@ -317,6 +335,7 @@ const toPortableProcessor = (
       bypassed: !instance.params.state.enabled,
     }
   }
+
   if (instance.kind === 'phaser') {
     return {
       ...common, kind: 'phaser', kindId: 6, state: encodePhaserProcessorState(instance.params.state),
@@ -330,8 +349,10 @@ const toPortableProcessor = (
       ], bypassed: !instance.params.state.enabled,
     }
   }
+
   if (instance.kind === 'tremolo' || instance.kind === 'autopan') {
     const kindId = instance.kind === 'tremolo' ? 7 : 8
+
     return {
       ...common, kind: instance.kind, kindId,
       state: instance.kind === 'tremolo'
@@ -352,6 +373,7 @@ const toPortableProcessor = (
         ], bypassed: !instance.params.state.enabled,
     }
   }
+
   if (instance.kind === 'ensemble') {
     return {
       ...common, kind: 'ensemble', kindId: 9, state: encodeEnsembleProcessorState(instance.params.state),
@@ -364,6 +386,7 @@ const toPortableProcessor = (
       ], bypassed: !instance.params.state.enabled,
     }
   }
+
   if (instance.kind === 'gate') {
     return {
       ...common, kind: 'gate', kindId: 10, state: encodeGateProcessorState(instance.params.state),
@@ -382,10 +405,12 @@ const toPortableProcessor = (
       ], bypassed: !instance.params.state.enabled,
     }
   }
+
   if (instance.kind === 'compressor') {
     const state = instance.params.enabled
       ? instance.params
       : { ...instance.params, makeupDb: 0, outputDb: 0 }
+
     return {
       ...common, kind: 'compressor', kindId: 11, state: encodeCompressorProcessorState(state),
       parameterTargets: [
@@ -403,6 +428,7 @@ const toPortableProcessor = (
       ], bypassed: !instance.params.enabled,
     }
   }
+
   if (instance.kind === 'limiter') {
     return {
       ...common, kind: 'limiter', kindId: 12, state: encodeLimiterProcessorState(instance.params.state),
@@ -414,8 +440,10 @@ const toPortableProcessor = (
       ], bypassed: !instance.params.state.enabled,
     }
   }
+
   if (instance.kind === 'lofi') {
     const params = normalizeLoFiParamsEnvelope(instance.params).state
+
     return {
       ...common, kind: 'lofi', kindId: 17, state: encodeLoFiProcessorState(params),
       parameterTargets: [
@@ -428,8 +456,10 @@ const toPortableProcessor = (
       bypassed: !params.enabled,
     }
   }
+
   if (instance.kind === 'delay') {
     const params = normalizeDelayParams(instance.params)
+
     return {
       ...common, kind: 'delay', kindId: 13, state: encodeDelayProcessorState({
         enabled: params.enabled,
@@ -451,8 +481,10 @@ const toPortableProcessor = (
       bypassed: !params.enabled,
     }
   }
+
   if (instance.kind === 'reverb') {
     const params = normalizeReverbParams(instance.params)
+
     return {
       ...common, kind: 'reverb', kindId: 14, state: encodeReverbProcessorState(params),
       parameterTargets: [
@@ -476,8 +508,10 @@ const toPortableProcessor = (
       bypassed: !params.enabled,
     }
   }
+
   if (instance.kind === 'spectral') {
     const params = instance.params.state
+
     return {
       ...common, kind: 'spectral', kindId: 15, state: encodeSpectralProcessorState(params),
       parameterTargets: [
@@ -496,6 +530,7 @@ const toPortableProcessor = (
       bypassed: !params.enabled,
     }
   }
+
   throw new Error('Portable processor is not implemented.')
 }
 
@@ -516,6 +551,7 @@ export const createPortableGraphSnapshot = ({
 }: CreatePortableGraphSnapshotOptions): AudioCoreGraphSnapshot => {
   if (!Number.isSafeInteger(revision) || revision <= 0) throw new Error('Portable graph revisions must be positive safe integers.')
   const timing = resolveMixerTiming(graph, sampleRate, bpm, externalLatencyFrames)
+
   const nodes = graph.channels.map((entry) => {
     return {
       id: entry.channel.id,
@@ -529,7 +565,9 @@ export const createPortableGraphSnapshot = ({
       mixer: toPortableMixerState(entry.channel.id, entry.gain, !!entry.channel.muted),
     }
   })
+
   const edges: AudioCoreGraphSnapshot['edges'][number][] = []
+
   for (const entry of graph.channels) {
     const outputTargetId = entry.outputTargetId ?? MASTER_ROUTE_TARGET
     edges.push({
@@ -543,6 +581,7 @@ export const createPortableGraphSnapshot = ({
       sidechain: false,
       pdcDelayFrames: timing.routeDelayFrames.get(mixerRouteKey(entry.channel.id, outputTargetId, 'output')) ?? 0,
     })
+
     for (const send of entry.sends) {
       edges.push({
         version: audioCoreContractVersion,
@@ -557,20 +596,26 @@ export const createPortableGraphSnapshot = ({
       })
     }
   }
+
   const channelIds = new Set(graph.channels.map((entry) => entry.channel.id))
+
   for (const route of sidechainRoutes) {
     if (!channelIds.has(route.sourceTrackId) || !channelIds.has(route.targetTrackId)) {
       throw new Error('Portable sidechain routes must reference resolved mixer channels.')
     }
+
     const target = graph.channels
       .find((entry) => entry.channel.id === route.targetTrackId)
       ?.fx?.instances.find((instance) => instance.id === route.effectInstanceId)
+
     if (target?.kind !== 'compressor' && target?.kind !== 'gate' && target?.kind !== 'spectral') {
       throw new Error(`Portable sidechain target "${route.effectInstanceId}" is not a supported detector processor.`)
     }
+
     if (target.kind === 'gate' && !target.params.state.sidechain.enabled) {
       throw new Error(`Portable Gate sidechain target "${route.effectInstanceId}" requires its detector filter to be enabled for legacy parity.`)
     }
+
     edges.push({
       version: audioCoreContractVersion,
       id: `sidechain:${JSON.stringify([route.sourceTrackId, route.targetTrackId, route.effectInstanceId])}`,
@@ -584,6 +629,7 @@ export const createPortableGraphSnapshot = ({
       pdcDelayFrames: 0,
     })
   }
+
   return {
     version: audioCoreContractVersion,
     revision,

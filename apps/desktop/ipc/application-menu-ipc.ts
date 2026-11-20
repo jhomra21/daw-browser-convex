@@ -13,6 +13,7 @@ export const registerApplicationMenuIpc = (dependencies: {
   dependencies.ipcMain.on(applicationMenuStateChannel, (event, value) => {
     if (!dependencies.applicationMenuStateAllowed(event)) return;
     const parsed = desktopApplicationMenuStateSchema.safeParse(value);
+
     if (parsed.success) dependencies.applicationMenuController.setState(parsed.data);
   });
 };

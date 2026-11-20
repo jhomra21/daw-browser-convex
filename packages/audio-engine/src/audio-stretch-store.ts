@@ -15,12 +15,15 @@ const STORE_NAME = 'renders'
 
 const openStretchCacheDb = () => {
   if (!('indexedDB' in globalThis) || !globalThis.indexedDB) return Promise.resolve<IDBDatabase | null>(null)
+
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = globalThis.indexedDB.open(DB_NAME, DB_VERSION)
     request.onupgradeneeded = () => {
       const db = request.result
+
       if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME, { keyPath: 'key' })
     }
+
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error ?? new Error('Failed to open stretch cache database.'))
   })
@@ -51,10 +54,12 @@ const isNumber = <Value>(value: Value): value is Value & number => typeof value 
 const normalizeStoredRender = <Value>(value: Value): StoredStretchedAudioRender | null => {
   if (!isStoredRenderFields(value) || !Array.isArray(value.channels)) return null
   const channels: Float32Array[] = []
+
   for (const channel of value.channels) {
     if (!(channel instanceof Float32Array)) return null
     channels.push(channel)
   }
+
   if (
     !isString(value.key)
     || !isNumber(value.sampleRate)
@@ -65,6 +70,7 @@ const normalizeStoredRender = <Value>(value: Value): StoredStretchedAudioRender 
   const updatedAt = isNumber(value.updatedAt) ? value.updatedAt : 0
   const fallback = getStoredRenderByteSize({ channels })
   const byteSize = isNumber(value.byteSize) ? value.byteSize : fallback
+
   return {
     key: value.key,
     sampleRate: value.sampleRate,
@@ -82,26 +88,32 @@ export const selectStoredRenderEvictionKeys = (
   maxBytes: number,
 ) => {
   let totalBytes = rows.reduce((total, row) => total + Math.max(0, row.byteSize), 0)
+
   if (totalBytes <= maxBytes) return []
   const keys: string[] = []
   const oldestFirst = [...rows].sort((left, right) => left.updatedAt - right.updatedAt)
+
   for (const row of oldestFirst) {
     if (totalBytes <= maxBytes) break
     keys.push(row.key)
     totalBytes -= Math.max(0, row.byteSize)
   }
+
   return keys
 }
 
 export const readStoredRender = async (key: string): Promise<StoredStretchedAudioRender | null> => {
   const db = await openStretchCacheDb()
+
   if (!db) return null
+
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readonly')
     const request = tx.objectStore(STORE_NAME).get(key)
     request.onsuccess = () => {
       resolve(normalizeStoredRender(request.result))
     }
+
     request.onerror = () => reject(request.error ?? new Error('Failed to read stored Stretch render.'))
     tx.oncomplete = () => db.close()
     tx.onabort = () => db.close()
@@ -110,6 +122,7 @@ export const readStoredRender = async (key: string): Promise<StoredStretchedAudi
 
 export const writeStoredRender = async (row: StoredStretchedAudioRender) => {
   const db = await openStretchCacheDb()
+
   if (!db) return
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite')
@@ -118,10 +131,12 @@ export const writeStoredRender = async (row: StoredStretchedAudioRender) => {
       db.close()
       resolve()
     }
+
     tx.onerror = () => {
       db.close()
       reject(tx.error ?? new Error('Failed to persist Stretch render.'))
     }
+
     tx.onabort = () => {
       db.close()
       reject(tx.error ?? new Error('Failed to persist Stretch render.'))
@@ -135,23 +150,32 @@ export const touchStoredRender = async (row: StoredStretchedAudioRender) => {
 
 const readStoredRenderRows = async () => {
   const db = await openStretchCacheDb()
+
   if (!db) return []
+
   return new Promise<StoredStretchedAudioRender[]>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readonly')
     const request = tx.objectStore(STORE_NAME).getAll()
     request.onsuccess = () => {
       const result: unknown = request.result
+
       if (!Array.isArray(result)) {
         resolve([])
+
         return
       }
+
       const rows: StoredStretchedAudioRender[] = []
+
       for (const value of result) {
         const row = normalizeStoredRender(value)
+
         if (row) rows.push(row)
       }
+
       resolve(rows)
     }
+
     request.onerror = () => reject(request.error ?? new Error('Failed to list stored Stretch renders.'))
     tx.oncomplete = () => db.close()
     tx.onabort = () => db.close()
@@ -161,19 +185,23 @@ const readStoredRenderRows = async () => {
 const deleteStoredRenders = async (keys: string[]) => {
   if (keys.length === 0) return
   const db = await openStretchCacheDb()
+
   if (!db) return
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite')
     const store = tx.objectStore(STORE_NAME)
+
     for (const key of keys) store.delete(key)
     tx.oncomplete = () => {
       db.close()
       resolve()
     }
+
     tx.onerror = () => {
       db.close()
       reject(tx.error ?? new Error('Failed to evict stored Stretch renders.'))
     }
+
     tx.onabort = () => {
       db.close()
       reject(tx.error ?? new Error('Failed to evict stored Stretch renders.'))

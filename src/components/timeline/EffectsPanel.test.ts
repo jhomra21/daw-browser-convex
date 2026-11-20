@@ -52,6 +52,7 @@ describe("effect automation display overlay", () => {
       createEqBandParameterId("high", "frequencyHz"),
       12_000,
     );
+
     const finalDisplay = overlayEffectAutomationValue(
       frequencyDisplay,
       createEqBandParameterId("high", "gainDb"),

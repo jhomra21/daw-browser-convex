@@ -8,15 +8,18 @@ export const createTimelineMixerLocalWrites = (flushAllTimers: () => Promise<voi
   const queueLocalTrackUpdate = (projectId: string, input: UpdateTrackInput) => {
     const chainKey = `${projectId}:${input.trackId}`
     const previous = localTrackUpdateChains.get(chainKey) ?? Promise.resolve()
+
     const next = previous
       .catch(() => undefined)
       .then(async () => {
         await createLocalTimelineRepository(projectId).updateTrack(input)
       })
+
     localTrackUpdateChains.set(chainKey, next)
     void next.finally(() => {
       if (localTrackUpdateChains.get(chainKey) === next) localTrackUpdateChains.delete(chainKey)
     }).catch(() => undefined)
+
     return next
   }
 

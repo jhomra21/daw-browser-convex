@@ -27,6 +27,7 @@ const source = (input: {
   persistable: input.persistable,
   readPages: async function* (options = {}) {
     input.started?.()
+
     if (input.release) await input.release
     options.signal?.throwIfAborted()
     yield {
@@ -42,15 +43,18 @@ const source = (input: {
 const deferred = () => {
   let resolve: () => void = () => {}
   const promise = new Promise<void>((nextResolve) => { resolve = nextResolve })
+
   return { promise, resolve }
 }
 
 const generationChunkKeys = async (assetKey: string) => {
   const request = indexedDB.open('audio-peaks-db', 5)
+
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
   })
+
   return await new Promise<string[]>((resolve, reject) => {
     const transaction = db.transaction('asset-chunks', 'readonly')
     const requestKeys = transaction.objectStore('asset-chunks').getAllKeys()
@@ -72,11 +76,13 @@ describe('waveform asset store', () => {
       sourceIdentity: { assetKey: 'generation', identity: 'one', durationSec: 1, frameCount: 400, sampleRate: 400, channelCount: 1 },
       source: source({ identity: 'one', durationSec: 1 }),
     })
+
     const second = ensurePeakAsset({
       assetKey: 'generation',
       sourceIdentity: { assetKey: 'generation', identity: 'two', durationSec: 2, frameCount: 800, sampleRate: 400, channelCount: 1 },
       source: source({ identity: 'two', durationSec: 2 }),
     })
+
     expect(await first).toBeNull()
     expect((await second)?.durationSec).toBe(2)
   })
@@ -85,6 +91,7 @@ describe('waveform asset store', () => {
     const started = deferred()
     const readAborted = deferred()
     let release: () => void = () => {}
+
     const oldSource: AudioPcmSourceDescriptor = {
       ...source({ identity: 'blocked-old', durationSec: 1 }),
       readPages: async function* (options = {}) {
@@ -101,18 +108,22 @@ describe('waveform asset store', () => {
         }
       },
     }
+
     const old = ensurePeakAsset({
       assetKey: 'blocked-superseded',
       source: oldSource,
     })
+
     const oldSettled = deferred()
     void old.then(() => oldSettled.resolve())
     await started.promise
+
     const replacement = ensurePeakAsset({
       assetKey: 'blocked-superseded',
       sourceIdentity: { assetKey: 'blocked-superseded', identity: 'new', durationSec: 2, frameCount: 800, sampleRate: 400, channelCount: 1 },
       source: source({ identity: 'new', durationSec: 2 }),
     })
+
     await readAborted.promise
     await oldSettled.promise
     release()
@@ -123,12 +134,14 @@ describe('waveform asset store', () => {
   test('detaches an aborted waiter while retaining a shared generation', async () => {
     const started = deferred()
     const release = deferred()
+
     const shared = source({
       identity: 'shared',
       durationSec: 1,
       started: started.resolve,
       release: release.promise,
     })
+
     const controller = new AbortController()
     const first = ensurePeakAsset({ assetKey: 'shared', source: shared, signal: controller.signal })
     await started.promise
@@ -145,6 +158,7 @@ describe('waveform asset store', () => {
     const firstStarted = deferred()
     const secondStarted = deferred()
     let reads = 0
+
     const shared: AudioPcmSourceDescriptor = {
       identity: 'restartable',
       durationSec: 1,
@@ -155,7 +169,9 @@ describe('waveform asset store', () => {
       readPages: async function* (options = {}) {
         reads += 1
         const read = reads
+
         if (read === 1) firstStarted.resolve()
+
         if (read === 2) secondStarted.resolve()
         await (read === 1 ? firstRelease.promise : secondRelease.promise)
         options.signal?.throwIfAborted()
@@ -168,6 +184,7 @@ describe('waveform asset store', () => {
         }
       },
     }
+
     const controller = new AbortController()
     const first = ensurePeakAsset({ assetKey: 'restartable', source: shared, signal: controller.signal })
     await firstStarted.promise
@@ -190,10 +207,12 @@ describe('waveform asset store', () => {
   test('keeps persisted readers on the old generation until replacement publication', async () => {
     const oldSource = source({ identity: 'old', durationSec: 1, persistable: true })
     const initial = await ensurePeakAsset({ assetKey: 'atomic', source: oldSource })
+
     if (!initial) throw new Error('Expected initial generation')
     clearWaveformAssetCache()
     const started = deferred()
     const release = deferred()
+
     const replacement = source({
       identity: 'new',
       durationSec: 2,
@@ -201,6 +220,7 @@ describe('waveform asset store', () => {
       started: started.resolve,
       release: release.promise,
     })
+
     const next = ensurePeakAsset({ assetKey: 'atomic', source: replacement })
     await started.promise
     expect((await loadPeakAssetRecord('atomic'))?.generationId).toBe(initial.generationId)
@@ -217,6 +237,7 @@ describe('waveform asset store', () => {
     let startedReplacement = false
     IDBObjectStore.prototype.put = function put(value, key) {
       const result = originalPut.call(this, value, key)
+
       if (!startedReplacement && this.name === 'asset-meta' && key === assetKey) {
         startedReplacement = true
         replacement = ensurePeakAsset({
@@ -232,15 +253,19 @@ describe('waveform asset store', () => {
           source: source({ identity: 'new', durationSec: 2, persistable: true }),
         })
       }
+
       return result
     }
+
     try {
       const old = ensurePeakAsset({
         assetKey,
         source: source({ identity: 'old', durationSec: 1, persistable: true }),
       })
+
       expect(await old).toBeNull()
       const next = replacement
+
       if (!next) throw new Error('Expected replacement generation')
       const published = await next
       expect(published?.sourceIdentity?.identity).toBe('new')
@@ -257,6 +282,7 @@ describe('waveform asset store', () => {
     const replacementStarted = deferred()
     const replacementRelease = deferred()
     let replacement: ReturnType<typeof ensurePeakAsset> | undefined
+
     const oldRecord = createPeakAssetRecord({
       durationSec: 1,
       frameCount: 400,
@@ -270,7 +296,9 @@ describe('waveform asset store', () => {
       sampleRate: 400,
       channelCount: 1,
     })
+
     await storePeakAssetRecord(oldRecord)
+
     const missingOldChunk = getPeakChunkRecord(
       assetKey,
       oldRecord.generationId,
@@ -278,10 +306,12 @@ describe('waveform asset store', () => {
       oldRecord.channelCount,
       0,
     )
+
     expect(await loadPeakChunk(missingOldChunk.chunkKey)).toBeNull()
     const originalPut = IDBObjectStore.prototype.put
     IDBObjectStore.prototype.put = function put(value, key) {
       const result = originalPut.call(this, value, key)
+
       if (!replacement && this.name === 'asset-meta' && key === assetKey) {
         replacement = ensurePeakAsset({
           assetKey,
@@ -310,13 +340,16 @@ describe('waveform asset store', () => {
           },
         })
       }
+
       return result
     }
+
     try {
       const stale = ensurePeakAsset({
         assetKey,
         source: source({ identity: 'new', durationSec: 2, persistable: true }),
       })
+
       await replacementStarted.promise
       expect(await stale).toBeNull()
       replacementRelease.resolve()
@@ -333,6 +366,7 @@ describe('waveform asset store', () => {
   test('settles pending readers during cache clear before ignored aborts complete', async () => {
     const started = deferred()
     const release = deferred()
+
     const blocked = ensurePeakAsset({
       assetKey: 'clear-blocked',
       source: {
@@ -351,13 +385,16 @@ describe('waveform asset store', () => {
         },
       },
     })
+
     await started.promise
     clearWaveformAssetCache()
     expect(await blocked).toBeNull()
+
     const replacement = ensurePeakAsset({
       assetKey: 'clear-blocked',
       source: source({ identity: 'replacement', durationSec: 2 }),
     })
+
     expect((await replacement)?.sourceIdentity?.identity).toBe('replacement')
     release.resolve()
     expect(await blocked).toBeNull()
@@ -365,6 +402,7 @@ describe('waveform asset store', () => {
 
   test('does not return stale metadata from a read crossing cache clear', async () => {
     const assetKey = 'blocked-metadata-read'
+
     const oldRecord = createPeakAssetRecord({
       durationSec: 1,
       frameCount: 400,
@@ -378,6 +416,7 @@ describe('waveform asset store', () => {
       sampleRate: 400,
       channelCount: 1,
     })
+
     const newRecord = createPeakAssetRecord({
       durationSec: 2,
       frameCount: 800,
@@ -391,16 +430,20 @@ describe('waveform asset store', () => {
       sampleRate: 400,
       channelCount: 1,
     })
+
     await storePeakAssetRecord(oldRecord)
     const started = deferred()
     const originalGet = IDBObjectStore.prototype.get
     let readBlocked = false
     let blockedSuccess: ((event: Event) => void) | null = null
+
     const releaseBlockedRead = () => {
       if (blockedSuccess) blockedSuccess(new Event('success'))
     }
+
     IDBObjectStore.prototype.get = function get(key) {
       const request = originalGet.call(this, key)
+
       if (!readBlocked && this.name === 'asset-meta' && key === assetKey) {
         readBlocked = true
         Object.defineProperty(request, 'onsuccess', {
@@ -414,8 +457,10 @@ describe('waveform asset store', () => {
           started.resolve()
         })
       }
+
       return request
     }
+
     try {
       const stale = loadCachedPeakAsset(assetKey)
       let staleSettled = false
@@ -438,6 +483,7 @@ describe('waveform asset store', () => {
 
   test('does not return stale chunk data from a read crossing cache clear', async () => {
     const assetKey = 'blocked-chunk-read'
+
     const record = createPeakAssetRecord({
       durationSec: 1,
       frameCount: 400,
@@ -451,6 +497,7 @@ describe('waveform asset store', () => {
       sampleRate: 400,
       channelCount: 1,
     })
+
     const chunk = getPeakChunkRecord(assetKey, record.generationId, record.levels[0]!, record.channelCount, 0)
     const oldData = [new Uint8Array(chunk.intervalCount * 2)]
     const newData = [new Uint8Array(chunk.intervalCount * 2).fill(1)]
@@ -459,11 +506,14 @@ describe('waveform asset store', () => {
     const originalGet = IDBObjectStore.prototype.get
     let readBlocked = false
     let blockedSuccess: ((event: Event) => void) | null = null
+
     const releaseBlockedRead = () => {
       if (blockedSuccess) blockedSuccess(new Event('success'))
     }
+
     IDBObjectStore.prototype.get = function get(key) {
       const request = originalGet.call(this, key)
+
       if (!readBlocked && this.name === 'asset-chunks' && key === chunk.chunkKey) {
         readBlocked = true
         Object.defineProperty(request, 'onsuccess', {
@@ -477,8 +527,10 @@ describe('waveform asset store', () => {
           started.resolve()
         })
       }
+
       return request
     }
+
     try {
       const stale = loadPeakChunkData(chunk.chunkKey)
       let staleSettled = false
@@ -503,6 +555,7 @@ describe('waveform asset store', () => {
     const started = deferred()
     const release = deferred()
     let reads = 0
+
     const shared = source({
       identity: 'three-way',
       durationSec: 1,
@@ -512,6 +565,7 @@ describe('waveform asset store', () => {
       },
       release: release.promise,
     })
+
     const creatorController = new AbortController()
     const creator = ensurePeakAsset({ assetKey: 'three-way', source: shared, signal: creatorController.signal })
     await started.promise
@@ -527,20 +581,24 @@ describe('waveform asset store', () => {
 
   test('does not persist session-only assets and bounds record cache entries', async () => {
     const assetKey = 'session-only'
+
     const record = await ensurePeakAsset({
       assetKey,
       source: source({ identity: 'session', durationSec: 1 }),
     })
+
     if (!record) throw new Error('Expected generated record')
     const chunk = getPeakChunkRecord(assetKey, record.generationId, record.levels[0]!, record.channelCount, 0)
     expect(await loadPeakAssetRecord(assetKey)).toBeNull()
     expect(await loadPeakChunk(chunk.chunkKey)).toBeNull()
+
     for (let index = 0; index < waveformCacheLimits.recordEntries + 4; index += 1) {
       await ensurePeakAsset({
         assetKey: `asset-${index}`,
         source: source({ identity: `asset-${index}`, durationSec: 0.1 }),
       })
     }
+
     expect(getWaveformCacheSizes().recordEntries).toBe(waveformCacheLimits.recordEntries)
     expect(getWaveformCacheSizes().generationEntries).toBe(0)
   })
@@ -549,6 +607,7 @@ describe('waveform asset store', () => {
     const assetKey = 'persisted'
     const persisted = source({ identity: 'persisted', durationSec: 2, persistable: true })
     const initial = await ensurePeakAsset({ assetKey, source: persisted })
+
     if (!initial) throw new Error('Expected persisted record')
     clearWaveformAssetCache()
     const reopened = await ensurePeakAsset({ assetKey, source: persisted })
@@ -559,6 +618,7 @@ describe('waveform asset store', () => {
   test('removes chunks from an aborted unpublished generation', async () => {
     const started = deferred()
     const release = deferred()
+
     const abortable: AudioPcmSourceDescriptor = {
       identity: 'aborted-generation',
       durationSec: 4,
@@ -586,12 +646,15 @@ describe('waveform asset store', () => {
         }
       },
     }
+
     const controller = new AbortController()
+
     const pending = ensurePeakAsset({
       assetKey: 'aborted-unpublished',
       source: abortable,
       signal: controller.signal,
     })
+
     await started.promise
     controller.abort()
     release.resolve()
@@ -602,6 +665,7 @@ describe('waveform asset store', () => {
   test('removes stale and failed unpublished generations without touching published metadata', async () => {
     const firstGate = deferred()
     const firstStarted = deferred()
+
     const first: AudioPcmSourceDescriptor = {
       identity: 'stale-generation',
       durationSec: 4,
@@ -628,6 +692,7 @@ describe('waveform asset store', () => {
         }
       },
     }
+
     const second = source({ identity: 'replacement-generation', durationSec: 1, persistable: true })
     const firstPending = ensurePeakAsset({ assetKey: 'stale-unpublished', source: first })
     await firstStarted.promise
@@ -635,6 +700,7 @@ describe('waveform asset store', () => {
     firstGate.resolve()
     expect(await firstPending).toBeNull()
     const published = await replacement
+
     if (!published) throw new Error('Expected replacement generation')
     expect(published.sourceIdentity?.identity).toBe('replacement-generation')
     const remaining = await generationChunkKeys('stale-unpublished')
@@ -653,6 +719,7 @@ describe('waveform asset store', () => {
         throw new Error('failed generation')
       },
     }
+
     clearWaveformAssetCache()
     expect(await ensurePeakAsset({ assetKey: 'failed-unpublished', source: failing })).toBeNull()
     expect(await generationChunkKeys('failed-unpublished')).toEqual([])

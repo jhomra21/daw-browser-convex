@@ -81,10 +81,12 @@ describe('reliability characterization report', () => {
     for (const terminal of ['complete', 'cancelled', 'failed']) {
       const ledger = createReliabilityResourceLedger()
       const releases = RELIABILITY_RESOURCE_KINDS.map((kind) => ledger.acquire(kind, { terminal, kind }))
+
       for (const release of releases.reverse()) {
         release()
         release()
       }
+
       expect(ledger.snapshot()).toEqual({
         'media-streams': 0,
         'audio-contexts': 0,
@@ -101,14 +103,18 @@ describe('reliability characterization report', () => {
 
   test('export cancellation cleans up at rendering, analysis, encoding, and saving', async () => {
     const stages: readonly CancellableExportStage[] = ['rendering', 'analysis', 'encoding', 'saving']
+
     for (const cancelledStage of stages) {
       const controller = new AbortController()
       const visited: CancellableExportStage[] = []
       let cleanupCount = 0
+
       const run = (stage: CancellableExportStage) => async () => {
         visited.push(stage)
+
         if (stage === cancelledStage) controller.abort(new DOMException('Cancelled', 'AbortError'))
       }
+
       await expect(runCancellableExportStages(controller.signal, {
         rendering: run('rendering'),
         analysis: run('analysis'),
@@ -134,10 +140,12 @@ describe('reliability characterization report', () => {
       'daw-limiter-processor-v1.js',
       'track-meter-processor-v2.js',
     ]
+
     for (const fileName of worklets) {
       const source = await Bun.file(new URL(`../../../public/audio-worklets/${fileName}`, import.meta.url)).text()
       const processBodies = [...source.matchAll(/process\s*\([^)]*\)\s*\{([\s\S]*?)\n\s{2}\}/g)].map((match) => match[1] ?? '')
       expect(processBodies.length).toBeGreaterThan(0)
+
       for (const body of processBodies) {
         expect(body).not.toMatch(/\bconsole\.|\bsetTimeout\b|\bsetInterval\b|\brequestAnimationFrame\b/)
         expect(body).not.toMatch(/\bnew\s+(?:Array|Float32Array|Float64Array|Uint8Array|Map|Set)\b/)

@@ -61,14 +61,19 @@ export const resolveTimelineTrackTarget = (
   if (!scrollElement || !timelineSurfaceElement) return { kind: "none" };
   const rect = scrollElement.getBoundingClientRect();
   const surfaceRect = timelineSurfaceElement.getBoundingClientRect();
+
   if (!isInsideRect(pointer, rect) || pointer.x < surfaceRect.left || pointer.x > surfaceRect.right) {
     return { kind: "none" };
   }
+
   const timelineY = clientYToTimelineTrackY(pointer.y, scrollElement);
   const laneIndex = trackLayoutDropIndexAtY(trackLayout, timelineY);
   const row = laneIndex >= 0 ? trackLayout[laneIndex] : undefined;
+
   if (row) return { kind: "track", trackId: row.trackId, laneIndex };
+
   if (laneIndex >= trackLayout.length) return { kind: "new-track" };
+
   return { kind: "none" };
 };
 
@@ -79,10 +84,13 @@ const resolveReturnTrackTarget = (
 ): BrowserDropTarget => {
   if (!section) return { kind: "none" };
   const rect = section.getBoundingClientRect();
+
   if (!isInsideRect(pointer, rect)) return { kind: "none" };
   const row = trackLayoutRowAtY(rows, pointer.y - rect.top);
+
   if (!row) return { kind: "none" };
   const laneIndex = trackLayoutRowIndexAtY(rows, pointer.y - rect.top);
+
   return { kind: "track", trackId: row.trackId, laneIndex };
 };
 
@@ -93,12 +101,16 @@ const resolveEffectChainPreview = (
 ): Pick<BrowserDragSession, "target" | "effectChainPreview"> | undefined => {
   if (!chainElement) return;
   const chainRect = chainElement.getBoundingClientRect();
+
   if (!isInsideRect(pointer, chainRect)) return;
   const cards = Array.from(chainElement.querySelectorAll("[data-effect-kind]"));
+
   for (let index = 0; index < cards.length; index += 1) {
     const card = cards[index];
+
     if (!(card instanceof HTMLElement)) continue;
     const rect = card.getBoundingClientRect();
+
     if (pointer.x < rect.left + rect.width / 2) {
       return {
         target: { kind: "effect-chain", targetId: currentTargetId, index },
@@ -106,6 +118,7 @@ const resolveEffectChainPreview = (
       };
     }
   }
+
   return {
     target: { kind: "effect-chain", targetId: currentTargetId, index: cards.length },
     effectChainPreview: { x: chainRect.right, top: chainRect.top, height: chainRect.height },
@@ -128,12 +141,15 @@ export const resolveBrowserDeviceDropTarget = (
       : candidates.isOverMasterTimeline
       ? { kind: "none" }
       : candidates.timelineTarget);
+
   if (target.kind === "track" || target.kind === "effect-chain") {
     return canDrop(payload, target) ? target : { kind: "none" };
   }
+
   if (target.kind === "new-track" && !canDrop(payload, target)) {
     return { kind: "none" };
   }
+
   return target;
 };
 
@@ -143,17 +159,22 @@ const resolveCompatibleTarget = (
   options: BrowserDeviceDragOptions,
 ): Pick<BrowserDragSession, "target" | "effectChainPreview"> => {
   let effectChain: Pick<BrowserDragSession, "target" | "effectChainPreview"> | undefined;
+
   if (payload.kind === "audio-effect" || payload.kind === "audio-effect-chain") {
     effectChain = resolveEffectChainPreview(pointer, options.effectsChainElement(), options.currentEffectsTargetId());
   }
+
   const returnTarget = resolveReturnTrackTarget(
     pointer,
     options.returnSectionElement(),
     options.returnTrackLayout(),
   );
+
   const masterTimelineElement = options.masterTimelineElement();
+
   const isOverMasterTimeline = masterTimelineElement
     && isInsideRect(pointer, masterTimelineElement.getBoundingClientRect());
+
   const timelineTarget: BrowserDropTarget = returnTarget.kind === "track" || isOverMasterTimeline
     ? { kind: "none" }
     : resolveTimelineTrackTarget(
@@ -162,12 +183,14 @@ const resolveCompatibleTarget = (
       options.timelineSurfaceElement(),
       options.trackLayout(),
     );
+
   const target = resolveBrowserDeviceDropTarget(payload, {
     effectChainTarget: effectChain?.target,
     returnTarget,
     isOverMasterTimeline: isOverMasterTimeline === true,
     timelineTarget,
   }, options.canDrop);
+
   return {
     target,
     effectChainPreview: target.kind === "effect-chain"
@@ -179,6 +202,7 @@ const resolveCompatibleTarget = (
 export function createBrowserDeviceDrag(options: BrowserDeviceDragOptions) {
   const [session, setSession] = createSignal<BrowserDragSession>();
   let clickSuppressor: ((event: MouseEvent) => void) | undefined;
+
   let pending:
     | {
       payload: BrowserDragPayload;
@@ -196,11 +220,13 @@ export function createBrowserDeviceDrag(options: BrowserDeviceDragOptions) {
 
   const suppressNextClick = () => {
     clearClickSuppressor();
+
     const handleClick = (event: MouseEvent) => {
       event.preventDefault();
       event.stopPropagation();
       clearClickSuppressor();
     };
+
     clickSuppressor = handleClick;
     window.addEventListener("click", handleClick, { capture: true, once: true });
   };
@@ -216,12 +242,15 @@ export function createBrowserDeviceDrag(options: BrowserDeviceDragOptions) {
     onDragMove: (pointer, event) => {
       if (!pending) return;
       const currentSession = session();
+
       if (currentSession) {
         const target = resolveCompatibleTarget(pending.payload, pointer, options);
         setSession({ ...currentSession, pointer, target: target.target, effectChainPreview: target.effectChainPreview });
         event.preventDefault();
+
         return;
       }
+
       if (distanceFromStart(pending.start, pointer) < DRAG_THRESHOLD_PX) return;
       const target = resolveCompatibleTarget(pending.payload, pointer, options);
       setSession({
@@ -236,12 +265,15 @@ export function createBrowserDeviceDrag(options: BrowserDeviceDragOptions) {
     },
     onDragEnd: () => {
       const droppedSession = session();
+
       if (droppedSession) {
         suppressNextClick();
+
         if (droppedSession.target.kind !== "none") {
           void Promise.resolve(options.onDrop(droppedSession.payload, droppedSession.target)).catch(() => {});
         }
       }
+
       cleanup();
     },
     onDragCancel: cleanup,
@@ -249,8 +281,10 @@ export function createBrowserDeviceDrag(options: BrowserDeviceDragOptions) {
 
   const onPointerDown = (event: PointerEvent, itemId: string) => {
     if (event.button !== 0) return;
+
     if (!(event.currentTarget instanceof HTMLElement)) return;
     const payload = options.resolvePayload(itemId);
+
     if (!payload) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const start = pointerPosition(event);

@@ -31,6 +31,7 @@ export const insertSampleRow = async (
   input: AssetRowInput,
 ) => {
   const now = Date.now();
+
   return await ctx.db.insert("samples", {
     ...input,
     createdAt: now,
@@ -43,9 +44,12 @@ export const moveSampleFolderRow = async (
   input: { projectId: string; assetKey: string; folderId?: string },
 ) => {
   const asset = await findSampleRow(ctx, input);
+
   if (!asset) return { changed: false, asset: null };
+
   if (asset.folderId === input.folderId) return { changed: false, asset };
   await ctx.db.patch(asset._id, { folderId: input.folderId, updatedAt: Date.now() });
+
   return { changed: true, asset };
 };
 
@@ -54,12 +58,16 @@ export const deleteSampleRow = async (
   input: { projectId: string; assetKey: string },
 ) => {
   const asset = await findSampleRow(ctx, input);
+
   if (!asset) return { changed: false, asset: null };
   await ctx.db.delete(asset._id);
+
   const receipts = await ctx.db
     .query("assetUploadReceipts")
     .withIndex("by_asset", (query) => query.eq("projectId", input.projectId).eq("assetKey", input.assetKey))
     .collect();
+
   for (const receipt of receipts) await ctx.db.delete(receipt._id);
+
   return { changed: true, asset };
 };

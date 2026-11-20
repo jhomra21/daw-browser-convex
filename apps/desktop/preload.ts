@@ -151,22 +151,29 @@ import { safePreloadReply } from "./preload-reply"
 if (process.env.DAW_BENCHMARK_HEARTBEAT === "1") {
   ipcRenderer.on(benchmarkRendererPingChannel, (_event, sequence) => {
     const parsed = z.number().int().safe().safeParse(sequence)
+
     if (parsed.success) {
       ipcRenderer.send(benchmarkRendererPongChannel, parsed.data)
     }
   })
 }
+
 const diagnosticsTraceStarts = new Map<string, number>()
+
 const traceDiagnostics = (id: string, stage: string) => {
   const start = diagnosticsTraceStarts.get(id)
+
   if (start === undefined) return
   ipcRenderer.send(diagnosticsV2TraceChannel, { stage, elapsedMs: Math.max(0, Date.now() - start) })
+
   if (stage === "preload-reply-sent" || stage === "preload-reply-invalid") diagnosticsTraceStarts.delete(id)
 }
+
 const maximumNativeMappedPageBytes = nativeAudioHostMaximumPayloadBytes - nativeAudioHostMappedAssetPageHeaderBytes
 const queueLimit = 32
 let closeHandler: (() => Promise<{ flushed: boolean }>) | undefined
 let activeGeneration = 0
+
 const ipcRendererListener = (
   listener: Parameters<typeof ipcRenderer.on>[1],
 ): Parameters<typeof ipcRenderer.on>[1] => listener
@@ -176,11 +183,13 @@ const incomingMessageSchema = z.object({
   frame: z.union([desktopCancelSchemaV1, desktopTrustedRendererRequestSchemaV1]),
   trustedActorSubject: z.string().regex(/^local:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/).optional(),
 }).passthrough()
+
 const vstEditorStateSchema = z.object({
   projectId: z.string(),
   instanceId: z.string(),
   open: z.boolean(),
 }).passthrough()
+
 const vstEditorCapturedStateSchema = z.object({
   requestId: z.string().uuid(),
   projectId: z.string(),
@@ -190,13 +199,16 @@ const vstEditorCapturedStateSchema = z.object({
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
   }).strict(),
 }).strict()
+
 const audioLifecycleSchema = z.object({
   state: z.enum(["suspended", "recovering", "ready", "failed"]),
   powerGeneration: z.number(),
 }).passthrough()
+
 const hostLossSchema = z.string().max(256)
 
 type NativeAudioHostDiagnosticsReply = Awaited<ReturnType<NonNullable<DesktopBridge["audioHost"]>["diagnostics"]>>
+
 type PluginCatalogReply = Awaited<ReturnType<NonNullable<DesktopBridge["pluginCatalog"]>["read"]>>
 
 const invokePluginCatalog = (channel: string, value?: { directory: string }): Promise<PluginCatalogReply> =>
@@ -204,11 +216,15 @@ const invokePluginCatalog = (channel: string, value?: { directory: string }): Pr
 
 
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
+
 type NativeConfigureReply =
   | { ok: true; hostIdentity: { pid: number; generation: number; configurationGeneration: number } }
   | { ok: false; error: string }
+
 type NativeTransactionReply = { ok: true; transactionToken: string } | { ok: false; error: string }
+
 type DeclaredAudioHostBridge = NonNullable<DesktopBridge["audioHost"]>
+
 type PreloadDesktopBridge = Omit<DesktopBridge, "audioHost"> & {
   audioHost?: {
     session: Omit<DeclaredAudioHostBridge["session"], "setRequestHandler" | "onPrepareToClose"> & {
@@ -217,38 +233,54 @@ type PreloadDesktopBridge = Omit<DesktopBridge, "audioHost"> & {
     }
   } & Omit<DeclaredAudioHostBridge, "session">
 }
+
 type NativeVstEditorCommand = Parameters<NonNullable<DesktopBridge["audioHost"]>["session"]["editor"]>[0]
+
 type NativeVstEditorReply = Awaited<ReturnType<NonNullable<DesktopBridge["audioHost"]>["session"]["editor"]>>
+
 type NativeOutputDeviceReply = { ok: true; device: NativeOutputDevice | null } | { ok: false; error: string }
+
 type NativeInputDeviceReply = { ok: true; device: NativeInputDevice | null } | { ok: false; error: string }
+
 type NativeDeviceListReply = { ok: true; devices: NativeAudioDevice[] } | { ok: false; error: string }
+
 type NativeVstAttachmentCoordinationInput = Parameters<NonNullable<DesktopBridge["audioHost"]>["session"]["coordinateVstAttachments"]>[0]
+
 const invokeNativeSession = <Value>(channel: string, value?: Value, transactionToken?: string): Promise<NativeSessionReply> =>
   ipcRenderer.invoke(channel, { value, transactionToken })
+
 const invokeNativeDelivery = (channel: string, value: Uint8Array, transactionToken?: string): Promise<NativeDeliveryReply> =>
   ipcRenderer.invoke(channel, { value, transactionToken })
+
 const invokeNativePatch = (value: Uint8Array, transactionToken?: string): Promise<NativeProcessorPatchReply> =>
   ipcRenderer.invoke(sessionQueueProcessorStatePatchChannel, { value, transactionToken })
+
 const invokeNativeTransaction = (): Promise<NativeTransactionReply> =>
   ipcRenderer.invoke(sessionBeginTransactionChannel, { value: undefined, transactionToken: undefined })
+
 const invokeNativeEditor = (input: NativeVstEditorCommand, transactionToken?: string): Promise<NativeVstEditorReply> =>
   ipcRenderer.invoke(sessionEditorChannel, { value: input, transactionToken })
+
 const invokeNativeOutputDevice = (preferredDeviceId?: string): Promise<NativeOutputDeviceReply> =>
   ipcRenderer.invoke(resolveOutputDeviceChannel, preferredDeviceId)
+
 const invokeNativeInputDevice = (preferredDeviceId?: string): Promise<NativeInputDeviceReply> =>
   ipcRenderer.invoke(resolveInputDeviceChannel, preferredDeviceId)
+
 const invokeNativeDeviceList = (): Promise<NativeDeviceListReply> => ipcRenderer.invoke(listDevicesChannel)
 const validExportRequestId = (requestId: string) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(requestId)
 const invalidExportRequest = () => Promise.reject(new Error("Invalid export output request."))
 
 const reply = (generation: number, response: PreloadHostResponse) => {
   traceDiagnostics(response.id, "preload-reply")
+
   const parsed = desktopReplySchemaV1.safeParse({
     version: "v1",
     type: "reply",
     id: response.id,
     ...(response.error === undefined ? { result: response.result } : { error: response.error }),
   })
+
   if (parsed.success) {
     ipcRenderer.send(hostResponseChannel, { generation, frame: parsed.data })
     traceDiagnostics(response.id, "preload-reply-sent")
@@ -257,6 +289,7 @@ const reply = (generation: number, response: PreloadHostResponse) => {
       traceDiagnostics(response.id, "preload-reply-invalid")
       ipcRenderer.send(diagnosticsV2TraceChannel, { stage: "preload-reply-invalid-path", elapsedMs: 0, paths: diagnosticValidationPaths(parsed.error) })
     }
+
     ipcRenderer.send(hostResponseChannel, { generation, frame: safePreloadReply(response) })
   }
 }
@@ -274,28 +307,40 @@ const dispatchLifecycle = (
 
 ipcRenderer.on(hostRequestChannel, (_event, message) => {
   const incoming = incomingMessageSchema.safeParse(message)
+
   if (!incoming.success) return
   const { generation, frame } = incoming.data
+
   if (generation < activeGeneration) return
+
   if (generation > activeGeneration) {
     requestQueue.reset(generation)
     activeGeneration = generation
   }
+
   const cancel = desktopCancelSchemaV1.safeParse(frame)
+
   if (cancel.success) {
     requestQueue.cancel(cancel.data.id)
+
     return
   }
+
   const parsed = desktopTrustedRendererRequestSchemaV1.safeParse(frame)
+
   if (!parsed.success) return
+
   if (incoming.data.diagnosticsTrace === true && parsed.data.operation === "diagnostics.snapshot.v2") {
     diagnosticsTraceStarts.set(parsed.data.id, Date.now())
     traceDiagnostics(parsed.data.id, "preload-received")
   }
+
   if (parsed.data.operation === "lifecycle.prepareToClose") {
     dispatchLifecycle(generation, parsed.data)
+
     return
   }
+
   requestQueue.dispatch(generation, parsed.data, incoming.data.trustedActorSubject)
 })
 
@@ -322,6 +367,7 @@ const desktopBridge = {
   ) {
     requestQueue.setRequestHandler(next && ((request) => {
       traceDiagnostics(request.id, "preload-handler")
+
       return next(request)
     }), onCancel)
   },
@@ -333,14 +379,17 @@ const desktopBridge = {
   },
   pickOutputFile(requestId: string, format: ExportAudioFormat) {
     if (!validExportRequestId(requestId) || !isExportAudioFormat(format)) return invalidExportRequest()
+
     return ipcRenderer.invoke(exportPickOutputFileChannel, { requestId, format })
   },
   pickOutputDirectory(requestId: string) {
     if (!validExportRequestId(requestId)) return invalidExportRequest()
+
     return ipcRenderer.invoke(exportPickOutputDirectoryChannel, { requestId })
   },
   releaseExportOutput(requestId: string) {
     if (!validExportRequestId(requestId)) return invalidExportRequest()
+
     return ipcRenderer.invoke(exportReleaseOutputChannel, { requestId })
   },
   readChunk(requestId: string, token: string, offset: number, length: number) {
@@ -370,13 +419,17 @@ const desktopBridge = {
       onCommand(listener: (command: DesktopApplicationMenuMessage) => void) {
       const notify = ipcRendererListener((_event, value) => {
         const parsed = desktopApplicationMenuMessageSchema.safeParse(value)
+
         if (parsed.success) listener(parsed.data)
       })
+
       ipcRenderer.on(applicationMenuCommandChannel, notify)
+
       return () => ipcRenderer.removeListener(applicationMenuCommandChannel, notify)
     },
     setState(state: DesktopApplicationMenuState) {
       const parsed = desktopApplicationMenuStateSchema.safeParse(state)
+
       if (parsed.success) ipcRenderer.send(applicationMenuStateChannel, parsed.data)
     },
   },
@@ -440,53 +493,69 @@ const desktopBridge = {
             const parsed = hostLossSchema.safeParse(value)
             listener(parsed.success ? parsed.data : undefined)
           })
+
           ipcRenderer.on(lossChannel, notify)
+
           return () => ipcRenderer.removeListener(lossChannel, notify)
         },
         onRecordingFailure: (listener) => {
           const schema = z.object({ generation: z.number().int().nonnegative(), sessionId: z.bigint().positive(), message: z.string().max(256) }).strict()
+
           const notify = ipcRendererListener((_event, value) => {
             const parsed = schema.safeParse(value)
+
             if (parsed.success) listener(parsed.data)
           })
+
           ipcRenderer.on(recordingFailureChannel, notify)
+
           return () => ipcRenderer.removeListener(recordingFailureChannel, notify)
         },
         onRecordingStatus: (listener: (status: NativeHostRecordingStatus) => void) => {
           const notify = (_event: Electron.IpcRendererEvent, status: NativeHostRecordingStatus) => listener(status)
           ipcRenderer.on(recordingStatusChannel, notify)
+
           return () => ipcRenderer.removeListener(recordingStatusChannel, notify)
         },
         onMeterBatch: (listener: (batch: NativeHostMeterBatch) => void) => {
           const notify = (_event: Electron.IpcRendererEvent, batch: NativeHostMeterBatch) => listener(batch)
           ipcRenderer.on(meterBatchChannel, notify)
+
           return () => ipcRenderer.removeListener(meterBatchChannel, notify)
         },
         setSpectrumNode: (nodeId: bigint | null) => invokeNativeSession(sessionSetSpectrumNodeChannel, nodeId),
         onSpectrumFrame: (listener: (frame: NativeHostSpectrumFrame) => void) => {
           const notify = (_event: Electron.IpcRendererEvent, frame: NativeHostSpectrumFrame) => listener(frame)
           ipcRenderer.on(spectrumFrameChannel, notify)
+
           return () => ipcRenderer.removeListener(spectrumFrameChannel, notify)
         },
         onScheduleProgress: (listener: (progress: NativeScheduleProgress) => void) => {
           const notify = (_event: Electron.IpcRendererEvent, progress: NativeScheduleProgress) => listener(progress)
           ipcRenderer.on(scheduleProgressChannel, notify)
+
           return () => ipcRenderer.removeListener(scheduleProgressChannel, notify)
         },
         onVstParameterEdit: (listener: (payload: DesktopVstParameterEditPayload) => void) => {
           const notify = ipcRendererListener((_event, value) => {
             const payload = desktopVstParameterEditPayloadSchema.safeParse(value)
+
             if (payload.success) listener(payload.data)
           })
+
           ipcRenderer.on(vstParameterEditChannel, notify)
+
           return () => ipcRenderer.removeListener(vstParameterEditChannel, notify)
         },
         onVstInstanceEvent: (listener: (event: DesktopVstInstanceEvent) => void) => {
           const notify = ipcRendererListener((_event, value) => {
             const event = desktopVstInstanceEventSchema.safeParse(value)
+
             if (event.success) listener(event.data)
           })
+
           ipcRenderer.on(vstInstanceEventChannel, notify)
+
           return () => ipcRenderer.removeListener(vstInstanceEventChannel, notify)
         },
       },
@@ -505,12 +574,16 @@ const desktopBridge = {
           if (!nativeOfflineRenderPlanSchema.safeParse(plan).success) {
             return { ok: false as const, error: "The native offline render plan is invalid." }
           }
+
           const notify = ipcRendererListener((_event, value) => {
             const parsed = offlinePcmMessageSchema.safeParse(value)
+
             if (!parsed.success) {
               void ipcRenderer.invoke(offlineCancelChannel, jobId).catch(() => undefined)
+
               return
             }
+
             if (parsed.data.jobId !== jobId
               || parsed.data.chunk.planes.length !== parsed.data.chunk.channelCount
               || !parsed.data.chunk.planes.every((plane) => plane.length === parsed.data.chunk.frameCount)) return
@@ -524,7 +597,9 @@ const desktopBridge = {
               void ipcRenderer.invoke(offlineCancelChannel, jobId).catch(() => undefined)
             })
           })
+
           ipcRenderer.on(offlinePcmChannel, notify)
+
           const pageNotify = ipcRendererListener((_event, value) => {
             const request = z.object({
               jobId: z.string(),
@@ -547,7 +622,9 @@ const desktopBridge = {
               startFrame: z.number().int().nonnegative().safe(),
               frameCount: z.number().int().positive().safe(),
             }).strict().safeParse(value)
+
             if (!request.success || request.data.jobId !== jobId) return
+
             if (
               !Number.isSafeInteger(request.data.startFrame + request.data.frameCount)
               || request.data.startFrame + request.data.frameCount > request.data.asset.frameCount
@@ -574,7 +651,9 @@ const desktopBridge = {
               }),
             )
           })
+
           ipcRenderer.on(offlineMappedPageRequestChannel, pageNotify)
+
           try {
             return await ipcRenderer.invoke(offlineRenderChannel, { jobId, plan })
           } finally {
@@ -587,14 +666,18 @@ const desktopBridge = {
       onVstEditorState: (listener: (payload: DesktopVstEditorState) => void) => {
         const notify = ipcRendererListener((_event, value) => {
           const parsed = vstEditorStateSchema.safeParse(value)
+
           if (parsed.success) listener(parsed.data)
         })
+
         ipcRenderer.on(vstEditorStateChannel, notify)
+
         return () => ipcRenderer.removeListener(vstEditorStateChannel, notify)
       },
       onVstEditorCapturedState: (listener: (payload: DesktopVstEditorCapturedState) => Promise<void> | void) => {
         const notify = ipcRendererListener((_event, value) => {
           const parsed = vstEditorCapturedStateSchema.safeParse(value)
+
           if (parsed.success) {
             void Promise.resolve(listener(parsed.data)).then(
               () => ipcRenderer.invoke(vstEditorCapturedStateAckChannel, {
@@ -609,7 +692,9 @@ const desktopBridge = {
             )
           }
         })
+
         ipcRenderer.on(vstEditorCapturedStateChannel, notify)
+
         return () => ipcRenderer.removeListener(vstEditorCapturedStateChannel, notify)
       },
       getLifecycle: () => ipcRenderer.invoke(lifecycleChannel),
@@ -620,9 +705,12 @@ const desktopBridge = {
       onLifecycle: (listener: Parameters<NonNullable<DesktopBridge["audioHost"]>["onLifecycle"]>[0]) => {
         const notify = ipcRendererListener((_event, value) => {
           const parsed = audioLifecycleSchema.safeParse(value)
+
           if (parsed.success) listener(parsed.data)
         })
+
         ipcRenderer.on(lifecycleChannel, notify)
+
         return () => ipcRenderer.removeListener(lifecycleChannel, notify)
       },
     } : undefined,

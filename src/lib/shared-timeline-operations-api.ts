@@ -30,18 +30,25 @@ export type EffectsOperationResult =
 
 export const decodeEffectsOperationResult = (value: JsonValue): EffectsOperationResult => {
   if (!isJsonObject(value)) throw new Error('Malformed effects operation result.')
+
   if (value.status === 'invalid') return { status: 'invalid' }
+
   if (value.status !== 'applied' || !isJsonString(value.effectId) || value.effectId.length === 0) {
     throw new Error('Malformed effects operation result.')
   }
+
   const revision = value.revision
+
   if (revision === undefined || revision === 0) {
     return { status: 'applied', effectId: value.effectId, revision: { kind: 'committed-unordered' } }
   }
+
   const orderedRevision = z.number().int().positive().safeParse(revision)
+
   if (!orderedRevision.success) {
     throw new Error('Malformed effects operation revision.')
   }
+
   return { status: 'applied', effectId: value.effectId, revision: { kind: 'ordered', revision: orderedRevision.data } }
 }
 
@@ -62,6 +69,7 @@ const assertValidClipCreateResult = (
   if (operation.kind === 'clips.create' && result === null) {
     throw new SharedTimelineOperationRejectedError('Clip creation was rejected.')
   }
+
   if (
     operation.kind === 'clips.createMany'
     && (
@@ -85,19 +93,25 @@ export const publishSharedTimelineOperation = async (
     body: JSON.stringify(operation),
     signal: options?.signal,
   })
+
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
     throw new SharedTimelineOperationHttpError(response.status, detail || undefined)
   }
+
   const result = await response.json().catch(() => null)
+
   if (isJsonObject(result) && result.status === 'rejected') {
     const detail = isJsonString(result.reason) ? result.reason : undefined
     throw new SharedTimelineOperationRejectedError(detail)
   }
+
   if (operation.kind.startsWith('effects.set') || operation.kind === 'instruments.setTrackInstrument') {
     return decodeEffectsOperationResult(result)
   }
+
   assertValidClipCreateResult(operation, result)
+
   return result
 }
 

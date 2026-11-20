@@ -190,6 +190,7 @@ test('stale reload continuation cannot publish after disposal', async () => {
     bindCommand('core.command', () => 'old')
   }))
   let release: (() => void) | undefined
+
   const reloading = kernel.reload(definition(
     'core.reloadable',
     'core.command',
@@ -201,6 +202,7 @@ test('stale reload continuation cannot publish after disposal', async () => {
     undefined,
     [],
   ))
+
   await Promise.resolve()
   await kernel.dispose()
   release?.()
@@ -226,10 +228,12 @@ test('normal activation cannot replace and shortcut resolution is deterministic'
 
 test('rejects duplicate shortcut IDs, chord conflicts, and invalid replacement targets', async () => {
   const kernel = createExtensionKernel()
+
   const duplicateShortcuts = [
     { id: 'other.one', commandId: 'other.command', chord: { mod: true, key: 'x' } },
     { id: 'other.one', commandId: 'other.command', chord: { mod: true, key: 'y' } },
   ]
+
   await expect(kernel.activate(definition(
     'other.duplicate',
     'other.command',
@@ -262,6 +266,7 @@ test('stale async activation cannot publish and receives abort on disposal', asy
   const kernel = createExtensionKernel()
   let release: (() => void) | undefined
   let signal: AbortSignal | undefined
+
   const activation = kernel.activate(definition(
     'async.pending',
     'async.command',
@@ -274,6 +279,7 @@ test('stale async activation cannot publish and receives abort on disposal', asy
     undefined,
     [],
   ))
+
   await Promise.resolve()
   await kernel.dispose()
   release?.()
@@ -316,9 +322,11 @@ test('supports subscriber snapshots and idempotent disposal', async () => {
 test('isolates subscriber failures across every lifecycle transition', async () => {
   const kernel = createExtensionKernel()
   const snapshots: Array<{ generation: number; extensions: readonly string[]; commands: readonly string[] }> = []
+
   const initialFailingUnsubscribe = kernel.subscribe(() => {
     throw new Error('subscriber failure')
   })
+
   expect(initialFailingUnsubscribe()).toBeFalse()
   kernel.subscribe((current) => {
     snapshots.push({
@@ -326,6 +334,7 @@ test('isolates subscriber failures across every lifecycle transition', async () 
       extensions: current.extensions.map((extension) => extension.id),
       commands: current.commands.map((command) => command.providerId),
     })
+
     if (current.generation > 0) throw new Error('transition subscriber failure')
   })
   let cleanupCount = 0
@@ -400,11 +409,13 @@ test('replacement keeps the target public contribution identity and title', asyn
 
 test('manages trusted static built-ins with immutable ordered state', async () => {
   const kernel = createExtensionKernel()
+
   const manager = createBuiltinExtensionManager([
     definition('builtin.one', 'builtin.one.command', 'builtin.one.contribution', ({ bindCommand }) => {
       bindCommand('builtin.one.command', () => 'one')
     }),
   ], kernel)
+
   await manager.enable('builtin.one')
   const state = manager.snapshot()
   expect(state.enabled).toEqual(['builtin.one'])

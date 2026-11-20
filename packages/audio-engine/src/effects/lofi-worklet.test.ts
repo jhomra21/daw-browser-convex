@@ -29,6 +29,7 @@ type ProcessorConstructor = new () => Processor
 const loadProcessor = async () => {
   const source = await Bun.file(new URL(`../../../../public/${loFiWorklet.modulePath}`, import.meta.url)).text()
   const registered = new Map<string, ProcessorConstructor>()
+
   class FakeAudioWorkletProcessor {
     port: Port = {
       onmessage: null,
@@ -36,13 +37,16 @@ const loadProcessor = async () => {
       close: () => {},
     }
   }
+
   new Function('AudioWorkletProcessor', 'registerProcessor', 'sampleRate', source)(
     FakeAudioWorkletProcessor,
     (name: string, processor: ProcessorConstructor) => registered.set(name, processor),
     48_000,
   )
   const Constructor = registered.get(loFiWorklet.processorName)
+
   if (!Constructor) throw new Error('LoFi processor did not register.')
+
   return new Constructor()
 }
 

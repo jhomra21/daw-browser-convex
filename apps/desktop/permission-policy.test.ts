@@ -75,6 +75,7 @@ describe("desktop MIDI permission policy", () => {
 
   test("rejects exact-origin lookalikes and userinfo", () => {
     const isTrustedOrigin = createTrustedDesktopOriginPolicy("http://localhost:5173/renderer/")
+
     for (const url of [
       "http://localhost:5174/",
       "http://127.0.0.1:5173/",

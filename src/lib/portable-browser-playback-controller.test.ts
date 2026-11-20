@@ -53,14 +53,18 @@ test.each(["synth", "master", "master-structural"])("3B1 r3 portable %s live gai
   const changed: UtilityParamsEnvelope = { version: 1, state: { ...initial.state, swap: true } }
   let projected = initial, rebuilds = 0
   const revision = 1
+
   const snapshot = () => {
     const base = compilation()
     const instances: AudioEffectRuntimeInstance[] = [{ id: "utility:r2", kind: "utility", params: projected }]
+
     const fx = { ...base.snapshot.mixer.fx, masterFxInstances: targetId === "master" ? instances : [],
       trackFx: { synth: { ...base.snapshot.mixer.fx.trackFx.synth, instances: targetId === "synth" ? instances : [] } } }
+
     return { ...base.snapshot, revision, mixer: { ...base.snapshot.mixer, fx,
       graph: resolveLiveMixerGraph([track], fx.trackFx, { masterFxInstances: fx.masterFxInstances }) } }
   }
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => ({ supported: true, snapshot: snapshot() }),
     getAudioContext: () => context, select: async () => selected,
@@ -70,25 +74,34 @@ test.each(["synth", "master", "master-structural"])("3B1 r3 portable %s live gai
       queueProcessorEvents: async (...args) => { batches.push(args) },
     }) },
   })
+
   try {
     expect(await controller.start(snapshot().transport)).toBe("started")
+
     const apply = createApplyPortableProcessor({
       liveProcessorControl: () => controller.liveProcessorControl,
       isPortableBrowserPlaybackPrepared: () => true, isNativePlaybackPrepared: () => false,
       syncPlaybackBackend: async () => { rebuilds++ }, renderTracks: () => [],
     })
+
     const registry = createProcessorEditRegistry(() => 120)
+
     const allocate = (to: UtilityParamsEnvelope) => targetId === "master"
       ? registry.allocate({ targetId, instanceId: "utility:r2", effect: "master-utility", from: initial, to })
       : registry.allocate({ targetId, instanceId: "utility:r2", effect: "utility", from: initial, to })
+
     const liveBatches = schedule === "master-structural" ? 0 : 1
+
     if (liveBatches) {
       const gain = allocate({ version: 1, state: { ...initial.state, gainDb: 1 } })
+
       if (!gain) throw new Error("Missing live edit")
       expect(await apply(gain)).toBe("applied")
       expect(batches).toHaveLength(liveBatches)
     }
+
     const edit = allocate(changed)
+
     if (!edit) throw new Error("Missing structural edit")
     projected = changed
     // The edit is neither applied live nor rebuilt for: the schedule follow adopts it at a seam (WHT W-C9-proc-3).
@@ -128,30 +141,38 @@ test("STEP5 B30 portable twenty live edits without rebuild", async () => {
   const initial: UtilityParamsEnvelope = { version: 1, state: createDefaultUtilityParams() };
   const instances: AudioEffectRuntimeInstance[] = [{ id: "utility-b30", kind: "utility", params: initial }];
   const fx = { ...base.snapshot.mixer.fx, masterFxInstances: instances };
+
   const snapshot = { ...base.snapshot, mixer: { ...base.snapshot.mixer, fx,
     graph: resolveLiveMixerGraph([track], fx.trackFx, { masterFxInstances: instances }) } };
+
   const controller = createPortableBrowserPlaybackController({
-    compileSnapshot: async () => { compiles++; return { supported: true, snapshot }; },
+    compileSnapshot: async () => { compiles++;
+
+ return { supported: true, snapshot }; },
     getAudioContext: () => context, select: async () => selected,
     backend: { createPlaybackSession: async () => ({
       ...createSession(calls, async () => {}),
       queueProcessorEvents: async (...args) => { batches.push(args); },
     }) },
   });
+
   try {
     expect(await controller.start(snapshot.transport)).toBe("started");
     const before = { compiles, calls: calls.length };
     const registry = createProcessorEditRegistry(() => 120);
     let previous = initial;
+
     for (let index = 1; index <= 20; index++) {
       const next: UtilityParamsEnvelope = { version: 1, state: { ...initial.state, gainDb: index / 10 } };
       const edit = registry.allocate({ targetId: "master", instanceId: "utility-b30", effect: "master-utility", from: previous, to: next });
+
       if (!edit) throw new Error("Missing portable edit");
       expect(await controller.liveProcessorControl.flush({ instanceId: "utility-b30",
         values: Object.entries(edit.content.values ?? {}).map(([parameterId, value]) => ({ parameterId, value })),
         edit })).toMatchObject({ accepted: true });
       previous = next;
     }
+
     console.log("STEP5 portable guard", JSON.stringify({ compiles: compiles - before.compiles,
       calls: calls.slice(before.calls), liveSends: batches.length }));
     expect(compiles - before.compiles).toBe(0);
@@ -162,6 +183,7 @@ test("STEP5 B30 portable twenty live edits without rebuild", async () => {
 
 const compilation = () => {
   const mixer = resolveLiveMixerGraph([track], {})
+
   return {
     supported: true as const,
     snapshot: {
@@ -200,6 +222,7 @@ const compilation = () => {
 
 const pagedAssetFrameCount = portableWasmPagedPageFrames * 96
 const pagedAssetIds = ['asset-a', 'asset-b'] as const
+
 const pagedTracks: RuntimeTrack[] = pagedAssetIds.map((assetId, index) => ({
   id: `audio-${index}`,
   kind: 'audio',
@@ -217,6 +240,7 @@ const pagedTracks: RuntimeTrack[] = pagedAssetIds.map((assetId, index) => ({
 
 const pagedCompilation = (transport: LivePlaybackTransport = compilation().snapshot.transport) => {
   const mixer = resolveLiveMixerGraph(pagedTracks, {})
+
   return {
     supported: true as const,
     snapshot: {
@@ -248,6 +272,7 @@ const manyPagedCompilation = (
   transport: LivePlaybackTransport = compilation().snapshot.transport,
 ) => {
   const assetId = 'asset-many'
+
   const tracks: RuntimeTrack[] = Array.from({ length: sourceCount }, (_, index) => ({
     id: `many-audio-${index}`,
     kind: 'audio',
@@ -262,8 +287,10 @@ const manyPagedCompilation = (
       sourceAssetKey: assetId,
     }],
   }))
+
   const mixer = resolveLiveMixerGraph(tracks, {})
   const base = compilation()
+
   return {
     supported: true as const,
     snapshot: {
@@ -304,6 +331,7 @@ const pagedDescriptor = (
     const startFrame = options.startFrame ?? 0
     const endFrame = options.endFrame ?? frameCount
     readCalls.push(`${assetId}:${startFrame}:${endFrame}`)
+
     for (let frame = startFrame; frame < endFrame; frame += portableWasmPagedPageFrames) {
       const frameCount = Math.min(portableWasmPagedPageFrames, endFrame - frame)
       yield {
@@ -337,17 +365,21 @@ const createRecordingFixture = (calls: string[]) => {
     removeEventListener: () => undefined,
     stop: (): void => { calls.push('track-stop') },
   })
+
   const stream: MediaStream = Object.assign(Object.create(null), {
     getTracks: () => [mediaTrack],
     getAudioTracks: () => [mediaTrack],
   })
+
   const source: MediaStreamAudioSourceNode = Object.assign(Object.create(null), {
     disconnect: (): void => { calls.push('source-disconnect') },
   })
+
   const recordingContext: AudioContext = Object.assign(Object.create(context), {
     sampleRate: 48_000,
     createMediaStreamSource: () => source,
   })
+
   return { stream, recordingContext }
 }
 
@@ -392,6 +424,7 @@ const createSession = (
   const preparations = new Set<number>()
   const registeredAssets: string[] = []
   let nextPreparationId = 1
+
   return {
     transports,
     writtenPages,
@@ -406,6 +439,7 @@ const createSession = (
     } : undefined,
     connectInput: () => {
       record('connect-input')
+
       return () => record('disconnect-input')
     },
     dispose: () => record('dispose'),
@@ -413,31 +447,38 @@ const createSession = (
     onFault: (listener: (error: Error) => void) => {
       faults.add(listener)
       allFaultListeners.add(listener)
+
       return () => {
         return faults.delete(listener)
       }
     },
     onRecordingStatus: (listener: (message: Extract<PortableWasmStatusMessage, { type: `recording-${string}` }>) => void) => {
       recordingStatus = listener
+
       return () => {
         if (recordingStatus !== listener) return false
         recordingStatus = undefined
+
         return true
       }
     },
     onTransportPosition: (listener: (message: Extract<PortableWasmStatusMessage, { type: "transport-position" }>) => void) => {
       transportPosition = listener
+
       return () => {
         if (transportPosition === listener) transportPosition = undefined
+
         return true
       }
     },
     postRecordingControl: (message: Extract<PortableWasmControlMessage, { type: `recording-${string}` }>) => {
       record(message.type)
+
       if (message.type === 'recording-capture-configure') {
         recordingGeneration = message.generation
         recordingSessionId = message.sessionId
       }
+
       const action = message.type === 'recording-capture-configure'
         ? 'configured'
         : message.type === 'recording-capture-finalize'
@@ -445,6 +486,7 @@ const createSession = (
           : message.type === 'recording-capture-cancel'
             ? 'cancelled'
             : null
+
       if (action) queueMicrotask(() => recordingStatus?.({
         version: 2,
         type: 'recording-capture-applied',
@@ -458,6 +500,7 @@ const createSession = (
     publishGraph: async () => { record('publish-graph') },
     registerAsset: async (asset: Parameters<PortableWasmPlaybackSession['registerAsset']>[0]) => {
       registeredAssets.push(asset.assetId)
+
       return { status: 'registered' as const, handle: { slot: 0, generation: 1 } }
     },
     installSchedule: async (schedule: PortableFrameSchedule) => {
@@ -468,6 +511,7 @@ const createSession = (
     registerPagedAsset: async () => ({ status: 'registered' as const, handle: { slot: 0, generation: 1 } }),
     writeAssetPage: async (assetId: string, _generation: number, pageIndex: number) => {
       writtenPages.add(`${assetId}:${pageIndex}`)
+
       return { status: 'written' as const }
     },
     prepareAssetRange: async (
@@ -478,19 +522,23 @@ const createSession = (
     ) => {
       const firstPage = Math.floor(sourceOffsetFrame / portableWasmPagedPageFrames)
       const lastPage = Math.floor((sourceOffsetFrame + sourceFrameCount - 1) / portableWasmPagedPageFrames)
+
       const missingPage = Array.from(
         { length: lastPage - firstPage + 1 },
         (_, index) => firstPage + index,
       ).find((page) => !writtenPages.has(`${assetId}:${page}`))
+
       if (missingPage !== undefined) return { status: 'missing-page' as const, firstMissingPage: missingPage }
       const preparationId = nextPreparationId
       nextPreparationId += 1
       preparations.add(preparationId)
+
       return { status: 'prepared' as const, preparationId }
     },
     schedulePreparedSources: async () => { record('schedule-prepared-sources') },
     releaseAssetPreparation: async (preparationId: number) => {
       preparations.delete(preparationId)
+
       return 'released' as const
     },
     setTransport: async (_epoch: number, running: boolean, frame: number) => {
@@ -520,20 +568,24 @@ test('prepares a partially missing Drum Rack with its healthy pads in browser pl
   const params = createDefaultDrumRackParams()
   const firstPad = params.pads[0]
   const secondPad = params.pads[1]
+
   if (!firstPad || !secondPad) throw new Error('Default Drum Rack pads are unavailable.')
   const source = { durationSec: 1, sampleRate: 48_000, channelCount: 1 }
+
   const missingSample: DrumRackPadSample = {
     assetKey: 'missing-drum-asset',
     url: 'local-asset:missing-drum-asset',
     sourceKind: 'upload',
     source,
   }
+
   const healthySample: DrumRackPadSample = {
     assetKey: 'healthy-drum-asset',
     url: 'local-asset:healthy-drum-asset',
     sourceKind: 'upload',
     source,
   }
+
   const paramsWithSamples = {
     ...params,
     pads: params.pads.map((pad) => pad.id === firstPad.id
@@ -542,12 +594,15 @@ test('prepares a partially missing Drum Rack with its healthy pads in browser pl
         ? { ...pad, sample: healthySample }
         : pad),
   }
+
   const base = compilation()
+
   const instrument: TrackInstrumentParams = {
     kind: 'drum-rack',
     instanceId: 'drums:1',
     params: paramsWithSamples,
   }
+
   const snapshot = {
     ...base.snapshot,
     assets: [{
@@ -569,6 +624,7 @@ test('prepares a partially missing Drum Rack with its healthy pads in browser pl
       },
     },
   }
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => ({ supported: true, snapshot }),
     getAudioContext: () => context,
@@ -586,6 +642,7 @@ test('installs an acknowledged MIDI schedule before starting portable output onc
   const calls: string[] = []
   const faults: string[] = []
   const session = createSession(calls, async () => undefined)
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => compilation(),
     getAudioContext: () => context,
@@ -612,15 +669,18 @@ test('installs an acknowledged MIDI schedule before starting portable output onc
 test('reports the portable playhead inside the active loop without changing raw transport frames', async () => {
   const calls: string[] = []
   const session = createSession(calls, async () => undefined)
+
   const loopTransport = {
     ...compilation().snapshot.transport,
     loopEnabled: true,
     loopStartSec: 1.5,
     loopEndSec: 3.5,
   }
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => {
       const base = compilation()
+
       return { ...base, snapshot: { ...base.snapshot, transport } }
     },
     getAudioContext: () => context,
@@ -640,14 +700,18 @@ test('reports the portable playhead inside the active loop without changing raw 
 
 test('hands the portable schedule off in place before its installed range ends', async () => {
   const calls: string[] = []
+
   const sessions = [
     createSession(calls, async () => undefined),
     createSession(calls, async () => undefined),
   ]
+
   let sessionIndex = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => {
       const base = compilation()
+
       return { ...base, snapshot: { ...base.snapshot, transport } }
     },
     getAudioContext: () => context,
@@ -656,7 +720,9 @@ test('hands the portable schedule off in place before its installed range ends',
       createPlaybackSession: async () => {
         const session = sessions[sessionIndex]
         sessionIndex += 1
+
         if (!session) throw new Error("Unexpected extra portable session.")
+
         return session
       },
     },
@@ -681,6 +747,7 @@ test('hands the portable schedule off in place before its installed range ends',
 test('prepares a fresh portable session while keeping transport paused', async () => {
   const calls: string[] = []
   const session = createSession(calls, async () => undefined)
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => compilation(),
     getAudioContext: () => context,
@@ -704,17 +771,20 @@ test('prepares a fresh portable session while keeping transport paused', async (
 test('rebuilds a paused portable session from its authoritative transport position', async () => {
   const calls: string[] = []
   let sessionCount = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => compilation(),
     getAudioContext: () => context,
     backend: {
       createPlaybackSession: async () => {
         sessionCount += 1
+
         return createSession(calls, async () => undefined)
       },
     },
     select: async () => selected,
   })
+
   const transport = {
     ...compilation().snapshot.transport,
     state: 'paused' as const,
@@ -734,6 +804,7 @@ test('rebuilds a paused portable session from its authoritative transport positi
 test('rejects unsupported prepared sources before creating or activating a worklet session', async () => {
   const calls: string[] = []
   let createdSessions = 0
+
   const unsupportedSource: RuntimeTrack = {
     id: 'audio',
     kind: 'audio',
@@ -748,7 +819,9 @@ test('rejects unsupported prepared sources before creating or activating a workl
       sourceAssetKey: 'missing',
     }],
   }
+
   const sourceCompilation = compilation()
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => ({
       ...sourceCompilation,
@@ -761,6 +834,7 @@ test('rejects unsupported prepared sources before creating or activating a workl
     backend: {
       createPlaybackSession: async () => {
         createdSessions += 1
+
         return createSession(calls, async () => undefined)
       },
     },
@@ -778,12 +852,14 @@ test('shares one in-flight portable playback startup across concurrent callers',
   const compile = Promise.withResolvers<ReturnType<typeof compilation>>()
   const session = createSession(calls, async () => undefined)
   let createdSessions = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: () => compile.promise,
     getAudioContext: () => context,
     backend: {
       createPlaybackSession: async () => {
         createdSessions += 1
+
         return session
       },
     },
@@ -806,21 +882,26 @@ test('promotes a pending portable preview without recompiling at the requested t
   const session = createSession(calls, async () => undefined)
   let createdSessions = 0
   let compileCalls = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: () => {
       compileCalls += 1
+
       return compile.promise
     },
     getAudioContext: () => context,
     backend: {
       createPlaybackSession: async () => {
         createdSessions += 1
+
         return session
       },
     },
     select: async () => selected,
   })
+
   const previewTransport = { ...compilation().snapshot.transport, state: 'paused' as const }
+
   const playTransport = {
     ...compilation().snapshot.transport,
     playheadSec: 0,
@@ -849,10 +930,12 @@ test('resumes a portable preview in place at a playhead outside its schedule', a
   const calls: string[] = []
   const compileCalls: LivePlaybackTransport[] = []
   let createdSessions = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => {
       compileCalls.push(transport)
       const base = compilation()
+
       return {
         ...base,
         snapshot: { ...base.snapshot, transport },
@@ -862,11 +945,13 @@ test('resumes a portable preview in place at a playhead outside its schedule', a
     backend: {
       createPlaybackSession: async () => {
         createdSessions += 1
+
         return createSession(calls, async () => undefined)
       },
     },
     select: async () => selected,
   })
+
   const previewTransport = { ...compilation().snapshot.transport, state: 'paused' as const }
   const requestedTransport = { ...compilation().snapshot.transport, playheadSec: 31 }
 
@@ -884,10 +969,12 @@ test('resumes a portable preview in place near the end of its schedule', async (
   const calls: string[] = []
   const compileCalls: LivePlaybackTransport[] = []
   let createdSessions = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => {
       compileCalls.push(transport)
       const base = compilation()
+
       return {
         ...base,
         snapshot: { ...base.snapshot, transport },
@@ -897,11 +984,13 @@ test('resumes a portable preview in place near the end of its schedule', async (
     backend: {
       createPlaybackSession: async () => {
         createdSessions += 1
+
         return createSession(calls, async () => undefined)
       },
     },
     select: async () => selected,
   })
+
   const previewTransport = { ...compilation().snapshot.transport, state: 'paused' as const, playheadSec: 0 }
   const originalStartTransport = { ...compilation().snapshot.transport, playheadSec: 0 }
   const nearEndTransport = { ...compilation().snapshot.transport, playheadSec: 29 }
@@ -920,10 +1009,12 @@ test('resumes a portable preview in place near the end of its schedule', async (
 test('resumes a portable preview in place when loop semantics change', async () => {
   const calls: string[] = []
   const compileCalls: LivePlaybackTransport[] = []
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => {
       compileCalls.push(transport)
       const base = compilation()
+
       return {
         ...base,
         snapshot: { ...base.snapshot, transport },
@@ -933,7 +1024,9 @@ test('resumes a portable preview in place when loop semantics change', async () 
     backend: { createPlaybackSession: async () => createSession(calls, async () => undefined) },
     select: async () => selected,
   })
+
   const previewTransport = { ...compilation().snapshot.transport, state: 'paused' as const }
+
   const loopTransport = {
     ...compilation().snapshot.transport,
     loopEnabled: true,
@@ -954,10 +1047,12 @@ test('shares one resume for concurrent starts of a paused portable session', asy
   const calls: string[] = []
   let compileCalls = 0
   let createdSessions = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: (transport) => {
       compileCalls += 1
       const base = compilation()
+
       return Promise.resolve({
         ...base,
         snapshot: { ...base.snapshot, transport },
@@ -967,11 +1062,13 @@ test('shares one resume for concurrent starts of a paused portable session', asy
     backend: {
       createPlaybackSession: async () => {
         createdSessions += 1
+
         return createSession(calls, async () => undefined)
       },
     },
     select: async () => selected,
   })
+
   const previewTransport = { ...compilation().snapshot.transport, state: 'paused' as const }
   const firstTransport = { ...compilation().snapshot.transport, playheadSec: 31 }
   const secondTransport = { ...compilation().snapshot.transport, playheadSec: 32 }
@@ -990,17 +1087,20 @@ test('shares one resume for concurrent starts of a paused portable session', asy
 test('disposal during a portable resume prevents activation', async () => {
   const calls: string[] = []
   let createdSessions = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => compilation(),
     getAudioContext: () => context,
     backend: {
       createPlaybackSession: async () => {
         createdSessions += 1
+
         return createSession(calls, async () => undefined)
       },
     },
     select: async () => selected,
   })
+
   const previewTransport = { ...compilation().snapshot.transport, state: 'paused' as const }
   const requestedTransport = { ...compilation().snapshot.transport, playheadSec: 31 }
 
@@ -1018,19 +1118,24 @@ test('disposal during a portable resume prevents activation', async () => {
 test('shares concurrent portable starts during preview promotion', async () => {
   const calls: string[] = []
   const promotion = Promise.withResolvers<void>()
+
   const session = createSession(calls, async () => undefined, async (running) => {
     if (running) await promotion.promise
   })
+
   let compileCalls = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => {
       compileCalls += 1
+
       return compilation()
     },
     getAudioContext: () => context,
     backend: { createPlaybackSession: async () => session },
     select: async () => selected,
   })
+
   const transport = { ...compilation().snapshot.transport, playheadSec: 0 }
 
   await expect(controller.ensurePrepared({ ...transport, state: 'paused' as const })).resolves.toBe('started')
@@ -1049,12 +1154,14 @@ test('does not promote an unavailable portable preview', async () => {
   const calls: string[] = []
   const selection = Promise.withResolvers<PortableWasmBackendSelection>()
   const session = createSession(calls, async () => undefined)
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => compilation(),
     getAudioContext: () => context,
     backend: { createPlaybackSession: async () => session },
     select: () => selection.promise,
   })
+
   const transport = compilation().snapshot.transport
 
   const preview = controller.ensurePrepared({ ...transport, state: 'paused' as const })
@@ -1073,11 +1180,14 @@ test('cancellation during portable preview prevents late promotion', async () =>
     const calls: string[] = []
     const installing = Promise.withResolvers<void>()
     const releaseInstall = Promise.withResolvers<void>()
+
     const session = createSession(calls, async () => {
       installing.resolve()
       await releaseInstall.promise
     })
+
     let projectGeneration = 1
+
     const controller = createPortableBrowserPlaybackController({
       compileSnapshot: async () => compilation(),
       getAudioContext: () => context,
@@ -1085,6 +1195,7 @@ test('cancellation during portable preview prevents late promotion', async () =>
       backend: { createPlaybackSession: async () => session },
       select: async () => selected,
     })
+
     const transport = {
       ...compilation().snapshot.transport,
       playheadSec: 0.5,
@@ -1093,6 +1204,7 @@ test('cancellation during portable preview prevents late promotion', async () =>
     const preview = controller.ensurePrepared({ ...transport, state: 'paused' as const })
     await installing.promise
     const started = controller.start(transport)
+
     if (invalidation === 'dispose') controller.dispose()
     else projectGeneration += 1
     releaseInstall.resolve()
@@ -1109,12 +1221,14 @@ test('pause and resume retain the prepared portable graph and session', async ()
   const calls: string[] = []
   const session = createSession(calls, async () => undefined)
   let createdSessions = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => compilation(),
     getAudioContext: () => context,
     backend: {
       createPlaybackSession: async () => {
         createdSessions += 1
+
         return session
       },
     },
@@ -1138,6 +1252,7 @@ test('project generation changes dispose the retained portable session before re
   const calls: string[] = []
   let projectGeneration = 1
   let createdSessions = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => compilation(),
     getAudioContext: () => context,
@@ -1145,6 +1260,7 @@ test('project generation changes dispose the retained portable session before re
     backend: {
       createPlaybackSession: async () => {
         createdSessions += 1
+
         return createSession(calls, async () => undefined)
       },
     },
@@ -1165,11 +1281,14 @@ test('dispose invalidates pending portable playback startup before late activati
   const calls: string[] = []
   const installing = Promise.withResolvers<void>()
   const releaseInstall = Promise.withResolvers<void>()
+
   const session = createSession(calls, async () => {
     installing.resolve()
     await releaseInstall.promise
   })
+
   const faults: string[] = []
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => compilation(),
     getAudioContext: () => context,
@@ -1194,6 +1313,7 @@ test('rolls back rejected or timed out schedule installation before activation',
   for (const message of ['schedule rejected', 'Portable playback control request timed out.']) {
     const calls: string[] = []
     const session = createSession(calls, async () => { throw new Error(message) })
+
     const controller = createPortableBrowserPlaybackController({
       compileSnapshot: async () => compilation(),
       getAudioContext: () => context,
@@ -1217,6 +1337,7 @@ test('stops portable playback when its active worklet faults', async () => {
   const calls: string[] = []
   const faults: string[] = []
   const session = createSession(calls, async () => undefined)
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => compilation(),
     getAudioContext: () => context,
@@ -1235,11 +1356,14 @@ test('stops portable playback when its active worklet faults', async () => {
 test('fits metadata-only ordinary startup pages and refreshes from the bounded horizon', async () => {
   const calls: string[] = []
   const readCalls: string[] = []
+
   const sessions = [
     createSession(calls, async () => undefined, undefined, true),
     createSession(calls, async () => undefined, undefined, true),
   ]
+
   let sessionIndex = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => pagedCompilation(transport),
     getAudioContext: () => context,
@@ -1249,7 +1373,9 @@ test('fits metadata-only ordinary startup pages and refreshes from the bounded h
       createPlaybackSession: async () => {
         const session = sessions[sessionIndex]
         sessionIndex += 1
+
         if (!session) throw new Error('Unexpected extra portable session.')
+
         return session
       },
     },
@@ -1258,6 +1384,7 @@ test('fits metadata-only ordinary startup pages and refreshes from the bounded h
 
   await expect(controller.start(pagedCompilation().snapshot.transport)).resolves.toBe('started')
   const initialSession = sessions[0]
+
   if (!initialSession) throw new Error('Initial session is missing.')
   expect(initialSession.writtenPages.size).toBe(portableWasmPagedSlotCount)
   expect(initialSession.preparations.size).toBeLessThanOrEqual(64)
@@ -1275,6 +1402,7 @@ test('fits metadata-only ordinary startup pages and refreshes from the bounded h
 test('reports unavailable before graph publication when the minimum paged window cannot fit', async () => {
   const calls: string[] = []
   const readCalls: string[] = []
+
   const overfullTrack: RuntimeTrack = {
     id: 'overfull-audio',
     kind: 'audio',
@@ -1290,7 +1418,9 @@ test('reports unavailable before graph publication when the minimum paged window
       bufferOffsetSec: index * portableWasmPagedPageFrames / context.sampleRate,
     })),
   }
+
   const base = pagedCompilation()
+
   const overfull = {
     ...base,
     snapshot: {
@@ -1310,6 +1440,7 @@ test('reports unavailable before graph publication when the minimum paged window
       },
     },
   }
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => overfull,
     getAudioContext: () => context,
@@ -1339,6 +1470,7 @@ test('preflights recording refresh preparation capacity at the exact boundary', 
     const faults: string[] = []
     const session = createSession(calls, async () => undefined, undefined, true)
     const { stream, recordingContext } = createRecordingFixture(calls)
+
     const controller = createPortableBrowserPlaybackController({
       compileSnapshot: async (transport) => manyPagedCompilation(sourceCount, transport),
       getAudioContext: () => recordingContext,
@@ -1363,6 +1495,7 @@ test('preflights recording refresh preparation capacity at the exact boundary', 
     const started = await controller.start(manyPagedCompilation(sourceCount).snapshot.transport)
     expect(started, faults.join('\n')).toBe('started')
     const startTransportCount = session.transports.filter((transport) => transport.running).length
+
     if (sourceCount === 33) {
       await expect(controller.startRecording({
         appSessionId: `over-capacity-${sourceCount}`,
@@ -1390,6 +1523,7 @@ test('preflights recording refresh preparation capacity at the exact boundary', 
         monitoring: false,
         punchStartFrame: 0,
       })
+
       await expect(recordingStart).resolves.toMatchObject({ sampleRate: 48_000, channelCount: 1 })
       expect(controller.isRecording()).toBeTrue()
       session.emitPosition(26 * context.sampleRate)
@@ -1400,6 +1534,7 @@ test('preflights recording refresh preparation capacity at the exact boundary', 
       await controller.cancelRecording()
       expect(controller.isRecording()).toBeFalse()
     }
+
     controller.dispose()
   }
 })
@@ -1410,6 +1545,7 @@ test('starts and finalizes portable recording through acknowledged bounded adapt
   const failures: string[] = []
   const session = createSession(calls, async () => undefined)
   let endedListener: (() => void) | undefined
+
   const mediaTrack: MediaStreamTrack = Object.assign(Object.create(null), {
     readyState: 'live',
     getSettings: () => ({ channelCount: 1 }),
@@ -1421,17 +1557,21 @@ test('starts and finalizes portable recording through acknowledged bounded adapt
     },
     stop: (): void => { calls.push('track-stop') },
   })
+
   const stream: MediaStream = Object.assign(Object.create(null), {
     getTracks: () => [mediaTrack],
     getAudioTracks: () => [mediaTrack],
   })
+
   const source: MediaStreamAudioSourceNode = Object.assign(Object.create(null), {
     disconnect: (): void => { calls.push('source-disconnect') },
   })
+
   const recordingContext: AudioContext = Object.assign(Object.create(context), {
     sampleRate: 48_000,
     createMediaStreamSource: () => source,
   })
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => compilation(),
     getAudioContext: () => recordingContext,
@@ -1443,6 +1583,7 @@ test('starts and finalizes portable recording through acknowledged bounded adapt
         write: () => undefined,
         finalize: async () => {
           calls.push('writer-finalize')
+
           return { capturedFrames: 0 }
         },
         abort: async () => {
@@ -1498,6 +1639,7 @@ test('preserves caller-owned recording streams when portable writer startup fail
   const calls: string[] = []
   const faults: string[] = []
   const session = createSession(calls, async () => undefined)
+
   const mediaTrack: MediaStreamTrack = Object.assign(Object.create(null), {
     readyState: 'live',
     getSettings: () => ({ channelCount: 1 }),
@@ -1505,18 +1647,23 @@ test('preserves caller-owned recording streams when portable writer startup fail
     removeEventListener: () => undefined,
     stop: () => calls.push('track-stop'),
   })
+
   const stream: MediaStream = Object.assign(Object.create(null), {
     getTracks: () => [mediaTrack],
     getAudioTracks: () => [mediaTrack],
   })
+
   const source: MediaStreamAudioSourceNode = Object.assign(Object.create(null), {
     disconnect: () => calls.push('source-disconnect'),
   })
+
   const recordingContext: AudioContext = Object.assign(Object.create(context), {
     sampleRate: 48_000,
     createMediaStreamSource: () => source,
   })
+
   let writerTerminations = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => compilation(),
     getAudioContext: () => recordingContext,
@@ -1558,29 +1705,38 @@ test('preserves caller-owned recording streams when portable writer startup fail
 // session compiled in live parameters alone. What it takes becomes its prepared snapshot, so the release announce
 // (the real Timeline handlers) rebuilds only for what it did not take.
 const p1Initial: TrackInstrumentParams = { kind: 'synth', instanceId: 'synth:1', params: createDefaultSynthParams() }
+
 const p1Synth = (from: TrackInstrumentParams, update: SynthParamsUpdate): TrackInstrumentParams =>
   from.kind === 'synth' ? { ...from, params: mergeSynthParams(from.params, update) } : from
+
 const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number; failCompile?: number; initial?: TrackInstrumentParams; assetKeys?: readonly string[]; holdAdoptionCompile?: Promise<void>; holdPrepare?: Promise<void> } = {}) => {
   let projected: TrackInstrumentParams = options.initial ?? p1Initial, revision = 1, rebuilds = 0
   const calls: string[] = [], batches: Array<readonly unknown[]> = [], faults: string[] = []
   const graphs: Parameters<PortableWasmPlaybackSession["prepareGraph"]>[0][] = []
+
   const snapshot = () => {
     const base = compilation()
     const trackFx = { synth: { ...base.snapshot.mixer.fx.trackFx.synth, instrument: projected } }
     const fx = { ...base.snapshot.mixer.fx, trackFx }
     const assets = (options.assetKeys ?? []).map(assetId => ({ assetId, source: { durationSec: 1, sampleRate: 48_000, channelCount: 1 }, buffer: new TestAudioBuffer() }))
+
     return { ...base.snapshot, revision, assets, mixer: { ...base.snapshot.mixer, fx,
       graph: resolveLiveMixerGraph([track], fx.trackFx, { masterFxInstances: [] }) } }
   }
+
   let refused = 0, settled = 0, compileFailures = 0, playing = false
   let registered: readonly string[] = []
   let emitPosition = (_frame: number, _sequence: number) => {}
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (_transport, compileContext) => {
       if (playing && compileFailures < (options.failCompile ?? 0)) { compileFailures++; throw new Error('P1 compile threw') }
+
       // The project is read when the compile starts, as a real compile does; the hold is the time it takes.
       const compiled = snapshot()
+
       if (compileContext?.liveAdoption) await options.holdAdoptionCompile
+
       return { supported: true, snapshot: compiled }
     },
     fingerprintSnapshot: next => JSON.stringify({ ...next, revision: 0, mixer: { ...next.mixer, graph: undefined } }),
@@ -1591,10 +1747,12 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
       const session = createSession(calls, async () => {})
       emitPosition = (frame, sequence) => session.emitPosition(frame, sequence)
       registered = session.registeredAssets
+
       return {
         ...session,
         prepareGraph: async graph => {
           if (graphs.length > 0 && refused < (options.failPrepare ?? 0)) { refused++; throw new Error('P1 prepare refused') }
+
           if (graphs.length > 0) await options.holdPrepare
           graphs.push(graph)
         },
@@ -1605,22 +1763,28 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
       }
     } },
   })
+
   // One transport-position report per call, as the worklet sends them; the retry waits on these.
   let reports = 0
+
   const report = async (count = 1) => {
     for (let index = 0; index < count; index++) { emitPosition(1_000 + ++reports, reports); await Bun.sleep(0) }
   }
+
   expect(await controller.start(snapshot().transport)).toBe('started')
   playing = true
+
   const rebuild = async () => {
     rebuilds++
     revision++
     expect(await controller.rebuildPrepared(snapshot().transport)).toBe('started')
   }
+
   const apply = createApplyPortableProcessor({
     liveProcessorControl: () => controller.liveProcessorControl, isPortableBrowserPlaybackPrepared: () => controller.isPrepared(),
     isNativePlaybackPrepared: () => false, syncPlaybackBackend: rebuild, renderTracks: () => [track],
   })
+
   const announce = createInstrumentPlaybackChange({
     mountedProjectGeneration: () => 0, awaitPlaybackPreparation: async () => {},
     preparedInstrument: (targetId: string) => controller.preparedInstrument(targetId),
@@ -1630,34 +1794,46 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
     syncPlaybackBackend: rebuild, renderTracks: () => [track],
     captureStructuralPlaybackIntent: () => ({}),
   })
+
   const registry = createProcessorEditRegistry(() => 120)
+
   // The persisted adapter projects each written value before its edit reaches playback.
   const allocate = (instrument: TrackInstrumentParams) => {
     const allocated = registry.allocate({ targetId: 'synth', effect: 'instrument', from: instrument, to: instrument })
+
     if (!allocated) throw new Error('Missing Synth edit')
+
     return allocated
   }
+
   const edit = (instrument: TrackInstrumentParams) => {
     projected = instrument
+
     return allocate(instrument)
   }
+
   const flush = (allocated: LiveProcessorEditIdentity) => controller.liveProcessorControl.flush({
     instanceId: allocated.target.instanceId,
     values: Object.entries(allocated.content.values ?? {}).map(([parameterId, value]) => ({ parameterId, value })),
     edit: allocated,
   })
+
   const sessionStructure = () => {
     const instrument = graphs.at(-1)?.nodes.find(node => node.id === 'synth')?.instrument
+
     return instrument?.kind === 'synth' ? nativeSynthStructureKey(instrument) : undefined
   }
+
   const structureOf = (instrument: TrackInstrumentParams) =>
     instrument.kind === 'synth' ? nativeSynthStructureKey(compilePortableSynthState(instrument.params)) : undefined
+
   return { controller, apply, announce, edit, allocate, flush, setProjected: (instrument: TrackInstrumentParams) => { projected = instrument }, batches, graphs, faults, rebuilds: () => rebuilds, sessionStructure, structureOf,
     report, refused: () => refused, settled: () => settled, registered: () => registered }
 }
 
 test('P1 a live Synth edit is accepted and the prepared portable snapshot follows it', async () => {
   const f = await p1Fixture()
+
   try {
     const next = p1Synth(p1Initial, { filter: { frequencyHz: 1500 } })
     expect(await f.flush(f.edit(next))).toMatchObject({ accepted: true })
@@ -1672,6 +1848,7 @@ test.each<[string, SynthParamsUpdate]>([
   ['oscillator waveform', { oscillators: [{ wave: 'square' }] }],
 ])('P1 a non-live Synth %s edit is adopted as a published configuration, never rebuilt', async (_name, update) => {
   const f = await p1Fixture()
+
   try {
     const next = p1Synth(p1Initial, update)
     expect(await f.apply(f.edit(next))).toBe('applied')
@@ -1684,15 +1861,18 @@ test.each<[string, SynthParamsUpdate]>([
 
 test('P1 a live Synth drag is heard once per frame and its release does not rebuild', async () => {
   const f = await p1Fixture()
+
   try {
     let current: TrackInstrumentParams = p1Initial
     const results: Array<EngineDisposition | undefined> = [], frameBatches: number[] = []
+
     for (let frame = 0; frame < 20; frame++) {
       current = p1Synth(current, { filter: { frequencyHz: 1000 + frame * 50 } })
       const before = f.batches.length
       results.push(await f.apply(f.edit(current)))
       frameBatches.push(f.batches.length - before)
     }
+
     expect({ results, frameBatches, rebuilds: f.rebuilds() })
       .toEqual({ results: Array(20).fill('applied'), frameBatches: Array(20).fill(1), rebuilds: 0 })
     expect(await f.apply(f.edit(current))).toBe('applied')
@@ -1705,11 +1885,13 @@ test('P1 a live Synth drag is heard once per frame and its release does not rebu
 
 test('P1 live then non-live Synth edits in one gesture keep the last live state and release adopts once', async () => {
   const f = await p1Fixture()
+
   try {
     const live = p1Synth(p1Synth(p1Initial, { filter: { frequencyHz: 1500 } }), { filter: { frequencyHz: 1600 } })
     const structural = p1Synth(live, { oscillators: [{ level: 0.3 }] })
     const after = p1Synth(structural, { filter: { frequencyHz: 1700 } })
     const results: Array<EngineDisposition | undefined> = []
+
     for (const instrument of [p1Synth(p1Initial, { filter: { frequencyHz: 1500 } }), live, structural, after]) results.push(await f.apply(f.edit(instrument)))
     expect({ results, batches: f.batches.length, rebuilds: f.rebuilds(), prepared: f.controller.preparedInstrument('synth') })
       .toEqual({ results: ['applied', 'applied', 'applied', 'applied'], batches: 4, rebuilds: 0, prepared: live })
@@ -1731,6 +1913,7 @@ test.each<[string, TrackInstrumentParams, TrackInstrumentParams]>([
     { kind: 'granular', instanceId: 'granular:1', params: { ...createDefaultGranularParams(), grainSizeMs: 90 } }],
 ])('P1 a %s edit while playing is adopted as a published configuration, never rebuilt', async (_name, initial, next) => {
   const f = await p1Fixture({ initial })
+
   try {
     await f.announce('synth', next)
     f.setProjected(next)
@@ -1751,16 +1934,20 @@ test('P1 a Sampler zone edit and a sample swap with real buffers are adopted on 
       ...zone,
     }] },
   })
+
   const initial = sampler({})
   const f = await p1Fixture({ initial, assetKeys: ['asset-a', 'asset-b'] })
+
   try {
     const steps = [sampler({ startSec: 0.25 }), sampler({ startSec: 0.25, tuneCents: 200 }), sampler({ startSec: 0.25, tuneCents: 200 }, 'asset-b')]
     const results: PortableAdoptionResult[] = []
+
     for (const next of steps) {
       await f.announce('synth', next)
       f.setProjected(next)
       results.push(await f.controller.adoptSchedule(noLoop))
     }
+
     expect({ results, rebuilds: f.rebuilds(), graphs: f.graphs.length, registered: f.registered() })
       .toEqual({ results: ['adopted', 'adopted', 'adopted'], rebuilds: 0, graphs: 4, registered: ['asset-a', 'asset-b'] })
     expect(f.controller.preparedInstrument('synth')).toEqual(steps[2])
@@ -1769,6 +1956,7 @@ test('P1 a Sampler zone edit and a sample swap with real buffers are adopted on 
 
 test('P1 a failed adoption of an instrument edit keeps the playing graph, never rebuilds, and the next adoption stages it', async () => {
   const f = await p1Fixture({ failPrepare: 1 })
+
   try {
     const next = p1Synth(p1Initial, { polyphony: 4 })
     expect(await f.apply(f.edit(next))).toBe('applied')
@@ -1784,6 +1972,7 @@ test('P1 a failed adoption of an instrument edit keeps the playing graph, never 
 
 test('M4 an instrument compile that throws keeps the playing graph, never rebuilds, and the next adoption stages it', async () => {
   const f = await p1Fixture({ failCompile: 1 })
+
   try {
     const next = p1Synth(p1Initial, { polyphony: 4 })
     expect(await f.apply(f.edit(next))).toBe('applied')
@@ -1798,6 +1987,7 @@ test('M4 an instrument compile that throws keeps the playing graph, never rebuil
 
 test('UD 8 a transient staging failure is retried at the next block boundary and applies', async () => {
   const f = await p1Fixture({ failPrepare: 1 })
+
   try {
     const next = p1Synth(p1Initial, { polyphony: 4 })
     expect(await f.apply(f.edit(next))).toBe('applied')
@@ -1816,6 +2006,7 @@ test('UD 8 a persistent staging failure stops after 8 resubmits with a defect lo
   const logged: string[] = []
   const warn = spyOn(console, 'warn').mockImplementation((message: string) => { logged.push(`warn ${message}`) })
   const error = spyOn(console, 'error').mockImplementation((message: string) => { logged.push(`error ${message}`) })
+
   try {
     const next = p1Synth(p1Initial, { polyphony: 4 })
     expect(await f.apply(f.edit(next))).toBe('applied')
@@ -1845,13 +2036,16 @@ test.each<[string, TrackInstrumentParams]>([
   ['another instance', { ...p1Initial, instanceId: 'synth:2' }],
 ])('P1 an edit that replaces the Synth with %s is refused and sends no live events', async (_name, replacement) => {
   const f = await p1Fixture()
+
   try {
     const allocated = f.allocate(p1Initial)
+
     const result = await f.controller.liveProcessorControl.flush({
       instanceId: allocated.target.instanceId,
       values: [{ parameterId: 'synth.outputGain', value: 0.5 }],
       edit: { ...allocated, content: { ...allocated.content, params: replacement } },
     })
+
     expect({ result, batches: f.batches.length, prepared: f.controller.preparedInstrument('synth') })
       .toEqual({ result: { accepted: false, reason: 'unsupported' }, batches: 0, prepared: p1Initial })
   } finally { f.controller.dispose() }
@@ -1859,6 +2053,7 @@ test.each<[string, TrackInstrumentParams]>([
 
 test('P1 a Synth portable bridge error is still reported and never rebuilds', async () => {
   const f = await p1Fixture({ failBatches: true })
+
   try {
     await expect(f.apply(f.edit(p1Synth(p1Initial, { filter: { frequencyHz: 1500 } })))).rejects.toThrow('P1 portable bridge down')
     await expect(f.apply(f.edit(p1Synth(p1Initial, { oscillators: [{ level: 0.3 }] })))).rejects.toThrow('P1 portable bridge down')
@@ -1872,21 +2067,25 @@ test('B6f ensurePrepared moves a live paused session to a newer playhead instead
   const compileCalls: LivePlaybackTransport[] = []
   const session = createSession(calls, async () => undefined)
   let createdSessions = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => {
       compileCalls.push(transport)
       const base = compilation()
+
       return { ...base, snapshot: { ...base.snapshot, transport } }
     },
     getAudioContext: () => context,
     backend: {
       createPlaybackSession: async () => {
         createdSessions += 1
+
         return session
       },
     },
     select: async () => selected,
   })
+
   const paused = { ...compilation().snapshot.transport, state: 'paused' as const }
 
   expect(await controller.ensurePrepared(paused)).toBe('started')
@@ -1908,21 +2107,28 @@ test('B6f ensurePrepared moves a live paused session to a newer playhead instead
 
 // B6f5: a playing portable session adopts mixer and automation edits on the same core, as native does.
 const noLoop: Pick<LivePlaybackTransport, 'loopEnabled' | 'loopStartSec' | 'loopEndSec'> = { loopEnabled: false, loopStartSec: 0, loopEndSec: 0 }
+
 const b6f5Fingerprint = (snapshot: { revision: number; transport: LivePlaybackTransport }) =>
   JSON.stringify({ ...snapshot, revision: undefined, transport: { ...snapshot.transport, playheadSec: undefined, state: undefined } })
+
 // The Timeline's fingerprint leaves the resolved mixer graph out: it is compiled from the tracks and effects it also holds.
 const b6f5ContentFingerprint = (snapshot: LivePlaybackSnapshot) => JSON.stringify({ ...snapshot, revision: undefined,
   transport: { ...snapshot.transport, playheadSec: undefined, state: undefined }, mixer: { ...snapshot.mixer, graph: undefined } })
+
 const b6f5Compilation = (transport: LivePlaybackTransport, volume: number, clipDuration = 1, masterUtility?: UtilityParamsEnvelope) => {
   const base = compilation()
   const edited: RuntimeTrack = { ...track, volume, clips: track.clips.map((clip) => ({ ...clip, duration: clipDuration })) }
   const masterFxInstances: AudioEffectRuntimeInstance[] = masterUtility ? [{ id: 'utility-b6f5', kind: 'utility', params: masterUtility }] : []
   const fx = { ...base.snapshot.mixer.fx, masterFxInstances }
+
   return { ...base, snapshot: { ...base.snapshot, transport, tracks: [edited], mixer: { ...base.snapshot.mixer, fx,
     graph: resolveLiveMixerGraph([edited], fx.trackFx, { masterFxInstances }) } } }
 }
+
 type PublishOptions = Parameters<PortableWasmPlaybackSession['publishGraph']>[1]
+
 type B6f5Publish = { revision: number; options: PublishOptions }
+
 const b6f5Session = (calls: string[], graphs: AudioCoreGraphSnapshot[], publishes: B6f5Publish[],
   publish: (options?: PublishOptions) => Promise<void> = async () => undefined) => ({
   ...createSession(calls, async () => undefined),
@@ -1933,6 +2139,7 @@ const b6f5Session = (calls: string[], graphs: AudioCoreGraphSnapshot[], publishe
     await publish(options)
   },
 })
+
 const b6f5Gain = (graph: AudioCoreGraphSnapshot | undefined) => graph?.nodes.find((node) => node.id === 'synth')?.mixer?.gain
 
 test('B6f5 a playing portable session adopts a mixer edit on the same session and follows it', async () => {
@@ -1941,12 +2148,16 @@ test('B6f5 a playing portable session adopts a mixer edit on the same session an
   const publishes: B6f5Publish[] = []
   let volume = 0.8
   let sessions = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => b6f5Compilation(transport, volume),
     fingerprintSnapshot: b6f5Fingerprint,
     getAudioContext: () => context, select: async () => selected,
-    backend: { createPlaybackSession: async () => { sessions += 1; return b6f5Session(calls, graphs, publishes) } },
+    backend: { createPlaybackSession: async () => { sessions += 1;
+
+ return b6f5Session(calls, graphs, publishes) } },
   })
+
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     const before = calls.length
@@ -1971,6 +2182,7 @@ test('B6f5 the adoption seam adapts to the round trips of recent adoptions, clam
   let installMs = 0
   let refuse = false
   const now = spyOn(performance, 'now').mockImplementation(() => clock)
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => b6f5Compilation(transport, volume),
     fingerprintSnapshot: b6f5Fingerprint,
@@ -1980,14 +2192,18 @@ test('B6f5 the adoption seam adapts to the round trips of recent adoptions, clam
       installSchedule: async () => { clock += installMs },
     }) },
   })
+
   const seams: number[] = []
+
   const adoptAt = async (next: number, slowInstallMs: number) => {
     volume = next
     installMs = slowInstallMs
     const result = await controller.adoptSchedule(noLoop)
     seams.push(publishes.at(-1)?.options?.publicationFrame ?? -1)
+
     return result
   }
+
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     const first = await adoptAt(0.7, 80)
@@ -2014,6 +2230,7 @@ test('B6f5 a refused adoption answers failed and keeps the session revision; a M
   // The seam lead follows the slowest recent round trip, so a real clock moves the seam by a frame or two between runs and
   // with it which schedule events fall before the seam. A fixed clock makes every round trip zero.
   const now = spyOn(performance, 'now').mockReturnValue(0)
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => b6f5Compilation(transport, volume, clipDuration),
     fingerprintSnapshot: b6f5Fingerprint,
@@ -2022,6 +2239,7 @@ test('B6f5 a refused adoption answers failed and keeps the session revision; a M
       if (refuse && options) throw new Error('Portable playback graph-published was rejected.')
     }) },
   })
+
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     volume = 0.5
@@ -2051,37 +2269,49 @@ test('B6f5 R2 a live send crossing an adoption publish never faults the session'
     let volume = 0.8
     let playingRevision = 0
     const base = b6f5Session(calls, graphs, publishes)
+
     const session = {
       ...base,
       publishGraph: async (revision: number, options?: PublishOptions) => {
         publishes.push({ revision, options })
-        if (!options) { playingRevision = revision; return }
+
+        if (!options) { playingRevision = revision;
+
+ return }
+
         // The worklet handles the publish in port order; its answer arrives later.
         if (accept) playingRevision = revision
         await gate.promise
+
         if (!accept) throw new Error('Portable playback graph-published was rejected.')
       },
       queueProcessorEvents: async (revision: number) => {
         sent.push(revision)
+
         if (revision !== playingRevision) {
           base.fail(new Error('Portable audio-core AudioWorklet control request failed.'))
           throw new Error('fault')
         }
       },
     }
+
     const utility: UtilityParamsEnvelope = { version: 1, state: createDefaultUtilityParams() }
+
     const controller = createPortableBrowserPlaybackController({
       compileSnapshot: async (transport) => b6f5Compilation(transport, volume, 1, utility),
       fingerprintSnapshot: b6f5Fingerprint,
       getAudioContext: () => context, select: async () => selected, reportFault: (message) => faults.push(message),
       backend: { createPlaybackSession: async () => session },
     })
+
     try {
       expect(await controller.start(compilation().snapshot.transport)).toBe('started')
       volume = 0.5
       const adoption = controller.adoptSchedule(noLoop)
+
       for (let turn = 0; turn < 50 && publishes.length < 2; turn += 1) await Promise.resolve()
       const live = controller.liveProcessorControl.flush({ instanceId: 'utility-b6f5', values: [{ parameterId: 'utility.gainDb', value: 1 }] })
+
       for (let turn = 0; turn < 50; turn += 1) await Promise.resolve()
       const sentDuringPublish = sent.length
       gate.resolve()
@@ -2097,15 +2327,18 @@ test('B6f5 R2 a live send crossing an adoption publish never faults the session'
 // slews every live target back to the stale one when it publishes (/tmp/m1-proof, case B: about six times louder).
 const m1Gain = (graphs: readonly AudioCoreGraphSnapshot[]) => {
   const instrument = graphs.at(-1)?.nodes.find(node => node.id === 'synth')?.instrument
+
   return instrument?.kind === 'synth' ? { gain: instrument.outputGain, level: instrument.oscillators?.[0]?.level } : undefined
 }
 
 test('B6f5 m1 a live synth value accepted during an adoption compile is in the configuration the adoption publishes', async () => {
   const hold = Promise.withResolvers<void>()
   const f = await p1Fixture({ holdAdoptionCompile: hold.promise })
+
   try {
     f.setProjected(p1Synth(p1Initial, { oscillators: [{ level: 0.3 }] }))
     const adoption = f.controller.adoptSchedule(noLoop)
+
     for (let turn = 0; turn < 50; turn++) await Promise.resolve()
     const live = await f.flush(f.allocate(p1Synth(p1Initial, { gain: 0.125 })))
     hold.resolve()
@@ -2118,11 +2351,14 @@ test('B6f5 m1 a live synth value accepted during an adoption compile is in the c
 test('B6f5 m1 a live synth send while the adoption prepares waits for the publish and reaches the revision that carries it', async () => {
   const hold = Promise.withResolvers<void>()
   const f = await p1Fixture({ holdPrepare: hold.promise })
+
   try {
     f.setProjected(p1Synth(p1Initial, { oscillators: [{ level: 0.3 }] }))
     const adoption = f.controller.adoptSchedule(noLoop)
+
     for (let turn = 0; turn < 50; turn++) await Promise.resolve()
     const live = f.flush(f.allocate(p1Synth(p1Initial, { gain: 0.125 })))
+
     for (let turn = 0; turn < 50; turn++) await Promise.resolve()
     const sentWhilePreparing = f.batches.length
     hold.resolve()
@@ -2138,22 +2374,31 @@ test('B6f5 adoptions coalesce to one in flight and one queued that carries the n
   const hold = Promise.withResolvers<void>()
   let volume = 0.8
   let adoptionCompiles = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport, compileContext) => {
       const value = volume
+
       if (compileContext?.liveAdoption && ++adoptionCompiles === 1) await hold.promise
+
       return b6f5Compilation(transport, value)
     },
     fingerprintSnapshot: b6f5Fingerprint,
     getAudioContext: () => context, select: async () => selected,
     backend: { createPlaybackSession: async () => b6f5Session(calls, graphs, publishes) },
   })
+
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     volume = 0.1
     const first = controller.adoptSchedule(noLoop)
+
     for (let turn = 0; turn < 20 && adoptionCompiles === 0; turn += 1) await Promise.resolve()
-    const queued = [0.2, 0.3, 0.4, 0.5].map((next) => { volume = next; return controller.adoptSchedule(noLoop) })
+
+    const queued = [0.2, 0.3, 0.4, 0.5].map((next) => { volume = next;
+
+ return controller.adoptSchedule(noLoop) })
+
     hold.resolve()
     const outcomes = await Promise.all([first, ...queued])
     expect({ outcomes, adoptionCompiles, gains: graphs.slice(1).map(b6f5Gain), publishes: publishes.length - 1 })
@@ -2171,6 +2416,7 @@ test('B6f5 R6 a schedule refresh after an adoption continues the adopted revisio
   let volume = 0.8
   const sessions = [b6f5Session(calls, graphs, publishes), b6f5Session(calls, graphs, publishes)]
   let sessionIndex = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => b6f5Compilation(transport, volume),
     fingerprintSnapshot: b6f5Fingerprint,
@@ -2178,10 +2424,13 @@ test('B6f5 R6 a schedule refresh after an adoption continues the adopted revisio
     backend: { createPlaybackSession: async () => {
       const session = sessions[sessionIndex]
       sessionIndex += 1
+
       if (!session) throw new Error('Unexpected extra portable session.')
+
       return session
     } },
   })
+
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     volume = 0.5
@@ -2197,26 +2446,35 @@ test('B6f5 R6 a schedule refresh after an adoption continues the adopted revisio
 // The structural edit is a Spectral fftSize change, which the core carries as a ghost of the old stage plus a fresh one.
 const b6f5Spectral = (fftSize: 512 | 1024): AudioEffectRuntimeInstance => ({ id: 'spectral-b6f5-structure', kind: 'spectral', params: { version: 1, state: { ...createDefaultSpectralParams(), fftSize } } })
 const b6f5AddedEffect = b6f5Spectral(1024)
+
 const b6f5StructuralCompilation = (transport: LivePlaybackTransport, added: AudioEffectRuntimeInstance | undefined) => {
   const base = compilation()
+
   const trackFx = Object.fromEntries(Object.entries(base.snapshot.mixer.fx.trackFx ?? {})
     .map(([id, entry]) => [id, id === track.id ? { ...entry, instances: [...entry.instances, added ?? b6f5Spectral(512)] } : entry]))
+
   const fx = { ...base.snapshot.mixer.fx, trackFx }
+
   return { ...base, snapshot: { ...base.snapshot, transport, mixer: { ...base.snapshot.mixer, fx, graph: resolveLiveMixerGraph(base.snapshot.tracks, fx.trackFx) } } }
 }
+
 // WK installSchedule answers `rejected` for an event whose target the prepared graph lacks (`!targets.has(key)`).
 const b6f5StrictSession = (calls: string[], graphs: AudioCoreGraphSnapshot[], publishes: B6f5Publish[]) => {
   const base = b6f5Session(calls, graphs, publishes)
   let nodes = new Set<string>()
+
   return { ...base,
     prepareGraph: async (graph: AudioCoreGraphSnapshot) => { await base.prepareGraph(graph); nodes = new Set(graph.nodes.map((node) => node.id)) },
     installSchedule: async (schedule: PortableFrameSchedule) => {
       await base.installSchedule(schedule)
+
       if (schedule.events.some((event) => event.target.kind === 'instrument' && !nodes.has(event.target.trackId)))
         throw new Error('Portable playback schedule-installed was rejected.')
     } }
 }
+
 type B6f5RecordingInput = Parameters<ReturnType<typeof createPortableBrowserPlaybackController>['startRecording']>[0]
+
 const b6f5RecordingInput = (stream: MediaStream): B6f5RecordingInput => ({ appSessionId: 'take-b6f5', stream, layout: 'mono', inputChannel: 0,
   gain: 1, polarity: 1, monitoring: false, punchStartFrame: 0 })
 
@@ -2228,14 +2486,18 @@ test('B6f5 step5b R6 a recording refresh after a structural edit skips without a
   const sessions: ReturnType<typeof b6f5StrictSession>[] = []
   let added: AudioEffectRuntimeInstance | undefined
   const { stream, recordingContext } = createRecordingFixture(calls)
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => b6f5StructuralCompilation(transport, added),
     fingerprintSnapshot: b6f5ContentFingerprint,
     getAudioContext: () => recordingContext, scheduleHorizonSec: 2, select: async () => selected, reportFault: (message) => faults.push(message),
-    backend: { createPlaybackSession: async () => { const session = b6f5StrictSession(calls, graphs, publishes); sessions.push(session); return session } },
+    backend: { createPlaybackSession: async () => { const session = b6f5StrictSession(calls, graphs, publishes); sessions.push(session);
+
+ return session } },
     createRecordingWriter: () => ({ ready: Promise.resolve(), write: () => undefined, finalize: async () => ({ capturedFrames: 0 }),
       abort: async () => undefined, terminate: () => undefined }),
   })
+
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     await controller.startRecording(b6f5RecordingInput(stream))
@@ -2258,12 +2520,16 @@ test('B6f5 step5b R6 a normal refresh after a structural edit skips without a fa
   const faults: string[] = []
   const sessions: ReturnType<typeof b6f5Session>[] = []
   let added: AudioEffectRuntimeInstance | undefined
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => b6f5StructuralCompilation(transport, added),
     fingerprintSnapshot: b6f5ContentFingerprint,
     getAudioContext: () => context, scheduleHorizonSec: 2, select: async () => selected, reportFault: (message) => faults.push(message),
-    backend: { createPlaybackSession: async () => { const session = b6f5Session(calls, graphs, publishes); sessions.push(session); return session } },
+    backend: { createPlaybackSession: async () => { const session = b6f5Session(calls, graphs, publishes); sessions.push(session);
+
+ return session } },
   })
+
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     added = b6f5AddedEffect
@@ -2288,21 +2554,28 @@ test('B6f5 D6 an adoption during portable recording keeps the take and its captu
   let sessions = 0
   const base = b6f5Session(calls, graphs, publishes, async (options) => { if (options) await gate.promise })
   let configure: Extract<PortableWasmControlMessage, { type: 'recording-capture-configure' }> | undefined
+
   const session = { ...base, postRecordingControl: (message: Extract<PortableWasmControlMessage, { type: `recording-${string}` }>) => {
     if (message.type === 'recording-capture-configure') configure = message
     base.postRecordingControl(message)
   } }
+
   const block = (sequence: number) => base.recordingStatus({ version: 2, type: 'recording-capture-block', generation: configure?.generation ?? -1,
     sessionId: configure?.sessionId ?? -1, sequence, frameCount: 128, channelCount: 1, planes: [new Float32Array(128)], rms: 0, peak: 0 })
+
   const { stream, recordingContext } = createRecordingFixture(calls)
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => b6f5Compilation(transport, volume),
     fingerprintSnapshot: b6f5Fingerprint,
     getAudioContext: () => recordingContext, select: async () => selected, reportFault: (message) => faults.push(message),
-    backend: { createPlaybackSession: async () => { sessions += 1; return session } },
+    backend: { createPlaybackSession: async () => { sessions += 1;
+
+ return session } },
     createRecordingWriter: () => ({ ready: Promise.resolve(), write: (message) => { written.push(message.sequence) },
       finalize: async () => ({ capturedFrames: written.length * 128 }), abort: async () => undefined, terminate: () => undefined }),
   })
+
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     await controller.startRecording(b6f5RecordingInput(stream))
@@ -2310,6 +2583,7 @@ test('B6f5 D6 an adoption during portable recording keeps the take and its captu
     block(2)
     volume = 0.5
     const adoption = controller.adoptSchedule(noLoop)
+
     for (let turn = 0; turn < 50 && publishes.length < 2; turn += 1) await Promise.resolve()
     // A block the worklet captures while the publish is in flight, then one after it answered.
     block(3)
@@ -2333,16 +2607,21 @@ test('B6f5 step5b R6 without a content fingerprint a Timeline revision bump stil
   const sessions: ReturnType<typeof b6f5StrictSession>[] = []
   let added: AudioEffectRuntimeInstance | undefined
   const { stream, recordingContext } = createRecordingFixture(calls)
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => {
       const compiled = b6f5StructuralCompilation(transport, added)
+
       return { ...compiled, snapshot: { ...compiled.snapshot, revision: added ? 2 : 1 } }
     },
     getAudioContext: () => recordingContext, scheduleHorizonSec: 2, select: async () => selected, reportFault: (message) => faults.push(message),
-    backend: { createPlaybackSession: async () => { const session = b6f5StrictSession(calls, graphs, publishes); sessions.push(session); return session } },
+    backend: { createPlaybackSession: async () => { const session = b6f5StrictSession(calls, graphs, publishes); sessions.push(session);
+
+ return session } },
     createRecordingWriter: () => ({ ready: Promise.resolve(), write: () => undefined, finalize: async () => ({ capturedFrames: 0 }),
       abort: async () => undefined, terminate: () => undefined }),
   })
+
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     await controller.startRecording(b6f5RecordingInput(stream))
@@ -2356,8 +2635,11 @@ test('B6f5 step5b R6 without a content fingerprint a Timeline revision bump stil
 // AE-08 phase 8 step 1: failure-first witnesses. Each asserts the behaviour required once the phase lands and is
 // `test.failing` until its implementing step flips it to `test`. The note and sequence ids are the design note's.
 type W8Note = NonNullable<RuntimeTrack['clips'][number]['midi']>['notes'][number]
+
 type W8Loop = typeof noLoop
+
 const w8Note = (id: string, beat: number, length = 1): W8Note => ({ id, beat, length, pitch: 60, velocity: 0.8 })
+
 const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loop?: W8Loop; audioStartSec?: number; clipSec?: number } = {}, options: { refuse?: () => boolean; failInstall?: () => boolean; failTransport?: (epoch: number, running: boolean) => boolean; unsupportedAdoption?: () => boolean; audioContext?: AudioContext } = {}) => {
   const state = { bpm: initial.bpm ?? 120, notes: initial.notes ?? [w8Note('note', 0)], audioStartSec: initial.audioStartSec, warped: false, projectGeneration: 0 }
   const calls: string[] = []
@@ -2370,23 +2652,30 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
   let sessions = 0
   let adoptionCompiles = 0
   let positionListener: ((message: Extract<PortableWasmStatusMessage, { type: 'transport-position' }>) => void) | undefined
+
   const compile = (transport: LivePlaybackTransport) => {
     const base = compilation()
     const midi: RuntimeTrack = { ...track, clips: track.clips.map((clip) => ({ ...clip, duration: initial.clipSec ?? clip.duration, midi: clip.midi && { ...clip.midi, notes: [...state.notes] } })) }
+
     const audio: RuntimeTrack[] = state.audioStartSec === undefined ? [] : [{ id: 'audio-w8', kind: 'audio', name: 'Audio', volume: 1, clips: [{
       id: 'clip-audio-w8', name: 'Audio', color: '#fff', startSec: state.audioStartSec, duration: 1, sourceAssetKey: 'asset-w8', buffer: new TestAudioBuffer(),
       ...(state.warped && { audioWarp: c9Stretch }) }] }]
+
     const tracks = [midi, ...audio]
     const assets = audio.length ? [{ assetId: 'asset-w8', buffer: new TestAudioBuffer() }] : []
+
     return { ...base, snapshot: { ...base.snapshot, bpm: state.bpm, transport, tracks, assets,
       mixer: { ...base.snapshot.mixer, graph: resolveLiveMixerGraph(tracks, base.snapshot.mixer.fx.trackFx) } } }
   }
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport, context) => {
       if (context?.liveAdoption) {
         adoptionCompiles += 1
+
         if (options.unsupportedAdoption?.()) return { supported: false, reasons: ['not carried'] }
       }
+
       return compile(transport)
     },
     fingerprintSnapshot: b6f5Fingerprint, getProjectGeneration: () => state.projectGeneration,
@@ -2397,13 +2686,16 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
       abort: async () => undefined, terminate: () => undefined }),
     backend: { createPlaybackSession: async () => {
       sessions += 1
+
       const base = b6f5Session(calls, graphs, publishes, async (publishOptions) => {
         if (publishOptions && options.refuse?.()) throw new Error('Portable playback graph-published was rejected.')
       })
+
       const withInstall = { ...base, ...createSession(calls, async (schedule) => {
         if (options.failInstall?.()) throw new Error('Portable playback install-schedule was rejected.')
         installs.push(schedule)
       }) }
+
       return { ...withInstall, prepareGraph: base.prepareGraph, publishGraph: base.publishGraph,
         scheduleSources: async (_revision: number, _epoch: number, events: readonly { sequence: number; startFrame: number }[]) => {
           calls.push('schedule-sources')
@@ -2411,22 +2703,29 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
         },
         setTransport: async (epoch: number, running: boolean, frame: number) => {
           epochs.push(epoch)
+
           if (options.failTransport?.(epoch, running)) throw new Error('Portable playback transport was rejected.')
           await withInstall.setTransport(epoch, running, frame)
         },
         onTransportPosition: (listener: (message: Extract<PortableWasmStatusMessage, { type: 'transport-position' }>) => void) => {
           positionListener = listener
+
           return withInstall.onTransportPosition(listener)
         } }
     } },
   })
+
   const transport: LivePlaybackTransport = { ...compilation().snapshot.transport, ...(initial.loop ?? noLoop) }
   const adopt = controller.adoptSchedule
+
   const noteEvents = (schedule: PortableFrameSchedule | undefined, type: 'note-on' | 'note-off') =>
     (schedule?.events ?? []).flatMap((event) => event.type === type ? [{ noteId: event.noteId, frame: event.frame }] : [])
+
   const position = (frame: number, epoch = 1, sequence = 1) => positionListener?.({ version: 2, type: 'transport-position', sessionId: 1, epoch, sequence, running: true, frame })
+
   return { state, controller, transport, noLoop, calls, graphs, publishes, installs, epochs, faults, scheduledSources, sessions: () => sessions, adoptionCompiles: () => adoptionCompiles, adopt, noteEvents, position }
 }
+
 const w8ShippedStarts = (f: { publishes: readonly B6f5Publish[] }) =>
   (f.publishes.at(-1)?.options?.sources?.ordinary ?? []).map((source) => source.startFrame)
 
@@ -2434,6 +2733,7 @@ const w8ShippedStarts = (f: { publishes: readonly B6f5Publish[] }) =>
 // and the follow marks the edit applied without installing anything.
 test('W-F20a a loop edit while playing installs and publishes a schedule for the new loop', async () => {
   const f = await w8Fixture({ loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 } })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     const before = f.calls.length
@@ -2456,6 +2756,7 @@ test('W-F20c a loop edit after a wrap maps positions across the seam, compiles t
   const f = await w8Fixture({ clipSec: 40, notes, loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 } })
   const reference = await w8Fixture({ clipSec: 40, notes, loop: edited })
   const sec = (frame: number) => frame / 48_000
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     expect(await reference.controller.start({ ...reference.transport, playheadSec: sec(15_856) })).toBe('started')
@@ -2488,6 +2789,7 @@ test('W-F20c a loop edit after a wrap maps positions across the seam, compiles t
 // every 48000 frames.
 test('W-F20d a loop edit with an audio clip present is adopted with the sources compiled for the new loop', async () => {
   const f = await w8Fixture({ audioStartSec: 0, loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 } })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     const result = await f.adopt({ loopEnabled: true, loopStartSec: 0, loopEndSec: 2 })
@@ -2502,6 +2804,7 @@ test('W-F20d a loop edit with an audio clip present is adopted with the sources 
 test('W-F20e toggling the loop while playing keeps the session, continues linearly and keeps a passed loop off', async () => {
   const f = await w8Fixture({ clipSec: 40, loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 } })
   const sec = (frame: number) => frame / 48_000
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     f.position(60_000, 1, 1)
@@ -2527,6 +2830,7 @@ test('W-F20e toggling the loop while playing keeps the session, continues linear
 // W-E5-1: a tempo edit while playing is adopted on the same session at a seam; the playhead keeps its time (UD 18).
 test('W-E5-1 a tempo edit while playing is adopted on the same session with the playhead time kept', async () => {
   const f = await w8Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     f.state.bpm = 90
@@ -2542,6 +2846,7 @@ test('W-E5-1 a tempo edit while playing is adopted on the same session with the 
 // W-E5-3: a note deleted while it sounds is released once, at the seam, and never started again.
 test('W-E5-3 a note removed while held gets one note-off at the seam and no note-on', async () => {
   const f = await w8Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     const heldId = f.noteEvents(f.installs[0], 'note-on')[0]?.noteId
@@ -2557,6 +2862,7 @@ test('W-E5-3 a note removed while held gets one note-off at the seam and no note
 // repeated Synth note-on needs two note-offs and a Sampler layers a second voice.
 test('W-E5-4 a note kept while held is not re-triggered at the seam', async () => {
   const f = await w8Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     const heldId = f.noteEvents(f.installs[0], 'note-on')[0]?.noteId
@@ -2573,6 +2879,7 @@ test('W-E5-4 a note kept while held is not re-triggered at the seam', async () =
 // W-E5-5: a note whose pitch changes while it sounds is released at the seam and the new pitch starts there.
 test('W-E5-5 a pitch change while held releases the old note at the seam and starts the new one', async () => {
   const f = await w8Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     const heldId = f.noteEvents(f.installs[0], 'note-on')[0]?.noteId
@@ -2589,6 +2896,7 @@ test('W-E5-5 a pitch change while held releases the old note at the seam and sta
 // W-E5-11: a window that holds more events than the worklet installs shrinks until it fits.
 test('W-E5-11 a tempo edit that makes the window exceed the install limit shrinks the window and is adopted', async () => {
   const f = await w8Fixture({ clipSec: 16, notes: Array.from({ length: 150 }, (_, index) => w8Note(`n${index}`, 0.5 + 0.2 * index, 0.1)) })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     f.state.bpm = 100
@@ -2603,6 +2911,7 @@ test('W-E5-11 a tempo edit that makes the window exceed the install limit shrink
 // on the same session, as native's adoption does, with the sources compiled for the new tempo.
 test('W-E5 a tempo edit that warps audio is adopted with the new sources and no rebuild', async () => {
   const f = await w8Fixture({ audioStartSec: 0 })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     const before = f.calls.length
@@ -2619,6 +2928,7 @@ test('W-E5 a tempo edit that warps audio is adopted with the new sources and no 
 test('W-E5-8 a refused tempo publish answers failed, restores the revision and adopts on resubmit', async () => {
   let refuse = true
   const f = await w8Fixture({}, { refuse: () => refuse })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     f.state.bpm = 90
@@ -2640,14 +2950,18 @@ test('W-FB-1 a refused publish and uncarried content answer failed, a missing fi
   let carried = true
   let refuse = true
   let sessions = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => carried ? b6f5Compilation(transport, volume) : { supported: false, reasons: ['not carried'] },
     fingerprintSnapshot: b6f5Fingerprint,
     getAudioContext: () => context, select: async () => selected,
-    backend: { createPlaybackSession: async () => { sessions += 1; return b6f5Session(calls, graphs, publishes, async (options) => {
+    backend: { createPlaybackSession: async () => { sessions += 1;
+
+ return b6f5Session(calls, graphs, publishes, async (options) => {
       if (refuse && options) throw new Error('Portable playback graph-published was rejected.')
     }) } },
   })
+
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     volume = 0.5
@@ -2663,11 +2977,13 @@ test('W-FB-1 a refused publish and uncarried content answer failed, a missing fi
   const errors: unknown[][] = []
   const original = console.error
   console.error = (...args: unknown[]) => { errors.push(args) }
+
   const bare = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => b6f5Compilation(transport, volume),
     getAudioContext: () => context, select: async () => selected,
     backend: { createPlaybackSession: async () => b6f5Session(calls, graphs, publishes) },
   })
+
   try {
     expect(await bare.start(compilation().snapshot.transport)).toBe('started')
     const result = await bare.adoptSchedule(noLoop)
@@ -2679,14 +2995,17 @@ test('W-FB unsupported adoption is not resubmitted at position reports', async (
   const f = await w8Fixture({}, { unsupportedAdoption: () => true })
   const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
   const error = spyOn(console, 'error').mockImplementation(() => undefined)
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     f.state.bpm = 90
     expect(await f.adopt(f.noLoop)).toBe('failed')
+
     for (let report = 1; report <= 300; report += 1) {
       f.position(48_000 + report)
       await Bun.sleep(0)
     }
+
     expect({ compiles: f.adoptionCompiles(), warnings: warn.mock.calls.length, defects: error.mock.calls.length })
       .toEqual({ compiles: 1, warnings: 0, defects: 0 })
   } finally { warn.mockRestore(); error.mockRestore(); f.controller.dispose() }
@@ -2696,6 +3015,7 @@ test('W-FB unsupported adoption is not resubmitted at position reports', async (
 // unchanged answer counts only when the sources it shipped place the clip where the edit put it.
 test('W-M3 an audio clip move is never adopted or reported unchanged without shipping its new sources', async () => {
   const f = await w8Fixture({ audioStartSec: 0 })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     f.state.audioStartSec = 0.5
@@ -2709,6 +3029,7 @@ test('W-M3 an audio clip move is never adopted or reported unchanged without shi
 // W-M3 end state: the audio class is carried: the move is adopted on the same session with its sources replaced.
 test('W-M3 an audio clip move answers adopted with its sources replaced, not a rebuild', async () => {
   const f = await w8Fixture({ audioStartSec: 0 })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     const before = f.calls.length
@@ -2722,6 +3043,7 @@ test('W-M3 an audio clip move answers adopted with its sources replaced, not a r
 // W-UD7p-1: an edit while paused is adopted in place; Play then resumes on the edited schedule with no re-prepare.
 test('W-UD7p-1 a note edit on a paused prepared session is adopted in place', async () => {
   const f = await w8Fixture({ clipSec: 4 })
+
   try {
     expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
     f.state.notes = [w8Note('note', 0), w8Note('later', 4)]
@@ -2736,6 +3058,7 @@ test('W-UD7p-1 a note edit on a paused prepared session is adopted in place', as
 // W-UD7p-3: a pause leaves its voices sounding, so the edit that deletes the note releases it once, at the paused frame.
 test('W-UD7p-3 deleting a note that a pause left sounding releases it once at the paused frame', async () => {
   const f = await w8Fixture({ clipSec: 4, notes: [w8Note('held', 0, 4)] })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     const heldId = f.noteEvents(f.installs[0], 'note-on')[0]?.noteId
@@ -2753,6 +3076,7 @@ test('W-UD7p-3 deleting a note that a pause left sounding releases it once at th
 // seeks the same session and compiles the edited tempo.
 test('W-UD7p-4 a paused tempo edit and a paused loop edit are adopted in place and a locate seeks the edited schedule', async () => {
   const f = await w8Fixture()
+
   try {
     expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
     f.state.bpm = 100
@@ -2772,6 +3096,7 @@ test('W-UD7p-4 a paused tempo edit and a paused loop edit are adopted in place a
 // W-UD7p-5: Play after a paused edit locates the session that adopted it and runs it: no prepare, no publish, no dispose.
 test('W-UD7p-5 Play after a paused structural edit resumes the same session with no prepare or publish', async () => {
   const f = await w8Fixture({ clipSec: 4 })
+
   try {
     expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
     f.state.notes = [w8Note('note', 0), w8Note('later', 4)]
@@ -2789,6 +3114,7 @@ test('W-R11 Play on a paused session with its loop on resumes the same session a
   const loop: W8Loop = { loopEnabled: true, loopStartSec: 0, loopEndSec: 2 }
   const f = await w8Fixture({ clipSec: 4, loop })
   const paused: LivePlaybackTransport = { ...f.transport, state: 'paused', playheadSec: 0.5 }
+
   try {
     expect(await f.controller.ensurePrepared(paused)).toBe('started')
     f.state.notes = [w8Note('note', 0), w8Note('later', 1)]
@@ -2804,6 +3130,7 @@ test('W-R11 Play on a paused session with its loop on resumes the same session a
 // W-UD7p-6: a locate right after a paused edit seeks the session that adopted it.
 test('W-UD7p-6 a seek after a paused edit compiles the edited notes on the same session', async () => {
   const f = await w8Fixture({ clipSec: 4 })
+
   try {
     expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
     f.state.notes = [w8Note('note', 0), w8Note('later', 4)]
@@ -2820,6 +3147,7 @@ test('W-UD7p-6 a seek after a paused edit compiles the edited notes on the same 
 test('W-UD7p-7 a refused paused edit answers failed, keeps the session and is resubmitted once Play reports frames', async () => {
   let refuse = true
   const f = await w8Fixture({ clipSec: 4 }, { refuse: () => refuse })
+
   try {
     expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
     f.state.notes = [w8Note('note', 0), w8Note('later', 4)]
@@ -2827,6 +3155,7 @@ test('W-UD7p-7 a refused paused edit answers failed, keeps the session and is re
     const started = await f.controller.start({ ...f.transport, state: 'playing' })
     refuse = false
     f.position(1_000, f.epochs.at(-1))
+
     for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
     expect({ failed, started, sessions: f.sessions(), disposed: f.calls.includes('dispose'), revisions: f.publishes.slice(1).map((entry) => entry.revision),
       laterNoteOn: f.noteEvents(f.installs.at(-1), 'note-on').some((event) => event.frame === 96_000) })
@@ -2836,6 +3165,7 @@ test('W-UD7p-7 a refused paused edit answers failed, keeps the session and is re
 
 test('W-E3-1 a seek while playing moves the transport in place at a new epoch', async () => {
   const f = await w8Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     const before = f.calls.length
@@ -2849,6 +3179,7 @@ test('W-E3-1 a seek while playing moves the transport in place at a new epoch', 
 
 test('W-E3-4 positions are reported again after a backward seek at the new epoch', async () => {
   const f = await w8Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     f.position(96_000)
@@ -2862,8 +3193,10 @@ test('W-E3-4 positions are reported again after a backward seek at the new epoch
 // origin, sources replaced at the new epoch, and a loop around the target repeats from it.
 test('W-E3-2 a seek outside the installed range compiles at the target on the same session, loop off and on', async () => {
   const far = [w8Note('far', 200, 1)]
+
   for (const loop of [{ loopEnabled: false, loopStartSec: 0, loopEndSec: 0 }, { loopEnabled: true, loopStartSec: 90, loopEndSec: 110 }]) {
     const f = await w8Fixture({ clipSec: 200, notes: far })
+
     try {
       expect(await f.controller.start(f.transport)).toBe('started')
       const before = f.calls.length
@@ -2882,6 +3215,7 @@ test('W-E3-2 a seek outside the installed range compiles at the target on the sa
 // note spanning it starts once at the target.
 test('W-E3-3 a seek starts a note that spans the target once and none that ended before it', async () => {
   const f = await w8Fixture({ clipSec: 4, notes: [w8Note('spans', 0, 4), w8Note('ended', 0, 0.5)] })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.controller.seek(1, f.noLoop)
@@ -2894,6 +3228,7 @@ test('W-E3-3 a seek starts a note that spans the target once and none that ended
 // W-E3-5: a seek waits for what is in flight and the newest one wins.
 test('W-E3-5 a seek supersedes an adoption in flight, the older of two seeks, and waits for a refresh', async () => {
   const adoption = await w8Fixture({ clipSec: 4 })
+
   try {
     expect(await adoption.controller.start(adoption.transport)).toBe('started')
     adoption.state.notes = [w8Note('note', 0), w8Note('later', 4)]
@@ -2905,7 +3240,9 @@ test('W-E3-5 a seek supersedes an adoption in flight, the older of two seeks, an
       seam: adoption.installs.at(-1)?.timeOrigin.frame })
       .toEqual({ adopting: 'unavailable', seeking: 'started', afterwards: 'adopted', sessions: 1, published: 2, seam: 72_000 + 3_856 })
   } finally { adoption.controller.dispose() }
+
   const twice = await w8Fixture()
+
   try {
     expect(await twice.controller.start(twice.transport)).toBe('started')
     const before = twice.calls.length
@@ -2915,7 +3252,9 @@ test('W-E3-5 a seek supersedes an adoption in flight, the older of two seeks, an
       transports: twice.calls.slice(before).filter((call) => call.endsWith('-transport')) })
       .toEqual({ first: 'started', second: 'started', origin: 96_000, position: 2, transports: ['stop-transport', 'start-transport'] })
   } finally { twice.controller.dispose() }
+
   const refreshing = await w8Fixture({ clipSec: 40 })
+
   try {
     expect(await refreshing.controller.start(refreshing.transport)).toBe('started')
     refreshing.position(1_250_000, 1, 1)
@@ -2930,12 +3269,14 @@ test('W-E3-5 a seek supersedes an adoption in flight, the older of two seeks, an
 test('W-E3-5 a seek during a take throws and leaves the transport alone', async () => {
   const calls: string[] = []
   const { stream, recordingContext } = createRecordingFixture(calls)
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => compilation(), getAudioContext: () => recordingContext, select: async () => selected,
     backend: { createPlaybackSession: async () => createSession(calls, async () => undefined) },
     createRecordingWriter: () => ({ ready: Promise.resolve(), write: () => undefined, finalize: async () => ({ capturedFrames: 0 }),
       abort: async () => undefined, terminate: () => undefined }),
   })
+
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     await controller.startRecording(b6f5RecordingInput(stream))
@@ -2948,6 +3289,7 @@ test('W-E3-5 a seek during a take throws and leaves the transport alone', async 
 // W-E3-7: the seek plays the snapshot the session holds; the edit that landed is adopted after it.
 test('W-E3-7 a seek with an edit pending plays the active snapshot and the next adoption carries the edit', async () => {
   const f = await w8Fixture({ clipSec: 4 })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     f.state.notes = [w8Note('note', 0), w8Note('later', 4)]
@@ -2965,6 +3307,7 @@ test('W-E3-8 a seek with the loop on after a wrap and a loop adoption resets the
   const loop: W8Loop = { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 }
   const f = await w8Fixture({ clipSec: 40, notes, loop })
   const sec = (frame: number) => frame / 48_000
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     f.position(60_000, 1, 1)
@@ -2987,6 +3330,7 @@ test('W-E3-D5 a seek stops, prepares the target pages, installs, schedules sourc
   const faults: string[] = []
   let registered = 0
   let sessions = 0
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => pagedCompilation(transport),
     getAudioContext: () => context, scheduleHorizonSec: 4, select: async () => selected, reportFault: (message) => faults.push(message),
@@ -2994,24 +3338,32 @@ test('W-E3-D5 a seek stops, prepares the target pages, installs, schedules sourc
     backend: { createPlaybackSession: async () => {
       sessions += 1
       const base = createSession(calls, async () => undefined, undefined, true)
+
       return { ...base,
         setTransport: async (epoch: number, running: boolean, frame: number) => { epochs.push(epoch); await base.setTransport(epoch, running, frame) },
         registerPagedAsset: async (_asset: Parameters<PortableWasmPlaybackSession['registerPagedAsset']>[0], generation: number) => {
-          registered = generation; generations.push(generation); return base.registerPagedAsset()
+          registered = generation; generations.push(generation);
+
+ return base.registerPagedAsset()
         },
         prepareAssetRange: async (assetId: string, generation: number, offset: number, count: number) => {
           calls.push('prepare-range'); generations.push(generation)
+
           return generation === registered ? base.prepareAssetRange(assetId, generation, offset, count) : { status: 'stale-generation' as const }
         },
         writeAssetPage: async (assetId: string, generation: number, pageIndex: number) => {
-          calls.push('write-page'); return base.writeAssetPage(assetId, generation, pageIndex)
+          calls.push('write-page');
+
+ return base.writeAssetPage(assetId, generation, pageIndex)
         },
         releaseAssetPreparation: async (preparationId: number, generation: number) => {
           calls.push('release-preparation'); generations.push(generation)
+
           return generation === registered ? base.releaseAssetPreparation(preparationId) : 'stale-preparation' as const
         } }
     } },
   })
+
   try {
     expect(await controller.start(pagedCompilation().snapshot.transport)).toBe('started')
     const before = calls.length
@@ -3030,12 +3382,14 @@ test('W-E3-D6 a seek failing inside the burst resubmits after a position report 
   let failures = 0
   const f = await w8Fixture({}, { failInstall: () => failures-- > 0 })
   const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     failures = 1
     expect(await f.controller.seek(1.5, f.noLoop)).toBe('unavailable')
     const epoch = f.epochs.at(-1) ?? 0
     f.position(75_000, epoch, 1)
+
     for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
     expect({ sessions: f.sessions(), faults: f.faults, origin: f.installs.at(-1)?.timeOrigin.frame, epoch: f.epochs.at(-1), active: f.controller.isActive(),
       warned: warn.mock.calls.length })
@@ -3046,17 +3400,25 @@ test('W-E3-D6 a seek failing inside the burst resubmits after a position report 
 test('W-E3-D6 a seek that keeps failing is a logged defect and the transport-fault notice after eight resubmits', async () => {
   let attempts = 0
   let armed = false
-  const f = await w8Fixture({}, { failInstall: () => { if (armed) attempts += 1; return armed } })
+
+  const f = await w8Fixture({}, { failInstall: () => { if (armed) attempts += 1;
+
+ return armed } })
+
   const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
   const error = spyOn(console, 'error').mockImplementation(() => undefined)
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     armed = true
     expect(await f.controller.seek(1.5, f.noLoop)).toBe('unavailable')
+
     for (let report = 1; report <= 400 && f.controller.isPrepared(); report += 1) {
       f.position(50_000 + report * 1_000, f.epochs.at(-1) ?? 0, report)
+
       for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
     }
+
     expect({ attempts, prepared: f.controller.isPrepared(), faults: f.faults, disposed: f.calls.includes('dispose'),
       warned: warn.mock.calls.length, defects: error.mock.calls.length })
       .toEqual({ attempts: 9, prepared: false, faults: ['Portable playback install-schedule was rejected.'], disposed: true, warned: 8, defects: 1 })
@@ -3069,6 +3431,7 @@ test('W-E3-N1 a position report from the epoch a seek left does not tick the ret
   let failures = 0
   const f = await w8Fixture({}, { failInstall: () => failures-- > 0 })
   const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     const left = f.epochs.at(-1) ?? 0
@@ -3077,9 +3440,11 @@ test('W-E3-N1 a position report from the epoch a seek left does not tick the ret
     const epoch = f.epochs.at(-1) ?? 0
     const attempts = f.epochs.length
     f.position(100_000, left, 1)
+
     for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
     const afterStale = f.epochs.length - attempts
     f.position(75_000, epoch, 1)
+
     for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
     expect({ moved: epoch !== left, afterStale, origin: f.installs.at(-1)?.timeOrigin.frame })
       .toEqual({ moved: true, afterStale: 0, origin: 75_000 })
@@ -3090,12 +3455,14 @@ test('W-E3-pos a seek restarts the position map: the resubmit starts where the n
   let failures = 0
   const f = await w8Fixture({}, { failInstall: () => failures-- > 0 })
   const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+
   try {
     expect(await f.controller.start({ ...f.transport, loopEnabled: true, loopStartSec: 0, loopEndSec: 1 })).toBe('started')
     f.position(60_000, f.epochs.at(-1) ?? 0, 1)
     failures = 1
     expect(await f.controller.seek(1.5, f.noLoop)).toBe('unavailable')
     f.position(75_000, f.epochs.at(-1) ?? 0, 1)
+
     for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
     expect(f.installs.at(-1)?.timeOrigin.frame).toBe(75_000)
   } finally { warn.mockRestore(); f.controller.dispose() }
@@ -3107,21 +3474,26 @@ test('W-R1 a seek that fails after preparing the target pages releases them, how
   const calls: string[] = []
   const base = createSession(calls, async () => { if (failing) throw new Error('Portable playback install-schedule was rejected.') }, undefined, true)
   const faults: string[] = []
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => pagedCompilation(transport),
     getAudioContext: () => context, scheduleHorizonSec: 4, select: async () => selected, reportFault: (message) => faults.push(message),
     resolveSource: async (clip) => pagedDescriptor(clip.sourceAssetKey ?? 'missing', []),
     backend: { createPlaybackSession: async () => base },
   })
+
   const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+
   try {
     expect(await controller.start(pagedCompilation().snapshot.transport)).toBe('started')
     failing = true
     const held: number[] = []
+
     for (const sec of [20, 21, 22]) {
       expect(await controller.seek(sec, noLoop)).toBe('unavailable')
       held.push(base.preparations.size)
     }
+
     expect({ held, faults, prepared: controller.isPrepared() }).toEqual({ held: [0, 0, 0], faults: [], prepared: true })
   } finally { warn.mockRestore(); controller.dispose() }
 })
@@ -3131,6 +3503,7 @@ test('W-R2 a seek whose first stop is rejected leaves the transport playing and 
   let failures = 0
   const f = await w8Fixture({}, { failTransport: () => failures-- > 0 })
   const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     f.position(60_000, 1, 1)
@@ -3139,6 +3512,7 @@ test('W-R2 a seek whose first stop is rejected leaves the transport playing and 
     const result = await f.controller.seek(1.5, f.noLoop)
     const transports = f.calls.slice(before).filter((call) => call.endsWith('-transport'))
     f.position(75_000, 1, 2)
+
     for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
     expect({ result, transports, origin: f.installs.at(-1)?.timeOrigin.frame, epoch: f.epochs.at(-1), sessions: f.sessions(), faults: f.faults })
       .toEqual({ result: 'unavailable', transports: [], origin: 72_000, epoch: 2, sessions: 1, faults: [] })
@@ -3148,6 +3522,7 @@ test('W-R2 a seek whose first stop is rejected leaves the transport playing and 
 // R9: a seek the session refuses without having failed (nothing was touched) is the caller's to rebuild.
 test('W-R9 a seek on a session of another project generation answers rebuild and touches nothing', async () => {
   const f = await w8Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     f.state.projectGeneration = 1
@@ -3162,6 +3537,7 @@ test('W-R9 a seek on a session of another project generation answers rebuild and
 test('W-R5 a note held across an adoption seam in a later loop pass is neither released nor re-attacked', async () => {
   const loop: W8Loop = { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 }
   const f = await w8Fixture({ clipSec: 40, notes: [w8Note('held', 0, 1)], loop })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     const heldId = f.noteEvents(f.installs[0], 'note-on').find((event) => event.frame === 96_000)?.noteId
@@ -3179,6 +3555,7 @@ test('W-R5 a note held across an adoption seam in a later loop pass is neither r
 test('W-R5 a note that restarts at the seam on a loop wrap keeps its attack', async () => {
   const loop: W8Loop = { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 }
   const f = await w8Fixture({ clipSec: 40, notes: [w8Note('whole', 0, 2)], loop })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     f.position(44_144, 1, 1)
@@ -3197,6 +3574,7 @@ test('W-R7 an adoption that shortens the window while recording does not make th
   const { stream, recordingContext } = createRecordingFixture(calls)
   const dense = Array.from({ length: 200 }, (_, index) => w8Note(`dense-${index}`, 20 + index * 0.05, 0.01))
   const f = await w8Fixture({ clipSec: 30, notes: dense, audioStartSec: 20 }, { audioContext: recordingContext })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.controller.startRecording(b6f5RecordingInput(stream))
@@ -3217,6 +3595,7 @@ test('W-R8a a loop edit during a take is held, and adopted once the take has end
   const { stream, recordingContext } = createRecordingFixture([])
   const f = await w8Fixture({ clipSec: 4 }, { audioContext: recordingContext })
   const loop: W8Loop = { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 }
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.controller.startRecording(b6f5RecordingInput(stream))
@@ -3235,18 +3614,24 @@ test('W-R8a a loop edit during a take is held, and adopted once the take has end
 // AE-08 phase 8 step 9a: an adoption carries the sources of its candidate with the publish and commits them with it.
 // Two paged clips: one spans every seam, the other starts after them.
 type C9Publish = { revision: number; options?: Parameters<PortableWasmPlaybackSession['publishGraph']>[1] }
+
 const c9StretchRepository = () => createPreparedStretchArtifactRepository({
   sessionId: `c9-${crypto.randomUUID()}`,
   lockManager: { request: async (name, _options, callback) => callback({ name }) },
 })
+
 type C9Warp = NonNullable<RuntimeTrack['clips'][number]['audioWarp']>
+
 type C9State = { volume: number; refusals: number; clip0Offset: number; clip1Start: number; clip1Present: boolean; clip1Asset: string; inUse: Set<string>; bpm: number; clip1Warp: C9Warp | undefined; clip1Duration: number }
+
 const c9Stretch: C9Warp = { enabled: true, mode: 'stretch', sourceBpm: 120 }
+
 const c9Tracks = (state: C9State): RuntimeTrack[] => [
   { id: 'audio-0', kind: 'audio', name: 'Audio 0', volume: state.volume, clips: [{ id: 'clip-0', name: 'Clip 0', color: '#fff', startSec: 0, duration: 30, bufferOffsetSec: state.clip0Offset, sourceAssetKey: 'asset-a' }] },
   { id: 'audio-1', kind: 'audio', name: 'Audio 1', volume: 1, clips: state.clip1Present
     ? [{ id: 'clip-1', name: 'Clip 1', color: '#fff', startSec: state.clip1Start, duration: state.clip1Duration, sourceAssetKey: state.clip1Asset, audioWarp: state.clip1Warp }] : [] },
 ]
+
 const c9Fixture = async (options: { refusals?: number; releaseFailures?: number; clip1Warp?: C9Warp; clip1Duration?: number } = {}) => {
   const state: C9State = { volume: 1, refusals: options.refusals ?? 0, clip0Offset: 0, clip1Start: 5, clip1Present: true, clip1Asset: 'asset-b', inUse: new Set(), bpm: 120, clip1Warp: options.clip1Warp, clip1Duration: options.clip1Duration ?? 10 }
   // Stretch artifacts the controller leased and released; a lease is made once per artifact a preparation produces.
@@ -3258,33 +3643,41 @@ const c9Fixture = async (options: { refusals?: number; releaseFailures?: number;
   const faults: string[] = []
   let releaseFailures = options.releaseFailures ?? 0
   const base = createSession(calls, async () => undefined, undefined, true)
+
   const session = {
     ...base,
     prepareGraph: async () => { calls.push('prepare-graph') },
     publishGraph: async (revision: number, publishOptions?: C9Publish['options']) => {
       publishes.push({ revision, options: publishOptions })
+
       if (publishOptions) calls.push('publish')
+
       if (publishOptions && state.refusals-- > 0) throw new Error('Portable playback graph-published was rejected.')
     },
     schedulePreparedSources: async (_revision: number, _epoch: number, events: PortableWasmPreparedSourceEventsOf) => { scheduled.push(events) },
     registerPagedAsset: async (asset: { assetId: string }) => {
       calls.push(`register:${asset.assetId}`)
+
       return { status: 'registered' as const, handle: { slot: 0, generation: 1 } }
     },
     releaseAsset: async (assetId: string) => {
       calls.push(`release:${assetId}`)
+
       if (releaseFailures > 0) {
         releaseFailures -= 1
         throw new Error('Portable playback asset release failed.')
       }
+
       return { status: state.inUse.has(assetId) ? 'asset-in-use' as const : 'released' as const }
     },
   }
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => {
       const compiled = pagedCompilation(transport)
       const tracks = c9Tracks(state)
       const assets = ['asset-a', state.clip1Asset].map((assetId) => ({ assetId, source: { durationSec: pagedAssetFrameCount / 48_000, sampleRate: 48_000, channelCount: 1 } }))
+
       return { ...compiled, snapshot: { ...compiled.snapshot, bpm: state.bpm, tracks, assets, mixer: { ...compiled.snapshot.mixer, graph: resolveLiveMixerGraph(tracks, {}) } } }
     },
     fingerprintSnapshot: b6f5Fingerprint, getAudioContext: () => context, scheduleHorizonSec: 8, select: async () => selected,
@@ -3293,12 +3686,15 @@ const c9Fixture = async (options: { refusals?: number; releaseFailures?: number;
     createPreparedStretchRepository: () => ({ ...stretchRepository, acquireLease: async (manifest) => {
       const lease = await stretchRepository.acquireLease(manifest)
       stretch.leased += 1
+
       return { ...lease, release: async () => { stretch.released += 1; await lease.release() } }
     } }),
     backend: { createPlaybackSession: async () => session },
   })
+
   const transport = pagedCompilation().snapshot.transport
   let reports = 0
+
   const report = async (frame: number, count = 1) => {
     for (let index = 0; index < count; index += 1) {
       reports += 1
@@ -3306,15 +3702,20 @@ const c9Fixture = async (options: { refusals?: number; releaseFailures?: number;
       await Bun.sleep(0)
     }
   }
+
   const sources = (publish?: C9Publish) => publish?.options?.sources
+
   return { state, controller, transport, base, calls, publishes, scheduled, faults, report, sources, stretch }
 }
+
 type PortableWasmPreparedSourceEventsOf = Parameters<PortableWasmPlaybackSession['schedulePreparedSources']>[2]
+
 const c9Starts = (events: readonly { sourceNodeId: string; startFrame: number; sourceOffsetFrame: number }[] | undefined) =>
   (events ?? []).map((event) => [event.sourceNodeId, event.startFrame, event.sourceOffsetFrame])
 
 test('C9a-1 an adoption ships the sources compiled at its seam with the publish; a clip after the seam is the source the start scheduled', async () => {
   const f = await c9Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(96_000)
@@ -3330,6 +3731,7 @@ test('C9a-1 an adoption ships the sources compiled at its seam with the publish;
 
 test('C9a-2 the preparations of the old sources are released once the position reaches the seam, the candidate\'s stay, and teardown releases all', async () => {
   const f = await c9Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     const held: number[] = [f.base.preparations.size]
@@ -3351,6 +3753,7 @@ test('C9a-2 the preparations of the old sources are released once the position r
 test('C9a-3 a refused publish keeps the old sources and their preparations, and a resubmit reuses the candidate preparations it still matches', async () => {
   const f = await c9Fixture({ refusals: 1 })
   const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(96_000)
@@ -3369,6 +3772,7 @@ test('C9a-3 a refused publish keeps the old sources and their preparations, and 
 test('C9a-4 the candidate preparations a failed attempt kept are released when the desired state changes', async () => {
   const f = await c9Fixture({ refusals: 1 })
   const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(96_000)
@@ -3386,6 +3790,7 @@ test('C9a-5 the candidate preparations are released when the resubmits run out, 
   const f = await c9Fixture({ refusals: 100 })
   const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
   const error = spyOn(console, 'error').mockImplementation(() => undefined)
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(96_000)
@@ -3401,10 +3806,12 @@ test('C9a-5 the candidate preparations are released when the resubmits run out, 
     expect(f.base.preparations.size).toBe(0)
   } finally { warn.mockRestore(); error.mockRestore(); f.controller.dispose() }
 })
+
 // AE-08 phase 8 step 9b: audio clip edits are carried at a seam. The sources shipped with the publish are those a start
 // at the seam would compile for the edited clips; the session is never disposed or rebuilt.
 test('W-C9-clip-1 a clip moved while playing is adopted: its source starts at the new frame and the old start is gone', async () => {
   const f = await c9Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(96_000)
@@ -3417,6 +3824,7 @@ test('W-C9-clip-1 a clip moved while playing is adopted: its source starts at th
 
 test('W-C9-clip-2 a trim of a clip that spans the seam starts its new source at the seam with the in-clip offset and its fraction', async () => {
   const f = await c9Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(96_000)
@@ -3430,6 +3838,7 @@ test('W-C9-clip-2 a trim of a clip that spans the seam starts its new source at 
 
 test('W-C9-clip-4 a clip move on a paused session is adopted in place with the seam at the position', async () => {
   const f = await c9Fixture()
+
   try {
     expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
     f.state.clip1Start = 6
@@ -3442,6 +3851,7 @@ test('W-C9-clip-4 a clip move on a paused session is adopted in place with the s
 
 test('W-C9-clip-5 a loop edit with audio clips is adopted with each iteration sliced from the shifted loop', async () => {
   const f = await c9Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(12_000)
@@ -3455,6 +3865,7 @@ test('W-C9-clip-5 a loop edit with audio clips is adopted with each iteration sl
 
 test('W-C9-clip-7 a clip deleted while playing leaves no source behind', async () => {
   const f = await c9Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(96_000)
@@ -3470,6 +3881,7 @@ test('W-C9-clip-R an audio clip move during a take is adopted and the take refre
   const calls: string[] = []
   const { stream, recordingContext } = createRecordingFixture(calls)
   const f = await w8Fixture({ clipSec: 30, audioStartSec: 28 }, { audioContext: recordingContext })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.controller.startRecording(b6f5RecordingInput(stream))
@@ -3493,6 +3905,7 @@ const c9Released = (calls: readonly string[]) => calls.filter((call) => call.sta
 
 test('W-C9-asset-1 a clip asset swapped while playing is registered and paged before the publish; the old one is released once the position reaches the seam', async () => {
   const f = await c9Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(96_000)
@@ -3515,6 +3928,7 @@ test('W-C9-asset-1 a clip asset swapped while playing is registered and paged be
 
 test('W-C9-asset-2 a release answered asset-in-use is asked again at the next position report until the core lets go', async () => {
   const f = await c9Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(96_000)
@@ -3533,6 +3947,7 @@ test('W-C9-asset-2 a release answered asset-in-use is asked again at the next po
 
 test('W-C9-asset-2 a thrown asset release remains due for the next position report', async () => {
   const f = await c9Fixture({ releaseFailures: 1 })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(96_000)
@@ -3548,6 +3963,7 @@ test('W-C9-asset-2 a thrown asset release remains due for the next position repo
 test('W-C9-asset-3 a refused publish keeps the registered asset for the resubmit, which registers nothing again', async () => {
   const f = await c9Fixture({ refusals: 1 })
   const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(96_000)
@@ -3565,6 +3981,7 @@ test('W-C9-asset-3 a refused publish keeps the registered asset for the resubmit
 test('W-C9-asset-4 the asset a failed attempt registered is released when the desired state changes, when the resubmits run out, and at teardown', async () => {
   const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
   const error = spyOn(console, 'error').mockImplementation(() => undefined)
+
   try {
     const changed = await c9Fixture({ refusals: 1 })
     expect(await changed.controller.start(changed.transport)).toBe('started')
@@ -3601,6 +4018,7 @@ test('W-C9-asset-4 the asset a failed attempt registered is released when the de
 
 test('W-C9-asset-5 a clip asset swap on a paused session is adopted in place and releases the old asset at once', async () => {
   const f = await c9Fixture()
+
   try {
     expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
     const mark = f.calls.length
@@ -3615,36 +4033,46 @@ test('W-C9-asset-5 a clip asset swap on a paused session is adopted in place and
 
 // A Drum Rack whose first pad (note 36) plays `padAsset`, held by one long note.
 type D9State = { padAsset: string; volume: number }
+
 const d9Source = { durationSec: 1, sampleRate: 48_000, channelCount: 1 }
+
 const d9Track: RuntimeTrack = { ...track, clips: track.clips.map((clip) => ({ ...clip, duration: 8,
   midi: clip.midi && { ...clip.midi, notes: [{ id: 'held', beat: 0, length: 8, pitch: 36, velocity: 0.8 }] } })) }
+
 const d9Fixture = async () => {
   const state: D9State = { padAsset: 'drum-a', volume: 1 }
   const calls: string[] = []
   const installs: PortableFrameSchedule[] = []
   const faults: string[] = []
   const base = createSession(calls, async (schedule) => { installs.push(schedule) })
+
   const session = {
     ...base,
     prepareGraph: async () => { calls.push('prepare-graph') },
     publishGraph: async (_revision: number, options?: Parameters<PortableWasmPlaybackSession['publishGraph']>[1]) => { if (options) calls.push('publish') },
     registerAsset: async (asset: { assetId: string }) => {
       calls.push(`register:${asset.assetId}`)
+
       return { status: 'registered' as const, handle: { slot: 0, generation: 1 } }
     },
     releaseAsset: async (assetId: string) => {
       calls.push(`release:${assetId}`)
+
       return { status: 'released' as const }
     },
   }
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => {
       const base = compilation()
       const params = createDefaultDrumRackParams()
+
       const instrument: TrackInstrumentParams = { kind: 'drum-rack', instanceId: 'drums:1', params: { ...params, pads: params.pads.map((pad, index) => index === 0
         ? { ...pad, sample: { assetKey: state.padAsset, url: `local-asset:${state.padAsset}`, sourceKind: 'upload' as const, source: d9Source } } : pad) } }
+
       const tracks = [{ ...d9Track, volume: state.volume }]
       const fx = { ...base.snapshot.mixer.fx, trackFx: { synth: { instances: [], instrument } } }
+
       return { ...base, snapshot: { ...base.snapshot, transport, tracks, assets: [{ assetId: state.padAsset, source: d9Source, buffer: new TestAudioBuffer() }],
         mixer: { ...base.snapshot.mixer, fx, graph: resolveLiveMixerGraph(tracks, fx.trackFx) } } }
     },
@@ -3652,15 +4080,18 @@ const d9Fixture = async () => {
     reportFault: (message) => faults.push(message),
     backend: { createPlaybackSession: async () => session },
   })
+
   const transport = compilation().snapshot.transport
   let reports = 0
   const report = async (frame: number) => { reports += 1; base.emitPosition(frame, reports); await Bun.sleep(0) }
   const events = (type: 'note-on' | 'note-off') => (installs.at(-1)?.events ?? []).flatMap((event) => event.type === type ? [event.frame] : [])
+
   return { state, controller, transport, calls, installs, faults, report, events }
 }
 
 test('W-C9-asset-6 a Drum Rack pad sample swapped while a note is held registers the asset before the publish and is adopted without a rebuild', async () => {
   const f = await d9Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(56_144)
@@ -3679,6 +4110,7 @@ test('W-C9-asset-6 a Drum Rack pad sample swapped while a note is held registers
 // voice and its note-on starts the new one; an instrument that is the same keeps its voice, as native does.
 test('W-C9-keeps-1 a held note of an instrument whose sample changed is released at the seam and started again there', async () => {
   const f = await d9Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(56_144)
@@ -3690,6 +4122,7 @@ test('W-C9-keeps-1 a held note of an instrument whose sample changed is released
 
 test('W-C9-keeps-2 a held note of an instrument that did not change keeps its voice through an edit elsewhere', async () => {
   const f = await d9Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(56_144)
@@ -3703,6 +4136,7 @@ test('W-C9-keeps-2 a held note of an instrument that did not change keeps its vo
 // the clip's placement and warp, so the candidate's artifacts are prepared, leased and registered before the publish, and
 // the session's own are released once the position has reached the seam.
 const c9Artifacts = (calls: readonly string[]) => c9Registered(calls).filter((call) => call !== 'register:asset-a' && call !== 'register:asset-b')
+
 // Stretch renders the clip for real, so the clip is short.
 const c9WarpFixture = (options: { refusals?: number; clip1Warp?: C9Warp } = {}) => c9Fixture({ clip1Duration: 1, ...options })
 const c9Settled = async (done: () => boolean) => { for (let turn = 0; turn < 500 && !done(); turn += 1) await Bun.sleep(0) }
@@ -3710,6 +4144,7 @@ const c9Phases = (calls: readonly string[]) => calls.flatMap((call) => call === 
 
 test('W-C9-warp-1 a tempo edit with a Stretch clip prepares its artifact at the new tempo before the publish and releases the old leases after the seam', async () => {
   const f = await c9WarpFixture({ clip1Warp: c9Stretch })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     const [oldArtifact] = c9Artifacts(f.calls)
@@ -3742,6 +4177,7 @@ test('W-C9-warp-1 a tempo edit with a Stretch clip prepares its artifact at the 
 test('W-C9-warp-2 a publish that answers late is retried on the Stretch artifact the first attempt prepared, which nothing prepares again', async () => {
   const f = await c9WarpFixture({ clip1Warp: c9Stretch, refusals: 1 })
   const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(96_000)
@@ -3760,6 +4196,7 @@ test('W-C9-warp-2 a publish that answers late is retried on the Stretch artifact
 
 test('W-C9-warp-3 a warp marker edit is adopted on a new artifact registered before the publish', async () => {
   const f = await c9WarpFixture({ clip1Warp: c9Stretch })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     const [oldArtifact] = c9Artifacts(f.calls)
@@ -3775,6 +4212,7 @@ test('W-C9-warp-3 a warp marker edit is adopted on a new artifact registered bef
 
 test('W-C9-warp-4 warp turned on or off while playing swaps the ordinary asset and the Stretch artifact at the seam', async () => {
   const on = await c9WarpFixture()
+
   try {
     expect(await on.controller.start(on.transport)).toBe('started')
     await on.report(96_000)
@@ -3785,7 +4223,9 @@ test('W-C9-warp-4 warp turned on or off while playing swaps the ordinary asset a
     expect({ result, order: c9Phases(on.calls.slice(mark)), leased: on.stretch.leased, ordinaryReleased: c9Released(on.calls.slice(mark)) })
       .toEqual({ result: 'adopted', order: ['register', 'publish'], leased: 1, ordinaryReleased: ['release:asset-b'] })
   } finally { on.controller.dispose() }
+
   const off = await c9WarpFixture({ clip1Warp: c9Stretch })
+
   try {
     expect(await off.controller.start(off.transport)).toBe('started')
     const [artifact] = c9Artifacts(off.calls)
@@ -3802,6 +4242,7 @@ test('W-C9-warp-4 warp turned on or off while playing swaps the ordinary asset a
 
 test('W-C9-warp-5 a tempo edit on a paused session with a Stretch clip is adopted in place and releases the old artifact at once', async () => {
   const f = await c9WarpFixture({ clip1Warp: c9Stretch })
+
   try {
     expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
     const mark = f.calls.length
@@ -3818,6 +4259,7 @@ test('W-C9-warp-5 a tempo edit on a paused session with a Stretch clip is adopte
 test('W-C9-warp-6 the Stretch artifact a failed attempt kept is released when the desired state changes, when the resubmits run out, and at teardown', async () => {
   const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
   const error = spyOn(console, 'error').mockImplementation(() => undefined)
+
   try {
     const changed = await c9WarpFixture({ clip1Warp: c9Stretch, refusals: 1 })
     expect(await changed.controller.start(changed.transport)).toBe('started')
@@ -3857,67 +4299,87 @@ test('W-C9-warp-6 the Stretch artifact a failed attempt kept is released when th
 // core's 5 ms ghost fade (D-3): a note-off for its node would reject the whole staged schedule. A track that moves
 // another route's delay is carried too (9h): the core moves the read heads.
 const e9Source = { durationSec: pagedAssetFrameCount / 48_000, sampleRate: 48_000, channelCount: 1 }
+
 const e9Midi = (id: string): RuntimeTrack => ({ ...track, id, name: id, clips: track.clips.map((clip) => ({ ...clip, id: `${id}-clip`, duration: 8,
   midi: clip.midi && { ...clip.midi, notes: [{ id: `${id}-held`, beat: 0, length: 8, pitch: 60, velocity: 0.8 }] } })) })
+
 const e9Audio = (id: string, assetId: string): RuntimeTrack => ({ id, kind: 'audio', name: id, volume: 1,
   clips: [{ id: `${id}-clip`, name: id, color: '#fff', startSec: 0, duration: 30, sourceAssetKey: assetId }] })
+
 // `instruments` replaces the Synth a MIDI track gets by default.
 type E9State = {
   tracks: readonly RuntimeTrack[]; effects: readonly AudioEffectRuntimeInstance[]; refusals: number
   instruments: Readonly<Record<string, TrackInstrumentParams>>
 }
+
 const e9Zone = (assetKey: string): SamplerZone => ({
   id: 'zone', keyLow: 0, keyHigh: 127, velocityLow: 1, velocityHigh: 127, rootNote: 60, tuneCents: 0, gain: 1, pan: 0,
   roundRobinGroup: 0, roundRobinIndex: 0, playbackMode: 'one-shot', startSec: 0, crossfadeSec: 0, chokeGroup: 0,
   sample: { assetKey, url: `local-asset:${assetKey}`, sourceKind: 'upload', source: d9Source },
 })
+
 const e9Granular = (instanceId: string, assetKey: string): TrackInstrumentParams => ({ kind: 'granular', instanceId, params: { ...createDefaultGranularParams(), zone: e9Zone(assetKey) } })
 const e9Sampler = (instanceId: string, assetKey: string): TrackInstrumentParams => ({ kind: 'sampler', instanceId, params: { ...createDefaultSamplerParams(), zones: [e9Zone(assetKey)] } })
+
 const e9Fixture = async (options: { tracks?: readonly RuntimeTrack[]; compressed?: boolean; effects?: readonly AudioEffectRuntimeInstance[];
   instruments?: E9State['instruments'] } = {}) => {
   const state: E9State = { tracks: options.tracks ?? [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a')], instruments: options.instruments ?? {},
     effects: options.effects ?? (options.compressed ? [{ id: 'compressor-a', kind: 'compressor', params: createDefaultCompressorParams() }] : []), refusals: 0 }
+
   const calls: string[] = []
   const installs: PortableFrameSchedule[] = []
   const graphs: AudioCoreGraphSnapshot[] = []
   const publishes: C9Publish[] = []
   const faults: string[] = []
   const base = createSession(calls, async (schedule) => { installs.push(schedule) }, undefined, true)
+
   const session = {
     ...base,
     prepareGraph: async (graph: AudioCoreGraphSnapshot) => { calls.push('prepare-graph'); graphs.push(graph) },
     publishGraph: async (revision: number, publishOptions?: C9Publish['options']) => {
       publishes.push({ revision, options: publishOptions })
+
       if (publishOptions) calls.push('publish')
+
       if (publishOptions && state.refusals-- > 0) throw new Error('Portable playback graph-published was rejected.')
     },
     registerAsset: async (asset: { assetId: string }) => {
       calls.push(`register:${asset.assetId}`)
+
       return { status: 'registered' as const, handle: { slot: 0, generation: 1 } }
     },
     registerPagedAsset: async (asset: { assetId: string }) => {
       calls.push(`register:${asset.assetId}`)
+
       return { status: 'registered' as const, handle: { slot: 0, generation: 1 } }
     },
     releaseAsset: async (assetId: string) => {
       calls.push(`release:${assetId}`)
+
       return { status: 'released' as const }
     },
   }
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => {
       const compiled = pagedCompilation(transport)
+
       const trackFx = Object.fromEntries(state.tracks.flatMap((entry) => entry.kind === 'instrument'
         ? [[entry.id, { instances: [], instrument: state.instruments[entry.id] ?? { kind: 'synth' as const, instanceId: `synth:${entry.id}`, params: createDefaultSynthParams() } }]]
         : entry.id === 'audio-a' && state.effects.length > 0 ? [[entry.id, { instances: [...state.effects] }]] : []))
+
       const assetIds = new Set(state.tracks.flatMap((entry) => entry.clips.flatMap((clip) => clip.sourceAssetKey ?? [])))
+
       const sampleKeys = state.tracks.flatMap((entry) => {
         const instrument = state.instruments[entry.id]
+
         return instrument?.kind === 'sampler' ? instrument.params.zones.map((zone) => zone.sample.assetKey)
           : instrument?.kind === 'granular' && instrument.params.zone ? [instrument.params.zone.sample.assetKey] : []
       })
+
       const assets = [...[...assetIds].map((assetId) => ({ assetId, source: e9Source })),
         ...sampleKeys.map((assetId) => ({ assetId, source: d9Source, buffer: new TestAudioBuffer() }))]
+
       return { ...compiled, snapshot: { ...compiled.snapshot, tracks: state.tracks, assets,
         mixer: { ...compiled.snapshot.mixer, fx: { ...compiled.snapshot.mixer.fx, trackFx }, graph: resolveLiveMixerGraph(state.tracks, trackFx) } } }
     },
@@ -3926,19 +4388,24 @@ const e9Fixture = async (options: { tracks?: readonly RuntimeTrack[]; compressed
     resolveSource: async (clip) => pagedDescriptor(clip.sourceAssetKey ?? 'missing', []),
     backend: { createPlaybackSession: async () => session },
   })
+
   const transport = pagedCompilation().snapshot.transport
   let reports = 0
   const report = async (frame: number) => { reports += 1; base.emitPosition(frame, reports); await Bun.sleep(0) }
   const shipped = () => c9Starts(publishes.at(-1)?.options?.sources?.prepared)
   const nodes = () => (graphs.at(-1)?.nodes ?? []).flatMap((node) => node.id === '$master' ? [] : [node.id])
+
   const notes = (type: 'note-on' | 'note-off') => (installs.at(-1)?.events ?? []).flatMap((event) => event.type === type ? [[event.target.trackId, event.frame]] : [])
     .toSorted((left, right) => String(left).localeCompare(String(right)))
+
   const published = () => publishes.filter((publish) => publish.options).length
+
   return { state, controller, transport, calls, graphs, publishes, installs, faults, report, shipped, nodes, notes, published }
 }
 
 test('W-C9-track-1 an audio track added while playing is adopted: its node is published, its asset registered first, its clip starts at the seam', async () => {
   const f = await e9Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(56_144)
@@ -3955,6 +4422,7 @@ test('W-C9-track-1 an audio track added while playing is adopted: its node is pu
 
 test('W-C9-track-2 a MIDI track added while playing is adopted: its note that spans the seam starts there and the held note elsewhere keeps its voice', async () => {
   const f = await e9Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(56_144)
@@ -3968,6 +4436,7 @@ test('W-C9-track-2 a MIDI track added while playing is adopted: its note that sp
 
 test('W-C9-track-3 an audio track deleted while playing leaves no source or node, and its asset is released once the position reaches the seam', async () => {
   const f = await e9Fixture({ tracks: [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a'), e9Audio('audio-b', 'asset-b')] })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(56_144)
@@ -3984,6 +4453,7 @@ test('W-C9-track-3 an audio track deleted while playing leaves no source or node
 
 test('W-C9-track-4 the held note of a deleted MIDI track gets no note-off: its node is not in the candidate and the core ghost ends the voice', async () => {
   const f = await e9Fixture({ tracks: [e9Midi('midi-a'), e9Midi('midi-b'), e9Audio('audio-a', 'asset-a')] })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(56_144)
@@ -3996,6 +4466,7 @@ test('W-C9-track-4 the held note of a deleted MIDI track gets no note-off: its n
 
 test('W-C9-track-5 a reorder is the session\'s own graph again: unchanged, nothing published, and the next edit keeps the node order', async () => {
   const f = await e9Fixture({ tracks: [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a'), e9Audio('audio-b', 'asset-b')] })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(56_144)
@@ -4012,6 +4483,7 @@ test('W-C9-track-5 a reorder is the session\'s own graph again: unchanged, nothi
 
 test('W-C9-track-6 a track added and then deleted on a paused session is adopted in place with the seam at the position', async () => {
   const f = await e9Fixture()
+
   try {
     expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
     f.state.tracks = [...f.state.tracks, e9Audio('audio-b', 'asset-b')]
@@ -4030,6 +4502,7 @@ test('W-C9-track-7 a track added or deleted where a latency-bearing effect gives
   const added = await e9Fixture({ compressed: true })
   const deletedPlain = await e9Fixture({ compressed: true, tracks: [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a'), e9Audio('audio-b', 'asset-b')] })
   const deletedLatent = await e9Fixture({ compressed: true, tracks: [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a'), e9Audio('audio-b', 'asset-b')] })
+
   try {
     expect(await added.controller.start(added.transport)).toBe('started')
     expect(await deletedPlain.controller.start(deletedPlain.transport)).toBe('started')
@@ -4051,6 +4524,7 @@ const f9Delay = (id: string): AudioEffectRuntimeInstance => ({ id, kind: 'delay'
 const f9Limiter = (id: string): AudioEffectRuntimeInstance => ({ id, kind: 'limiter', params: { version: 1, state: createDefaultLimiterParams() } })
 const f9Compressor = (id: string): AudioEffectRuntimeInstance => ({ id, kind: 'compressor', params: createDefaultCompressorParams() })
 const f9Chain = (f: Awaited<ReturnType<typeof e9Fixture>>) => f.graphs.at(-1)?.nodes.find((node) => node.id === 'audio-a')?.processorOrder.map((processor) => processor.id)
+
 const f9Edits: ReadonlyArray<readonly [string, readonly AudioEffectRuntimeInstance[], readonly AudioEffectRuntimeInstance[], string[]]> = [
   ['inserted', [], [f9Utility('util-a')], ['util-a']],
   ['inserted beside a delaying effect it keeps', [f9Limiter('limiter-a')], [f9Limiter('limiter-a'), f9Utility('util-a')], ['limiter-a', 'util-a']],
@@ -4061,6 +4535,7 @@ const f9Edits: ReadonlyArray<readonly [string, readonly AudioEffectRuntimeInstan
 
 test.each(f9Edits)('W-C9-fx-1 an effect %s while playing is adopted in place: one publish, nothing disposed, the new chain', async (_name, before, after, chain) => {
   const f = await e9Fixture({ effects: before })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(56_144)
@@ -4073,6 +4548,7 @@ test.each(f9Edits)('W-C9-fx-1 an effect %s while playing is adopted in place: on
 
 test.each(f9Edits)('W-C9-fx-1p an effect %s on a paused session is adopted in place with the seam at the position', async (_name, before, after, chain) => {
   const f = await e9Fixture({ effects: before })
+
   try {
     expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
     f.state.effects = after
@@ -4091,9 +4567,12 @@ test('W-C9-fx-4 an effect that delays the signal inserted, removed, replaced or 
     [[f9Limiter('limiter-a')], [f9Limiter('limiter-b')]],
     [[f9Limiter('limiter-a'), f9Compressor('compressor-a')], [f9Compressor('compressor-a'), f9Limiter('limiter-a')]],
   ]
+
   const results: { result: PortableAdoptionResult; published: number }[] = []
+
   for (const tracks of [undefined, [e9Audio('audio-a', 'asset-a')]]) for (const [before, after] of cases) {
     const f = await e9Fixture({ tracks, effects: before })
+
     try {
       expect(await f.controller.start(f.transport)).toBe('started')
       await f.report(56_144)
@@ -4101,6 +4580,7 @@ test('W-C9-fx-4 an effect that delays the signal inserted, removed, replaced or 
       results.push({ result: await f.controller.adoptSchedule(noLoop), published: f.published() })
     } finally { f.controller.dispose() }
   }
+
   expect(results).toEqual(Array.from({ length: 2 * cases.length }, () => ({ result: 'adopted', published: 1 })))
 })
 
@@ -4109,6 +4589,7 @@ test('W-C9-fx-4 an effect that delays the signal inserted, removed, replaced or 
 // (WK:2462, CORE:7806), so it meets free ghosts and converges: WHT W-C9-fx-7 pins the core side.
 test('W-C9-fx-6 a removal refused by ghost capacity is retried after one position report and adopted', async () => {
   const f = await e9Fixture({ effects: [f9Utility('util-a'), f9Delay('delay-a')] })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(56_144)
@@ -4131,8 +4612,10 @@ const g9Replacements: ReadonlyArray<readonly [string, TrackInstrumentParams, str
   ['kind', e9Sampler('sampler:midi-a', 'smp-a'), ['register:smp-a', 'publish']],
   ['instance', { kind: 'synth', instanceId: 'synth:replacement', params: createDefaultSynthParams() }, ['publish']],
 ]
+
 test.each(g9Replacements)('W-C9-inst-1 a %s replacement of the instrument while a note is held is adopted: released on the old voice at the seam, started on the new instrument', async (_name, replacement, order) => {
   const f = await e9Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(56_144)
@@ -4148,6 +4631,7 @@ test.each(g9Replacements)('W-C9-inst-1 a %s replacement of the instrument while 
 
 test.each(g9Replacements)('W-C9-inst-1p a %s replacement of the instrument on a paused session is adopted in place with the seam at the position', async (_name, replacement, order) => {
   const f = await e9Fixture()
+
   try {
     expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
     const mark = f.calls.length
@@ -4165,6 +4649,7 @@ test.each(g9Replacements)('W-C9-inst-1p a %s replacement of the instrument on a 
 // parity; the retry waits one position report, which is longer than the 5 ms blend (WHT W-C9-inst-5).
 test('W-C9-inst-6 a replacement refused by blend capacity is retried after one position report and adopted', async () => {
   const f = await e9Fixture()
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(56_144)
@@ -4186,9 +4671,11 @@ const g9State = (f: Awaited<ReturnType<typeof e9Fixture>>) => Array.from(f.graph
 test('W-C9-proc-1 a processor parameter the live path does not take is adopted in place, playing and paused, with the new state in the published graph', async () => {
   for (const paused of [false, true]) {
     const f = await e9Fixture({ effects: [g9Utility(false)] })
+
     try {
       if (paused) expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
       else { expect(await f.controller.start(f.transport)).toBe('started'); await f.report(56_144) }
+
       const before = g9State(f)
       f.state.effects = [g9Utility(true)]
       const result = await f.controller.adoptSchedule(noLoop)
@@ -4201,6 +4688,7 @@ test('W-C9-proc-1 a processor parameter the live path does not take is adopted i
 // The core replaces the stage: the old one fades out as a ghost, a fresh one of the new size starts (WHT W-C9-spectral-1).
 test('W-C9-proc-2 a Spectral fftSize change is adopted in place with one publish and the new size in the published graph', async () => {
   const f = await e9Fixture({ effects: [g9Spectral(512)] })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(56_144)
@@ -4214,15 +4702,19 @@ test('W-C9-proc-2 a Spectral fftSize change is adopted in place with one publish
 // track that carries one is added and deleted like any other, and the old sample is released after the seam.
 test('W-C9-asset-7 a Granular sample changed, and a Granular track added and deleted, while playing are adopted with the asset registered before the publish', async () => {
   const f = await e9Fixture({ instruments: { 'midi-a': e9Granular('granular:a', 'grain-a') } })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(56_144)
+
     const steps: Array<readonly [() => void, string[], string[]]> = [
       [() => { f.state.instruments = { 'midi-a': e9Granular('granular:a', 'grain-b') } }, ['register:grain-b', 'publish'], ['release:grain-a']],
       [() => { f.state.tracks = [...f.state.tracks, e9Midi('midi-g')]; f.state.instruments = { 'midi-a': e9Granular('granular:a', 'grain-b'), 'midi-g': e9Granular('granular:g', 'grain-g') } }, ['register:grain-g', 'publish'], []],
       [() => { f.state.tracks = f.state.tracks.filter((entry) => entry.id !== 'midi-g') }, ['publish'], ['release:grain-g']],
     ]
+
     let frame = 60_000
+
     for (const [edit, order, released] of steps) {
       const mark = f.calls.length
       const releasedBefore = c9Released(f.calls).length
@@ -4234,6 +4726,7 @@ test('W-C9-asset-7 a Granular sample changed, and a Granular track added and del
       expect({ result, order: adoption.filter((call) => call === 'publish' || call.startsWith('register:')), released: c9Released(f.calls).slice(releasedBefore), disposed: f.calls.includes('dispose') })
         .toEqual({ result: 'adopted', order, released, disposed: false })
     }
+
     expect(f.nodes()).toEqual(['midi-a', 'audio-a'])
   } finally { f.controller.dispose() }
 })
@@ -4246,6 +4739,7 @@ test('W-C9-track-R a track added and deleted during a take is adopted and the ta
   const calls: string[] = []
   const { stream, recordingContext } = createRecordingFixture(calls)
   const f = await w8Fixture({ clipSec: 30 }, { audioContext: recordingContext })
+
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.controller.startRecording(b6f5RecordingInput(stream))

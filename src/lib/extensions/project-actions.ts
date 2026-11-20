@@ -33,6 +33,7 @@ export type ProjectActionFacade = Readonly<{
 
 const ensureActive = (lifecycle: ProjectActionLifecycle) => {
   lifecycle.signal.throwIfAborted();
+
   if (!lifecycle.isCurrent(lifecycle.generation)) throw new Error("Project action generation is stale.");
 };
 
@@ -43,6 +44,7 @@ const ensureGrant = (
 ) => {
   if (!grant[operation]) throw new Error(`Project action ${operation} is not granted.`);
   const allowed = new Set(grant.actionKinds);
+
   if (request.actions.some((action) => !allowed.has(action.kind))) {
     throw new Error("Project action contains an ungranted action kind.");
   }
@@ -61,6 +63,7 @@ export const createProjectActionFacade = (
     ensureGrant(parsed, input.grant, "preview");
     const result = await input.client.control.preview(parsed);
     ensureActive(input.lifecycle);
+
     return result;
   };
 
@@ -68,6 +71,7 @@ export const createProjectActionFacade = (
     ensureActive(input.lifecycle);
     const parsed = controlApprovalRequestSchemaV1.parse(request);
     ensureGrant(parsed, input.grant, "approval");
+
     // Approval issuance creates durable authority. Once dispatched, its result
     // must not be converted into a lifecycle error after the authority exists.
     return input.client.control.requestApproval(parsed);
@@ -77,6 +81,7 @@ export const createProjectActionFacade = (
     ensureActive(input.lifecycle);
     const parsed = controlCommitRequestSchemaV1.parse(request);
     ensureGrant(parsed, input.grant, "commit");
+
     // Commit is authoritative and idempotent. Lifecycle changes after dispatch
     // cannot safely turn a successful authority result into an ambiguous failure.
     return input.client.control.commit(parsed);

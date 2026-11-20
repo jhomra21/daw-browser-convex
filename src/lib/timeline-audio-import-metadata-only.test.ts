@@ -11,20 +11,24 @@ import { createAudioImportTransaction } from './timeline-audio-import'
 
 const createAssetStorage = () => {
   const files = new Map<string, File>()
+
   const assets = {
     getFileHandle: async (name: string) => ({
       getFile: async () => files.get(name) ?? new File([], name),
       createWritable: async () => {
         const chunks: Uint8Array[] = []
+
         return {
           write: async (chunk: Uint8Array) => { chunks.push(chunk) },
           close: async () => {
             const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
             let offset = 0
+
             for (const chunk of chunks) {
               bytes.set(chunk, offset)
               offset += chunk.byteLength
             }
+
             files.set(name, new File([bytes], name))
           },
           abort: async () => undefined,
@@ -35,9 +39,11 @@ const createAssetStorage = () => {
       files.delete(name)
     },
   }
+
   const root = {
     getDirectoryHandle: async (name: string) => name === 'assets' ? assets : root,
   }
+
   return { root }
 }
 
@@ -52,9 +58,11 @@ test('creates a local audio clip from persisted metadata without an AudioBuffer'
   try {
     const project = await createLocalProject(`Metadata import ${crypto.randomUUID()}`)
     const persistedTrack = (await createLocalTimelineRepository(project.id).loadSnapshot()).tracks[0]
+
     if (!persistedTrack) throw new Error('Expected a persisted track.')
     const track: Track = { ...persistedTrack, clips: [] }
     const inserted: Clip[] = []
+
     const transaction = createAudioImportTransaction({
       project: {
         projectId: () => project.id,
@@ -96,6 +104,7 @@ test('creates a local audio clip from persisted metadata without an AudioBuffer'
     })
 
     expect(result.status).toBe('created')
+
     if (result.status !== 'created') throw new Error('Expected a created local clip.')
     expect(inserted[0]).toMatchObject({
       id: result.clipId,
@@ -133,17 +142,22 @@ test('C0F a local import during native playback is decoded, staged and installed
   const audioBuffer = Object.getOwnPropertyDescriptor(globalThis, 'AudioBuffer')
   const { root } = createAssetStorage()
   Object.defineProperty(navigator, 'storage', { configurable: true, value: { getDirectory: async () => root } })
+
   if (!audioBuffer) Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: ImportedAudioBuffer })
   const fx = () => ({ masterVolume: 1, masterFxInstances: [], trackFx: {} })
   const inputs = () => ({ masterVolume: 1, automation: [], sidechains: [] })
+
   const retained: Track<AudioBuffer> = { id: 'track-c0f-retained', name: 'Retained', volume: 1, clips: [{ id: 'clip-c0f-retained',
     name: 'retained.wav', startSec: 0, duration: 1, color: '#fff', sourceAssetKey: 'asset-c0f-retained', buffer: new ImportedAudioBuffer() }] }
+
   let mounted: Awaited<ReturnType<typeof mountStep5Playback>> | undefined
   // The repository attaches its lifecycle flush to the first window it sees; the playback fixture's window has no events.
   const restoreWindow = installHermeticWindow({ clearTimeout, setTimeout })
+
   try {
     const project = await createLocalProject(`Live import ${crypto.randomUUID()}`)
     const persistedTrack = (await createLocalTimelineRepository(project.id).loadSnapshot()).tracks[0]
+
     if (!persistedTrack) throw new Error('Expected a persisted track.')
     const target: Track = { ...persistedTrack, clips: [] }
     // The renderer's projection: inserted clips take their buffer from the clip buffer cache, as resolveTimelineTracks does.
@@ -151,10 +165,13 @@ test('C0F a local import during native playback is decoded, staged and installed
     const [decoded, setDecoded] = createSignal(new Map<string, AudioBuffer>())
     const tracks = () => [retained, { ...target, clips: inserted().map((clip) => ({ ...clip, buffer: decoded().get(clip.id) ?? null })) }]
     const preloaded: string[] = []
+
     const f = await mountStep5Playback({ projectId: project.id, tracks, playbackInputs: inputs, desiredFx: fx,
       renderState: async () => ({ fx: fx(), automationEnvelopes: [] }) })
+
     mounted = f
     await f.playback.handlePlay(untrack(tracks)); await f.frame()
+
     const transaction = createAudioImportTransaction({
       project: { projectId: () => project.id, userId: () => undefined, tracks: () => [target], isActiveProjectTrack: () => true },
       clips: {
@@ -175,14 +192,18 @@ test('C0F a local import during native playback is decoded, staged and installed
       cloud: { uploadToR2: async () => null },
       rollback: { removeLocalTrack: async () => undefined, removeCloudTrack: async () => undefined },
     })
+
     const edit = f.mark()
+
     const result = await transaction.createUploadedFileClip({
       file: new File(['project-owned-source'], 'changed.wav', { type: 'audio/wav' }),
       source: { durationSec: 0.25, sampleRate: 48_000, channelCount: 2 },
       track: target,
       startSec: 0,
     })
+
     await settleStep5Playback(); await f.frame(); await settleStep5Playback()
+
     if (result.status !== 'created') throw new Error('Expected a created local clip.')
     const calls = f.host.calls.slice(edit.calls)
     expect({ preloaded, buffered: untrack(tracks)[1]?.clips.every((clip) => clip.buffer instanceof ImportedAudioBuffer),
@@ -193,7 +214,9 @@ test('C0F a local import during native playback is decoded, staged and installed
   } finally {
     await mounted?.close()
     restoreWindow()
+
     if (!audioBuffer) Reflect.deleteProperty(globalThis, 'AudioBuffer')
+
     if (storage) Object.defineProperty(navigator, 'storage', storage)
     else Reflect.deleteProperty(navigator, 'storage')
   }

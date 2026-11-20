@@ -1,4 +1,5 @@
 export type ClipColorToken = 'clip-audio' | 'clip-midi' | 'clip-recording'
+
 export type TrackColor = string
 
 export const isClipColorToken = (color: string): color is ClipColorToken =>

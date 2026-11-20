@@ -29,6 +29,7 @@ const scanTruePeakFrames = (
   peak: number,
 ) => {
   let next = peak
+
   for (const channel of channels) {
     for (let frame = startFrame; frame < endFrame; frame += 1) {
       next = Math.max(next, predictLinkedTruePeakAtFrame({
@@ -40,6 +41,7 @@ const scanTruePeakFrames = (
       }))
     }
   }
+
   return next
 }
 
@@ -55,11 +57,14 @@ export function scanTruePeak(
 ): TruePeakScanResult {
   const channels = readTruePeakChannels(buffer)
   let peak = 0
+
   for (let startFrame = 0; startFrame < buffer.length; startFrame += truePeakChunkFrames) {
     signal?.throwIfAborted()
     peak = scanTruePeakFrames(channels, startFrame, Math.min(buffer.length, startFrame + truePeakChunkFrames), peak)
   }
+
   signal?.throwIfAborted()
+
   return toTruePeakResult(peak)
 }
 
@@ -70,11 +75,14 @@ export async function scanTruePeakAsync(
 ): Promise<TruePeakScanResult> {
   const channels = readTruePeakChannels(buffer)
   let peak = 0
+
   for (let startFrame = 0; startFrame < buffer.length; startFrame += truePeakChunkFrames) {
     signal?.throwIfAborted()
     peak = scanTruePeakFrames(channels, startFrame, Math.min(buffer.length, startFrame + truePeakChunkFrames), peak)
     await yieldToEventLoop()
   }
+
   signal?.throwIfAborted()
+
   return toTruePeakResult(peak)
 }

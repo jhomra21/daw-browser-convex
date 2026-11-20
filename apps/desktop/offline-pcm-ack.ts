@@ -31,6 +31,7 @@ export const deliverOfflinePcmChunk = async (
     sequence,
     endFrame: chunk.startFrame + chunk.frameCount,
   }
+
   await listener(chunk)
   sendAck(ack)
 }
@@ -43,6 +44,7 @@ export const createOfflinePcmAckTracker = (): OfflinePcmAckTracker => {
       if (pending) throw new Error("An offline PCM acknowledgement is already pending.")
       const deferred = Promise.withResolvers<void>()
       pending = { ...expected, resolve: deferred.resolve, reject: deferred.reject }
+
       return deferred.promise
     },
     acknowledge(value) {
@@ -53,6 +55,7 @@ export const createOfflinePcmAckTracker = (): OfflinePcmAckTracker => {
       const current = pending
       pending = undefined
       current.resolve()
+
       return true
     },
     cancel(error) {

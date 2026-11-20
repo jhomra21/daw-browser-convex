@@ -33,6 +33,7 @@ export const isProjectManifestSyncStateKey = (key: string) => (
 )
 
 const storedValueSchema = z.custom<LocalProjectStoredValue>()
+
 const nonJsonStructuredValueSchema = z.union([
   z.bigint(),
   z.date(),
@@ -47,17 +48,22 @@ const nonJsonStructuredValueSchema = z.union([
 const hasNonJsonStructuredValue = (value: LocalProjectStoredValue): boolean => {
   if (nonJsonStructuredValueSchema.safeParse(value).success) return true
   const array = z.array(storedValueSchema).safeParse(value)
+
   if (array.success) return array.data.some(hasNonJsonStructuredValue)
   const record = z.record(z.string(), storedValueSchema).safeParse(value)
+
   return record.success && Object.values(record.data).some(hasNonJsonStructuredValue)
 }
 
 const archiveJsonValue = (value: LocalProjectStoredValue) => {
   if (hasNonJsonStructuredValue(value)) return undefined
+
   try {
     const serialized = JSON.stringify(value)
+
     if (serialized === undefined) return undefined
     const parsed = z.json().safeParse(JSON.parse(serialized))
+
     return parsed.success ? parsed.data : undefined
   } catch {
     return undefined
@@ -66,12 +72,15 @@ const archiveJsonValue = (value: LocalProjectStoredValue) => {
 
 const archiveSafeEntity = (entity: Awaited<ReturnType<typeof exportLocalProjectRows>>["entities"][number]) => {
   const value = archiveJsonValue(entity.value)
+
   if (value === undefined) return undefined
+
   if (entity.kind !== "external-plugin" || !isJsonObject(value)
     || !isJsonObject(value.manifest)
     || !isJsonObject(value.manifest.identity)
     || !("discoveredPath" in value.manifest.identity)) return { ...entity, value }
   const { discoveredPath: _discoveredPath, ...identity } = value.manifest.identity
+
   return { ...entity, value: { ...value, manifest: { ...value.manifest, identity } } }
 }
 
@@ -79,6 +88,7 @@ const archiveSafeStateRows = (
   rows: Awaited<ReturnType<typeof exportLocalProjectRows>>["projectState"],
 ) => rows.flatMap((row) => {
   const value = archiveJsonValue(row.value)
+
   return value === undefined ? [] : [{ ...row, value }]
 })
 
@@ -87,13 +97,19 @@ const latestLocalProjectUpdate = (
   rows: Awaited<ReturnType<typeof exportLocalProjectRows>>,
 ) => {
   let latest = projectUpdatedAt
+
   for (const row of rows.entities) latest = Math.max(latest, row.updatedAt)
+
   for (const row of rows.assets) latest = Math.max(latest, row.updatedAt)
+
   for (const row of rows.projectState) latest = Math.max(latest, row.updatedAt)
+
   for (const row of rows.syncState) {
     if (!isLocalSyncMetadataKey(row.key)) latest = Math.max(latest, row.updatedAt)
   }
+
   for (const row of rows.externalPluginArtifacts) latest = Math.max(latest, row.updatedAt)
+
   return latest
 }
 
@@ -101,11 +117,13 @@ const buildAssetCloudKeys = (
   rows: Awaited<ReturnType<typeof exportLocalProjectRows>>,
 ) => {
   const cloudKeys = new Map<string, string>()
+
   for (const row of rows.syncState) {
     if (isAssetCloudMappingRow(row)) {
       cloudKeys.set(row.value.localId, row.value.cloudId)
     }
   }
+
   return cloudKeys
 }
 
@@ -114,23 +132,31 @@ export const buildProjectManifest = async (
   mode: 'backup' | 'shared' = 'backup',
 ): Promise<ProjectManifest> => {
   const project = await getLocalProject(projectId)
+
   if (!project) throw new Error('Local project not found.')
   await flushLocalProjectPendingWrites(projectId)
   const rows = await exportLocalProjectRows(projectId)
   const updatedAt = latestLocalProjectUpdate(project.updatedAt, rows)
   const assetCloudKeys = buildAssetCloudKeys(rows)
+
   const assets = rows.assets.map((asset) => {
     if (asset.missing) return asset
     const cloudKey = assetCloudKeys.get(asset.id)
+
     return cloudKey ? { ...asset, cloudKey } : asset
   })
+
   const syncState = rows.syncState.filter((row) => isProjectManifestSyncStateKey(row.key))
+
   const entities = rows.entities.flatMap((entity) => {
     const archived = archiveSafeEntity(entity)
+
     return archived ? [archived] : []
   })
+
   const projectState = archiveSafeStateRows(rows.projectState)
   const archivedSyncState = archiveSafeStateRows(syncState)
+
   return {
     schemaVersion: PROJECT_MANIFEST_SCHEMA_VERSION,
     projectId,
@@ -151,6 +177,7 @@ export const buildProjectManifest = async (
 
 export const createRestoredProjectEntry = (manifest: ProjectManifest, name = manifest.name) => {
   const timestamp = Date.now()
+
   return {
     id: manifest.projectId,
     name: name.trim() || manifest.name || 'Untitled',

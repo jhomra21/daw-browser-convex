@@ -19,12 +19,15 @@ import {
 
 test("prepares the dry-run release environment with native artifact paths", () => {
   const command: ReleaseCommand = "package"
+
   const artifactPaths: NativeReleaseArtifactPaths = {
     scannerPath: "/project/native/vst3-scanner",
     workerPath: "/project/native/vst3-worker",
     audioHostPath: "/project/native/audio-host",
   }
+
   const manifestPath = "/project/apps/desktop/.native/daw-native-artifacts-v1.json"
+
   const preparation = createReleasePreparation(
     command,
     {
@@ -55,12 +58,15 @@ test("prepares the dry-run release environment with native artifact paths", () =
 
 test("prepares local desktop start with native artifact paths", () => {
   const command: LocalPackageCommand = "start"
+
   const artifactPaths: NativeReleaseArtifactPaths = {
     scannerPath: "/project/native/vst3-scanner",
     workerPath: "/project/native/vst3-worker",
     audioHostPath: "/project/native/audio-host",
   }
+
   const manifestPath = "/project/apps/desktop/.native/daw-native-artifacts-v1.json"
+
   const preparation = createLocalPackagePreparation(
     command,
     { PATH: "/usr/bin" },
@@ -80,6 +86,7 @@ test("prepares local desktop start with native artifact paths", () => {
 
 test("refuses a node_modules that links back to itself and accepts a plain one", () => {
   const root = mkdtempSync(path.join(tmpdir(), "daw-nm-"))
+
   try {
     mkdirSync(path.join(root, "node_modules"))
     expect(() => assertNoSelfReferentialNodeModules(root)).not.toThrow()
@@ -96,7 +103,9 @@ test("assembles local package environment without signing or notarization", () =
     workerPath: "/project/native/vst3-worker",
     audioHostPath: "/project/native/audio-host",
   }
+
   const manifestPath = "/project/apps/desktop/.native/daw-native-artifacts-v1.json"
+
   const environment = createLocalPackageEnvironment({
     PATH: "/usr/bin",
     APPLE_SIGNING_IDENTITY: "must-not-forward",

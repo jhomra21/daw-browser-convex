@@ -14,25 +14,32 @@ export const instrumentLateCommitScript = (source: string, startupDiagnostics = 
   const registrationCalls: ts.CallExpression[] = []
   let controllers = 0
   let leaseCalls = 0
+
   const visit = (node: ts.Node) => {
     if (startupDiagnostics && ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
       && (node.expression.name.text === "setRequestHandler" || node.expression.name.text === "onPrepareToClose")) {
       registrationCalls.push(node)
     }
+
     if (ts.isReturnStatement(node) && node.expression && ts.isObjectLiteralExpression(node.expression)
       && node.expression.properties.some((property) => ts.isPropertyAssignment(property)
         && property.name.getText(tree) === "isPrepared")) {
       let parent: ts.Node | undefined = node.parent
+
       while (parent && !ts.isArrowFunction(parent) && !ts.isFunctionDeclaration(parent)) parent = parent.parent
+
       if (!parent || (!ts.isArrowFunction(parent) && !ts.isFunctionDeclaration(parent))
         || !parent.body || !ts.isBlock(parent.body) || parent.parameters.length !== 1
         || !parent.parameters[0] || !ts.isIdentifier(parent.parameters[0].name))
         throw new Error("Unambiguous native controller factory unavailable.")
       const body = parent.body.getText(tree)
+
       if (!body.includes(".commitTransaction(")) return
+
       if (!body.includes("getPendingStart:")) throw new Error("Unexpected native controller contract.")
       controllers++
       const argument = parent.parameters[0].name.text
+
       if (!startupDiagnostics) {
         edits.push({ start: parent.body.getStart(tree) + 1, end: parent.body.getStart(tree) + 1,
           text: `${argument}=globalThis.__dawLateCommitObservation.input(${argument});` })
@@ -42,22 +49,29 @@ export const instrumentLateCommitScript = (source: string, startupDiagnostics = 
         edits.push({ start: node.expression.end, end: node.expression.end, text: ")" })
       }
     }
+
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
       && node.expression.name.text === "acquireLease") {
       leaseCalls++
+
       if (!startupDiagnostics) {
         edits.push({ start: node.getStart(tree), end: node.getStart(tree),
           text: "globalThis.__dawLateCommitObservation.lease(()=>" })
         edits.push({ start: node.end, end: node.end, text: ")" })
       }
     }
+
     ts.forEachChild(node, visit)
   }
+
   visit(tree)
+
   if (controllers !== 1 || leaseCalls !== 2)
     throw new Error("Expected one controller and two Stretch lease call boundaries.")
+
   if (startupDiagnostics) {
     const [setActive, closeActive, setInactive, closeInactive] = registrationCalls
+
     const pair = (first: ts.CallExpression | undefined, second: ts.CallExpression | undefined) => {
       if (!first || !second || !ts.isBinaryExpression(first.parent) || first.parent !== second.parent
         || first.parent.operatorToken.kind !== ts.SyntaxKind.CommaToken
@@ -65,19 +79,26 @@ export const instrumentLateCommitScript = (source: string, startupDiagnostics = 
         || !ts.isPropertyAccessExpression(first.expression) || !ts.isPropertyAccessExpression(second.expression)
         || first.expression.expression.getText(tree) !== "window.dawDesktop"
         || second.expression.expression.getText(tree) !== "window.dawDesktop") return undefined
+
       return first.parent
     }
+
     const activePair = pair(setActive, closeActive)
     const activeSequence = activePair && ts.isBinaryExpression(activePair.parent) ? activePair.parent : undefined
+
     const teardownOwner = (node: ts.Node | undefined) => {
       let parent = node?.parent
+
       while (parent && !ts.isArrowFunction(parent)) parent = parent.parent
+
       return parent
     }
+
     const inactiveArgument = setInactive?.arguments[0]
     const activeCloseArgument = closeActive?.arguments[0]
     const inactiveSetArgument = setInactive?.arguments[0]
     const inactiveCloseArgument = closeInactive?.arguments[0]
+
     if (registrationCalls.length !== 4 || !setActive || !closeActive || !setInactive || !closeInactive
       || !activePair || !activeSequence
       || activePair.left !== setActive || activePair.right !== closeActive
@@ -108,15 +129,20 @@ export const instrumentLateCommitScript = (source: string, startupDiagnostics = 
       text: ",globalThis.__dawLateCommitObservation?.registrationReturned?.()",
     })
   }
+
   let observed = source
+
   for (const edit of edits.sort((a, b) => b.start - a.start)) {
     observed = observed.slice(0, edit.start) + edit.text + observed.slice(edit.end)
   }
+
   const transformed = "globalThis.__dawLateCommitObservation.scriptInstalled();" + observed
+
   if (startupDiagnostics
     && (ts.transpileModule(transformed, { compilerOptions: { target: ts.ScriptTarget.Latest }, reportDiagnostics: true })
       .diagnostics?.length ?? 0) > 0)
     throw new Error("Startup observer transformed script failed to parse.")
+
   return { source: transformed, controllers, leaseCalls }
 }
 
@@ -134,10 +160,13 @@ export const installLateCommitObserver = async (endpoint: string, startupDiagnos
   const inspector = await openAcceptanceInspector(endpoint)
   const nonce = crypto.randomUUID()
   const binding = `__lateCommitReady_${nonce.replaceAll("-", "")}`
+
   const registrationSignal = startupDiagnostics
     ? `,()=>{try{const callback=globalThis[${JSON.stringify(binding)}];if(typeof callback==="function")callback(${JSON.stringify(`${nonce}:registration-returned`)})}catch{}}` : ""
+
   const bootstrap = ts.transpileModule(`(${installLateCommitObservation.toString()})(${JSON.stringify(nonce)},()=>globalThis[${JSON.stringify(binding)}](${JSON.stringify(nonce)})${registrationSignal})`,
     { compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.None } }).outputText
+
   let bootstrapId = ""
   let changed = 0
   let failure: Error | undefined
@@ -151,6 +180,7 @@ export const installLateCommitObserver = async (endpoint: string, startupDiagnos
   const diagnosticInterruption = Promise.withResolvers<"exception" | "observer-failure">()
   let interruptionReported = false
   let interruptionReason: "exception" | "observer-failure" | undefined
+
   const interrupt = (reason: "exception" | "observer-failure") => {
     if (startupDiagnostics && !interruptionReported) {
       interruptionReported = true
@@ -158,18 +188,22 @@ export const installLateCommitObserver = async (endpoint: string, startupDiagnos
       diagnosticInterruption.resolve(reason)
     }
   }
+
   const intercepted = Promise.withResolvers<void>()
   const scriptReady = Promise.withResolvers<true>()
   // The rejected interception is joined below, including when reload fails.
   void intercepted.promise.catch(() => undefined)
+
   const unlisten = inspector.listen((message) => {
     if (message.method === "Runtime.bindingCalled") {
       if (!startupDiagnostics && message.params?.name === binding && message.params.payload === nonce)
         scriptReady.resolve(true)
+
       if (startupDiagnostics) {
         const call = z.object({
           name: z.string(), payload: z.string(), executionContextId: z.number(),
         }).safeParse(message.params)
+
         if (call.success && call.data.name === binding && newDocumentNavigated
           && call.data.executionContextId === currentContextId) {
           if (call.data.payload === nonce) scriptReady.resolve(true)
@@ -177,55 +211,71 @@ export const installLateCommitObserver = async (endpoint: string, startupDiagnos
         }
       }
     }
+
     if (startupDiagnostics && message.method === "Page.frameNavigated") {
       const frame = z.object({ id: z.string(), parentId: z.string().optional() }).safeParse(message.params?.frame)
+
       if (frame.success && frame.data.id === mainFrameId && frame.data.parentId === undefined) {
         newDocumentNavigated = reloadStarted
         currentContextId = undefined
       }
     }
+
     if (startupDiagnostics && message.method === "Page.frameStartedLoading") {
       const frame = z.object({ frameId: z.string() }).safeParse(message.params)
+
       if (frame.success && frame.data.frameId === mainFrameId) {
         newDocumentNavigated = reloadStarted
         currentContextId = undefined
       }
     }
+
     if (startupDiagnostics && message.method === "Runtime.executionContextCreated") {
       const context = z.object({ id: z.number(), auxData: z.object({
         frameId: z.string().optional(), isDefault: z.boolean().optional(),
       }).passthrough().optional() }).safeParse(message.params?.context)
+
       if (context.success && newDocumentNavigated && context.data.auxData?.frameId === mainFrameId
         && context.data.auxData.isDefault === true) currentContextId = context.data.id
     }
+
     if (startupDiagnostics && message.method === "Runtime.executionContextDestroyed") {
       const destroyed = z.object({ executionContextId: z.number() }).safeParse(message.params)
+
       if (destroyed.success && destroyed.data.executionContextId === currentContextId)
         currentContextId = undefined
     }
+
     if (startupDiagnostics && message.method === "Runtime.exceptionThrown") {
       const details = z.object({ executionContextId: z.number().optional(), exception: z.object({
         className: z.string().optional(), type: z.string().optional(), subtype: z.string().optional(),
       }).passthrough().optional() }).passthrough().safeParse(message.params?.exceptionDetails)
+
       if (!details.success) {
         interrupt("observer-failure")
       } else if (details.data.executionContextId !== undefined && reloadStarted && currentContextId !== undefined
         && details.data.executionContextId === currentContextId) {
         const className = details.data.exception?.className
+
         const category = className === "TypeError" || className === "RangeError" || className === "SyntaxError"
           ? className : className === "Error" || details.data.exception?.subtype === "error" ? "Error" : "unknown"
+
         if (exceptions.length < 30) exceptions.push({ occurrence: exceptions.length + 1, category })
         else exceptionOverflow = true
         interrupt("exception")
       }
     }
+
     if (message.method !== "Fetch.requestPaused") return
     void (async () => {
       const paused = z.object({ requestId: z.string(), responseStatusCode: z.number() }).parse(message.params)
+
       const response = z.object({ body: z.string(), base64Encoded: z.boolean() }).parse(
         await inspector.send("Fetch.getResponseBody", { requestId: paused.requestId }))
+
       const original = response.base64Encoded ? Buffer.from(response.body, "base64").toString("utf8") : response.body
       const transformed = instrumentLateCommitScript(original, startupDiagnostics)
+
       if (++changed !== 1) throw new Error("Repeated late Commit script interception.")
       await inspector.send("Fetch.fulfillRequest", { requestId: paused.requestId, responseCode: paused.responseStatusCode,
         responseHeaders: [{ name: "Content-Type", value: "text/javascript" }],
@@ -237,10 +287,12 @@ export const installLateCommitObserver = async (endpoint: string, startupDiagnos
       interrupt("observer-failure")
     })
   })
+
   const invoke = async (operation: string) => JSON.parse(parseSpoolEvaluation(await inspector.send("Runtime.evaluate", {
     expression: `globalThis.__dawLateCommitObservation.invoke(${JSON.stringify(nonce)},${JSON.stringify(operation)})`,
     returnByValue: true, awaitPromise: true,
   })))
+
   const close = async () => {
     try {
       if (!startupDiagnostics) {
@@ -248,6 +300,7 @@ export const installLateCommitObserver = async (endpoint: string, startupDiagnos
         await invoke("settle").catch(() => undefined)
         await invoke("close").catch(() => undefined)
       }
+
       unlisten()
       await Promise.allSettled([
         inspector.send("Fetch.disable"),
@@ -259,17 +312,22 @@ export const installLateCommitObserver = async (endpoint: string, startupDiagnos
       }).catch(() => undefined)
     } finally { inspector.close() }
   }
+
   try {
     await inspector.send("Runtime.enable")
     await inspector.send("Runtime.addBinding", { name: binding })
     await inspector.send("Page.enable")
+
     if (startupDiagnostics) {
       const frameTree = z.object({ frameTree: z.object({ frame: z.object({ id: z.string() }).passthrough() }).passthrough() })
         .parse(await inspector.send("Page.getFrameTree"))
+
       mainFrameId = frameTree.frameTree.frame.id
     }
+
     bootstrapId = z.string().parse((await inspector.send("Page.addScriptToEvaluateOnNewDocument", { source: bootstrap })).identifier)
     await inspector.send("Fetch.enable", { patterns: [{ urlPattern: "daw://app/*index-*.js", requestStage: "Response" }] })
+
     if (startupDiagnostics) {
       reloadStarted = true
       newDocumentNavigated = false
@@ -283,6 +341,7 @@ export const installLateCommitObserver = async (endpoint: string, startupDiagnos
         }),
       ])
     } else await inspector.send("Page.reload", { ignoreCache: true })
+
     // Authenticated new-document binding avoids evaluating in the old context
     // immediately after reload. Reuse the existing bounded acceptance deadline.
     if (startupDiagnostics) {
@@ -291,21 +350,27 @@ export const installLateCommitObserver = async (endpoint: string, startupDiagnos
           complete ? "script-ready" : "script-ready-deadline"),
         diagnosticInterruption.promise,
       ])
+
       if (ready === "exception" || ready === "observer-failure")
         throw new StartupObservationInterrupted({
           registrationReturned, exceptionOverflow, exceptions: [...exceptions],
         }, ready)
+
       if (ready === "script-ready-deadline") throw new Error("Packaged script-ready observation deadline.")
     } else if (!await waitForAcceptanceEvent(scriptReady.promise, 15000))
       throw new Error("Packaged script-ready observation deadline.")
+
     if (failure) throw failure
+
     if (changed !== 1) throw new Error("Packaged controller script was not intercepted.")
     await intercepted.promise
     await inspector.send("Fetch.disable")
+
     if (interruptionReason)
       throw new StartupObservationInterrupted({
         registrationReturned, exceptionOverflow, exceptions: [...exceptions],
       }, interruptionReason)
+
     return {
       invoke, close, closed: inspector.closed,
       diagnosticInterruption: diagnosticInterruption.promise,
@@ -316,6 +381,7 @@ export const installLateCommitObserver = async (endpoint: string, startupDiagnos
     }
   } catch (error) {
     await close().catch(() => inspector.close())
+
     if (startupDiagnostics && !(error instanceof StartupObservationInterrupted))
       throw new StartupObservationInterrupted({
         registrationReturned, exceptionOverflow, exceptions: [...exceptions],

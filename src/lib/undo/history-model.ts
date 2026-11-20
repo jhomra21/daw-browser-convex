@@ -5,15 +5,18 @@ export const cloneHistoryTracks = (tracks: Track[]) => tracks.map(cloneTimelineT
 
 export const insertTrackIntoHistoryModel = (tracks: Track[], track: Track, index: number) => {
   const existingIndex = tracks.findIndex((entry) => entry.id === track.id)
+
   if (existingIndex >= 0) {
     tracks.splice(existingIndex, 1)
   }
+
   const insertIndex = Math.max(0, Math.min(index, tracks.length))
   tracks.splice(insertIndex, 0, cloneTimelineTrack(track))
 }
 
 export const removeTrackFromHistoryModel = (tracks: Track[], trackId: Track['id']) => {
   const index = tracks.findIndex((track) => track.id === trackId)
+
   if (index >= 0) {
     tracks.splice(index, 1)
   }
@@ -21,19 +24,25 @@ export const removeTrackFromHistoryModel = (tracks: Track[], trackId: Track['id'
 
 export const insertClipIntoHistoryModel = (tracks: Track[], trackId: string, clip: Track['clips'][number]) => {
   const track = tracks.find((entry) => entry.id === trackId)
+
   if (!track) return
   const nextClip = cloneTimelineClip(clip)
   const existingIndex = track.clips.findIndex((entry) => entry.id === nextClip.id)
+
   if (existingIndex >= 0) {
     track.clips.splice(existingIndex, 1, nextClip)
+
     return
   }
+
   track.clips.push(nextClip)
 }
 
 export const removeClipsFromHistoryModel = (tracks: Track[], clipIds: Iterable<string>) => {
   const removedIds = new Set(clipIds)
+
   if (removedIds.size === 0) return
+
   for (const track of tracks) {
     track.clips = track.clips.filter((clip) => !removedIds.has(clip.id))
   }
@@ -48,24 +57,30 @@ export const commitClipMovesInHistoryModel = (
 
   for (const track of tracks) {
     const remaining: Track['clips'] = []
+
     for (const clip of track.clips) {
       const move = moveByClipId.get(clip.id)
+
       if (!move) {
         remaining.push(clip)
         continue
       }
+
       movedClips.set(clip.id, {
         ...cloneTimelineClip(clip),
         startSec: move.startSec,
       })
     }
+
     track.clips = remaining
   }
 
   const trackById = new Map(tracks.map((track) => [track.id, track]))
+
   for (const move of moves) {
     const track = trackById.get(move.trackId)
     const clip = movedClips.get(move.clipId)
+
     if (!track || !clip) continue
     track.clips.push(clip)
   }
@@ -78,6 +93,7 @@ export const commitClipTimingInHistoryModel = (
 ) => {
   for (const track of tracks) {
     const clip = track.clips.find((entry) => entry.id === clipId)
+
     if (!clip) continue
     clip.startSec = patch.startSec
     clip.duration = patch.duration
@@ -86,6 +102,7 @@ export const commitClipTimingInHistoryModel = (
     clip.midiOffsetBeats = patch.midiOffsetBeats
     clip.gain = patch.gain
     clip.fades = patch.fades ? { ...patch.fades } : undefined
+
     return
   }
 }
@@ -97,8 +114,10 @@ export const commitClipAudioWarpInHistoryModel = (
 ) => {
   for (const track of tracks) {
     const clip = track.clips.find((entry) => entry.id === clipId)
+
     if (!clip) continue
     clip.audioWarp = audioWarp
+
     return
   }
 }
@@ -110,8 +129,10 @@ export const commitClipFadesInHistoryModel = (
 ) => {
   for (const track of tracks) {
     const clip = track.clips.find((entry) => entry.id === clipId)
+
     if (!clip) continue
     clip.fades = fades ? { ...fades } : undefined
+
     return
   }
 }
@@ -123,14 +144,17 @@ export const commitClipMidiInHistoryModel = (
 ) => {
   for (const track of tracks) {
     const clip = track.clips.find((entry) => entry.id === clipId)
+
     if (!clip) continue
     clip.midi = midi
+
     return
   }
 }
 
 export const applyTrackVolumeInHistoryModel = (tracks: Track[], trackId: string, volume: number) => {
   const track = tracks.find((entry) => entry.id === trackId)
+
   if (track) {
     track.volume = volume
   }
@@ -142,10 +166,13 @@ export const applyTrackMixStateInHistoryModel = (
   patch: { muted?: boolean; soloed?: boolean },
 ) => {
   const track = tracks.find((entry) => entry.id === trackId)
+
   if (!track) return
+
   if (patch.muted !== undefined) {
     track.muted = patch.muted
   }
+
   if (patch.soloed !== undefined) {
     track.soloed = patch.soloed
   }
@@ -153,6 +180,7 @@ export const applyTrackMixStateInHistoryModel = (
 
 export const applyTrackRoutingInHistoryModel = (tracks: Track[], trackId: string, routing: TrackRouting) => {
   const track = tracks.find((entry) => entry.id === trackId)
+
   if (!track) return
   track.sends = routing.sends?.map((send) => ({ ...send })) ?? []
   track.outputTargetId = routing.outputTargetId
@@ -164,12 +192,18 @@ export const applyTrackPatchInHistoryModel = (
   patch: Partial<Pick<Track, 'groupId' | 'outputTargetId' | 'color'>> & { index?: number },
 ) => {
   const track = tracks.find((entry) => entry.id === trackId)
+
   if (!track) return
+
   if (Object.hasOwn(patch, 'groupId')) track.groupId = patch.groupId
+
   if (Object.hasOwn(patch, 'outputTargetId')) track.outputTargetId = patch.outputTargetId
+
   if (Object.hasOwn(patch, 'color')) track.color = patch.color
+
   if (Object.hasOwn(patch, 'index') && patch.index !== undefined) {
     const currentIndex = tracks.findIndex((entry) => entry.id === trackId)
+
     if (currentIndex < 0) return
     tracks.splice(currentIndex, 1)
     tracks.splice(Math.max(0, Math.min(patch.index, tracks.length)), 0, track)

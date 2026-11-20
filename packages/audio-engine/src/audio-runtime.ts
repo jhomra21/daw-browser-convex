@@ -15,12 +15,14 @@ const CANONICAL_DECODE_SAMPLE_RATE = 44_100
 
 export function createAudioRuntime(options: AudioRuntimeOptions): AudioRuntime {
   let ctx: AudioContext
+
   try {
     ctx = new AudioContext(options)
   } catch (error) {
     if (options.sampleRate === undefined || !(error instanceof Error) || error.name !== "NotSupportedError") throw error
     ctx = new AudioContext({ latencyHint: options.latencyHint })
   }
+
   const masterGain = ctx.createGain()
   masterGain.gain.value = 1.0
 
@@ -39,7 +41,9 @@ export async function decodeAudioData(
   if (!Number.isFinite(targetSampleRate) || targetSampleRate <= 0) {
     throw new Error(`Invalid decode sample rate: ${targetSampleRate}`)
   }
+
   const offline = new OfflineAudioContext(2, 1, targetSampleRate)
+
   return offline.decodeAudioData(arrayBuffer)
 }
 
@@ -51,11 +55,13 @@ export function getOutputLatencySec(runtime: AudioRuntime | null) {
   if (!runtime) return 0
   const { baseLatency = 0, outputLatency = 0 } = runtime.ctx
   const total = baseLatency + outputLatency
+
   return Number.isFinite(total) ? total : 0
 }
 
 export function closeAudioRuntime(runtime: AudioRuntime | null) {
   if (!runtime) return
   disconnectAudioNodes([runtime.masterGain])
+
   try { runtime.ctx.close() } catch {}
 }

@@ -66,6 +66,7 @@ describe('project format boundaries', () => {
         location: 'plugin-artifacts/a7a0b9ac-7884-492c-8b68-80f15802442c',
       }],
     }
+
     expect(normalizeProjectManifest(manifest).externalPluginArtifacts).toEqual(manifest.externalPluginArtifacts)
   })
 
@@ -80,11 +81,13 @@ describe('project format boundaries', () => {
       bucket: 'local',
       location: 'plugin-artifacts/a7a0b9ac-7884-492c-8b68-80f15802442c',
     }
+
     const manifest = {
       ...manifestV1,
       schemaVersion: PROJECT_MANIFEST_SCHEMA_VERSION,
       externalPluginArtifacts: [artifact],
     }
+
     expect(() => normalizeProjectManifest({
       ...manifest,
       externalPluginArtifacts: [{ ...artifact, id: 'not-a-uuid' }],
@@ -122,6 +125,7 @@ describe('project format boundaries', () => {
         location: 'projects/project-1/plugin-artifacts/a7a0b9ac-7884-492c-8b68-80f15802442c',
       }],
     }
+
     expect(() => assertProjectManifestPublishIntegrity(manifest)).toThrow(
       'external plugin artifacts cannot be published',
     )
@@ -138,6 +142,7 @@ describe('project format boundaries', () => {
         manifestV1.entities[0],
       ],
     }
+
     const normalized = normalizeProjectManifest(manifest)
     expect(normalized.entities[0]?.value).toEqual(manifest.entities[0]?.value)
     expect(normalized.entities[1]).toEqual(manifest.entities[1])
@@ -146,6 +151,7 @@ describe('project format boundaries', () => {
 
   test('roundtrips structured automation targets and opaque keys in generic entities', () => {
     const targetKey = 'automation:v2:["track","track:colon","delay:instance:colon","delay.feedback"]'
+
     const manifest: ProjectManifest = {
       ...manifestV1,
       schemaVersion: PROJECT_MANIFEST_SCHEMA_VERSION,

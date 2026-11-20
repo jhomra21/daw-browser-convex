@@ -10,14 +10,17 @@ import {
 const outputSink = () => {
   let bytes = new Uint8Array()
   let aborted = false
+
   const sink: WavOutputSink = {
     write: async (chunk) => {
       const required = chunk.position + chunk.data.byteLength
+
       if (required > bytes.byteLength) {
         const expanded = new Uint8Array(required)
         expanded.set(bytes)
         bytes = expanded
       }
+
       bytes.set(chunk.data, chunk.position)
     },
     close: async () => undefined,
@@ -25,6 +28,7 @@ const outputSink = () => {
       aborted = true
     },
   }
+
   return { sink, bytes: () => bytes, aborted: () => aborted }
 }
 
@@ -34,16 +38,20 @@ const blocks = async function* (items: readonly PlanarAudioBlock[]) {
 
 const findChunk = (bytes: Uint8Array, name: string) => {
   const marker = new TextEncoder().encode(name)
+
   for (let offset = 0; offset <= bytes.length - marker.length; offset += 1) {
     if (marker.every((value, index) => bytes[offset + index] === value)) return offset
   }
+
   return -1
 }
 
 const wavSamples = (bytes: Uint8Array) => {
   const dataOffset = findChunk(bytes, 'data')
+
   if (dataOffset < 0) throw new Error('Missing WAV data chunk.')
   const view = new DataView(bytes.buffer, bytes.byteOffset + dataOffset + 8)
+
   return Array.from({ length: view.byteLength / 4 }, (_, index) => view.getFloat32(index * 4, true))
 }
 
@@ -133,10 +141,12 @@ describe('planar float32 WAV encoder', () => {
 
   test('aborts the sink after source and sink failures', async () => {
     const sourceFailure = outputSink()
+
     async function* failedBlocks() {
       yield { frameCount: 1, channels: [new Float32Array([1])] }
       throw new Error('reader-failed')
     }
+
     await expect(encodePlanarFloat32Wav({
       sampleRate: 48000,
       channelCount: 1,
@@ -165,6 +175,7 @@ describe('planar float32 WAV encoder', () => {
     const output = outputSink()
     let activeReads = 0
     let maxActiveReads = 0
+
     async function* measuredBlocks() {
       for (let index = 0; index < 32; index += 1) {
         activeReads += 1
@@ -173,6 +184,7 @@ describe('planar float32 WAV encoder', () => {
         activeReads -= 1
       }
     }
+
     await encodePlanarFloat32Wav({
       sampleRate: 48000,
       channelCount: 1,

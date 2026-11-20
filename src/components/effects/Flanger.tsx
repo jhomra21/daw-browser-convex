@@ -12,8 +12,10 @@ type FlangerProps = {
   onAutomationParameterTouch?: (parameterId: string) => void
   onManualAutomationOverride?: (parameterId: string) => void
 }
+
 const defaults = createDefaultFlangerParams()
 const percent = formatDevicePercent
+
 export default function Flanger(props: FlangerProps) {
   return <EffectShell title="Flanger" typeLabel="Modulation" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="w-60 min-w-60"><div class="grid min-h-0 flex-1 grid-cols-2 grid-rows-3 items-center gap-x-8 px-4 py-3">
     <Knob label="Delay" value={props.params.delayMs} valueLabel={formatDeviceMilliseconds(props.params.delayMs, 1)} resetValue={defaults.delayMs} min={0.1} max={10} step={0.1} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get("flanger.delayMs")} automated={props.automationRangesByParameterId?.has("flanger.delayMs")} onAutomationSelect={() => props.onAutomationParameterTouch?.("flanger.delayMs")} onValueChange={(delayMs) => { props.onManualAutomationOverride?.("flanger.delayMs"); props.onChange({ delayMs }) }} />

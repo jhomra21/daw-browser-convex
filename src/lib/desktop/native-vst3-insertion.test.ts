@@ -99,6 +99,7 @@ test("accepts instrument tracks but rejects routed targets before native preflig
   })).toMatchObject({ enabled: false, code: "unsupported-bus" })
 
   let preflightCalls = 0
+
   const result = await insertNativeVst3Effect({
     projectId: "project:00000000-0000-4000-8000-000000000000",
     targetId: "track-1",
@@ -107,16 +108,19 @@ test("accepts instrument tracks but rejects routed targets before native preflig
     bridge: {
       preflightInsertion: async () => {
         preflightCalls += 1
+
         return { ok: false, code: "worker-timeout", message: "preflight failed" }
       },
     },
   })
+
   expect(result).toMatchObject({ ok: false, code: "worker-timeout" })
   expect(preflightCalls).toBe(1)
 })
 
 test("preflights and persists an external VST instrument on an instrument track", async () => {
   let persistedRole: string | undefined
+
   const result = await insertNativeVst3Effect({
     projectId: "project:00000000-0000-4000-8000-000000000000",
     targetId: "track-1",
@@ -141,15 +145,18 @@ test("preflights and persists an external VST instrument on an instrument track"
     createInstanceId: () => "a7a0b9ac-7884-492c-8b68-80f15802442c",
     persist: async (_projectId, processor) => {
       persistedRole = processor.manifest.role
+
       return { ...processor, index: 0 }
     },
   })
+
   expect(result).toMatchObject({ ok: true })
   expect(persistedRole).toBe("instrument")
 })
 
 test("persists only path-free identity after successful preflight", async () => {
   let persisted: Omit<ExternalProcessor, "index"> | undefined
+
   const result = await insertNativeVst3Effect({
     projectId: "project:00000000-0000-4000-8000-000000000000",
     targetId: "track-1",
@@ -185,6 +192,7 @@ test("persists only path-free identity after successful preflight", async () => 
     createInstanceId: () => "a7a0b9ac-7884-492c-8b68-80f15802442c",
     persist: async (_projectId, processor) => {
       persisted = processor
+
       return { ...processor, index: 0 }
     },
   })
@@ -229,6 +237,7 @@ test("persists only path-free identity after successful preflight", async () => 
 
 test("does not persist when native worker preflight fails", async () => {
   let persistCalls = 0
+
   const result = await insertNativeVst3Effect({
     projectId: "project:00000000-0000-4000-8000-000000000000",
     targetId: "track-1",
@@ -253,6 +262,7 @@ test("does not persist when native worker preflight fails", async () => {
 
 test("does not persist when the selected project or track changes during preflight", async () => {
   let persistCalls = 0
+
   const result = await insertNativeVst3Effect({
     projectId: "project:00000000-0000-4000-8000-000000000000",
     targetId: "track-1",
@@ -311,6 +321,7 @@ test("distinguishes persistence failure after successful native preflight", asyn
       throw new Error("local project write failed")
     },
   })
+
   expect(result).toMatchObject({
     ok: false,
     code: "project-unavailable",
@@ -347,6 +358,7 @@ test("sanitizes local persistence reasons while preserving their safe code", asy
       )
     },
   })
+
   expect(result).toEqual({
     ok: false,
     code: "project-unavailable",

@@ -21,7 +21,9 @@ const contained = (observe: () => void) => {
 
 const fnv1a = (text: string) => {
   let hash = 0x811c9dc5
+
   for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193)
+
   return (hash >>> 0).toString(16)
 }
 
@@ -29,14 +31,17 @@ const fnv1a = (text: string) => {
 // `acceptance.mark` only with the latter. Without an observer a call site pays one optional chain and no key runs.
 export const desktopAcceptanceObserver = (bridge: Pick<DesktopBridge, "acceptance"> | undefined): PlaybackAcceptanceObserver | undefined => {
   const acceptance = bridge?.acceptance
+
   if (!acceptance) return undefined
   const { mark } = acceptance
+
   return {
     ownsNativeSession: !acceptance.externalNativeSession,
     mark: (name, key) => {
       if (!mark) return
       contained(() => {
         const value = key()
+
         if (value !== undefined) mark(name, value)
       })
     },
@@ -46,6 +51,7 @@ export const desktopAcceptanceObserver = (bridge: Pick<DesktopBridge, "acceptanc
     adoption: (intentKey) => {
       if (!mark || intentKey === undefined) return undefined
       const key = fnv1a(intentKey)
+
       return (name) => contained(() => mark(name, key))
     },
   }

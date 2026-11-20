@@ -54,6 +54,7 @@ const countOwnedRows = async (sessionId: string) => {
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error ?? new Error('Failed to inspect prepared Stretch artifact database.'))
   })
+
   try {
     return await new Promise<{ writes: number; pages: number }>((resolve, reject) => {
       const transaction = db.transaction(['writes', 'pages'], 'readonly')
@@ -64,29 +65,35 @@ const countOwnedRows = async (sessionId: string) => {
       const writeIds = new Set<string>()
       writesRequest.onsuccess = () => {
         const cursor = writesRequest.result
+
         if (!cursor) return
         const row: { sessionId: string; writeId: string } = cursor.value
         ownedWrites.push(row)
         cursor.continue()
       }
+
       pagesRequest.onsuccess = () => {
         const cursor = pagesRequest.result
+
         if (!cursor) return
         const row: { writeId: string } = cursor.value
         allPages.push(row)
         cursor.continue()
       }
+
       writesRequest.onerror = () => reject(writesRequest.error ?? new Error('Failed to inspect prepared Stretch writes.'))
       pagesRequest.onerror = () => reject(pagesRequest.error ?? new Error('Failed to inspect prepared Stretch pages.'))
       transaction.oncomplete = () => {
         for (const row of ownedWrites) {
           if (row.sessionId === sessionId) writeIds.add(row.writeId)
         }
+
         resolve({
           writes: writeIds.size,
           pages: allPages.filter((row) => writeIds.has(row.writeId)).length,
         })
       }
+
       transaction.onerror = () => reject(transaction.error ?? new Error('Failed to inspect prepared Stretch rows.'))
       transaction.onabort = () => reject(transaction.error ?? new Error('Prepared Stretch row inspection aborted.'))
     })
@@ -101,6 +108,7 @@ const countGarbageForWrite = async (writeId: string) => {
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error ?? new Error('Failed to inspect prepared Stretch artifact database.'))
   })
+
   try {
     return await new Promise<{ garbage: number; pages: number }>((resolve, reject) => {
       const transaction = db.transaction(['garbage', 'pages'], 'readonly')
@@ -110,18 +118,24 @@ const countGarbageForWrite = async (writeId: string) => {
       let pages = 0
       garbageRequest.onsuccess = () => {
         const cursor = garbageRequest.result
+
         if (!cursor) return
         const row: { writeId: string } = cursor.value
+
         if (row.writeId === writeId) garbage += 1
         cursor.continue()
       }
+
       pagesRequest.onsuccess = () => {
         const cursor = pagesRequest.result
+
         if (!cursor) return
         const row: { writeId: string } = cursor.value
+
         if (row.writeId === writeId) pages += 1
         cursor.continue()
       }
+
       garbageRequest.onerror = () => reject(garbageRequest.error ?? new Error('Failed to inspect prepared Stretch garbage.'))
       pagesRequest.onerror = () => reject(pagesRequest.error ?? new Error('Failed to inspect prepared Stretch pages.'))
       transaction.oncomplete = () => resolve({ garbage, pages })
@@ -139,6 +153,7 @@ const createDelayedWriteReleaseLockManager = (throwOnRelease = false) => {
   const releaseGate = new Promise<void>((resolve) => { releaseResolve = resolve })
   const releaseStarted = new Promise<void>((resolve) => { releaseStartedResolve = resolve })
   let started = false
+
   const lockManager: PreparedStretchArtifactLockManager = {
     request: async <Value>(
       name: string,
@@ -146,17 +161,22 @@ const createDelayedWriteReleaseLockManager = (throwOnRelease = false) => {
       callback: (lock: { name: string } | null) => Promise<Value>,
     ) => {
       const result = await preparedStretchTestLockManager.request(name, options, callback)
+
       if (options.ifAvailable !== true && name.startsWith('daw-browser-prepared-stretch-write:')) {
         if (!started) {
           started = true
           releaseStartedResolve()
         }
+
         await releaseGate
+
         if (throwOnRelease) throw new Error('Prepared Stretch test lock release failed.')
       }
+
       return result
     },
   }
+
   return {
     lockManager,
     releaseStarted,
@@ -173,6 +193,7 @@ test('stores exact and partial artifact page reads and publishes atomically', as
   const manifest = await write.commit()
   expect(manifest.frameCount).toBe(5)
   const pages = []
+
   for await (const page of repository.read(artifact.artifactId, 1, 4)) pages.push(page)
   expect(pages.flatMap((page) => [...(page.planes[0] ?? [])])).toEqual([1, 2, 3])
   await repository.dispose?.()
@@ -193,6 +214,7 @@ test('rejects invalid ranges and append shapes before storage changes', async ()
   const validWrite = await repository.begin(validationArtifact)
   await validWrite.append([Float32Array.of(0, 1, 2, 3, 4)])
   await validWrite.commit()
+
   for (const range of [
     [Number.NaN, 1],
     [0.5, 1],
@@ -204,12 +226,14 @@ test('rejects invalid ranges and append shapes before storage changes', async ()
     await expect(repository.read(validationArtifact.artifactId, range[0], range[1]).next())
       .rejects.toThrow('read range is invalid')
   }
+
   const write = await repository.begin({ ...artifact, artifactId: `${artifact.artifactId}-append-validation` })
   await expect(write.append([new Float32Array(0)])).rejects.toThrow('PCM page is invalid')
   await expect(write.append([new Float32Array(6)])).rejects.toThrow('exceeds the declared frame count')
   await write.append([Float32Array.of(0, 1, 2, 3, 4)])
   await write.commit()
   const pages = []
+
   for await (const page of repository.read(`${artifact.artifactId}-append-validation`, 4, 5)) pages.push(page)
   expect(pages[0]?.frameCount).toBe(1)
   await repository.dispose?.()
@@ -230,11 +254,13 @@ test('binds committed pages to the winning write generation', async () => {
 
   expect(losingCommit.writeId).toBe(winningManifest.writeId)
   const pages = []
+
   for await (const page of leftRepository.read(artifactId)) pages.push(page)
   expect(pages.flatMap((page) => [...(page.planes[0] ?? [])])).toEqual([2, 2, 2, 2, 2])
 
   await leftRepository.cleanupSession('left-generation')
   const afterLoserCleanup = []
+
   for await (const page of rightRepository.read(artifactId)) afterLoserCleanup.push(page)
   expect(afterLoserCleanup.flatMap((page) => [...(page.planes[0] ?? [])])).toEqual([2, 2, 2, 2, 2])
   await leftRepository.dispose?.()
@@ -243,16 +269,19 @@ test('binds committed pages to the winning write generation', async () => {
 
 test('keeps a live foreign writer past its expiry and reclaims an abandoned writer', async () => {
   let timestamp = 1_000
+
   const liveRepository = createPreparedStretchArtifactRepository({
     sessionId: 'live-writer',
     now: () => timestamp,
     lockManager: preparedStretchTestLockManager,
   })
+
   const observerRepository = createPreparedStretchArtifactRepository({
     sessionId: 'observer',
     now: () => timestamp,
     lockManager: preparedStretchTestLockManager,
   })
+
   const liveArtifact = { ...artifact, artifactId: `${artifact.artifactId}-live` }
   const liveWrite = await liveRepository.begin(liveArtifact)
   await liveWrite.append([Float32Array.of(1, 2)])
@@ -268,11 +297,13 @@ test('keeps a live foreign writer past its expiry and reclaims an abandoned writ
   await liveRepository.cleanupSession('live-writer')
   await observerRepository.cleanupSession('live-writer')
   let resumed = true
+
   try {
     await abandonedWrite.append([Float32Array.of(3, 4, 5)])
   } catch {
     resumed = false
   }
+
   expect(resumed).toBe(false)
   expect(await observerRepository.find(abandonedArtifact.artifactId)).toBeNull()
   await liveRepository.dispose?.()
@@ -281,31 +312,39 @@ test('keeps a live foreign writer past its expiry and reclaims an abandoned writ
 
 test('reclaims more than one batch of empty abandoned writes', async () => {
   const sessionId = `empty-abandoned-${crypto.randomUUID()}`
+
   const repository = createPreparedStretchArtifactRepository({
     sessionId,
     lockManager: preparedStretchTestLockManager,
   })
+
   const writes = []
+
   for (let index = 0; index < 65; index += 1) {
     writes.push(await repository.begin({
       ...artifact,
       artifactId: `${artifact.artifactId}-empty-abandoned-${index}-${crypto.randomUUID()}`,
     }))
   }
+
   await repository.cleanupSession(sessionId)
   expect(await countOwnedRows(sessionId)).toEqual({ writes: 0, pages: 0 })
+
   for (const write of writes) await write.abort()
   await repository.dispose?.()
 })
 
 test.serial('unpublishes before bounded quota cleanup and reclaims remaining garbage later', async () => {
   const pageFrames = 16_384
+
   for (const pageCount of [63, 64, 65]) {
     await deletePreparedStretchDatabase()
+
     const repository = createPreparedStretchArtifactRepository({
       sessionId: `quota-generation-${pageCount}-${crypto.randomUUID()}`,
       lockManager: preparedStretchTestLockManager,
     })
+
     const source: AudioPcmSourceDescriptor = {
       identity: `quota-source-${pageCount}`,
       contentHash: pageCount.toString(16).padStart(64, '0'),
@@ -317,6 +356,7 @@ test.serial('unpublishes before bounded quota cleanup and reclaims remaining gar
       channelCount: 1,
       readPages: async function* () {},
     }
+
     const oldArtifact = createPreparedStretchArtifact({
       source,
       plan: createAudioStretchReadPlan({
@@ -334,7 +374,9 @@ test.serial('unpublishes before bounded quota cleanup and reclaims remaining gar
       overlapFrameCount: 2,
       searchFrameCount: 1,
     })
+
     const oldWrite = await repository.begin(oldArtifact)
+
     for (let index = 0; index < pageCount; index += 1) await oldWrite.append([new Float32Array(pageFrames)])
     const oldManifest = await oldWrite.commit()
     const originalPut = IDBObjectStore.prototype.put
@@ -344,8 +386,10 @@ test.serial('unpublishes before bounded quota cleanup and reclaims remaining gar
         failures -= 1
         throw new DOMException('Quota exceeded.', 'QuotaExceededError')
       }
+
       return originalPut.call(this, value, key)
     }
+
     try {
       const replacementSource: AudioPcmSourceDescriptor = {
         ...source,
@@ -354,6 +398,7 @@ test.serial('unpublishes before bounded quota cleanup and reclaims remaining gar
         durationSec: 1,
         frameCount: pageFrames,
       }
+
       const replacement = createPreparedStretchArtifact({
         source: replacementSource,
         plan: createAudioStretchReadPlan({
@@ -371,6 +416,7 @@ test.serial('unpublishes before bounded quota cleanup and reclaims remaining gar
         overlapFrameCount: 2,
         searchFrameCount: 1,
       })
+
       const replacementWrite = await repository.begin(replacement)
       await replacementWrite.append([new Float32Array(pageFrames)])
       expect(await repository.find(oldArtifact.artifactId)).toBeNull()
@@ -384,6 +430,7 @@ test.serial('unpublishes before bounded quota cleanup and reclaims remaining gar
       expect(replacementManifest.writeId).not.toBe(oldManifest.writeId)
       expect((await repository.find(replacement.artifactId))?.writeId).toBe(replacementManifest.writeId)
       const pages = []
+
       for await (const page of repository.read(replacement.artifactId)) pages.push(page)
       expect(pages).toHaveLength(1)
       expect(pages[0]?.writeId).toBe(replacementManifest.writeId)
@@ -398,11 +445,13 @@ test.serial('unpublishes before bounded quota cleanup and reclaims remaining gar
 
 test.serial('does not evict a leased generation on quota retry', async () => {
   let timestamp = 1_000
+
   const repository = createPreparedStretchArtifactRepository({
     sessionId: 'leased-quota',
     now: () => timestamp,
     lockManager: preparedStretchTestLockManager,
   })
+
   const leasedArtifact = { ...artifact, artifactId: `${artifact.artifactId}-leased-quota` }
   const oldWrite = await repository.begin(leasedArtifact)
   await oldWrite.append([Float32Array.of(1, 2, 3, 4, 5)])
@@ -414,8 +463,10 @@ test.serial('does not evict a leased generation on quota retry', async () => {
   const originalPut = IDBObjectStore.prototype.put
   IDBObjectStore.prototype.put = function (value, key) {
     if (this.name === 'pages') throw new DOMException('Quota exceeded.', 'QuotaExceededError')
+
     return originalPut.call(this, value, key)
   }
+
   try {
     const replacementWrite = await repository.begin({ ...leasedArtifact })
     await replacementWrite.append([Float32Array.of(6, 7, 8, 9, 10)])
@@ -425,6 +476,7 @@ test.serial('does not evict a leased generation on quota retry', async () => {
     IDBObjectStore.prototype.put = originalPut
     await reader.return?.(undefined)
   }
+
   await repository.dispose?.()
 })
 
@@ -433,6 +485,7 @@ test('pins an exact generation until its idempotent lease release', async () => 
     sessionId: `lease-generation-${crypto.randomUUID()}`,
     lockManager: preparedStretchTestLockManager,
   })
+
   const published = await repository.begin({ ...artifact, artifactId: `${artifact.artifactId}-pin` })
   await published.append([Float32Array.of(1, 2, 3, 4, 5)])
   const manifest = await published.commit()
@@ -454,11 +507,13 @@ test('reads a retained generation while its shared lease remains held', async ()
     sessionId: `lease-read-${crypto.randomUUID()}`,
     lockManager: preparedStretchTestLockManager,
   })
+
   const write = await repository.begin({ ...artifact, artifactId: `${artifact.artifactId}-lease-read` })
   await write.append([Float32Array.of(1, 2, 3, 4, 5)])
   const manifest = await write.commit()
   const lease = await repository.acquireLease(manifest)
   const pages = []
+
   for await (const page of repository.read(manifest.artifactId)) pages.push(page)
   expect(pages.flatMap((page) => [...(page.planes[0] ?? [])])).toEqual([1, 2, 3, 4, 5])
   await lease.release()
@@ -470,6 +525,7 @@ test('allows shared readers but blocks replacement until every reader releases',
     sessionId: `shared-readers-${crypto.randomUUID()}`,
     lockManager: preparedStretchTestLockManager,
   })
+
   const artifactId = `${artifact.artifactId}-shared-readers`
   const write = await repository.begin({ ...artifact, artifactId })
   await write.append([Float32Array.of(1, 2, 3, 4, 5)])
@@ -494,11 +550,13 @@ test('allows shared readers but blocks replacement until every reader releases',
 
 test('persists a finite lease recovery deadline and reclaims a failed release', async () => {
   let timestamp = 1_000
+
   const repository = createPreparedStretchArtifactRepository({
     sessionId: `lease-release-failure-${crypto.randomUUID()}`,
     now: () => timestamp,
     lockManager: preparedStretchTestLockManager,
   })
+
   const artifactId = `${artifact.artifactId}-lease-release-failure`
   const write = await repository.begin({ ...artifact, artifactId })
   await write.append([Float32Array.of(1, 2, 3, 4, 5)])
@@ -511,8 +569,10 @@ test('persists a finite lease recovery deadline and reclaims a failed release', 
       deleteFailures -= 1
       throw new Error('Injected lease deletion failure.')
     }
+
     return originalDelete.call(this, key)
   }
+
   try {
     await lease.release()
   } finally {
@@ -530,11 +590,13 @@ test('persists a finite lease recovery deadline and reclaims a failed release', 
 
 test('does not reclaim a live shared owner after its persisted deadline', async () => {
   let timestamp = 1_000
+
   const repository = createPreparedStretchArtifactRepository({
     sessionId: `live-lease-${crypto.randomUUID()}`,
     now: () => timestamp,
     lockManager: preparedStretchTestLockManager,
   })
+
   const artifactId = `${artifact.artifactId}-live-lease`
   const write = await repository.begin({ ...artifact, artifactId })
   await write.append([Float32Array.of(1, 2, 3, 4, 5)])
@@ -559,39 +621,51 @@ test('packs every source append into fixed pages and preserves the tail range', 
     sessionId: `packing-${crypto.randomUUID()}`,
     lockManager: preparedStretchTestLockManager,
   })
+
   const packingArtifact = {
     ...artifact,
     artifactId: `${artifact.artifactId}-packing-${crypto.randomUUID()}`,
     output: { ...artifact.output, frameCount: 16_386 },
   }
+
   const write = await repository.begin(packingArtifact)
   await write.append([Float32Array.from({ length: 2 }, (_, index) => index)])
   await write.append([Float32Array.from({ length: 16_384 }, (_, index) => index + 2)])
   await write.commit()
 
   const pages = []
+
   for await (const page of repository.read(packingArtifact.artifactId)) pages.push(page)
   expect(pages.map((page) => [page.startFrame, page.frameCount])).toEqual([[0, 16_384], [16_384, 2]])
   const tail = []
+
   for await (const page of repository.read(packingArtifact.artifactId, 16_385, 16_386)) {
     tail.push(...(page.planes[0] ?? []))
   }
+
   expect(tail).toEqual([16_385])
   const boundary = []
+
   for await (const page of repository.read(packingArtifact.artifactId, 16_383, 16_386)) {
     boundary.push(...(page.planes[0] ?? []))
   }
+
   expect(boundary).toEqual([16_383, 16_384, 16_385])
+
   const variedArtifact = {
     ...packingArtifact,
     artifactId: `${packingArtifact.artifactId}-varied`,
   }
+
   const variedWrite = await repository.begin(variedArtifact)
+
   for (const chunk of [1, 3, 7, 16_373, 1, 1]) {
     await variedWrite.append([Float32Array.from({ length: chunk }, (_, index) => index)])
   }
+
   await variedWrite.commit()
   const variedPages = []
+
   for await (const page of repository.read(variedArtifact.artifactId)) variedPages.push(page)
   expect(variedPages.map((page) => page.frameCount)).toEqual([16_384, 2])
   await repository.dispose?.()
@@ -599,14 +673,17 @@ test('packs every source append into fixed pages and preserves the tail range', 
 
 test('namespaces session artifacts and cleanup by session ownership', async () => {
   const artifactId = `${artifact.artifactId}-session-${crypto.randomUUID()}`
+
   const left = createPreparedStretchArtifactRepository({
     sessionId: 'session-left',
     lockManager: preparedStretchTestLockManager,
   })
+
   const right = createPreparedStretchArtifactRepository({
     sessionId: 'session-right',
     lockManager: preparedStretchTestLockManager,
   })
+
   const sessionArtifact = { ...artifact, artifactId, persistable: false }
   const write = await left.begin(sessionArtifact)
   await write.append([Float32Array.of(1, 2, 3, 4, 5)])
@@ -625,6 +702,7 @@ test('disposal invalidates a writer before commit or append can publish', async 
     sessionId: `dispose-${crypto.randomUUID()}`,
     lockManager: preparedStretchTestLockManager,
   })
+
   const disposableArtifact = { ...artifact, artifactId: `${artifact.artifactId}-dispose-${crypto.randomUUID()}` }
   const write = await repository.begin(disposableArtifact)
   await write.append([Float32Array.of(1, 2)])
@@ -638,14 +716,17 @@ test('disposal invalidates a writer before commit or append can publish', async 
 test('disposal waits for commit cleanup and shares its completion promise', async () => {
   const delayed = createDelayedWriteReleaseLockManager()
   const sessionId = `dispose-delayed-${crypto.randomUUID()}`
+
   const repository = createPreparedStretchArtifactRepository({
     sessionId,
     lockManager: delayed.lockManager,
   })
+
   const observer = createPreparedStretchArtifactRepository({
     sessionId: `dispose-delayed-observer-${crypto.randomUUID()}`,
     lockManager: preparedStretchTestLockManager,
   })
+
   const disposableArtifact = { ...artifact, artifactId: `${artifact.artifactId}-dispose-delayed-${crypto.randomUUID()}` }
   const write = await repository.begin(disposableArtifact)
   await write.append([Float32Array.of(1, 2, 3, 4, 5)])
@@ -667,14 +748,17 @@ test('disposal waits for commit cleanup and shares its completion promise', asyn
 test('continues cleanup when lock release throws after durable publication', async () => {
   const delayed = createDelayedWriteReleaseLockManager(true)
   const sessionId = `dispose-release-error-${crypto.randomUUID()}`
+
   const repository = createPreparedStretchArtifactRepository({
     sessionId,
     lockManager: delayed.lockManager,
   })
+
   const observer = createPreparedStretchArtifactRepository({
     sessionId: `dispose-release-error-observer-${crypto.randomUUID()}`,
     lockManager: preparedStretchTestLockManager,
   })
+
   const disposableArtifact = { ...artifact, artifactId: `${artifact.artifactId}-dispose-release-error-${crypto.randomUUID()}` }
   const write = await repository.begin(disposableArtifact)
   await write.append([Float32Array.of(1, 2, 3, 4, 5)])
@@ -691,14 +775,17 @@ test('continues cleanup when lock release throws after durable publication', asy
 test('rejects a publication intercepted before transaction completion', async () => {
   await deletePreparedStretchDatabase()
   const sessionId = `dispose-publication-${crypto.randomUUID()}`
+
   const repository = createPreparedStretchArtifactRepository({
     sessionId,
     lockManager: preparedStretchTestLockManager,
   })
+
   const observer = createPreparedStretchArtifactRepository({
     sessionId: `dispose-observer-${crypto.randomUUID()}`,
     lockManager: preparedStretchTestLockManager,
   })
+
   const disposableArtifact = { ...artifact, artifactId: `${artifact.artifactId}-dispose-publication-${crypto.randomUUID()}` }
   const write = await repository.begin(disposableArtifact)
   await write.append([Float32Array.of(1, 2, 3, 4, 5)])
@@ -710,6 +797,7 @@ test('rejects a publication intercepted before transaction completion', async ()
   const manifestPutBarrier = new Promise<void>((resolve) => { barrierResolve = resolve })
   IDBObjectStore.prototype.put = function (value, key) {
     const request = originalPut.call(this, value, key)
+
     if (this.name === 'manifests' && !intercepted) {
       intercepted = true
       queueMicrotask(() => {
@@ -717,8 +805,10 @@ test('rejects a publication intercepted before transaction completion', async ()
         barrierResolve()
       })
     }
+
     return request
   }
+
   try {
     const commit = write.commit()
     await manifestPutBarrier
@@ -738,19 +828,24 @@ test('rejects a publication intercepted before transaction completion', async ()
 test('aborts pending publication without removing a concurrent same-artifact winner', async () => {
   await deletePreparedStretchDatabase()
   const artifactId = `${artifact.artifactId}-dispose-publication-${crypto.randomUUID()}`
+
   const winner = createPreparedStretchArtifactRepository({
     sessionId: `winner-${crypto.randomUUID()}`,
     lockManager: preparedStretchTestLockManager,
   })
+
   const loserSessionId = `loser-${crypto.randomUUID()}`
+
   const loser = createPreparedStretchArtifactRepository({
     sessionId: loserSessionId,
     lockManager: preparedStretchTestLockManager,
   })
+
   const observer = createPreparedStretchArtifactRepository({
     sessionId: `observer-${crypto.randomUUID()}`,
     lockManager: preparedStretchTestLockManager,
   })
+
   const winnerWrite = await winner.begin({ ...artifact, artifactId })
   await winnerWrite.append([Float32Array.of(1, 2, 3, 4, 5)])
   const loserWrite = await loser.begin({ ...artifact, artifactId })
@@ -764,6 +859,7 @@ test('aborts pending publication without removing a concurrent same-artifact win
   const manifestPutBarrier = new Promise<void>((resolve) => { barrierResolve = resolve })
   IDBObjectStore.prototype.put = function (value, key) {
     const request = originalPut.call(this, value, key)
+
     if (this.name === 'manifests' && !intercepted) {
       intercepted = true
       queueMicrotask(() => {
@@ -772,13 +868,16 @@ test('aborts pending publication without removing a concurrent same-artifact win
         barrierResolve()
       })
     }
+
     return request
   }
+
   try {
     const loserCommit = loserWrite.commit()
     await manifestPutBarrier
     await expect(loserCommit).rejects.toThrow()
     await disposing
+
     if (!winnerCommit) throw new Error('Expected the concurrent winner commit.')
     const winnerManifest = await winnerCommit
     expect((await observer.find(artifactId))?.writeId).toBe(winnerManifest.writeId)
@@ -798,21 +897,25 @@ test.serial('fails closed without cross-realm Web Locks before creating artifact
   const navigatorObject = globalThis.navigator
   const locksDescriptor = Object.getOwnPropertyDescriptor(navigatorObject, 'locks')
   Object.defineProperty(navigatorObject, 'locks', { value: undefined, configurable: true })
+
   try {
     const repository = createPreparedStretchArtifactRepository({
       sessionId: `no-locks-${crypto.randomUUID()}`,
     })
+
     await expect(repository.begin({ ...artifact, artifactId: `${artifact.artifactId}-no-locks-${crypto.randomUUID()}` }))
       .rejects.toThrow('Web Locks are required')
   } finally {
     if (locksDescriptor) Object.defineProperty(navigatorObject, 'locks', locksDescriptor)
     else Object.defineProperty(navigatorObject, 'locks', { value: undefined, configurable: true })
+
     if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor)
   }
 })
 
 test.serial('continues eviction past the first 64 locked candidates', async () => {
   const blocked = new Set<string>()
+
   const lockManager: PreparedStretchArtifactLockManager = {
     request: <Value>(
       name: string,
@@ -820,25 +923,31 @@ test.serial('continues eviction past the first 64 locked candidates', async () =
       callback: (lock: { name: string } | null) => Promise<Value>,
     ) => {
       if (options.ifAvailable === true && blocked.has(name)) return callback(null)
+
       return preparedStretchTestLockManager.request(name, options, callback)
     },
   }
+
   const repository = createPreparedStretchArtifactRepository({
     sessionId: `eviction-${crypto.randomUUID()}`,
     lockManager,
   })
+
   const pageFrames = 16_384
   const artifacts = []
+
   for (let index = 0; index < 65; index += 1) {
     const candidate = {
       ...artifact,
       artifactId: `000-evict-${index.toString().padStart(3, '0')}-${crypto.randomUUID()}`,
       output: { ...artifact.output, frameCount: pageFrames },
     }
+
     const write = await repository.begin(candidate)
     await write.append([new Float32Array(pageFrames)])
     const manifest = await write.commit()
     artifacts.push({ candidate, manifest })
+
     if (index < 64) blocked.add(`daw-browser-prepared-stretch-write:${manifest.writeId}`)
   }
 
@@ -849,10 +958,13 @@ test.serial('continues eviction past the first 64 locked candidates', async () =
       failures -= 1
       throw new DOMException('Quota exceeded.', 'QuotaExceededError')
     }
+
     return originalPut.call(this, value, key)
   }
+
   try {
     const last = artifacts[64]
+
     if (!last) throw new Error('Expected the final eviction candidate.')
     const replacement = await repository.begin(last.candidate)
     await replacement.append([new Float32Array(pageFrames)])

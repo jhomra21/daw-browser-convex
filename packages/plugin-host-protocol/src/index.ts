@@ -20,11 +20,14 @@ export const nativeVst3WorkerTransportAbiVersion = 7
 const requestIdSchema = z.string().min(1).max(96).regex(/^[A-Za-z0-9._-]+$/)
 const uuidSchema = z.string().uuid()
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/)
+
 const unsigned64DecimalSchema = z.string().min(1).max(20).regex(/^[1-9][0-9]*$/)
   .refine((value) => BigInt(value) <= 0xffff_ffff_ffff_ffffn, 'Native graph node ID exceeds uint64.')
+
 const finiteNumber = z.number().finite()
 const scannerText = z.string().min(1).max(256)
 const scannerPath = z.string().min(1).max(4096)
+
 const compatibilitySchema = z.object({
   minimum: z.number().int().positive(),
   maximum: z.number().int().positive(),
@@ -42,6 +45,7 @@ export const pluginIdentitySchema = z.object({
   discoveredPath: z.string().min(1).max(4096).optional(),
   binaryFingerprint: sha256Schema,
 }).strict()
+
 export type PluginIdentity = z.infer<typeof pluginIdentitySchema>
 
 const busSchema = z.object({
@@ -64,10 +68,12 @@ export const pluginParameterDescriptorSchema = z.object({
   if (value.minimum > value.maximum) {
     context.addIssue({ code: 'custom', message: 'Parameter minimum exceeds maximum.' })
   }
+
   if (value.defaultValue < value.minimum || value.defaultValue > value.maximum) {
     context.addIssue({ code: 'custom', message: 'Parameter default is outside its range.' })
   }
 })
+
 export type PluginParameterDescriptor = z.infer<typeof pluginParameterDescriptorSchema>
 
 export const pluginManifestSchema = z.object({
@@ -84,6 +90,7 @@ export const pluginManifestSchema = z.object({
   supportsEditor: z.boolean(),
   supportsState: z.boolean(),
 }).strict()
+
 export type PluginManifest = z.infer<typeof pluginManifestSchema>
 
 export const vst3ScannerClassResultSchema = z.object({
@@ -95,6 +102,7 @@ export const vst3ScannerClassResultSchema = z.object({
   source: z.enum(['moduleinfo', 'factory']),
   sdkVersion: z.string().max(128).optional(),
 }).strict()
+
 export type Vst3ScannerClassResult = z.infer<typeof vst3ScannerClassResultSchema>
 
 const scannerEnvelopeSchemaV2 = z.object({
@@ -107,6 +115,7 @@ export const vst3ScannerRequestSchemaV2 = scannerEnvelopeSchemaV2.extend({
   type: z.literal('scan'),
   bundlePath: scannerPath,
 }).strict()
+
 export type Vst3ScannerRequestV2 = z.infer<typeof vst3ScannerRequestSchemaV2>
 
 export const vst3ScannerResponseSchemaV2 = z.discriminatedUnion('type', [
@@ -123,12 +132,14 @@ export const vst3ScannerResponseSchemaV2 = z.discriminatedUnion('type', [
     message: z.string().min(1).max(512),
   }).strict(),
 ])
+
 export type Vst3ScannerResponseV2 = z.infer<typeof vst3ScannerResponseSchemaV2>
 
 export const parseVst3ScannerRequestV2 = (raw: string): Vst3ScannerRequestV2 => {
   if (new TextEncoder().encode(raw).byteLength > maxPluginHostControlFrameBytes) {
     throw new Error('Plugin host control frame exceeds the maximum size.')
   }
+
   return vst3ScannerRequestSchemaV2.parse(JSON.parse(raw))
 }
 
@@ -136,6 +147,7 @@ export const parseVst3ScannerResponseV2 = (raw: string): Vst3ScannerResponseV2 =
   if (new TextEncoder().encode(raw).byteLength > maxPluginHostControlFrameBytes) {
     throw new Error('Plugin host control frame exceeds the maximum size.')
   }
+
   return vst3ScannerResponseSchemaV2.parse(JSON.parse(raw))
 }
 
@@ -149,6 +161,7 @@ export const opaquePluginStateMetadataSchema = z.object({
   bucket: z.enum(['local', 'r2-plugin-artifacts']),
   location: z.string().min(1).max(1024),
 }).strict()
+
 export type OpaquePluginStateMetadata = z.infer<typeof opaquePluginStateMetadataSchema>
 
 export const pluginHealthSchema = z.object({
@@ -156,6 +169,7 @@ export const pluginHealthSchema = z.object({
   reason: z.string().min(1).max(512).optional(),
   updatedAt: z.number().int().nonnegative(),
 }).strict()
+
 export type PluginHealth = z.infer<typeof pluginHealthSchema>
 
 const controlEnvelopeSchema = z.object({
@@ -179,20 +193,24 @@ export const pluginHostRequestSchema = z.discriminatedUnion('type', [
     if (value.action === 'load' && !value.metadata) context.addIssue({ code: 'custom', message: 'Loading state requires metadata, not state bytes.' })
   }),
 ])
+
 export type PluginHostRequest = z.infer<typeof pluginHostRequestSchema>
 
 export const pluginHostResponseSchema = z.discriminatedUnion('type', [
   controlEnvelopeSchema.extend({ type: z.literal('ok'), instanceId: uuidSchema.optional(), manifest: pluginManifestSchema.optional(), state: opaquePluginStateMetadataSchema.optional() }).strict(),
   controlEnvelopeSchema.extend({ type: z.literal('error'), code: z.enum(['invalid-request', 'unsupported', 'not-found', 'timeout', 'faulted', 'unavailable']), message: z.string().min(1).max(512) }).strict(),
 ])
+
 export type PluginHostResponse = z.infer<typeof pluginHostResponseSchema>
 
 export const parsePluginHostControlFrame = (raw: string): PluginHostRequest => {
   if (new TextEncoder().encode(raw).byteLength > maxPluginHostControlFrameBytes) {
     throw new Error('Plugin host control frame exceeds the maximum size.')
   }
+
   const request = pluginHostRequestSchema.parse(JSON.parse(raw))
   const compatibility = request.compatibility
+
   if (
     request.version < compatibility.minimum
     || request.version > compatibility.maximum
@@ -201,6 +219,7 @@ export const parsePluginHostControlFrame = (raw: string): PluginHostRequest => {
   ) {
     throw new Error('Plugin host control frame has incompatible protocol compatibility.')
   }
+
   return request
 }
 
@@ -228,8 +247,10 @@ export const nativeVst3WorkerFaultOrigins = Object.freeze({
   controlIoFailure: 15,
   launchNotTrusted: 16,
 })
+
 export const nativeVst3ZeroDiagnosticFaultOrigin = nativeVst3WorkerFaultOrigins.workerNotification
 export const nativeVst3LaunchNotTrustedFaultOrigin = nativeVst3WorkerFaultOrigins.launchNotTrusted
+
 export const nativeVst3PluginFaultOrigins: ReadonlySet<number> = new Set([
   nativeVst3WorkerFaultOrigins.childExit,
   nativeVst3WorkerFaultOrigins.childSignal,
@@ -277,6 +298,7 @@ export const vst3WorkerTransportDescriptorSchema = z.object({
   outputChannels: z.number().int().min(1).max(maxVst3WorkerChannels),
   maximumEventsPerBlock: z.number().int().min(0).max(maxVst3WorkerEventsPerBlock),
 }).strict()
+
 export type Vst3WorkerTransportDescriptor = z.infer<typeof vst3WorkerTransportDescriptorSchema>
 
 const nativeExternalWorkerTransportDimensionsSchema = z.object({
@@ -295,6 +317,7 @@ const nativeVst3WorkerArtifactIdentitySchema = z.object({
   id: z.literal(nativeVst3WorkerArtifactId),
   version: z.literal(nativeVst3WorkerArtifactVersion),
 }).strict()
+
 export type NativeVst3WorkerArtifactIdentity = z.infer<typeof nativeVst3WorkerArtifactIdentitySchema>
 
 export const nativeVst3WorkerManifestSchema = z.object({
@@ -319,22 +342,28 @@ export const nativeVst3WorkerManifestSchema = z.object({
   const inputChannels = value.inputBuses
     .filter((bus) => bus.enabled)
     .reduce((channels, bus) => channels + bus.channels, 0)
+
   const outputChannels = value.outputBuses
     .filter((bus) => bus.enabled)
     .reduce((channels, bus) => channels + bus.channels, 0)
+
   if (inputChannels !== value.transport.inputChannels) {
     context.addIssue({ code: 'custom', path: ['transport', 'inputChannels'], message: 'Worker transport input channels do not match enabled input buses.' })
   }
+
   if (outputChannels !== value.transport.outputChannels) {
     context.addIssue({ code: 'custom', path: ['transport', 'outputChannels'], message: 'Worker transport output channels do not match enabled output buses.' })
   }
+
   if (value.role === 'instrument' && inputChannels !== 0) {
     context.addIssue({ code: 'custom', path: ['inputBuses'], message: 'Instrument workers must not expose enabled audio input buses.' })
   }
+
   if (value.role === 'effect' && inputChannels === 0) {
     context.addIssue({ code: 'custom', path: ['inputBuses'], message: 'Effect workers must expose an enabled audio input bus.' })
   }
 })
+
 export type NativeVst3WorkerManifest = z.infer<typeof nativeVst3WorkerManifestSchema>
 
 export const nativeVst3WorkerHelloSchema = z.object({
@@ -343,6 +372,7 @@ export const nativeVst3WorkerHelloSchema = z.object({
   instanceId: uuidSchema,
   manifest: nativeVst3WorkerManifestSchema,
 }).strict()
+
 export type NativeVst3WorkerHello = z.infer<typeof nativeVst3WorkerHelloSchema>
 
 export const encodeNativeVst3WorkerHello = (hello: NativeVst3WorkerHello): string => (
@@ -353,6 +383,7 @@ export const decodeNativeVst3WorkerHello = (raw: string): NativeVst3WorkerHello 
   if (new TextEncoder().encode(raw).byteLength > maxPluginHostControlFrameBytes) {
     throw new Error('Native VST3 worker hello exceeds the maximum size.')
   }
+
   return nativeVst3WorkerHelloSchema.parse(JSON.parse(raw))
 }
 
@@ -372,6 +403,7 @@ export const nativeVst3PreflightRequestSchema = z.object({
   requestId: requestIdSchema,
   requirements: nativeVst3PreflightRequirementsSchema,
 }).strict()
+
 export type NativeVst3PreflightRequest = z.infer<typeof nativeVst3PreflightRequestSchema>
 
 const nativeVst3PreflightResultEnvelopeSchema = z.object({
@@ -392,6 +424,7 @@ export const nativeVst3PreflightResultSchema = z.discriminatedUnion('status', [
     message: z.string().min(1).max(512),
   }).strict(),
 ])
+
 export type NativeVst3PreflightResult = z.infer<typeof nativeVst3PreflightResultSchema>
 
 export const encodeNativeVst3PreflightRequest = (request: NativeVst3PreflightRequest): string => (
@@ -402,6 +435,7 @@ export const decodeNativeVst3PreflightRequest = (raw: string): NativeVst3Preflig
   if (new TextEncoder().encode(raw).byteLength > maxPluginHostControlFrameBytes) {
     throw new Error('Native VST3 preflight request exceeds the maximum size.')
   }
+
   return nativeVst3PreflightRequestSchema.parse(JSON.parse(raw))
 }
 
@@ -413,6 +447,7 @@ export const decodeNativeVst3PreflightResult = (raw: string): NativeVst3Prefligh
   if (new TextEncoder().encode(raw).byteLength > maxPluginHostControlFrameBytes) {
     throw new Error('Native VST3 preflight result exceeds the maximum size.')
   }
+
   return nativeVst3PreflightResultSchema.parse(JSON.parse(raw))
 }
 
@@ -425,12 +460,14 @@ export const nativeVst3CatalogReferenceSchema = z.object({
   binaryFingerprint: sha256Schema,
   scannerCatalogVersion: z.literal(vst3WorkerProtocolVersion),
 }).strict()
+
 export type NativeVst3CatalogReference = z.infer<typeof nativeVst3CatalogReferenceSchema>
 
 export const nativeVst3InsertionPreflightRequestSchema = z.object({
   instanceId: uuidSchema,
   reference: nativeVst3CatalogReferenceSchema,
 }).strict()
+
 export type NativeVst3InsertionPreflightRequest = z.infer<typeof nativeVst3InsertionPreflightRequestSchema>
 
 export const nativeVst3InsertionFailureCodeSchema = z.enum([
@@ -446,6 +483,7 @@ export const nativeVst3InsertionFailureCodeSchema = z.enum([
   'worker-crashed',
   'worker-invalid-response',
 ])
+
 export type NativeVst3InsertionFailureCode = z.infer<typeof nativeVst3InsertionFailureCodeSchema>
 
 const nativeVst3InsertionManifestSchema = z.object({
@@ -471,6 +509,7 @@ export const nativeVst3InsertionPreflightResultSchema = z.discriminatedUnion('ok
     message: z.string().min(1).max(512),
   }).strict(),
 ])
+
 export type NativeVst3InsertionPreflightResult = z.infer<typeof nativeVst3InsertionPreflightResultSchema>
 
 /**
@@ -514,6 +553,7 @@ const nativeExternalAttachmentFields = {
 } as const
 
 const nativeExternalAttachmentSchemaV1 = z.object(nativeExternalAttachmentFields).strict()
+
 const nativeExternalAttachmentSchemaV2 = z.object({
   ...nativeExternalAttachmentFields,
   stageIndex: z.number().int().nonnegative().max(0x7fffffff),
@@ -530,13 +570,16 @@ const validateNativeExternalAttachmentPlan = (
   const instanceIds = new Set<string>()
   const chains = new Map<string, Array<{ index: number; nativeGraphNodeId: string; role: 'effect' | 'instrument' }>>()
   const graphNodeByNativeId = new Map<string, string>()
+
   for (const [index, attachment] of value.attachments.entries()) {
     const inputChannels = attachment.inputBuses
       .filter((bus) => bus.enabled)
       .reduce((channels, bus) => channels + bus.channels, 0)
+
     const outputChannels = attachment.outputBuses
       .filter((bus) => bus.enabled)
       .reduce((channels, bus) => channels + bus.channels, 0)
+
     if (inputChannels !== attachment.workerTransport.inputChannels) {
       context.addIssue({
         code: 'custom',
@@ -544,6 +587,7 @@ const validateNativeExternalAttachmentPlan = (
         message: 'External attachment transport input channels do not match enabled input buses.',
       })
     }
+
     if (outputChannels !== attachment.workerTransport.outputChannels) {
       context.addIssue({
         code: 'custom',
@@ -551,6 +595,7 @@ const validateNativeExternalAttachmentPlan = (
         message: 'External attachment transport output channels do not match enabled output buses.',
       })
     }
+
     if (attachment.role === 'instrument' && inputChannels !== 0) {
       context.addIssue({
         code: 'custom',
@@ -558,6 +603,7 @@ const validateNativeExternalAttachmentPlan = (
         message: 'Instrument attachments must not expose enabled audio input buses.',
       })
     }
+
     if (attachment.role === 'instrument'
       && attachment.sourceIndex !== undefined
       && attachment.sourceIndex !== 0) {
@@ -567,6 +613,7 @@ const validateNativeExternalAttachmentPlan = (
         message: 'Instrument attachments must identify source index zero.',
       })
     }
+
     if (attachment.role === 'effect' && attachment.sourceIndex !== undefined) {
       context.addIssue({
         code: 'custom',
@@ -574,6 +621,7 @@ const validateNativeExternalAttachmentPlan = (
         message: 'Effect attachments must not identify an instrument source.',
       })
     }
+
     if (attachment.role === 'effect' && inputChannels === 0) {
       context.addIssue({
         code: 'custom',
@@ -581,6 +629,7 @@ const validateNativeExternalAttachmentPlan = (
         message: 'Effect attachments must expose an enabled audio input bus.',
       })
     }
+
     if (instanceIds.has(attachment.instanceId)) {
       context.addIssue({
         code: 'custom',
@@ -588,8 +637,10 @@ const validateNativeExternalAttachmentPlan = (
         message: 'External attachment instance IDs must be unique.',
       })
     }
+
     instanceIds.add(attachment.instanceId)
     const chain = chains.get(attachment.graphNodeId) ?? []
+
     if (chain.some((candidate) => candidate.role === attachment.role && candidate.index === attachment.stageIndex)) {
       context.addIssue({
         code: 'custom',
@@ -597,6 +648,7 @@ const validateNativeExternalAttachmentPlan = (
         message: 'External attachment chain indexes must be unique per graph node.',
       })
     }
+
     if (chain.some((candidate) => candidate.nativeGraphNodeId !== attachment.nativeGraphNodeId)) {
       context.addIssue({
         code: 'custom',
@@ -604,7 +656,9 @@ const validateNativeExternalAttachmentPlan = (
         message: 'External attachments on one graph node must share its native graph node ID.',
       })
     }
+
     const existingGraphNode = graphNodeByNativeId.get(attachment.nativeGraphNodeId)
+
     if (existingGraphNode !== undefined && existingGraphNode !== attachment.graphNodeId) {
       context.addIssue({
         code: 'custom',
@@ -612,6 +666,7 @@ const validateNativeExternalAttachmentPlan = (
         message: 'Native graph node IDs must identify only one graph node.',
       })
     }
+
     graphNodeByNativeId.set(attachment.nativeGraphNodeId, attachment.graphNodeId)
     chain.push({
       index: attachment.role === 'instrument' ? (attachment.sourceIndex ?? 0) : attachment.stageIndex,
@@ -638,6 +693,7 @@ export const nativeExternalAttachmentPlanSchema = z.union([
   nativeExternalAttachmentPlanSchemaV1,
   nativeExternalAttachmentPlanSchemaV2,
 ])
+
 export type NativeExternalAttachmentPlan = z.infer<typeof nativeExternalAttachmentPlanSchema>
 
 export const encodeNativeExternalAttachmentPlan = (plan: NativeExternalAttachmentPlan): string => (
@@ -648,6 +704,7 @@ export const decodeNativeExternalAttachmentPlan = (raw: string): NativeExternalA
   if (new TextEncoder().encode(raw).byteLength > maxPluginHostControlFrameBytes) {
     throw new Error('Native external attachment plan exceeds the maximum size.')
   }
+
   return nativeExternalAttachmentPlanSchema.parse(JSON.parse(raw))
 }
 
@@ -657,6 +714,7 @@ const workerStateTransferSchema = z.object({
   bytesBase64: z.string().max(Math.ceil(maxVst3WorkerStateBytes / 3) * 4).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
 }).strict().superRefine((value, context) => {
   const padding = value.bytesBase64.endsWith('==') ? 2 : value.bytesBase64.endsWith('=') ? 1 : 0
+
   if ((value.bytesBase64.length / 4) * 3 - padding !== value.byteLength) {
     context.addIssue({ code: 'custom', message: 'State byte length does not match base64 payload.' })
   }
@@ -677,6 +735,7 @@ export const vst3WorkerControlRequestSchemaV2 = z.discriminatedUnion('type', [
   }),
   workerEnvelopeSchemaV2.extend({ type: z.literal('events'), instanceId: uuidSchema, events: z.array(workerEventSchema).max(maxVst3WorkerEventsPerBlock) }).strict(),
 ])
+
 export type Vst3WorkerControlRequestV2 = z.infer<typeof vst3WorkerControlRequestSchemaV2>
 
 export const vst3WorkerNotificationSchemaV2 = z.discriminatedUnion('type', [
@@ -687,15 +746,19 @@ export const vst3WorkerNotificationSchemaV2 = z.discriminatedUnion('type', [
   workerEnvelopeSchemaV2.extend({ type: z.literal('health'), instanceId: uuidSchema, health: pluginHealthSchema }).strict(),
   workerEnvelopeSchemaV2.extend({ type: z.literal('fault'), instanceId: uuidSchema.optional(), code: z.enum(['invalid-request', 'transport', 'timeout', 'launch', 'state', 'faulted']), message: z.string().min(1).max(512) }).strict(),
 ])
+
 export type Vst3WorkerNotificationV2 = z.infer<typeof vst3WorkerNotificationSchemaV2>
 
 export const parseVst3WorkerControlRequestV2 = (raw: string): Vst3WorkerControlRequestV2 => {
   if (new TextEncoder().encode(raw).byteLength > maxPluginHostControlFrameBytes) {
     throw new Error('Plugin host control frame exceeds the maximum size.')
   }
+
   const request = vst3WorkerControlRequestSchemaV2.parse(JSON.parse(raw))
+
   if (request.compatibility.minimum > vst3WorkerProtocolVersion || request.compatibility.maximum < vst3WorkerProtocolVersion) {
     throw new Error('VST3 worker control frame has incompatible protocol compatibility.')
   }
+
   return request
 }

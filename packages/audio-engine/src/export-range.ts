@@ -15,17 +15,21 @@ export const getExportRangeBounds = (
 ): ExportRangeBounds => {
   if (range.mode !== 'whole') {
     const startSec = Math.max(0, range.startSec)
+
     return {
       startSec,
       endSec: Math.max(startSec + 0.001, range.endSec),
     }
   }
+
   let endSec = 0.001
+
   for (const track of tracks) {
     for (const clip of track.clips) {
       endSec = Math.max(endSec, clip.startSec + clip.duration)
     }
   }
+
   return { startSec: 0, endSec }
 }
 
@@ -34,5 +38,6 @@ export const getExportRangeDuration = (
   range: ExportRange,
 ): number => {
   const bounds = getExportRangeBounds(tracks, range)
+
   return bounds.endSec - bounds.startSec
 }

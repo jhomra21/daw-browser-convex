@@ -4,9 +4,11 @@ import { createImportJobQueue } from "./import-job-queue"
 test("keeps accepted imports independent from the request lifetime", async () => {
   const queue = createImportJobQueue(() => "import-1")
   const release = Promise.withResolvers<void>()
+
   const submitted = queue.submit("audio.wav", async (signal) => {
     await release.promise
     signal.throwIfAborted()
+
     return { outcomes: [{ fileName: "audio.wav", status: "created", assetId: "asset-1", clipId: "clip-1" }] }
   })
 
@@ -22,11 +24,14 @@ test("keeps accepted imports independent from the request lifetime", async () =>
 test("cancels queued and active imports", async () => {
   const queue = createImportJobQueue(() => "import-1")
   const first = Promise.withResolvers<void>()
+
   const active = queue.submit("active.wav", async (signal) => {
     await first.promise
     signal.throwIfAborted()
+
     return { outcomes: [] }
   })
+
   await Promise.resolve()
   const queued = queue.submit("queued.wav", async () => ({ outcomes: [] }))
   queue.cancel(queued.id)
@@ -41,11 +46,14 @@ test("cancels queued and active imports", async () => {
 test("cancels every queued and active import during project transition", async () => {
   const queue = createImportJobQueue(() => `import-${crypto.randomUUID()}`)
   const release = Promise.withResolvers<void>()
+
   const active = queue.submit("active.wav", async (signal) => {
     await release.promise
     signal.throwIfAborted()
+
     return { outcomes: [] }
   })
+
   await Promise.resolve()
   const queued = queue.submit("queued.wav", async () => ({ outcomes: [] }))
 
@@ -61,6 +69,7 @@ test("cancels every queued and active import during project transition", async (
 test("retains active jobs while bounding terminal history", async () => {
   let nextId = 0
   const queue = createImportJobQueue(() => `import-${++nextId}`)
+
   const completions = Array.from({ length: 17 }, (_, index) => queue.submit(
     `audio-${index}.wav`,
     async () => ({ outcomes: [{ fileName: `audio-${index}.wav`, status: "failed" }] }),

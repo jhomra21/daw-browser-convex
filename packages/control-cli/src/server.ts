@@ -70,6 +70,7 @@ export const authorizeControlMcpScope = async (
 ) => {
   if (scope === "control:read") return true
   const credentials = await store.read()
+
   return credentials !== undefined
     && sameCredentialIdentity(expectedIdentity, credentials)
     && credentials.scopes.includes("control:write")
@@ -78,27 +79,36 @@ export const authorizeControlMcpScope = async (
 export const startControlMcp = async () => {
   const store = createCredentialStore()
   let cloudCredentialIdentity: ControlCredentialIdentity | undefined
+
   const readCloudCredentials = async () => {
     let credentials: ControlCredentials | undefined
+
     try {
       credentials = await store.read()
     } catch {
       throw new CloudControlError()
     }
+
     if (!credentials) throw new CloudControlError()
+
     if (cloudCredentialIdentity !== undefined && !sameCredentialIdentity(cloudCredentialIdentity, credentials)) {
       throw new CloudControlError()
     }
+
     const identity = credentialIdentity(credentials)
     cloudCredentialIdentity ??= identity
+
     return { credentials, identity }
   }
+
   const cloudService = async (_scope: ControlMcpScope): Promise<ControlService> => {
     const { credentials, identity } = await readCloudCredentials()
+
     const client = createControlClient({
       baseUrl: credentials.baseUrl,
       accessToken: createAccessTokenProvider(identity, store),
     })
+
     const withTransportBoundary = async <Value>(request: () => Promise<Value>) => {
       try {
         return await request()
@@ -107,7 +117,9 @@ export const startControlMcp = async () => {
         throw error
       }
     }
+
     const methods = createCanonicalControlMethodsFromLegacy(client)
+
     return controlServiceFromCanonicalMethods({
       ...methods,
       control: {
@@ -121,18 +133,22 @@ export const startControlMcp = async () => {
       },
     })
   }
+
   const hostService = async (): Promise<{ service: ControlService; close: () => void }> => {
     const client = await createAvailableDesktopHostClient(cliDesktopControlOptions())
+
     const service: ControlService = {
       projects: {
         list: async () => {
           const status = desktopHostStatusSchemaV1.parse(await client.request("host.status", {}))
+
           return projectListResultSchema.parse({
             projects: status.project ? [{ projectId: status.project.id }] : [],
           })
         },
         current: async () => {
           const status = desktopHostStatusSchemaV1.parse(await client.request("host.status", {}))
+
           return projectCurrentResultSchema.parse(status.project
             ? { status: "present", project: { projectId: status.project.id } }
             : { status: "absent" })
@@ -148,23 +164,27 @@ export const startControlMcp = async () => {
       history: async (input) => controlHistoryResultSchemaV1.parse(await client.request("control.history", input)),
       recoveries: async (input) => controlRecoveriesResultSchemaV1.parse(await client.request("control.recoveries", input)),
     }
+
     return {
       service,
       close: client.close,
     }
   }
+
   const requestHostTool = async <Value>(
     operation: DesktopOperationV1,
     input: DesktopJsonValue,
     parseResult: (value: DesktopJsonValue) => Value,
   ) => {
     const client = await createAvailableDesktopHostClient(cliDesktopControlOptions())
+
     try {
       return parseResult(await client.request(operation, input))
     } finally {
       client.close()
     }
   }
+
   const hostTools = {
     status: async () => requestHostTool("host.status", {}, desktopHostStatusSchemaV1.parse),
     transportStatus: async () => requestHostTool("transport.status", {}, desktopTransportStatusSchemaV1.parse),
@@ -211,26 +231,33 @@ export const startControlMcp = async () => {
       desktopHostVstParametersResultSchemaV1.parse,
     ),
   }
+
   const server = createControlMcpServer(undefined, {
     authorize: async (scope) => {
       const { credentials } = await readCloudCredentials()
+
       return credentials.scopes.includes(scope)
     },
     hostTools,
     hostService,
     cloudService,
   })
+
   const transport = new StdioServerTransport()
   let closed = false
+
   const close = async () => {
     if (closed) return
     closed = true
     await transport.close()
     await server.close()
   }
+
   process.once("SIGINT", () => { void close().finally(() => process.exit(0)) })
   process.once("SIGTERM", () => { void close().finally(() => process.exit(0)) })
   transport.onerror = () => { void close() }
+
   transport.onclose = () => { void close() }
+
   await server.connect(transport)
 }

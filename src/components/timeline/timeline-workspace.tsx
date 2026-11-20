@@ -68,6 +68,7 @@ const createViewportRedrawState = () => {
 
     let dprQuery: MediaQueryList | undefined;
     let dprListener: (() => void) | undefined;
+
     const bindDprListener = () => {
       if (dprQuery && dprListener)
         dprQuery.removeEventListener("change", dprListener);
@@ -77,13 +78,16 @@ const createViewportRedrawState = () => {
         requestRedraw();
         bindDprListener();
       };
+
       dprQuery.addEventListener("change", dprListener);
     };
+
     bindDprListener();
 
     onCleanup(() => {
       window.removeEventListener("resize", requestRedraw);
       window.visualViewport?.removeEventListener("resize", requestRedraw);
+
       if (dprQuery && dprListener)
         dprQuery.removeEventListener("change", dprListener);
     });
@@ -225,53 +229,69 @@ export default function TimelineWorkspace(props: Props) {
   const viewportRedrawState = createViewportRedrawState();
   const [verticalScrollTop, setVerticalScrollTop] = createSignal(0);
   const [verticalClientHeight, setVerticalClientHeight] = createSignal(0);
+
   const verticalScrollSync = createTimelineVerticalScrollSync({
     onCanonicalScrollTop: setVerticalScrollTop,
   });
+
   const observeScrollViewport = (element: HTMLDivElement) => {
     timelineScrollElement = element;
     props.scrollRef(element);
     verticalScrollSync.bindTimeline(element);
     setVerticalClientHeight(element.clientHeight);
+
     const resizeObserver = new ResizeObserver(() => {
       setVerticalClientHeight(element.clientHeight);
     });
+
     resizeObserver.observe(element);
     onCleanup(() => resizeObserver.disconnect());
   };
+
   const verticalWaveformTrackIds = createMemo(() => new Set(trackIdsInYRange(
     props.trackLayout.scrollingRows,
     verticalScrollTop() - TIMELINE_HEADER_HEIGHT - 512,
     verticalScrollTop() + verticalClientHeight() - TIMELINE_HEADER_HEIGHT + 512,
   )));
+
   const trackById = createMemo(() => props.trackLookup.trackById);
+
   const visibleTracks = createMemo(() =>
     [
       ...props.trackLayout.scrollingRows,
       ...props.trackLayout.returnRows,
     ].flatMap((row) => {
       const track = trackById().get(row.trackId);
+
       return track ? [track] : [];
     }),
   );
+
   const selectedTrackIds = createMemo(() => {
     const range = props.selection.rangeSelection();
+
     if (range) return range.trackIds;
     const selectedTrackId = props.selection.selectedTrackId();
+
     return selectedTrackId ? [selectedTrackId] : [];
   });
+
   const collapsedGroupIds = createMemo(() => new Set(
     props.tracks
       .filter((track) => track.channelRole === "group" && track.collapsed === true)
       .map((track) => track.id),
   ));
+
   const trackHierarchyById = createMemo(() => {
     const hierarchy = new Map<string, string>();
+
     for (const track of props.tracks) {
       if (track.groupId) hierarchy.set(track.id, track.groupId);
     }
+
     return hierarchy;
   });
+
   const groupClipOverviewByTrackId = createMemo(() => (
     buildGroupClipOverviews(
       props.tracks,
@@ -279,33 +299,45 @@ export default function TimelineWorkspace(props: Props) {
       trackHierarchyById(),
     )
   ));
+
   const trackAreaHeight = () =>
     props.trackLayout.scrollingHeightPx +
     (props.dropAtNewTrack ? LANE_HEIGHT : 0);
+
   const masterAutomationVisible = () =>
     !props.sidebar.master.collapsed && props.automation.lanes.masterVisible;
+
   const masterBaseHeight = () =>
     masterRowHeight(props.sidebar.master.collapsed);
+
   const masterTotalHeight = () =>
     masterAreaHeight(
       props.sidebar.master.collapsed,
       props.automation.lanes.masterVisible,
       props.automation.lanes.masterHeight,
     );
+
   const returnAreaHeight = () => props.trackLayout.returnHeightPx;
+
   const stickyFooterHeight = () =>
     returnAreaHeight() + masterTotalHeight();
+
   const fullHeight = () =>
     TIMELINE_HEADER_HEIGHT + trackAreaHeight() + stickyFooterHeight();
+
   const scrollContentHeight = () => fullHeight() + props.bottomPanelOffsetPx;
+
   const masterSelection = () =>
     props.automation.lanes.selectedTargetsByOwnerKey.master ?? {
       parameterId: "volume",
     };
+
   const masterTarget = () =>
     createAutomationTarget({ kind: "master" }, masterSelection().effectInstanceId);
+
   const masterTargetKey = () =>
     automationTargetKey(masterTarget(), masterSelection().parameterId);
+
   const fallbackMenuItems = (): TimelineContextMenuItem[] => [
     { kind: "label", label: "Timeline" },
     {
@@ -315,6 +347,7 @@ export default function TimelineWorkspace(props: Props) {
       onSelect: props.automation.actions.toggleMasterVisibility,
     },
   ];
+
   const RenderTrackLane: Component<{
     row: TimelineTrackLayoutRow;
     layout: TimelineTrackLayoutRow;
@@ -322,11 +355,14 @@ export default function TimelineWorkspace(props: Props) {
     isReturn?: boolean;
   }> = (laneProps) => {
     const track = () => trackById().get(laneProps.row.trackId);
+
     const visibleTargetKeys = () =>
       props.automation.lanes.visibleTargetKeysByTrackId[laneProps.row.trackId] ?? [];
+
     const laneHeight = () =>
       props.automation.lanes.heightsByLaneOwnerKey[laneProps.row.trackId] ??
       DEFAULT_AUTOMATION_LANE_HEIGHT;
+
     return (
       <Show when={track()}>
         {(visibleTrack) => (
@@ -366,6 +402,7 @@ export default function TimelineWorkspace(props: Props) {
             timeToX={props.viewport.timeToX}
             clientXToTime={(clientX) => {
               const scrollElement = timelineScrollElement;
+
               return scrollElement
                 ? props.viewport.xToTime(clientX - scrollElement.getBoundingClientRect().left)
                 : 0;
@@ -385,6 +422,7 @@ export default function TimelineWorkspace(props: Props) {
               selections: visibleTargetKeys().flatMap((targetKey) => {
                 const selection =
                   props.automation.lanes.selectionByTargetKey.get(targetKey);
+
                 return selection ? [selection] : [];
               }),
               laneHeightPx: laneHeight(),
@@ -409,6 +447,7 @@ export default function TimelineWorkspace(props: Props) {
       </Show>
     );
   };
+
   return (
     <div class="flex-1 flex min-h-0" ref={props.containerRef}>
       <div
@@ -481,6 +520,7 @@ export default function TimelineWorkspace(props: Props) {
                         (props.browserDropTargetTrackId === null &&
                           props.dropTargetLane === i()),
                     );
+
                     return (
                       <RenderTrackLane
                         row={row}
@@ -542,6 +582,7 @@ export default function TimelineWorkspace(props: Props) {
                       const isDropTarget = createMemo(
                         () => props.browserDropTargetTrackId === row.trackId,
                       );
+
                       return (
                         <div
                         class="absolute left-0 right-0"

@@ -46,6 +46,7 @@ type NativeBuildCommand = (
 
 const runSecurityCommand: SecurityCommand = (command, arguments_) => {
   const result = spawnSync(command, [...arguments_], { encoding: "utf8" })
+
   return {
     status: result.status,
     stdout: result.stdout ?? "",
@@ -56,6 +57,7 @@ const runSecurityCommand: SecurityCommand = (command, arguments_) => {
 
 const runNativeBuildCommand: NativeBuildCommand = (command, arguments_) => {
   const result = spawnSync(command, [...arguments_], { stdio: "inherit" })
+
   return {
     status: result.status,
     error: result.error ? result.error : undefined,
@@ -68,11 +70,13 @@ export const rebuildNativePackageArtifacts = (
   environment: NodeJS.ProcessEnv = process.env,
 ): void => {
   const vst3SdkPath = environment.VST3_SDK_PATH
+
   if (!vst3SdkPath) {
     throw new Error("VST3_SDK_PATH is required to rebuild native package artifacts.")
   }
 
   const nativeRoot = path.join(projectRoot, "native")
+
   const builds = [
     {
       name: "VST3 scanner and worker",
@@ -107,9 +111,11 @@ export const rebuildNativePackageArtifacts = (
       ...build.configureArguments,
       `-DVST3_SDK_PATH:PATH=${vst3SdkPath}`,
     ])
+
     if (configure.error || configure.status !== 0) {
       throw new Error(`CMake configure failed for ${build.name}.`)
     }
+
     const compile = runCommand("cmake", [
       "--build",
       build.directory,
@@ -118,6 +124,7 @@ export const rebuildNativePackageArtifacts = (
       "--parallel",
       String(jobLimit()),
     ])
+
     if (compile.error || compile.status !== 0) {
       throw new Error(`CMake build failed for ${build.name}.`)
     }
@@ -126,10 +133,13 @@ export const rebuildNativePackageArtifacts = (
 
 export const parseDeveloperIdApplicationIdentities = (output: string): string[] => {
   const identities: string[] = []
+
   for (const line of output.split(/\r?\n/)) {
     const match = line.match(/^\s*\d+\)\s+[0-9A-Fa-f]{40}\s+"(Developer ID Application:[^"]+)"\s*$/)
+
     if (match?.[1]) identities.push(match[1])
   }
+
   return identities
 }
 
@@ -137,15 +147,19 @@ export const discoverSigningIdentity = (
   runCommand: SecurityCommand = runSecurityCommand,
 ): string => {
   const result = runCommand("security", ["find-identity", "-v", "-p", "codesigning"])
+
   if (result.error || result.status !== 0) {
     throw new Error("Unable to inspect macOS code-signing identities with security find-identity.")
   }
+
   const identity = parseDeveloperIdApplicationIdentities(result.stdout)[0]
+
   if (!identity) {
     throw new Error(
       "No valid Developer ID Application identity was found. Install a Developer ID Application certificate in the macOS keychain.",
     )
   }
+
   return identity
 }
 
@@ -174,6 +188,7 @@ const resolveCandidate = (
   fileExists: (filePath: string) => boolean,
 ): string => {
   const resolved = candidates.find(fileExists)
+
   if (resolved) return resolved
   throw new Error(
     `Required macOS native ${name} artifact is missing. Checked:\n${candidates.map((candidate) => `- ${candidate}`).join("\n")}`,
@@ -193,6 +208,7 @@ export const resolveNativeArtifactPaths = (
   fileExists: (filePath: string) => boolean = isFile,
 ): NativeReleaseArtifactPaths => {
   const candidates = artifactCandidates(projectRoot)
+
   return {
     scannerPath: resolveCandidate("VST3 scanner", candidates.scannerPath, fileExists),
     workerPath: resolveCandidate("VST3 worker", candidates.workerPath, fileExists),

@@ -31,6 +31,7 @@ export type MixerVolumeSliderProps = {
 
 const MixerVolumeSlider: Component<MixerVolumeSliderProps> = (props) => {
   const [activePointer, setActivePointer] = createSignal<ActivePointer>();
+
   const [keyboardStartValue, setKeyboardStartValue] = createSignal<
     number | undefined
   >();
@@ -38,19 +39,24 @@ const MixerVolumeSlider: Component<MixerVolumeSliderProps> = (props) => {
   const currentValue = () =>
     activePointer()?.value ??
     mixerSliderPositionToVolume(mixerVolumeToSliderPosition(props.value));
+
   const currentPosition = () => mixerVolumeToSliderPosition(currentValue());
+
   const automationStart = () =>
     mixerVolumeToSliderPosition(props.automationRange?.min ?? 0);
+
   const automationEnd = () =>
     mixerVolumeToSliderPosition(props.automationRange?.max ?? 0);
 
   const previewFromPosition = (position: number) => {
     const value = mixerSliderPositionToVolume(position);
     const active = activePointer();
+
     if (active) {
       if (active.value === value) return;
       setActivePointer({ ...active, value });
     }
+
     props.onPreview(value);
   };
 
@@ -66,6 +72,7 @@ const MixerVolumeSlider: Component<MixerVolumeSliderProps> = (props) => {
 
   const finishPointer = (input: HTMLInputElement, pointerId: number) => {
     const active = activePointer();
+
     if (!active || active.pointerId !== pointerId) return;
     setActivePointer();
     releasePointer(input, pointerId);
@@ -74,6 +81,7 @@ const MixerVolumeSlider: Component<MixerVolumeSliderProps> = (props) => {
 
   const cancelPointer = (input: HTMLInputElement, pointerId: number) => {
     const active = activePointer();
+
     if (!active || active.pointerId !== pointerId) return;
     setActivePointer();
     releasePointer(input, pointerId);
@@ -97,6 +105,7 @@ const MixerVolumeSlider: Component<MixerVolumeSliderProps> = (props) => {
         onClick={(event) => event.stopPropagation()}
         onPointerDown={(event) => {
           event.stopPropagation();
+
           if (props.disabled) return;
           props.onSelect();
           event.preventDefault();
@@ -112,6 +121,7 @@ const MixerVolumeSlider: Component<MixerVolumeSliderProps> = (props) => {
         }}
         onPointerMove={(event) => {
           const active = activePointer();
+
           if (!active || active.pointerId !== event.pointerId) return;
           event.stopPropagation();
           updateFromPointer(event.currentTarget, event.clientX);
@@ -129,15 +139,21 @@ const MixerVolumeSlider: Component<MixerVolumeSliderProps> = (props) => {
         }}
         onInput={(event) => {
           event.stopPropagation();
+
           if (props.disabled) return;
+
           const value = mixerSliderPositionToVolume(
             Number.parseFloat(event.currentTarget.value),
           );
+
           const active = activePointer();
+
           if (active) {
             previewFromPosition(Number.parseFloat(event.currentTarget.value));
+
             return;
           }
+
           if (keyboardStartValue() === undefined)
             setKeyboardStartValue(normalizeMixerVolume(props.value));
           props.onPreview(value);
@@ -145,6 +161,7 @@ const MixerVolumeSlider: Component<MixerVolumeSliderProps> = (props) => {
         onChange={(event) => {
           event.stopPropagation();
           const startValue = keyboardStartValue();
+
           if (props.disabled || startValue === undefined) return;
           setKeyboardStartValue();
           props.onCommit(
@@ -157,6 +174,7 @@ const MixerVolumeSlider: Component<MixerVolumeSliderProps> = (props) => {
         onDblClick={(event) => {
           event.stopPropagation();
           event.preventDefault();
+
           if (props.disabled) return;
           setActivePointer();
           setKeyboardStartValue();

@@ -11,6 +11,7 @@ test('async WSOLA transaction awaits each append with one pending write', async 
   let pending = 0
   let maximumPending = 0
   const stored: Float32Array[] = []
+
   const source: WsolaPcmSource = {
     sampleRate: 100,
     channelCount: 1,
@@ -24,6 +25,7 @@ test('async WSOLA transaction awaits each append with one pending write', async 
     },
     dispose: () => {},
   }
+
   const result = await createWsolaBoundedSourceAsyncTransaction(source, {
     outputFrameCount: 384,
     windowFrameCount: 64,
@@ -47,6 +49,7 @@ test('async WSOLA transaction awaits each append with one pending write', async 
       abort: async () => {},
     }),
   })
+
   expect(maximumPending).toBe(1)
   expect([...result.source.replay()].reduce((total, chunk) => total + (chunk.channels[0]?.length ?? 0), 0)).toBe(384)
   result.source.dispose()
@@ -56,6 +59,7 @@ test('async WSOLA transaction aborts without committing', async () => {
   const controller = new AbortController()
   let committed = false
   let aborted = false
+
   const source: WsolaPcmSource = {
     sampleRate: 100,
     channelCount: 1,
@@ -66,6 +70,7 @@ test('async WSOLA transaction aborts without committing', async () => {
     },
     dispose: () => {},
   }
+
   await expect(createWsolaBoundedSourceAsyncTransaction(source, {
     outputFrameCount: 384,
     signal: controller.signal,
@@ -77,6 +82,7 @@ test('async WSOLA transaction aborts without committing', async () => {
       },
       commit: async () => {
         committed = true
+
         return createWsolaMaterializingCompatibilityTransaction(metadata).commit()
       },
       abort: async () => { aborted = true },
@@ -90,6 +96,7 @@ test('async WSOLA disposes a mismatched committed source, input, and transaction
   let sourceDisposals = 0
   let committedDisposals = 0
   let aborts = 0
+
   const source: WsolaPcmSource = {
     sampleRate: 100,
     channelCount: 1,
@@ -98,6 +105,7 @@ test('async WSOLA disposes a mismatched committed source, input, and transaction
     replayAsync: async function* () { yield { channels: [input] } },
     dispose: () => { sourceDisposals += 1 },
   }
+
   await expect(createWsolaBoundedSourceAsyncTransaction(source, {
     outputFrameCount: 384,
     createAsyncTransaction: (metadata) => ({

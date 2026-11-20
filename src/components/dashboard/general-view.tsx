@@ -32,6 +32,7 @@ function PreviewButtonGroup(props: PreviewButtonGroupProps) {
       onMouseLeave={() => props.cancel()}
       onFocusOut={(event) => {
         const nextTarget = event.relatedTarget;
+
         if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
           props.cancel();
         }

@@ -27,5 +27,6 @@ test("processor edit IDs match the previous renderer switch", () => {
     expect(processorEditKindId(effect)).toBe(id);
     expect(processorEditKindId(`master-${effect}`)).toBe(id);
   }
+
   expect(processorEditKindId("unknown")).toBeUndefined();
 });

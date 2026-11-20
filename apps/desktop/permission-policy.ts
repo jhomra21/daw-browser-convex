@@ -5,12 +5,15 @@ export type DesktopOriginPolicy = (url: string) => boolean
 const parsedTrustedOrigin = (value: string): string | undefined => {
   try {
     const parsed = new URL(value)
+
     if (parsed.username || parsed.password) return undefined
+
     if (parsed.protocol === "daw:") {
       return parsed.hostname === "app" && parsed.port === ""
         ? packagedDesktopRendererOrigin
         : undefined
     }
+
     return parsed.protocol === "http:" || parsed.protocol === "https:"
       ? parsed.origin
       : undefined
@@ -25,8 +28,10 @@ export const createTrustedDesktopOriginPolicy = (
   const configuredRendererOrigin = configuredRendererUrl === undefined
     ? undefined
     : parsedTrustedOrigin(configuredRendererUrl)
+
   return (url) => {
     const origin = parsedTrustedOrigin(url)
+
     return origin === packagedDesktopRendererOrigin
       || configuredRendererOrigin !== undefined && origin === configuredRendererOrigin
   }

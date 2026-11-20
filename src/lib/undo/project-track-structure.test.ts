@@ -24,6 +24,7 @@ test('redoing a track create adds the track the executor recreates', () => {
 
 test('redoing a track-and-clip create adds the track the executor recreates', () => {
   const created = track('new')
+
   const entry = buildTrackClipCreateHistoryEntry({
     projectId,
     track: created,
@@ -31,6 +32,7 @@ test('redoing a track-and-clip create adds the track the executor recreates', ()
     clipId: 'clip',
     clip: { startSec: 0, duration: 1 },
   })
+
   expect(ids(projectTrackStructure(entry, 'redo', [track('a')]))).toEqual(['a', 'new'])
 })
 
@@ -38,11 +40,13 @@ test('undoing a track delete restores the track with its group and its own routi
   const group = track('group', { channelRole: 'group' })
   const out = track('out')
   const send = track('send')
+
   const deleted = track('deleted', {
     groupId: 'group',
     outputTargetId: 'out',
     sends: [{ targetId: 'send', amount: 0.5 }],
   })
+
   const entry = buildTrackDeleteHistoryEntry({ projectId, track: deleted, tracks: [group, out, send, deleted] })
   const restored = byId(projectTrackStructure(entry, 'undo', [group, out, send]), 'deleted')
   expect(restored?.groupId).toBe('group')
@@ -74,12 +78,15 @@ test('undoing an ungroup restores the group with its parent group and its own ro
 test('the recording guard refuses a redo that re-creates a track the take is routed into', () => {
   const target = track('target', { outputTargetId: 'bus' })
   const entry = buildTrackCreateHistoryEntry({ projectId, trackId: 'bus', index: 1 })
+
   const refusal = createRoot((dispose) => {
     const lock = createRecordingTargetLock(() => [target])
     lock.start('target')
     const result = lock.refuseHistory(entry, 'redo')
     dispose()
+
     return result
   })
+
   expect(refusal).toBe(RECORDING_TARGET_LOCKED_REASON)
 })

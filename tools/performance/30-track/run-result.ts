@@ -1,6 +1,8 @@
 import type { BrowserProbeResult } from "./probe"
 import type { runTierThree } from "./tier-three"
+
 export type TierThreeEvidence = Awaited<ReturnType<typeof runTierThree>>
+
 export type TierThreeOutcome = TierThreeEvidence | {
   readonly status: "failed"
   readonly stage: string
@@ -11,9 +13,12 @@ export type TierThreeOutcome = TierThreeEvidence | {
 
 export const deriveTierThreeFailures = (requested: boolean, outcome: TierThreeOutcome | undefined): string[] => {
   if (!requested) return []
+
   if (!outcome) return ["Tier 3 workload did not produce a result."]
+
   return outcome.status === "failed" ? [`Tier 3 failed at ${outcome.stage}: ${outcome.reason}`] : []
 }
+
 import type { NativeDiagnosticDelta, ProcessMetric } from "./electron"
 import type { z } from "zod"
 import type { desktopDiagnosticsSchemaV2, desktopHostStatusSchemaV1, desktopTransportStatusSchemaV1 } from "@daw-browser/desktop-protocol"
@@ -88,11 +93,16 @@ export const tierTwoDevicesVisible = (
 
 export const deriveUnavailable = (surface: "browser" | "electron", probe: BrowserProbeResult | null): string[] => {
   const unavailable = new Set<string>()
+
   if (surface === "electron" && probe === null) unavailable.add("electron-surface-not-run")
+
   if (probe === null || probe.phases.every((phase) => !phase.raf.supported)) unavailable.add("raf-not-delivered")
+
   if (probe === null || !probe.display.viewportSupported) unavailable.add("viewport-not-reported")
+
   if (probe === null || probe.phases.every((phase) => !phase.longTasks.supported)) unavailable.add("long-task-observer-unavailable")
   unavailable.add("canvas-attribution-not-instrumented")
+
   return [...unavailable]
 }
 
@@ -108,6 +118,7 @@ export const deriveRequiredTier2Failures = (
   probe: BrowserProbeResult,
 ): string[] => {
   const visible = probe.integrity.tier2VisibleWorkload
+
   return [
     ...(visible.trackSelected ? [] : ["Tier 2 Synth track was not selected through the rendered UI."]),
     ...(visible.effectsPanelOpened ? [] : ["Effects panel was not opened through the rendered UI."]),

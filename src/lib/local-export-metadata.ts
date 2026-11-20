@@ -16,6 +16,7 @@ const MAX_LOCAL_EXPORTS = 25
 
 const isExportMetadata = (value: JsonValue): value is LocalExportMetadata => {
   if (!isJsonObject(value)) return false
+
   return (
     isJsonString(value.id)
     && isJsonString(value.name)
@@ -30,6 +31,7 @@ const isExportMetadata = (value: JsonValue): value is LocalExportMetadata => {
 
 const readExports = async (projectId: string): Promise<LocalExportMetadata[]> => {
   const rows = await loadLocalProjectState<JsonValue>(projectId, EXPORTS_KEY)
+
   return Array.isArray(rows) ? rows.filter(isExportMetadata) : []
 }
 
@@ -43,11 +45,13 @@ export const saveLocalExportMetadataBatch = async (
 ): Promise<void> => {
   if (inputs.length === 0) return
   const createdAt = Date.now()
+
   const rows = inputs.map((input) => ({
     ...input,
     id: `export:${crypto.randomUUID()}`,
     createdAt,
   }))
+
   const next = [...rows, ...(await readExports(projectId))].slice(0, MAX_LOCAL_EXPORTS)
   await saveLocalProjectState(projectId, EXPORTS_KEY, next)
 }

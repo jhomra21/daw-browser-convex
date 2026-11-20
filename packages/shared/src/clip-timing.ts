@@ -16,11 +16,13 @@ type NormalizedClipTimingPatch = {
 
 export function normalizeClipStartSec(startSec: number): number {
   if (!Number.isFinite(startSec)) return 0
+
   return Math.max(0, startSec)
 }
 
 function normalizeClipOffset(value: number | undefined): number | undefined {
   if (value === undefined || !Number.isFinite(value)) return undefined
+
   return Math.max(0, value)
 }
 

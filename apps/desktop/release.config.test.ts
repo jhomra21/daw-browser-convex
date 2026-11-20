@@ -37,9 +37,11 @@ test("discovers the first Developer ID Application identity from security output
     `  1) 784124C9079315765EBBAF9D5B73F61B289C8EE3 "Developer ID Application: First (TEAMID)"`,
     `  2) B564926D00637B449E75CBB86B3F62C5C7081FEB "Developer ID Application: Second (TEAMID)"`,
   ].join("\n")
+
   let invocation: { command: string; arguments_: readonly string[] } | undefined
   expect(discoverSigningIdentity((command, arguments_) => {
     invocation = { command, arguments_ }
+
     return { status: 0, stdout: output, stderr: "" }
   })).toBe("Developer ID Application: First (TEAMID)")
   expect(invocation).toEqual({
@@ -62,6 +64,7 @@ test("resolves release artifact candidates with the release audio host preferred
     "/project/native/build/vst3-worker-debug/plugin-host/daw-vst3-worker",
     "/project/native/build/audio-host-macos-debug/audio-host-macos/daw-audio-host-macos",
   ])
+
   expect(resolveNativeArtifactPaths("/project", (filePath) => existing.has(filePath))).toEqual({
     scannerPath: "/project/native/build/vst3-worker-debug/plugin-host/daw-vst3-scanner",
     workerPath: "/project/native/build/vst3-worker-debug/plugin-host/daw-vst3-worker",
@@ -75,6 +78,7 @@ test("never builds or packages the AE-08 failure-injection test plug-in", () => 
     "/project",
     (command, arguments_) => {
       calls.push([command, ...arguments_].join(" "))
+
       return { status: 0 }
     },
     { VST3_SDK_PATH: "/sdk" },
@@ -91,6 +95,7 @@ test("rebuilds every native artifact used by desktop packaging", () => {
     "/project",
     (command, arguments_) => {
       calls.push({ command, arguments_ })
+
       return { status: 0 }
     },
     { VST3_SDK_PATH: "/sdk" },
@@ -155,6 +160,7 @@ test("requires VST3_SDK_PATH before running native packaging commands", () => {
   let invoked = false
   expect(() => rebuildNativePackageArtifacts("/project", () => {
     invoked = true
+
     return { status: 0 }
   }, {})).toThrow("VST3_SDK_PATH is required to rebuild native package artifacts.")
   expect(invoked).toBe(false)
@@ -166,6 +172,7 @@ test("passes VST3 SDK paths with spaces as one CMake argument", () => {
     "/project",
     (command, arguments_) => {
       calls.push({ command, arguments_ })
+
       return { status: 0 }
     },
     { VST3_SDK_PATH: "/Users/example/VST3 SDK 3.8" },
@@ -173,7 +180,9 @@ test("passes VST3 SDK paths with spaces as one CMake argument", () => {
 
   const configureCalls = calls.filter(({ command, arguments_ }) =>
     command === "cmake" && arguments_.includes("-S"))
+
   expect(configureCalls).toHaveLength(2)
+
   for (const call of configureCalls) {
     expect(call.arguments_).toContain("-DVST3_SDK_PATH:PATH=/Users/example/VST3 SDK 3.8")
     expect(call.arguments_).not.toContain("\"/Users/example/VST3 SDK 3.8\"")
@@ -195,6 +204,7 @@ test("assembles only the release environment passed to the Forge child", () => {
     artifactPaths,
     "/project/apps/desktop/.native/daw-native-artifacts-v1.json",
   )
+
   expect(environment).toMatchObject({
     PATH: "/usr/bin",
     NOT_SECRET_TO_CHILD: "kept",
@@ -213,6 +223,7 @@ test("reports every candidate when a native release artifact is missing", () => 
     "/project/native/build/vst3-worker-debug/plugin-host/daw-vst3-scanner",
     "/project/native/build/vst3-worker-debug/plugin-host/daw-vst3-worker",
   ])
+
   expect(() => resolveNativeArtifactPaths("/project", (filePath) => existing.has(filePath))).toThrow(
     [
       "Required macOS native Audio host artifact is missing. Checked:",
@@ -230,6 +241,7 @@ test("diagnostics omit environment secrets", () => {
     artifactPaths,
     "/project/apps/desktop/.native/daw-native-artifacts-v1.json",
   )
+
   expect(diagnostic).toContain("Developer ID Application: Example (TEAMID)")
   expect(diagnostic).toContain(defaultNotaryProfile)
   expect(diagnostic).not.toContain("APPLE_API_KEY")

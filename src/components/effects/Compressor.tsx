@@ -70,21 +70,27 @@ function MiniStatus(props: { label: string; value: string; tone?: 'cyan' | 'yell
 
 function CompressorGraph(props: { params: CompressorParams; viewMode: ViewMode; history: CompressorMeterFrame[] }) {
   const patternId = createUniqueId()
+
   const transferPoints = () => {
     const values: string[] = []
+
     for (let index = 0; index <= 80; index++) {
       const inputDb = -60 + (index / 80) * 60
       const outputDb = computeCompressorStaticCurveDb(inputDb, props.params) + props.params.makeupDb
       values.push(`${(index / 80) * 180},${normalizeDbY(outputDb)}`)
     }
+
     return values.join(' ')
   }
+
   const historyPoints = (value: (frame: CompressorMeterFrame) => number, yForValue: (value: number) => number) => {
     const denominator = HISTORY_SIZE - 1
+
     return props.history.map((frame, index) => {
       return `${(index / denominator) * 180},${yForValue(value(frame))}`
     }).join(' ')
   }
+
   const thresholdY = () => normalizeDbY(props.history.at(-1)?.thresholdDb ?? props.params.thresholdDb)
 
   return (
@@ -124,7 +130,9 @@ export default function Compressor(props: CompressorProps) {
       setMeter(null)
       setHistory([])
     })
+
     if (!audioEngine || !targetId || !props.effectInstanceId) return
+
     const unsubscribe = targetId === 'master'
       ? audioEngine.subscribeMasterCompressorMeter(props.effectInstanceId, (frame) => {
         setMeter(frame)
@@ -134,6 +142,7 @@ export default function Compressor(props: CompressorProps) {
         setMeter(frame)
         setHistory((frames) => [...frames.slice(1 - HISTORY_SIZE), frame])
       })
+
     onCleanup(unsubscribe)
   })
 

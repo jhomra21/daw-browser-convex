@@ -23,10 +23,12 @@ const jumpToClipWhile = (playing: boolean, startSec: number) => createRoot((disp
     id: 'track', name: 'Track', volume: 1,
     clips: [{ id: 'clip', name: 'Clip', startSec, duration: 2, color: '#ffffff' }],
   }]
+
   const [projectId] = createSignal('project:jump')
   const selection = useTimelineSelectionState({ projectId, tracks: () => tracks })
   const playheads: number[] = []
   const opened: string[] = []
+
   const actions = useTimelineActions({
     tracks: () => tracks,
     room: { projectId, setProjectId: () => undefined, userId: () => 'user' },
@@ -56,9 +58,11 @@ const jumpToClipWhile = (playing: boolean, startSec: number) => createRoot((disp
       pixelsPerSecond: () => 100,
     },
   })
+
   actions.jumpToClip('track', 'clip', startSec)
   const selected = selection.selectedClip()
   dispose()
+
   return { playheads, opened, selected }
 })
 
@@ -105,6 +109,7 @@ const projectCreation = (
         .sort((left, right) => left.index - right.index)
     },
   )
+
   return projected
 }
 
@@ -115,7 +120,9 @@ test('projects local creation repairs immediately so canonical tracks can reorde
     { track: localTrack('normal-b', 2), index: 2 },
     { track: localTrack('return-b', 3, { channelRole: 'return', groupId: 'legacy-group' }), index: 3 },
   ]
+
   const normal = localTrack('normal-new', 2)
+
   const afterNormal = projectCreation(initial, normal, 2, [
     buildTimelineTrackRow({ id: 'normal-a', index: 0, groupId: 'group-a', timestamp: 1 }),
     buildTimelineTrackRow({ id: 'normal-b', index: 1, timestamp: 1 }),
@@ -123,7 +130,9 @@ test('projects local creation repairs immediately so canonical tracks can reorde
     buildTimelineTrackRow({ id: 'return-a', index: 3, channelRole: 'return', timestamp: 1 }),
     buildTimelineTrackRow({ id: 'return-b', index: 4, channelRole: 'return', timestamp: 1 }),
   ])
+
   const returnTrack = localTrack('return-new', 3, { channelRole: 'return' })
+
   const projected = projectCreation(afterNormal, returnTrack, 3, [
     buildTimelineTrackRow({ id: 'normal-a', index: 0, groupId: 'group-a', timestamp: 1 }),
     buildTimelineTrackRow({ id: 'normal-b', index: 1, timestamp: 1 }),
@@ -157,6 +166,7 @@ test('projects only repaired local tracks before inserting the created track', (
     localTrack('unchanged', 0),
     localTrack('repaired', 1, { groupId: 'legacy-group' }),
   ]
+
   const created = localTrack('created', 2)
   const updates: Array<{ trackId: string; index: number; groupId?: string }> = []
   const inserts: Array<{ trackId: string; index: number }> = []
@@ -190,6 +200,7 @@ const lockedEditActions = (projectId: Accessor<string>, tracks: RuntimeTrack[], 
   const notices: string[] = []
   const removed: string[] = []
   const selection = useTimelineSelectionState({ projectId, tracks: () => tracks })
+
   const actions = useTimelineActions({
     tracks: () => tracks,
     room: { projectId, setProjectId: () => undefined, userId: () => 'user' },
@@ -221,24 +232,30 @@ const lockedEditActions = (projectId: Accessor<string>, tracks: RuntimeTrack[], 
       pixelsPerSecond: () => 100,
     },
   })
+
   return { actions, notices, removed }
 }
 
 test('ungroup refuses when a take starts while the group effects load', async () => {
   const project = await createLocalProject(`Take during ungroup ${crypto.randomUUID()}`)
+
   const tracks: RuntimeTrack[] = [
     { id: 'group', name: 'Group', volume: 1, clips: [], channelRole: 'group' },
     { id: 'child', name: 'Child', volume: 1, clips: [], groupId: 'group', outputTargetId: 'group' },
   ]
+
   const lock = createRecordingTargetLock(() => tracks)
+
   const { notices, removed } = await createRoot(async (dispose) => {
     const edit = lockedEditActions(() => project.id, tracks, lock)
     const pending = edit.actions.ungroupTrack('group')
     lock.start('child')
     await pending
     dispose()
+
     return edit
   })
+
   expect(notices).toEqual([RECORDING_TARGET_LOCKED_REASON])
   expect(removed).toEqual([])
 })
@@ -250,14 +267,17 @@ test('group discards its new group track when a take starts while it is created'
   const before = (await repository.loadSnapshot()).tracks.map((track) => track.id)
   const tracks: RuntimeTrack[] = [{ id: created.id, name: 'Child', volume: 1, clips: [] }]
   const lock = createRecordingTargetLock(() => tracks)
+
   const { notices, removed } = await createRoot(async (dispose) => {
     const edit = lockedEditActions(() => project.id, tracks, lock)
     const pending = edit.actions.groupSelectedTracks([created.id])
     lock.start(created.id)
     await pending
     dispose()
+
     return edit
   })
+
   expect(notices).toEqual([RECORDING_TARGET_LOCKED_REASON])
   expect(removed).toHaveLength(1)
   expect((await repository.loadSnapshot()).tracks.map((track) => track.id)).toEqual(before)
@@ -270,6 +290,7 @@ const deleteHarness = (id: string, tracks: RuntimeTrack[], lock: RecordingTarget
   const selection = useTimelineSelectionState({ projectId, tracks: () => tracks })
   const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<string | null>(null)
   const [confirmOpen, setConfirmOpen] = createSignal(false)
+
   const actions = useTimelineClipActions({
     tracks: () => tracks,
     insertLocalClip: () => undefined,
@@ -302,6 +323,7 @@ const deleteHarness = (id: string, tracks: RuntimeTrack[], lock: RecordingTarget
     recordingTargetLock: lock,
     notify: (_title, message) => { notices.push(message) },
   })
+
   return { actions, notices, removed, pendingDeleteTrackId, confirmOpen }
 }
 
@@ -311,6 +333,7 @@ test('track delete refuses when a take starts while the delete is prepared', asy
   const created = await repository.createTrack({ index: 0 })
   const tracks: RuntimeTrack[] = [{ id: created.id, name: 'Doomed', volume: 1, clips: [] }]
   const lock = createRecordingTargetLock(() => tracks)
+
   const { notices, removed } = await createRoot(async (dispose) => {
     const harness = deleteHarness(project.id, tracks, lock)
     const pending = harness.actions.performDeleteTrack(created.id)
@@ -319,8 +342,10 @@ test('track delete refuses when a take starts while the delete is prepared', asy
     expect(untrack(harness.pendingDeleteTrackId)).toBeNull()
     expect(untrack(harness.confirmOpen)).toBe(false)
     dispose()
+
     return harness
   })
+
   expect(notices).toEqual([RECORDING_TARGET_LOCKED_REASON])
   expect(removed).toEqual([])
   expect((await repository.loadSnapshot()).tracks.map((track) => track.id)).toContain(created.id)
@@ -333,21 +358,29 @@ test('cloud track delete refuses without calling the server when a take starts w
   const mutationDescriptor = Object.getOwnPropertyDescriptor(convexClient, 'mutation')
   const mutations: unknown[] = []
   // The effect snapshot reads through the module-level client: the take starts while that read is awaited.
-  Object.defineProperty(convexClient, 'query', { configurable: true, value: async () => { lock.start('cloud-track'); return [] } })
-  Object.defineProperty(convexClient, 'mutation', { configurable: true, value: async (...args: unknown[]) => { mutations.push(args); return { status: 'deleted' } } })
+  Object.defineProperty(convexClient, 'query', { configurable: true, value: async () => { lock.start('cloud-track');
+
+ return [] } })
+  Object.defineProperty(convexClient, 'mutation', { configurable: true, value: async (...args: unknown[]) => { mutations.push(args);
+
+ return { status: 'deleted' } } })
+
   try {
     const { notices, removed } = await createRoot(async (dispose) => {
       const harness = deleteHarness('cloud-project', tracks, lock)
       await harness.actions.performDeleteTrack('cloud-track')
       dispose()
+
       return harness
     })
+
     expect(notices).toEqual([RECORDING_TARGET_LOCKED_REASON])
     expect(mutations).toEqual([])
     expect(removed).toEqual([])
   } finally {
     if (queryDescriptor) Object.defineProperty(convexClient, 'query', queryDescriptor)
     else Reflect.deleteProperty(convexClient, 'query')
+
     if (mutationDescriptor) Object.defineProperty(convexClient, 'mutation', mutationDescriptor)
     else Reflect.deleteProperty(convexClient, 'mutation')
   }

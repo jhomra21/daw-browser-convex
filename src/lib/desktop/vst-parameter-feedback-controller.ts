@@ -21,32 +21,41 @@ export const createVstParameterFeedbackController = (
   input: VstParameterFeedbackControllerInput,
 ): VstParameterFeedbackController | undefined => {
   const subscription = window.dawDesktop?.audioHost?.session.onVstParameterEdit
+
   if (!subscription) return undefined
   let disposed = false
+
   type PendingEdit = {
     payload: DesktopVstParameterEditPayload
     projectId: string
     generation: number
   }
+
   type InstanceState = {
     pending: Map<number, PendingEdit>
     inFlight: boolean
     scheduled: boolean
   }
+
   const instances = new Map<string, InstanceState>()
+
   const reportFault = (failure: Error | string) => {
     input.reportFault?.(failure instanceof Error ? failure.message : failure)
   }
+
   const drain = async (instanceId: string, state: InstanceState) => {
     if (state.inFlight || disposed) return
     state.scheduled = false
     state.inFlight = true
+
     try {
       while (!disposed && state.pending.size > 0) {
         const snapshot = [...state.pending.values()]
         state.pending.clear()
         const first = snapshot[0]
+
         if (!first) continue
+
         if (
           snapshot.some((entry) => (
             entry.projectId !== first.projectId
@@ -55,10 +64,12 @@ export const createVstParameterFeedbackController = (
             || input.mountedProjectGeneration() !== entry.generation
           ))
         ) continue
+
         if (snapshot.length > maxVst3WorkerEventsPerBlock) {
           reportFault(`VST parameter feedback exceeded the bounded ${maxVst3WorkerEventsPerBlock}-parameter limit.`)
           continue
         }
+
         const commit = await mergeLocalExternalProcessorParameterOverrides(
           first.projectId,
           instanceId,
@@ -67,8 +78,11 @@ export const createVstParameterFeedbackController = (
             normalizedValue: payload.normalizedValue,
           })),
         )
+
         if (!commit || disposed) continue
+
         if (input.projectId() !== first.projectId || input.mountedProjectGeneration() !== first.generation) continue
+
         for (const { payload } of snapshot) {
           if (payload.source === "editor-session" && input.isNativePlaybackPrepared?.()) {
             const delivery = await input.nativeVstParameterQueue?.enqueue({
@@ -76,23 +90,28 @@ export const createVstParameterFeedbackController = (
               id: payload.parameterId,
               value: payload.normalizedValue,
             }) ?? "delivered"
+
             if (delivery === "superseded") continue
+
             if (delivery !== "delivered") {
               throw new Error("The native VST parameter feedback queue rejected delivery.")
             }
           }
+
           if (
             disposed
             || input.projectId() !== first.projectId
             || input.mountedProjectGeneration() !== first.generation
           ) continue
           const parameterId = externalAutomationParameterId(instanceId, payload.parameterId)
+
           const targetKey = automationTargetKey(
             commit.current.targetId === "master"
               ? { kind: "master", effectInstanceId: instanceId }
               : { kind: "track", trackId: commit.current.targetId, effectInstanceId: instanceId },
             parameterId,
           )
+
           try {
             input.overrideTarget(targetKey)
           } catch {
@@ -105,30 +124,39 @@ export const createVstParameterFeedbackController = (
       reportFault(error instanceof Error ? error : "VST parameter feedback persistence failed.")
     } finally {
       state.inFlight = false
+
       if (state.pending.size === 0) instances.delete(instanceId)
     }
   }
+
   const unsubscribe = subscription((payload: DesktopVstParameterEditPayload) => {
     const projectId = input.projectId()
     const generation = input.mountedProjectGeneration()
+
     if (disposed || !isLocalId("project", projectId) || payload.projectId !== projectId) return
     const state = instances.get(payload.instanceId) ?? { pending: new Map(), inFlight: false, scheduled: false }
+
     if (!state.pending.has(payload.parameterId) && state.pending.size >= maxVst3WorkerEventsPerBlock) {
       reportFault(`VST parameter feedback exceeded the bounded ${maxVst3WorkerEventsPerBlock}-parameter limit.`)
+
       return
     }
+
     state.pending.set(payload.parameterId, { payload, projectId, generation })
     instances.set(payload.instanceId, state)
+
     if (!state.inFlight && !state.scheduled) {
       state.scheduled = true
       queueMicrotask(() => void drain(payload.instanceId, state))
     }
   })
+
   return {
     dispose() {
       if (disposed) return
       disposed = true
       unsubscribe()
+
       for (const state of instances.values()) state.pending.clear()
       instances.clear()
     },

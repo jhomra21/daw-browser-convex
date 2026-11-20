@@ -14,16 +14,19 @@ describe('history automation rebasing', () => {
       points: [],
       updatedAt: 1,
     }
+
     const granular = {
       ...sampler,
       id: 'granular',
       parameterId: granularAutomationKey('old-track', 'instrument:granular:1', 'grainSize'),
     }
+
     const effect = {
       ...sampler,
       id: 'effect',
       parameterId: 'compressor.thresholdDb',
     }
+
     const synth = {
       ...sampler,
       id: 'synth',

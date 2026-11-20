@@ -159,12 +159,15 @@ async function applyTrackRoutingEntry(entry: Extract<HistoryEntry, { type: 'trac
 async function applyTrackGroupEntry(entry: Extract<HistoryEntry, { type: 'track-group' }>, deps: Deps, direction: HistoryDirection) {
   const index = buildRefIndex(deps)
   const ops = planStructuralOps(entry, direction)
+
   if (direction === 'undo') {
     const [removal] = structuralOpsOfKind(ops, 'remove-track')
+
     const groupTrackId = requireResolved(
       removal && resolveRemovedTrackId(index, deps.getTracks(), removal),
       'Group track not found for track-group undo',
     )
+
     for (const patch of structuralOpsOfKind(ops, 'patch-track')) {
       const trackId = requireResolved(resolveTrackId(index, patch.trackRef), 'Child track not found for track-group undo')
       const previousGroupId = resolveTrackId(index, patch.groupRef)
@@ -172,14 +175,17 @@ async function applyTrackGroupEntry(entry: Extract<HistoryEntry, { type: 'track-
       await persistHistoryTrackGroup(deps, trackId, previousGroupId, previousOutputTargetId)
       deps.actions.applyTrackPatch(trackId, { groupId: previousGroupId, outputTargetId: previousOutputTargetId })
     }
+
     await removeHistoryTrackOrThrow(deps, groupTrackId, 'Failed to remove group track during track-group undo')
     deps.actions.removeLocalTrack(groupTrackId)
     entry.data.currentGroupTrackId = undefined
+
     return
   }
 
   let groupTrackId = resolveTrackId(index, entry.data.groupTrackRef) ?? resolveStoredTrackId(deps.getTracks(), entry.data.currentGroupTrackId)
   let groupTrackIndex = entry.data.groupTrack.index
+
   if (!groupTrackId) {
     const createdTrack = await createHistoryTrack(deps, {
       trackRef: entry.data.groupTrackRef,
@@ -188,9 +194,11 @@ async function applyTrackGroupEntry(entry: Extract<HistoryEntry, { type: 'track-
       channelRole: 'group',
       color: entry.data.groupTrack.color,
     })
+
     groupTrackId = createdTrack.trackId
     groupTrackIndex = createdTrack.index
   }
+
   groupTrackId = assertDefined(groupTrackId, 'Failed to recreate group track')
   entry.data.currentGroupTrackId = groupTrackId
   deps.grantTrackWrite(groupTrackId, { projectId: deps.projectId, userId: deps.userId })
@@ -203,6 +211,7 @@ async function applyTrackGroupEntry(entry: Extract<HistoryEntry, { type: 'track-
     color: entry.data.groupTrack.color,
   }), groupTrackIndex)
   const childRefIndex = buildRefIndex(deps)
+
   for (const patch of structuralOpsOfKind(ops, 'patch-track')) {
     const trackId = requireResolved(resolveTrackId(childRefIndex, patch.trackRef), 'Child track not found for track-group redo')
     const groupId = resolveTrackId(childRefIndex, patch.groupRef)
@@ -215,30 +224,37 @@ async function applyTrackGroupEntry(entry: Extract<HistoryEntry, { type: 'track-
 async function applyTrackUngroupEntry(entry: Extract<HistoryEntry, { type: 'track-ungroup' }>, deps: Deps, direction: HistoryDirection) {
   const index = buildRefIndex(deps)
   const ops = planStructuralOps(entry, direction)
+
   if (direction === 'undo') {
     const groupSnapshot = requireResolved(entry.data.groupTrack, 'Cannot restore legacy track-ungroup history entry')
     const [restored] = structuralOpsOfKind(ops, 'add-track')
     const sourceGroupTrackId = requireResolved(entry.data.sourceGroupTrackId, 'Cannot restore legacy track-ungroup history entry')
     const parentGroupId = resolveTrackId(index, groupSnapshot.groupRef)
     const routing = resolveTrackRoutingSnapshot(index, groupSnapshot.routing)
+
     const children = structuralOpsOfKind(ops, 'patch-track').map((patch) => ({
       trackId: requireResolved(resolveTrackId(index, patch.trackRef), 'Child track not found for track-ungroup undo'),
       outputTargetId: resolveTrackId(index, patch.outputTargetRef),
       outputToGroup: patch.outputTargetRef === restored?.trackRef,
     }))
+
     const sidechainRoutes = (entry.data.sidechainRoutes ?? []).flatMap((route) => {
       const sourceTrackId = route.sourceTrackRef === entry.data.groupTrackRef
         ? undefined
         : resolveTrackId(index, route.sourceTrackRef)
+
       const targetTrackId = route.targetTrackRef === entry.data.groupTrackRef
         ? undefined
         : resolveTrackId(index, route.targetTrackRef)
+
       if (
         (route.sourceTrackRef !== entry.data.groupTrackRef && !sourceTrackId)
         || (route.targetTrackRef !== entry.data.groupTrackRef && !targetTrackId)
       ) return []
+
       return [{ sourceTrackId, targetTrackId, effectInstanceId: route.effectInstanceId }]
     })
+
     const groupTrackId = await persistHistoryRestoreUngroup(deps, {
       groupId: sourceGroupTrackId,
       operationId: entry.data.restoreOperationId,
@@ -261,6 +277,7 @@ async function applyTrackUngroupEntry(entry: Extract<HistoryEntry, { type: 'trac
       automation: entry.data.automation,
       sidechainRoutes,
     })
+
     entry.data.currentGroupTrackId = groupTrackId
     deps.grantTrackWrite(groupTrackId, { projectId: deps.projectId, userId: deps.userId })
     deps.actions.insertLocalTrack(createLocalTrack({
@@ -279,30 +296,37 @@ async function applyTrackUngroupEntry(entry: Extract<HistoryEntry, { type: 'trac
       sends: routing.sends,
       outputTargetId: routing.outputTargetId,
     }), groupSnapshot.index)
+
     for (const child of children) {
       deps.actions.applyTrackPatch(child.trackId, {
         groupId: groupTrackId,
         outputTargetId: child.outputToGroup ? groupTrackId : child.outputTargetId,
       })
     }
+
     for (const envelope of entry.data.automation ?? []) {
       const rebased = rebaseTrackAutomationEnvelope(envelope, groupTrackId)
       deps.actions.applyAutomationEnvelope(rebased, rebased.targetKey)
     }
+
     return
   }
 
   const [removal] = structuralOpsOfKind(ops, 'remove-track')
+
   const groupTrackId = requireResolved(
     removal && resolveRemovedTrackId(index, deps.getTracks(), removal),
     'Group track not found for track-ungroup redo',
   )
+
   await persistHistoryUngroup(deps, groupTrackId)
   entry.data.restoreOperationId = crypto.randomUUID()
+
   for (const envelope of entry.data.automation ?? []) {
     const rebased = rebaseTrackAutomationEnvelope(envelope, groupTrackId)
     deps.actions.applyAutomationEnvelope(undefined, rebased.targetKey)
   }
+
   for (const patch of structuralOpsOfKind(ops, 'patch-track')) {
     const trackId = requireResolved(resolveTrackId(index, patch.trackRef), 'Child track not found for track-ungroup redo')
     deps.actions.applyTrackPatch(trackId, {
@@ -310,6 +334,7 @@ async function applyTrackUngroupEntry(entry: Extract<HistoryEntry, { type: 'trac
       outputTargetId: resolveTrackId(index, patch.outputTargetRef),
     })
   }
+
   deps.actions.removeLocalTrack(groupTrackId)
   entry.data.currentGroupTrackId = undefined
 }
@@ -324,21 +349,27 @@ async function applyTrackColorEntry(entry: Extract<HistoryEntry, { type: 'track-
 
 async function applyTrackColorCascadeEntry(entry: Extract<HistoryEntry, { type: 'track-color-cascade' }>, deps: Deps, direction: HistoryDirection) {
   const index = buildRefIndex(deps)
+
   const tracks = entry.data.tracks.map((update) => ({
     trackId: requireResolved(resolveTrackId(index, update.trackRef), 'Track not found for track-color-cascade history entry'),
     color: pickDirectionalValue(direction, update.from, update.to),
   }))
+
   const clips = entry.data.clips.map((update) => ({
     clipId: requireResolved(resolveClipId(index, update.clipRef), 'Clip not found for track-color-cascade history entry'),
     color: requireResolved(pickDirectionalValue(direction, update.from, update.to), 'Missing clip color for track-color-cascade history entry'),
   }))
+
   await persistHistoryColorBatch(deps, { tracks, clips })
   const trackIndex = createTimelineTrackIndex(deps.getTracks())
+
   for (const update of tracks) {
     deps.actions.applyTrackPatch(update.trackId, { color: update.color })
   }
+
   for (const update of clips) {
     const entry = trackIndex.clipEntryById.get(update.clipId)
+
     if (entry) deps.actions.replaceLocalClip(entry.trackId, { ...entry.clip, color: update.color })
   }
 }
@@ -346,15 +377,19 @@ async function applyTrackColorCascadeEntry(entry: Extract<HistoryEntry, { type: 
 async function applyTrackReorderEntry(entry: Extract<HistoryEntry, { type: 'track-reorder' }>, deps: Deps, direction: HistoryDirection) {
   const index = buildRefIndex(deps)
   const currentTracks = deps.getTracks()
+
   const patches = structuralOpsOfKind(planStructuralOps(entry, direction), 'patch-track').map((patch) => ({
     trackId: requireResolved(resolveTrackId(index, patch.trackRef), 'Track not found for track-reorder history entry'),
     index: patch.index,
     groupId: resolveTrackId(index, patch.groupRef) ?? null,
     outputTargetId: resolveTrackId(index, patch.outputTargetRef) ?? null,
   }))
+
   const patchById = new Map(patches.map((patch) => [patch.trackId, patch]))
+
   const updates = currentTracks.map((track, trackIndex) => {
     const patch = patchById.get(track.id)
+
     return {
       trackId: track.id,
       index: patch?.index ?? trackIndex,
@@ -362,7 +397,9 @@ async function applyTrackReorderEntry(entry: Extract<HistoryEntry, { type: 'trac
       outputTargetId: patch ? patch.outputTargetId : track.outputTargetId ?? null,
     }
   })
+
   await persistHistoryTrackReorder(deps, updates)
+
   for (const patch of patches) {
     deps.actions.applyTrackPatch(patch.trackId, {
       index: patch.index,
@@ -376,19 +413,23 @@ type EffectParamsEntry = Extract<HistoryEntry, { type: 'effect-params' }>
 
 function readEffectTrackId(entry: EffectParamsEntry, deps: Deps) {
   const index = buildRefIndex(deps)
+
   return requireResolved(resolveTrackId(index, entry.data.trackRef), `Track not found for ${entry.data.effect} history entry`)
 }
 
 function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetId: string, direction: HistoryDirection) {
   if (deps.isCurrentScope && !deps.isCurrentScope()) return
+
   try {
     const replayParams = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+
     if (entry.data.instanceId && deps.replayInstanceEffectParams?.({
       targetId,
       effect: entry.data.effect,
       instanceId: entry.data.instanceId,
       params: replayParams,
     })) return
+
     switch (entry.data.effect) {
       case 'master-eq':
       case 'master-reverb':
@@ -403,11 +444,14 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
       case 'delay':
       case 'spectral': {
         const instanceId = entry.data.instanceId
+
         if (!instanceId) throw new Error(`Missing effect instance ID for ${entry.data.effect} history entry.`)
         const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+
         if (!deps.replayInstanceEffectParams?.({ targetId, effect: entry.data.effect, instanceId, params })) {
           throw new Error(`Unable to replay effect instance ${instanceId}.`)
         }
+
         return
       }
     }
@@ -422,6 +466,7 @@ async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, dire
   const targetId = MASTER_EFFECT_TYPES.has(entry.data.effect)
     ? 'master'
     : readEffectTrackId(entry, deps)
+
   // An instance edit takes its identity at initiation, before persistence
   // awaits; the post-success replay (or its projection echo) adopts it. If a
   // newer write lands on the member during the await, the reservation is
@@ -435,12 +480,14 @@ async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, dire
       params: pickDirectionalValue(direction, entry.data.from, entry.data.to),
     })
     : undefined
+
   try {
     await persistHistoryEffectParams(deps, entry, targetId, direction)
   } catch (error) {
     if (edit) deps.releaseInstanceEffectEdit?.(edit)
     throw error
   }
+
   applyEffectParamsToEngine(entry, deps, targetId, direction)
 }
 
@@ -448,6 +495,7 @@ async function applyAutomationEnvelopeEntry(entry: Extract<HistoryEntry, { type:
   await persistHistoryAutomationEnvelope(deps, entry, direction)
   const envelope = pickDirectionalValue(direction, entry.data.before, entry.data.after)
   const targetKey = envelope?.targetKey ?? entry.data.before?.targetKey ?? entry.data.after?.targetKey
+
   if (targetKey) deps.actions.applyAutomationEnvelope(envelope ?? undefined, targetKey)
 }
 
@@ -457,6 +505,7 @@ async function applyClipTimingEntry(entry: Extract<HistoryEntry, { type: 'clip-t
   const timing = pickDirectionalValue(direction, entry.data.from, entry.data.to)
   await persistHistoryClipTimingOrThrow(deps, clipId, timing, 'Failed to apply clip timing during history replay')
   deps.actions.commitClipTiming(clipId, timing)
+
   if (timing.audioWarp) deps.actions.commitClipAudioWarp(clipId, timing.audioWarp)
   deps.actions.rescheduleChangedClips([clipId])
 }
@@ -482,19 +531,28 @@ async function applyClipFadesEntry(entry: Extract<HistoryEntry, { type: 'clip-fa
 // Only the fields the edit changed are written, so a collaborator's edits to other fields survive.
 function changedMidiNoteFields(current: MidiEditorNote, target: MidiEditorNote) {
   const changes: Partial<Pick<MidiEditorNote, 'beat' | 'length' | 'pitch' | 'velocity' | 'channel'>> = {}
+
   if (current.beat !== target.beat) changes.beat = target.beat
+
   if (current.length !== target.length) changes.length = target.length
+
   if (current.pitch !== target.pitch) changes.pitch = target.pitch
+
   if (current.velocity !== target.velocity) changes.velocity = target.velocity
+
   if (current.channel !== target.channel) changes.channel = target.channel
+
   return changes
 }
 
 function midiNoteReplayOperation(change: MidiNoteHistoryChange, direction: HistoryDirection): MidiEditorOperation {
   const target = pickDirectionalValue(direction, change.before, change.after)
   const current = pickDirectionalValue(direction, change.after, change.before)
+
   if (!target) return { kind: 'delete', id: change.id }
+
   if (!current) return { kind: 'insert', note: target }
+
   return { kind: 'update', id: change.id, changes: changedMidiNoteFields(current, target) }
 }
 
@@ -503,11 +561,13 @@ async function applyClipMidiNotesEntry(entry: Extract<HistoryEntry, { type: 'cli
   const clipId = requireResolved(resolveClipId(index, entry.data.clipRef), 'Clip not found for clip-midi-notes history entry')
   // Pending editor writes must land first, or they would re-apply on top of this replay.
   await flushMidiProjectWrites(deps.projectId)
+
   const midi = await commitMidiEditorOperations({
     projectId: deps.projectId,
     clipId,
     operations: entry.data.changes.map((change) => midiNoteReplayOperation(change, direction)),
   })
+
   deps.actions.commitClipMidi(clipId, midi)
 }
 
@@ -518,6 +578,7 @@ async function applyClipColorEntry(entry: Extract<HistoryEntry, { type: 'clip-co
   await persistHistoryClipColorOrThrow(deps, clipId, color, 'Failed to apply clip color during history replay')
   const track = deps.getTracks().find((track) => track.clips.some((clip) => clip.id === clipId))
   const clip = track?.clips.find((clip) => clip.id === clipId)
+
   if (track && clip && color) deps.actions.replaceLocalClip(track.id, { ...clip, color })
 }
 
@@ -525,36 +586,50 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
   const grantScope = { projectId: deps.projectId, userId: deps.userId }
   const index = buildRefIndex(deps)
   const sourceItems = entry.data.items ?? []
+
   if (sourceItems.length === 0) return
+
   const items = sourceItems.map(({ trackRef, clip }) => {
     const trackId = requireResolved(resolveTrackId(index, trackRef), 'Track not found for clip-delete history entry')
+
     return {
       trackId,
       clip,
     }
   })
+
   if (!isLocalHistoryProject(deps)) {
     const persistedRecoveryIdsByOperation = new Map<string, Map<string, string>>()
+
     for (const item of items) {
       const { recoveryId, recoveryOperationId, recoverySourceClipId } = item.clip
+
       if (recoveryId || !recoveryOperationId || !recoverySourceClipId) continue
       let recoveryIds = persistedRecoveryIdsByOperation.get(recoveryOperationId)
+
       if (!recoveryIds) {
         recoveryIds = readQueuedClipDeletionRecoveryIds(deps.projectId, deps.userId, recoveryOperationId)
         persistedRecoveryIdsByOperation.set(recoveryOperationId, recoveryIds)
       }
+
       const persistedRecoveryId = recoveryIds.get(recoverySourceClipId)
+
       if (persistedRecoveryId) item.clip.recoveryId = persistedRecoveryId
     }
+
     const pendingOperationIds = new Set(
       items.flatMap((item) => item.clip.recoveryId || !item.clip.recoveryOperationId ? [] : [item.clip.recoveryOperationId]),
     )
+
     for (const operationId of pendingOperationIds) {
       const flushed = await flushSharedOutboxOperation(deps.projectId, deps.userId, operationId)
+
       if (flushed.status !== 'applied') {
         throw new Error('Cloud clip deletion recovery is still pending.')
       }
+
       const recoveryIds = readQueuedClipDeletionRecoveryIds(deps.projectId, deps.userId, operationId)
+
       if (isJsonObject(flushed.result) && Array.isArray(flushed.result.recoveries)) {
         for (const recovery of flushed.result.recoveries) {
           if (
@@ -564,9 +639,11 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
           ) recoveryIds.set(recovery.sourceClipId, recovery.recoveryId)
         }
       }
+
       for (const item of items) {
         if (item.clip.recoveryOperationId !== operationId || !item.clip.recoverySourceClipId) continue
         const recoveryId = recoveryIds.get(item.clip.recoverySourceClipId)
+
         if (!recoveryId) throw new Error('Cloud clip deletion recovery is still pending.')
         item.clip.recoveryId = recoveryId
       }
@@ -575,6 +652,7 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
 
   const recreatedClipIdsByRef = new Map((entry.data.recreatedClips ?? []).map((item) => [item.clipRef, item.clipId]))
   const pendingItems = items.filter((item) => !recreatedClipIdsByRef.has(item.clip.clipRef))
+
   if (pendingItems.length > 0) {
     if (isLocalHistoryProject(deps)) {
       for (const item of pendingItems) {
@@ -582,6 +660,7 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
           await createHistoryClip(deps, item.trackId, item.clip),
           'Failed to recreate clip',
         )
+
         recreatedClipIdsByRef.set(item.clip.clipRef, clipId)
       }
     } else {
@@ -590,34 +669,42 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
           if (!entry.data.legacyRecreate) {
             throw new Error('Cloud clip deletion history is missing its recovery descriptor.')
           }
+
           const clipId = assertDefined(
             await createHistoryClip(deps, item.trackId, item.clip),
             'Failed to recreate legacy cloud clip',
           )
+
           recreatedClipIdsByRef.set(item.clip.clipRef, clipId)
           continue
         }
+
         const result = await deps.convexClient.mutation(deps.convexApi.clips.restoreDeleted, {
           recoveryId: item.clip.recoveryId,
         })
+
         if (
           (result.status !== 'applied' && result.status !== 'noop')
           || !isJsonString(result.clipId)
         ) {
           throw new Error('Failed to restore deleted cloud clip.')
         }
+
         recreatedClipIdsByRef.set(item.clip.clipRef, result.clipId)
       }
     }
   }
 
   const perTrackAdds = new Map<Track['id'], Track['clips']>()
+
   for (const item of items) {
     const clipId = requireResolved(recreatedClipIdsByRef.get(item.clip.clipRef), 'Missing recreated clip id')
     deps.grantClipWrite(clipId, grantScope)
+
     if (item.clip.sampleUrl) {
       await deps.ensureClipBuffer?.(clipId, item.clip.sampleUrl)
     }
+
     const adds = perTrackAdds.get(item.trackId) ?? []
     adds.push(buildLocalClip({ id: clipId, clip: item.clip }))
     perTrackAdds.set(item.trackId, adds)
@@ -628,10 +715,13 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
       deps.actions.insertLocalClip(trackId, clip)
     }
   }
+
   const recreatedClipIds = Array.from(recreatedClipIdsByRef.values())
+
   if (recreatedClipIds.length > 0) {
     deps.actions.rescheduleChangedClips(recreatedClipIds)
   }
+
   entry.data.recreatedClips = Array.from(recreatedClipIdsByRef.entries()).map(([clipRef, clipId]) => ({ clipRef, clipId }))
   syncHistoryClipCreateEntryIds(deps.getHistoryEntries(), recreatedClipIdsByRef)
 }
@@ -643,6 +733,7 @@ async function applyControlRangeDeleteEntry(
 ) {
   const control = requireResolved(deps.controlClient, 'Control client is unavailable for range deletion history.')
   await flushMidiProjectWrites(deps.projectId)
+
   if (direction === 'undo') {
     if (entry.data.restoreOperationId === undefined || entry.data.restoreExpectedRevision === undefined) {
       const snapshot = await control.snapshotV2()
@@ -650,6 +741,7 @@ async function applyControlRangeDeleteEntry(
       entry.data.restoreExpectedRevision = snapshot.project.revision
       deps.persistHistory?.()
     }
+
     const restoreRequest = (): ControlCommitRequestV1 => ({
       version: 'v1',
       projectId: deps.projectId,
@@ -657,7 +749,9 @@ async function applyControlRangeDeleteEntry(
       idempotencyKey: entry.data.restoreOperationId!,
       actions: [{ kind: 'recovery.restore', recovery: { id: entry.data.recoveryId } }],
     })
+
     let restored
+
     try {
       restored = await control.commitV1(restoreRequest())
     } catch (error) {
@@ -668,6 +762,7 @@ async function applyControlRangeDeleteEntry(
         entry.data.restoreOperationId = crypto.randomUUID()
         entry.data.restoreExpectedRevision = snapshot.project.revision
         deps.persistHistory?.()
+
         try {
           restored = await control.commitV1(restoreRequest())
         } catch (retryError) {
@@ -676,6 +771,7 @@ async function applyControlRangeDeleteEntry(
             entry.data.restoreExpectedRevision = undefined
             deps.persistHistory?.()
           }
+
           throw retryError
         }
       } else if (isProjectControlError(error)) {
@@ -684,49 +780,60 @@ async function applyControlRangeDeleteEntry(
         restored = await control.commitV1(restoreRequest())
       }
     }
+
     if (!restored.applied) throw new Error('Range deletion undo did not restore the project.')
     entry.data.restoreOperationId = undefined
     entry.data.restoreExpectedRevision = undefined
     deps.persistHistory?.()
+
     if (isLocalHistoryProject(deps)) await deps.actions.refreshLocalTimeline?.()
     deps.actions.rescheduleTimeline?.()
+
     return
   }
 
   const index = buildRefIndex(deps)
+
   const trackIds = entry.data.trackRefs.map((trackRef) => (
     requireResolved(resolveTrackId(index, trackRef), 'Track not found for range deletion history')
   ))
+
   const action: Extract<ControlActionV1, { kind: 'timeline.range.delete' }> = {
     kind: 'timeline.range.delete',
     tracks: trackIds.map((id) => ({ source: 'persisted', id })),
     startSec: entry.data.startSec,
     endSec: entry.data.endSec,
   }
+
   if (
     entry.data.deleteOperationId === undefined
     || entry.data.deleteExpectedRevision === undefined
     || entry.data.deleteApprovalToken === undefined
   ) {
     const snapshot = await control.snapshotV2()
+
     const preview = await control.previewV1({
       version: 'v1',
       projectId: deps.projectId,
       expectedRevision: snapshot.project.revision,
       actions: [action],
     })
+
     if (!preview.applied) throw new Error('Range deletion redo did not change the project.')
+
     const approval = await control.requestApprovalV1({
       version: 'v1',
       projectId: deps.projectId,
       expectedRevision: snapshot.project.revision,
       actions: [action],
     })
+
     entry.data.deleteOperationId = crypto.randomUUID()
     entry.data.deleteExpectedRevision = snapshot.project.revision
     entry.data.deleteApprovalToken = approval.approvalToken
     deps.persistHistory?.()
   }
+
   const commitRequest = (): ControlCommitRequestV1 => ({
     version: 'v1',
     projectId: deps.projectId,
@@ -735,7 +842,9 @@ async function applyControlRangeDeleteEntry(
     approvalToken: entry.data.deleteApprovalToken,
     actions: [action],
   })
+
   let committed
+
   try {
     committed = await control.commitV1(commitRequest())
   } catch (error) {
@@ -744,14 +853,18 @@ async function applyControlRangeDeleteEntry(
       entry.data.deleteExpectedRevision = undefined
       entry.data.deleteApprovalToken = undefined
       deps.persistHistory?.()
+
       return await applyControlRangeDeleteEntry(entry, deps, direction)
     }
+
     if (isProjectControlError(error)) throw error
     committed = await control.commitV1(commitRequest())
   }
+
   const recovery = committed.recoveries.find((candidate) => (
     candidate.actionIndex === 0 && candidate.kind === 'timeline.range.delete'
   ))
+
   if (!recovery) throw new Error('Range deletion redo did not return a recovery descriptor.')
   entry.data.recoveryId = recovery.id
   entry.data.restoreOperationId = undefined
@@ -760,6 +873,7 @@ async function applyControlRangeDeleteEntry(
   entry.data.deleteExpectedRevision = undefined
   entry.data.deleteApprovalToken = undefined
   deps.persistHistory?.()
+
   if (isLocalHistoryProject(deps)) await deps.actions.refreshLocalTimeline?.()
   deps.actions.rescheduleTimeline?.()
 }
@@ -772,24 +886,31 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
   switch (entry.type) {
     case 'section-edit': {
       const entries = planStructuralTransition(entry, direction)
+
       const trackDeleteContext = direction === 'redo'
         ? { refIndex: buildRefIndex(deps), deletedTrackIds: new Set<Track['id']>() }
         : null
+
       const completed: HistoryEntry[] = []
+
       try {
         for (const child of entries) {
           const refusal = deps.refuseStep?.(child)
+
           if (refusal) throw new Error(refusal)
+
           if (trackDeleteContext && child.type === 'track-delete') {
             await applyTrackDeleteEntry(child, deps, direction, trackDeleteContext)
           } else {
             await execHistoryEntry(child, deps, direction)
           }
+
           completed.push(child)
         }
       } catch (error) {
         const compensationErrors: unknown[] = []
         const inverseDirection = direction === 'undo' ? 'redo' : 'undo'
+
         for (const child of completed.reverse()) {
           try {
             await execHistoryEntry(child, deps, inverseDirection)
@@ -797,23 +918,28 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
             compensationErrors.push(compensationError)
           }
         }
+
         if (compensationErrors.length > 0) {
           throw new AggregateError(
             [error, ...compensationErrors],
             'Section history replay failed and compensation was incomplete.',
           )
         }
+
         throw error
       }
+
       return
     }
 
     case 'control-range-delete':
       await applyControlRangeDeleteEntry(entry, deps, direction)
+
       return
 
     case 'clip-create': {
       const index = buildRefIndex(deps)
+
       if (direction === 'undo') {
         const clipId = requireResolved(resolveClipId(index, entry.data.clip.clipRef) ?? entry.data.clip.currentId, 'Clip not found for clip-create undo')
         const trackIdByClipId = createTimelineTrackIndex(deps.getTracks()).clipTrackIdById
@@ -829,6 +955,7 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
         deps.actions.removeLocalClips([clipId])
         entry.data.clip.currentId = undefined
         entry.data.clip.deleteOperationId = undefined
+
         return
       }
 
@@ -839,91 +966,117 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
       const resolvedNewId = assertDefined(newId, 'Failed to recreate clip')
       entry.data.clip.currentId = resolvedNewId
       deps.grantClipWrite(resolvedNewId, grantScope)
+
       if (clipSnapshot.sampleUrl) {
         await deps.ensureClipBuffer?.(resolvedNewId, clipSnapshot.sampleUrl)
       }
+
       deps.actions.insertLocalClip(trackId, buildLocalClip({ id: resolvedNewId, clip: clipSnapshot }))
       deps.actions.rescheduleChangedClips([resolvedNewId])
+
       return
     }
 
     case 'clip-delete': {
       if (direction === 'undo') {
         await recreateDeletedClips(entry, deps)
+
         return
       }
+
       const ids = (entry.data.recreatedClips ?? []).map((item) => item.clipId)
+
       if (ids.length === 0) return
       const deleteOperationId = entry.data.deleteOperationId ?? crypto.randomUUID()
       entry.data.deleteOperationId = deleteOperationId
+
       const recoveryIdsByClipId = await removeHistoryClipIdsOrThrow(
         deps,
         ids,
         deleteOperationId,
         'Failed to remove clips during clip-delete redo',
       )
+
       deps.actions.removeLocalClips(ids)
+
       for (const item of entry.data.items) {
         const recreated = (entry.data.recreatedClips ?? []).find((entry) => entry.clipRef === item.clip.clipRef)
+
         if (!recreated) continue
         const recoveryId = recoveryIdsByClipId.get(recreated.clipId)
+
         if (recoveryId) item.clip.recoveryId = recoveryId
       }
+
       entry.data.recreatedClips = []
       entry.data.deleteOperationId = undefined
+
       return
     }
 
     case 'clips-move': {
       const index = buildRefIndex(deps)
+
       const moves = entry.data.moves.map((move) => {
         const clipId = requireResolved(resolveClipId(index, move.clipRef), 'Clip not found for clips-move history entry')
         const target = pickDirectionalValue(direction, move.from, move.to)
         const toTrackId = requireResolved(resolveTrackId(index, target.trackRef), 'Target track not found for clips-move history entry')
+
         return { clipId, trackId: toTrackId, startSec: target.startSec }
       })
+
       await persistHistoryClipMovesOrThrow(deps, moves, 'Failed to move clip during history replay')
       deps.actions.commitClipMoves(moves)
       deps.actions.rescheduleChangedClips(moves.map((move) => move.clipId))
+
       return
     }
 
     case 'clip-timing':
       await applyClipTimingEntry(entry, deps, direction)
+
       return
 
     case 'clip-audio-warp':
       await applyClipAudioWarpEntry(entry, deps, direction)
+
       return
 
     case 'clip-fades':
       await applyClipFadesEntry(entry, deps, direction)
+
       return
 
     case 'clip-midi-notes':
       await applyClipMidiNotesEntry(entry, deps, direction)
+
       return
 
     case 'clip-color':
       await applyClipColorEntry(entry, deps, direction)
+
       return
 
     case 'track-create': {
       if (direction === 'undo') {
         const [removal] = structuralOpsOfKind(planStructuralOps(entry, direction), 'remove-track')
+
         const trackId = requireResolved(
           removal && resolveRemovedTrackId(buildRefIndex(deps), deps.getTracks(), removal),
           'Track not found for track-create undo',
         )
+
         await removeHistoryTrackOrThrow(deps, trackId, 'Failed to remove track during track-create undo')
         deps.actions.removeLocalTrack(trackId)
         entry.data.currentTrackId = undefined
+
         return
       }
 
       let newId = resolveStoredTrackId(deps.getTracks(), entry.data.currentTrackId)
       const collapsed = trackCreationCollapsed(entry.data.channelRole, entry.data.collapsed)
       let index = entry.data.index
+
       if (!newId) {
         const createdTrack = await createHistoryTrack(deps, {
           trackRef: entry.data.trackRef,
@@ -934,9 +1087,11 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
           collapsed,
           color: entry.data.color,
         })
+
         newId = createdTrack.trackId
         index = createdTrack.index
       }
+
       const resolvedNewId = assertDefined(newId, 'Failed to recreate track')
       entry.data.currentTrackId = resolvedNewId
       deps.grantTrackWrite(resolvedNewId, grantScope)
@@ -950,60 +1105,73 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
         collapsed,
         color: entry.data.color,
       }), index)
+
       return
     }
 
     case 'track-clip-create': {
       const historyContext = { refIndex: buildRefIndex(deps) }
       await applyTrackClipCreateEntry(entry, deps, direction, historyContext)
+
       return
     }
 
     case 'track-delete': {
       const historyContext = { refIndex: buildRefIndex(deps) }
       await applyTrackDeleteEntry(entry, deps, direction, historyContext)
+
       return
     }
 
     case 'track-volume':
       await applyTrackVolumeEntry(entry, deps, direction)
+
       return
 
     case 'track-mute':
     case 'track-solo':
       await applyTrackBooleanEntry(entry, deps, direction)
+
       return
 
     case 'track-routing':
       await applyTrackRoutingEntry(entry, deps, direction)
+
       return
 
     case 'track-group':
       await applyTrackGroupEntry(entry, deps, direction)
+
       return
 
     case 'track-ungroup':
       await applyTrackUngroupEntry(entry, deps, direction)
+
       return
 
     case 'track-color':
       await applyTrackColorEntry(entry, deps, direction)
+
       return
 
     case 'track-color-cascade':
       await applyTrackColorCascadeEntry(entry, deps, direction)
+
       return
 
     case 'track-reorder':
       await applyTrackReorderEntry(entry, deps, direction)
+
       return
 
     case 'effect-params':
       await applyEffectParamsEntry(entry, deps, direction)
+
       return
 
     case 'automation-envelope-change':
       await applyAutomationEnvelopeEntry(entry, deps, direction)
+
       return
   }
 }

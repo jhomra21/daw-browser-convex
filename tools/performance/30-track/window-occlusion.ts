@@ -72,19 +72,24 @@ const boundedExit = async (child: Bun.Subprocess, timeoutMs: number) => {
   const timedOut = new Promise<"timeout">((resolve) => { timer = setTimeout(() => resolve("timeout"), timeoutMs) })
   const result = await Promise.race([child.exited, timedOut])
   clearTimeout(timer)
+
   if (result !== "timeout") return result
   child.kill("SIGKILL")
   await child.exited
+
   return null
 }
 
 const setMinimized = async (pid: number, minimized: boolean) => {
   const child = Bun.spawn(["osascript", "-l", "JavaScript", "-e", minimizeScript, String(pid), String(minimized)], { stdout: "pipe", stderr: "pipe" })
+
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(child.stdout).text(), new Response(child.stderr).text(), boundedExit(child, 10_000),
   ])
+
   if (exitCode !== 0) throw new Error(`Owned window minimize=${minimized} failed: ${(stderr || "timed out").trim().slice(0, 256)}`)
   const result = minimizedResultSchema.parse(JSON.parse(stdout))
+
   if (result.minimized !== minimized) throw new Error(`Owned window reported minimized=${result.minimized} after requesting ${minimized}.`)
 }
 
@@ -92,10 +97,13 @@ const observeMinimized = async (pid: number) => {
   const child = Bun.spawn(["osascript", "-l", "JavaScript", "-e", observeMinimizedScript, String(pid)], {
     stdout: "pipe", stderr: "pipe",
   })
+
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(child.stdout).text(), new Response(child.stderr).text(), boundedExit(child, 10_000),
   ])
+
   if (exitCode !== 0) throw new Error(`Owned window minimized observation failed: ${(stderr || "timed out").trim().slice(0, 256)}`)
+
   return minimizedResultSchema.parse(JSON.parse(stdout))
 }
 
@@ -106,9 +114,11 @@ const startCover = async (maxSeconds: number) => {
   let output = ""
   let timer: ReturnType<typeof setTimeout> | undefined
   const deadline = new Promise<"timeout">((resolve) => { timer = setTimeout(() => resolve("timeout"), 10_000) })
+
   try {
     while (!/covered [1-9]\d*/.test(output)) {
       const next = await Promise.race([reader.read(), deadline])
+
       if (next === "timeout" || next.done) throw new Error(`Occluding window did not appear: ${output.trim().slice(0, 256)}`)
       output += decoder.decode(next.value)
     }
@@ -120,21 +130,26 @@ const startCover = async (maxSeconds: number) => {
     clearTimeout(timer)
     reader.releaseLock()
   }
+
   const match = output.match(/covered ([1-9]\d*)/)
+
   if (!match?.[1]) throw new Error("Occluding window screen count is missing.")
   const screensCovered = Number(match[1])
   const startedAt = performance.now()
+
   return {
     screensCovered,
     async remove() {
       child.kill("SIGTERM")
       await boundedExit(child, 3_000)
+
       return { intervalMs: performance.now() - startedAt }
     },
   }
 }
 
 export type RecordingWindowState = "minimized" | "occluded"
+
 export type RecordingWindowObservation = {
   state: RecordingWindowState
   minimized?: boolean
@@ -145,17 +160,21 @@ export type RecordingWindowObservation = {
 export const createOwnedWindowControl = (pid: number, mainSamplePath?: string) => {
   let minimized = false
   let cover: Awaited<ReturnType<typeof startCover>> | undefined
+
   return {
     observe: () => observeMinimized(pid),
     async enter(state: RecordingWindowState, maxSeconds: number) {
       if (minimized || cover) throw new Error("Owned window is already backgrounded.")
+
       if (state === "minimized") {
         minimized = true
+
         // Diagnostic-only sampling of the verified runner-owned root PID.
         // Never changes app priority/throttling; sampled runs are not benchmarks.
         const sampler = mainSamplePath
           ? Bun.spawn(["sample", String(pid), "2", "5", "-file", mainSamplePath], { stdout: "ignore", stderr: "pipe" })
           : undefined
+
         try {
           await setMinimized(pid, true)
         } finally {
@@ -163,14 +182,18 @@ export const createOwnedWindowControl = (pid: number, mainSamplePath?: string) =
             const [stderr, exitCode] = await Promise.all([
               new Response(sampler.stderr).text(), boundedExit(sampler, 6_000),
             ])
+
             await writePrivateArtifact(`${mainSamplePath}.status.json`, JSON.stringify({
               exitCode, stderr: stderr.slice(-1_000), interpretation: "Diagnostic sampling; not frame-performance evidence.",
             }))
           }
         }
+
         return { state, minimized: true } satisfies RecordingWindowObservation
       }
+
       cover = await startCover(maxSeconds)
+
       return { state, screensCovered: cover.screensCovered } satisfies RecordingWindowObservation
     },
     async restore() {
@@ -178,17 +201,22 @@ export const createOwnedWindowControl = (pid: number, mainSamplePath?: string) =
       cover = undefined
       let restoredMinimized = false
       let coveredIntervalMs: number | undefined
+
       if (activeCover) {
         coveredIntervalMs = (await activeCover.remove()).intervalMs
+
         if (coveredIntervalMs < 1) throw new Error("Owned cover window interval was not observed.")
       }
+
       if (minimized) {
         await setMinimized(pid, false)
         minimized = false
         restoredMinimized = true
       }
+
       return { minimized: restoredMinimized, coveredIntervalMs }
     },
   }
 }
+
 export type OwnedWindowControl = ReturnType<typeof createOwnedWindowControl>

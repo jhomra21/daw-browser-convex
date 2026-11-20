@@ -131,6 +131,7 @@ const render = async (
   source.buffer = buffer
   await connect(context, source)
   source.start()
+
   return context.startRendering()
 }
 
@@ -142,13 +143,16 @@ const renderResampled = async (
   const outputLength = Math.ceil(channels[0].length * targetSampleRate / sourceSampleRate)
   const context = new OfflineAudioContext(channels.length, outputLength, targetSampleRate)
   const buffer = context.createBuffer(channels.length, channels[0].length, sourceSampleRate)
+
   for (let channel = 0; channel < channels.length; channel += 1) {
     buffer.getChannelData(channel).set(channels[channel])
   }
+
   const source = context.createBufferSource()
   source.buffer = buffer
   source.connect(context.destination)
   source.start()
+
   return context.startRendering()
 }
 
@@ -159,48 +163,61 @@ const characterizeSampleRateConversion = async (
   const durationSec = 0.25
   const inputLength = Math.ceil(durationSec * sourceSampleRate)
   const expectedOutputLength = Math.ceil(inputLength * targetSampleRate / sourceSampleRate)
+
   const startedAt = 'performance' in globalThis && globalThis.performance
     ? globalThis.performance.now()
     : null
+
   try {
     const toneFrequencies = [1_000, Math.min(sourceSampleRate, targetSampleRate) * 0.1, Math.min(sourceSampleRate, targetSampleRate) * 0.225]
     const amplitudes: number[] = []
     let oneKhzAmplitude = 0
+
     for (const frequency of toneFrequencies) {
       const rendered = await renderResampled(
         sourceSampleRate,
         targetSampleRate,
         [createSrcToneFixture(inputLength, frequency, sourceSampleRate)],
       )
+
       const amplitude = measureToneAmplitude(rendered.getChannelData(0), frequency, targetSampleRate, Math.ceil(targetSampleRate * 0.02))
       amplitudes.push(amplitude)
+
       if (frequency === 1_000) oneKhzAmplitude = amplitude
     }
+
     const passbandDb = amplitudes.map((amplitude) => 20 * Math.log10(Math.max(amplitude, 1e-15)))
     const passbandRippleDb = Math.max(...passbandDb) - Math.min(...passbandDb)
     const aliasProbeFrequency = targetSampleRate < sourceSampleRate ? targetSampleRate * 0.55 : null
     let aliasLevelDb: number | null = null
+
     if (aliasProbeFrequency !== null) {
       const aliasRendered = await renderResampled(
         sourceSampleRate,
         targetSampleRate,
         [createSrcToneFixture(inputLength, aliasProbeFrequency, sourceSampleRate)],
       )
+
       const aliasFrequency = Math.abs(aliasProbeFrequency - targetSampleRate)
+
       const aliasAmplitude = measureToneAmplitude(
         aliasRendered.getChannelData(0),
         aliasFrequency,
         targetSampleRate,
         Math.ceil(targetSampleRate * 0.02),
       )
+
       aliasLevelDb = 20 * Math.log10(Math.max(aliasAmplitude, 1e-15))
     }
+
     const impulseFrame = Math.floor(inputLength / 2)
+
     const impulseRendered = await renderResampled(
       sourceSampleRate,
       targetSampleRate,
       [createSrcImpulseFixture(inputLength, impulseFrame)],
     )
+
     const expectedPeakFrame = Math.round(impulseFrame * targetSampleRate / sourceSampleRate)
     const impulse = measureSrcImpulse(impulseRendered.getChannelData(0), expectedPeakFrame)
     const stereoInput = createSrcStereoIsolationFixture(inputLength, sourceSampleRate)
@@ -208,6 +225,7 @@ const characterizeSampleRateConversion = async (
     const left = stereoRendered.getChannelData(0)
     const right = stereoRendered.getChannelData(1)
     const elapsedMs = startedAt === null ? null : performance.now() - startedAt
+
     const metrics = {
       outputSampleRate: impulseRendered.sampleRate,
       outputLength: impulseRendered.length,
@@ -225,6 +243,7 @@ const characterizeSampleRateConversion = async (
       inputBytes: inputLength * 2 * Float32Array.BYTES_PER_ELEMENT,
       outputBytes: expectedOutputLength * 2 * Float32Array.BYTES_PER_ELEMENT,
     }
+
     const passed = metrics.outputSampleRate === targetSampleRate
       && metrics.outputLength === expectedOutputLength
       && Math.abs(metrics.gainErrorDb) <= 0.25
@@ -232,6 +251,7 @@ const characterizeSampleRateConversion = async (
       && (metrics.aliasLevelDb === null || metrics.aliasLevelDb <= -60)
       && Math.abs(metrics.phaseDelayFrames) <= 1
       && metrics.isolationDb <= -120
+
     return { sourceSampleRate, targetSampleRate, status: passed ? 'pass' : 'fail', metrics }
   } catch (error) {
     return {
@@ -245,6 +265,7 @@ const characterizeSampleRateConversion = async (
 
 const capture = async (run: () => Promise<BrowserCharacterizationCase>): Promise<BrowserCharacterizationCase> => {
   let timeoutId: ReturnType<typeof setTimeout> | undefined
+
   try {
     return await Promise.race([
       run(),
@@ -266,7 +287,9 @@ const connectSingleEqFilter = (context: BaseAudioContext, source: AudioNode, fre
     channelMode: 'stereo',
     bands: [{ id: 'characterization', type: 'peaking', frequency: frequencyHz, gainDb: 6, q: 1, enabled: true }],
   })
+
   const [filter, ...rest] = createEqNodes(context, params, 2)
+
   if (!filter || rest.length > 0) throw new Error('Characterization EQ must create exactly one filter.')
   source.connect(filter)
   filter.connect(context.destination)
@@ -277,11 +300,13 @@ const characterizeBrowserStereoIsolation = async (): Promise<BrowserCharacteriza
     source.buffer?.getChannelData(0).set([1])
     connectSingleEqFilter(context, source, 1_000)
   })
+
   const left = rendered.getChannelData(0)
   const right = rendered.getChannelData(1)
   const leftPeak = measureAudio([left]).peak
   const rightPeak = measureAudio([right]).peak
   const crosstalkDb = Math.max(-300, measureCrosstalkDb(left, right))
+
   return {
     status: Number.isFinite(leftPeak) && leftPeak > 0 && crosstalkDb <= -120 ? 'pass' : 'fail',
     metrics: { leftPeak, rightPeak, crosstalkDb },
@@ -292,17 +317,20 @@ const characterizeBrowserEq = async (): Promise<BrowserCharacterizationCase> => 
   const sampleRate = 48_000
   const frequencyHz = 1_000
   const input = createSineFixture(4_800, frequencyHz, sampleRate)[0].map((sample) => sample * 0.25)
+
   const rendered = await render(sampleRate, 2, input.length, (context, source) => {
     source.buffer?.getChannelData(0).set(input)
     source.buffer?.getChannelData(1).set(input)
     connectSingleEqFilter(context, source, frequencyHz)
   })
+
   const output = rendered.getChannelData(0)
   const settleFrame = 480
   const settledInput = input.subarray(settleFrame)
   const settledOutput = output.subarray(settleFrame)
   const transfer = measureToneTransfer(settledInput, settledOutput, frequencyHz, sampleRate)
   const thdPlusNoiseDb = Math.max(-300, measureThdPlusNoise(settledOutput, frequencyHz, sampleRate))
+
   return {
     status: transfer.finite
       && transfer.gainDb > 5.5
@@ -326,16 +354,27 @@ const envelope = <State>(state: State): CharacterizationEnvelope<State> => ({ ve
 
 const staticParams = (kind: StaticWorkletKind) => {
   if (kind === 'utility') return envelope({ ...createDefaultUtilityParams(), enabled: false })
+
   if (kind === 'autofilter') return envelope({ ...createDefaultAutoFilterParams(), enabled: false })
+
   if (kind === 'gate') return envelope({ ...createDefaultGateParams(), enabled: false })
+
   if (kind === 'limiter') return envelope({ ...createDefaultLimiterParams(), enabled: false })
+
   if (kind === 'lofi') return envelope({ ...createDefaultLoFiParams(), enabled: false })
+
   if (kind === 'chorus') return envelope({ ...createDefaultChorusParams(), enabled: false })
+
   if (kind === 'flanger') return envelope({ ...createDefaultFlangerParams(), enabled: false })
+
   if (kind === 'phaser') return envelope({ ...createDefaultPhaserParams(), enabled: false })
+
   if (kind === 'tremolo') return envelope({ ...createDefaultTremoloParams(), enabled: false })
+
   if (kind === 'autopan') return envelope({ ...createDefaultAutoPanParams(), enabled: false })
+
   if (kind === 'spectral') return normalizeSpectralParamsEnvelope({ ...createDefaultSpectralParams(), enabled: false })
+
   return envelope({ ...createDefaultEnsembleParams(), enabled: false })
 }
 
@@ -372,12 +411,14 @@ const isStaticModuleCharacterizationFields = <Value>(
 const isString = <Value>(value: Value): value is Value & string => typeof value === 'string'
 const isNumber = <Value>(value: Value): value is Value & number => typeof value === 'number'
 const isBoolean = <Value>(value: Value): value is Value & boolean => typeof value === 'boolean'
+
 const isValidStatus = <Value>(status: Value): status is Value & BrowserCharacterizationCase['status'] => (
   status === 'pass' || status === 'fail' || status === 'unsupported'
 )
 
 export function isStaticModuleCharacterization<Value>(value: Value): value is Value & StaticModuleCharacterization {
   if (!isStaticModuleCharacterizationFields(value)) return false
+
   return isString(value.kind)
     && isNumber(value.sampleRate)
     && (value.channels === 1 || value.channels === 2)
@@ -394,6 +435,7 @@ const characterizeStaticModule = async (
   channels: number,
 ): Promise<StaticModuleCharacterization> => {
   const declaredLatencyFrames = getStaticModuleDeclaredLatencyFrames(kind, sampleRate)
+
   if (!('audioWorklet' in OfflineAudioContext.prototype)) {
     return {
       kind,
@@ -407,24 +449,31 @@ const characterizeStaticModule = async (
       message: 'OfflineAudioContext AudioWorklet registration is unavailable.',
     }
   }
+
   let registered = false
+
   const result = await capture(async () => {
     const frames = Math.max(128, declaredLatencyFrames + 2)
+
     const rendered = await render(sampleRate, channels, frames, async (context, source) => {
       for (let channel = 0; channel < channels; channel += 1) {
         source.buffer?.getChannelData(channel).fill(channel === 0 ? 0.25 : -0.125)
       }
+
       const chain = await createStaticWorkletNodeChain(context, kind, staticParams(kind))
       registered = true
       source.connect(chain.node)
       chain.node.connect(context.destination)
     })
+
     const metrics = measureAudio(readBuffer(rendered))
+
     return {
       status: metrics.containsNonFiniteSamples ? 'fail' : 'pass',
       metrics: { containsNonFiniteSamples: metrics.containsNonFiniteSamples },
     }
   })
+
   return {
     kind,
     sampleRate,
@@ -442,17 +491,21 @@ const characterizeStaticModule = async (
 
 export async function runBrowserCharacterization(): Promise<BrowserCharacterizationReport> {
   const sampleRates: Record<string, BrowserCharacterizationCase> = {}
+
   for (const sampleRate of [44_100, 48_000, 96_000]) {
     sampleRates[String(sampleRate)] = await capture(async () => {
       const context = new OfflineAudioContext(1, 1, sampleRate)
       const rendered = await context.startRendering()
+
       return {
         status: rendered.sampleRate === sampleRate ? 'pass' : 'fail',
         metrics: { requestedSampleRate: sampleRate, activeSampleRate: rendered.sampleRate },
       }
     })
   }
+
   const sampleRateConversionMatrix: SampleRateConversionResult[] = []
+
   for (const sourceSampleRate of [44_100, 48_000, 96_000]) {
     for (const targetSampleRate of [44_100, 48_000, 96_000]) {
       if (sourceSampleRate !== targetSampleRate) {
@@ -469,7 +522,9 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
       source.connect(gain)
       gain.connect(context.destination)
     })
+
     const metrics = measureAudio(readBuffer(rendered))
+
     return { status: Math.abs(metrics.peak - 0.5) < 1e-3 ? 'pass' : 'fail', metrics: { peak: metrics.peak, rms: metrics.rms } }
   })
 
@@ -482,16 +537,20 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
         source.buffer.getChannelData(0)[16] = 0.5
         source.buffer.getChannelData(1)[80] = -0.25
       }
+
       const chain = await createCompressorNodeChain(context, normalizeCompressorParams({ enabled: true, dryWet: 0 }))
       source.connect(chain.input)
       chain.output.connect(context.destination)
     })
+
     const left = rendered.getChannelData(0)
     const right = rendered.getChannelData(1)
+
     const expectedFramesMatch = left[16] === 0.5
       && right[80] === -0.25
       && left[80] === 0
       && right[16] === 0
+
     return {
       status: expectedFramesMatch ? 'pass' : 'fail',
       metrics: {
@@ -506,9 +565,11 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
 
   const compressorProcessing = await capture(async () => {
     const inputLevel = 0.5
+
     const rendered = await render(48_000, 2, 4_800, async (context, source) => {
       source.buffer?.getChannelData(0).fill(inputLevel)
       source.buffer?.getChannelData(1).fill(inputLevel)
+
       const chain = await createCompressorNodeChain(context, normalizeCompressorParams({
         enabled: true,
         thresholdDb: -30,
@@ -520,11 +581,14 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
         kneeDb: 0,
         detectorMode: 'peak',
       }))
+
       source.connect(chain.input)
       chain.output.connect(context.destination)
     })
+
     const settled = rendered.getChannelData(0).subarray(2_400)
     const metrics = measureAudio([settled])
+
     return {
       status: !metrics.containsNonFiniteSamples && metrics.rms < inputLevel * 0.5 ? 'pass' : 'fail',
       metrics: {
@@ -540,8 +604,10 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
     if (!('audioWorklet' in OfflineAudioContext.prototype)) {
       return { status: 'unsupported', message: 'OfflineAudioContext AudioWorklet registration is unavailable.' }
     }
+
     const context = new OfflineAudioContext(2, 128, 48_000)
     await context.audioWorklet.addModule(resolveWorkletModuleUrl(trackMeterWorklet.modulePath))
+
     return { status: 'pass' }
   })
 
@@ -549,29 +615,37 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
     if (!('audioWorklet' in OfflineAudioContext.prototype)) {
       return { status: 'unsupported', message: 'OfflineAudioContext AudioWorklet registration is unavailable.' }
     }
+
     const frames = Math.ceil(sampleRate * 0.002) + 2
+
     const rendered = await render(sampleRate, 2, frames, async (context, source) => {
       if (source.buffer) {
         source.buffer.getChannelData(0)[0] = 0.5
         source.buffer.getChannelData(1)[0] = -0.25
       }
+
       const params = kind === 'utility' ? normalizeUtilityParamsEnvelope({}) : normalizeGateParamsEnvelope({ state: { enabled: false } })
       const chain = await createStaticWorkletNodeChain(context, kind, params)
       source.connect(chain.node)
       chain.node.connect(context.destination)
     })
+
     const expectedFrame = kind === 'gate' ? Math.ceil(sampleRate * 0.002) : 0
     const left = rendered.getChannelData(0)[expectedFrame]
     const right = rendered.getChannelData(1)[expectedFrame]
     const matches = Math.abs(left - 0.5) <= 1e-6 && Math.abs(right + 0.25) <= 1e-6
+
     return { status: matches ? 'pass' : 'fail', metrics: { sampleRate, expectedFrame, left, right } }
   })
+
   const utilityWorklet: Record<string, BrowserCharacterizationCase> = {}
   const gateWorklet: Record<string, BrowserCharacterizationCase> = {}
+
   for (const sampleRate of [44_100, 48_000, 96_000]) {
     utilityWorklet[String(sampleRate)] = await characterizeStaticWorklet('utility', sampleRate)
     gateWorklet[String(sampleRate)] = await characterizeStaticWorklet('gate', sampleRate)
   }
+
   const modulationDefaults = {
     chorus: createDefaultChorusParams,
     flanger: createDefaultFlangerParams,
@@ -580,16 +654,20 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
     autopan: createDefaultAutoPanParams,
     ensemble: createDefaultEnsembleParams,
   }
+
   const modulationWorklet: Record<string, BrowserCharacterizationCase> = {}
   const modulationKinds: Array<keyof typeof modulationDefaults> = ['chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble']
+
   for (const kind of modulationKinds) {
     modulationWorklet[kind] = await capture(async () => {
       if (!('audioWorklet' in OfflineAudioContext.prototype)) {
         return { status: 'unsupported', message: 'OfflineAudioContext AudioWorklet registration is unavailable.' }
       }
+
       const rendered = await render(48_000, 2, 128, async (context, source) => {
         source.buffer?.getChannelData(0).fill(0.25)
         source.buffer?.getChannelData(1).fill(-0.125)
+
         const chain = kind === 'chorus'
           ? await createStaticWorkletNodeChain(context, kind, { version: 1, state: { ...createDefaultChorusParams(), enabled: false } })
           : kind === 'flanger'
@@ -601,11 +679,14 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
                 : kind === 'autopan'
                   ? await createStaticWorkletNodeChain(context, kind, { version: 1, state: { ...createDefaultAutoPanParams(), enabled: false } })
                   : await createStaticWorkletNodeChain(context, kind, { version: 1, state: { ...createDefaultEnsembleParams(), enabled: false } })
+
         source.connect(chain.node)
         chain.node.connect(context.destination)
       })
+
       const left = rendered.getChannelData(0)[0]
       const right = rendered.getChannelData(1)[0]
+
       return { status: left === 0.25 && right === -0.125 ? 'pass' : 'fail', metrics: { left, right } }
     })
   }
@@ -624,6 +705,7 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
     'ensemble',
     'spectral',
   ]
+
   const staticModules = await Promise.all(staticKinds.flatMap((kind) =>
     [44_100, 48_000, 96_000].flatMap((sampleRate) =>
       [1, 2].map((channels) => characterizeStaticModule(kind, sampleRate, channels)))))

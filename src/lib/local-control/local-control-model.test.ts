@@ -7,6 +7,7 @@ import { materializeLocalControlSnapshot, parseLocalProjectStoredJsonValue } fro
 
 test('parses nested stored JSON without building a validation error per container', () => {
   const stringify = spyOn(JSON, 'stringify')
+
   try {
     expect(parseLocalProjectStoredJsonValue({ a: [1, { b: 'x', c: null }], d: { e: true } }))
       .toEqual({ a: [1, { b: 'x', c: null }], d: { e: true } })
@@ -52,16 +53,20 @@ test('materializes a legacy oversized persisted MIDI snapshot', () => {
     assets: [],
     assetFolders: [],
   }
+
   const model = materializeLocalControlSnapshot({
     entities: [],
     assets: [],
     projectState: [],
   }, snapshot, 1)
+
   const clip = model.entities.find((entity) => entity.kind === 'clip')
   const value = clip ? parseLocalProjectStoredJsonValue(clip.value) : undefined
+
   if (!clip || !isJsonObject(value) || value.midi === undefined) {
     throw new Error('Expected a materialized MIDI clip.')
   }
+
   expect(value.midi).toMatchObject({ wave: 'custom-legacy', gain: 7 })
   expect(JSON.stringify(value.midi)).toContain('"channel":1')
 })
@@ -82,6 +87,7 @@ test('clears a legacy clip URL when assigning its first authoritative source', (
     }],
     processors: [], automation: [], sidechains: [], assets: [], assetFolders: [],
   }
+
   const model = materializeLocalControlSnapshot({
     entities: [createLocalProjectEntityRow('clip', 'clip-1', {
       id: 'clip-1', trackId: 'track-1', sampleUrl: 'https://stale.example/audio.wav',
@@ -89,15 +95,19 @@ test('clears a legacy clip URL when assigning its first authoritative source', (
     assets: [],
     projectState: [],
   }, snapshot, 2)
+
   const clip = model.entities.find((entity) => entity.kind === 'clip')
   const value = clip ? parseLocalProjectStoredJsonValue(clip.value) : undefined
+
   if (!clip || !isJsonObject(value)) {
     throw new Error('Expected a materialized audio clip.')
   }
+
   expect(value.sampleUrl).toBeUndefined()
 })
 
 const externalInstanceId = '00000000-0000-4000-8000-000000000001'
+
 const externalRow = externalProcessorSchema.parse({
   instanceId: externalInstanceId,
   targetId: 'track-1',
@@ -188,6 +198,7 @@ test('updates external overrides while preserving local-only plugin metadata', (
     assets: [],
     projectState: [],
   }, externalSnapshot({ '1': 0.75 }), 2)
+
   const row = model.entities[0]
   expect(row?.value).toMatchObject({
     manifest: { identity: { discoveredPath: '/local/Fixture.vst3' } },

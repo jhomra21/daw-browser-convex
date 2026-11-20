@@ -7,6 +7,7 @@ describe('useClipWaveformViewModel', () => {
       stdout: 'pipe',
       stderr: 'pipe',
     })
+
     expect(result.exitCode).toBe(0)
   })
 })

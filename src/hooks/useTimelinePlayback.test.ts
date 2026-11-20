@@ -53,38 +53,47 @@ for (const kind of ["unprepared", "refused", "unconfirmed", "unavailable", "late
     const fixture = createNativeHookBridge()
     const faults: NativePlaybackFault[] = []
     const [keep, setKeep] = createSignal(new Set<string>())
+
     const reply = (status: "prepared" | "published" | "retired"): NativeRevisionReply => ({
       ok: true, hostPid: 123, hostGeneration: 7,
       revision: { status, continuity: "accepted", requestedRevision: 2, activeRevision: 2,
         preparedRevision: 2, retiredRevision: 0, publicationFrame: 1024n, renderEpoch: 10n },
     })
+
     const revisions: NativeRevisionSession = {
       prepare: async () => {
         if (kind === "latency-unsupported") {
           const prepared = reply("prepared")
+
           return prepared.ok ? { ...prepared, revision: { ...prepared.revision,
             status: "prepare-failed", continuity: "rejected", preparedRevision: 0, diagnosticCode: 3 } } : prepared
         }
+
         return kind === "refused" || kind === "unconfirmed" || kind === "unavailable"
           ? { ok: false, kind, error: "same diagnostic" } : reply("prepared")
       },
       publish: async () => reply("published"), inspect: async () => reply("published"),
       rollback: async () => reply("prepared"), retire: async () => reply("retired"),
     }
+
     Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: {
       ...fixture.audioHost, session: { ...fixture.audioHost.session, revisions,
         configureInstrumentStates: async () => ({ ok: true }) },
     } } } })
+
     try {
       await withFakeRaf(async () => {
         let dispose = () => {}
+
         const playback = createRoot(cleanup => {
           dispose = cleanup
+
           return useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
             undefined, { requiresNativeAudio: true, enabled: () => true, projectId: () => "project",
               keepLatencyNodeIds: keep, compileSnapshot: nativeRequiredSnapshot,
               reportFault: fault => faults.push(fault) })
         })
+
         try {
           if (kind !== "unprepared") await playback.handlePlay([track])
           setKeep(new Set([track.id]))
@@ -110,34 +119,42 @@ test("B6a3 terminal-routing hook host loss during latency publication preserves 
   const [keep, setKeep] = createSignal(new Set<string>())
   const entered = Promise.withResolvers<void>()
   const released = Promise.withResolvers<void>()
+
   const reply = (status: "prepared" | "published" | "retired"): NativeRevisionReply => ({
     ok: true, hostPid: 123, hostGeneration: 7,
     revision: { status, continuity: "accepted", requestedRevision: 2, activeRevision: 2,
       preparedRevision: 2, retiredRevision: 0, publicationFrame: 1024n, renderEpoch: 10n },
   })
+
   const revisions: NativeRevisionSession = {
     prepare: async () => {
       entered.resolve()
       await released.promise
+
       return reply("prepared")
     },
     publish: async () => reply("published"), inspect: async () => reply("published"),
     rollback: async () => reply("prepared"), retire: async () => reply("retired"),
   }
+
   Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: {
     ...fixture.audioHost, session: { ...fixture.audioHost.session, revisions,
       configureInstrumentStates: async () => ({ ok: true }) },
   } } } })
+
   try {
     await withFakeRaf(async () => {
       let dispose = () => {}
+
       const playback = createRoot(cleanup => {
         dispose = cleanup
+
         return useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
           undefined, { requiresNativeAudio: true, enabled: () => true, projectId: () => "project",
             keepLatencyNodeIds: keep, compileSnapshot: nativeRequiredSnapshot,
             reportFault: fault => { visibleFault = fault; faults.push(fault) } })
       })
+
       try {
         await playback.handlePlay([track])
         setKeep(new Set([track.id]))
@@ -167,20 +184,25 @@ test("a rejected Keep Latency update is reported as a stopped native session, no
   const [keep, setKeep] = createSignal(new Set<string>())
   Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
   process.on("unhandledRejection", onUnhandled)
+
   try {
     await withFakeRaf(async () => {
       let dispose = () => {}
+
       const playback = createRoot(cleanup => {
         dispose = cleanup
+
         return useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
           undefined, { requiresNativeAudio: true, enabled: () => true, projectId: () => "project",
             keepLatencyNodeIds: keep, compileSnapshot: nativeRequiredSnapshot,
             getDesiredProcessorState: (snapshot, rate) => {
               if (failProjection) throw new Error("projection failed")
+
               return compileDesiredNativeProcessorState(snapshot, rate, 20)
             },
             reportFault: fault => faults.push(fault) })
       })
+
       try {
         await playback.handlePlay([track])
         failProjection = true
@@ -192,6 +214,7 @@ test("a rejected Keep Latency update is reported as a stopped native session, no
     })
   } finally {
     process.off("unhandledRejection", onUnhandled)
+
     if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow)
     else Reflect.deleteProperty(globalThis, "window")
   }
@@ -203,6 +226,7 @@ type ScheduleCall = {
 }
 
 type LifecycleEmitter = { emit: (value: DesktopAudioLifecycle) => void }
+
 type NativeTransactionReply = { ok: true; transactionToken: string } | { ok: false; error: string }
 
 const nativeTransactionToken = 'native-playback-transaction-token-000000000'
@@ -212,21 +236,28 @@ const nativeTransactionToken = 'native-playback-transaction-token-000000000'
 for (const transport of ["playing", "paused"]) {
   test(`STEP5 D2 ${transport} cancelled reservation guard`, async () => {
     const params = createDefaultDelayParams();
+
     const effects: ExportEffectsProjection = { replaceAudioEffectTargets: [{ targetId: "track-1", rows: [
       { targetId: "track-1", effect: "delay", instanceId: "delay-d2", index: 0, params },
     ] }], upsertDeviceRows: [] };
+
     const inputs = () => ({ canonical: undefined, local: undefined, masterVolume: 1, effects, automation: [], sidechains: [] });
+
     const fx = (captured: ReturnType<typeof inputs>) => resolveDesiredPlaybackFx(
       { masterVolume: captured.masterVolume, masterFxInstances: [], trackFx: {} }, captured.effects, undefined);
+
     const f = await mountStep5Playback({ projectId: `step5-d2-${transport}`, tracks: () => [track], playbackInputs: inputs,
       desiredFx: fx, renderState: async captured => ({ fx: fx(captured), automationEnvelopes: [] }) });
+
     try {
       if (transport === "playing") await f.playback.handlePlay([track]);
       await settleStep5Playback();
       const before = f.mark();
       const latest = f.processorEdits.target("track-1", "delay-d2")?.latest;
+
       const reservation = f.processorEdits.reserve({ targetId: "track-1", effect: "delay", instanceId: "delay-d2",
         from: params, to: { ...params, pingPong: !params.pingPong } });
+
       if (!reservation) throw new Error("Reservation missing");
       await f.frame();
       expect(f.processorEdits.target("track-1", "delay-d2")?.latest).toBe(latest);
@@ -245,6 +276,7 @@ test.each(["announce", "unsupported", "announce+sample"])("3B1 r2 actual playbac
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
   const fixture = createNativeHookBridge()
   Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => {
       await createRoot(async dispose => {
@@ -254,6 +286,7 @@ test.each(["announce", "unsupported", "announce+sample"])("3B1 r2 actual playbac
         const heldDecode = new Promise<void>(resolve => { releaseDecode = resolve })
         const enteredDecode = new Promise<void>(resolve => { enterDecode = resolve })
         const buffer = new TestAudioBuffer()
+
         const sampler = createSamplerBufferSync({
           projectId: () => "project:sampled",
           readLocalAsset: async () => ({ status: "ready", file: new File([], "held.wav") }),
@@ -265,6 +298,7 @@ test.each(["announce", "unsupported", "announce+sample"])("3B1 r2 actual playbac
           },
           createBuffer: () => buffer,
         })
+
         if (path === "announce+sample") {
           sampledWork.track("project", sampler.syncTrack(new AudioEngine(), "sampled", {
             ...createDefaultSamplerParams(),
@@ -276,25 +310,32 @@ test.each(["announce", "unsupported", "announce+sample"])("3B1 r2 actual playbac
           }, "held"))
           await enteredDecode
         }
+
         const playback = useTimelinePlayback(
           createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
             requiresNativeAudio: true, enabled: () => true, projectId: () => "project",
             compileSnapshot: async (transport, context) => {
               const effects = {
-                awaitInstrumentReadiness: async () => { await sampledWork.flushPending("project"); return undefined },
+                awaitInstrumentReadiness: async () => { await sampledWork.flushPending("project");
+
+ return undefined },
                 snapshotEffectsProjection: () => ({ replaceAudioEffectTargets: [], upsertDeviceRows: [] }),
               }
+
               compileEffectsProjection(effects, await awaitCompileInstruments(effects, context))
               compiled++
+
               return nativeRequiredSnapshot(transport)
             },
           },
         )
+
         const wiring = {
           isNativePlaybackPrepared: playback.isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared: () => false,
           syncPlaybackBackend: () => playback.restartTimelineSchedule([track], { rebuildBackend: true, resumePlayback: false, playheadSec: 0 }),
           renderTracks: () => [track], captureStructuralPlaybackIntent: () => ({}),
         }
+
         const callbacks = {
           onStructuralPlaybackChange: createInstrumentPlaybackChange({
             ...wiring, mountedProjectGeneration: () => 0, awaitPlaybackPreparation: playback.awaitPlaybackPreparation,
@@ -305,12 +346,15 @@ test.each(["announce", "unsupported", "announce+sample"])("3B1 r2 actual playbac
             ...wiring, liveProcessorControl: () => ({ flush: async () => ({ accepted: false, reason: "unsupported" }) }),
           }),
         }
+
         const edit = createProcessorEditRegistry(() => 120).allocate({
           targetId: "track-1", instanceId: "utility", effect: "utility",
           from: { version: 1, state: createDefaultUtilityParams() },
           to: { version: 1, state: { ...createDefaultUtilityParams(), swap: true } },
         })
+
         if (!edit) throw new Error("Missing structural edit")
+
         const owner = createParameterGestureOwner<string, number>({
           admission: effectAdmission,
           key: value => value, scope: () => ({ projectId: "project", generation: 0 }),
@@ -320,21 +364,27 @@ test.each(["announce", "unsupported", "announce+sample"])("3B1 r2 actual playbac
           persist: async () => ({ kind: "committed-unordered" }), history: () => { saved = true },
           announce: async record => {
             announcing = true
+
             if (path !== "unsupported") await callbacks.onStructuralPlaybackChange(record.target, undefined)
           },
           allocateEdit: () => undefined, onError: (_stage, cause) => { throw cause },
         })
+
         let play = Promise.resolve()
+
         try {
           if (path === "unsupported") await playback.handlePlay([track])
           owner.set("track-1", 1)
+
           if (path !== "unsupported") play = playback.handlePlay([track])
+
           if (path === "announce+sample") {
             for (let turn = 0; turn < 80; turn++) await Promise.resolve()
             const beforeDecode = { compiled, announcing, pending: playback.isPlayPending() }
             releaseDecode()
             expect(beforeDecode).toEqual({ compiled: 0, announcing: true, pending: true })
           }
+
           // Bounded microtask observation, not a timeout or product polling.
           for (let turn = 0; turn < 300; turn++) await Promise.resolve()
           expect({ compiled: compiled > (path === "unsupported" ? 1 : 0), saved, announcing, pending: playback.isPlayPending() })
@@ -370,6 +420,7 @@ if (!globalThis.navigator?.locks) {
             | [options: { ifAvailable?: boolean; mode?: 'shared' | 'exclusive' }, callback: (lock: { name: string } | null) => Promise<Value>]
         ) => {
           const callback = args.length === 1 ? args[0] : args[1]
+
           return callback({ name })
         },
       },
@@ -388,45 +439,59 @@ const portableResponseFor = (
     return { version: portableWasmProtocolVersion, type: 'ready', revision: 1, pagedAbi: audioCoreWasmPagedAbiVersion,
       pagedPageFrames: portableWasmPagedPageFrames, pagedSlotCount: portableWasmPagedSlotCount, pagedMaxChannels: portableWasmPagedMaxChannels }
   }
+
   if (message.type === 'register-paged-asset') {
     return { version: portableWasmProtocolVersion, type: 'paged-asset-registered', requestId: message.requestId, generation: message.generation, assetId: message.asset.assetId, result: 'registered', handle: { slot: 0, generation: message.generation } }
   }
+
   if (message.type === 'write-asset-page') {
     return { version: portableWasmProtocolVersion, type: 'asset-page-written', requestId: message.requestId, generation: message.generation, assetId: message.assetId, pageIndex: message.pageIndex, result: 'written' }
   }
+
   if (message.type === 'prepare-asset-range') {
     return { version: portableWasmProtocolVersion, type: 'asset-range-prepared', requestId: message.requestId, generation: message.generation, assetId: message.assetId, result: 'prepared', preparationId: message.requestId }
   }
+
   if (message.type === 'schedule-prepared-sources') {
     return { version: portableWasmProtocolVersion, type: 'prepared-sources-scheduled', requestId: message.requestId, revision: message.revision, epoch: message.epoch, result: 'scheduled' }
   }
+
   if (message.type === 'release-asset-preparation') {
     return { version: portableWasmProtocolVersion, type: 'asset-preparation-released', requestId: message.requestId, generation: message.generation, preparationId: message.preparationId, result: 'released' }
   }
+
   if (message.type === 'release-asset') {
     return { version: portableWasmProtocolVersion, type: 'asset-released', requestId: message.requestId, generation: message.generation, assetId: message.assetId, result: 'released' }
   }
+
   if (message.type === 'prepare-graph') {
     return { version: portableWasmProtocolVersion, type: 'graph-prepared', requestId: message.requestId, revision: message.snapshot.revision, result: 'prepared' }
   }
+
   if (message.type === 'publish-graph') {
     return { version: portableWasmProtocolVersion, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'published' }
   }
+
   if (message.type === 'transport') {
     return { version: portableWasmProtocolVersion, type: 'transport-applied', requestId: message.requestId, epoch: message.epoch, result: 'applied' }
   }
+
   if (message.type === 'install-schedule') {
     return { version: portableWasmProtocolVersion, type: 'schedule-installed', requestId: message.requestId, revision: message.schedule.revision, epoch: message.schedule.transportEpoch, result: 'installed' }
   }
+
   if (message.type === 'schedule-sources') {
     return { version: portableWasmProtocolVersion, type: 'sources-scheduled', requestId: message.requestId, revision: message.revision, epoch: message.epoch, result: 'scheduled' }
   }
+
   if (message.type === 'replace-sources') {
     return { version: portableWasmProtocolVersion, type: 'sources-replaced', requestId: message.requestId, revision: message.revision, epoch: message.epoch, result: 'replaced' }
   }
+
   if (message.type === 'register-asset') {
     return { version: portableWasmProtocolVersion, type: 'asset-registered', requestId: message.requestId, generation: message.generation, assetId: message.asset.assetId, result: 'registered', handle: { slot: 0, generation: message.generation } }
   }
+
   return undefined
 }
 
@@ -517,12 +582,16 @@ const withFakeRaf = async (run: (flushRaf: () => void) => Promise<void>) => {
   const previousCancel = globalThis.cancelAnimationFrame
   globalThis.requestAnimationFrame = (callback) => {
     callbacks.push(callback)
+
     return callbacks.length
   }
+
   globalThis.cancelAnimationFrame = () => {}
+
   try {
     await run(() => {
       const callback = callbacks.shift()
+
       if (callback) callback(0)
     })
   } finally {
@@ -541,16 +610,19 @@ const withPortableAudioWorklet = async (run: () => Promise<void>) => {
   const previousFetch = globalThis.fetch
   const hadAudioContext = "AudioContext" in globalThis
   const hadAudioWorkletNode = "AudioWorkletNode" in globalThis
+
   class FakeAudioContext {
     readonly sampleRate = 48_000
     readonly destination = {}
     readonly audioWorklet = { addModule: async () => undefined }
   }
+
   type FakePort = {
     onmessage: ((event: { data: PortableWasmStatusMessage }) => void) | null
     postMessage: (message: PortableWasmControlMessage) => void
     close: () => void
   }
+
   class FakeAudioWorkletNode {
     readonly port: FakePort
     constructor() {
@@ -558,6 +630,7 @@ const withPortableAudioWorklet = async (run: () => Promise<void>) => {
         onmessage: null,
         postMessage: (message) => {
           const response = portableResponseFor(message)
+
           if (response) queueMicrotask(() => this.port.onmessage?.({ data: response }))
         },
         close: () => {},
@@ -567,6 +640,7 @@ const withPortableAudioWorklet = async (run: () => Promise<void>) => {
     connect = () => {}
     disconnect = () => {}
   }
+
   const manifest = await readFile(new URL("../../public/audio-core/daw-audio-core.manifest.json", import.meta.url), "utf8")
   const wasm = await readFile(new URL("../../public/audio-core/daw-audio-core.wasm", import.meta.url))
   Object.defineProperty(globalThis, "AudioContext", { configurable: true, value: FakeAudioContext })
@@ -579,11 +653,13 @@ const withPortableAudioWorklet = async (run: () => Promise<void>) => {
         : new Response(wasm, { status: 200 })
     ),
   })
+
   try {
     await run()
   } finally {
     if (hadAudioContext) Object.defineProperty(globalThis, "AudioContext", { configurable: true, value: previousAudioContext })
     else Object.defineProperty(globalThis, "AudioContext", { configurable: true, value: undefined })
+
     if (hadAudioWorkletNode) Object.defineProperty(globalThis, "AudioWorkletNode", { configurable: true, value: previousAudioWorkletNode })
     else Object.defineProperty(globalThis, "AudioWorkletNode", { configurable: true, value: undefined })
     Object.defineProperty(globalThis, "fetch", { configurable: true, value: previousFetch })
@@ -607,14 +683,20 @@ const createNativeHookBridge = (
   const transportPayloads: NativeHostTransport[] = []
   const transportFrames: number[] = []
   let beginGate = initialBeginGate
+
   const reply = (name: string) => async () => {
     calls.push(name)
     const failureName = isFailureResolver(failure) ? failure() : failure
+
     if (name === failureName) return { ok: false as const, error: failureMessage }
+
     if (name === "begin" && beginGate) return beginGate
+
     if (name === "begin") return { ok: true as const, transactionToken: nativeTransactionToken }
+
     return { ok: true as const }
   }
+
   const progressListeners = new Set<(progress: NativeScheduleProgress) => void>()
   let runtimeRevision = 1
   let currentEpoch = 1
@@ -625,9 +707,11 @@ const createNativeHookBridge = (
   let progressSequence = 0n
   let currentTransport = { epoch: 1, frame: 0, running: false, transitionId: 0n }
   let admissionCapacityGeneration = 0n
+
   const emitScheduleProgress = (capacityGeneration?: bigint) => {
     if (capacityGeneration !== undefined) admissionCapacityGeneration = capacityGeneration
     progressSequence++
+
     for (const listener of progressListeners) listener({ revision: runtimeRevision, epoch: currentTransport.epoch,
       progressSequence, admissionCapacityGeneration, latencyCompletionGeneration: 0n, renderedThroughFrame: BigInt(currentTransport.frame),
       acceptedThroughFrame: acceptedFrames.get(currentTransport.epoch) ?? BigInt(currentTransport.frame + 1),
@@ -635,23 +719,33 @@ const createNativeHookBridge = (
       appliedUrgentSequence: 0n, appliedProcessorSequence: 0n, running: currentTransport.running,
       scheduleComplete, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256 })
   }
+
   let lifecycleListener: ((value: DesktopAudioLifecycle) => void) | undefined
   let transportGateArmed = false
   const deviceId: `coreaudio:${string}` = 'coreaudio:default'
   // The packaged host always stages revisions and instrument states, so a prepared session adopts every edit in place.
   let revisionStatus: "prepared" | "published" | "rolled-back" = "prepared"
   let preparedRevision = 1
+
   const revisionReply = async (): Promise<NativeRevisionReply> => ({ ok: true, hostPid: 123, hostGeneration: 7,
     revision: { status: revisionStatus, continuity: "accepted", requestedRevision: preparedRevision, activeRevision: runtimeRevision,
       preparedRevision: revisionStatus === "prepared" ? preparedRevision : 0, retiredRevision: 0, renderEpoch: 1n,
       transportEpoch: currentEpoch, publicationFrame: 0n, progressFrame: 0n } })
+
   const revisions: NativeRevisionSession = {
-    prepare: async request => { preparedRevision = request.projectRevision; revisionStatus = "prepared"; return revisionReply() },
-    publish: async () => { revisionStatus = "published"; runtimeRevision = preparedRevision; return revisionReply() },
+    prepare: async request => { preparedRevision = request.projectRevision; revisionStatus = "prepared";
+
+ return revisionReply() },
+    publish: async () => { revisionStatus = "published"; runtimeRevision = preparedRevision;
+
+ return revisionReply() },
     inspect: revisionReply,
-    rollback: async () => { revisionStatus = "rolled-back"; return revisionReply() },
+    rollback: async () => { revisionStatus = "rolled-back";
+
+ return revisionReply() },
     retire: revisionReply,
   }
+
   return {
     calls,
     transportStates,
@@ -683,6 +777,7 @@ const createNativeHookBridge = (
       session: {
         configure: async (): Promise<({ ok: true; hostIdentity: { pid: number; generation: number; configurationGeneration: number } } | { ok: false; error: string })> => {
           const result = await reply('configure')()
+
           return result.ok ? { ok: true, hostIdentity: { pid: 123, generation: 7, configurationGeneration: 1 } } : result
         },
         revisions,
@@ -694,6 +789,7 @@ const createNativeHookBridge = (
         releaseAsset: reply('release'),
         publishGraph: (bytes: Uint8Array) => {
           runtimeRevision = Number(new DataView(bytes.buffer, bytes.byteOffset).getBigUint64(0, false))
+
           return reply('graph')()
         },
         createMappedAsset: mappedAssets ? reply('install') : undefined,
@@ -706,12 +802,15 @@ const createNativeHookBridge = (
         queueScheduleWindow: (bytes: Uint8Array) => {
           const view = new DataView(bytes.buffer, bytes.byteOffset)
           acceptedFrames.set(view.getUint32(4, true), view.getBigUint64(24, true))
+
           if (realisticProgress) queueMicrotask(emitScheduleProgress)
+
           return reply('schedule')()
         },
         // The host answers a plug-in state read it cannot serve with a refusal ack, which the main process reports so.
         captureVstState: async (): Promise<{ ok: false; error: string }> => {
           calls.push('vst-state-get')
+
           return { ok: false, error: 'The native audio session rejected vstStateGet request 26.' }
         },
         setTransport: async (transport: NativeHostTransport) => {
@@ -721,6 +820,7 @@ const createNativeHookBridge = (
           transportStates.push(transport.running)
           transportPayloads.push(transport)
           transportFrames.push(transport.frame)
+
           if (
             !transport.running
             && transportGate
@@ -744,6 +844,7 @@ const createNativeHookBridge = (
             sourceCredits: 256,
             admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
           }) })
+
           return { ok: true as const }
         },
         configureRecording: reply('recording-configure'),
@@ -755,12 +856,14 @@ const createNativeHookBridge = (
         teardown: reply('teardown'),
         onLoss: (listener: () => void) => {
           lossListeners.add(listener)
+
           return () => { lossListeners.delete(listener) }
         },
         onRecordingStatus: () => () => {},
         onScheduleProgress: (listener: (progress: NativeScheduleProgress) => void) => {
           if (!realisticProgress) progressListeners.clear()
           progressListeners.add(listener)
+
           return () => { progressListeners.delete(listener) }
         },
       },
@@ -769,6 +872,7 @@ const createNativeHookBridge = (
       retryRecovery: lifecycle?.retryRecovery,
       onLifecycle: lifecycle === undefined ? undefined : (listener: (value: DesktopAudioLifecycle) => void) => {
         lifecycleListener = listener
+
         return () => { lifecycleListener = undefined }
       },
     },
@@ -780,6 +884,7 @@ const createFakeEngine = (deferredWindow: DeferredStretchWindow) => {
   let stretchListener = () => {}
   const scheduleCalls: ScheduleCall[] = []
   const transportEvents: string[] = []
+
   const engine = {
     get currentTimelineSec() {
       return currentTimelineSec
@@ -800,10 +905,12 @@ const createFakeEngine = (deferredWindow: DeferredStretchWindow) => {
     resume: async () => {},
     rescheduleClipsAtPlayhead: (_tracks, playheadSec, clipIds, opts) => {
       scheduleCalls.push({ playheadSec, opts: { ...opts, clipIds } })
+
       return { deferredStretchWindows: [deferredWindow] }
     },
     scheduleAllClipsFromPlayhead: (_tracks, playheadSec, opts) => {
       scheduleCalls.push({ playheadSec, opts })
+
       return scheduleCalls.length === 1
         ? { deferredStretchWindows: [deferredWindow] }
         : { deferredStretchWindows: [] }
@@ -812,6 +919,7 @@ const createFakeEngine = (deferredWindow: DeferredStretchWindow) => {
     stopAllSources: () => {},
     subscribeStretchRenderState: (listener) => {
       stretchListener = listener
+
       return () => true
     },
   } satisfies Parameters<typeof useTimelinePlayback>[0]
@@ -836,7 +944,9 @@ const nativeRequiredSnapshot = async (transport: Parameters<typeof compileLivePl
     renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
     sidechainRoutes: [],
   })
+
   if (!result.supported) return result
+
   return {
     supported: true as const,
     snapshot: {
@@ -848,18 +958,24 @@ const nativeRequiredSnapshot = async (transport: Parameters<typeof compileLivePl
 }
 
 const adoptionChildren = new Set<ReturnType<typeof Bun.spawn>>()
+
 afterEach(() => {
   for (const child of adoptionChildren) child.kill()
   adoptionChildren.clear()
 })
+
 test.skipIf(!isServer)('adopted snapshots exercise real Solid reactive effects', async () => {
   const child = Bun.spawn(["bun", "test", "--conditions=browser", "--timeout", "30000",
     import.meta.path, "-t", "adopted snapshot"], { stdout: "pipe", stderr: "pipe" })
+
   adoptionChildren.add(child)
+
   const [stdout, stderr, code] = await Promise.all([
     new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
   ])
+
   adoptionChildren.delete(child)
+
   if (code !== 0) throw new Error(`${stdout}\n${stderr}`)
   expect(code).toBe(0)
 })
@@ -886,13 +1002,17 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
     const releaseAsset = fixture.audioHost.session.releaseAsset
     fixture.audioHost.session.releaseAsset = async (...args) => {
       if (scenario === "capacity-release") await releaseAck.promise
+
       return releaseAsset(...args)
     }
+
     const compiling = Promise.withResolvers<void>()
     let holdCompile = false
     let changed = false
+
     let failed = ["failure", "rejection", "publish-error", "compile-error", "progress-retry",
       "pending-exhaustion", "rebase-exhaustion"].includes(scenario)
+
     let publishAttempts = 0
     let preparing = false
     let compilations = 0
@@ -907,37 +1027,50 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
     const queue = fixture.audioHost.session.queueScheduleWindow
     fixture.audioHost.session.queueScheduleWindow = (bytes) => {
       if (new DataView(bytes.buffer, bytes.byteOffset).getUint8(60) !== 0) stagedWindows.push(bytes)
+
       return queue(bytes)
     }
+
     const reply = async (): Promise<NativeRevisionReply> => ({ ok: true, hostPid: 123, hostGeneration: 7,
       revision: { status, continuity: "accepted", requestedRevision: revision, activeRevision,
         preparedRevision: status === "prepared" ? revision : 0, retiredRevision: 0,
         renderEpoch: 1n, transportEpoch: fixture.epoch(), publicationFrame: status === "published" ? seam : 0n,
         progressFrame: 0n } })
+
     const revisions: NativeRevisionSession = {
       prepare: async (request) => {
         expect(request.projectId).toBe("project")
         preparedTracks.push(tracks())
+
         if (scenario === "seek-inflight" && changed && !preparing) { preparing = true; publishing.resolve(); await publicationGate.promise }
+
         revision++
         seam = request.requestedPublicationFrame ?? 0n
+
         if (failed && scenario === "failure") throw new Error("temporary staging failure")
+
         if (failed && ["progress-retry", "capacity-release"].includes(scenario)) return { ok: false, error: "asset-capacity-exceeded", kind: "refused" }
         status = failed && scenario === "pending-exhaustion" ? "publish-pending"
           : failed && !["publish-error", "rebase-exhaustion"].includes(scenario) ? "invalid-revision" : "prepared"
+
         return reply()
       },
       publish: async (request) => {
         publishAttempts++
+
         if (scenario === "loop-inflight" && publishAttempts === 1) {
           publishing.resolve()
           await publicationGate.promise
         }
+
         if (failed && scenario === "publish-error") throw new Error("permanent publication bridge failure")
+
         if (failed && scenario === "rebase-exhaustion") {
           status = status === "rebase-required" ? "prepared" : "rebase-required"
+
           return reply()
         }
+
         expect(request.hostGeneration).toBe(7)
         expect(request.projectId).toBe("project")
         status = "published"
@@ -945,43 +1078,53 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
         fixture.setRuntimeRevision(revision)
         published.push(revision)
         compilationsAtPublication.push(compilations)
+
         return reply()
       },
       inspect: async () => {
         // Lost bridge replies are not native proof of a prepared or failed bank.
         if (failed && scenario === "publish-error") throw new Error("Inspection reply lost")
+
         return reply()
       },
       rollback: async () => {
         if (failed && scenario === "publish-error") throw new Error("Rollback reply lost")
         // audio-host.cpp:3123–3162 releases an unclaimed prepared bank.
         status = activeRevision === revision ? "stale-revision" : "rolled-back"
+
         return reply()
       },
       retire: reply,
     }
+
     Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: {
       ...fixture.audioHost, session: { ...fixture.audioHost.session, revisions,
         configureInstrumentStates: async () => ({ ok: true }) },
     } } } })
+
     try {
       await withFakeRaf(async () => {
         let dispose = () => {}
+
         const playback = createRoot((cleanup) => {
           dispose = cleanup
           const playbackInputs = createMemo(() => ({ revision: mixRevision() }))
+
           return useTimelinePlayback(createFakeEngine({ clipId: "x", startSec: 0, endSec: 1 }).engine,
             { getTracks: tracks, bpm, loopEnabled, loopStartSec: () => 0, loopEndSec }, {
               requiresNativeAudio: true, enabled: () => true, projectId,
               playbackInputs,
               compileSnapshot: async (transport) => {
                 compilations++
+
                 if (changed && failed && scenario === "compile-error") throw new Error("persistent compiler failure")
                 const capturedTracks = tracks()
                 const capturedBpm = bpm()
                 const hold = holdCompile
                 holdCompile = false
+
                 if (hold) { compiling.resolve(); await gate.promise }
+
                 const result = compileLivePlaybackSnapshot({ revision: 1, bpm: capturedBpm, transport,
                   tracks: capturedTracks, renderState: {
                     fx: { masterVolume: changed && ["effect-only", "mixer-only"].includes(scenario) ? 0.5 : 1, masterFxInstances: [], trackFx: {} },
@@ -991,16 +1134,21 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
                       points: [{ id: "point", timeSec: 0, value: 0.5, interpolation: "linear" }],
                     }] : [],
                   }, sidechainRoutes: [] })
+
                 if (result.supported && changed && scenario === "time-signature")
                   return { ...result, snapshot: { ...result.snapshot, timeSignature: { numerator: 3, denominator: 4 } } }
+
                 return result
               },
             })
         })
+
         const settle = async () => { for (let i = 0; i < 30; i++) await flushMicrotasks() }
+
         try {
           await settle()
           await playback.handlePlay(untrack(tracks))
+
           if (scenario === "capacity-release") {
             setTracks([{ ...initial, clips: [] }])
             await settle()
@@ -1009,12 +1157,15 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
             preparedTracks.length = 0
             failed = true
           }
+
           const epoch = fixture.epoch()
           const before = fixture.calls.length
           const compilationsBeforeEdit = compilations
           changed = true
+
           const desired = { ...initial, clips: scenario === "delete" || scenario === "burst" ? []
             : initial.clips.map((clip) => ({ ...clip, startSec: 0.25, duration: 0.5, bufferOffsetSec: 0.125 })) }
+
           if (scenario === "loop-inflight") {
             expect(fixture.transportPayloads.at(-1)).toMatchObject({ cycleActive: true, cycleStartSec: 0, cycleEndSec: 1 })
             setTracks([desired])
@@ -1040,11 +1191,14 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
             await settle()
             expect(published).toHaveLength(1)
             expect(preparedTracks.at(-1)).toEqual([desired])
+
             return
           } else if (scenario.startsWith("loop-")) {
             setLoopEnabled(true)
             setLoopEndSec(0.75)
+
             if (scenario === "loop-ui") void playback.updateNativeLoop()
+
             if (scenario === "loop-clip") setTracks([desired])
           } else if (scenario === "automation-only" || scenario === "mixer-only") setMixRevision(1)
           else if (scenario === "effect-only") await playback.restartTimelineSchedule(untrack(tracks))
@@ -1057,45 +1211,62 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
             if (["stale-compile", "burst-during-compile", "inputs-during-compile", "stop", "seek", "project"].includes(scenario)) holdCompile = true
             setTracks(scenario === "add" ? [initial, { ...track, id: "added" }] : [desired])
           }
+
           if (scenario === "explicit") await playback.restartTimelineSchedule(untrack(tracks))
+
           if (["stale-compile", "burst-during-compile", "inputs-during-compile", "stop", "seek", "project"].includes(scenario)) {
             await compiling.promise
+
             if (scenario === "inputs-during-compile") {
               for (let index = 1; index <= 10; index++) { setMixRevision(index); await settle() }
             }
+
             if (scenario === "stale-compile") setTracks([{ ...desired, clips: [] }])
+
             if (scenario === "burst-during-compile") {
               for (let i = 1; i <= 5; i++) setTracks([{ ...desired, clips: [] },
                 ...Array.from({ length: i }, (_, index) => ({ ...track, id: `added-${index}` }))])
             }
+
             if (scenario === "stop") await playback.handleStop()
+
             if (scenario === "seek") playback.setPlayhead(1, untrack(tracks))
+
             if (scenario === "project") setProjectId("next-project")
             expect(preparedTracks).toHaveLength(0)
             gate.resolve()
           }
+
           await settle()
+
           if (scenario.endsWith("exhaustion")) {
             for (let event = 0; event < 12; event++) { fixture.emitScheduleProgress(); await settle() }
           }
+
           if (scenario.startsWith("loop-")) {
             expect(fixture.calls.slice(before).filter((call) => call === "graph")).toHaveLength(0)
             expect(fixture.calls.slice(before).filter((call) => call === "transport")).toHaveLength(2)
             expect(published).toHaveLength(scenario === "loop-clip" || scenario === "loop-inflight" ? 1 : 0)
             expect(playback.isPlaying()).toBe(true)
+
             return
           }
+
           if (scenario === "stop" || scenario === "project" || scenario === "seek") {
             // UD 7 (D7): after a Stop the kept paused preview adopts the edit the stopped session never published.
             expect(published).toHaveLength(scenario === "seek" || scenario === "stop" ? 1 : 0)
             expect(playback.isPlaying()).toBe(scenario === "seek")
+
             if (scenario === "seek" || scenario === "stop") expect(fixture.calls.slice(before).filter((call) =>
               ["configure", "begin", "graph"].includes(call))).toEqual([])
+
             return
           }
+
           if (["failure", "rejection", "publish-error", "compile-error", "progress-retry",
             "capacity-release", "pending-exhaustion", "rebase-exhaustion"].includes(scenario)) {
             if (scenario === "pending-exhaustion") expect(preparedTracks).toHaveLength(9)
+
             if (scenario === "rebase-exhaustion") expect(publishAttempts).toBe(9)
             expect(published).toHaveLength(0)
             expect(playback.isPlaying()).toBe(true)
@@ -1104,15 +1275,19 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
               const attempts = preparedTracks.length
               const compiled = compilations
               const publishCount = publishAttempts
+
               for (let event = 0; event < 25; event++) {
                 fixture.emitScheduleProgress()
                 await settle()
               }
+
               expect(preparedTracks).toHaveLength(attempts)
               expect(compilations).toBe(compiled)
               expect(publishAttempts).toBe(publishCount)
             }
+
             failed = false
+
             if (scenario === "capacity-release") {
               const attempts = preparedTracks.length
               const compiled = compilations
@@ -1124,36 +1299,46 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
               expect(preparedTracks).toHaveLength(attempts + 1)
               expect(compilations).toBe(compiled)
             }
+
             if (scenario === "pending-exhaustion") {
               const attempts = preparedTracks.length
               fixture.emitScheduleProgress(1n)
               await settle()
               expect(preparedTracks).toHaveLength(attempts + 1)
               expect(published).toHaveLength(1)
+
               for (let event = 0; event < 5; event++) { fixture.emitScheduleProgress(1n); await settle() }
+
               expect(preparedTracks).toHaveLength(attempts + 1)
+
               return
             }
+
             if (scenario === "progress-retry") {
               const compiled = compilations
               await playback.restartTimelineSchedule(untrack(tracks))
               expect(compilations).toBe(compiled)
             }
+
             if (!["progress-retry", "capacity-release"].includes(scenario)) setTracks([{ ...desired, clips: [] }, { ...track, id: "latest" }])
             fixture.emitScheduleProgress()
             await settle()
           }
+
           expect(published).toHaveLength(1)
+
           if (scenario === "inputs-during-compile") expect(compilationsAtPublication[0]).toBe(compilationsBeforeEdit + 1)
           expect(stagedWindows.length).toBeGreaterThan(0)
           expect(stagedWindows.every((bytes) => new DataView(bytes.buffer, bytes.byteOffset).getUint32(4, true) === epoch)).toBe(true)
           expect(preparedTracks.at(-1)).toEqual(untrack(tracks))
+
           if (scenario === "duplicate" || scenario === "explicit") {
             setTracks(untrack(tracks).map((entry) => ({ ...entry })))
             await playback.restartTimelineSchedule(untrack(tracks))
             await settle()
             expect(published).toHaveLength(1)
           }
+
           expect(fixture.epoch()).toBe(epoch)
           expect(fixture.calls.slice(before).filter((call) =>
             ["stop", "teardown", "configure", "begin", "graph"].includes(call))).toEqual([])
@@ -1165,6 +1350,7 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
     } finally {
       if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow)
       else Reflect.deleteProperty(globalThis, "window")
+
       if (previousBuffer) Object.defineProperty(globalThis, "AudioBuffer", previousBuffer)
       else Reflect.deleteProperty(globalThis, "AudioBuffer")
     }
@@ -1175,6 +1361,7 @@ test.skipIf(isServer)('recording save hydration cannot retire active playback be
   const previousWindow = globalThis.window
   const previousAudioBuffer = Object.getOwnPropertyDescriptor(globalThis, 'AudioBuffer')
   Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
+
   try {
     for (const intent of ['stop', 'pause', 'record-only']) {
       const fixture = createNativeHookBridge()
@@ -1186,8 +1373,10 @@ test.skipIf(isServer)('recording save hydration cannot retire active playback be
       })
       await withFakeRaf(async (flushRaf) => {
         let dispose = () => {}
+
         const playback = createRoot((cleanup) => {
           dispose = cleanup
+
           return useTimelinePlayback(
             createFakeEngine({ clipId: 'recorded', startSec: 0, endSec: 1 }).engine,
             { getTracks: tracks },
@@ -1200,7 +1389,9 @@ test.skipIf(isServer)('recording save hydration cannot retire active playback be
             },
           )
         })
+
         const sourceRelease = Promise.withResolvers<void>()
+
         try {
           await flushMicrotasks()
           expect(playback.isNativePlaybackPrepared()).toBeTrue()
@@ -1216,10 +1407,13 @@ test.skipIf(isServer)('recording save hydration cannot retire active playback be
             setTracks([audioTrack(null)])
             await sourceRelease.promise
           })
+
           const transport = save.then(() => {
             if (intent === 'stop') return playback.handleStop()
+
             if (intent === 'pause') return playback.handlePause()
           })
+
           await flushMicrotasks()
           flushRaf()
           expect(faults).toEqual([])
@@ -1242,6 +1436,7 @@ test.skipIf(isServer)('recording save hydration cannot retire active playback be
           expect(playback.isPlaying()).toBe(intent === 'record-only')
           expect(playback.playheadSec()).toBe(intent === 'stop' ? 0 : 1)
           expect(fixture.calls).not.toContain('teardown')
+
           if (intent === 'record-only') await playback.handlePause()
           await playback.handlePlay(untrack(tracks))
           expect(playback.isPlaying()).toBeTrue()
@@ -1266,6 +1461,7 @@ test.skipIf(isServer)('pending save hydration still reports real host loss and h
   const previousWindow = globalThis.window
   const previousAudioBuffer = Object.getOwnPropertyDescriptor(globalThis, 'AudioBuffer')
   Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
+
   try {
     for (const transition of ['loss', 'graph-retired', 'project', 'generation']) {
       const fixture = createNativeHookBridge()
@@ -1279,8 +1475,10 @@ test.skipIf(isServer)('pending save hydration still reports real host loss and h
       })
       await withFakeRaf(async (flushRaf) => {
         let dispose = () => {}
+
         const playback = createRoot((cleanup) => {
           dispose = cleanup
+
           return useTimelinePlayback(
             createFakeEngine({ clipId: 'recorded', startSec: 0, endSec: 1 }).engine,
             { getTracks: tracks },
@@ -1294,11 +1492,13 @@ test.skipIf(isServer)('pending save hydration still reports real host loss and h
             },
           )
         })
+
         try {
           await flushMicrotasks()
           await playback.handlePlay(untrack(tracks))
           setTracks([audioTrack(null)])
           await flushMicrotasks()
+
           if (transition === 'loss') fixture.emitLoss()
           else if (transition === 'graph-retired') await playback.disposePreparedBackends(undefined, "test-graph-retired")
           else if (transition === 'project') setProjectId('another-project')
@@ -1307,6 +1507,7 @@ test.skipIf(isServer)('pending save hydration still reports real host loss and h
           flushRaf()
           expect(playback.isPlaying()).toBeFalse()
           expect(playback.isNativePlayback()).toBeFalse()
+
           if (transition === 'loss') {
             expect(faults).toEqual(['Native playback host connection was lost.'])
           } else if (transition === 'graph-retired') {
@@ -1339,28 +1540,39 @@ test('fingerprints all playback-relevant audio clip compiler fields for paused p
   const fixture = createNativeHookBridge(undefined, undefined, undefined, undefined, "failed", true)
   const reload = createProjectReload()
   let compiles = 0
+
   const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]["transport"]) => {
     compiles += 1
+
     return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
       renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
   }
+
   Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     let dispose = () => {}
+
     createRoot((cleanup) => {
       dispose = cleanup
+
       return useTimelinePlayback(createFakeEngine({ clipId: "clip-audio", startSec: 0, endSec: 1 }).engine, { getTracks: () => tracks() }, {
         requiresNativeAudio: true, enabled: () => true, projectId: () => "project", projectGeneration: reload.projectGeneration, compileSnapshot,
       })
     })
     await flushMicrotasks()
+
     for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
+
     const recompiledBy = async (edit: Partial<Track<AudioBuffer>["clips"][number]>) => {
       const before = compiles
       setTracks((current) => current.map((entry) => ({ ...entry, clips: entry.clips.map((clip) => ({ ...clip, ...edit })) })))
+
       for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
+
       return compiles > before
     }
+
     // The compiles read an absent offset as 0, and a persisted row carries 0 where a live create carries none: the two
     // compile alike, so a commit's first store emission does not republish an unchanged graph.
     expect({
@@ -1374,6 +1586,7 @@ test('fingerprints all playback-relevant audio clip compiler fields for paused p
     // A project reload disposes the paused preview and prepares it again, whatever the edits left.
     const beforeReload = compiles
     reload.reload()
+
     for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
     expect(compiles).toBeGreaterThan(beforeReload)
     dispose()
@@ -1388,6 +1601,7 @@ test('waits for audio clip hydration before native paused preview and retries af
   const hydratedTrack = audioTrack(new TestAudioBuffer())
   const fixture = createNativeHookBridge(undefined, undefined, undefined, undefined, "failed", true)
   const faults: string[] = []
+
   const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]["transport"]) => (
     compileLivePlaybackSnapshot({
       revision: 1,
@@ -1398,14 +1612,18 @@ test('waits for audio clip hydration before native paused preview and retries af
       sidechainRoutes: [],
     })
   )
+
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     let dispose = () => {}
+
     const playback = createRoot((cleanup) => {
       dispose = cleanup
+
       return useTimelinePlayback(
         createFakeEngine({ clipId: "clip-audio", startSec: 0, endSec: 1 }).engine,
         { getTracks: () => tracks() },
@@ -1418,6 +1636,7 @@ test('waits for audio clip hydration before native paused preview and retries af
         },
       )
     })
+
     await flushMicrotasks()
     expect(fixture.calls).not.toContain("begin")
     expect(faults).toEqual([])
@@ -1431,6 +1650,7 @@ test('waits for audio clip hydration before native paused preview and retries af
       expect(faults).toEqual([])
       expect(playback.isNativePlaybackPrepared()).toBeTrue()
     }
+
     dispose()
   } finally {
     Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
@@ -1446,6 +1666,7 @@ test('reports unhydrated native audio when playback is explicitly requested', as
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await createRoot(async (dispose) => {
       const playback = useTimelinePlayback(
@@ -1466,6 +1687,7 @@ test('reports unhydrated native audio when playback is explicitly requested', as
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
         },
       )
+
       await flushMicrotasks()
       expect(faults).toEqual([])
 
@@ -1485,6 +1707,7 @@ test("STEP7B3 real host paused edit during claimed latency", async () => {
   // Run the standalone acceptance fixture in its own browser-conditioned
   // process: it owns IDB, virtual time and the mounted hook's global host.
   const fixturePath = new URL("../../tools/acceptance/ae-08-processor-state-fuzz-hook.ts", import.meta.url).pathname
+
   const child = Bun.spawn(["perl", "-e", "alarm shift; exec @ARGV", "20", process.execPath,
     "--conditions=browser", "-e", `
       import assert from "node:assert/strict"
@@ -1528,10 +1751,12 @@ test("STEP7B3 real host paused edit during claimed latency", async () => {
       } finally { await f.cleanup() }
       process.exit(0)
     `], { stdout: "pipe", stderr: "pipe" })
+
   try {
     const [code, stdout, stderr] = await Promise.all([
       child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
     ])
+
     console.log(stdout)
     expect(code, stderr).toBe(0)
   } finally {
@@ -1559,51 +1784,66 @@ for (const [resume, replaces] of [[false, false], [true, false], [false, true], 
   let replaced = false
   let status: "prepared" | "published" | "rolled-back" = "prepared"
   const captures: { state: string; starts: number[] }[] = []
+
   const reply = async (): Promise<NativeRevisionReply> => ({ ok: true, hostPid: 123, hostGeneration: 7,
     revision: { status, continuity: "accepted", requestedRevision: revision, activeRevision,
       preparedRevision: status === "prepared" ? revision : 0, retiredRevision: 0, renderEpoch: 1n,
       transportEpoch: fixture.epoch(), publicationFrame: status === "published" ? seam : 0n, progressFrame: 0n } })
+
   const revisions: NativeRevisionSession = {
-    prepare: async request => { revision++; seam = request.requestedPublicationFrame ?? 0n; status = "prepared"; return reply() },
+    prepare: async request => { revision++; seam = request.requestedPublicationFrame ?? 0n; status = "prepared";
+
+ return reply() },
     publish: async () => {
       publishing.resolve()
       await publishGate.promise
       status = "published"; activeRevision = revision
+
       // The host's runtime revision belongs to the session in force: a retired session's publication does not move it.
       if (!replaced) fixture.setRuntimeRevision(revision)
+
       return reply()
     },
     inspect: reply,
-    rollback: async () => { status = "rolled-back"; return reply() },
+    rollback: async () => { status = "rolled-back";
+
+ return reply() },
     retire: reply,
   }
+
   const setTransport = fixture.audioHost.session.setTransport
   fixture.audioHost.session.setTransport = async transport => {
     if (holdTransport && !transport.running) await transportGate.promise
+
     return setTransport(transport)
   }
+
   Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: {
     ...fixture.audioHost, session: { ...fixture.audioHost.session, revisions,
       configureInstrumentStates: async () => ({ ok: true }) },
   } } } })
   let dispose = () => {}
   const settle = async () => { for (let i = 0; i < 800; i++) await Promise.resolve() }
+
   try {
     await withFakeRaf(async () => {
       const playback = createRoot(cleanup => {
         dispose = cleanup
+
         return useTimelinePlayback(createFakeEngine({ clipId: "x", startSec: 0, endSec: 1 }).engine,
           { getTracks: tracks, bpm: () => 120 }, {
             requiresNativeAudio: true, enabled: () => true, projectId: () => "project", projectGeneration: reload.projectGeneration,
             compileSnapshot: async transport => {
               const captured = tracks()
               captures.push({ state: transport.state, starts: captured.flatMap(track => track.clips.map(clip => clip.startSec)) })
+
               return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: captured,
                 renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
                 sidechainRoutes: [] })
             },
           })
       })
+
       await settle()
       await playback.handlePlay(untrack(tracks))
       const editA = { ...initial, clips: initial.clips.map(clip => ({ ...clip, startSec: 0.25 })) }
@@ -1617,6 +1857,7 @@ for (const [resume, replaces] of [[false, false], [true, false], [false, true], 
       const stopBefore = fixture.calls.filter(call => call === "stop").length
       const editB = { ...initial, clips: initial.clips.map(clip => ({ ...clip, startSec: 0.75 })) }
       setTracks([editB])
+
       // The project reloads under the held pause: the preview it kept is replaced, not adopted into.
       if (replaces) {
         reload.reload()
@@ -1625,14 +1866,18 @@ for (const [resume, replaces] of [[false, false], [true, false], [false, true], 
         replaced = true
         fixture.setRuntimeRevision(1)
       }
+
       const restart = resume ? playback.handlePlay(untrack(tracks)) : undefined
       await settle()
+
       // An edit waits for the held pause before it retires the preview; a reload retires it at once.
       if (!replaces) {
         expect(playback.isNativePlaybackPrepared()).toBe(true)
         expect(fixture.calls.filter(call => call === "stop").length).toBe(stopBefore)
       }
+
       console.log("STEP7B3-PAUSED-EDIT-BEFORE-ACK", JSON.stringify({ before, captures, calls: fixture.calls.slice(-15), prepared: playback.isNativePlaybackPrepared() }))
+
       if (resume && !replaces) expect(captures).toHaveLength(before)
       publishGate.resolve(); transportGate.resolve()
       await pause
@@ -1642,15 +1887,18 @@ for (const [resume, replaces] of [[false, false], [true, false], [false, true], 
       console.log("STEP7B3-PAUSED-EDIT-FINAL", JSON.stringify({ latestCaptured, captures,
         stopBefore, stopAfter: fixture.calls.filter(call => call === "stop").length,
         prepared: playback.isNativePlaybackPrepared(), playing: playback.isPlaying() }))
+
       // Either install the new structure or invalidate the old preview. Leaving
       // the old graph advertised as prepared is the regression under review.
       try {
         expect(latestCaptured || !playback.isNativePlaybackPrepared()).toBe(true)
+
         if (resume) {
           expect(playback.isPlaying()).toBe(true)
           // UD 7 (D7): the paused edit and the Play both run on the session the pause kept. The edit is compiled for its
           // adoption and again for the resume, so a compile count says nothing; a second session would.
           expect(captures.slice(before).some(capture => capture.state === "playing" && capture.starts.includes(0.75))).toBe(true)
+
           if (!replaces) expect(fixture.calls.filter(call => call === "begin")).toHaveLength(beginsBefore)
         }
       } finally {
@@ -1662,8 +1910,10 @@ for (const [resume, replaces] of [[false, false], [true, false], [false, true], 
     publishGate.resolve(); transportGate.resolve()
     dispose()
     await settle()
+
     if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow)
     else Reflect.deleteProperty(globalThis, "window")
+
     if (previousBuffer) Object.defineProperty(globalThis, "AudioBuffer", previousBuffer)
     else Reflect.deleteProperty(globalThis, "AudioBuffer")
   }
@@ -1682,18 +1932,27 @@ test("B6d2 a paused structural change requested while the pause is pending is no
   let revision = 1
   let status: "prepared" | "rolled-back" = "prepared"
   const captures: number[][] = []
+
   const reply = async (): Promise<NativeRevisionReply> => ({ ok: true, hostPid: 123, hostGeneration: 7,
     revision: { status, continuity: "accepted", requestedRevision: revision, activeRevision: 1,
       preparedRevision: status === "prepared" ? revision : 0, retiredRevision: 0, renderEpoch: 1n,
       transportEpoch: fixture.epoch(), publicationFrame: 0n, progressFrame: 0n } })
+
   const revisions: NativeRevisionSession = {
-    prepare: async () => { revision++; status = "prepared"; return reply() },
+    prepare: async () => { revision++; status = "prepared";
+
+ return reply() },
     // The pause wins: native never publishes the adopted edit.
-    publish: async () => { publishing.resolve(); await publishGate.promise; status = "rolled-back"; return reply() },
+    publish: async () => { publishing.resolve(); await publishGate.promise; status = "rolled-back";
+
+ return reply() },
     inspect: reply,
-    rollback: async () => { status = "rolled-back"; return reply() },
+    rollback: async () => { status = "rolled-back";
+
+ return reply() },
     retire: reply,
   }
+
   Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: {
     ...fixture.audioHost, session: { ...fixture.audioHost.session, revisions,
       configureInstrumentStates: async () => ({ ok: true }) },
@@ -1701,22 +1960,26 @@ test("B6d2 a paused structural change requested while the pause is pending is no
   let dispose = () => {}
   const settle = async () => { for (let i = 0; i < 800; i++) await Promise.resolve() }
   const begins = () => fixture.calls.filter(call => call === "begin").length
+
   try {
     await withFakeRaf(async () => {
       const playback = createRoot(cleanup => {
         dispose = cleanup
+
         return useTimelinePlayback(createFakeEngine({ clipId: "x", startSec: 0, endSec: 1 }).engine,
           { getTracks: tracks, bpm: () => 120 }, {
             requiresNativeAudio: true, enabled: () => true, projectId: () => "project",
             compileSnapshot: async transport => {
               const captured = tracks()
               captures.push(captured.flatMap(track => track.clips.map(clip => clip.startSec)))
+
               return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: captured,
                 renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
                 sidechainRoutes: [] })
             },
           })
       })
+
       await settle()
       await playback.handlePlay(untrack(tracks))
       const before = begins()
@@ -1729,6 +1992,7 @@ test("B6d2 a paused structural change requested while the pause is pending is no
       await pause
       await settle()
       const paused = { begins: begins(), calls: [...fixture.calls], prepared: playback.isNativePlaybackPrepared() }
+
       try {
         // UD 7 (D7): the paused preview adopts the edit in place (a compile of the edited project, no new session), and
         // the next play resumes it instead of preparing again.
@@ -1749,8 +2013,10 @@ test("B6d2 a paused structural change requested while the pause is pending is no
     publishGate.resolve()
     dispose()
     await settle()
+
     if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow)
     else Reflect.deleteProperty(globalThis, "window")
+
     if (previousBuffer) Object.defineProperty(globalThis, "AudioBuffer", previousBuffer)
     else Reflect.deleteProperty(globalThis, "AudioBuffer")
   }
@@ -1777,11 +2043,13 @@ describe('useTimelinePlayback deferred stretch retries', () => {
 
   test('paused seek updates the transport epoch before applying destination automation', async () => {
     const transportEvents: string[] = []
+
     const engine = {
       ...createFakeEngine({ clipId: 'clip-1', startSec: 12, endSec: 16 }).engine,
       onTransportSeek: () => transportEvents.push('onTransportSeek'),
       applyAutomationAtTimelineSec: () => transportEvents.push('applyAutomationAtTimelineSec'),
     }
+
     await createRoot((dispose) => {
       const playback = useTimelinePlayback(engine)
       playback.setPlayhead(4, [track])
@@ -1800,6 +2068,7 @@ describe('useTimelinePlayback deferred stretch retries', () => {
           loopEndSec: () => 6,
           getTracks: () => [track],
         })
+
         await flushMicrotasks()
         await playback.handlePlay([track])
 
@@ -1919,6 +2188,7 @@ describe('useTimelinePlayback deferred stretch retries', () => {
       let currentTimelineSec = 0
       let stretchListener = () => {}
       const scheduleCalls: ScheduleCall[] = []
+
       const engine = {
         get currentTimelineSec() {
           return currentTimelineSec
@@ -1933,10 +2203,12 @@ describe('useTimelinePlayback deferred stretch retries', () => {
         resume: async () => {},
         rescheduleClipsAtPlayhead: (_tracks, playheadSec, clipIds, opts) => {
           scheduleCalls.push({ playheadSec, opts: { ...opts, clipIds } })
+
           return { deferredStretchWindows: [] }
         },
         scheduleAllClipsFromPlayhead: (_tracks, playheadSec, opts) => {
           scheduleCalls.push({ playheadSec, opts })
+
           return scheduleCalls.length === 1
             ? { deferredStretchWindows: [{ clipId: 'clip-1', startSec: 12, endSec: 16 }] }
             : { deferredStretchWindows: [] }
@@ -1945,6 +2217,7 @@ describe('useTimelinePlayback deferred stretch retries', () => {
         stopAllSources: () => {},
         subscribeStretchRenderState: (listener) => {
           stretchListener = listener
+
           return () => true
         },
       } satisfies Parameters<typeof useTimelinePlayback>[0]
@@ -1993,6 +2266,7 @@ describe('useTimelinePlayback deferred stretch retries', () => {
       let currentTimelineSec = 0
       let stretchListener = () => {}
       const scheduleCalls: ScheduleCall[] = []
+
       const engine = {
         get currentTimelineSec() {
           return currentTimelineSec
@@ -2007,18 +2281,21 @@ describe('useTimelinePlayback deferred stretch retries', () => {
         resume: async () => {},
         rescheduleClipsAtPlayhead: (_tracks, playheadSec, clipIds, opts) => {
           scheduleCalls.push({ playheadSec, opts: { ...opts, clipIds } })
+
           return scheduleCalls.length === 2
             ? { deferredStretchWindows: [{ clipId: 'clip-1', startSec: 12, endSec: 16, replaceExistingSource: true }] }
             : { deferredStretchWindows: [] }
         },
         scheduleAllClipsFromPlayhead: (_tracks, playheadSec, opts) => {
           scheduleCalls.push({ playheadSec, opts })
+
           return { deferredStretchWindows: [{ clipId: 'clip-1', startSec: 12, endSec: 16 }] }
         },
         scheduleAutomationFromPlayhead: () => {},
         stopAllSources: () => {},
         subscribeStretchRenderState: (listener) => {
           stretchListener = listener
+
           return () => true
         },
       } satisfies Parameters<typeof useTimelinePlayback>[0]
@@ -2049,18 +2326,22 @@ test('does not acknowledge stale recovery after suspend or unmount', async () =>
   const previousWindow = globalThis.window
   const gate = Promise.withResolvers<NativeTransactionReply>()
   const acknowledgements: Array<{ generation: number; result: "ready" | "failed" }> = []
+
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "suspended", powerGeneration: 1 },
     completeRecovery: async (generation, result) => {
       acknowledgements.push({ generation, result })
+
       return { accepted: true }
     },
     retryRecovery: async () => ({ accepted: false }),
   }, gate.promise)
+
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await createRoot(async (dispose) => {
       const playback = useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
@@ -2068,6 +2349,7 @@ test('does not acknowledge stale recovery after suspend or unmount', async () =>
         projectId: () => "project",
         compileSnapshot: nativeRequiredSnapshot,
       })
+
       fixture.emitLifecycle({ state: "recovering", powerGeneration: 1 })
       await flushMicrotasks()
       fixture.emitLifecycle({ state: "suspended", powerGeneration: 2 })
@@ -2085,18 +2367,22 @@ test('does not acknowledge stale recovery after suspend or unmount', async () =>
 test('keeps legacy recovery inert until explicit play', async () => {
   const previousWindow = globalThis.window
   const acknowledgements: Array<{ generation: number; result: "ready" | "failed" }> = []
+
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "suspended", powerGeneration: 1 },
     completeRecovery: async (generation, result) => {
       acknowledgements.push({ generation, result })
+
       return { accepted: true }
     },
     retryRecovery: async () => ({ accepted: false }),
   })
+
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
     await createRoot(async (dispose) => {
@@ -2115,15 +2401,18 @@ test('keeps legacy recovery inert until explicit play', async () => {
 
 test('plays through legacy Web Audio while lifecycle is recovering', async () => {
   const previousWindow = globalThis.window
+
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "recovering", powerGeneration: 1 },
     completeRecovery: async () => ({ accepted: true }),
     retryRecovery: async () => ({ accepted: true }),
   })
+
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -2133,6 +2422,7 @@ test('plays through legacy Web Audio while lifecycle is recovering', async () =>
           projectId: () => "project",
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         fixture.emitLifecycle({ state: "recovering", powerGeneration: 2 })
         await playback.handlePlay([track])
         expect(playback.isPlaying()).toBeTrue()
@@ -2150,18 +2440,22 @@ test('plays through legacy Web Audio while lifecycle is recovering', async () =>
 test('plays through legacy Web Audio and retries native recovery while lifecycle is failed', async () => {
   const previousWindow = globalThis.window
   let retries = 0
+
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "failed", powerGeneration: 1 },
     completeRecovery: async () => ({ accepted: true }),
     retryRecovery: async () => {
       retries += 1
+
       return { accepted: true }
     },
   })
+
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -2171,6 +2465,7 @@ test('plays through legacy Web Audio and retries native recovery while lifecycle
           projectId: () => "project",
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         await flushMicrotasks()
         fixture.emitLifecycle({ state: "failed", powerGeneration: 1 })
         await flushMicrotasks()
@@ -2191,26 +2486,32 @@ test('native-required play retries failed recovery and stays stopped while recov
   const previousWindow = globalThis.window
   let retries = 0
   const acknowledgements: Array<{ generation: number; result: "ready" | "failed" }> = []
+
   const lifecycleEmitter: LifecycleEmitter = {
     emit: () => {},
   }
+
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "failed", powerGeneration: 1 },
     completeRecovery: async (generation, result) => {
       acknowledgements.push({ generation, result })
+
       return { accepted: true }
     },
     retryRecovery: async () => {
       retries += 1
       lifecycleEmitter.emit({ state: "recovering", powerGeneration: 2 })
+
       return { accepted: true }
     },
   })
+
   lifecycleEmitter.emit = fixture.emitLifecycle
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     const faults: string[] = []
     await createRoot(async (dispose) => {
@@ -2221,6 +2522,7 @@ test('native-required play retries failed recovery and stays stopped while recov
         compileSnapshot: nativeRequiredSnapshot,
         reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
       })
+
       await flushMicrotasks()
       await playback.handlePlay([track])
       await flushMicrotasks()
@@ -2239,18 +2541,22 @@ test('native-required play retries failed recovery and stays stopped while recov
 test('native-required play reports rejected recovery and retries it on a later play', async () => {
   const previousWindow = globalThis.window
   let retries = 0
+
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "failed", powerGeneration: 1 },
     completeRecovery: async () => ({ accepted: true }),
     retryRecovery: async () => {
       retries += 1
+
       return { accepted: false }
     },
   })
+
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     const faults: string[] = []
     await createRoot(async (dispose) => {
@@ -2261,6 +2567,7 @@ test('native-required play reports rejected recovery and retries it on a later p
         compileSnapshot: nativeRequiredSnapshot,
         reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
       })
+
       await flushMicrotasks()
       await playback.handlePlay([track])
       await playback.handlePlay([track])
@@ -2278,18 +2585,22 @@ test('coalesces concurrent native-required recovery retries', async () => {
   const previousWindow = globalThis.window
   const retryGate = Promise.withResolvers<{ accepted: boolean }>()
   let retries = 0
+
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "failed", powerGeneration: 1 },
     completeRecovery: async () => ({ accepted: true }),
     retryRecovery: async () => {
       retries += 1
+
       return retryGate.promise
     },
   })
+
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     const faults: string[] = []
     await createRoot(async (dispose) => {
@@ -2300,6 +2611,7 @@ test('coalesces concurrent native-required recovery retries', async () => {
         compileSnapshot: nativeRequiredSnapshot,
         reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
       })
+
       await flushMicrotasks()
       const first = playback.handlePlay([track])
       const second = playback.handlePlay([track])
@@ -2320,22 +2632,27 @@ test('allows a rejected recovery retry to be attempted again in the same generat
   const previousWindow = globalThis.window
   let retries = 0
   let rejectRetry = true
+
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "failed", powerGeneration: 1 },
     completeRecovery: async () => ({ accepted: true }),
     retryRecovery: async () => {
       retries += 1
+
       if (rejectRetry) {
         rejectRetry = false
         throw new Error("retry failed")
       }
+
       return { accepted: true }
     },
   })
+
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -2360,18 +2677,22 @@ test('coalesces concurrent recovery retries', async () => {
   const previousWindow = globalThis.window
   const retryGate = Promise.withResolvers<{ accepted: boolean }>()
   let retries = 0
+
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "failed", powerGeneration: 1 },
     completeRecovery: async () => ({ accepted: true }),
     retryRecovery: async () => {
       retries += 1
+
       return retryGate.promise
     },
   })
+
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -2398,16 +2719,19 @@ test('serializes three rapid play calls into one legacy startup', async () => {
     const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
     let resumeCalls = 0
     let stopAllSourcesCalls = 0
+
     const engine = {
       ...fake.engine,
       resume: () => {
         resumeCalls += 1
+
         return resumeGate.promise
       },
       stopAllSources: () => {
         stopAllSourcesCalls += 1
       },
     }
+
     await createRoot(async (dispose) => {
       const first = useTimelinePlayback(engine)
       const second = first.handlePlay([track])
@@ -2430,10 +2754,12 @@ test('cancels delayed legacy resume before it schedules playback', async () => {
   await withFakeRaf(async () => {
     const resumeGate = Promise.withResolvers<void>()
     const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+
     const engine = {
       ...fake.engine,
       resume: () => resumeGate.promise,
     }
+
     await createRoot(async (dispose) => {
       const playback = useTimelinePlayback(engine)
       const play = playback.handlePlay([track])
@@ -2454,17 +2780,22 @@ test('waits for a cancelled play attempt before starting a fresh play', async ()
       Promise.withResolvers<void>(),
       Promise.withResolvers<void>(),
     ]
+
     let resumeCalls = 0
     const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+
     const engine = {
       ...fake.engine,
       resume: () => {
         const gate = resumeGates[resumeCalls]
         resumeCalls += 1
+
         if (!gate) throw new Error("Unexpected extra resume.")
+
         return gate.promise
       },
     }
+
     await createRoot(async (dispose) => {
       const playback = useTimelinePlayback(engine)
       const first = playback.handlePlay([track])
@@ -2492,10 +2823,12 @@ test('cancels delayed portable resume before it can start the portable backend',
   await withFakeRaf(async () => {
     const resumeGate = Promise.withResolvers<void>()
     const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+
     const engine = {
       ...fake.engine,
       resume: () => resumeGate.promise,
     }
+
     await createRoot(async (dispose) => {
       const playback = useTimelinePlayback(
         engine,
@@ -2512,6 +2845,7 @@ test('cancels delayed portable resume before it can start the portable backend',
           }),
         },
       )
+
       const play = playback.handlePlay([track])
       await flushMicrotasks()
       await playback.handlePause()
@@ -2534,6 +2868,7 @@ test('cancels delayed native startup and disposes the late backend', async () =>
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -2543,6 +2878,7 @@ test('cancels delayed native startup and disposes the late backend', async () =>
           projectId: () => "project",
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         await flushMicrotasks()
         const play = playback.handlePlay([track])
         await flushMicrotasks()
@@ -2571,6 +2907,7 @@ test('settles a cancelled native start before replacement playback can rebuild',
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -2581,6 +2918,7 @@ test('settles a cancelled native start before replacement playback can rebuild',
           projectId: () => "project",
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         setNativeEnabled(true)
         const firstPlay = playback.handlePlay([track])
         await flushMicrotasks()
@@ -2629,22 +2967,27 @@ const withOutputDeviceSwitch = async (
   fixture.audioHost.resolveOutputDevice = async (id?: string): Promise<Awaited<ReturnType<typeof resolveDefault>>> => {
     requested.push(id)
     const reply = await resolveDefault()
+
     return id !== undefined && unavailable.has(id) ? { ok: true, device: { ...reply.device, available: false } } : reply
   }
+
   // The packaged host offers revisions, so a playing session adopts edits in place: only a device move replaces it.
   const reply = (status: "prepared" | "published" | "retired"): NativeRevisionReply => ({
     ok: true, hostPid: 123, hostGeneration: 7,
     revision: { status, continuity: "accepted", requestedRevision: 2, activeRevision: 2,
       preparedRevision: 2, retiredRevision: 0, publicationFrame: 1024n, renderEpoch: 10n },
   })
+
   const revisions: NativeRevisionSession = {
     prepare: async () => reply("prepared"), publish: async () => reply("published"), inspect: async () => reply("published"),
     rollback: async () => reply("prepared"), retire: async () => reply("retired"),
   }
+
   Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: {
     ...fixture.audioHost, session: { ...fixture.audioHost.session, revisions,
       configureInstrumentStates: async () => ({ ok: true }) },
   } } } })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -2678,13 +3021,17 @@ const settleRebuild = async () => {
 const createDeviceMove = () => {
   const [outputDeviceId, setOutputDeviceId] = createSignal("coreaudio:A")
   let moves = 0
-  return { outputDeviceId, move: () => { setOutputDeviceId(`coreaudio:move-${moves += 1}`); return settleRebuild() } }
+
+  return { outputDeviceId, move: () => { setOutputDeviceId(`coreaudio:move-${moves += 1}`);
+
+ return settleRebuild() } }
 }
 
 // The lifecycle cause that replaces a paused native preview without a track edit: the project reloads under a new
 // generation, so the preview is disposed and prepared again.
 const createProjectReload = () => {
   const [projectGeneration, setProjectGeneration] = createSignal(1)
+
   return { projectGeneration, reload: () => setProjectGeneration(generation => generation + 1) }
 }
 
@@ -2812,15 +3159,19 @@ test.skipIf(isServer)('a reserved Stop does not replay its locate after a Play p
 // The plug-in state the move reads is refused by the host, as for a session whose worker cannot answer.
 const withRefusedVstStateMove = (resumePlayback: boolean) => withOutputDeviceSwitch(async ({ fixture, requested, faults, mount }) => {
   const [outputId, setOutputId] = createSignal("coreaudio:A")
+
   const playback = mount({
     outputDeviceId: outputId,
     captureNativeVstStates: async () => {
       const reply = await fixture.audioHost.session.captureVstState()
+
       if (!reply.ok) throw new Error(`Native VST3 state capture failed: ${reply.error}`)
     },
   })
+
   playback.setPlayhead(2, [track])
   await playback.handlePlay([track])
+
   if (!resumePlayback) await playback.handlePause()
   const beginsBefore = fixture.calls.filter((call) => call === "begin").length
   const resolvedBefore = requested.length
@@ -2888,6 +3239,7 @@ test('cancels an in-flight native preview before selecting portable playback', a
     const previousWindow = globalThis.window
     const beginGate = Promise.withResolvers<NativeTransactionReply>()
     const fixture = createNativeHookBridge(undefined, undefined, beginGate.promise)
+
     const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport']) => (
       compileLivePlaybackSnapshot({
         revision: 1,
@@ -2898,17 +3250,21 @@ test('cancels an in-flight native preview before selecting portable playback', a
         sidechainRoutes: [],
       })
     )
+
     Object.defineProperty(globalThis, "window", {
       configurable: true,
       value: { dawDesktop: { audioHost: fixture.audioHost } },
     })
+
     try {
       await withFakeRaf(async () => {
         const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+
         const engine = {
           ...fake.engine,
           getAudioContext: () => new AudioContext(),
         }
+
         await createRoot(async (dispose) => {
           const playback = useTimelinePlayback(
             engine,
@@ -2920,6 +3276,7 @@ test('cancels an in-flight native preview before selecting portable playback', a
             },
             { compileSnapshot },
           )
+
           const note = playback.nativeLiveMidi.start({ trackId: track.id, pitch: 60, velocity: 0.5 })
           await flushMicrotasks()
           expect(fixture.calls).toContain("begin")
@@ -2937,6 +3294,7 @@ test('cancels an in-flight native preview before selecting portable playback', a
           expect(playback.isPortableBrowserPlaybackPrepared()).toBeTrue()
           expect(playback.isNativePlaybackPrepared()).toBeFalse()
           expect(playback.backendDiagnostics().activeBackend).toBe("portable-browser")
+
           if (note) playback.nativeLiveMidi.stop(note)
           dispose()
         })
@@ -2950,19 +3308,23 @@ test('cancels an in-flight native preview before selecting portable playback', a
 test('an acceptance-owned native session is never acquired or retired by the renderer', async () => {
   const previousWindow = globalThis.window
   const acknowledgements: Array<{ generation: number; result: "ready" | "failed" }> = []
+
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "ready", powerGeneration: 1 },
     completeRecovery: async (generation, result) => {
       acknowledgements.push({ generation, result })
+
       return { accepted: true }
     },
     retryRecovery: async () => ({ accepted: true }),
   })
+
   const [projectGeneration, setProjectGeneration] = createSignal(1)
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     const faults: string[] = []
     await createRoot(async (dispose) => {
@@ -2975,6 +3337,7 @@ test('an acceptance-owned native session is never acquired or retired by the ren
         compileSnapshot: nativeRequiredSnapshot,
         reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
       })
+
       await flushMicrotasks()
       // The mount's paused-preview request.
       expect(fixture.calls).toEqual([])
@@ -3011,6 +3374,7 @@ test('rebuilds from the persisted generation when native insertion races delayed
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -3022,6 +3386,7 @@ test('rebuilds from the persisted generation when native insertion races delayed
           projectGeneration: () => projectGeneration,
           compileSnapshot: async (transport) => {
             compiled.push({ generation: projectGeneration, order: [...insertionOrder] })
+
             return compileLivePlaybackSnapshot({
               revision: 1,
               bpm: 120,
@@ -3032,6 +3397,7 @@ test('rebuilds from the persisted generation when native insertion races delayed
             })
           },
         })
+
         setNativeEnabled(true)
         const play = playback.handlePlay([track])
         await flushMicrotasks()
@@ -3063,6 +3429,7 @@ test('rebuilds from the persisted generation when native insertion races delayed
 test('keeps a paused portable session compatible when enabling a loop', async () => {
   await withPortableAudioWorklet(async () => {
     const [loopEnabled, setLoopEnabled] = createSignal(false)
+
     const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport']) => (
       compileLivePlaybackSnapshot({
         revision: 1,
@@ -3073,12 +3440,15 @@ test('keeps a paused portable session compatible when enabling a loop', async ()
         sidechainRoutes: [],
       })
     )
+
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+
       const engine = {
         ...fake.engine,
         getAudioContext: () => new AudioContext(),
       }
+
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(
           engine,
@@ -3091,6 +3461,7 @@ test('keeps a paused portable session compatible when enabling a loop', async ()
           undefined,
           { compileSnapshot },
         )
+
         await playback.handlePlay([track])
         await playback.handlePause()
         expect(playback.isPortableBrowserPlaybackPrepared()).toBeTrue()
@@ -3120,6 +3491,7 @@ test('keeps a paused portable session compatible when enabling a loop', async ()
 test('rebuilds active portable playback into compatibility playback for a loop', async () => {
   await withPortableAudioWorklet(async () => {
     const [loopEnabled, setLoopEnabled] = createSignal(false)
+
     const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport']) => (
       compileLivePlaybackSnapshot({
         revision: 1,
@@ -3130,12 +3502,15 @@ test('rebuilds active portable playback into compatibility playback for a loop',
         sidechainRoutes: [],
       })
     )
+
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+
       const engine = {
         ...fake.engine,
         getAudioContext: () => new AudioContext(),
       }
+
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(
           engine,
@@ -3148,6 +3523,7 @@ test('rebuilds active portable playback into compatibility playback for a loop',
           undefined,
           { compileSnapshot },
         )
+
         await playback.handlePlay([track])
         expect(playback.isPortableBrowserPlayback()).toBeTrue()
 
@@ -3177,6 +3553,7 @@ test('preserves an explicitly captured native owner across queued generation reb
     // A native preview is prepared at mount whenever native is enabled and a Play resumes it, so the Play that lands on
     // the portable session starts before native is enabled.
     const [nativeEnabled, setNativeEnabled] = createSignal(false)
+
     const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport']) => (
       compileLivePlaybackSnapshot({
         revision: 1,
@@ -3187,17 +3564,21 @@ test('preserves an explicitly captured native owner across queued generation reb
         sidechainRoutes: [],
       })
     )
+
     Object.defineProperty(globalThis, "window", {
       configurable: true,
       value: { dawDesktop: { audioHost: fixture.audioHost } },
     })
+
     try {
       await withFakeRaf(async () => {
         const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+
         const engine = {
           ...fake.engine,
           getAudioContext: () => new AudioContext(),
         }
+
         await createRoot(async (dispose) => {
           const playback = useTimelinePlayback(
             engine,
@@ -3213,6 +3594,7 @@ test('preserves an explicitly captured native owner across queued generation reb
               compileSnapshot,
             },
           )
+
           await flushMicrotasks()
           await playback.handlePlay([track])
           expect(playback.backendDiagnostics().activeBackend).toBe("portable-browser")
@@ -3220,6 +3602,7 @@ test('preserves an explicitly captured native owner across queued generation reb
           setNativeEnabled(true)
           setProjectGeneration(2)
           await flushMicrotasks()
+
           const first = playback.restartTimelineSchedule([track], {
             rebuildBackend: true,
             resumePlayback: true,
@@ -3228,6 +3611,7 @@ test('preserves an explicitly captured native owner across queued generation reb
             projectId: "project",
             projectGeneration: 2,
           })
+
           const second = playback.restartTimelineSchedule([track], {
             rebuildBackend: true,
             resumePlayback: true,
@@ -3236,6 +3620,7 @@ test('preserves an explicitly captured native owner across queued generation reb
             projectId: "project",
             projectGeneration: 2,
           })
+
           await Promise.all([first, second])
 
           expect(playback.isPlaying()).toBeTrue()
@@ -3256,6 +3641,7 @@ test('preserves an explicitly captured native owner across queued generation reb
 test('pauses Web Audio transport before disposing portable playback on project generation change', async () => {
   await withPortableAudioWorklet(async () => {
     const [projectGeneration, setProjectGeneration] = createSignal(1)
+
     const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport']) => (
       compileLivePlaybackSnapshot({
         revision: 1,
@@ -3266,17 +3652,21 @@ test('pauses Web Audio transport before disposing portable playback on project g
         sidechainRoutes: [],
       })
     )
+
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+
       const engine = {
         ...fake.engine,
         getAudioContext: () => new AudioContext(),
       }
+
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(engine, undefined, undefined, {
           projectGeneration,
           compileSnapshot,
         })
+
         await playback.handlePlay([track])
         expect(playback.isPortableBrowserPlayback()).toBeTrue()
 
@@ -3309,12 +3699,15 @@ test('pauses Web Audio transport before disposing active portable playback on cl
         sidechainRoutes: [],
       })
     )
+
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+
       const engine = {
         ...fake.engine,
         getAudioContext: () => new AudioContext(),
       }
+
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(engine, undefined, undefined, { compileSnapshot })
         await playback.handlePlay([track])
@@ -3333,15 +3726,18 @@ test('pauses Web Audio transport before disposing active portable playback on cl
 test('waits for lifecycle recovery before restarting an active native graph', async () => {
   const previousWindow = globalThis.window
   const device = createDeviceMove()
+
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "ready", powerGeneration: 1 },
     completeRecovery: async () => ({ accepted: true }),
     retryRecovery: async () => ({ accepted: true }),
   })
+
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -3353,6 +3749,7 @@ test('waits for lifecycle recovery before restarting an active native graph', as
           projectId: () => "project",
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         await flushMicrotasks()
         await playback.handlePlay([track])
         expect(playback.isPlaying()).toBeTrue()
@@ -3374,20 +3771,25 @@ test('waits for lifecycle recovery before restarting an active native graph', as
 
 test('resolves a pending rebuild when intentional teardown cancels lifecycle readiness', async () => {
   const previousWindow = globalThis.window
+
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "suspended", powerGeneration: 1 },
     completeRecovery: async () => ({ accepted: true }),
     retryRecovery: async () => ({ accepted: false }),
   })
+
   const faults: string[] = []
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     let dispose = () => {}
+
     const playback = createRoot((cleanup) => {
       dispose = cleanup
+
       return useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
         requiresNativeAudio: true,
         enabled: () => true,
@@ -3396,6 +3798,7 @@ test('resolves a pending rebuild when intentional teardown cancels lifecycle rea
         reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
       })
     })
+
     await flushMicrotasks()
 
     const rebuild = playback.restartTimelineSchedule([track], {
@@ -3405,6 +3808,7 @@ test('resolves a pending rebuild when intentional teardown cancels lifecycle rea
       owner: "native",
       projectId: "project",
     })
+
     await flushMicrotasks()
     dispose()
 
@@ -3423,12 +3827,15 @@ test('resumes an explicitly captured structural rebuild after project generation
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
       let dispose = () => {}
+
       const playback = createRoot((cleanup) => {
         dispose = cleanup
+
         return useTimelinePlayback(fake.engine, undefined, {
           requiresNativeAudio: true,
           enabled: () => true,
@@ -3437,6 +3844,7 @@ test('resumes an explicitly captured structural rebuild after project generation
           compileSnapshot: nativeRequiredSnapshot,
         })
       })
+
       await flushMicrotasks()
       await playback.handlePlay([track])
       expect(playback.isPlaying()).toBeTrue()
@@ -3446,6 +3854,7 @@ test('resumes an explicitly captured structural rebuild after project generation
         playheadSec: 3,
         projectId: "project",
       }
+
       projectGeneration = 2
       await playback.handlePause()
       expect(playback.isPlaying()).toBeFalse()
@@ -3473,6 +3882,7 @@ test('resumes after the generation effect disposes playback before structural re
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -3484,9 +3894,11 @@ test('resumes after the generation effect disposes playback before structural re
           projectGeneration,
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         await flushMicrotasks()
         await playback.handlePlay([track])
         fake.setCurrentTimelineSec(3)
+
         const intent = {
           resumePlayback: playback.isPlaying(),
           playheadSec: 3,
@@ -3523,12 +3935,15 @@ test('live schedule compile failure retains the active graph for a later retry',
   let compilations = 0
   const faults: string[] = []
   const unsupported = async (): Promise<NativeRevisionReply> => ({ ok: false, error: "not used", kind: "unavailable" })
+
   const revisions: NativeRevisionSession = { prepare: unsupported, publish: unsupported,
     inspect: unsupported, rollback: unsupported, retire: unsupported }
+
   Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: {
     ...fixture.audioHost, session: { ...fixture.audioHost.session, revisions,
       configureInstrumentStates: async () => ({ ok: true }) },
   } } } })
+
   try {
     await withFakeRaf(async () => createRoot(async (dispose) => {
       const playback = useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
@@ -3536,10 +3951,13 @@ test('live schedule compile failure retains the active graph for a later retry',
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           compileSnapshot: async (transport) => {
             compilations++
+
             if (compilations === 2) return { supported: false, reasons: ["edit remains desired"] }
+
             return nativeRequiredSnapshot(transport)
           },
         })
+
       await playback.handlePlay([track])
       const before = fixture.calls.length
       await playback.restartTimelineSchedule([track])
@@ -3561,13 +3979,16 @@ test('typed-fault-forwarding: a delivery incident reaches the native reportFault
   const received: Array<{ fault: NativePlaybackFault; options: { retainPlayback: true } | undefined }> = []
   const utility = createDefaultUtilityParams()
   const unsupported = async (): Promise<NativeRevisionReply> => ({ ok: false, error: "not used", kind: "unavailable" })
+
   const revisions: NativeRevisionSession = { prepare: unsupported, publish: unsupported,
     inspect: unsupported, rollback: unsupported, retire: unsupported }
+
   Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: {
     ...fixture.audioHost, session: { ...fixture.audioHost.session, revisions,
       configureInstrumentStates: async () => ({ ok: true }),
       queueProcessorStatePatch: async () => ({ ok: true, outcome: "refused", refusal: "invalid", coreResult: 0 }) },
   } } } })
+
   try {
     await withFakeRaf(async () => createRoot(async (dispose) => {
       const playback = useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
@@ -3575,19 +3996,24 @@ test('typed-fault-forwarding: a delivery incident reaches the native reportFault
           reportFault: (fault, options) => received.push({ fault, options }),
           compileSnapshot: async (transport) => {
             const compiled = await nativeRequiredSnapshot(transport)
+
             if (!compiled.supported) return compiled
+
             return { ...compiled, snapshot: { ...compiled.snapshot, mixer: { ...compiled.snapshot.mixer,
               fx: { ...compiled.snapshot.mixer.fx, trackFx: { [track.id]: { instances: [
                 { id: "utility:1", kind: "utility", params: { version: 1, state: utility } },
               ] } } } } } }
           },
         })
+
       await playback.handlePlay([track])
       expect(playback.isPlaying()).toBe(true)
+
       const edit = createProcessorEditRegistry(() => 120).allocate({
         effect: "utility", instanceId: "utility:1", targetId: track.id,
         from: { version: 1, state: utility }, to: { version: 1, state: { ...utility, gainDb: -3 } },
       });
+
       if (!edit) throw new Error("Missing utility edit.");
       await playback.deliverProcessor({ ...edit, content: { ...edit.content, values: {} } }).settled;
       expect(received).toEqual([{ fault: { kind: "delivery-refused", targets: 1 }, options: { retainPlayback: true } }])
@@ -3612,13 +4038,17 @@ for (const edit of ["audio-add", "audio-move", "audio-resize", "audio-delete", "
     let graphs = 0
     let installedRevision = 0n
     const faults: string[] = []
+
     const audioTrack: RuntimeTrack = { ...track, clips: [{ id: "audio", name: "Audio", color: "#fff",
       startSec: 0, duration: 1, sourceAssetKey: "asset", buffer: new TestAudioBuffer() }] }
+
     const synthTrack: Track = { ...track, kind: "instrument", clips: [{ id: "midi", name: "MIDI", color: "#fff",
       startSec: 0, duration: 3, midi: { wave: "sawtooth", notes: [{ id: "note", pitch: 60, beat: 0, length: 4, velocity: 0.8 }] } }] }
+
     const retainedTrack = { ...audioTrack, id: "retained", clips: audioTrack.clips.map((clip) => ({
       ...clip, id: "retained-audio", sourceAssetKey: "retained-asset",
     })) }
+
     const base: LivePlaybackSnapshotInput = {
       revision: 1, bpm: 120,
       transport: { state: "playing", playheadSec: 0, loopEnabled: false, loopStartSec: 0, loopEndSec: 0 },
@@ -3627,42 +4057,55 @@ for (const edit of ["audio-add", "audio-move", "audio-resize", "audio-delete", "
         [track.id]: { instances: [], instrument: { kind: "synth", instanceId: "synth", params: createDefaultSynthParams() } },
       } }, automationEnvelopes: [] }, sidechainRoutes: [],
     }
+
     let desired: LivePlaybackSnapshotInput = { ...base, revision: 2 }
+
     if (edit === "sidechain") desired = { ...desired, sidechainRoutes: [{
       sourceTrackId: track.id, targetTrackId: "master", effectInstanceId: "external",
     }] }
+
     if (edit === "midi-mappings") desired = { ...desired, tracks: [{ ...synthTrack,
       clips: synthTrack.clips.map((clip) => ({ ...clip, midi: clip.midi && { ...clip.midi,
         mappings: [{ id: "mapping", source: { kind: "cc", controller: 1, channel: 1 },
           target: { parameterId: "gain" }, outputMin: 0, outputMax: 1 }] } })),
     }] }
+
     if (edit === "supported") desired = { ...desired, tracks: [{ ...synthTrack,
       clips: synthTrack.clips.map((clip) => ({ ...clip, midi: clip.midi && { ...clip.midi,
         notes: clip.midi.notes.map((note) => ({ ...note, pitch: 62 })) } })),
     }] }
+
     if (edit === "audio-add" || edit === "asset-add") desired = { ...desired, tracks: [{ ...audioTrack,
       clips: [...audioTrack.clips, { ...audioTrack.clips[0]!, id: "added", startSec: 2,
         sourceAssetKey: edit === "asset-add" ? "new-asset" : "asset" }] }, retainedTrack] }
+
     if (edit === "audio-move" || edit === "audio-resize" || edit === "asset-replace") desired = { ...desired,
       tracks: [{ ...audioTrack, clips: audioTrack.clips.map((clip) => ({ ...clip,
         startSec: edit === "audio-move" ? 2 : 0, duration: edit === "audio-resize" ? 0.5 : 1,
         buffer: edit === "asset-replace" ? new TestAudioBuffer() : clip.buffer })) }, retainedTrack] }
+
     if (edit === "audio-delete") desired = { ...desired, tracks: [{ ...audioTrack, clips: [] }, retainedTrack] }
+
     if (edit === "audio-track-remove") desired = { ...desired, tracks: [retainedTrack, {
       ...audioTrack, id: "added-track", clips: audioTrack.clips.map((clip) => ({
         ...clip, id: "added-audio", sourceAssetKey: "added-asset",
       })),
     }],
       renderState: { ...base.renderState, fx: { ...base.renderState.fx, trackFx: {} } } }
+
     if (edit === "audio-tempo") desired = { ...desired, bpm: 130 }
+
     if (edit.endsWith("-move")) desired = { ...desired, tracks: [{ ...audioTrack,
       clips: audioTrack.clips.map((clip) => ({ ...clip, startSec: 1 })) }, retainedTrack] }
+
     if (edit === "time-signature-move") desired = { ...desired, timeSignature: { numerator: 3, denominator: 4 } }
+
     if (edit === "instrument-replace") desired = { ...desired,
       renderState: { ...base.renderState, fx: { ...base.renderState.fx, trackFx: {
         [track.id]: { instances: [], instrument: { kind: "synth", instanceId: "synth",
           params: { ...createDefaultSynthParams(), gain: 0.2 } } },
       } } } }
+
     if (edit === "sampled-add") desired = { ...desired,
       tracks: [...base.tracks, { ...synthTrack, id: "sampled", clips: [] }],
       renderState: { ...base.renderState, fx: { ...base.renderState.fx, trackFx: { ...base.renderState.fx.trackFx,
@@ -3670,32 +4113,44 @@ for (const edit of ["audio-add", "audio-move", "audio-resize", "audio-delete", "
       } } } }
     let seam = 0n
     let status: "prepared" | "published" | "invalid-revision" = "prepared"
+
     const reply = async (): Promise<NativeRevisionReply> => ({ ok: true, hostPid: 123, hostGeneration: 7,
       revision: { status, continuity: "accepted", requestedRevision: 2, activeRevision: status === "published" ? 2 : 1,
         preparedRevision: status === "prepared" ? 2 : 0, retiredRevision: 0, renderEpoch: 1n, transportEpoch: fixture.epoch(),
         publicationFrame: status === "published" ? seam : 0n, progressFrame: seam } })
+
     const revisions: NativeRevisionSession = { prepare: async (request) => {
       staged++
       seam = request.requestedPublicationFrame ?? 0n
       status = edit === "publication-failure" ? "invalid-revision" : "prepared"
+
       return reply()
-    }, publish: async () => { status = "published"; return reply() }, inspect: reply, rollback: reply, retire: reply }
+    }, publish: async () => { status = "published";
+
+ return reply() }, inspect: reply, rollback: reply, retire: reply }
+
     const publishGraph = fixture.audioHost.session.publishGraph
     const installedWindows: Uint8Array[] = []
     const queueScheduleWindow = fixture.audioHost.session.queueScheduleWindow
     fixture.audioHost.session.queueScheduleWindow = (bytes) => {
       if (changed) installedWindows.push(bytes)
+
       return queueScheduleWindow(bytes)
     }
+
     fixture.audioHost.session.publishGraph = (bytes) => {
       graphs++
       installedRevision = new DataView(bytes.buffer, bytes.byteOffset).getBigUint64(0, false)
+
       if (changed) desiredInstalled = true
+
       return publishGraph(bytes)
     }
+
     Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: {
       ...fixture.audioHost, session: { ...fixture.audioHost.session, revisions, configureInstrumentStates: async () => ({ ok: true }) },
     } } } })
+
     try {
       await withFakeRaf(async () => createRoot(async (dispose) => {
         const playback = useTimelinePlayback(createFakeEngine({ clipId: "x", startSec: 0, endSec: 1 }).engine,
@@ -3704,18 +4159,25 @@ for (const edit of ["audio-add", "audio-move", "audio-resize", "audio-delete", "
             compileSnapshot: async (transport) => {
               compiles++;
               const compiled = compileLivePlaybackSnapshot({ ...(changed ? desired : base), transport })
+
               if (!compiled.supported) return compiled
+
               if (edit.startsWith("vst")) {
                 const processor = { ...insertedExternalProcessor(), targetId: track.id,
                   bypassed: changed && edit === "vst-bypass", index: changed && edit === "vst-reorder" ? 1 : 0 }
+
                 const plan = compileNativeExternalAttachmentPlan({ target: "native", graph: compiled.snapshot.mixer.graph,
                   processors: edit.startsWith("vst-insert") && !changed || edit === "vst-remove" && changed ? [] : [processor],
                   workerTransport: { slotCount: 2, maximumFrames: 8192, maximumEventsPerBlock: 128 } })
+
                 if (!plan.supported) throw new Error(plan.reasons.join(" "))
+
                 return { ...compiled, snapshot: { ...compiled.snapshot, nativeExternalAttachmentPlan: plan.plan, requiresNativePlayback: true } }
               }
+
               return compiled
             } })
+
         try {
           fixture.setScheduleComplete(false)
           await playback.handlePlay([track])
@@ -3723,6 +4185,7 @@ for (const edit of ["audio-add", "audio-move", "audio-resize", "audio-delete", "
           const beforeCompiles = compiles;
           changed = true
           const restart = playback.restartTimelineSchedule([track])
+
           if (edit === "sidechain" || edit === "midi-mappings") {
             await restart.catch(() => undefined)
             expect(staged).toBe(0)
@@ -3730,27 +4193,36 @@ for (const edit of ["audio-add", "audio-move", "audio-resize", "audio-delete", "
             expect(desiredInstalled).toBe(false)
             expect(faults).toEqual([])
             expect(playback.isPlaying()).toBe(true)
+
             return
           }
+
           await restart
+
           // A plug-in edit joins the playing graph as one staged publication: no cold rebuild, no second graph.
           if (edit.startsWith("vst") && !edit.endsWith("-move")) expect(compiles - beforeCompiles).toBe(1);
+
           if (edit !== "publication-failure") expect(faults).toEqual([])
+
           const stagedEdit = ["supported", "audio-add", "audio-move", "audio-resize", "audio-delete", "audio-track-remove",
             "audio-tempo", "asset-replace", "asset-add", "sampled-add", "instrument-replace", "time-signature-move"].includes(edit)
             || edit.startsWith("vst")
+
           expect(desiredInstalled).toBe(!stagedEdit && edit !== "publication-failure")
           expect(graphs).toBe(stagedEdit || edit === "publication-failure" ? 1 : 2)
           expect(installedRevision).toBe(stagedEdit || edit === "publication-failure" ? 1n : 2n)
           expect(staged).toBe(stagedEdit ? 1 : edit === "publication-failure" ? 9 : 0)
+
           if (edit.endsWith("-move")) {
             expect(installedWindows.flatMap((bytes) => {
               const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
               const offset = 72 + view.getUint32(44, true) * 48
+
               return Array.from({ length: view.getUint32(48, true) }, (_, index) =>
                 view.getBigInt64(offset + index * 112 + 24, true))
             })).toContain(48_000n)
           }
+
           expect(playback.isPlaying()).toBe(true)
         } finally { dispose() }
       }))
@@ -3767,6 +4239,7 @@ test('instrument readiness waits for Play preparation before comparing the prepa
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       await createRoot(async (dispose) => {
@@ -3780,19 +4253,23 @@ test('instrument readiness waits for Play preparation before comparing the prepa
             compileSnapshot: async (transport) => {
               compiling.resolve()
               await ready.promise
+
               return nativeRequiredSnapshot(transport)
             },
           },
         )
+
         try {
           const play = playback.handlePlay([track])
           await compiling.promise
           let compared = false
+
           const instrumentReady = playback.awaitPlaybackPreparation().then(() => {
             compared = true
             expect(playback.isPlaying()).toBeTrue()
             expect(playback.isNativePlaybackPrepared()).toBeTrue()
           })
+
           await flushMicrotasks()
           expect(compared).toBeFalse()
           ready.resolve()
@@ -3821,6 +4298,7 @@ test('instrument readiness stops waiting on disposal during an unresolved compil
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       await createRoot(async (dispose) => {
@@ -3834,10 +4312,12 @@ test('instrument readiness stops waiting on disposal during an unresolved compil
             compileSnapshot: async (transport) => {
               compiling.resolve()
               await ready.promise
+
               return nativeRequiredSnapshot(transport)
             },
           },
         )
+
         try {
           const play = playback.handlePlay([track])
           await compiling.promise
@@ -3871,8 +4351,10 @@ test('keeps Play visible throughout a cold native rebuild and resumes at the sto
   fixture.audioHost.session.beginTransaction = async () => {
     if (!holdRebuild) return begin()
     rebuilding.resolve()
+
     return ready.promise
   }
+
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: {
@@ -3882,6 +4364,7 @@ test('keeps Play visible throughout a cold native rebuild and resumes at the sto
       } }),
     } } },
   })
+
   try {
     await withFakeRaf(async () => {
       await createRoot(async (dispose) => {
@@ -3896,6 +4379,7 @@ test('keeps Play visible throughout a cold native rebuild and resumes at the sto
             compileSnapshot: nativeRequiredSnapshot,
           },
         )
+
         try {
           await playback.handlePlay([track])
           holdRebuild = true
@@ -3922,11 +4406,13 @@ for (const failure of ["loss", "suspended", "failed"]) {
   test(`clears cold rebuild Play intent immediately on ${failure}`, async () => {
     const previousWindow = globalThis.window
     const device = createDeviceMove()
+
     const fixture = createNativeHookBridge(undefined, {
       initial: { state: "ready", powerGeneration: 0 },
       completeRecovery: async () => ({ accepted: true }),
       retryRecovery: async () => ({ accepted: true }),
     })
+
     const rebuilding = Promise.withResolvers<void>()
     const ready = Promise.withResolvers<NativeTransactionReply>()
     const begin = fixture.audioHost.session.beginTransaction
@@ -3934,12 +4420,15 @@ for (const failure of ["loss", "suspended", "failed"]) {
     fixture.audioHost.session.beginTransaction = async () => {
       if (!holdRebuild) return begin()
       rebuilding.resolve()
+
       return ready.promise
     }
+
     Object.defineProperty(globalThis, "window", {
       configurable: true,
       value: { dawDesktop: { audioHost: fixture.audioHost } },
     })
+
     try {
       await withFakeRaf(async () => {
         await createRoot(async (dispose) => {
@@ -3949,6 +4438,7 @@ for (const failure of ["loss", "suspended", "failed"]) {
             { requiresNativeAudio: true, enabled: () => true, outputDeviceId: device.outputDeviceId, projectId: () => "project",
               compileSnapshot: nativeRequiredSnapshot },
           )
+
           try {
             await flushMicrotasks()
             await playback.handlePlay([track])
@@ -3957,6 +4447,7 @@ for (const failure of ["loss", "suspended", "failed"]) {
             await rebuilding.promise
             expect(playback.isPlaying()).toBeTrue()
             const runningCount = fixture.transportStates.filter(Boolean).length
+
             if (failure === "loss") fixture.emitLoss()
             else fixture.emitLifecycle({ state: failure === "suspended" ? "suspended" : "failed", powerGeneration: 1 })
             await flushMicrotasks()
@@ -3985,12 +4476,15 @@ test('coalesces queued structural rebuilds and resumes once', async () => {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
       let dispose = () => {}
+
       const playback = createRoot((cleanup) => {
         dispose = cleanup
+
         return useTimelinePlayback(fake.engine, undefined, {
           requiresNativeAudio: true,
           enabled: () => true,
@@ -3999,6 +4493,7 @@ test('coalesces queued structural rebuilds and resumes once', async () => {
           compileSnapshot: nativeRequiredSnapshot,
         })
       })
+
       await flushMicrotasks()
       playback.setPlayhead(2, [track])
       await playback.handlePlay([track])
@@ -4023,16 +4518,19 @@ test('carries the latest inserted processor through coalesced paused rebuild com
   const fixture = createNativeHookBridge()
   const inserted = insertedExternalProcessor()
   const compileContexts: Array<unknown> = []
+
   const longTrack: Track = {
     id: 'track-2',
     name: 'Track 2',
     volume: 1,
     clips: [],
   }
+
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       await createRoot(async (dispose) => {
@@ -4042,6 +4540,7 @@ test('carries the latest inserted processor through coalesced paused rebuild com
           projectId: () => 'project',
           compileSnapshot: async (transport, context) => {
             compileContexts.push(context)
+
             const result = compileLivePlaybackSnapshot({
               revision: 1,
               bpm: 120,
@@ -4050,23 +4549,28 @@ test('carries the latest inserted processor through coalesced paused rebuild com
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
               sidechainRoutes: [],
             })
+
             if (!result.supported) return result
+
             const processors = await resolveNativeLivePlaybackProcessors({
               projectId: 'project',
               persisted: [],
               seed: context?.externalProcessor,
               readPersisted: async () => undefined,
             })
+
             const plan = compileNativeExternalAttachmentPlan({
               target: 'native',
               graph: result.snapshot.mixer.graph,
               processors,
               workerTransport: { slotCount: 2, maximumFrames: 8_192, maximumEventsPerBlock: 128 },
             })
+
             if (!plan.supported) return {
               supported: true as const,
               snapshot: { ...result.snapshot, requiresNativePlayback: true },
             }
+
             return {
               supported: true as const,
               snapshot: {
@@ -4077,6 +4581,7 @@ test('carries the latest inserted processor through coalesced paused rebuild com
             }
           },
         })
+
         const first = playback.restartTimelineSchedule([longTrack], {
           rebuildBackend: true,
           resumePlayback: false,
@@ -4084,6 +4589,7 @@ test('carries the latest inserted processor through coalesced paused rebuild com
           projectId: 'project',
           externalProcessor: { projectId: 'project', processor: inserted },
         })
+
         const second = playback.restartTimelineSchedule([longTrack], {
           rebuildBackend: true,
           resumePlayback: false,
@@ -4091,6 +4597,7 @@ test('carries the latest inserted processor through coalesced paused rebuild com
           projectId: 'project',
           externalProcessor: { projectId: 'project', processor: inserted },
         })
+
         await Promise.all([first, second])
         expect(compileContexts).toContainEqual({
           externalProcessor: { projectId: 'project', processor: inserted },
@@ -4111,20 +4618,24 @@ test('preserves the latest instrument override across an active structural rebui
   const previousWindow = globalThis.window
   const fixture = createNativeHookBridge()
   const compileContexts: Array<unknown> = []
+
   const instrumentA = {
     kind: 'drum-rack' as const,
     instanceId: 'instrument-a',
     params: createDefaultDrumRackParams(),
   }
+
   const instrumentB = {
     kind: 'drum-rack' as const,
     instanceId: 'instrument-b',
     params: createDefaultDrumRackParams(),
   }
+
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -4135,9 +4646,11 @@ test('preserves the latest instrument override across an active structural rebui
           projectId: () => "project",
           compileSnapshot: async (transport, context) => {
             compileContexts.push(context)
+
             return nativeRequiredSnapshot(transport)
           },
         })
+
         await playback.handlePlay([track])
         fixture.calls.length = 0
 
@@ -4156,6 +4669,7 @@ test('preserves the latest instrument override across an active structural rebui
           projectId: "project",
           instrumentOverride: { targetId: track.id, instrument: instrumentB },
         })
+
         await Promise.all([first, second])
         await settleRebuild()
 
@@ -4182,6 +4696,7 @@ test('does not restart after pause wins an active native rebuild', async () => {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -4193,6 +4708,7 @@ test('does not restart after pause wins an active native rebuild', async () => {
           projectId: () => "project",
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         await flushMicrotasks()
         await playback.handlePlay([track])
         fixture.setBeginGate(beginGate.promise)
@@ -4225,6 +4741,7 @@ test('does not resume a structural rebuild after stop wins', async () => {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -4236,6 +4753,7 @@ test('does not resume a structural rebuild after stop wins', async () => {
           projectId: () => "project",
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         await flushMicrotasks()
         await playback.handlePlay([track])
         fixture.calls.length = 0
@@ -4247,6 +4765,7 @@ test('does not resume a structural rebuild after stop wins', async () => {
         await playback.handleStop()
         beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await expect(rebuild).resolves.toBeUndefined()
+
         // Stop wins: nothing resumes, and the paused graph stays live at the start.
         for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
         await flushMicrotasks()
@@ -4275,6 +4794,7 @@ test('does not resume a structural rebuild after switching projects', async () =
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -4287,6 +4807,7 @@ test('does not resume a structural rebuild after switching projects', async () =
           projectGeneration: () => projectGeneration,
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         await flushMicrotasks()
         await playback.handlePlay([track])
         fixture.calls.length = 0
@@ -4320,6 +4841,7 @@ test('rebuilds a delayed paused native preview without committing play intent', 
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -4330,6 +4852,7 @@ test('rebuilds a delayed paused native preview without committing play intent', 
           projectId: () => "project",
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         const note = playback.nativeLiveMidi.start({ trackId: track.id, pitch: 60, velocity: 0.5 })
         await flushMicrotasks()
         expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(1)
@@ -4343,6 +4866,7 @@ test('rebuilds a delayed paused native preview without committing play intent', 
         expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(2)
         expect(fixture.calls.filter((call) => call === "start")).toHaveLength(1)
         expect(fixture.transportStates).not.toContain(true)
+
         if (note) playback.nativeLiveMidi.stop(note)
         dispose()
       })
@@ -4356,15 +4880,18 @@ test('fails safely when the fresh native graph cannot start after insertion', as
   const previousWindow = globalThis.window
   const beginGate = Promise.withResolvers<NativeTransactionReply>()
   let failFreshBegin = false
+
   const fixture = createNativeHookBridge(() => {
     return failFreshBegin ? "begin" : undefined
   }, undefined, beginGate.promise)
+
   const [nativeEnabled, setNativeEnabled] = createSignal(false)
   let projectGeneration = 1
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -4376,6 +4903,7 @@ test('fails safely when the fresh native graph cannot start after insertion', as
           projectGeneration: () => projectGeneration,
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         setNativeEnabled(true)
         const play = playback.handlePlay([track])
         await flushMicrotasks()
@@ -4388,7 +4916,9 @@ test('fails safely when the fresh native graph cannot start after insertion', as
           () => undefined,
           (cause) => cause instanceof Error ? cause : new Error(String(cause)),
         )
+
         expect(rebuildError).toBeInstanceOf(Error)
+
         if (rebuildError instanceof Error) expect(rebuildError.message).toContain("failed")
         await play
         expect(playback.isPlaying()).toBeFalse()
@@ -4411,6 +4941,7 @@ test('serializes a delayed native pause before immediate play', async () => {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -4420,6 +4951,7 @@ test('serializes a delayed native pause before immediate play', async () => {
           projectId: () => "project",
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         await playback.handlePlay([track])
         fixture.armTransportGate()
         fixture.calls.length = 0
@@ -4453,6 +4985,7 @@ test("a locate that cancels a Play resuming behind a delayed Pause, after a seco
   const fixture = createNativeHookBridge(undefined, undefined, undefined, pauseGate.promise)
   let locateOnResume: (() => void) | undefined
   Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -4461,8 +4994,11 @@ test("a locate that cancels a Play resuming behind a delayed Pause, after a seco
           requiresNativeAudio: true,
           enabled: () => true,
           projectId: () => "project",
-          compileSnapshot: (transport) => { locateOnResume?.(); return nativeRequiredSnapshot(transport) },
+          compileSnapshot: (transport) => { locateOnResume?.();
+
+ return nativeRequiredSnapshot(transport) },
         })
+
         await playback.handlePlay([track])
         fixture.armTransportGate()
         const pause = playback.handlePause()
@@ -4472,8 +5008,10 @@ test("a locate that cancels a Play resuming behind a delayed Pause, after a seco
         const secondPause = playback.handlePause()
         await flushMicrotasks()
         locateOnResume = () => { locateOnResume = undefined; playback.setPlayhead(1.5, [track]) }
+
         pauseGate.resolve({ ok: true })
         await Promise.all([pause, play, secondPause])
+
         for (let index = 0; index < 60; index += 1) await flushMicrotasks()
         // The locate cancelled the resuming Play after the second Pause had made its intent stale: the replay from the locate
         // ends there, and the Play is neither running nor left pending.
@@ -4493,16 +5031,21 @@ test("a locate made while playing resumes on the rebuild when a generation chang
   const beginGate = Promise.withResolvers<NativeTransactionReply>()
   const fixture = createNativeHookBridge()
   let holdSeek = false
+
   const host = { ...fixture.audioHost, session: { ...fixture.audioHost.session, setTransport: async (transport: NativeHostTransport) => {
     if (holdSeek && transport.running) await seekGate.promise
+
     return fixture.audioHost.session.setTransport(transport)
   } } }
+
   Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: host } } })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
       await createRoot(async (dispose) => {
         const [generation, setGeneration] = createSignal(1)
+
         const playback = useTimelinePlayback(fake.engine, undefined, {
           requiresNativeAudio: true,
           enabled: () => true,
@@ -4510,22 +5053,27 @@ test("a locate made while playing resumes on the rebuild when a generation chang
           projectGeneration: generation,
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         await playback.handlePlay([track])
         expect(playback.isPlaying()).toBeTrue()
         holdSeek = true
         playback.setPlayhead(2, [track])
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         // The preview the new generation requests stays pending while the locate's seek settles.
         fixture.setBeginGate(beginGate.promise)
         setGeneration(2)
+
         for (let index = 0; index < 60; index += 1) await flushMicrotasks()
         expect(playback.isPlaying()).toBeFalse()
         holdSeek = false
         seekGate.resolve()
+
         for (let index = 0; index < 60; index += 1) await flushMicrotasks()
         fixture.setBeginGate(undefined)
         beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
+
         for (let index = 0; index < 100; index += 1) await flushMicrotasks()
         // The locate was made while playing: the Play resumes on the replacement graph; a preview carries no such intent.
         expect({ playing: playback.isPlaying(), running: fixture.transportStates.at(-1) }).toEqual({ playing: true, running: true })
@@ -4545,6 +5093,7 @@ test('serializes play behind an in-flight stop while retaining the native sessio
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -4555,6 +5104,7 @@ test('serializes play behind an in-flight stop while retaining the native sessio
           projectId: () => "project",
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         await playback.handlePlay([track])
         fixture.armTransportGate()
         fixture.calls.length = 0
@@ -4589,33 +5139,40 @@ test('keeps fallback startup alive across a failed native retry', async () => {
   const previousWindow = globalThis.window
   let emitLifecycle = (_lifecycle: DesktopAudioLifecycle) => {}
   const resumeGate = Promise.withResolvers<void>()
+
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "failed", powerGeneration: 1 },
     completeRecovery: async () => ({ accepted: true }),
     retryRecovery: async () => {
       emitLifecycle({ state: "recovering", powerGeneration: 2 })
       emitLifecycle({ state: "failed", powerGeneration: 2 })
+
       return { accepted: true }
     },
   })
+
   emitLifecycle = fixture.emitLifecycle
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+
       const engine = {
         ...fake.engine,
         resume: () => resumeGate.promise,
       }
+
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(engine, undefined, {
           enabled: () => true,
           projectId: () => "project",
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         await flushMicrotasks()
         const play = playback.handlePlay([track])
         await flushMicrotasks()
@@ -4637,6 +5194,7 @@ test('preserves active legacy playback across a failed native retry', async () =
   const previousWindow = globalThis.window
   let emitLifecycle = (_lifecycle: DesktopAudioLifecycle) => {}
   const retryGate = Promise.withResolvers<{ accepted: boolean }>()
+
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "failed", powerGeneration: 1 },
     completeRecovery: async () => ({ accepted: true }),
@@ -4644,14 +5202,17 @@ test('preserves active legacy playback across a failed native retry', async () =
       await retryGate.promise
       emitLifecycle({ state: "recovering", powerGeneration: 2 })
       emitLifecycle({ state: "failed", powerGeneration: 2 })
+
       return { accepted: true }
     },
   })
+
   emitLifecycle = fixture.emitLifecycle
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -4661,6 +5222,7 @@ test('preserves active legacy playback across a failed native retry', async () =
           projectId: () => "project",
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         await playback.handlePlay([track])
         expect(playback.isPlaying()).toBeTrue()
         expect(playback.backendDiagnostics().activeBackend).toBe("legacy")
@@ -4680,15 +5242,18 @@ test('preserves active legacy playback across a failed native retry', async () =
 test('suspension cancels delayed native startup before it can commit playback', async () => {
   const previousWindow = globalThis.window
   const beginGate = Promise.withResolvers<NativeTransactionReply>()
+
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "recovering", powerGeneration: 1 },
     completeRecovery: async () => ({ accepted: true }),
     retryRecovery: async () => ({ accepted: true }),
   }, beginGate.promise)
+
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -4698,6 +5263,7 @@ test('suspension cancels delayed native startup before it can commit playback', 
           projectId: () => "project",
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         fixture.emitLifecycle({ state: "ready", powerGeneration: 2 })
         const play = playback.handlePlay([track])
         await flushMicrotasks()
@@ -4718,15 +5284,18 @@ test('suspension cancels delayed native startup before it can commit playback', 
 test('failed lifecycle transition cancels delayed native startup', async () => {
   const previousWindow = globalThis.window
   const beginGate = Promise.withResolvers<NativeTransactionReply>()
+
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "ready", powerGeneration: 1 },
     completeRecovery: async () => ({ accepted: true }),
     retryRecovery: async () => ({ accepted: true }),
   }, beginGate.promise)
+
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -4736,6 +5305,7 @@ test('failed lifecycle transition cancels delayed native startup', async () => {
           projectId: () => "project",
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         await flushMicrotasks()
         const play = playback.handlePlay([track])
         await flushMicrotasks()
@@ -4762,6 +5332,7 @@ test('native live MIDI availability includes a recoverable native preview', asyn
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
@@ -4778,6 +5349,7 @@ test('native live MIDI availability includes a recoverable native preview', asyn
             sidechainRoutes: [],
           }),
         })
+
         expect(playback.nativeLiveMidi.isAvailable()).toBeTrue()
         expect(playback.nativeLiveMidi.isActive()).toBeFalse()
         await playback.handlePlay([track])
@@ -4796,6 +5368,7 @@ test('retries failed recovery only after explicit play and stays paused until re
   let failed = true
   let emitLifecycle = (_lifecycle: DesktopAudioLifecycle) => {}
   const acknowledgements: Array<{ generation: number; result: "ready" | "failed" }> = []
+
   const fixture = createNativeHookBridge(
     () => failed ? "begin" : undefined,
     {
@@ -4803,19 +5376,23 @@ test('retries failed recovery only after explicit play and stays paused until re
       completeRecovery: async (generation, result) => {
         acknowledgements.push({ generation, result })
         emitLifecycle({ state: result, powerGeneration: generation })
+
         return { accepted: true }
       },
       retryRecovery: async () => {
         emitLifecycle({ state: "recovering", powerGeneration: 3 })
+
         return { accepted: true }
       },
     },
   )
+
   emitLifecycle = fixture.emitLifecycle
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       await createRoot(async (dispose) => {
@@ -4824,7 +5401,9 @@ test('retries failed recovery only after explicit play and stays paused until re
           projectId: () => "project",
           compileSnapshot: nativeRequiredSnapshot,
         })
+
         fixture.emitLifecycle({ state: "recovering", powerGeneration: 2 })
+
         for (let index = 0; index < 100; index += 1) await Promise.resolve()
         expect(acknowledgements).toContainEqual({ generation: 2, result: "failed" })
         failed = false
@@ -4853,14 +5432,17 @@ test('does not prepare native audio when disabled and keeps browser playback ava
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       let webEnsures = 0
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+
       const engine = {
         ...fake.engine,
         ensureAudio: () => { webEnsures += 1 },
       }
+
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(engine, undefined, {
           enabled: () => false,
@@ -4897,6 +5479,7 @@ test('suppresses native faults while preparing an idle preview', async () => {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
     await createRoot(async (dispose) => {
@@ -4933,6 +5516,7 @@ test('reports native faults and stops active playback', async () => {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
@@ -4972,12 +5556,15 @@ test('uses the committed native backend without scheduling Web Audio', async () 
   const previousWindow = globalThis.window
   const device = createDeviceMove()
   const calls: string[] = []
+
   const reply = (name: string) => async () => {
     calls.push(name)
+
     return name === 'begin'
       ? { ok: true as const, transactionToken: nativeTransactionToken }
       : { ok: true as const }
   }
+
   let progressListener = (_progress: NativeScheduleProgress) => {}
   let progressSequence = 0n
   const deviceId: `coreaudio:${string}` = 'coreaudio:default'
@@ -5000,6 +5587,7 @@ test('uses the committed native backend without scheduling Web Audio', async () 
           session: {
             configure: async () => {
               const result = await reply('configure')()
+
               return result.ok ? { ok: true as const, hostIdentity: { pid: 123, generation: 7, configurationGeneration: 1 } } : result
             },
             beginTransaction: reply('begin'),
@@ -5032,6 +5620,7 @@ test('uses the committed native backend without scheduling Web Audio', async () 
                 sourceCredits: 256,
                 admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
               }))
+
               return { ok: true as const }
             },
             start: reply('start'),
@@ -5040,6 +5629,7 @@ test('uses the committed native backend without scheduling Web Audio', async () 
             onLoss: () => () => {},
             onScheduleProgress: (listener: (progress: NativeScheduleProgress) => void) => {
               progressListener = listener
+
               return () => { progressListener = () => {} }
             },
           },
@@ -5047,19 +5637,23 @@ test('uses the committed native backend without scheduling Web Audio', async () 
       },
     },
   })
+
   try {
     await withFakeRaf(async () => {
       let nativeEnabled = true
       let webSchedules = 0
       let webEnsures = 0
+
       const engine = {
         ...createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
         ensureAudio: () => { webEnsures += 1 },
         scheduleAllClipsFromPlayhead: () => {
           webSchedules += 1
+
           return { deferredStretchWindows: [] }
         },
       }
+
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(engine, undefined, {
           enabled: () => nativeEnabled,
@@ -5073,6 +5667,7 @@ test('uses the committed native backend without scheduling Web Audio', async () 
             sidechainRoutes: [],
           }),
         })
+
         await playback.handlePlay([track])
         expect(webEnsures).toBe(0)
         expect(webSchedules).toBe(0)
@@ -5125,13 +5720,16 @@ test('native-required playback does not fall back when native startup fails', as
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
     let webEnsures = 0
+
     const engine = {
       ...fake.engine,
       ensureAudio: () => { webEnsures += 1 },
     }
+
     await createRoot(async (dispose) => {
       const playback = useTimelinePlayback(engine, undefined, {
         requiresNativeAudio: true,
@@ -5139,6 +5737,7 @@ test('native-required playback does not fall back when native startup fails', as
         compileSnapshot: async (transport) => nativeRequiredSnapshot(transport),
         reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
       })
+
       await playback.handlePlay([track])
       expect(playback.isPlaying()).toBeFalse()
       expect(webEnsures).toBe(0)
@@ -5159,16 +5758,19 @@ test('preserves a prepared native preview across a paused native seek', async ()
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const transportEvents: string[] = []
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+
       const engine = {
         ...fake.engine,
         applyAutomationAtTimelineSec: () => transportEvents.push('applyAutomationAtTimelineSec'),
         cancelAutomationSchedules: () => transportEvents.push('cancelAutomationSchedules'),
         onTransportSeek: () => transportEvents.push('onTransportSeek'),
       }
+
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(engine, undefined, {
           requiresNativeAudio: true,
@@ -5187,6 +5789,7 @@ test('preserves a prepared native preview across a paused native seek', async ()
         await playback.handlePlay([track])
         await playback.handlePause()
         expect(playback.isNativePlaybackPrepared()).toBeTrue()
+
         const beforeCounts = {
           begin: fixture.calls.filter((call) => call === 'begin').length,
           release: fixture.calls.filter((call) => call === 'release').length,
@@ -5236,6 +5839,7 @@ test('reconciles a paused seek superseded by native preview fingerprint disposal
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -5310,6 +5914,7 @@ test('B6d3 a paused seek superseded by a structural replacement keeps that repla
   const faults: string[] = []
   const compiled: number[] = []
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -5320,11 +5925,13 @@ test('B6d3 a paused seek superseded by a structural replacement keeps that repla
           projectGeneration: reload.projectGeneration,
           compileSnapshot: async (transport) => {
             compiled.push(transport.playheadSec)
+
             return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
           },
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
         })
+
         await playback.handlePlay(tracks())
         await playback.handlePause()
         const before = fixture.calls.filter(call => call === 'begin').length
@@ -5334,6 +5941,7 @@ test('B6d3 a paused seek superseded by a structural replacement keeps that repla
         reload.reload()
         await flushMicrotasks()
         transportGate.resolve({ ok: true })
+
         for (let index = 0; index < 40; index += 1) await flushMicrotasks()
         const begins = fixture.calls.filter(call => call === 'begin').length
         console.log('B6D3-PAUSED-SEEK', JSON.stringify({ before, begins, compiled, frame: fixture.transportFrames.at(-1), faults }))
@@ -5358,6 +5966,7 @@ test('B6d3 a paused structural replacement prepares at the playhead a Stop publi
   const [tracks] = createSignal([track])
   const compiled: number[] = []
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -5368,18 +5977,22 @@ test('B6d3 a paused structural replacement prepares at the playhead a Stop publi
           projectGeneration: reload.projectGeneration,
           compileSnapshot: async (transport) => {
             compiled.push(transport.playheadSec)
+
             return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
           },
         })
+
         await playback.handlePlay(tracks())
         await playback.handlePause()
         playback.setPlayhead(4, tracks())
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         expect(fixture.transportFrames.at(-1)).toBe(192_000)
         // The reload's replacement waits for its dispose; the Stop lands in that window.
         reload.reload()
         void playback.handleStop()
+
         for (let index = 0; index < 40; index += 1) await flushMicrotasks()
         console.log('B6D3-PAUSED-STOP', JSON.stringify({ compiled, frames: fixture.transportFrames.slice(-2),
           prepared: playback.isNativePlaybackPrepared(), playhead: playback.playheadSec() }))
@@ -5405,6 +6018,7 @@ for (const structural of [false, true]) {
     const [tracks] = createSignal([track])
     const faults: string[] = []
     Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
     try {
       await withFakeRaf(async () => {
         const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -5417,12 +6031,14 @@ for (const structural of [false, true]) {
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
             reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           })
+
           if (structural) {
             await playback.handlePlay(tracks())
             await playback.handlePause()
             fixture.setBeginGate(beginGate.promise)
             reload.reload()
           }
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           // A paused preview start is held at its transaction, and Play waits on it.
           expect(fixture.calls.at(-1)).toBe('begin')
@@ -5430,19 +6046,23 @@ for (const structural of [false, true]) {
           // Play from another position than the preview's, so the resume moves the prepared graph.
           playback.setPlayhead(1, tracks())
           const play = playback.handlePlay(tracks())
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           fixture.setBeginGate(undefined)
           beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
+
           for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
           expect(playback.isNativePlaybackPrepared()).toBeTrue()
           // The preview has committed and is still starting when the seek lands; its transport is still in flight.
           const transportsBefore = fixture.transportFrames.length
           fixture.armTransportGate()
           playback.setPlayhead(2, tracks())
+
           // Hold the seek's transport until the resumed Play has sent its own.
           for (let turn = 0; turn < 400 && fixture.transportFrames.length < transportsBefore + 2; turn += 1) await Promise.resolve()
           transportGate.resolve({ ok: true })
           await play
+
           for (let index = 0; index < 40; index += 1) await flushMicrotasks()
           const running = fixture.transportStates.at(-1)
           console.log('B6D3-SEEK-PENDING-PLAY', JSON.stringify({ structural, faults, playing: playback.isPlaying(),
@@ -5462,6 +6082,7 @@ for (const structural of [false, true]) {
     }
   })
 }
+
 for (const { structural, stop } of [{ structural: false, stop: false }, { structural: true, stop: false }, { structural: false, stop: true }]) {
   test(stop
     ? 'B6d4 a Stop issued after a locate superseded a waiting Play still stops'
@@ -5474,6 +6095,7 @@ for (const { structural, stop } of [{ structural: false, stop: false }, { struct
     const [tracks] = createSignal([track])
     const faults: string[] = []
     Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
     try {
       await withFakeRaf(async () => {
         const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -5486,19 +6108,23 @@ for (const { structural, stop } of [{ structural: false, stop: false }, { struct
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
             reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           })
+
           if (structural) {
             await playback.handlePlay(tracks())
             await playback.handlePause()
             fixture.setBeginGate(beginGate.promise)
             reload.reload()
           }
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           expect(fixture.calls.at(-1)).toBe('begin')
           playback.setPlayhead(1, tracks())
           const play = playback.handlePlay(tracks())
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           fixture.setBeginGate(undefined)
           beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
+
           for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
           expect(playback.isNativePlaybackPrepared()).toBeTrue()
           // The locate lands while Play waits on the committed preview, and wins over it.
@@ -5507,16 +6133,19 @@ for (const { structural, stop } of [{ structural: false, stop: false }, { struct
           playback.setPlayhead(2, tracks())
           // The user stops right after the locate, before the superseded Play answers.
           const stopped = stop ? playback.handleStop() : undefined
+
           for (let turn = 0; turn < 400 && fixture.transportFrames.length < transportsBefore + 2; turn += 1) await Promise.resolve()
           const sentBefore = fixture.transportStates.length
           transportGate.resolve({ ok: true })
           await play
           await stopped
+
           for (let index = 0; index < 40; index += 1) await flushMicrotasks()
           const sent = fixture.transportStates.slice(sentBefore)
           console.log('B6D4-LOCATE-SUPERSEDES-PLAY', JSON.stringify({ structural, stop, faults, playing: playback.isPlaying(), sent,
             frame: fixture.transportFrames.at(-1), playhead: playback.playheadSec() }))
           expect(faults).toEqual([])
+
           if (stop) {
             expect(playback.isPlaying()).toBeFalse()
             expect(sent).not.toContain(true)
@@ -5528,6 +6157,7 @@ for (const { structural, stop } of [{ structural: false, stop: false }, { struct
             expect(fixture.transportFrames.at(-1)).toBe(96_000)
             expect(playback.playheadSec()).toBe(2)
           }
+
           dispose()
         })
       })
@@ -5544,6 +6174,7 @@ test('B6d4 a locate made while Play waits on an uncommitted preview is applied o
   const [tracks] = createSignal([track])
   const faults: string[] = []
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -5555,17 +6186,21 @@ test('B6d4 a locate made while Play waits on an uncommitted preview is applied o
             renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
         })
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         expect(fixture.calls.at(-1)).toBe('begin')
         expect(playback.isNativePlaybackPrepared()).toBeFalse()
         playback.setPlayhead(1, tracks())
         const play = playback.handlePlay(tracks())
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         playback.setPlayhead(2, tracks())
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         fixture.setBeginGate(undefined)
         beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await play
+
         for (let index = 0; index < 40; index += 1) await flushMicrotasks()
         console.log('B6D4-LOCATE-UNCOMMITTED-START', JSON.stringify({ faults, playing: playback.isPlaying(), running: fixture.transportStates.at(-1),
           frames: fixture.transportFrames, playhead: playback.playheadSec() }))
@@ -5590,6 +6225,7 @@ test('B6d4 a Stop in the same tick as a paused structural edit reports no fault'
   const faults: string[] = []
   const compiled: number[] = []
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -5600,18 +6236,22 @@ test('B6d4 a Stop in the same tick as a paused structural edit reports no fault'
           projectGeneration: reload.projectGeneration,
           compileSnapshot: async (transport) => {
             compiled.push(transport.playheadSec)
+
             return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
           },
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
         })
+
         await playback.handlePlay(tracks())
         await playback.handlePause()
         playback.setPlayhead(4, tracks())
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         // The Stop's seek reaches the graph the edit's dispose is retiring.
         reload.reload()
         void playback.handleStop()
+
         for (let index = 0; index < 40; index += 1) await flushMicrotasks()
         console.log('B6D4-STOP-RACES-DISPOSE', JSON.stringify({ faults, compiled, prepared: playback.isNativePlaybackPrepared(),
           playhead: playback.playheadSec(), frame: fixture.transportFrames.at(-1) }))
@@ -5637,6 +6277,7 @@ test('B6d4 a Stop while the paused replacement is starting keeps a live graph at
   const faults: string[] = []
   const compiled: number[] = []
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -5647,25 +6288,31 @@ test('B6d4 a Stop while the paused replacement is starting keeps a live graph at
           projectGeneration: reload.projectGeneration,
           compileSnapshot: async (transport) => {
             compiled.push(transport.playheadSec)
+
             return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
           },
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
         })
+
         await playback.handlePlay(tracks())
         await playback.handlePause()
         playback.setPlayhead(4, tracks())
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         fixture.setBeginGate(beginGate.promise)
         reload.reload()
+
         for (let turn = 0; turn < 400 && fixture.calls.at(-1) !== 'begin'; turn += 1) await Promise.resolve()
         expect(fixture.calls.at(-1)).toBe('begin')
         expect(playback.isNativePlaybackPrepared()).toBeFalse()
         const stop = playback.handleStop()
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         fixture.setBeginGate(undefined)
         beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await stop
+
         for (let index = 0; index < 40; index += 1) await flushMicrotasks()
         const begins = fixture.calls.filter(call => call === 'begin').length
         console.log('B6D4-STOP-PENDING-REPLACEMENT', JSON.stringify({ faults, compiled, prepared: playback.isNativePlaybackPrepared(),
@@ -5676,6 +6323,7 @@ test('B6d4 a Stop while the paused replacement is starting keeps a live graph at
         expect(fixture.transportFrames.at(-1)).toBe(0)
         // The next Play resumes that graph instead of preparing another.
         await playback.handlePlay(tracks())
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         expect(playback.isPlaying()).toBeTrue()
         expect(fixture.calls.filter(call => call === 'begin').length).toBe(begins)
@@ -5694,6 +6342,7 @@ test('B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing ru
   const [tracks] = createSignal([track])
   const faults: string[] = []
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -5705,18 +6354,23 @@ test('B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing ru
             renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
         })
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         expect(fixture.calls.at(-1)).toBe('begin')
         playback.setPlayhead(1, tracks())
         const play = playback.handlePlay(tracks())
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         const stop = playback.handleStop()
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         fixture.setBeginGate(undefined)
         beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await play
         await stop
+
         for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
+
         for (let index = 0; index < 40; index += 1) await flushMicrotasks()
         console.log('B6D5-STOP-CHAINED-PLAY', JSON.stringify({ faults, prepared: playback.isNativePlaybackPrepared(),
           native: playback.isNativePlayback(), playing: playback.isPlaying(), playhead: playback.playheadSec(),
@@ -5747,6 +6401,7 @@ for (const route of ['stop', 'pause'] as const) {
     const compiled: number[] = []
     let compileGate: Promise<void> | undefined
     Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
     try {
       await withFakeRaf(async () => {
         const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -5757,14 +6412,17 @@ for (const route of ['stop', 'pause'] as const) {
             compileSnapshot: async (transport) => {
               compiled.push(transport.playheadSec)
               await compileGate
+
               return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
                 renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
             },
             reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           })
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           expect(playback.isNativePlaybackPrepared()).toBeTrue()
           playback.setPlayhead(1, tracks())
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           // The Play resuming the prepared graph is held at its recompile, before it sends any transport.
           const held = Promise.withResolvers<void>()
@@ -5772,6 +6430,7 @@ for (const route of ['stop', 'pause'] as const) {
           const sentBefore = fixture.transportStates.length
           const callsBefore = fixture.calls.length
           const play = playback.handlePlay(tracks())
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           expect(playback.isPlayPending()).toBeTrue()
           const compiledAtCancel = compiled.length
@@ -5780,6 +6439,7 @@ for (const route of ['stop', 'pause'] as const) {
           held.resolve()
           await play
           await cancelled
+
           for (let index = 0; index < 40; index += 1) await flushMicrotasks()
           const position = route === 'stop' ? 0 : 1
           const afterCancel = fixture.calls.slice(callsBefore)
@@ -5801,6 +6461,7 @@ for (const route of ['stop', 'pause'] as const) {
           expect(playback.isPlaying()).toBeTrue()
           expect(fixture.transportStates.at(-1)).toBeTrue()
           const resumeCalls = fixture.calls.slice(callsBeforeResume)
+
           for (const rebuilt of ['stop', 'teardown', 'begin', 'configure']) expect(resumeCalls).not.toContain(rebuilt)
           expect(compiled.length - compiledBeforeResume).toBe(1)
           dispose()
@@ -5819,6 +6480,7 @@ for (const route of ['stop', 'pause'] as const) {
     const [tracks] = createSignal([track])
     const faults: string[] = []
     Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
     try {
       await withFakeRaf(async () => {
         const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -5830,26 +6492,32 @@ for (const route of ['stop', 'pause'] as const) {
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
             reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           })
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           await playback.handlePlay(tracks())
           expect(playback.isPlaying()).toBeTrue()
           await playback.handlePause()
+
           for (let turns = 0; turns < 60; turns += 1) {
             const play = playback.handlePlay(tracks())
+
             for (let turn = 0; turn < turns; turn += 1) await Promise.resolve()
             const callsBefore = fixture.calls.length
             const cancelled = route === 'stop' ? playback.handleStop() : playback.handlePause()
             await Promise.all([play, cancelled])
+
             for (let index = 0; index < 40; index += 1) await flushMicrotasks()
             const afterCancel = fixture.calls.slice(callsBefore)
             expect(faults).toEqual([])
             expect(playback.isPlaying()).toBeFalse()
             expect(playback.isNativePlaybackPrepared()).toBeTrue()
             expect(fixture.transportStates.at(-1)).toBeFalse()
+
             for (const rebuilt of ['stop', 'teardown', 'begin', 'configure']) {
               if (afterCancel.includes(rebuilt)) throw new Error(`${rebuilt} after ${route} at turn ${turns}: ${afterCancel.join(',')}`)
             }
           }
+
           dispose()
         })
       })
@@ -5867,6 +6535,7 @@ test('B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live 
   const [tracks] = createSignal([track])
   const faults: string[] = []
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -5879,19 +6548,24 @@ test('B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live 
             renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
         })
+
         await playback.handlePlay(tracks())
         const sentBefore = fixture.transportStates.length
         fixture.setBeginGate(beginGate.promise)
         const rebuild = device.move()
+
         for (let turn = 0; turn < 400 && fixture.calls.at(-1) !== 'begin'; turn += 1) await Promise.resolve()
         expect(fixture.calls.at(-1)).toBe('begin')
         const stop = playback.handleStop()
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         fixture.setBeginGate(undefined)
         beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await rebuild
         await stop
+
         for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
+
         for (let index = 0; index < 40; index += 1) await flushMicrotasks()
         console.log('B6D5-STOP-REBUILD-START', JSON.stringify({ faults, prepared: playback.isNativePlaybackPrepared(),
           playing: playback.isPlaying(), playhead: playback.playheadSec(), frame: fixture.transportFrames.at(-1),
@@ -5921,6 +6595,7 @@ for (const stop of ['none', 'waiting', 'after'] as const) {
     const [tracks] = createSignal([track])
     const faults: string[] = []
     Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
     try {
       await withFakeRaf(async () => {
         const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -5933,23 +6608,29 @@ for (const stop of ['none', 'waiting', 'after'] as const) {
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
             reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           })
+
           await playback.handlePlay(tracks())
           await playback.handlePause()
           playback.setPlayhead(4, tracks())
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           fixture.setBeginGate(beginGate.promise)
           reload.reload()
+
           for (let turn = 0; turn < 400 && fixture.calls.at(-1) !== 'begin'; turn += 1) await Promise.resolve()
           expect(fixture.calls.at(-1)).toBe('begin')
           const waiting = stop === 'waiting' ? playback.handleStop() : undefined
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           playback.setPlayhead(2, tracks())
           const after = stop === 'after' ? playback.handleStop() : undefined
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           fixture.setBeginGate(undefined)
           beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
           await waiting
           await after
+
           for (let index = 0; index < 60; index += 1) await flushMicrotasks()
           const position = stop === 'after' ? 0 : 2
           console.log('B6D5-LOCATE-UNCOMMITTED-PREVIEW', JSON.stringify({ stop, faults, prepared: playback.isNativePlaybackPrepared(),
@@ -5960,6 +6641,7 @@ for (const stop of ['none', 'waiting', 'after'] as const) {
           expect(playback.playheadSec()).toBe(position)
           expect(fixture.transportStates.at(-1)).toBeFalse()
           expect(fixture.transportFrames.at(-1)).toBe(position * 48_000)
+
           // A locate the later Stop superseded never reaches native.
           if (stop === 'after') expect(fixture.transportFrames).not.toContain(96_000)
           dispose()
@@ -5980,6 +6662,7 @@ test('B6d5 a Play replayed from a locate stays pending until it plays', async ()
   const faults: string[] = []
   const pending: boolean[] = []
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -5991,25 +6674,32 @@ test('B6d5 a Play replayed from a locate stays pending until it plays', async ()
             renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
         })
+
         const pendingNow = createMemo(() => {
           const value = playback.isPlayPending()
           pending.push(value)
+
           return value
         })
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         expect(fixture.calls.at(-1)).toBe('begin')
         playback.setPlayhead(1, tracks())
         const play = playback.handlePlay(tracks())
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         fixture.setBeginGate(undefined)
         beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
+
         for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
         const transportsBefore = fixture.transportFrames.length
         fixture.armTransportGate()
         playback.setPlayhead(2, tracks())
+
         for (let turn = 0; turn < 400 && fixture.transportFrames.length < transportsBefore + 2; turn += 1) await Promise.resolve()
         transportGate.resolve({ ok: true })
         await play
+
         for (let index = 0; index < 40; index += 1) await flushMicrotasks()
         console.log('B6D5-REPLAY-PENDING', JSON.stringify({ faults, pending, playing: playback.isPlaying(), frame: fixture.transportFrames.at(-1) }))
         expect(faults).toEqual([])
@@ -6024,6 +6714,7 @@ test('B6d5 a Play replayed from a locate stays pending until it plays', async ()
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
 })
+
 for (const hold of ['teardown', 'capture'] as const) {
   test(`B6d6 a Stop while a resuming rebuild retires the playing graph at the ${hold === 'teardown' ? 'teardown' : 'VST state capture'} leaves nothing running and a live paused graph at the start`, async () => {
     const previousWindow = globalThis.window
@@ -6034,6 +6725,7 @@ for (const hold of ['teardown', 'capture'] as const) {
     const retireGate = Promise.withResolvers<void>()
     let retireHeld = false
     Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
     try {
       await withFakeRaf(async () => {
         const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -6048,24 +6740,32 @@ for (const hold of ['teardown', 'capture'] as const) {
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
             reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           })
+
           await playback.handlePlay(tracks())
           const realTeardown = fixture.audioHost.session.teardown
+
           if (hold === 'teardown') fixture.audioHost.session.teardown = async () => {
             retireHeld = true
             await retireGate.promise
+
             return realTeardown()
           }
+
           // The rebuild is held retiring the playing graph, before it requests its own start.
           const rebuild = device.move()
+
           for (let turn = 0; turn < 400 && !retireHeld; turn += 1) await Promise.resolve()
           expect(retireHeld).toBeTrue()
           const sentBefore = fixture.transportStates.length
           const stop = playback.handleStop()
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           retireGate.resolve()
           await rebuild
           await stop
+
           for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
+
           for (let index = 0; index < 40; index += 1) await flushMicrotasks()
           console.log('B6D6-STOP-REBUILD-RETIRE', JSON.stringify({ hold, faults, prepared: playback.isNativePlaybackPrepared(),
             playing: playback.isPlaying(), playhead: playback.playheadSec(), frames: fixture.transportFrames,
@@ -6084,6 +6784,7 @@ for (const hold of ['teardown', 'capture'] as const) {
     }
   })
 }
+
 test('B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing', async () => {
   const previousWindow = globalThis.window
   const device = createDeviceMove()
@@ -6092,6 +6793,7 @@ test('B6d6 a Stop that lands as a Pause settles under a queued rebuild retires t
   const [tracks] = createSignal([track])
   const faults: string[] = []
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -6104,6 +6806,7 @@ test('B6d6 a Stop that lands as a Pause settles under a queued rebuild retires t
             renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
         })
+
         await playback.handlePlay(tracks())
         fixture.armTransportGate()
         const pause = playback.handlePause()
@@ -6113,6 +6816,7 @@ test('B6d6 a Stop that lands as a Pause settles under a queued rebuild retires t
         expect(playback.isStructuralRebuildInProgress()).toBeTrue()
         // The host has paused, but the Pause is still tracked: the Stop leaves the cancelling to itself.
         pauseGate.resolve({ ok: true })
+
         for (let turn = 0; turn < 400 && playback.isNativePlayback(); turn += 1) await Promise.resolve()
         expect(playback.isStructuralRebuildInProgress()).toBeTrue()
         const callsBefore = fixture.calls.length
@@ -6120,7 +6824,9 @@ test('B6d6 a Stop that lands as a Pause settles under a queued rebuild retires t
         await pause
         await rebuild
         await stop
+
         for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
+
         for (let index = 0; index < 40; index += 1) await flushMicrotasks()
         expect(faults).toEqual([])
         expect(playback.isPlaying()).toBeFalse()
@@ -6137,6 +6843,7 @@ test('B6d6 a Stop that lands as a Pause settles under a queued rebuild retires t
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
 })
+
 for (const release of ['begin', 'teardown'] as const) {
   test(`B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (${release} released first) and leaves nothing running and a live paused graph at the start`, async () => {
     const previousWindow = globalThis.window
@@ -6145,6 +6852,7 @@ for (const release of ['begin', 'teardown'] as const) {
     const [projectId, setProjectId] = createSignal('project-a')
     const faults: string[] = []
     Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
     try {
       await withFakeRaf(async () => {
         const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -6157,6 +6865,7 @@ for (const release of ['begin', 'teardown'] as const) {
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
             reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           })
+
           await playback.handlePlay(tracks())
           const realTeardown = fixture.audioHost.session.teardown
           const teardownGate = Promise.withResolvers<void>()
@@ -6165,29 +6874,40 @@ for (const release of ['begin', 'teardown'] as const) {
           fixture.audioHost.session.teardown = async () => {
             teardownHeld = true
             await teardownGate.promise
+
             return realTeardown()
           }
+
           // The project switch's dispose has already cancelled the pending start, so the Play below creates one it never sees.
           setProjectId('project-b')
+
           for (let turn = 0; turn < 400 && !teardownHeld; turn += 1) await Promise.resolve()
           expect(teardownHeld).toBeTrue()
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           fixture.setBeginGate(beginGate.promise)
           const play = playback.handlePlay(tracks())
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           expect(playback.isPlayPending()).toBeTrue()
           const sentBefore = fixture.transportStates.length
           const stop = playback.handleStop()
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           fixture.audioHost.session.teardown = realTeardown
           fixture.setBeginGate(undefined)
+
           if (release === 'begin') beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
           else teardownGate.resolve()
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
+
           if (release === 'begin') teardownGate.resolve()
           else beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
           await Promise.allSettled([play, stop])
+
           for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
+
           for (let index = 0; index < 60; index += 1) await flushMicrotasks()
           console.log('B6D7-STOP-JOINED-DISPOSE', JSON.stringify({ release, faults, prepared: playback.isNativePlaybackPrepared(),
             native: playback.isNativePlayback(), playing: playback.isPlaying(), playhead: playback.playheadSec(),
@@ -6207,6 +6927,7 @@ for (const release of ['begin', 'teardown'] as const) {
     }
   })
 }
+
 test('B6d7 a locate during a Pause that cancels a pending Play keeps its paused rebuild and reports no fault', async () => {
   const previousWindow = globalThis.window
   const beginGate = Promise.withResolvers<NativeTransactionReply>()
@@ -6214,6 +6935,7 @@ test('B6d7 a locate during a Pause that cancels a pending Play keeps its paused 
   const [tracks] = createSignal([track])
   const faults: string[] = []
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -6225,21 +6947,27 @@ test('B6d7 a locate during a Pause that cancels a pending Play keeps its paused 
             renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
         })
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         expect(fixture.calls.at(-1)).toBe('begin')
         playback.setPlayhead(1, tracks())
         const play = playback.handlePlay(tracks())
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         const pause = playback.handlePause()
+
         for (let index = 0; index < 5; index += 1) await flushMicrotasks()
         // The locate's rebuild requests its paused start while the cancelled Play's own cleanup dispose is still joining.
         playback.setPlayhead(3, tracks())
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         fixture.setBeginGate(undefined)
         beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await play
         await pause
+
         for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
+
         for (let index = 0; index < 60; index += 1) await flushMicrotasks()
         console.log('B6D7-PAUSE-LOCATE-REBUILD', JSON.stringify({ faults, prepared: playback.isNativePlaybackPrepared(), native: playback.isNativePlayback(),
           playing: playback.isPlaying(), pending: playback.isPlayPending(), playhead: playback.playheadSec(),
@@ -6256,6 +6984,7 @@ test('B6d7 a locate during a Pause that cancels a pending Play keeps its paused 
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
 })
+
 test("B6d7 a locate during a Pause that cancels a cold Play (native audio optional) keeps the rebuild's paused start when the Play's cleanup joins the Pause's dispose", async () => {
   const previousWindow = globalThis.window
   let failBegin = true
@@ -6264,6 +6993,7 @@ test("B6d7 a locate during a Pause that cancels a cold Play (native audio option
   const [tracks] = createSignal([track])
   const faults: string[] = []
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -6276,20 +7006,25 @@ test("B6d7 a locate during a Pause that cancels a cold Play (native audio option
             renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
         })
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         failBegin = false
         fixture.setBeginGate(beginGate.promise)
         const play = playback.handlePlay(tracks())
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         expect(playback.isPlayPending()).toBeTrue()
         const pause = playback.handlePause()
+
         for (let index = 0; index < 5; index += 1) await flushMicrotasks()
         // The rebuild requests its paused start while the cancelled Play's cleanup dispose still joins the Pause's.
         const rebuild = playback.restartTimelineSchedule(tracks(), { rebuildBackend: true, resumePlayback: false, playheadSec: 3, owner: 'native', projectId: 'project' })
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         fixture.setBeginGate(undefined)
         beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await Promise.allSettled([play, pause, rebuild])
+
         for (let index = 0; index < 60; index += 1) await flushMicrotasks()
         expect(faults).toEqual([])
         expect(fixture.transportStates).not.toContain(true)
@@ -6304,22 +7039,26 @@ test("B6d7 a locate during a Pause that cancels a cold Play (native audio option
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
 })
+
 test('a Pause that cancels a pending legacy Play requests no native preview while native playback is disabled', async () => {
   const previousWindow = globalThis.window
   const resumeGate = Promise.withResolvers<void>()
   const fixture = createNativeHookBridge()
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => {
       const engine = { ...createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine, resume: () => resumeGate.promise }
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(engine, undefined, { enabled: () => false, projectId: () => 'project', compileSnapshot: nativeRequiredSnapshot })
         const play = playback.handlePlay([track])
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         expect(playback.isPlayPending()).toBeTrue()
         const pause = playback.handlePause()
         resumeGate.resolve()
         await Promise.allSettled([play, pause])
+
         for (let index = 0; index < 60; index += 1) await flushMicrotasks()
         expect(playback.isPlaying()).toBeFalse()
         expect(fixture.calls).not.toContain('begin')
@@ -6331,6 +7070,7 @@ test('a Pause that cancels a pending legacy Play requests no native preview whil
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
 })
+
 test('B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position', async () => {
   const previousWindow = globalThis.window
   const device = createDeviceMove()
@@ -6340,6 +7080,7 @@ test('B6d8 a Pause while a resuming rebuild retires the playing graph keeps a li
   const retireGate = Promise.withResolvers<void>()
   let retireHeld = false
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -6352,28 +7093,35 @@ test('B6d8 a Pause while a resuming rebuild retires the playing graph keeps a li
             renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
         })
+
         playback.setPlayhead(2, tracks())
         await playback.handlePlay(tracks())
         const realTeardown = fixture.audioHost.session.teardown
         fixture.audioHost.session.teardown = async () => {
           retireHeld = true
           await retireGate.promise
+
           return realTeardown()
         }
+
         // The rebuild is held retiring the playing graph while the transport still shows playing.
         const rebuild = device.move()
+
         for (let turn = 0; turn < 400 && !retireHeld; turn += 1) await Promise.resolve()
         expect(retireHeld).toBeTrue()
         expect(playback.isPlaying()).toBeTrue()
         expect(playback.isStructuralRebuildInProgress()).toBeTrue()
         const sentBefore = fixture.transportStates.length
         const pause = playback.handlePause()
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         fixture.audioHost.session.teardown = realTeardown
         retireGate.resolve()
         await rebuild
         await pause
+
         for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
+
         for (let index = 0; index < 60; index += 1) await flushMicrotasks()
         console.log('B6D8-PAUSE-RESUMING-REBUILD', JSON.stringify({ faults, prepared: playback.isNativePlaybackPrepared(),
           native: playback.isNativePlayback(), playing: playback.isPlaying(), playhead: playback.playheadSec(),
@@ -6392,12 +7140,14 @@ test('B6d8 a Pause while a resuming rebuild retires the playing graph keeps a li
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
 })
+
 test('B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate', async () => {
   const previousWindow = globalThis.window
   const fixture = createNativeHookBridge()
   const [tracks] = createSignal([track])
   const faults: string[] = []
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -6409,25 +7159,31 @@ test('B6d8 a Pause while a paused rebuild is starting keeps a live paused graph 
             renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
         })
+
         for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
         expect(playback.isNativePlaybackPrepared()).toBeTrue()
         playback.setPlayhead(1, tracks())
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         const beginGate = Promise.withResolvers<NativeTransactionReply>()
         fixture.setBeginGate(beginGate.promise)
         const beginsBefore = fixture.calls.filter(call => call === 'begin').length
         // MIDI record arming pauses the transport unconditionally, so a Pause can land while a paused rebuild starts.
         const rebuild = playback.restartTimelineSchedule(tracks(), { rebuildBackend: true, resumePlayback: false, playheadSec: 1 })
+
         for (let turn = 0; turn < 800 && fixture.calls.filter(call => call === 'begin').length === beginsBefore; turn += 1) await Promise.resolve()
         expect(fixture.calls.filter(call => call === 'begin').length).toBe(beginsBefore + 1)
         expect(playback.isStructuralRebuildInProgress()).toBeTrue()
         const sentBefore = fixture.transportStates.length
         const pause = playback.handlePause()
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         fixture.setBeginGate(undefined)
         beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await Promise.allSettled([rebuild, pause])
+
         for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
+
         for (let index = 0; index < 60; index += 1) await flushMicrotasks()
         console.log('B6D8-PAUSE-PAUSED-REBUILD', JSON.stringify({ faults, prepared: playback.isNativePlaybackPrepared(),
           native: playback.isNativePlayback(), playing: playback.isPlaying(), playhead: playback.playheadSec(),
@@ -6446,6 +7202,7 @@ test('B6d8 a Pause while a paused rebuild is starting keeps a live paused graph 
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
 })
+
 for (const hold of ['begin', 'teardown'] as const) {
   test(`B6d8 a Stop while a paused rebuild is ${hold === 'begin' ? 'starting' : 'retiring its graph'} leaves nothing running and a live paused graph at the start`, async () => {
     const previousWindow = globalThis.window
@@ -6456,6 +7213,7 @@ for (const hold of ['begin', 'teardown'] as const) {
     const retireGate = Promise.withResolvers<void>()
     let held = false
     Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
     try {
       await withFakeRaf(async () => {
         const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -6467,33 +7225,43 @@ for (const hold of ['begin', 'teardown'] as const) {
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
             reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           })
+
           for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
           expect(playback.isNativePlaybackPrepared()).toBeTrue()
           playback.setPlayhead(1, tracks())
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           const realTeardown = fixture.audioHost.session.teardown
           const beginsBefore = fixture.calls.filter(call => call === 'begin').length
+
           if (hold === 'begin') fixture.setBeginGate(beginGate.promise)
           else fixture.audioHost.session.teardown = async () => {
             held = true
             await retireGate.promise
+
             return realTeardown()
           }
+
           // Stop's own Pause and Stop both cancel this rebuild; the graph must still come back at the start.
           const rebuild = playback.restartTimelineSchedule(tracks(), { rebuildBackend: true, resumePlayback: false, playheadSec: 1 })
+
           for (let turn = 0; turn < 800 && !held && fixture.calls.filter(call => call === 'begin').length === beginsBefore; turn += 1) await Promise.resolve()
+
           if (hold === 'begin') expect(fixture.calls.filter(call => call === 'begin').length).toBe(beginsBefore + 1)
           else expect(held).toBeTrue()
           expect(playback.isStructuralRebuildInProgress()).toBeTrue()
           const sentBefore = fixture.transportStates.length
           const stop = playback.handleStop()
+
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           fixture.setBeginGate(undefined)
           fixture.audioHost.session.teardown = realTeardown
           beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
           retireGate.resolve()
           await Promise.allSettled([rebuild, stop])
+
           for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
+
           for (let index = 0; index < 60; index += 1) await flushMicrotasks()
           console.log('B6D8-STOP-PAUSED-REBUILD', JSON.stringify({ hold, faults, prepared: playback.isNativePlaybackPrepared(),
             native: playback.isNativePlayback(), playing: playback.isPlaying(), playhead: playback.playheadSec(),
@@ -6513,10 +7281,12 @@ for (const hold of ['begin', 'teardown'] as const) {
     }
   })
 }
+
 // B6e: a Pause while playing that supersedes a resuming rebuild must leave a live paused graph of the edited tracks.
 // Before the rebuild retires the playing graph, the superseded rebuild returns and the paused-preview owner has skipped
 // the edit; after the rebuild's own Play commits, the superseded rebuild disposes the graph that Pause has just paused.
 const b6eEditedTracks: Track[] = [track, { ...track, id: 'track-b6e', name: 'B6e edit' }]
+
 const runB6eSupersededRebuild = async (
   action: 'pause' | 'stop' | 'locate' | 'locate-after-move',
   at: 'before-retire' | 'after-play-commit',
@@ -6530,6 +7300,7 @@ const runB6eSupersededRebuild = async (
   const faults: string[] = []
   const compiles: { state: string; trackIds: string[] }[] = []
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
@@ -6540,16 +7311,20 @@ const runB6eSupersededRebuild = async (
           outputDeviceId: device.outputDeviceId,
           compileSnapshot: async (transport) => {
             compiles.push({ state: transport.state, trackIds: tracks().map(entry => entry.id) })
+
             return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
           },
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
         })
+
         for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
         expect(playback.isNativePlaybackPrepared()).toBeTrue()
         playback.setPlayhead(1, tracks())
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         await playback.handlePlay(tracks())
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         expect(playback.isPlaying()).toBeTrue()
         expect(playback.isNativePlayback()).toBeTrue()
@@ -6559,15 +7334,18 @@ const runB6eSupersededRebuild = async (
         const retired = () => fixture.calls.slice(callsBefore).some(call => call === 'stop' || call === 'teardown')
         // An edit while playing, then the output device moving in the same task: the move's resuming rebuild replaces the session.
         setTracks(b6eEditedTracks)
+
         // A locate lands before the device moves; the move resumes the session where the locate left it.
         if (action === 'locate') playback.setPlayhead(3, tracks())
         const rebuild = device.move()
+
         // A locate after the move was requested, while its rebuild still owns the session, moves where that rebuild resumes.
         if (action === 'locate-after-move') playback.setPlayhead(3, tracks())
         // The first turn at which the rebuild has retired the old graph and its own Play has committed: the new session
         // runs and the Play attempt is no longer preparing, but the rebuild has not yet returned from it.
         const committed = () => retired() && playback.isNativePlayback() && !playback.isPreparingPlayback()
         let anchorTurn = 0
+
         if (at === 'after-play-commit') for (; anchorTurn < 400 && !committed(); anchorTurn += 1) await Promise.resolve()
         expect(committed()).toBe(at === 'after-play-commit')
         expect(playback.isStructuralRebuildInProgress()).toBeTrue()
@@ -6575,33 +7353,42 @@ const runB6eSupersededRebuild = async (
         expect(playback.isNativePlayback()).toBeTrue()
         expect(retired()).toBe(at === 'after-play-commit')
         expect(fixture.calls.slice(callsBefore).includes('start')).toBe(at === 'after-play-commit')
+
         if (hold) fixture.armTransportGate()
         const callsAtAction = fixture.calls.length
         const sentAtAction = fixture.transportStates.length
         let pending: Promise<unknown> = Promise.resolve()
+
         if (action === 'pause') pending = playback.handlePause()
+
         if (action === 'stop') pending = playback.handleStop()
         const playheadAtAction = playback.playheadSec()
+
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
         const callsWhileHeld = hold ? fixture.calls.slice(callsAtAction) : []
         transportGate.resolve({ ok: true })
         await Promise.allSettled([rebuild, pending])
+
         for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
+
         for (let index = 0; index < 60; index += 1) await flushMicrotasks()
         console.log('B6E-SUPERSEDED-REBUILD', JSON.stringify({ action, at, hold, anchorTurn, faults, prepared: playback.isNativePlaybackPrepared(),
           native: playback.isNativePlayback(), playing: playback.isPlaying(), playhead: playback.playheadSec(), playheadAtAction,
           compilesAfterEdit: compiles.slice(compilesBefore), frames: fixture.transportFrames.slice(sentBefore),
           sentAfterAction: fixture.transportStates.slice(sentAtAction), callsWhileHeld, calls: fixture.calls.slice(callsBefore) }))
+
         if (hold) {
           expect(callsWhileHeld).toContain('transport')
           // The replacement graph is prepared only once the host has applied the Pause.
           expect(callsWhileHeld).not.toContain('begin')
         }
+
         expect(faults).toEqual([])
         expect(playback.isStructuralRebuildInProgress()).toBeFalse()
         expect(playback.isNativePlaybackPrepared()).toBeTrue()
         expect(compiles.length).toBeGreaterThan(compilesBefore)
         expect(compiles.at(-1)?.trackIds).toEqual(['track-1', 'track-b6e'])
+
         if (action === 'locate' || action === 'locate-after-move') {
           expect(playback.isPlaying()).toBeTrue()
           expect(playback.isNativePlayback()).toBeTrue()
@@ -6618,6 +7405,7 @@ const runB6eSupersededRebuild = async (
           expect(playback.playheadSec()).toBe(expected)
           expect(fixture.transportFrames.at(-1)).toBe(expected * 48_000)
         }
+
         dispose()
       })
     })
@@ -6625,6 +7413,7 @@ const runB6eSupersededRebuild = async (
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
 }
+
 for (const hold of [false, true]) {
   test(`B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit${hold ? ' (host pause held)' : ''}`, async () => {
     await runB6eSupersededRebuild('pause', 'before-retire', hold)
@@ -6633,24 +7422,31 @@ for (const hold of [false, true]) {
     await runB6eSupersededRebuild('pause', 'after-play-commit', hold)
   })
 }
+
 test("B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start", async () => {
   await runB6eSupersededRebuild('stop', 'after-play-commit', false)
 })
+
 test('B6e a locate before a resuming rebuild retires the playing graph plays the edit from the locate', async () => {
   await runB6eSupersededRebuild('locate', 'before-retire', false)
 })
+
 test('B6e a locate after a resuming rebuild is requested plays the edit from the locate', async () => {
   await runB6eSupersededRebuild('locate-after-move', 'before-retire', false)
 })
+
 test('rebuilds a prepared native backend while paused', async () => {
   const previousWindow = globalThis.window
   const calls: string[] = []
+
   const reply = (name: string) => async () => {
     calls.push(name)
+
     return name === 'begin'
       ? { ok: true as const, transactionToken: nativeTransactionToken }
       : { ok: true as const }
   }
+
   let progressListener = (_progress: NativeScheduleProgress) => {}
   let progressSequence = 0n
   const deviceId: `coreaudio:${string}` = 'coreaudio:default'
@@ -6673,6 +7469,7 @@ test('rebuilds a prepared native backend while paused', async () => {
           session: {
             configure: async () => {
               const result = await reply('configure')()
+
               return result.ok ? { ok: true as const, hostIdentity: { pid: 123, generation: 7, configurationGeneration: 1 } } : result
             },
             beginTransaction: reply('begin'),
@@ -6705,6 +7502,7 @@ test('rebuilds a prepared native backend while paused', async () => {
                 sourceCredits: 256,
                 admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
               }))
+
               return { ok: true as const }
             },
             start: reply('start'),
@@ -6713,6 +7511,7 @@ test('rebuilds a prepared native backend while paused', async () => {
             onLoss: () => () => {},
             onScheduleProgress: (listener: (progress: NativeScheduleProgress) => void) => {
               progressListener = listener
+
               return () => { progressListener = () => {} }
             },
           },
@@ -6720,6 +7519,7 @@ test('rebuilds a prepared native backend while paused', async () => {
       },
     },
   })
+
   try {
     await withFakeRaf(async () => {
       const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
@@ -6769,6 +7569,7 @@ test('re-establishes paused native preview after structural fingerprint disposal
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
@@ -6804,12 +7605,14 @@ test('re-establishes paused native preview after structural fingerprint disposal
             }),
           },
         )
+
         await playback.handlePlay(tracks())
         await playback.handlePause()
         expect(playback.isNativePlaybackPrepared()).toBeTrue()
         const beginsBefore = fixture.calls.filter((call) => call === 'begin').length
 
         setTracks([instrument])
+
         const rebuild = playback.restartTimelineSchedule([instrument], {
           rebuildBackend: true,
           resumePlayback: false,
@@ -6823,6 +7626,7 @@ test('re-establishes paused native preview after structural fingerprint disposal
             },
           },
         })
+
         await expect(rebuild).resolves.toBeUndefined()
         await flushMicrotasks()
 
@@ -6840,6 +7644,7 @@ test('re-establishes paused native preview after structural fingerprint disposal
 test('keeps optional paused structural rebuilds idle when native preview becomes unavailable', async () => {
   const previousWindow = globalThis.window
   let failBegin = false
+
   const fixture = createNativeHookBridge(
     () => failBegin ? 'begin' : undefined,
     undefined,
@@ -6847,11 +7652,13 @@ test('keeps optional paused structural rebuilds idle when native preview becomes
     undefined,
     'The native audio session is unavailable.',
   )
+
   const faults: string[] = []
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       await createRoot(async (dispose) => {
@@ -6914,6 +7721,7 @@ test('structural rebuild owns paused preview while reactive tracks change', asyn
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
@@ -6927,16 +7735,19 @@ test('structural rebuild owns paused preview while reactive tracks change', asyn
             projectId: () => 'project',
             compileSnapshot: async (transport, context) => {
               compileContexts.push(context)
+
               return nativeRequiredSnapshot(transport)
             },
           },
         )
+
         await playback.handlePlay(tracks())
         await playback.handlePause()
         fixture.calls.length = 0
         fixture.setBeginGate(beginGate.promise)
 
         setTracks([instrument])
+
         const rebuild = playback.restartTimelineSchedule([instrument], {
           rebuildBackend: true,
           resumePlayback: false,
@@ -6951,6 +7762,7 @@ test('structural rebuild owns paused preview while reactive tracks change', asyn
             },
           },
         })
+
         await flushMicrotasks()
         beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await expect(rebuild).resolves.toBeUndefined()
@@ -6987,6 +7799,7 @@ test('serializes stop teardown before a paused structural insertion', async () =
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
@@ -6999,6 +7812,7 @@ test('serializes stop teardown before a paused structural insertion', async () =
           compileSnapshot: nativeRequiredSnapshot,
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
         })
+
         await playback.handlePlay([track])
         fixture.armTransportGate()
         fixture.calls.length = 0
@@ -7033,6 +7847,7 @@ test('disposes the native backend even when state persistence fails', async () =
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       const faults: string[] = []
@@ -7051,6 +7866,7 @@ test('disposes the native backend even when state persistence fails', async () =
             reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           },
         )
+
         await playback.handlePlay([track])
         expect(playback.isNativePlaybackPrepared()).toBeTrue()
 
@@ -7079,6 +7895,7 @@ test('captures a prepared native graph against its original project after naviga
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       await createRoot(async (dispose) => {
@@ -7096,6 +7913,7 @@ test('captures a prepared native graph against its original project after naviga
             },
           },
         )
+
         await playback.handlePlay([track])
         const stop = playback.handleStop()
         await captureStarted.promise
@@ -7119,6 +7937,7 @@ test('serializes play behind capture and disposal of the previous native session
     configurable: true,
     value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
+
   try {
     await withFakeRaf(async () => {
       await createRoot(async (dispose) => {
@@ -7132,6 +7951,7 @@ test('serializes play behind capture and disposal of the previous native session
             captureNativeVstStates: async () => captureGate.promise,
           },
         )
+
         await playback.handlePlay([track])
         const stop = playback.handleStop()
         await flushMicrotasks()
@@ -7155,18 +7975,26 @@ test('serializes play behind capture and disposal of the previous native session
 // transport after a Stop or Pause. The shape is the browser build's (Timeline.tsx:167, :763-781, :855-859): no desktop
 // bridge, native `enabled` (default true), portable options, and no AudioContext until a Play gesture creates one.
 type B6fLiveSession = { createdSeq: number; closed: boolean; graph: string; positions: { seq: number; sec: number; running: boolean }[] }
+
 type B6fLiveHold = { armed: boolean; held: (() => void)[]; reached: PromiseWithResolvers<void> }
+
 type B6fLiveWorld = { seq: number; sessions: B6fLiveSession[]; transportHold: B6fLiveHold }
+
 type B6fLiveEdit = 'none' | 'structure' | 'volume'
+
 const b6fLiveHold = (): B6fLiveHold => ({ armed: false, held: [], reached: Promise.withResolvers<void>() })
+
 const holdB6fLive = (hold: B6fLiveHold, resume: () => void) => {
   hold.held.push(resume)
   hold.reached.resolve()
 }
+
 const releaseB6fLive = (hold: B6fLiveHold) => {
   hold.armed = false
+
   for (const resume of hold.held.splice(0)) resume()
 }
+
 const b6fLiveEditedTracks: Track[] = [track, { ...track, id: 'track-b6f', name: 'B6f edit' }]
 
 const mountB6fLive = (world: B6fLiveWorld, nativeEnabled: boolean) => {
@@ -7179,18 +8007,22 @@ const mountB6fLive = (world: B6fLiveWorld, nativeEnabled: boolean) => {
   const [projectId, setProjectId] = createSignal('project-a')
   const [generation, setGeneration] = createSignal(1)
   const faults: string[] = []
+
   const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport']) => {
     if (compileHold.armed) await new Promise<void>((resolve) => holdB6fLive(compileHold, resolve))
     world.seq += 1
+
     return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
       renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
   }
+
   const engine = {
     ...fake.engine,
     ensureAudio: () => { audioCreated = true },
     getAudioContext: () => audioCreated ? audioContext : null,
     resume: async () => { if (resumeHold.armed) await new Promise<void>((resolve) => holdB6fLive(resumeHold, resolve)) },
   }
+
   const playback = useTimelinePlayback(engine, { getTracks: () => tracks() }, {
     enabled: () => nativeEnabled,
     projectId,
@@ -7198,13 +8030,16 @@ const mountB6fLive = (world: B6fLiveWorld, nativeEnabled: boolean) => {
     compileSnapshot,
     reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
   }, { projectGeneration: generation, compileSnapshot, reportFault: (message) => faults.push(message) })
+
   const holds = { resume: resumeHold, compile: compileHold, transport: world.transportHold }
+
   const summary = (mark: number) => {
     const open = world.sessions.filter((session) => !session.closed)
     const session = open.at(-1)
     const position = session?.positions.at(-1)
     // The graph the session holds: prepared with the edit, or republished with it by a paused adoption.
     const gain = session ? JSON.parse(session.graph || '{}').nodes?.find((node: { id: string }) => node.id === track.id)?.mixer?.gain : undefined
+
     return {
       faults: [...faults],
       playing: playback.isPlaying(),
@@ -7217,41 +8052,50 @@ const mountB6fLive = (world: B6fLiveWorld, nativeEnabled: boolean) => {
       runningAfterMark: world.sessions.flatMap((entry) => entry.positions).filter((entry) => entry.seq > mark && entry.running).length,
     }
   }
+
   // Waits on hook state, not on a count of turns: the bound only ends a run that never reaches it.
   const until = async (reached: () => boolean) => {
     for (let turn = 0; turn < 5_000 && !reached(); turn += 1) await Promise.resolve()
   }
+
   // Paused or stopped: no running transport is sent after the mark. Playing: the session runs from the locate.
   const expectLive = async (running: boolean, sec: number, mark: number, edit: B6fLiveEdit) => {
     const expected = () => ({
       faults: [], playing: running, portableActive: running, prepared: true, playhead: sec, openSessions: 1,
       position: { sec, running }, edit, runningAfterMark: running ? summary(mark).runningAfterMark : 0,
     })
+
     await until(() => !playback.isPreparingPlayback() && Bun.deepEquals(summary(mark), expected()))
     expect(summary(mark)).toEqual(expected())
   }
+
   const playFrom = async (sec: number) => {
     playback.setPlayhead(sec, tracks())
     await playback.handlePlay(tracks())
     await expectLive(true, sec, world.seq, 'none')
   }
+
   const pausedAt = async (sec: number) => {
     await playFrom(sec)
     const mark = world.seq
     await playback.handlePause()
     await expectLive(false, sec, mark, 'none')
   }
+
   // Timeline.tsx:923-929: a structural edit rebuilds the backend the Timeline sees prepared, with the captured intent.
   const timelineReschedule = () => {
     if (!playback.isNativePlaybackPrepared() && !playback.isPortableBrowserPlaybackPrepared()) return Promise.resolve()
+
     return playback.restartTimelineSchedule(tracks(), {
       rebuildBackend: true, resumePlayback: playback.isPlaying(), playheadSec: playback.playheadSec(),
       owner: 'portable-browser', projectId: projectId(), projectGeneration: generation(),
     })
   }
+
   const resumingRebuild = () => playback.restartTimelineSchedule(tracks(), {
     rebuildBackend: true, resumePlayback: true, playheadSec: 2, owner: 'portable-browser', projectId: projectId(), projectGeneration: generation(),
   })
+
   return { playback, tracks, setTracks, setProjectId, setGeneration, holds, until, summary, expectLive, playFrom, pausedAt,
     timelineReschedule, resumingRebuild, mark: () => world.seq, liveSession: () => world.sessions.filter((session) => !session.closed).at(-1) }
 }
@@ -7263,12 +8107,15 @@ const runB6fLive = async (body: (live: ReturnType<typeof mountB6fLive>) => Promi
     AudioWorkletNode: Object.getOwnPropertyDescriptor(globalThis, 'AudioWorkletNode'),
     fetch: Object.getOwnPropertyDescriptor(globalThis, 'fetch'),
   }
+
   const world: B6fLiveWorld = { seq: 0, sessions: [], transportHold: b6fLiveHold() }
+
   class FakeAudioContext {
     readonly sampleRate = 48_000
     readonly destination = {}
     readonly audioWorklet = { addModule: async () => undefined }
   }
+
   class FakeAudioWorkletNode {
     readonly port: { onmessage: ((event: { data: PortableWasmStatusMessage }) => void) | null; postMessage: (message: PortableWasmControlMessage) => void; close: () => void }
     constructor() {
@@ -7278,12 +8125,17 @@ const runB6fLive = async (body: (live: ReturnType<typeof mountB6fLive>) => Promi
         onmessage: null,
         postMessage: (message) => {
           world.seq += 1
+
           if (message.type === 'prepare-graph') session.graph = JSON.stringify(message.snapshot)
+
           if (message.type === 'install-schedule') session.positions.push({ seq: world.seq, sec: message.schedule.timeOrigin.timelineSec, running: false })
+
           if (message.type === 'transport') session.positions.push({ seq: world.seq, sec: message.frame / 48_000, running: message.running })
           const response = portableResponseFor(message)
+
           if (!response) return
           const deliver = () => queueMicrotask(() => this.port.onmessage?.({ data: response }))
+
           if (message.type === 'transport' && message.running && world.transportHold.armed) holdB6fLive(world.transportHold, deliver)
           else deliver()
         },
@@ -7294,6 +8146,7 @@ const runB6fLive = async (body: (live: ReturnType<typeof mountB6fLive>) => Promi
     connect = () => {}
     disconnect = () => {}
   }
+
   const manifest = await readFile(new URL('../../public/audio-core/daw-audio-core.manifest.json', import.meta.url), 'utf8')
   const wasm = await readFile(new URL('../../public/audio-core/daw-audio-core.wasm', import.meta.url))
   Object.defineProperty(globalThis, 'window', { configurable: true, value: {} })
@@ -7301,6 +8154,7 @@ const runB6fLive = async (body: (live: ReturnType<typeof mountB6fLive>) => Promi
   Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: FakeAudioWorkletNode })
   Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (input: string | URL) => (
     String(input).endsWith('.manifest.json') ? new Response(manifest, { status: 200 }) : new Response(wasm, { status: 200 })) })
+
   try {
     await withFakeRaf(() => createRoot(async (dispose) => {
       try {
@@ -7364,6 +8218,7 @@ test("B6f a locate during a pending Play or a rebuild's Play plays from the loca
   for (const route of ['pending-play', 'rebuild'] as const) await runB6fLive(async (live) => {
     const hold = route === 'pending-play' ? live.holds.compile : live.holds.transport
     let pending: Promise<unknown>
+
     if (route === 'pending-play') {
       live.playback.setPlayhead(1, live.tracks())
       hold.armed = true
@@ -7374,6 +8229,7 @@ test("B6f a locate during a pending Play or a rebuild's Play plays from the loca
       hold.armed = true
       pending = live.resumingRebuild()
     }
+
     await hold.reached.promise
     expect(live.playback.isPreparingPlayback() || live.playback.isStructuralRebuildInProgress()).toBeTrue()
     const mark = live.mark()
@@ -7400,6 +8256,7 @@ test('B6f a mixer edit without a Timeline rebuild leaves a live paused portable 
     const mark = live.mark()
     // useTimelineMixerController.ts setTrackVolume reaches the resolved tracks, not restartTimelineSchedule.
     live.setTracks([{ ...track, volume: 0.5 }])
+
     if (when === 'playing-then-pause') await live.playback.handlePause()
     await live.expectLive(false, 1, mark, 'volume')
   })
@@ -7425,6 +8282,7 @@ test('B6f a project switch leaves a live paused portable session of the new proj
 // B6f2: each kept guard and wait of ensureLivePortableSession, driven through the route that needs it. The runner is
 // runB6fLive's plus the root's dispose and a hold on the worklet's `transport running:false` reply (a Pause in flight).
 type B6f2Root = { dispose: () => void; pauseHold: B6fLiveHold }
+
 const runB6f2Live = async (body: (live: ReturnType<typeof mountB6fLive>, root: B6f2Root) => Promise<void>, nativeEnabled = true) => {
   const previous = {
     window: Object.getOwnPropertyDescriptor(globalThis, 'window'),
@@ -7432,13 +8290,16 @@ const runB6f2Live = async (body: (live: ReturnType<typeof mountB6fLive>, root: B
     AudioWorkletNode: Object.getOwnPropertyDescriptor(globalThis, 'AudioWorkletNode'),
     fetch: Object.getOwnPropertyDescriptor(globalThis, 'fetch'),
   }
+
   const world: B6fLiveWorld = { seq: 0, sessions: [], transportHold: b6fLiveHold() }
   const pauseHold = b6fLiveHold()
+
   class FakeAudioContext {
     readonly sampleRate = 48_000
     readonly destination = {}
     readonly audioWorklet = { addModule: async () => undefined }
   }
+
   class FakeAudioWorkletNode {
     readonly port: { onmessage: ((event: { data: PortableWasmStatusMessage }) => void) | null; postMessage: (message: PortableWasmControlMessage) => void; close: () => void }
     constructor() {
@@ -7448,12 +8309,17 @@ const runB6f2Live = async (body: (live: ReturnType<typeof mountB6fLive>, root: B
         onmessage: null,
         postMessage: (message) => {
           world.seq += 1
+
           if (message.type === 'prepare-graph') session.graph = JSON.stringify(message.snapshot)
+
           if (message.type === 'install-schedule') session.positions.push({ seq: world.seq, sec: message.schedule.timeOrigin.timelineSec, running: false })
+
           if (message.type === 'transport') session.positions.push({ seq: world.seq, sec: message.frame / 48_000, running: message.running })
           const response = portableResponseFor(message)
+
           if (!response) return
           const deliver = () => queueMicrotask(() => this.port.onmessage?.({ data: response }))
+
           if (message.type === 'transport' && message.running && world.transportHold.armed) holdB6fLive(world.transportHold, deliver)
           else if (message.type === 'transport' && !message.running && pauseHold.armed) holdB6fLive(pauseHold, deliver)
           else deliver()
@@ -7465,6 +8331,7 @@ const runB6f2Live = async (body: (live: ReturnType<typeof mountB6fLive>, root: B
     connect = () => {}
     disconnect = () => {}
   }
+
   const manifest = await readFile(new URL('../../public/audio-core/daw-audio-core.manifest.json', import.meta.url), 'utf8')
   const wasm = await readFile(new URL('../../public/audio-core/daw-audio-core.wasm', import.meta.url))
   Object.defineProperty(globalThis, 'window', { configurable: true, value: {} })
@@ -7472,6 +8339,7 @@ const runB6f2Live = async (body: (live: ReturnType<typeof mountB6fLive>, root: B
   Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: FakeAudioWorkletNode })
   Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (input: string | URL) => (
     String(input).endsWith('.manifest.json') ? new Response(manifest, { status: 200 }) : new Response(wasm, { status: 200 })) })
+
   try {
     await withFakeRaf(() => createRoot(async (dispose) => {
       try {
@@ -7542,11 +8410,14 @@ test('B6f2 a paused locate whose re-prepare settles after a Play committed keeps
     await live.expectLive(true, 3, mark, 'none')
     releaseB6fLive(live.holds.resume)
     await play
+
     // Nothing after the Play's running transport: the locate's re-prepare does not pause it.
     const afterRunning = () => {
       const positions = live.liveSession()?.positions.filter((entry) => entry.seq > mark) ?? []
+
       return positions.slice(positions.map((entry) => entry.running).lastIndexOf(true) + 1)
     }
+
     await live.until(() => afterRunning().length > 0)
     expect(afterRunning()).toEqual([])
     expect(live.summary(mark)).toMatchObject({ playing: true, position: { sec: 3, running: true } })
@@ -7585,10 +8456,12 @@ test('B6f3 a portable session fault while playing leaves a live paused portable 
     expect(nodes).toHaveLength(1)
     const mark = live.mark()
     nodes[0]?.onprocessorerror?.(new ErrorEvent('processorerror'))
+
     const expected = {
       faults: ['Portable audio-core AudioWorklet processing failed.'], playing: false, portableActive: false, prepared: true,
       playhead: 1, openSessions: 1, position: { sec: 1, running: false }, edit: 'none', runningAfterMark: 0,
     }
+
     await live.until(() => !live.playback.isPreparingPlayback() && Bun.deepEquals(live.summary(mark), expected))
     expect(live.summary(mark)).toEqual(expected)
   }, nativeEnabled)
@@ -7604,6 +8477,7 @@ test('B6f4 a mixer edit with native playback off leaves a live paused portable s
     const mark = live.mark()
     // useTimelineMixerController.ts setTrackVolume reaches the resolved tracks, not restartTimelineSchedule.
     live.setTracks([{ ...track, volume: 0.5 }])
+
     if (when === 'playing-then-pause') await live.playback.handlePause()
     await live.expectLive(false, 1, mark, 'volume')
     const graph = JSON.parse(live.liveSession()?.graph ?? '{}')
@@ -7623,6 +8497,7 @@ test('B6f4 a paused-preview re-run with native playback off and no edit keeps th
       }
     } })
     await live.pausedAt(1)
+
     // The Pause's own paused-preview run records what the session compiled once its prepare settles; the edit below
     // must be the one that moves the baseline.
     for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
@@ -7631,6 +8506,7 @@ test('B6f4 a paused-preview re-run with native playback off and no edit keeps th
     await live.expectLive(false, 1, mark, 'volume')
     const session = live.liveSession()
     const prepared = nodes.length
+
     // Equal tracks in a new array re-run the effect, which reads them for its fingerprint, without changing that fingerprint.
     // The hook records what the adoption carries once its publish answers, after the session shows the edit.
     for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
@@ -7654,17 +8530,22 @@ type B6f5Session = { createdSeq: number; closed: boolean; graph: AudioCoreGraphS
   installedRevisions: number[]
   positions: { seq: number; sec: number; running: boolean }[]
   proc: { seq: number; values: number[] }[]; inst: { seq: number; values: number[] }[] }
+
 // `refusals`: the next adopting publishes the worklet rejects, a mechanism failure the controller retries.
 type B6f5World = { seq: number; refusals: number; sessions: B6f5Session[]; transportHold: B6fLiveHold
   pauseHold: B6fLiveHold; onNode?: () => void }
+
 type B6f5Kind = 'mixer' | 'master' | 'automation' | 'structural' | 'proc-live' | 'proc-nonlive' | 'synth-live' | 'synth-nonlive' | 'sampled'
+
 const b6f5LiveKinds = new Set<B6f5Kind>(['proc-live', 'synth-live'])
+
 // What a playing session adopts on its own core (D5); elsewhere these reach the session as any edit does.
 const b6f5AdoptedKinds = new Set<B6f5Kind>(['mixer', 'master', 'automation', 'synth-nonlive', 'sampled'])
 const b6f5TrackS: Track = { ...track, id: 'track-s', name: 'Sampled' }
 const b6f5Utility0: UtilityParamsEnvelope = { version: 1, state: createDefaultUtilityParams() }
 const b6f5Synth0: TrackInstrumentParams = { kind: 'synth', instanceId: 'synth:1', params: createDefaultSynthParams() }
 const b6f5Sampler0: TrackInstrumentParams = { kind: 'sampler', instanceId: 'sampler:1', params: createDefaultSamplerParams() }
+
 const b6f5Automation: AutomationEnvelope = { id: 'automation-b6f5', projectId: 'project-a', target: { kind: 'track', trackId: 'track-1' },
   targetKey: 'automation-b6f5', parameterId: 'volume', enabled: true,
   points: [{ id: 'point', timeSec: 0, value: 0.25, interpolation: 'hold' }], updatedAt: 1 }
@@ -7691,8 +8572,10 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean) => {
   const [sampler, setSampler] = createSignal(b6f5Sampler0)
   const [masterVolume, setMasterVolume] = createSignal(1)
   const [automation, setAutomation] = createSignal<AutomationEnvelope[]>([])
+
   const spectralInstance = (): AudioEffectRuntimeInstance =>
     ({ id: 'spectral-1', kind: 'spectral', params: { version: 1, state: { ...createDefaultSpectralParams(), fftSize: spectralFftSize() } } })
+
   const fxOf = (instrumentOverride?: { targetId: string; instrument: TrackInstrumentParams }) => ({
     masterVolume: masterVolume(), masterFxInstances: [],
     trackFx: {
@@ -7701,49 +8584,66 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean) => {
       'track-s': { instances: [], instrument: instrumentOverride?.targetId === 'track-s' ? instrumentOverride.instrument : sampler() },
     },
   })
+
   // Timeline.tsx:447-468: the registry observes the effective projection; the playback inputs carry master volume,
   // automation and the processor structure.
   const registry = createProcessorEditRegistry(() => 120)
   createComputed(() => { const fx = fxOf(); untrack(() => registry.observe(fx)) })
+
   const playbackInputs = createMemo(() => ({ masterVolume: masterVolume(), automationEnvelopes: automation(),
     processorStructure: registry.structure() }))
+
   const faults: string[] = []
   let compiles = 0
   // A compile reads the tracks it started with, not the ones that landed while it was held.
   let compileReadsAtStart = false
+
   const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport'], context?: LivePlaybackCompileContext) => {
     const started = tracks()
+
     if (compileHold.armed) await new Promise<void>((resolve) => holdB6fLive(compileHold, resolve))
     compiles += 1
+
     return compileLivePlaybackSnapshot({ revision: compiles, bpm: bpm(), transport, tracks: compileReadsAtStart ? started : tracks(),
       renderState: { fx: fxOf(context?.instrumentOverride), automationEnvelopes: automation() }, sidechainRoutes: [] })
   }
+
   const engine = {
     ...fake.engine,
     ensureAudio: () => { audioCreated = true; audioHidden = false },
     getAudioContext: () => audioCreated && !audioHidden ? audioContext : null,
     resume: async () => { if (resumeHold.armed) await new Promise<void>((resolve) => holdB6fLive(resumeHold, resolve)) },
   }
+
   // Called synchronously wherever the hook reads the desired tracks, the follow at the end of a rebuild included.
   let onTracksRead: (() => void) | undefined
-  const playback = useTimelinePlayback(engine, { getTracks: () => { onTracksRead?.(); return tracks() }, bpm, loopEnabled: () => loop().enabled,
+
+  const playback = useTimelinePlayback(engine, { getTracks: () => { onTracksRead?.();
+
+ return tracks() }, bpm, loopEnabled: () => loop().enabled,
     loopStartSec: () => loop().start, loopEndSec: () => loop().end }, {
     enabled: () => nativeEnabled, projectId, projectGeneration: generation, compileSnapshot, playbackInputs,
     reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
   }, { projectGeneration: generation, compileSnapshot, reportFault: (message) => faults.push(message) })
+
   // Timeline.tsx captureStructuralPlaybackIntent and rebuildPlaybackBackend, as written there.
   const captureStructuralPlaybackIntent = (): TimelineEditIntent => ({ projectId: projectId(), projectGeneration: generation() })
+
   // Nothing here is a prepared native session, so Timeline's syncPlaybackBackend is the rebuild.
   const syncPlaybackBackend = (next: Track[], intent: TimelineEditIntent = captureStructuralPlaybackIntent(),
     instrumentOverride?: { targetId: string; instrument: TrackInstrumentParams }) => playback.restartTimelineSchedule(next, {
     ...intent, rebuildBackend: true, resumePlayback: playback.isPlaying(), playheadSec: playback.playheadSec(), instrumentOverride })
+
   const rescheduleTimeline = () => {
     if (playback.isNativePlaybackPrepared() || playback.isPortableBrowserPlaybackPrepared()) return
+
     if (playback.isPlaying()) playback.restartTimelineSchedule(tracks()).catch((cause: unknown) => faults.push(`reschedule: ${String(cause)}`))
   }
+
   const applyPortableProcessor = createApplyPortableProcessor({
     liveProcessorControl: playback.liveProcessorControl, isNativePlaybackPrepared: playback.isNativePlaybackPrepared,
     isPortableBrowserPlaybackPrepared: playback.isPortableBrowserPlaybackPrepared, syncPlaybackBackend, renderTracks: tracks })
+
   const announce = createInstrumentPlaybackChange({
     mountedProjectGeneration: generation, awaitPlaybackPreparation: playback.awaitPlaybackPreparation,
     preparedInstrument: playback.preparedInstrument, isStructuralRebuildInProgress: playback.isStructuralRebuildInProgress,
@@ -7751,92 +8651,128 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean) => {
     isNativePlaybackPrepared: playback.isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared: playback.isPortableBrowserPlaybackPrepared,
     syncPlaybackBackend, renderTracks: tracks, captureStructuralPlaybackIntent,
   })
+
   const onMixedReorderCommitted = createMixedReorderCommitted({
     isNativePlaybackPrepared: playback.isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared: playback.isPortableBrowserPlaybackPrepared,
     isPlaying: playback.isPlaying, captureStructuralPlaybackIntent, syncPlaybackBackend, renderTracks: tracks })
+
   const work: Promise<unknown>[] = []
   // A structural edit with no live path: a Spectral fftSize change, which the core replaces at a seam.
   const addEffect = () => setSpectralFftSize(1024)
   // An effect that does not delay the signal is carried at a seam (9f), here with the Timeline's effect-order caller.
   const insertEffect = () => { setAddedEffects([{ id: 'utility-2', kind: 'utility', params: b6f5Utility0 }]); onMixedReorderCommitted(undefined) }
+
   // The same with an effect that delays the signal, which the core carries by moving the read heads (9h).
   const insertLimiter = () => { setAddedEffects([{ id: 'limiter-2', kind: 'limiter', params: { version: 1, state: createDefaultLimiterParams() } }]); onMixedReorderCommitted(undefined) }
   let lastEdit: LiveProcessorEditIdentity | undefined
   const setVolume = (volume: number) => setTracks((current) => current.map((entry) => entry.id === track.id ? { ...entry, volume } : entry))
+
   // One user edit of each kind, delivered the way the product delivers it.
   const edit = (kind: B6f5Kind) => {
     if (kind === 'mixer') setVolume(0.5)
+
     if (kind === 'master') setMasterVolume(0.5)
+
     if (kind === 'automation') setAutomation([b6f5Automation])
+
     if (kind === 'structural') { addEffect(); rescheduleTimeline() }
+
     if (kind === 'proc-live' || kind === 'proc-nonlive') {
       const to: UtilityParamsEnvelope = { version: 1, state: kind === 'proc-live' ? { ...utility().state, gainDb: 3.25 } : { ...utility().state, swap: true } }
       const allocated = registry.allocate({ targetId: track.id, instanceId: 'utility-1', effect: 'utility', from: utility(), to })
+
       if (!allocated) throw new Error('Missing utility edit')
       lastEdit = allocated
       setUtility(to)
       work.push(applyPortableProcessor(allocated).catch((cause: unknown) => faults.push(`apply: ${String(cause)}`)))
     }
+
     if (kind === 'synth-live' || kind === 'synth-nonlive') {
       const current = synth()
+
       const to: TrackInstrumentParams = current.kind === 'synth' ? { ...current, params: mergeSynthParams(current.params,
         kind === 'synth-live' ? { filter: { frequencyHz: 1500 } } : { polyphony: 4 }) } : current
+
       const allocated = registry.allocate({ targetId: track.id, effect: 'instrument', from: to, to })
+
       if (!allocated) throw new Error('Missing synth edit')
       lastEdit = allocated
       setSynth(to)
       // create-effects-panel-state.ts applies the Synth through applyPortableProcessor; the release announces it.
       work.push(applyPortableProcessor(allocated).then(() => announce(track.id, to)).catch((cause: unknown) => faults.push(`synth: ${String(cause)}`)))
     }
+
     if (kind === 'sampled') {
       const current = sampler()
       const to: TrackInstrumentParams = current.kind === 'sampler' ? { ...current, params: { ...current.params, filterFrequencyHz: 5000 } } : current
       setSampler(to)
       work.push(announce(b6f5TrackS.id, to).catch((cause: unknown) => faults.push(`sampled: ${String(cause)}`)))
     }
+
     if (b6f5LiveKinds.has(kind) && Object.keys(lastEdit?.content.values ?? {}).length === 0) throw new Error(`B6f5 live edit ${kind} has no values`)
   }
+
   // The Synth replaced by another kind or another instance, announced as the effects panel's release does.
   const replaceInstrument = (by: 'kind' | 'instance') => {
     const to: TrackInstrumentParams = by === 'kind' ? { kind: 'sampler', instanceId: 'sampler:2', params: createDefaultSamplerParams() } : { ...b6f5Synth0, instanceId: 'synth:2' }
     setSynth(to)
     work.push(announce(track.id, to).catch((cause: unknown) => faults.push(`replace: ${String(cause)}`)))
   }
+
   // The graph the newest desired state prepares, through the controller's own compilers (preparedSession).
   const desiredGraph = () => {
     const compiled = compileLivePlaybackSnapshot({ revision: 1, bpm: 120, tracks: tracks(), sidechainRoutes: [],
       transport: { state: 'paused', playheadSec: 0, loopEnabled: false, loopStartSec: 0, loopEndSec: 0 },
       renderState: { fx: fxOf(), automationEnvelopes: automation() } })
+
     if (!compiled.supported) throw new Error(compiled.reasons.join(' '))
+
     const prepared = compilePreparedPortableLiveSession(compiled.snapshot, { assetRegistry: { projectGeneration: 1, assets: [] },
       sampleRateHz: 48_000, transportEpoch: 1, timeOrigin: { timelineSec: 0, frame: 0 }, rangeEndSec: 1, sourceFirstSequence: 1 })
+
     if (!prepared.supported) throw new Error('B6f5 desired graph is unsupported')
+
     return prepared.graph
   }
+
   // What the worklet holds: its prepared graph and installed schedule, plus the live values it took.
   const carries = (kind: B6f5Kind, session: B6f5Session | undefined) => {
     const graph = session?.graph
+
     if (!graph) return false
     const desired = desiredGraph()
     const node = (id: string) => graph.nodes.find((entry) => entry.id === id)
+
     const changed = (id: string, field: 'processorOrder' | 'instrument') => JSON.stringify(node(id)?.[field])
       !== JSON.stringify(desired.nodes.find((entry) => entry.id === id)?.[field])
+
     const values = Object.values(lastEdit?.content.values ?? {}).toSorted()
     const liveTook = (batches: { values: number[] }[]) => batches.some((batch) => Bun.deepEquals(batch.values.toSorted(), values))
+
     if (kind === 'mixer') return node(track.id)?.mixer?.gain === 0.5
+
     if (kind === 'master') return node(graph.masterNodeId)?.mixer?.gain === 0.5
+
     if (kind === 'automation') return session.parameters.includes('"value":0.25')
+
     if (kind === 'structural') return !changed(track.id, 'processorOrder')
+
     if (kind === 'proc-live') return !changed(track.id, 'processorOrder') || liveTook(session.proc)
+
     if (kind === 'proc-nonlive') return !changed(track.id, 'processorOrder')
+
     if (kind === 'synth-live') return !changed(track.id, 'instrument') || liveTook(session.inst)
+
     if (kind === 'synth-nonlive') return !changed(track.id, 'instrument')
+
     return !changed(b6f5TrackS.id, 'instrument')
   }
+
   const summary = (mark: number, kind: B6f5Kind) => {
     const open = world.sessions.filter((session) => !session.closed)
     const session = open.at(-1)
     const position = session?.positions.at(-1)
+
     return {
       faults: [...faults], playing: playback.isPlaying(), portableActive: playback.isPortableBrowserPlayback(),
       prepared: playback.isPortableBrowserPlaybackPrepared(), openSessions: open.length,
@@ -7846,20 +8782,24 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean) => {
       sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length,
     }
   }
+
   const until = async (reached: () => boolean) => {
     for (let turn = 0; turn < 5_000 && !reached(); turn += 1) await Promise.resolve()
   }
+
   // Once the transport settles the one live session carries the newest edit: paused or stopped at the playhead with
   // nothing running after the mark, or playing, and without a new session for an edit the playing session takes live.
   const expectEnd = async (running: boolean, sec: number | undefined, mark: number, kind: B6f5Kind, noRebuild: boolean) => {
     const expected = (): ReturnType<typeof summary> => {
       const now = summary(mark, kind)
+
       return {
         faults: [], playing: running, portableActive: running, prepared: true, openSessions: 1,
         position: { sec: (running ? now.position?.sec : sec) ?? Number.NaN, running }, playhead: (running ? now.playhead : sec) ?? Number.NaN, carries: true,
         runningAfterMark: running ? now.runningAfterMark : 0, sessionsAfterMark: noRebuild ? 0 : now.sessionsAfterMark,
       }
     }
+
     const settled = () => !playback.isPreparingPlayback() && !playback.isStructuralRebuildInProgress() && Bun.deepEquals(summary(mark, kind), expected())
     await until(settled)
     await Promise.allSettled(work)
@@ -7870,22 +8810,28 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean) => {
     await until(() => world.sessions.length !== sessions)
     expect(world.sessions.length).toBe(sessions)
   }
+
   const settle = () => until(() => !playback.isPreparingPlayback() && !playback.isStructuralRebuildInProgress())
+
   const playFrom = async (sec: number) => {
     playback.setPlayhead(sec, tracks())
     await playback.handlePlay(tracks())
     await until(() => playback.isPortableBrowserPlayback() && !playback.isPreparingPlayback())
     expect(playback.isPortableBrowserPlayback()).toBeTrue()
   }
+
   const pausedAt = async (sec: number) => {
     await playFrom(sec)
     await playback.handlePause()
     await until(() => playback.isPortableBrowserPlaybackPrepared() && !playback.isPreparingPlayback())
   }
+
   const resumingRebuild = (resumePlayback = true) => playback.restartTimelineSchedule(tracks(), {
     rebuildBackend: true, resumePlayback, playheadSec: 2, owner: 'portable-browser', projectId: projectId(), projectGeneration: generation(),
   })
+
   const rebuild = (next: Track[]) => syncPlaybackBackend(next)
+
   return { playback, tracks, observeTracksRead: (observer: () => void) => { onTracksRead = observer }, edit, replaceInstrument, addEffect, insertEffect, insertLimiter, rebuild, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, hideAudioContext: () => { audioHidden = true }, readCompileTracksAtStart: () => { compileReadsAtStart = true }, mark: () => world.seq,
     locate: (sec: number) => playback.setPlayhead(sec, tracks()),
     liveSession: () => world.sessions.filter((session) => !session.closed).at(-1),
@@ -7899,17 +8845,21 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
     AudioWorkletNode: Object.getOwnPropertyDescriptor(globalThis, 'AudioWorkletNode'),
     fetch: Object.getOwnPropertyDescriptor(globalThis, 'fetch'),
   }
+
   const world: B6f5World = { seq: 0, refusals: 0, sessions: [], transportHold: b6fLiveHold(), pauseHold: b6fLiveHold() }
+
   class FakeAudioContext {
     readonly sampleRate = 48_000
     readonly destination = {}
     readonly audioWorklet = { addModule: async () => undefined }
   }
+
   class FakeAudioWorkletNode {
     readonly port: { onmessage: ((event: { data: PortableWasmStatusMessage }) => void) | null; postMessage: (message: PortableWasmControlMessage) => void; close: () => void }
     constructor() {
       const session: B6f5Session = { createdSeq: ++world.seq, closed: false, graph: undefined, publishedRevision: undefined, parameters: '',
         adoptions: 0, installedBpm: [], installedNoteOns: [], installedRevisions: [], report: () => {}, positions: [], proc: [], inst: [] }
+
       world.sessions.push(session)
       world.onNode?.()
       let transportEpoch = 1
@@ -7920,13 +8870,17 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
         onmessage: null,
         postMessage: (message) => {
           world.seq += 1
+
           if (message.type === 'prepare-graph') session.graph = message.snapshot
           const refused = message.type === 'publish-graph' && message.requireContinuity === true && world.refusals > 0
+
           if (refused) world.refusals -= 1
           else if (message.type === 'publish-graph') {
             session.publishedRevision = message.revision
+
             if (message.requireContinuity) session.adoptions += 1
           }
+
           if (message.type === 'install-schedule') {
             session.installedBpm.push(message.schedule.bpm)
             session.installedRevisions.push(message.schedule.revision)
@@ -7934,27 +8888,35 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
             session.parameters = JSON.stringify(message.schedule.events.filter((event) => event.type.startsWith('parameter')))
             // A schedule staged for the next revision moves no transport: the publish swaps it in at the playing frame.
             const staged = session.publishedRevision !== undefined && message.schedule.revision > session.publishedRevision
+
             if (!staged) session.positions.push({ seq: world.seq, sec: message.schedule.timeOrigin.timelineSec, running: false })
           }
+
           if (message.type === 'transport') transportEpoch = message.epoch
+
           if (message.type === 'transport') session.positions.push({ seq: world.seq, sec: message.frame / 48_000, running: message.running })
           let response = portableResponseFor(message)
+
           if (message.type === 'publish-graph' && refused) {
             response = { version: portableWasmProtocolVersion, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'rejected' }
           }
+
           if (message.type === 'processor-events') {
             session.proc.push({ seq: world.seq, values: message.events.map((event) => event.value) })
             response = { version: portableWasmProtocolVersion, type: 'processor-events-applied', requestId: message.requestId,
               revision: message.revision, epoch: message.epoch, sequence: message.sequence, result: 'applied' }
           }
+
           if (message.type === 'instrument-parameters') {
             session.inst.push({ seq: world.seq, values: message.events.map((event) => event.value) })
             response = { version: portableWasmProtocolVersion, type: 'instrument-events-applied', requestId: message.requestId,
               revision: message.revision, epoch: message.epoch, sequence: message.sequence, result: 'applied' }
           }
+
           if (!response) return
           const answer = response
           const deliver = () => queueMicrotask(() => this.port.onmessage?.({ data: answer }))
+
           if (message.type === 'transport' && message.running && world.transportHold.armed) holdB6fLive(world.transportHold, deliver)
           else if (message.type === 'transport' && !message.running && world.pauseHold.armed) holdB6fLive(world.pauseHold, deliver)
           else deliver()
@@ -7966,6 +8928,7 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
     connect = () => {}
     disconnect = () => {}
   }
+
   const manifest = await readFile(new URL('../../public/audio-core/daw-audio-core.manifest.json', import.meta.url), 'utf8')
   const wasm = await readFile(new URL('../../public/audio-core/daw-audio-core.wasm', import.meta.url))
   Object.defineProperty(globalThis, 'window', { configurable: true, value: {} })
@@ -7973,6 +8936,7 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
   Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: FakeAudioWorkletNode })
   Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (input: string | URL) => (
     String(input).endsWith('.manifest.json') ? new Response(manifest, { status: 200 }) : new Response(wasm, { status: 200 })) })
+
   try {
     await withFakeRaf((flushRaf) => createRoot(async (dispose) => {
       try {
@@ -7996,19 +8960,26 @@ type B6f5State = 'paused' | 'stopped' | 'playing' | 'pending-warm-play' | 'pendi
 // One cell of the newest-edit matrix: drive the transport into `state`, make one edit of `kind`, and expect the end state.
 const b6f5Cell = (state: B6f5State, kind: B6f5Kind, nativeEnabled: boolean) => runB6f5(async (live, world) => {
   const { playback } = live
+
   if (state === 'paused' || state === 'stopped') {
     await live.pausedAt(1)
+
     if (state === 'stopped') { await playback.handleStop(); await live.settle() }
+
     const mark = live.mark()
     live.edit(kind)
+
     return live.expectEnd(false, state === 'stopped' ? 0 : 1, mark, kind, b6f5LiveKinds.has(kind))
   }
+
   if (state === 'playing') {
     await live.playFrom(1)
     const mark = live.mark()
     live.edit(kind)
+
     return live.expectEnd(true, undefined, mark, kind, b6f5LiveKinds.has(kind) || b6f5AdoptedKinds.has(kind))
   }
+
   if (state === 'pending-warm-play' || state === 'pending-cold-play-precompile' || state === 'pending-cold-play-postcompile') {
     if (state === 'pending-warm-play') await live.pausedAt(1)
     else playback.setPlayhead(1, [])
@@ -8020,8 +8991,10 @@ const b6f5Cell = (state: B6f5State, kind: B6f5Kind, nativeEnabled: boolean) => r
     live.edit(kind)
     releaseB6fLive(hold)
     await play
+
     return live.expectEnd(true, undefined, mark, kind, false)
   }
+
   if (state === 'pending-pause' || state === 'pending-stop') {
     await live.playFrom(1)
     const mark = live.mark()
@@ -8031,8 +9004,10 @@ const b6f5Cell = (state: B6f5State, kind: B6f5Kind, nativeEnabled: boolean) => r
     live.edit(kind)
     releaseB6fLive(live.holds.pause)
     await action
+
     return live.expectEnd(false, state === 'pending-stop' ? 0 : 1, mark, kind, false)
   }
+
   if (state === 'rebuild-precompile' || state === 'rebuild-before-commit') {
     await live.playFrom(1)
     const hold = state === 'rebuild-precompile' ? live.holds.compile : live.holds.transport
@@ -8043,28 +9018,35 @@ const b6f5Cell = (state: B6f5State, kind: B6f5Kind, nativeEnabled: boolean) => r
     live.edit(kind)
     releaseB6fLive(hold)
     await rebuild.catch(() => undefined)
+
     return live.expectEnd(true, undefined, mark, kind, false)
   }
+
   if (state === 'rebuild-after-commit') {
     await live.playFrom(1)
     const before = live.mark()
     const rebuild = live.resumingRebuild()
+
     // The rebuild's own session runs and the hook committed it while the rebuild still owns the transport.
     const committed = () => playback.isPortableBrowserPlayback() && playback.isPlayPending() === false && playback.isStructuralRebuildInProgress()
       && (world.sessions.at(-1)?.createdSeq ?? 0) > before && world.sessions.at(-1)?.positions.at(-1)?.running === true
       && world.sessions.filter((session) => !session.closed).length === 1
+
     await live.until(committed)
     expect(committed()).toBeTrue()
     const mark = live.mark()
     live.edit(kind)
     await rebuild.catch(() => undefined)
+
     return live.expectEnd(true, undefined, mark, kind, false)
   }
+
   // A paused locate moves the kept session in place; an edit that lands with it reaches that session.
   await live.pausedAt(1)
   const mark = live.mark()
   live.locate(3)
   live.edit(kind)
+
   return live.expectEnd(false, 3, mark, kind, false)
 }, nativeEnabled)
 
@@ -8087,6 +9069,7 @@ test('the Timeline tick refreshes an adopted portable session at the revision it
     const session = live.liveSession()
     live.edit('mixer')
     await live.until(() => session?.adoptions === 1)
+
     // The adoption is in flight until the hook has recorded what it carries, after the publish this waits for.
     for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
     const installed = session?.installedRevisions.length ?? 0
@@ -8125,10 +9108,12 @@ test('B6f5 E5 a note and a tempo edit while playing are adopted at a seam withou
 // iteration's frame says where the installed schedule loops.
 const f20Clip = { id: 'clip-f20', name: 'MIDI', color: '#fff', startSec: 0, duration: 30, midiOffsetBeats: 0,
   midi: { wave: 'sine' as const, notes: [{ id: 'note-f20', pitch: 60, beat: 4, length: 1, velocity: 0.8 }] } }
+
 const playF20 = async (live: ReturnType<typeof mountB6f5>, loop: { enabled: boolean; start: number; end: number }) => {
   live.setTracks((current) => current.map((entry) => entry.id === track.id ? { ...entry, kind: 'instrument', clips: [f20Clip] } : entry))
   live.setLoop(loop)
   await live.playFrom(1)
+
   return live.liveSession()
 }
 
@@ -8154,6 +9139,7 @@ test('F20 W-F20f toggling the loop on and off while playing is adopted without a
     live.setLoop({ enabled: true, start: 0, end: 3 })
     await live.until(() => session?.adoptions === 1)
     const looping = session?.installedNoteOns.slice(0, 2)
+
     // The hook records what the adoption carries once its answer arrives, after the publish this waits for.
     for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
     live.setLoop({ enabled: false, start: 0, end: 3 })
@@ -8169,9 +9155,11 @@ test('F20 W-F20f toggling the loop on and off while playing is adopted without a
 // rebuild. The hook does not mount Timeline: the follow reads the edited tracks, as it does for a MIDI clip.
 const c9bClip: Track<AudioBuffer>['clips'][number] = { id: 'clip-c9b', name: 'Audio', color: '#fff', startSec: 2, duration: 1, sourceAssetKey: 'asset-c9b', buffer: new TestAudioBuffer() }
 const c9bTrack: Track<AudioBuffer> = { id: 'track-c9b', name: 'Audio', kind: 'audio', volume: 1, clips: [c9bClip] }
+
 test('C9b W-C9-clip-6 an audio clip move while playing or paused is adopted by the same session with no dispose and no rebuild', async () => {
   for (const paused of [false, true]) await runB6f5(async (live, world) => {
     live.setTracks((current) => [...current, c9bTrack])
+
     if (paused) await live.pausedAt(1)
     else await live.playFrom(1)
     const session = live.liveSession()
@@ -8190,6 +9178,7 @@ test('C9b W-C9-clip-6 an audio clip move while playing or paused is adopted by t
 test('C9c W-C9-asset-7 an audio clip asset swap while playing or paused is adopted by the same session with no dispose and no rebuild', async () => {
   for (const paused of [false, true]) await runB6f5(async (live, world) => {
     live.setTracks((current) => [...current, c9bTrack])
+
     if (paused) await live.pausedAt(1)
     else await live.playFrom(1)
     const session = live.liveSession()
@@ -8249,6 +9238,7 @@ test('C9g W-C9-inst-7 an instrument replaced or a processor parameter edited whi
     else await live.playFrom(1)
     const session = live.liveSession()
     const mark = live.mark()
+
     if (edit === 'processor') live.edit('proc-nonlive')
     else live.replaceInstrument(edit)
     await live.until(() => session?.adoptions === 1 || world.sessions.length > 1)
@@ -8270,19 +9260,24 @@ class C9dAudioBuffer implements AudioBuffer {
   copyToChannel() {}
   getChannelData() { return new Float32Array(this.length) }
 }
+
 const c9dWarp: NonNullable<Track<AudioBuffer>['clips'][number]['audioWarp']> = { enabled: true, mode: 'stretch', sourceBpm: 120 }
 const c9dClip: Track<AudioBuffer>['clips'][number] = { id: 'clip-c9d', name: 'Audio', color: '#fff', startSec: 2, duration: 1, sourceAssetKey: 'asset-c9d', buffer: new C9dAudioBuffer(), audioWarp: c9dWarp }
 const c9dTrack: Track<AudioBuffer> = { id: 'track-c9d', name: 'Audio', kind: 'audio', volume: 1, clips: [c9dClip] }
+
 test('C9d W-C9-warp-8 a tempo or warp marker edit under a Stretch clip while playing or paused is adopted by the same session with no dispose and no rebuild', async () => {
   for (const paused of [false, true]) for (const edit of ['tempo', 'markers'] as const) await runB6f5(async (live, world) => {
     live.setTracks((current) => [...current, c9dTrack])
+
     if (paused) await live.pausedAt(1)
     else await live.playFrom(1)
     const session = live.liveSession()
     const mark = live.mark()
+
     if (edit === 'tempo') live.setBpm(90)
     else live.setTracks((current) => current.map((entry) => entry.id === c9dTrack.id
       ? { ...entry, clips: [{ ...c9dClip, audioWarp: { ...c9dWarp, markers: [{ id: 'start', sourceBeat: 0, timelineBeat: 0 }, { id: 'stretched', sourceBeat: 2, timelineBeat: 3 }] } }] } : entry))
+
     // The Stretch artifact is rendered through IndexedDB, which takes macrotasks.
     for (let turn = 0; turn < 2_000 && session?.adoptions !== 1 && world.sessions.length === 1; turn += 1) await Bun.sleep(0)
     await live.settle()
@@ -8328,9 +9323,11 @@ test('B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play r
       ? { ...entry, clips: [{ ...emptyClip, midi: { ...emptyClip.midi, notes: [note] } }] } : entry))
     await live.until(() => session?.adoptions === 1)
     await live.settle()
+
     const paused = { adoptions: session?.adoptions, closed: session?.closed, same: live.liveSession() === session, playing: live.playback.isPlaying(),
       sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length, runningAfterMark: session?.positions.filter((entry) => entry.seq > mark && entry.running).length,
       noteOns: session?.installedNoteOns }
+
     await live.playback.handlePlay([])
     await live.until(() => live.playback.isPortableBrowserPlayback() && !live.playback.isPreparingPlayback())
     expect({ paused, resumed: live.playback.isPortableBrowserPlayback(), same: live.liveSession() === session, closed: session?.closed,
@@ -8360,6 +9357,7 @@ test('E3 W-E3-6 a locate while playing seeks the same session without a dispose 
 // every locate was before the seek moved in place.
 test('E3 W-E3-R9 a locate the live session refuses without a failure rebuilds at the target and keeps playing', async () => {
   const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+
   try {
     await runB6f5(async (live, world) => {
       await live.playFrom(1)
@@ -8367,8 +9365,10 @@ test('E3 W-E3-R9 a locate the live session refuses without a failure rebuilds at
       const mark = live.mark()
       live.hideAudioContext()
       live.locate(3)
+
       const rebuilt = () => session?.closed === true && live.playback.isPortableBrowserPlayback() && !live.playback.isPreparingPlayback()
         && !live.playback.isStructuralRebuildInProgress()
+
       await live.until(rebuilt)
       const now = live.liveSession()
       expect({ closed: session?.closed, playing: live.playback.isPlaying(), sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length,
@@ -8395,6 +9395,7 @@ test('B6f5 A an edit the playing portable session cannot take live is adopted on
 // publish the worklet refuses is a failed adoption the controller retries on the same session: no dispose, no new session.
 test('W-FB-2 a refused adopting publish while playing keeps the session and a later adoption carries the edit', async () => {
   const error = spyOn(console, 'error').mockImplementation(() => undefined)
+
   try {
     await runB6f5(async (live, world) => {
       await live.playFrom(1)
@@ -8432,12 +9433,14 @@ test('W-FB-3 a structural edit while a session is kept paused reaches its adopti
 
 test('B6f5 B an edit during a Play whose compile has run reaches the session that Play commits', async () => {
   const kinds: B6f5Kind[] = ['mixer', 'structural', 'proc-nonlive']
+
   for (const kind of kinds) await b6f5Cell('pending-cold-play-postcompile', kind, false)
 })
 
 test('B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits', async () => {
   const states: B6f5State[] = ['rebuild-before-commit', 'rebuild-after-commit']
   const kinds: B6f5Kind[] = ['mixer', 'proc-nonlive']
+
   for (const state of states) for (const kind of kinds) await b6f5Cell(state, kind, false)
 })
 
@@ -8473,6 +9476,7 @@ test('B6f5 479 a rebuild requested after the running rebuild passed its last req
 
 test('B6f5 D a structural edit during a warm Play keeps the Play and reaches its session', async () => {
   const kinds: B6f5Kind[] = ['structural', 'proc-nonlive']
+
   for (const kind of kinds) await b6f5Cell('pending-warm-play', kind, false)
 })
 
@@ -8496,12 +9500,14 @@ test('B6f5 481 a rebuild that lands on a pending warm Play resumes that Play; on
 
 test('B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from', async () => {
   const cells: [B6f5State, B6f5Kind][] = [['pending-cold-play-precompile', 'mixer'], ['pending-warm-play', 'sampled'], ['pending-warm-play', 'synth-nonlive']]
+
   for (const [state, kind] of cells) await b6f5Cell(state, kind, true)
 })
 
 test('B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits', async () => {
   const cells: [B6f5State, B6f5Kind][] = [['pending-cold-play-postcompile', 'proc-live'], ['paused-locate', 'proc-live'],
     ['paused-locate', 'synth-live']]
+
   for (const [state, kind] of cells) await b6f5Cell(state, kind, false)
 })
 
@@ -8510,11 +9516,14 @@ test('B6f5 twenty settled volume commits while playing are twenty adoptions and 
     await live.playFrom(1)
     const session = live.liveSession()
     const sessions = world.sessions.length
+
     for (let frame = 1; frame <= 20; frame += 1) {
       live.setVolume(frame / 40)
       await live.until(() => session?.adoptions === frame)
     }
+
     const settled = { sessions: world.sessions.length - sessions, adoptions: session?.adoptions }
+
     for (let frame = 1; frame <= 20; frame += 1) live.setVolume(0.5 + frame / 100)
     // Published, not only prepared: the adoption that carries the burst's last value has answered.
     await live.until(() => session?.graph?.nodes.find((node) => node.id === track.id)?.mixer?.gain === 0.7
@@ -8549,22 +9558,30 @@ test('B6f5 renaming a track while paused on native does not recompile the paused
   const faults: string[] = []
   const reload = createProjectReload()
   let compiles = 0
+
   const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]["transport"]) => {
     compiles += 1
+
     return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
       renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
   }
+
   Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     let dispose = () => {}
+
     const playback = createRoot((cleanup) => {
       dispose = cleanup
+
       return useTimelinePlayback(createFakeEngine({ clipId: "clip-audio", startSec: 0, endSec: 1 }).engine, { getTracks: () => tracks() }, {
         requiresNativeAudio: true, enabled: () => true, projectId: () => "project", projectGeneration: reload.projectGeneration, compileSnapshot,
         reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
       })
     })
+
     await flushMicrotasks()
+
     for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
     const prepared = { compiles, begins: fixture.calls.filter((call) => call === "begin").length, prepared: playback.isNativePlaybackPrepared() }
     setTracks((current) => current.map((entry) => ({ ...entry, name: "Renamed", color: "#123456" })))
@@ -8575,6 +9592,7 @@ test('B6f5 renaming a track while paused on native does not recompile the paused
     const beforeReload = compiles
     // A project reload disposes the paused preview and prepares it again.
     reload.reload()
+
     for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
     expect({ prepared: prepared.prepared, renamed, volumeRecompiled: beforeReload - prepared.compiles - renamed.compiles > 0, reloadedPreview: compiles > beforeReload && playback.isNativePlaybackPrepared(), faults })
       .toEqual({ prepared: true, renamed: { compiles: 0, begins: 0 }, volumeRecompiled: true, reloadedPreview: true, faults: [] })
@@ -8592,6 +9610,7 @@ test('B6f5 a resume after an adoption plays the newest state', async () => {
     const session = live.liveSession()
     live.setVolume(0.5)
     await live.until(() => session?.adoptions === 1)
+
     // The hook records what the adoption carries once its answer arrives, after the publish this waits for.
     for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
     await live.playback.handlePause()
@@ -8612,6 +9631,7 @@ test('B6f5 a resume after an adoption and a paused locate plays the newest state
     const session = live.liveSession()
     live.setVolume(0.5)
     await live.until(() => session?.adoptions === 1)
+
     for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
     await live.playback.handlePause()
     await live.settle()
@@ -8620,8 +9640,10 @@ test('B6f5 a resume after an adoption and a paused locate plays the newest state
     await live.playback.handlePlay([])
     await live.until(() => live.playback.isPortableBrowserPlayback() && !live.playback.isPreparingPlayback())
     await live.settle()
+
     const resumed = { sessions: world.sessions.length, same: live.liveSession() === session, adoptions: session?.adoptions, playing: live.playback.isPlaying(),
       gain: live.liveSession()?.graph?.nodes.find((node) => node.id === track.id)?.mixer?.gain }
+
     // Back to the volume the session started with: a resume that took a baseline older than the adopted edit sees no change here.
     live.setVolume(1)
     await live.until(() => session?.adoptions === 2)
@@ -8675,6 +9697,7 @@ test('B6f5 an edit back to the adopted state while the previous edit compiles le
 // B6f5 step 5b: mute and solo are fields the compile reads (createMixerChannel), so a playing session adopts them.
 test('B6f5 a mute or solo edit while playing is adopted by the playing portable session', async () => {
   const fields: ('muted' | 'soloed')[] = ['muted', 'soloed']
+
   for (const field of fields) await runB6f5(async (live, world) => {
     await live.playFrom(1)
     const session = live.liveSession()
@@ -8694,13 +9717,16 @@ test('B6f5 a mute or solo edit while playing is adopted by the playing portable 
 // adopts nor rebuilds for them. A clip field the compile reads (its start) still rebuilds.
 const b6f5cClip: Track['clips'][number] = { id: 'clip-b6f5c', name: 'B6f5c clip', color: '#ffffff', startSec: 0, duration: 8,
   midi: { wave: 'sine', notes: Array.from({ length: 8 }, (_, index) => ({ id: `note-b6f5c-${index}`, pitch: 60, beat: index, length: 0.5, velocity: 0.8 })) } }
+
 const b6f5cGroup: Track = { ...track, id: 'track-g', name: 'B6f5c group', channelRole: 'group' }
+
 const b6f5cEditOutcome = async (live: ReturnType<typeof mountB6f5>, world: B6f5World, edit: () => void) => {
   const session = live.liveSession()
   const sessions = world.sessions.length
   edit()
   await live.until(() => world.sessions.length !== sessions || (session?.adoptions ?? 0) > 0)
   await live.settle()
+
   return { rebuilds: world.sessions.length - sessions, adoptions: session?.adoptions, open: session?.closed === false, playing: live.playback.isPlaying() }
 }
 
@@ -8710,11 +9736,14 @@ test('B6f5c recolouring or renaming a clip while playing is neither adopted nor 
     ['name', (clip) => ({ ...clip, name: 'Renamed clip' }), 0],
     ['startSec', (clip) => ({ ...clip, startSec: 0.25 }), 1],
   ]
+
   for (const nativeEnabled of [false, true]) for (const [field, patch, adoptions] of edits) await runB6f5(async (live, world) => {
     live.setTracks((current) => current.map((entry) => entry.id === track.id ? { ...entry, kind: 'instrument', clips: [b6f5cClip] } : entry))
     await live.playFrom(1)
+
     const outcome = await b6f5cEditOutcome(live, world, () => live.setTracks((current) => current.map((entry) => entry.id === track.id
       ? { ...entry, clips: entry.clips.map(patch) } : entry)))
+
     expect({ nativeEnabled, field, ...outcome }).toEqual({ nativeEnabled, field, rebuilds: 0, adoptions, open: true, playing: true })
   }, nativeEnabled)
 })
@@ -8726,9 +9755,11 @@ test('B6f5c a group colour cascading to its clips while playing is neither adopt
       ? { ...entry, kind: 'instrument', groupId: b6f5cGroup.id, outputTargetId: b6f5cGroup.id, clips: [b6f5cClip] } : entry), b6f5cGroup])
     await live.playFrom(1)
     let cascaded = 0
+
     const outcome = await b6f5cEditOutcome(live, world, () => live.setTracks((current) => {
       const plan = planSetTrackColor(current, b6f5cGroup.id, '#ff0000')
       cascaded = plan?.clipUpdates.length ?? 0
+
       return current.map((entry) => ({
         ...entry,
         color: plan?.trackUpdates.find((update) => update.trackId === entry.id)?.to ?? entry.color,
@@ -8736,6 +9767,7 @@ test('B6f5c a group colour cascading to its clips while playing is neither adopt
           color: plan?.clipUpdates.find((update) => update.trackId === entry.id && update.clipId === clip.id)?.to ?? clip.color })),
       }))
     }))
+
     expect({ nativeEnabled, cascaded, ...outcome }).toEqual({ nativeEnabled, cascaded: 1, rebuilds: 0, adoptions: 0, open: true, playing: true })
   }, nativeEnabled)
 })
@@ -8747,6 +9779,7 @@ const b6f5cRecording = () => {
   const controls: string[] = []
   const previous = { node: Object.getOwnPropertyDescriptor(globalThis, 'AudioWorkletNode'), worker: Object.getOwnPropertyDescriptor(globalThis, 'Worker') }
   const Base = globalThis.AudioWorkletNode
+
   class RecordingNode extends Base {
     constructor(context: BaseAudioContext, name: string, options?: AudioWorkletNodeOptions) {
       super(context, name, options)
@@ -8756,48 +9789,60 @@ const b6f5cRecording = () => {
       port.postMessage = (message: PortableWasmControlMessage) => {
         if (!message.type.startsWith('recording-capture-')) return post(message)
         controls.push(message.type)
+
         if (message.type === 'recording-capture-configure') take = { generation: message.generation, sessionId: message.sessionId }
+
         const action = message.type === 'recording-capture-configure' ? 'configured'
           : message.type === 'recording-capture-finalize' ? 'finalized' : message.type === 'recording-capture-cancel' ? 'cancelled' : undefined
+
         if (!take || !action) return
         const data: PortableWasmStatusMessage = { version: portableWasmProtocolVersion, type: 'recording-capture-applied', ...take, action, frame: 0 }
         queueMicrotask(() => port.onmessage?.call(port, new MessageEvent('message', { data })))
       }
     }
   }
+
   class WriterWorker {
     onmessage: ((event: { data: object }) => void) | null = null
     postMessage(message: { type: string; generation: number; sessionId: string; capturedFrames?: number }) {
       const reply = message.type === 'start' ? { type: 'ready' } : message.type === 'finalize' ? { type: 'finalized', capturedFrames: message.capturedFrames }
         : message.type === 'abort' ? { type: 'aborted' } : undefined
+
       if (reply) queueMicrotask(() => this.onmessage?.({ data: { ...reply, generation: message.generation, sessionId: message.sessionId } }))
     }
     terminate() {}
   }
+
   Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: RecordingNode })
   Object.defineProperty(globalThis, 'Worker', { configurable: true, value: WriterWorker })
   Object.defineProperty(globalThis.AudioContext.prototype, 'createMediaStreamSource', { configurable: true,
     value: () => ({ connect: () => undefined, disconnect: () => undefined }) })
   let onEnded: EventListener | undefined
+
   const mediaTrack: MediaStreamTrack = Object.assign(Object.create(null), {
     readyState: 'live', getSettings: () => ({ channelCount: 1 }),
     addEventListener: (type: string, listener: EventListener) => { if (type === 'ended') onEnded = listener },
     removeEventListener: () => undefined })
+
   const stream: MediaStream = Object.assign(Object.create(null), { getTracks: () => [mediaTrack], getAudioTracks: () => [mediaTrack] })
+
   const input: Parameters<ReturnType<typeof mountB6f5>['playback']['portableRecording']['start']>[0] = {
     appSessionId: 'take-b6f5c', stream, layout: 'mono', inputChannel: 0, gain: 1, polarity: 1, monitoring: false, punchStartFrame: 0 }
+
   const restore = () => {
     for (const [key, descriptor] of [['AudioWorkletNode', previous.node], ['Worker', previous.worker]] satisfies [string, PropertyDescriptor | undefined][]) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor)
       else Reflect.deleteProperty(globalThis, key)
     }
   }
+
   return { controls, input, restore, endDevice: () => onEnded?.(new Event('ended')) }
 }
 
 test('B6f5c a structural edit during a portable take is adopted in place and the take stops or is cancelled afterwards', async () => {
   for (const end of ['stop', 'cancel']) await runB6f5(async (live, world) => {
     const recording = b6f5cRecording()
+
     try {
       await live.playFrom(1)
       const session = live.liveSession()
@@ -8806,6 +9851,7 @@ test('B6f5c a structural edit during a portable take is adopted in place and the
       const spectral = () => JSON.stringify(Array.from(session?.graph?.nodes.find((node) => node.id === track.id)?.processorOrder.find((processor) => processor.id === 'spectral-1')?.state ?? []))
       const installed = spectral()
       live.addEffect()
+
       for (let turn = 0; turn < 3_000; turn += 1) await Promise.resolve()
       await live.settle()
       expect({ end, during: { sessions: world.sessions.length, open: session?.closed === false,
@@ -8823,6 +9869,7 @@ test('B6f5c a structural edit during a portable take is adopted in place and the
 test('B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take', async () => {
   for (const kind of ['synth-nonlive', 'sampled', 'mixer'] as const) await runB6f5(async (live, world) => {
     const recording = b6f5cRecording()
+
     try {
       await live.playFrom(1)
       const session = live.liveSession()
@@ -8842,11 +9889,13 @@ test('B6f5c an instrument or unrelated edit during a portable take is adopted an
 test('B6f5c W-R8a a loop edit during a portable take is adopted once the take has stopped or been cancelled', async () => {
   for (const end of ['stop', 'cancel'] as const) await runB6f5(async (live, world) => {
     const recording = b6f5cRecording()
+
     try {
       const session = await playF20(live, { enabled: false, start: 0, end: 3 })
       await live.playback.portableRecording.start(recording.input)
       const mark = live.mark()
       live.setLoop({ enabled: true, start: 0, end: 3 })
+
       for (let turn = 0; turn < 3_000; turn += 1) await Promise.resolve()
       await live.settle()
       const during = { adoptions: session?.adoptions, noteOns: session?.installedNoteOns.slice(0, 2) }
@@ -8863,11 +9912,13 @@ test('B6f5c W-R8a a loop edit during a portable take is adopted once the take ha
 test('B6f5c a take ended by a device fault follows the edit it held', async () => {
   await runB6f5(async (live, world) => {
     const recording = b6f5cRecording()
+
     try {
       await live.playFrom(1)
       await live.playback.portableRecording.start({ ...recording.input, onFailure: () => undefined })
       const mark = live.mark()
       live.addEffect()
+
       for (let turn = 0; turn < 3_000; turn += 1) await Promise.resolve()
       await live.settle()
       expect(world.sessions.filter((entry) => entry.createdSeq > mark).length).toBe(0)
@@ -8883,6 +9934,7 @@ test('B6f5c a take ended by a device fault follows the edit it held', async () =
 test('B6f5c a failed take followed by the caller stop or cancel adopts each edit once', async () => {
   for (const end of ['stop', 'cancel'] as const) await runB6f5(async (live, world) => {
     const recording = b6f5cRecording()
+
     try {
       await live.playFrom(1)
       const session = live.liveSession()
@@ -8892,6 +9944,7 @@ test('B6f5c a failed take followed by the caller stop or cancel adopts each edit
       await live.settle()
       const mark = live.mark()
       live.addEffect()
+
       for (let turn = 0; turn < 3_000; turn += 1) await Promise.resolve()
       await live.settle()
       recording.endDevice()
@@ -8920,6 +9973,7 @@ test('B6f5c a send, output target, channel role or group edit while playing reac
       b6f5cOn(b6f5cGroup.id, { channelRole: 'group' })],
     ['groupId', (current) => [...current, b6f5cGroup, b6f5cGroup2], b6f5cOn(b6f5cGroup2.id, { groupId: b6f5cGroup.id })],
   ]
+
   for (const [field, setup, edit] of cases) {
     let fresh = ''
     await runB6f5(async (live) => {
@@ -8946,8 +10000,10 @@ test('C0F Pause then Play after a staged live publication resumes warm through t
   const inputs = () => ({ masterVolume: 1, automation: [], sidechains: [] })
   const retained: Track = { ...track, id: 'track-c0f-retained', name: 'Retained', clips: [] }
   const [tracks, setTracks] = createSignal<Track[]>([retained])
+
   const f = await mountStep5Playback({ projectId: 'c0f-resume', tracks, playbackInputs: inputs, desiredFx: fx,
     renderState: async () => ({ fx: fx(), automationEnvelopes: [] }) })
+
   try {
     await f.playback.handlePlay(untrack(tracks)); await f.frame()
     const edit = f.mark()
@@ -8969,34 +10025,43 @@ test('C0F Pause then Play after a staged live publication resumes warm through t
 // field that changes the compiled schedule makes the preview recompile; a name, colour or waveform key does neither.
 test('C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key', async () => {
   const duration = 4 / 48_000
+
   const audio: Track<AudioBuffer> = { ...track, id: 'track-c0g-audio', clips: [{ id: 'clip-c0g-audio', historyRef: 'clip-c0g-audio',
     name: 'Audio', mediaStatus: undefined, startSec: 0, duration, sourceAssetKey: 'asset-c0g', waveformAssetKey: 'waveform:asset-c0g',
     sourceKind: 'upload', sourceDurationSec: duration, sourceSampleRate: 48_000, sourceChannelCount: 1, leftPadSec: 0, bufferOffsetSec: 0,
     audioWarp: undefined, gain: 0.5, fades: undefined, color: '#fff', sampleUrl: 'https://r2.example/asset-c0g.wav', midi: undefined,
     midiOffsetBeats: 0, buffer: new TestAudioBuffer() }] }
+
   const instrument: Track<AudioBuffer> = { ...track, id: 'track-c0g-midi', kind: 'instrument', clips: [{ ...b6f5cClip, id: 'clip-c0g-midi',
     historyRef: 'clip-c0g-midi', mediaStatus: undefined, sourceAssetKey: undefined, waveformAssetKey: undefined, sourceKind: undefined,
     sourceDurationSec: undefined, sourceSampleRate: undefined, sourceChannelCount: undefined, leftPadSec: 0, bufferOffsetSec: 0,
     audioWarp: undefined, gain: undefined, fades: undefined, sampleUrl: undefined, midiOffsetBeats: 0, buffer: null }] }
+
   // What playback compiles from the tracks: the snapshot, and the native projection and portable session scheduled from it.
   const compiledSchedule = (tracks: Track<AudioBuffer>[]) => {
     const compiled = compileLivePlaybackSnapshot({ revision: 1, bpm: 120,
       transport: { state: "playing", playheadSec: 0, loopEnabled: false, loopStartSec: 0, loopEndSec: 0 },
       tracks, renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: { [instrument.id]: { instances: [], instrument: b6f5Synth0 } } },
         automationEnvelopes: [] }, sidechainRoutes: [] })
+
     if (!compiled.supported) return { snapshot: JSON.stringify(compiled.reasons), schedule: 'unsupported' }
     const { snapshot } = compiled
+
     const native = compileLiveNativeProjection({ tracks: snapshot.tracks, bpm: 120, sampleRateHz: 48_000, revision: 1, epoch: 1,
       firstSequence: 1, fx: snapshot.mixer.fx })
+
     // The portable session compiles the MIDI track; its audio would need a decoded asset registry.
     const portable = compilePreparedPortableLiveSession({ ...snapshot, tracks: snapshot.tracks.filter((entry) => entry.id === instrument.id) },
       { assetRegistry: { projectGeneration: 1, assets: [] },
       sampleRateHz: 48_000, transportEpoch: 1, timeOrigin: { timelineSec: 0, frame: 0 }, rangeEndSec: 4, sourceFirstSequence: 1 })
+
     return { snapshot: JSON.stringify({ ...snapshot, revision: 0 }), schedule: JSON.stringify({ native, portable }) }
   }
+
   // A native paused preview recompiles exactly when the track fingerprint changes: edit one clip field of a paused preview
   // and see whether the hook compiles again.
   type AudioClip = Track<AudioBuffer>['clips'][number]
+
   const edits = new Map<string, (clip: AudioClip) => AudioClip>([
     ['id', (clip) => ({ ...clip, id: 'clip-other' })],
     ['historyRef', (clip) => ({ ...clip, historyRef: 'clip-history' })],
@@ -9020,62 +10085,80 @@ test('C0G the clip fingerprint names every clip field a playback compile reads, 
     ['color', (clip) => ({ ...clip, color: '#123456' })],
     ['waveformAssetKey', (clip) => ({ ...clip, waveformAssetKey: 'waveform:other' })],
   ])
+
   const recompilesOnEdit = async (edit: (clip: AudioClip) => AudioClip) => {
     const previousWindow = globalThis.window
     const [tracks, setTracks] = createSignal([audioTrack(new TestAudioBuffer())])
     const fixture = createNativeHookBridge(undefined, undefined, undefined, undefined, "failed", true)
     const reload = createProjectReload()
     let compiles = 0
+
     const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]["transport"]) => {
       compiles += 1
+
       return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
         renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
     }
+
     Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
     let dispose = () => {}
+
     try {
       createRoot((cleanup) => {
         dispose = cleanup
+
         return useTimelinePlayback(createFakeEngine({ clipId: "clip-audio", startSec: 0, endSec: 1 }).engine, { getTracks: () => tracks() }, {
           requiresNativeAudio: true, enabled: () => true, projectId: () => "project", projectGeneration: reload.projectGeneration, compileSnapshot,
           reportFault: () => undefined,
         })
       })
+
       // An edit landing on a preview still preparing is adopted after it, so the edit comes once the preview is prepared.
       for (let turn = 0; turn < 40; turn += 1) await flushMicrotasks()
       const prepared = compiles
       setTracks((current) => current.map((entry) => ({ ...entry, clips: entry.clips.map(edit) })))
+
       for (let turn = 0; turn < 40; turn += 1) await flushMicrotasks()
       const recompiled = compiles > prepared
       // Whatever the edit did, a project reload disposes the paused preview and prepares it again.
       reload.reload()
+
       for (let turn = 0; turn < 40; turn += 1) await flushMicrotasks()
       expect(compiles).toBeGreaterThan(prepared + (recompiled ? 1 : 0))
+
       return recompiled
     } finally {
       dispose()
       Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
     }
   }
+
   const baseline = compiledSchedule([audio, instrument])
   expect(baseline.schedule).not.toBe('unsupported')
+
   // The edit lands on one track at a time, so clip ids stay unique.
   const compiledAfter = (edit: (clip: AudioClip) => AudioClip) => {
     const edited = (entry: Track<AudioBuffer>) => ({ ...entry, clips: entry.clips.map(edit) })
+
     return [compiledSchedule([edited(audio), instrument]), compiledSchedule([audio, edited(instrument)])]
   }
+
   const changesCompile = (edit: (clip: AudioClip) => AudioClip) =>
     compiledAfter(edit).some((after) => after.snapshot !== baseline.snapshot || after.schedule !== baseline.schedule)
+
   const changesSchedule = (edit: (clip: AudioClip) => AudioClip) =>
     compiledAfter(edit).some((after) => after.schedule !== baseline.schedule)
+
   const compiles: Record<string, boolean> = {}
   const scheduled: Record<string, boolean> = {}
   const recompiles: Record<string, boolean> = {}
+
   for (const [field, edit] of edits) {
     compiles[field] = changesCompile(edit)
     scheduled[field] = changesSchedule(edit)
     recompiles[field] = await recompilesOnEdit(edit)
   }
+
   const fields = [...edits.keys()]
   const excluded = ['name', 'color', 'waveformAssetKey']
   // The hook reads these itself: mediaStatus gates hydration (hasPendingAudioClipHydration), historyRef names the clip.
@@ -9096,11 +10179,14 @@ test('C0G a clip waveform key or key order change while playing is neither adopt
     ['waveformAssetKey', (clip) => ({ ...clip, waveformAssetKey: 'waveform:other' })],
     ['keyOrder', ({ id, name, color, startSec, duration, midi, ...rest }) => ({ ...rest, midi, duration, startSec, color, name, id })],
   ]
+
   for (const nativeEnabled of [false, true]) for (const [field, patch] of edits) await runB6f5(async (live, world) => {
     live.setTracks((current) => current.map((entry) => entry.id === track.id ? { ...entry, kind: 'instrument', clips: [b6f5cClip] } : entry))
     await live.playFrom(1)
+
     const outcome = await b6f5cEditOutcome(live, world, () => live.setTracks((current) => current.map((entry) => entry.id === track.id
       ? { ...entry, clips: entry.clips.map(patch) } : entry)))
+
     expect({ nativeEnabled, field, ...outcome }).toEqual({ nativeEnabled, field, rebuilds: 0, adoptions: 0, open: true, playing: true })
   }, nativeEnabled)
 })
@@ -9114,17 +10200,25 @@ test('UD7n W-UD7n-5 a paused native edit is adopted in place: no dispose, no hos
   const faults: string[] = []
   const seams: bigint[] = []
   let status: 'prepared' | 'published' = 'prepared'
+
   const reply = async (): Promise<NativeRevisionReply> => ({ ok: true, hostPid: 123, hostGeneration: 7,
     revision: { status, continuity: 'accepted', requestedRevision: 2, activeRevision: status === 'published' ? 2 : 1,
       preparedRevision: status === 'prepared' ? 2 : 0, retiredRevision: 0, renderEpoch: 1n, transportEpoch: fixture.epoch(),
       publicationFrame: 0n, progressFrame: 0n } })
+
   const revisions: NativeRevisionSession = {
-    prepare: async (request) => { seams.push(request.requestedPublicationFrame ?? 0n); status = 'prepared'; return reply() },
-    publish: async () => { status = 'published'; return reply() }, inspect: reply, rollback: reply, retire: reply,
+    prepare: async (request) => { seams.push(request.requestedPublicationFrame ?? 0n); status = 'prepared';
+
+ return reply() },
+    publish: async () => { status = 'published';
+
+ return reply() }, inspect: reply, rollback: reply, retire: reply,
   }
+
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: {
     ...fixture.audioHost, session: { ...fixture.audioHost.session, revisions, configureInstrumentStates: async () => ({ ok: true }) },
   } } } })
+
   try {
     await withFakeRaf(async () => createRoot(async (dispose) => {
       const playback = useTimelinePlayback(createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
@@ -9132,6 +10226,7 @@ test('UD7n W-UD7n-5 a paused native edit is adopted in place: no dispose, no hos
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           compileSnapshot: async (transport) => compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
             renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }) })
+
       await playback.handlePlay(tracks())
       await playback.handlePause()
       expect(playback.isNativePlaybackPrepared()).toBeTrue()
@@ -9154,16 +10249,20 @@ test('W-TL-1 a structural playback change that fails is logged with console.erro
   const logged: unknown[][] = []
   const original = console.error
   console.error = (...args: unknown[]) => { logged.push(args) }
+
   const failure = new Error('rebuild failed')
+
   const deps = { mountedProjectGeneration: () => 0, awaitPlaybackPreparation: async () => {}, preparedInstrument: () => undefined,
     isStructuralRebuildInProgress: () => false, isPreparingPlayback: () => false, isPlaying: () => true,
     isNativePlaybackPrepared: () => true, isPortableBrowserPlaybackPrepared: () => false,
     syncPlaybackBackend: async () => { throw failure }, renderTracks: () => [track], captureStructuralPlaybackIntent: () => ({}) }
+
   try {
     await createInstrumentPlaybackChange(deps)(track.id, { kind: 'synth', instanceId: 'synth:replacement', params: createDefaultSynthParams() })
     createMixedReorderCommitted(deps)(undefined)
     await flushMicrotasks()
   } finally { console.error = original }
+
   expect(logged.map(([message, cause]) => [message, cause]))
     .toEqual([
       ['[Timeline] failed to apply an instrument change to native playback', failure],
@@ -9180,28 +10279,39 @@ test('W-FB-5 a paused native instrument replacement requested by the Timeline is
   const contexts: (LivePlaybackCompileContext | undefined)[] = []
   const replacement = { kind: 'drum-rack' as const, instanceId: 'instrument-replacement', params: createDefaultDrumRackParams() }
   let status: 'prepared' | 'published' = 'prepared'
+
   const reply = async (): Promise<NativeRevisionReply> => ({ ok: true, hostPid: 123, hostGeneration: 7,
     revision: { status, continuity: 'accepted', requestedRevision: 2, activeRevision: status === 'published' ? 2 : 1,
       preparedRevision: status === 'prepared' ? 2 : 0, retiredRevision: 0, renderEpoch: 1n, transportEpoch: fixture.epoch(),
       publicationFrame: 0n, progressFrame: 0n } })
+
   const revisions: NativeRevisionSession = {
-    prepare: async (request) => { seams.push(request.requestedPublicationFrame ?? 0n); status = 'prepared'; return reply() },
-    publish: async () => { status = 'published'; return reply() }, inspect: reply, rollback: reply, retire: reply,
+    prepare: async (request) => { seams.push(request.requestedPublicationFrame ?? 0n); status = 'prepared';
+
+ return reply() },
+    publish: async () => { status = 'published';
+
+ return reply() }, inspect: reply, rollback: reply, retire: reply,
   }
+
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: {
     ...fixture.audioHost, session: { ...fixture.audioHost.session, revisions, configureInstrumentStates: async () => ({ ok: true }) },
   } } } })
+
   try {
     await withFakeRaf(async () => createRoot(async (dispose) => {
       const faults: string[] = []
+
       const playback = useTimelinePlayback(createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
         { getTracks: () => [track] }, { requiresNativeAudio: true, enabled: () => true, projectId: () => 'project',
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           compileSnapshot: async (transport, context) => {
             contexts.push(context)
+
             return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: [{ ...track, volume: context?.instrumentOverride ? 0.25 : track.volume }],
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
           } })
+
       await playback.handlePlay([track])
       await playback.handlePause()
       expect(playback.isNativePlaybackPrepared()).toBeTrue()
@@ -9223,6 +10333,7 @@ test('W-FB-5 a paused native instrument replacement requested by the Timeline is
 // session through the call the Timeline makes, playing or paused: the host, its device and its session stay, and the
 // staged instance is the one in the plan the host coordinated.
 type VstLiveEditOutcome = { coordinated: string[][]; seams: bigint[]; lifecycle: number; prepared: boolean; playing: boolean; faults: string[]; failed: boolean }
+
 const vstLiveEdit = async (paused: boolean, edit: 'insert' | 'undo' | 'load-failure') => {
   const previousWindow = globalThis.window
   const fixture = createNativeHookBridge()
@@ -9235,29 +10346,38 @@ const vstLiveEdit = async (paused: boolean, edit: 'insert' | 'undo' | 'load-fail
   let status: 'prepared' | 'published' = 'prepared'
   let requested = 2
   let seam = 0n
+
   const reply = async (): Promise<NativeRevisionReply> => ({ ok: true, hostPid: 123, hostGeneration: 7,
     revision: { status, continuity: 'accepted', requestedRevision: requested, activeRevision: status === 'published' ? requested : requested - 1,
       preparedRevision: status === 'prepared' ? requested : 0, retiredRevision: 0, renderEpoch: 1n, transportEpoch: fixture.epoch(),
       publicationFrame: status === 'published' ? seam : 0n, progressFrame: seam } })
+
   const revisions: NativeRevisionSession = {
     prepare: async (request) => {
       seam = request.requestedPublicationFrame ?? 0n
       seams.push(seam)
       requested = Number(request.projectRevision)
       status = 'prepared'
+
       return reply()
     },
-    publish: async () => { status = 'published'; return reply() }, inspect: reply, rollback: reply, retire: reply,
+    publish: async () => { status = 'published';
+
+ return reply() }, inspect: reply, rollback: reply, retire: reply,
   }
+
   const session = { ...fixture.audioHost.session, revisions, configureInstrumentStates: async () => ({ ok: true as const }),
     coordinateVstAttachments: async () => {
       coordinated.push(withPlugin ? [inserted.instanceId] : [])
+
       return edit === 'load-failure' && withPlugin
         ? { ok: false as const, error: 'The native VST3 worker preflight failed.',
           failure: { code: 'worker-crashed' as const, origin: 'plugin' as const, instanceId: inserted.instanceId } }
         : { ok: true as const }
     } }
+
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: { ...fixture.audioHost, session } } } })
+
   try {
     let outcome: VstLiveEditOutcome | undefined
     await withFakeRaf(async () => createRoot(async (dispose) => {
@@ -9267,16 +10387,23 @@ const vstLiveEdit = async (paused: boolean, edit: 'insert' | 'undo' | 'load-fail
           compileSnapshot: async (transport, context) => {
             const compiled = compileLivePlaybackSnapshot({ revision: revisionCounter++, bpm: 120, transport, tracks: [track],
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
+
             if (!compiled.supported) return compiled
+
             const processors = await resolveNativeLivePlaybackProcessors({ projectId: 'project',
               persisted: edit === 'undo' && withPlugin ? [inserted] : [], seed: context?.externalProcessor, readPersisted: async () => undefined })
+
             const plan = compileNativeExternalAttachmentPlan({ target: 'native', graph: compiled.snapshot.mixer.graph, processors,
               workerTransport: { slotCount: 2, maximumFrames: 8192, maximumEventsPerBlock: 128 } })
+
             if (!plan.supported) throw new Error(plan.reasons.join(' '))
+
             return { ...compiled, snapshot: { ...compiled.snapshot, nativeExternalAttachmentPlan: plan.plan, requiresNativePlayback: true } }
           } })
+
       fixture.setScheduleComplete(false)
       await playback.handlePlay([track])
+
       if (paused) await playback.handlePause()
       coordinated.length = 0
       seams.length = 0
@@ -9290,6 +10417,7 @@ const vstLiveEdit = async (paused: boolean, edit: 'insert' | 'undo' | 'load-fail
         playing: playback.isPlaying(), faults, failed: vstInstanceFailed(inserted.instanceId) }
       dispose()
     }))
+
     return outcome
   } finally {
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
@@ -9317,6 +10445,7 @@ for (const paused of [false, true]) {
 // `hold` keeps every compile that starts while it is set until it settles; the compile reads the tracks of the moment it started.
 type TransportEditWorld = { fixture: ReturnType<typeof createNativeHookBridge>; seams: bigint[]; publishes: number[]; compiled: number[]; clipsCompiled: number[]
   contexts: (LivePlaybackCompileContext | undefined)[]; faults: string[]; lifecycle: () => number; hold: Promise<void> | undefined }
+
 const withNativeTransportEdit = async (
   run: (world: TransportEditWorld, playback: ReturnType<typeof useTimelinePlayback>, setVolume: (volume: number) => void,
     setTracks: (update: (current: Track<AudioBuffer>[]) => Track<AudioBuffer>[]) => void) => Promise<void>,
@@ -9331,32 +10460,42 @@ const withNativeTransportEdit = async (
   const clipsCompiled: number[] = []
   const contexts: (LivePlaybackCompileContext | undefined)[] = []
   const faults: string[] = []
+
   const world: TransportEditWorld = { fixture, seams, publishes, compiled, clipsCompiled, contexts, faults, hold: undefined,
     lifecycle: () => fixture.calls.filter((call) => ['begin', 'stop', 'teardown', 'configure'].includes(call)).length }
+
   let revision = 1
   let status: 'prepared' | 'published' = 'prepared'
   let requested = 2
   let seam = 0n
+
   const reply = async (): Promise<NativeRevisionReply> => ({ ok: true, hostPid: 123, hostGeneration: 7,
     revision: { status, continuity: 'accepted', requestedRevision: requested, activeRevision: status === 'published' ? requested : requested - 1,
       preparedRevision: status === 'prepared' ? requested : 0, retiredRevision: 0, renderEpoch: 1n, transportEpoch: fixture.epoch(),
       publicationFrame: status === 'published' ? seam : 0n, progressFrame: seam } })
+
   const revisions: NativeRevisionSession = {
     prepare: async (request) => {
       seam = request.requestedPublicationFrame ?? 0n
       seams.push(seam)
       requested = Number(request.projectRevision)
       status = 'prepared'
+
       return reply()
     },
-    publish: async () => { status = 'published'; publishes.push(requested); return reply() }, inspect: reply, rollback: reply, retire: reply,
+    publish: async () => { status = 'published'; publishes.push(requested);
+
+ return reply() }, inspect: reply, rollback: reply, retire: reply,
   }
+
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: {
     ...fixture.audioHost, session: { ...fixture.audioHost.session, revisions, configureInstrumentStates: async () => ({ ok: true as const }) },
   } } } })
+
   try {
     await withFakeRaf(async () => createRoot(async (dispose) => {
       fixture.setScheduleComplete(false)
+
       const playback = useTimelinePlayback(createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
         { getTracks: () => tracks() }, { requiresNativeAudio: true, enabled: () => options.enabled, projectId: () => 'project',
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
@@ -9365,10 +10504,13 @@ const withNativeTransportEdit = async (
             compiled.push(tracks()[0]?.volume ?? Number.NaN)
             clipsCompiled.push(tracks().reduce((count, entry) => count + entry.clips.length, 0))
             const compiling = tracks()
+
             if (world.hold) await world.hold
+
             return compileLivePlaybackSnapshot({ revision: revision++, bpm: 120, transport, tracks: compiling,
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
           } })
+
       await run(world, playback, (volume) => setTracks((current) => current.map((entry) => ({ ...entry, volume }))), setTracks)
       dispose()
     }))
@@ -9446,6 +10588,7 @@ test('UD7n W-S11d-A4 an edit back to the adopted state while the previous edit c
     setVolume(track.volume)
     await flushMicrotasks()
     held.resolve()
+
     for (let index = 0; index < 20; index += 1) await flushMicrotasks()
     expect({ playing: playback.isPlaying(), adoptions: world.seams.length, publishes: world.publishes.length, faults: world.faults })
       .toEqual({ playing: true, adoptions: 0, publishes: 0, faults: [] })
@@ -9461,6 +10604,7 @@ test('UD7n W-S11d-B1 an edit that lands while a paused native preview is prepari
     setVolume(0.25)
     await flushMicrotasks()
     gate.resolve({ ok: true, transactionToken: nativeTransactionToken })
+
     for (let index = 0; index < 20; index += 1) await flushMicrotasks()
     const count = (name: string) => world.fixture.calls.filter((call) => call === name).length
     expect({ begins: count('begin'), configures: count('configure'), stops: count('stop'), teardowns: count('teardown'),
@@ -9475,6 +10619,7 @@ test('UD7n W-S11d-B2 an edit that lands while a paused portable session is prepa
     const mark = live.mark()
     // The session's node is created once its compile has read the desired state, so the edit lands mid-prepare.
     world.onNode = () => { world.onNode = undefined; live.edit('structural') }
+
     await live.playback.handleStop()
     await live.until(() => world.sessions.some((session) => session.createdSeq > mark && session.adoptions > 0))
     await live.expectEnd(false, 0, mark, 'structural', false)
@@ -9491,9 +10636,11 @@ test('UD7n W-S11d-C1 an unhydrated clip inserted into a prepared preview keeps t
     const before = world.lifecycle()
     const compiles = world.compiled.length
     setTracks((current) => [...current, audioTrack(null)])
+
     for (let index = 0; index < 40; index += 1) await flushMicrotasks()
     const unhydrated = { lifecycle: world.lifecycle() - before, prepared: playback.isNativePlaybackPrepared(), compiles: world.compiled.length - compiles }
     setTracks((current) => [current[0] ?? track, audioTrack(new TestAudioBuffer())])
+
     for (let index = 0; index < 40; index += 1) await flushMicrotasks()
     expect({ unhydrated, lifecycle: world.lifecycle() - before, prepared: playback.isNativePlaybackPrepared(), adoptions: world.seams.length,
       lastClips: world.clipsCompiled.at(-1), faults: world.faults })
@@ -9503,13 +10650,16 @@ test('UD7n W-S11d-C1 an unhydrated clip inserted into a prepared preview keeps t
 
 test('UD7n W-S11d-C2 an unhydrated clip inserted into a paused portable session keeps the session, stages nothing, and is adopted after hydration', async () => {
   const warned = spyOn(console, 'warn').mockImplementation(() => undefined)
+
   try {
     await runB6f5(async (live, world) => {
       await live.pausedAt(1)
+
       for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
       const session = live.liveSession()
       const mark = live.mark()
       live.setTracks((current) => [...current, audioTrack(null)])
+
       for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
       const unhydrated = { sameSession: live.liveSession() === session, quiet: live.mark() === mark, adoptions: session?.adoptions, warned: warned.mock.calls.length }
       live.setTracks((current) => [...current.slice(0, 2), audioTrack(new TestAudioBuffer())])
@@ -9532,6 +10682,7 @@ for (const playing of [true, false]) {
   test(`UD7n W-S11d-E1 a VST3 insert ${playing ? 'while playing' : 'while paused'} with only a browser session prepared rebuilds nothing and shows the limitation`, async () => {
     const info = spyOn(console, 'info').mockImplementation(() => undefined)
     const inserted = { ...insertedExternalProcessor(), targetId: track.id }
+
     try {
       await runB6f5(async (live, world) => {
         if (playing) await live.playFrom(1)
@@ -9539,13 +10690,17 @@ for (const playing of [true, false]) {
         const mark = live.mark()
         const session = live.liveSession()
         let rebuilds = 0
+
         const sync = createSyncPlaybackBackend({
           isNativePlaybackPrepared: live.playback.isNativePlaybackPrepared,
           isPortableBrowserPlaybackPrepared: live.playback.isPortableBrowserPlaybackPrepared,
           restartTimelineSchedule: live.playback.restartTimelineSchedule,
-          rebuildPlaybackBackend: () => { rebuilds += 1; return Promise.resolve() },
+          rebuildPlaybackBackend: () => { rebuilds += 1;
+
+ return Promise.resolve() },
           captureStructuralPlaybackIntent: () => ({ projectId: 'project-a', projectGeneration: 1 }),
         })
+
         await sync(live.tracks(), { projectId: 'project-a', projectGeneration: 1,
           externalProcessor: { projectId: 'project-a', processor: inserted } })
         await live.settle()
@@ -9570,6 +10725,7 @@ test('UD7n W-S11d-E2 the browser limit notice clears when the native session hos
   const inserted = { ...insertedExternalProcessor(), targetId: track.id }
   const faults: string[] = []
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+
   try {
     await withFakeRaf(async () => createRoot(async (dispose) => {
       const playback = useTimelinePlayback(createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
@@ -9577,10 +10733,13 @@ test('UD7n W-S11d-E2 the browser limit notice clears when the native session hos
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           compileSnapshot: async (transport) => compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: [track],
             renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }) })
+
       addInstanceLimit(inserted.instanceId, 'The browser engine does not host VST3 plug-ins yet.')
+
       for (let index = 0; index < 40; index += 1) await flushMicrotasks()
       const before = { prepared: playback.isNativePlaybackPrepared(), limited: instanceLimit(inserted.instanceId) !== undefined }
       setNativeEnabled(true)
+
       for (let index = 0; index < 40; index += 1) await flushMicrotasks()
       expect({ before, prepared: playback.isNativePlaybackPrepared(), limited: instanceLimit(inserted.instanceId) !== undefined, faults })
         .toEqual({ before: { prepared: false, limited: true }, prepared: true, limited: false, faults: [] })

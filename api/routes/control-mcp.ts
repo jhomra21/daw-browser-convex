@@ -65,14 +65,19 @@ const parseMcpBody = async (request: Request): Promise<ParsedMcpBody> => {
   if (!contentTypeIsJson(request)) {
     return { response: new Response("Content-Type must be application/json.", { status: 415, headers: noStore }) }
   }
+
   const contentLength = request.headers.get("content-length")
+
   if (contentLength && (!/^\d+$/.test(contentLength) || Number(contentLength) > controlLimitsV1.maxSerializedBodyBytes)) {
     return { response: new Response("MCP body exceeds the serialized body limit.", { status: 413, headers: noStore }) }
   }
+
   const bytes = new Uint8Array(await request.clone().arrayBuffer())
+
   if (bytes.byteLength > controlLimitsV1.maxSerializedBodyBytes) {
     return { response: new Response("MCP body exceeds the serialized body limit.", { status: 413, headers: noStore }) }
   }
+
   try {
     return { value: z.json().parse(JSON.parse(new TextDecoder().decode(bytes))) }
   } catch {
@@ -82,6 +87,7 @@ const parseMcpBody = async (request: Request): Promise<ParsedMcpBody> => {
 
 const requiresWriteScope = (value: JsonValue) => {
   const requests = Array.isArray(value) ? value : [value]
+
   return requests.some((request) => (
     isJsonObject(request)
     && request.method === "tools/call"
@@ -93,6 +99,7 @@ const requiresWriteScope = (value: JsonValue) => {
 
 const controlGateway = async (context: ApiContext, bearer: ControlBearer): Promise<ControlService> => {
   const gateway = await createControlConvexClient(context, bearer)
+
   return {
     capabilities: async () => controlCapabilitiesV1,
     capabilitiesV2: async () => controlCapabilitiesV2,
@@ -112,10 +119,13 @@ const lazyService = (
   createGateway: (context: ApiContext, bearer: ControlBearer) => Promise<ControlService>,
 ): ControlService => {
   let gateway: Promise<ControlService> | undefined
+
   const resolveGateway = () => {
     gateway ??= createGateway(context, bearer)
+
     return gateway
   }
+
   return {
     capabilities: async () => controlCapabilitiesV1,
     capabilitiesV2: async () => controlCapabilitiesV2,
@@ -132,6 +142,7 @@ const lazyService = (
 const withNoStore = (response: Response) => {
   const headers = new Headers(response.headers)
   headers.set("Cache-Control", "no-store")
+
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
 }
 
@@ -142,17 +153,21 @@ export function registerControlMcpRoutes(app: App, dependencies: ControlMcpRoute
   app.all("/api/mcp", async (context) => {
     if (context.req.method !== "POST") {
       if (!await resolveBearer(context.req.raw, context.env, "control:read")) return unauthorized(context)
+
       return unsupportedMethod()
     }
 
     const parsedBody = await parseMcpBody(context.req.raw)
+
     if ("response" in parsedBody) return parsedBody.response
     const requiredScope = requiresWriteScope(parsedBody.value) ? "control:write" : "control:read"
     const bearer = await resolveBearer(context.req.raw, context.env, requiredScope)
+
     if (!bearer) {
       if (requiredScope === "control:write" && await resolveBearer(context.req.raw, context.env, "control:read")) {
         return insufficientScope(context)
       }
+
       return unauthorized(context)
     }
 
@@ -160,12 +175,15 @@ export function registerControlMcpRoutes(app: App, dependencies: ControlMcpRoute
       lazyService(context, bearer, createGateway),
       { authorize: () => true },
     )
+
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
     })
+
     try {
       await server.connect(transport)
+
       return withNoStore(await transport.handleRequest(context.req.raw, { parsedBody: parsedBody.value }))
     } finally {
       await transport.close()

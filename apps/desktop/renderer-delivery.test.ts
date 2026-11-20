@@ -3,6 +3,7 @@ import { deliverToRenderer, type RendererDeliveryTarget } from "./renderer-deliv
 
 const createTarget = (send: RendererDeliveryTarget["send"]) => {
   let destroyed = false
+
   return {
     target: {
       isDestroyed: () => destroyed,
@@ -31,6 +32,7 @@ describe("renderer delivery", () => {
     const { target, destroy } = createTarget(() => {
       throw new Error("send should not be called")
     })
+
     destroy()
 
     expect(deliverToRenderer({
@@ -44,10 +46,13 @@ describe("renderer delivery", () => {
   test("handles destruction between readiness check and send", () => {
     let destroyed = false
     let checks = 0
+
     const target = {
       isDestroyed: () => {
         checks += 1
+
         if (checks === 2) destroyed = true
+
         return destroyed
       },
       getURL: () => "daw://app/",
@@ -126,6 +131,7 @@ describe("renderer delivery", () => {
       getTarget: () => {
         const target = current
         current = second.target
+
         return target
       },
       channel: "channel",

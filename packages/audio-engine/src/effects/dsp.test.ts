@@ -72,6 +72,7 @@ describe('reverb parameter normalization', () => {
       'reflectionShape': 2,
       diffuse: -1,
     })
+
     expect(normalized.reflectionModAmountMs).toBe(25)
     expect(normalized.reflectionModRateHz).toBe(0.01)
     expect(normalized['reflectionShape']).toBe(1)

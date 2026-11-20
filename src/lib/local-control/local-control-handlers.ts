@@ -30,6 +30,7 @@ export const createLocalControlHandlers = (input: {
   refuseRecordingTargetChange?: Parameters<typeof createLocalControlService>[0]['refuseRecordingTargetChange']
 }) => {
   const service = createLocalControlService(input)
+
   const assertBoundProject = (requestedProjectId: string) => {
     if (requestedProjectId !== input.projectId) throw boundProjectError(input.projectId)
   }
@@ -37,12 +38,14 @@ export const createLocalControlHandlers = (input: {
   return {
     'project.list': async () => {
       const project = await getLocalProject(input.projectId)
+
       return projectListResultSchema.parse({
         projects: project === undefined ? [] : [{ projectId: project.id, name: project.name }],
       })
     },
     'project.current': async () => {
       const project = await getLocalProject(input.projectId)
+
       return projectCurrentResultSchema.parse(project === undefined
         ? { status: 'absent' }
         : { status: 'present', project: { projectId: project.id, name: project.name } })
@@ -50,26 +53,32 @@ export const createLocalControlHandlers = (input: {
     'control.capabilities': () => canonicalLocalControlCapabilities,
     'control.snapshot': async (request) => {
       assertBoundProject(request.projectId)
+
       return canonicalProjectSnapshotSchema.parse(await service.snapshotV2(request))
     },
     'control.preview': async (request) => {
       assertBoundProject(request.projectId)
+
       return controlPreviewResultSchemaV1.parse(await service.preview(serializeJsonValue(request)))
     },
     'control.requestApproval': async (request) => {
       assertBoundProject(request.projectId)
+
       return controlApprovalResultSchemaV1.parse(await service.requestApproval(serializeJsonValue(request)))
     },
     'control.commit': async (request) => {
       assertBoundProject(request.projectId)
+
       return controlCommitResultSchemaV1.parse(await service.commit(serializeJsonValue(request)))
     },
     'control.history': async (request) => {
       assertBoundProject(request.projectId)
+
       return controlHistoryResultSchemaV1.parse(await service.history(request))
     },
     'control.recoveries': async (request) => {
       assertBoundProject(request.projectId)
+
       return controlRecoveriesResultSchemaV1.parse(await service.recoveries(request))
     },
   } satisfies ControlOperationHandlers<'desktop'>

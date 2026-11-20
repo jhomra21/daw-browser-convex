@@ -24,14 +24,17 @@ const wave = () => {
   view.setUint16(34, 16, true)
   writeAscii(bytes, 36, 'data')
   view.setUint32(40, frames * 2, true)
+
   for (let frame = 0; frame < frames; frame += 1) {
     view.setInt16(44 + frame * 2, (frame + 1) * 1000, true)
   }
+
   return bytes
 }
 
 const dataUrl = (bytes: Uint8Array) => {
   const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('')
+
   return `data:audio/wav;base64,${btoa(binary)}`
 }
 
@@ -53,7 +56,9 @@ const collectPages = async (
   options: Parameters<typeof decodeAudioPages>[1] = { pageFrames: 2 },
 ) => {
   const pages: DecodedAudioPage[] = []
+
   for await (const page of decodeAudioPages(source, options)) pages.push(page)
+
   return pages
 }
 
@@ -114,11 +119,13 @@ test('prefers exact integer frame bounds over seconds rounding', async () => {
 
 test('concatenates adjacent ranges without duplicate or omitted frames', async () => {
   const whole = await collectPages(dataUrl(wave()), { pageFrames: 2 })
+
   const first = await collectPages(dataUrl(wave()), {
     startSec: 0,
     endSec: 2 / 48_000,
     pageFrames: 2,
   })
+
   const second = await collectPages(dataUrl(wave()), {
     startSec: 2 / 48_000,
     endSec: 5 / 48_000,
@@ -155,6 +162,7 @@ test('applies and validates page size for AudioBuffer sources', async () => {
     },
     copyToChannel: () => undefined,
   }
+
   const descriptor = createAudioPcmSourceDescriptor({
     identity: 'audio-buffer',
     durationSec: 1,
@@ -164,7 +172,9 @@ test('applies and validates page size for AudioBuffer sources', async () => {
     source: buffer,
     pageFrames: 2,
   })
+
   const pages = []
+
   for await (const page of descriptor.readPages()) pages.push(page)
 
   expect(pageSummary(pages)).toEqual([
@@ -184,11 +194,13 @@ test('applies and validates page size for AudioBuffer sources', async () => {
 
 test('bounds a stalled remote request without weakening explicit cancellation', async () => {
   const fetchCalls: number[] = []
+
   const pages = decodeAudioPages('https://stall.example/audio.wav', {
     remoteRequestTimeoutMs: 10,
     remoteMaxRetries: 0,
     fetchFn: Object.assign(async (_input: URL | RequestInfo, init?: RequestInit) => {
       fetchCalls.push(1)
+
       return await new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true })
       })
@@ -201,6 +213,7 @@ test('bounds a stalled remote request without weakening explicit cancellation', 
 
 test('stops retrying a remote source after the configured finite retry count', async () => {
   let fetchCalls = 0
+
   const pages = decodeAudioPages('https://retry.example/audio.wav', {
     remoteRequestTimeoutMs: 100,
     remoteMaxRetries: 0,

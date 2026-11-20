@@ -11,6 +11,7 @@ const BINS = 1024
 
 const toneFrame = (hz: number): SpectrumFrame => {
   const center = (hz / (SAMPLE_RATE / 2)) * (BINS - 1)
+
   return { data: Float32Array.from({ length: BINS }, (_, bin) => Math.max(0, 1 - Math.abs(bin - center) / 2)), sampleRate: SAMPLE_RATE }
 }
 
@@ -37,14 +38,18 @@ const run = async () => {
       onReset={() => setParams(createDefaultSpectrumParams())}
     />
   ), host)
+
   const layout = async () => {
     await nextFrame()
     await nextFrame()
   }
+
   await layout()
   const labels = () => [...host.querySelectorAll('canvas')].map((canvas) => canvas.getAttribute('aria-label')).join()
+
   const press = (label: string) => {
     const button = [...host.querySelectorAll('button')].find((candidate) => candidate.textContent?.trim() === label)
+
     if (!button) throw new Error(`No ${label} button`)
     button.click()
   }
@@ -54,14 +59,19 @@ const run = async () => {
   for (let index = 0; index < 60; index++) setFrame(toneFrame(500 + index * 40))
   await nextFrame()
   const spectrogram = host.querySelectorAll('canvas')[1]
+
   const lit = (canvas: HTMLCanvasElement) => {
     const context = canvas.getContext('2d')
+
     if (!context) throw new Error('No canvas context')
     const { data } = context.getImageData(0, 0, canvas.width, canvas.height)
     let count = 0
+
     for (let index = 0; index < data.length; index += 4) if (data[index] + data[index + 1] + data[index + 2] > 90) count++
+
     return count
   }
+
   scenarios['frames-fed-to-the-device-paint-spectrogram-columns'] = lit(spectrogram) > 0
 
   press('Spectrogram')
@@ -78,6 +88,7 @@ const run = async () => {
   const cleared = host.querySelectorAll('canvas')[1]
   scenarios['a-bypassed-device-shows-nothing'] = lit(cleared) === 0
   setParams((previous) => ({ ...previous, enabled: true }))
+
   for (let index = 0; index < 120; index++) setFrame(toneFrame(200 + index * 60))
   await nextFrame()
   scenarios['re-enabling-the-device-resumes-the-spectrogram'] = lit(host.querySelectorAll('canvas')[1]) > 0

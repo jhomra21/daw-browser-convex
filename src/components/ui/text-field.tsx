@@ -19,6 +19,7 @@ function TextField(
   props: PolymorphicProps<ValidComponent, TextFieldRootProps<ValidComponent>>,
 ): JSX.Element {
   const [local, others] = splitProps(props, ["class"])
+
   return <TextFieldPrimitive.Root class={cn("flex flex-col gap-1", local.class)} {...others} />
 }
 
@@ -58,6 +59,7 @@ function TextFieldInput(
 ): JSX.Element {
   const props = mergeProps({ type: "text" }, rawProps)
   const [local, others] = splitProps(props, ["type", "class"])
+
   return (
     <TextFieldPrimitive.Input
       type={local.type}
@@ -80,6 +82,7 @@ function TextFieldTextArea(
   props: PolymorphicProps<ValidComponent, TextFieldTextAreaProps<ValidComponent>>,
 ): JSX.Element {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <TextFieldPrimitive.TextArea
       class={cn(
@@ -117,6 +120,7 @@ function TextFieldLabel(
   props: PolymorphicProps<ValidComponent, TextFieldLabelProps<ValidComponent>>,
 ): JSX.Element {
   const [local, others] = splitProps(props, ["class"])
+
   return <TextFieldPrimitive.Label class={cn(labelVariants(), local.class)} {...others} />
 }
 
@@ -132,6 +136,7 @@ function TextFieldDescription(
   props: PolymorphicProps<ValidComponent, TextFieldDescriptionProps<ValidComponent>>,
 ): JSX.Element {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <TextFieldPrimitive.Description
       class={cn(labelVariants({ variant: "description" }), local.class)}
@@ -152,6 +157,7 @@ function TextFieldErrorMessage(
   props: PolymorphicProps<ValidComponent, TextFieldErrorMessageProps<ValidComponent>>,
 ): JSX.Element {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <TextFieldPrimitive.ErrorMessage
       class={cn(labelVariants({ variant: "error" }), local.class)}

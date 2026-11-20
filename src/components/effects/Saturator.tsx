@@ -42,11 +42,13 @@ const formatCurve = (curve: SaturatorCurve) => curve[0].toUpperCase() + curve.sl
 
 const createSaturatorCurvePoints = (curve: SaturatorCurve) => {
   const points: string[] = []
+
   for (let index = 0; index <= 80; index++) {
     const input = (index / 80) * 2 - 1
     const output = evaluateSaturatorCurvePoint(curve, input)
     points.push(`${(index / 80) * 180},${50 - output * 40}`)
   }
+
   return points.join(' ')
 }
 
@@ -85,10 +87,12 @@ function SaturatorCurveGraph(props: { curve: SaturatorCurve }) {
 
 export default function Saturator(props: SaturatorProps) {
   const automationRange = (parameterId: string) => props.automationRangesByParameterId?.get(parameterId)
+
   const changeAutomated = (parameterId: string, updates: Partial<SaturatorParams>) => {
     props.onManualAutomationOverride?.(parameterId)
     props.onChange(updates)
   }
+
   return (
     <EffectShell
       title="Saturator"

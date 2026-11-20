@@ -53,6 +53,7 @@ test('rejects unsupported project features before attempting portable playback',
     hasAutomation: false,
     hasExternalPlugins: false,
   })
+
   expect(selection).toEqual({
     selected: false,
     reason: 'The portable Wasm backend requires a project fully covered by the graph parity capability matrix.',
@@ -78,6 +79,7 @@ test('rejects processor kinds that the worklet cannot execute', async () => {
 test('disposes failed and timed out AudioWorklet initialization attempts', async () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, 'AudioWorkletNode')
   let mode: 'fault' | 'silent' = 'fault'
+
   let created: {
     messages: PortableWasmControlMessage[]
     disconnects: number
@@ -93,15 +95,18 @@ test('disposes failed and timed out AudioWorklet initialization attempts', async
   ) {
     const messages: PortableWasmControlMessage[] = []
     const state = { disconnects: 0, closes: 0 }
+
     type TestPort = {
       onmessage: ((event: MessageEvent<PortableWasmStatusMessage>) => void) | null
       postMessage: (message: PortableWasmControlMessage) => void
       close: () => void
     }
+
     const port: TestPort = {
       onmessage: null,
       postMessage: (message) => {
         messages.push(message)
+
         if (mode === 'fault' && message.type === 'initialize') {
           port.onmessage?.(new MessageEvent('message', {
             data: {
@@ -116,6 +121,7 @@ test('disposes failed and timed out AudioWorklet initialization attempts', async
         state.closes += 1
       },
     }
+
     const node = {
       messages,
       options,
@@ -131,7 +137,9 @@ test('disposes failed and timed out AudioWorklet initialization attempts', async
         state.disconnects += 1
       },
     }
+
     created = node
+
     return node
   }
 
@@ -140,10 +148,12 @@ test('disposes failed and timed out AudioWorklet initialization attempts', async
       addModule: async () => undefined,
     },
   })
+
   Object.defineProperty(globalThis, 'AudioWorkletNode', {
     configurable: true,
     value: FakeAudioWorkletNode,
   })
+
   try {
     const backend = new WasmAudioWorkletBackend(5)
     const portableCapability = capability()
@@ -152,6 +162,7 @@ test('disposes failed and timed out AudioWorklet initialization attempts', async
     expect(created?.messages.map((message) => message.type))
       .toEqual(['initialize', 'dispose'])
     const initialization = created?.messages[0]
+
     if (!initialization || initialization.type !== 'initialize') throw new Error('Expected portable Wasm initialization message.')
     expect(initialization).not.toHaveProperty('wasmModule')
     expect(created?.options.processorOptions?.wasmModule).toBe(portableCapability.artifact.module)

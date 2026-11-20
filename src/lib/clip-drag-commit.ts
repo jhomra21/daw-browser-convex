@@ -48,6 +48,7 @@ export const commitDuplicatedClipDrag = async (input: DuplicateCommitInput) => {
     : await createProjectedCloudClips(input);
 
   const nextSelection = buildCreatedClipSelection(created);
+
   if (nextSelection) input.selection.selectClipGroup(nextSelection);
 
   if (input.addedTrackId && created.some((item) => item.trackId === input.addedTrackId)) {
@@ -77,6 +78,7 @@ const createProjectedCloudClips = async (input: DuplicateCommitInput) => {
   if (!input.userId) {
     throw new Error("Cloud clip duplication requires a user id.");
   }
+
   return await createProjectedClips({
     projectId: input.projectId,
     items: input.items,
@@ -112,7 +114,9 @@ const pushMoveHistory = (
 ) => {
   if (successfulMoves.length === 0) return;
   input.onCommitMoves?.(successfulMoves.map((move) => move.clipId));
+
   if (!input.historyPush) return;
+
   if (input.addedTrackId && successfulMoves.some((move) => move.trackId === input.addedTrackId)) {
     pushTrackCreateHistory(
       input.historyPush,
@@ -121,6 +125,7 @@ const pushMoveHistory = (
       input.trackSnapshotForHistory.find((entry) => entry.id === input.addedTrackId),
     );
   }
+
   input.historyPush(buildClipsMoveHistoryEntry({
     projectId: input.projectId,
     tracks: input.trackSnapshotForHistory,
@@ -136,6 +141,7 @@ export const commitMovedClipDrag = async (input: MoveCommitInput) => {
   if (isLocalId("project", input.projectId)) {
     await input.moveLocalClips(input.plannedMoves);
     pushMoveHistory(input, input.plannedMoves);
+
     return;
   }
 
@@ -146,27 +152,36 @@ export const commitMovedClipDrag = async (input: MoveCommitInput) => {
       return false;
     }
   }));
+
   if (moveApplied.every(Boolean)) {
     pushMoveHistory(input, input.plannedMoves);
+
     return;
   }
 
   // A rejected multi-clip move reverts at once. A clip whose compensating cloud write fails
   // stays where the cloud has it and gets its own undo entry.
   input.commitClipMoves(input.previousMoves);
+
   const remainingMoves = (await Promise.all(input.plannedMoves.flatMap((move, index) => {
     const previous = input.previousPositions.get(move.clipId);
+
     if (!moveApplied[index] || !previous) return [];
+
     return [input.moveCloudClip({ clipId: move.clipId, ...previous }).catch(() => false).then((compensated) => compensated ? [] : [move])];
   }))).flat();
+
   if (remainingMoves.length > 0) input.commitClipMoves(remainingMoves);
   pushMoveHistory(input, remainingMoves);
+
   if (input.addedTrackId && !remainingMoves.some((move) => move.trackId === input.addedTrackId)) {
     input.cleanupUnusedAddedTrack(input.addedTrackId);
   }
+
   const selectedMove = remainingMoves.find((move) => move.clipId === input.selectionAfterCommit.clipId);
   const rollbackAnchor = input.previousMoves.find((move) => move.clipId === input.selectionAfterCommit.clipId);
   const selectedClip = selectedMove ?? rollbackAnchor;
+
   if (selectedClip) {
     input.selection.selectPrimaryClip(
       { trackId: selectedClip.trackId, clipId: selectedClip.clipId },

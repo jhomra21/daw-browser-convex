@@ -55,6 +55,7 @@ describe('createUndoManager', () => {
     expect(undo).toHaveLength(1)
     const merged = undo[0]
     expect(merged?.type).toBe('effect-params')
+
     if (merged?.type === 'effect-params') {
       expect(merged.data.from).toEqual(compressorParams)
       expect(merged.data.to).toEqual({ ...compressorParams, thresholdDb: -42 })
@@ -84,6 +85,7 @@ describe('createUndoManager', () => {
     expect(undo).toHaveLength(1)
     const merged = undo[0]
     expect(merged?.type).toBe('effect-params')
+
     if (merged?.type === 'effect-params') {
       expect(merged.data.from).toEqual(compressorParams)
       expect(merged.data.to).toEqual({ ...compressorParams, thresholdDb: -42 })

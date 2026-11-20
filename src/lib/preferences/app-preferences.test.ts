@@ -220,6 +220,7 @@ describe("normalizeAppPreferences", () => {
       platformIdentity: "browser-platform",
       createdAtMs: index
     }))
+
     const recording = normalizeAppPreferences({
       version: APP_PREFERENCES_VERSION,
       recording: {
@@ -262,6 +263,7 @@ describe("normalizeAppPreferences", () => {
       gainDb: Number.NaN,
       invertPolarity: true
     }
+
     expect(normalizeRecordingInputPreferences(input)).toEqual({
       ...input,
       inputChannel: 0,
@@ -287,6 +289,7 @@ describe("normalizeAppPreferences", () => {
       platformIdentity: "browser-platform",
       createdAtMs: index
     }))
+
     expect(normalizeRecordingCalibrations(calibrations)).toHaveLength(32)
     const calibrationUpdated = updateRecordingCalibrations(defaultAppPreferences.recording, calibrations)
     expect(calibrationUpdated.calibrations).toHaveLength(32)
@@ -300,6 +303,7 @@ describe("normalizeAppPreferences", () => {
       audio: { inputDeviceId: "canonical-input" },
       recording: { deviceId: "legacy-duplicate" }
     })
+
     expect(normalized.audio.inputDeviceId).toBe("canonical-input")
     expect("deviceId" in normalized.recording).toBeFalse()
   })

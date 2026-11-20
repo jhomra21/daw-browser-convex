@@ -156,10 +156,12 @@ const applyAutomationPatches = (
 ) => {
   if (!patches || patches.length === 0) return envelopes.map(cloneAutomationEnvelope)
   const merged = new Map(envelopes.map((envelope) => [envelope.targetKey, envelope]))
+
   for (const patch of patches) {
     if (patch.envelope) merged.set(patch.targetKey, cloneAutomationEnvelope(patch.envelope))
     else merged.delete(patch.targetKey)
   }
+
   return Array.from(merged.values(), cloneAutomationEnvelope)
 }
 
@@ -173,6 +175,7 @@ const MAX_CONCURRENT_BUFFER_LOADS = 4
 const createExportSeed = () => {
   const values = new Uint32Array(1)
   crypto.getRandomValues(values)
+
   return values[0]
 }
 
@@ -180,6 +183,7 @@ const createEncodingProgressReporter = (
   report: (sizeBytes: number) => void,
 ): ((sizeBytes: number) => void) => {
   let lastReportedBytes = 0
+
   return (sizeBytes) => {
     if (sizeBytes - lastReportedBytes < ENCODING_PROGRESS_STEP_BYTES) return
     lastReportedBytes = sizeBytes
@@ -192,8 +196,10 @@ const createExportRangeClipPredicate = (
   range: ExportRange,
 ): ((clip: RuntimeClip) => boolean) => {
   const { startSec: rangeStart, endSec: rangeEnd } = getExportRangeBounds(tracks, range)
+
   return (clip) => {
     const clipEnd = clip.startSec + clip.duration
+
     return clipEnd > rangeStart && clip.startSec < rangeEnd
   }
 }
@@ -203,6 +209,7 @@ const filterTracksToExportRange = (
   range: ExportRange,
 ) => {
   const intersects = createExportRangeClipPredicate(tracks, range)
+
   return tracks.map((track) => ({
     ...track,
     clips: track.clips.filter(intersects),
@@ -218,6 +225,7 @@ async function ensureNativeStretchBuffers(input: {
 }) {
   const intersects = createExportRangeClipPredicate(input.tracks, input.range)
   const jobs: (() => Promise<void>)[] = []
+
   for (const track of input.tracks) {
     for (const clip of track.clips) {
       if (clip.midi || !intersects(clip) || clip.buffer
@@ -225,6 +233,7 @@ async function ensureNativeStretchBuffers(input: {
       jobs.push(() => input.loadCapturedClipBuffer(clip, input.signal))
     }
   }
+
   await runWithConcurrency(jobs, MAX_CONCURRENT_BUFFER_LOADS, async (job) => {
     throwIfExportAborted(input.signal)
     await job()
@@ -258,8 +267,10 @@ export const createExportRenderStateSnapshot = async (input: {
     automationPatches,
     externalPluginPolicy = 'browser-export',
   } = input
+
   const fx = createExportFx(masterVolume)
   const localOnly = projectId ? isLocalId('project', projectId) || await getLocalProject(projectId) !== undefined : false
+
   if (localOnly && projectId) {
     // Playback reads the effects draft without draining its preparation-dependent owner. The only rows read are effects and
     // automation envelopes; the other pending-write kinds and the timeline writes never write those rows, and an automation
@@ -267,29 +278,37 @@ export const createExportRenderStateSnapshot = async (input: {
     if (externalPluginPolicy !== 'native-playback' || !effectsProjection) {
       await flushLocalProjectPendingWrites(projectId)
     }
+
     const rows = await captureLocalExportRenderRowsSnapshot(projectId)
+
     if (externalPluginPolicy === 'browser-export') {
       assertBrowserExportHasNoLiveExternalPlugins(await listLocalExternalProcessors(projectId))
     }
+
     applyLocalEffectRowsToFx(fx, rows.effects)
     applyEffectsProjectionToFx(fx, effectsProjection)
+
     return {
       fx: cloneExportFx(fx),
       automationEnvelopes: applyAutomationPatches(rows.automationEnvelopes, automationPatches),
     }
   }
+
   if (!localOnly && projectId && userId) {
     if (!cloudRows) throw new Error('Cloud timeline snapshot is unavailable.')
     applyRoomEffectRowsToFx(fx, cloudRows.effects)
     applyEffectsProjectionToFx(fx, effectsProjection)
+
     return {
       fx: cloneExportFx(fx),
       automationEnvelopes: applyAutomationPatches(cloudRows.automationEnvelopes.flatMap((row) => {
         const envelope = automationEnvelopeFromRow(row)
+
         return envelope ? [envelope] : []
       }), automationPatches),
     }
   }
+
   return { fx: cloneExportFx(fx), automationEnvelopes: [] }
 }
 
@@ -302,14 +321,17 @@ export async function loadInstrumentExportBuffers(
   memory: InstrumentExportMemoryPolicy = portableInstrumentExportMemory,
 ): Promise<void> {
   const trackFx = fx.trackFx
+
   if (!trackFx) return
   const budget = sampledInstrumentRegionScope
+
   type ExportSample = {
     assetKey: string
     url: string
     sourceKind: 'upload' | 'url' | 'recording'
     source: { durationSec: number; sampleRate: number; channelCount: number }
   }
+
   type Consumer = {
     input: ExportSample
     bounds: { sourceStartFrame: number; sourceEndFrame: number }
@@ -318,13 +340,16 @@ export async function loadInstrumentExportBuffers(
     install: (buffer: SampledInstrumentBuffer) => void
     current: SampledInstrumentBuffer | undefined
   }
+
   type RegionJob = {
     key: string
     bytes: number
     consumers: Consumer[]
     existing?: SampledInstrumentBuffer
   }
+
   const jobsByIdentity = new Map<string, RegionJob>()
+
   const matchesRegion = (
     buffer: SampledInstrumentBuffer | undefined,
     sample: ExportSample,
@@ -338,6 +363,7 @@ export async function loadInstrumentExportBuffers(
         return false
       }
     })()
+
   const addConsumer = (
     key: string,
     retainedBytes: number,
@@ -346,13 +372,18 @@ export async function loadInstrumentExportBuffers(
     if (consumer.decodedBytes > consumer.maxDecodedBytes) {
       throw new Error(`Sampled instrument region exceeds the ${consumer.maxDecodedBytes} byte limit.`)
     }
+
     const existing = jobsByIdentity.get(key)
+
     if (existing) {
       existing.consumers.push(consumer)
       existing.bytes = Math.max(existing.bytes, retainedBytes)
+
       if (!existing.existing && consumer.current) existing.existing = consumer.current
+
       return
     }
+
     jobsByIdentity.set(key, {
       key,
       bytes: retainedBytes,
@@ -360,16 +391,21 @@ export async function loadInstrumentExportBuffers(
       existing: consumer.current,
     })
   }
+
   for (const [trackId, entry] of Object.entries(trackFx)) {
     if (allowedTrackIds && !allowedTrackIds.has(trackId)) continue
+
     if (entry.instrument?.kind === 'drum-rack') {
       const buffers = new Map<string, SampledInstrumentBuffer>(entry.drumRackBuffers ?? [])
       entry.drumRackBuffers = buffers
+
       for (const pad of entry.instrument.params.pads) {
         const sample = pad.sample
+
         const region = sample
           ? sampledInstrumentRegion(sample.source, pad.startSec, pad.endSec ?? sample.source.durationSec)
           : undefined
+
         if (sample && region) {
           const key = sampledInstrumentRegionIdentity(sample, region)
           addConsumer(key, sampledInstrumentRegionBytes(region, sample.source.channelCount), {
@@ -382,20 +418,26 @@ export async function loadInstrumentExportBuffers(
           })
         }
       }
+
       const localRegions = new Map<string, number>()
+
       for (const pad of entry.instrument.params.pads) {
         if (!pad.sample) continue
         const region = sampledInstrumentRegion(pad.sample.source, pad.startSec, pad.endSec ?? pad.sample.source.durationSec)
         localRegions.set(sampledInstrumentRegionIdentity(pad.sample, region), sampledInstrumentRegionBytes(region, pad.sample.source.channelCount))
       }
+
       const localBytes = [...localRegions.values()].reduce((total, bytes) => total + bytes, 0)
       const limit = memory.decodedLimit(DRUM_RACK_MAX_DECODED_BYTES)
+
       if (localBytes > limit) throw new Error(`Drum Rack regions exceed the ${limit} byte limit.`)
     }
+
     if (entry.instrument?.kind === 'sampler') {
       const buffers = new Map<string, SampledInstrumentBuffer>(entry.samplerBuffers ?? [])
       entry.samplerBuffers = buffers
       const localRegions = new Map<string, number>()
+
       for (const zone of entry.instrument.params.zones) {
         const region = sampledInstrumentRegion(zone.sample.source, zone.startSec, zone.endSec ?? zone.sample.source.durationSec)
         const key = sampledInstrumentRegionIdentity(zone.sample, region)
@@ -410,14 +452,18 @@ export async function loadInstrumentExportBuffers(
           install: (buffer) => buffers.set(zone.id, buffer),
         })
       }
+
       const localBytes = [...localRegions.values()].reduce((total, bytes) => total + bytes, 0)
       const limit = memory.decodedLimit(entry.instrument.params.maxDecodedBytes)
+
       if (localBytes > limit) {
         throw new Error(`Sampler regions exceed the ${limit} byte limit.`)
       }
     }
+
     if (entry.instrument?.kind === 'granular') {
       const zone = entry.instrument.params.zone
+
       if (!zone) {
         entry.granularBuffer = undefined
       } else {
@@ -441,34 +487,45 @@ export async function loadInstrumentExportBuffers(
             }
           },
         })
+
         if (decodedBytes > limit) {
           throw new Error(`Granular regions exceed the ${limit} byte limit.`)
         }
       }
     }
   }
+
   const jobs = [...jobsByIdentity.values()]
+
   if (jobs.length === 0) return
   memory.admit(budget, jobs)
+
   const leasedExisting = (job: RegionJob) => (
     job.existing !== undefined
     && budget?.isLeased(job.existing.buffer) === true
   )
+
   if (budget) {
     budget.ensureCapacityFor(new Map(
       jobs.flatMap((job) => leasedExisting(job) ? [] : [[job.key, job.bytes]]),
     ))
   }
+
   for (const job of jobs) {
     if (!job.existing) continue
+
     if (!leasedExisting(job)) budget?.set(job.key, job.bytes, () => undefined, job.existing.buffer)
+
     for (const consumer of job.consumers) consumer.install(job.existing)
   }
+
   const loads = jobs.filter((job) => !job.existing)
   const reservations = new Map<string, { release: () => void; commit: () => void }>()
+
   if (budget) {
     for (const job of loads) reservations.set(job.key, budget.reserve(job.key, job.bytes))
   }
+
   try {
     let loadError: unknown
     const loading = new AbortController()
@@ -476,6 +533,7 @@ export async function loadInstrumentExportBuffers(
     await runWithConcurrency(loads, MAX_CONCURRENT_BUFFER_LOADS, async (job) => {
       try {
         throwIfExportAborted(loadSignal)
+
         const result = await loadSampledInstrumentRegion(
           job.consumers[0]?.input ?? (() => { throw new Error('Export sample job has no consumer.') })(),
           job.consumers[0]?.bounds ?? (() => { throw new Error('Export sample job has no bounds.') })(),
@@ -483,15 +541,20 @@ export async function loadInstrumentExportBuffers(
           loadSignal,
           projectId ? { projectId: () => projectId } : {},
         )
+
         throwIfExportAborted(loadSignal)
+
         if (result.status === 'missing') {
           throw new Error(`Failed to preload export sample ${job.consumers[0]?.input.url ?? job.key}`)
         }
+
         const buffer = result.buffer
         const reservation = reservations.get(job.key)
         reservation?.commit()
         budget?.set(job.key, job.bytes, () => undefined, buffer.buffer)
+
         if (memory.leaseRegions) budget?.lease([{ key: job.key, buffer: buffer.buffer, bytes: job.bytes }], true)
+
         for (const consumer of job.consumers) consumer.install(buffer)
       } catch (error) {
         if (!loading.signal.aborted) {
@@ -500,6 +563,7 @@ export async function loadInstrumentExportBuffers(
         }
       }
     })
+
     // Drain sibling decodes before their owning export scope may be released.
     if (loading.signal.aborted) throw loadError
     throwIfExportAborted(signal)
@@ -512,24 +576,30 @@ export const collectStemTracks = (input: StemExportSelection & { tracks: Runtime
   const matchesMode = (track: RuntimeTrack) => input.stemMode === 'channel-output'
     ? track.channelRole === 'group' || track.channelRole === 'return'
     : isRenderableExportTrack(track)
+
   if (input.stemSelection === 'all-tracks') return input.tracks.filter(matchesMode)
   const selectedIds = new Set(input.selectedTrackIds)
+
   return input.tracks.filter((track) => selectedIds.has(track.id) && matchesMode(track))
 }
 
 const requireExportFormats = (formats: readonly ExportAudioFormat[]): readonly ExportAudioFormat[] => {
   const uniqueFormats = [...new Set(formats)]
+
   if (uniqueFormats.length === 0) throw new Error('Select at least one export format.')
+
   return uniqueFormats
 }
 
 const createMixdownFileName = (date: Date, format: ExportAudioFormat): string => {
   const metadata = getExportAudioFormatMetadata(format)
+
   return `mixdown_${formatExportFileTimestamp(date)}${metadata.fileExtension}`
 }
 
 const createSaveTypes = (format: ExportAudioFormat): FilePickerAcceptType[] => {
   const metadata = getExportAudioFormatMetadata(format)
+
   return [{ description: `${metadata.label} audio`, accept: { [metadata.mimeType]: [metadata.fileExtension] } }]
 }
 
@@ -581,11 +651,13 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
   let portableRepository: PreparedStretchArtifactRepository | undefined
   let portableWorkerCleanup: (() => Promise<void>) | undefined
   const nativeInstrumentSources = new Map<string, AudioBuffer>()
+
   const removeNativeSpool = async () => {
     if (!nativeSpool || nativeSpoolRemoved) return
     await nativeSpool.remove()
     nativeSpoolRemoved = true
   }
+
   const disposeNativeStretchResources = async () => {
     await nativeTimelinePageManager?.dispose()
     nativeTimelinePageManager = undefined
@@ -596,21 +668,25 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     await nativeStretchRepository?.dispose?.()
     nativeStretchRepository = undefined
   }
+
   const disposePortableResources = async () => {
     await portableWorkerCleanup?.().catch(() => undefined)
     portableWorkerCleanup = undefined
     await portableRepository?.dispose?.().catch(() => undefined)
     portableRepository = undefined
   }
+
   const saveCompletedLocalMetadata = async () => {
     if (!localProjectId) return
     await saveLocalExportMetadataBatch(localProjectId, localMetadataRows)
     localMetadataRows.length = 0
   }
+
   try {
     if (input.nativeRendererRequired && !input.nativeOfflinePcmRenderer) {
       throw new Error(NATIVE_EXPORT_UNAVAILABLE_MESSAGE)
     }
+
     input.onProgress?.({ phase: 'snapshot' })
     const formats = requireExportFormats(input.formats)
     const multiFormat = formats.length > 1
@@ -635,25 +711,31 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     input.onProgress?.({ phase: 'preroll' })
     input.onProgress?.({ phase: 'tail' })
     const tailMaximumSec = getExportTailMaximumSec(input.render.tail)
+
     const renderRange: ExportRange = {
       mode: 'custom',
       startSec: sourceBounds.startSec,
       endSec: sourceBounds.endSec + tailMaximumSec,
     }
+
     const mixdownModule = import('@daw-browser/audio-engine/export-mixdown')
     const fx = cloneExportFx(input.renderStateSnapshot.fx)
     const automationEnvelopes = input.renderStateSnapshot.automationEnvelopes.map(cloneAutomationEnvelope)
+
     const nativeTracks = input.nativeRendererRequired
       ? filterTracksToExportRange(preloadTracks, input.range)
       : preloadTracks
+
     const nativeStretchTracks = nativeTracks.map((track) => ({
       ...track,
       clips: track.clips.filter(isPortableStretchClip),
     }))
+
     const mayRenderPortableTimeline = !input.nativeRendererRequired
       && input.renderStateSnapshot.automationEnvelopes.length === 0
       && input.sidechainRoutes.length === 0
       && Boolean(input.resolveAudioSource)
+
     const preparation = await Promise.allSettled([
       mixdownModule,
       input.nativeRendererRequired
@@ -672,21 +754,26 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         input.nativeRendererRequired ? nativeInstrumentExportMemory : portableInstrumentExportMemory,
       ),
     ])
+
     for (const result of preparation) if (result.status === 'rejected') throw result.reason
     const mixdown = preparation[0]
+
     if (mixdown.status === 'rejected') throw mixdown.reason
     const exportMixdown = mixdown.value
     throwIfExportAborted(input.signal)
     let preparedStretchAssets: readonly NativePreparedStretchAsset[] = []
+
     if (input.nativeRendererRequired && nativeTracks.some((track) => track.clips.some(isPortableStretchClip))) {
       if (!globalThis.indexedDB || !globalThis.navigator?.locks) {
         throw new Error("Native Stretch export requires IndexedDB and cross-realm Web Locks for bounded artifact storage.")
       }
+
       nativeStretchRepository = createPreparedStretchArtifactRepository()
       nativeStretchCache = createAudioStretchCache({
         resolveSource: input.resolveAudioSource,
         artifactRepository: nativeStretchRepository,
       })
+
       const preparation = await prepareNativeStretchArtifacts({
         tracks: nativeTracks,
         projectBpm: input.bpm,
@@ -695,16 +782,21 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         repository: nativeStretchRepository,
         signal: input.signal,
       })
+
       throwIfExportAborted(input.signal)
+
       if (!preparation.supported) {
         throw new Error(preparation.diagnostics.map((diagnostic) => diagnostic.message).join(' '))
       }
+
       preparedStretchAssets = preparation.assets
       nativeStretchLeaseDispose = preparation.dispose
     }
+
     if (input.getProjectGeneration && input.getProjectGeneration() !== input.projectGeneration) {
       throw new Error('Project changed while preparing export.')
     }
+
     const nativeRender = input.nativeRendererRequired
       ? compileNativeOfflineRenderPlan({
         tracks: nativeTracks,
@@ -727,6 +819,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         },
       })
       : undefined
+
     const nativePlan = nativeRender?.plan
     let latencyFrames = nativeRender?.latencyFrames ?? 0
     outputTarget = await input.outputTargets.createMixdownTarget({
@@ -740,11 +833,14 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     throwIfExportAborted(input.signal)
     input.onProgress?.({ phase: 'rendering' })
     let portableSpool: NativeOfflinePcmSpoolSession | undefined
+
     if (!nativePlan && mayRenderPortableTimeline) {
       if (!globalThis.indexedDB || !globalThis.navigator?.locks) {
         throw new Error('Portable export requires IndexedDB and Web Locks for bounded artifact and PCM spool storage.')
       }
+
       portableRepository = createPreparedStretchArtifactRepository()
+
       const portableMixdown = await exportMixdown.renderPortableMixdownChunks({
         tracks: preloadTracks,
         bpm: input.bpm,
@@ -762,17 +858,21 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       }, async (index, startFrame, pcm, totalFrames) => {
         if (!portableSpool) {
           const spools = createNativeOfflinePcmSpool()
+
           const session = await spools.createSession({
             sessionId: `portable-${crypto.randomUUID()}`,
             sampleRate: input.render.sampleRate,
             channelCount: input.render.numberOfChannels,
             totalFrames,
           })
+
           portableSpool = session
           nativeSpool = portableSpool
           nativeSpoolRemoved = false
         }
+
         const spool = portableSpool
+
         if (!spool) throw new Error('Portable export PCM spool was not created.')
         await spool.append({
           startFrame,
@@ -782,19 +882,25 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         })
         void index
       })
+
       if (!portableMixdown) throw new Error('Portable timeline export is unavailable for this project.')
       portableWorkerCleanup = portableMixdown.cleanup
       latencyFrames = portableMixdown.latencyFrames
     }
+
     if (nativePlan || portableSpool) {
       const nativeRenderer = input.nativeOfflinePcmRenderer
+
       if (nativePlan && !nativeRenderer) throw new Error(NATIVE_EXPORT_UNAVAILABLE_MESSAGE)
       const sourceByKey = new Map<string, NativeOfflineMappedAsset>()
+
       const clipsBySourceKey = new Map(preloadTracks.flatMap((track) => track.clips)
         .filter((clip) => clip.sourceAssetKey !== undefined).map((clip) => [clip.sourceAssetKey, clip]))
+
       if (nativePlan?.mappedAssets && nativePlan.mappedAssets.length > 0) {
         for (const asset of nativePlan.mappedAssets) {
           const previous = sourceByKey.get(asset.sourceAssetKey)
+
           if (previous && (
             previous.frameCount !== asset.frameCount
             || previous.sampleRateHz !== asset.sampleRateHz
@@ -803,8 +909,10 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
           )) {
             throw new Error(`Native export mapped source "${asset.sourceAssetKey}" resolves inconsistently.`)
           }
+
           sourceByKey.set(asset.sourceAssetKey, asset)
         }
+
         const nativeSources = await Promise.all([...sourceByKey.values()].map(async (asset) => ({
             sourceAssetKey: asset.sourceAssetKey,
             sessionAssetId: asset.sessionAssetId,
@@ -817,6 +925,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
               ? undefined
               : await (async () => {
                 const buffer = nativeInstrumentSources.get(asset.sourceAssetKey)
+
                 if (buffer) {
                   return createAudioPcmSourceDescriptor({
                     identity: asset.sourceAssetKey,
@@ -825,13 +934,17 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
                     source: buffer,
                   })
                 }
+
                 const clip = clipsBySourceKey.get(asset.sourceAssetKey)
+
                 if (!clip) {
                   throw new Error(`Native export source "${asset.sourceAssetKey}" is not present in the timeline.`)
                 }
+
                 if (input.resolveAudioSource) {
                   return input.resolveAudioSource(clip, input.signal)
                 }
+
                 if (clip.buffer) {
                   return createAudioPcmSourceDescriptor({
                     identity: getAudioBufferSessionIdentity(clip.buffer),
@@ -842,20 +955,24 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
                     source: clip.buffer,
                   })
                 }
+
                 return undefined
               })(),
         })))
+
         if (nativeSources.some((source) => (
           source.preparedStretchArtifactId === undefined
           && source.descriptor === undefined
         ))) {
           throw new Error('Native export metadata-only mapped audio requires a PCM source resolver.')
         }
+
         nativeTimelinePageManager = createNativeTimelinePageManager({
           sources: nativeSources,
           writePage: async () => undefined,
         })
       }
+
       const provideMappedPage = nativeTimelinePageManager
         ? async (request: {
           asset: NativeOfflineMappedAsset
@@ -864,24 +981,29 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
           signal: AbortSignal
         }): Promise<NativeHostMappedAssetPage> => {
           const registered = sourceByKey.get(request.asset.sourceAssetKey)
+
           if (!registered || registered.sessionAssetId !== request.asset.sessionAssetId
             || registered.frameCount !== request.asset.frameCount
             || registered.sampleRateHz !== request.asset.sampleRateHz
             || registered.channelCount !== request.asset.channelCount) {
             throw new NativeOfflineRenderError('Native offline instrument/source identity changed. Reload samples and retry.')
           }
+
           const page = await nativeTimelinePageManager?.readPage(
             request.asset.sourceAssetKey,
             request.startFrame,
             request.frameCount,
             request.signal,
           )
+
           if (!page || page.sessionAssetId !== request.asset.sessionAssetId) {
             throw new NativeOfflineRenderError('Native offline mapped page identity is invalid.')
           }
+
           return page
         }
         : undefined
+
       const spool = nativePlan
         ? await (nativeRenderer
           ? nativeRenderer(nativePlan, input.signal, (renderedFrames, totalFrames) => {
@@ -889,11 +1011,14 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
             }, provideMappedPage)
           : Promise.reject<NativeOfflinePcmSpoolSession>(new Error(NATIVE_EXPORT_UNAVAILABLE_MESSAGE)))
         : portableSpool
+
       if (!spool) throw new Error('Portable export did not produce a PCM spool.')
+
       if (nativePlan) {
         nativeSpool = spool
         nativeSpoolRemoved = false
       }
+
       const processed = await processNativeOfflinePcmSpool({
         spool,
         latencyFrames,
@@ -901,23 +1026,31 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         render: input.render,
         signal: input.signal,
       })
+
       input.onProgress?.({ phase: 'analyzing' })
+
       if (input.render.normalization.mode !== 'none') input.onProgress?.({ phase: 'gain' })
+
       if (input.render.normalization.mode === 'loudness' && input.render.normalization.limiting === 'true-peak') {
         input.onProgress?.({ phase: 'limiting' })
       }
+
       input.onProgress?.({ phase: 'verifying', analysis: processed.analysis })
       const ditherSeed = createExportSeed()
       let completedFormats = 0
+
       for (const format of formats) {
         const fileName = createMixdownFileName(exportDate, format)
         const fileSink = await outputTarget.openFile(fileName)
+
         try {
           if (format === 'wav') reportFormatProgress(input, 'quantizing', format, completedFormats, formats.length)
           reportFormatProgress(input, 'encoding', format, completedFormats, formats.length)
+
           const reportEncodingProgress = createEncodingProgressReporter((sizeBytes) => {
             reportFormatProgress(input, 'encoding', format, completedFormats, formats.length, sizeBytes)
           })
+
           const enc = await exportMixdown.encodeAudioChunks(processed.replay(), {
             format,
             bitrate: isLossyExportAudioFormat(format) ? input.encoding.bitrateByFormat[format] : undefined,
@@ -927,12 +1060,15 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
             wav: input.encoding.wav,
             ditherSeed,
           })
+
           throwIfExportAborted(input.signal)
           const committed = await fileSink?.commit()
           const savedName = fileSink?.name ?? fileName
           const sizeBytes = committed?.byteLength ?? enc.sizeBytes
+
           if (fileSink) {
             reportFormatProgress(input, 'saving', format, completedFormats, formats.length)
+
             if (localProjectId) {
               localMetadataRows.push({
                 name: savedName,
@@ -942,10 +1078,12 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
                 sizeBytes,
               })
             }
+
             outputs.push({ destination: 'local', name: savedName, sizeBytes, analysis: processed.analysis })
           } else {
             if (!enc.blob) throw new Error('Export did not produce a downloadable file.')
             reportFormatProgress(input, 'saving', format, completedFormats, formats.length)
+
             const saved = await outputTarget.saveBuffer({
               blob: enc.blob,
               fileName,
@@ -955,11 +1093,14 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
               sampleRate: enc.sampleRate,
               signal: input.signal,
             })
+
             throwIfExportAborted(input.signal)
+
             if (localProjectId) {
               if (saved.destination !== 'local') {
                 throw new Error('Local export target selected a cloud destination.')
               }
+
               localMetadataRows.push({
                 name: saved.name,
                 format: enc.format,
@@ -977,6 +1118,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
               if (saved.destination !== 'cloud') {
                 throw new Error('Cloud export target selected a local destination.')
               }
+
               outputs.push({
                 destination: 'cloud',
                 name: saved.name,
@@ -990,10 +1132,13 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
           await fileSink?.abort(error)
           throw error
         }
+
         completedFormats += 1
       }
+
       await saveCompletedLocalMetadata()
       await removeNativeSpool()
+
       return { type: 'success', outputs }
     } else {
       throw new Error(
@@ -1006,7 +1151,9 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     try {
       await saveCompletedLocalMetadata()
     } catch {}
+
     if (isAbortError(err)) return { type: 'canceled', outputs }
+
     return {
       type: 'error',
       message: err instanceof Error ? err.message : 'Export failed',
@@ -1019,19 +1166,23 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     } catch (cleanupError) {
       console.error('[export] portable export cleanup failed after export failure', cleanupError)
     }
+
     try {
       await removeNativeSpool()
     } catch (cleanupError) {
       console.error('[export] native offline PCM cleanup failed after export failure', cleanupError)
     }
+
     try {
       await outputTarget?.dispose?.()
     } catch {}
+
     try {
       await disposeNativeStretchResources()
     } catch (cleanupError) {
       console.error('[export] native Stretch cleanup failed after export', cleanupError)
     }
+
     input.sampledInstrumentRegionScope?.release()
     nativeInstrumentSources.clear()
   }
@@ -1041,14 +1192,17 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
   const outputs: ExportOutput[] = []
   let stemSpool: NativeOfflinePcmSpoolSession | undefined
   let portableRepository: PreparedStretchArtifactRepository | undefined
+
   try {
     if (input.nativeRendererRequired) {
       return { type: 'error', message: NATIVE_EXPORT_UNAVAILABLE_MESSAGE, outputs }
     }
+
     input.onProgress?.({ phase: 'snapshot' })
     const formats = requireExportFormats(input.formats)
     const preloadTracks = input.getTracks()
     const preloadStemTracks = collectStemTracks({ ...input, tracks: preloadTracks })
+
     if (preloadStemTracks.length === 0) throw new Error('Select at least one track to export stems.')
     preflightExportResources({
       tracks: preloadTracks,
@@ -1065,43 +1219,57 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
     const exportMixdown = await import('@daw-browser/audio-engine/export-mixdown')
     const sourceBounds = getExportRangeBounds(preloadTracks, input.range)
     const tailMaximumSec = getExportTailMaximumSec(input.render.tail)
+
     const renderRange: ExportRange = {
       mode: 'custom',
       startSec: sourceBounds.startSec,
       endSec: sourceBounds.endSec + tailMaximumSec,
     }
+
     const graph = exportMixdown.resolveExportMixerGraph({ tracks: preloadTracks, fx })
     const preloadTrackIds = new Set<string>()
+
     for (const track of preloadStemTracks) {
       const plan = exportMixdown.createStemRenderPlan(
         graph,
         { id: track.id, name: track.name, mode: input.stemMode, targetTrackId: track.id },
         input.sidechainRoutes,
       )
+
       for (const id of plan.sourceTrackIds) preloadTrackIds.add(id)
+
       for (const id of plan.detectorOnlyTrackIds) preloadTrackIds.add(id)
+
       const scope = exportMixdown.createSourceAutomationScope(plan.graph, {
         sourceTrackIds: plan.sourceTrackIds,
         includeMasterFx: input.stemMode === 'full-master-contribution',
       })
+
       for (const id of scope.trackIds ?? []) preloadTrackIds.add(id)
     }
+
     const localProject = input.projectId ? await getLocalProject(input.projectId) : undefined
+
     const localProjectId = input.projectId
       && (isLocalId('project', input.projectId) || localProject !== undefined)
       ? input.projectId
       : undefined
+
     const mayRenderPortableStems = automationEnvelopes.length === 0
       && input.sidechainRoutes.length === 0
       && Boolean(input.resolveAudioSource)
+
     if (!mayRenderPortableStems) {
       throw new Error('Portable stem export does not support automation, sidechain routing, or unavailable source paging.')
     }
+
     const outputTarget = await input.outputTargets.createStemTarget()
     throwIfExportAborted(input.signal)
+
     if (mayRenderPortableStems && (!globalThis.indexedDB || !globalThis.navigator?.locks)) {
       throw new Error('Portable stem export requires IndexedDB and Web Locks for bounded artifact and PCM spool storage.')
     }
+
     await loadInstrumentExportBuffers(
       fx,
       input.signal,
@@ -1114,7 +1282,9 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
     const stemTracks = preloadStemTracks
     let completedStems = 0
     const usedStemFileNames = new Set<string>()
+
     if (mayRenderPortableStems) portableRepository = createPreparedStretchArtifactRepository()
+
     for (const track of stemTracks) {
       input.onProgress?.({
         phase: 'rendering',
@@ -1122,14 +1292,18 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
         completedStems,
         totalStems: stemTracks.length,
       })
+
       const plan = exportMixdown.createStemRenderPlan(
         graph,
         { id: track.id, name: track.name, mode: input.stemMode, targetTrackId: track.id },
         input.sidechainRoutes,
       )
+
       let processedSpool: Awaited<ReturnType<typeof processNativeOfflinePcmSpool>> | undefined
+
       if (mayRenderPortableStems) {
         const stemTrackIds = new Set([...plan.sourceTrackIds, ...plan.detectorOnlyTrackIds])
+
         const portable = await exportMixdown.renderPortableMixdownChunks({
           tracks,
           bpm: input.bpm,
@@ -1156,6 +1330,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
               totalFrames,
             })
           }
+
           await stemSpool.append({
             startFrame,
             frameCount: pcm.frameCount,
@@ -1164,8 +1339,10 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
           })
           void index
         })
+
         if (!portable) throw new Error('Portable stem export is unavailable for this project.')
         await portable.cleanup()
+
         if (!stemSpool) throw new Error('Portable stem export did not produce a PCM spool.')
         const spool = stemSpool
         processedSpool = await processNativeOfflinePcmSpool({
@@ -1176,24 +1353,31 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
           signal: input.signal,
         })
       }
+
       const renderedStemMetadata = plan.metadata
       throwIfExportAborted(input.signal)
       const processed = processedSpool
+
       if (!processed) throw new Error('Portable stem export did not produce processed audio.')
       const analysis = processed.analysis
+
       if (!analysis) throw new Error('Stem export analysis is unavailable.')
       let completedFormats = 0
+
       for (const format of formats) {
         const metadata = getExportAudioFormatMetadata(format)
         const fileName = createUniqueStemFileName(track.name, metadata.fileExtension, usedStemFileNames)
         const fileSink = await outputTarget.openFile(fileName)
         let committed: ExportFileCommit = {}
         let encodedSizeBytes = 0
+
         try {
           reportStemFormatProgress(input, 'encoding', format, track, completedStems, stemTracks.length, completedFormats, formats.length)
+
           const reportEncodingProgress = createEncodingProgressReporter((sizeBytes) => {
             reportStemFormatProgress(input, 'encoding', format, track, completedStems, stemTracks.length, completedFormats, formats.length, sizeBytes)
           })
+
           const encoded = await exportMixdown.encodeAudioChunks(processed.replay(), {
             format,
             bitrate: isLossyExportAudioFormat(format) ? input.encoding.bitrateByFormat[format] : undefined,
@@ -1203,6 +1387,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
             wav: input.encoding.wav,
             ditherSeed: createExportSeed(),
           })
+
           encodedSizeBytes = encoded.sizeBytes
           throwIfExportAborted(input.signal)
           committed = await fileSink.commit()
@@ -1210,19 +1395,24 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
           await fileSink.abort(error)
           throw error
         }
+
         outputs.push({ destination: 'local', name: `stems/${fileName}`, sizeBytes: committed.byteLength ?? encodedSizeBytes, analysis, stem: renderedStemMetadata })
         completedFormats += 1
         throwIfExportAborted(input.signal)
       }
+
       await stemSpool?.remove()
       stemSpool = undefined
       completedStems += 1
       throwIfExportAborted(input.signal)
     }
+
     input.onProgress?.({ phase: 'saving', completedStems, totalStems: stemTracks.length })
+
     return { type: 'success', outputs }
   } catch (err) {
     if (isAbortError(err)) return { type: 'canceled', outputs }
+
     return {
       type: 'error',
       message: err instanceof Error ? err.message : 'Stem export failed',
@@ -1232,9 +1422,11 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
     try {
       await stemSpool?.remove()
     } catch {}
+
     try {
       await portableRepository?.dispose?.()
     } catch {}
+
     input.sampledInstrumentRegionScope?.release()
   }
 }

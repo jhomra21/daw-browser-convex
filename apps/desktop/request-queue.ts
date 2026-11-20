@@ -27,9 +27,11 @@ type RequestQueueOptions = {
 }
 
 type RequestHandler = (request: PreloadHostRequest) => Promise<PreloadHostResponse>
+
 type RequestCancellationHandler = (requestId: string) => void
 
 const errorFor = (_operation: DesktopOperationV1, code: HostErrorV1["code"], message: string): HostErrorV1 | ControlErrorV1 => hostError(code, message)
+
 const deadlineExceeded = (id: string, operation: DesktopOperationV1): PreloadHostResponse => ({
   id,
   error: errorFor(operation, "deadline-exceeded", "The request deadline elapsed."),
@@ -56,21 +58,27 @@ export const createRequestQueue = ({ reply, now = Date.now, queueLimit }: Reques
   let handler: RequestHandler | undefined
   let cancelHandler: RequestCancellationHandler | undefined
   let currentGeneration = 0
+
   const cancelActive = (id: string, controller: AbortController) => {
     controller.abort()
+
     try {
       cancelHandler?.(id)
     } catch {}
   }
+
   const cancelAll = () => {
     for (const entry of queued.values()) reply(entry.generation, cancelled(entry.request.id, entry.request.operation))
     queued.clear()
+
     for (const { controller, entry } of active.values()) {
       cancelActive(entry.request.id, controller)
       reply(entry.generation, cancelled(entry.request.id, entry.request.operation))
     }
+
     active.clear()
   }
+
   const advance = (nextGeneration: number) => {
     if (nextGeneration <= currentGeneration) return
     currentGeneration = nextGeneration
@@ -80,25 +88,35 @@ export const createRequestQueue = ({ reply, now = Date.now, queueLimit }: Reques
   const dispatch = (entry: QueuedRequest) => {
     if (queued.has(entry.request.id) || active.has(entry.request.id)) {
       reply(entry.generation, duplicate(entry.request.id, entry.request.operation))
+
       return
     }
+
     if (entry.deadlineAt <= now()) {
       reply(entry.generation, deadlineExceeded(entry.request.id, entry.request.operation))
+
       return
     }
+
     if (!handler) {
       if (queued.size >= queueLimit) {
         reply(entry.generation, { id: entry.request.id, error: errorFor(entry.request.operation, "unavailable", "The timeline controller is not ready.") })
+
         return
       }
+
       queued.set(entry.request.id, entry)
+
       return
     }
+
     const controller = new AbortController()
     active.set(entry.request.id, { controller, entry })
+
     const settle = () => {
       if (active.get(entry.request.id)?.controller === controller) active.delete(entry.request.id)
     }
+
     void handler({
       id: entry.request.id,
       operation: entry.request.operation,
@@ -140,12 +158,16 @@ export const createRequestQueue = ({ reply, now = Date.now, queueLimit }: Reques
     },
     cancel(id: string) {
       const entry = queued.get(id)
+
       if (entry) {
         queued.delete(id)
         reply(entry.generation, cancelled(id, entry.request.operation))
+
         return
       }
+
       const current = active.get(id)
+
       if (!current) return
       cancelActive(id, current.controller)
       active.delete(id)
@@ -156,12 +178,15 @@ export const createRequestQueue = ({ reply, now = Date.now, queueLimit }: Reques
         handler = undefined
         cancelAll()
         cancelHandler = undefined
+
         return
       }
+
       handler = next
       cancelHandler = onCancel
       const entries = [...queued.values()]
       queued.clear()
+
       for (const entry of entries) dispatch(entry)
     },
   }

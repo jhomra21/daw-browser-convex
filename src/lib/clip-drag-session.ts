@@ -9,6 +9,7 @@ import type { Clip, Track, TrackId } from "@daw-browser/timeline-core/types";
 import type { RuntimeClip, RuntimeTrack } from "~/lib/timeline-runtime-types";
 
 type DraggingIds = { trackId: Track["id"]; clipId: string };
+
 type ClipMove = { clipId: string; trackId: Track["id"]; startSec: number };
 
 type ClipDragStart = {
@@ -28,15 +29,18 @@ export const buildClipDragStart = (input: {
   canWriteClip: (clipId: string) => boolean;
 }): ClipDragStart => {
   const ownedSelectionIds = Array.from(input.selectedClipIds).filter((id) => input.canWriteClip(id));
+
   const dragSelectionIds = input.selectedClipIds.has(input.clipId) && ownedSelectionIds.length > 1
     ? ownedSelectionIds
     : [input.clipId];
+
   const isMultiDrag = dragSelectionIds.length > 1;
   const prePositions = new Map<string, ClipMove>();
 
   for (const id of dragSelectionIds) {
     const clip = input.lookup.clipById.get(id);
     const trackId = input.lookup.clipTrackIdById.get(id);
+
     if (!clip || !trackId) continue;
     prePositions.set(id, { clipId: id, trackId, startSec: clip.startSec });
   }
@@ -52,10 +56,12 @@ export const buildClipDragStart = (input: {
 
   const anchorTrackIdx = input.tracks.findIndex((track) => track.id === input.trackId);
   const items: MultiDragSnapshot["items"] = [];
+
   for (const id of dragSelectionIds) {
     const clip = input.lookup.clipById.get(id);
     const trackId = input.lookup.clipTrackIdById.get(id);
     const trackIdx = trackId ? (input.lookup.trackIndexById.get(trackId) ?? -1) : -1;
+
     if (!clip || trackIdx < 0) continue;
     items.push({ clipId: id, origTrackIdx: trackIdx, origStartSec: clip.startSec });
   }
@@ -75,11 +81,14 @@ export const buildClipDragStart = (input: {
 
 export const draftMovesChanged = (previous: ClipMove[] | null, nextMoves: ClipMove[]) => {
   if (!previous || previous.length !== nextMoves.length) return true;
+
   for (let index = 0; index < nextMoves.length; index++) {
     const prev = previous[index];
     const next = nextMoves[index];
+
     if (prev.clipId !== next.clipId || prev.trackId !== next.trackId || prev.startSec !== next.startSec) return true;
   }
+
   return false;
 };
 
@@ -98,6 +107,7 @@ export const readDragPointer = (input: {
   const x = input.event.clientX - rect.left - input.dragDeltaX;
   const laneIdx = trackLayoutDropIndexAtClientY(input.trackLayout, input.event.clientY, input.scroll);
   const rawStart = Math.max(0, (input.visibleStartSec ?? 0) + x / input.pixelsPerSecond);
+
   return {
     desiredStart: input.gridEnabled
       ? quantizeSecToGrid(rawStart, input.bpm, input.gridDenominator, "round")
@@ -108,6 +118,7 @@ export const readDragPointer = (input: {
 
 export const createDuplicatePreviews = (placements: DuplicatedClipPlacement[], previewPrefix: string) => {
   const previews = new Map<TrackId, Clip[]>();
+
   for (const placement of placements) {
     const trackPreviews = previews.get(placement.trackId) ?? [];
     trackPreviews.push({
@@ -117,6 +128,7 @@ export const createDuplicatePreviews = (placements: DuplicatedClipPlacement[], p
     });
     previews.set(placement.trackId, trackPreviews);
   }
+
   return previews;
 };
 
@@ -155,11 +167,13 @@ export const previousMovesFrom = (moves: ClipMove[], prePositions: Map<string, C
 export const createDragTrackLookupCache = () => {
   let tracksSnapshot: Track[] | null = null;
   let lookupSnapshot: TimelineTrackIndex | null = null;
+
   return {
     get(tracks: Track[]) {
       if (tracksSnapshot === tracks && lookupSnapshot) return lookupSnapshot;
       tracksSnapshot = tracks;
       lookupSnapshot = createTimelineTrackIndex(tracks);
+
       return lookupSnapshot;
     },
     clear() {

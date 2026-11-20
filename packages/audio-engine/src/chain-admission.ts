@@ -17,14 +17,19 @@ export function createChainAdmission<Result>(joined: (underlying: Result) => Res
   const admit = (instances: AudioEffectRuntimeInstance[], install: Install<Result> | undefined, dropped: Result): Promise<Result> => {
     const key = JSON.stringify(instances)
     intent = instances
+
     if (!install) {
       awaitingContext = true
       work = undefined
+
       return Promise.resolve(dropped)
     }
+
     awaitingContext = false
+
     if (work?.key === key) return work.promise.then(joined)
     const id = ++lastWorkId
+
     const run = async () => {
       try {
         return await install(instances)
@@ -32,8 +37,10 @@ export function createChainAdmission<Result>(joined: (underlying: Result) => Res
         if (work?.id === id) work = undefined
       }
     }
+
     const promise = run()
     work = { id, key, promise }
+
     return promise
   }
 

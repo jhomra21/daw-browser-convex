@@ -226,6 +226,7 @@ window.browserFixture = {
 const buildFixture = async () => {
   const stubSources = new Map(Object.entries(stubs))
   const stubFor = (id: string) => Array.from(stubSources.keys()).find((suffix) => id.endsWith(suffix))
+
   const result = await build({
     root: repositoryRoot,
     configFile: false,
@@ -236,21 +237,27 @@ const buildFixture = async () => {
       resolveId: (id) => {
         if (id.endsWith(fixtureId)) return `\0${fixtureId}.ts`
         const stub = stubFor(id)
+
         return stub ? `\0stub:${stub}.ts` : undefined
       },
       load: (id) => {
         if (id === `\0${fixtureId}.ts`) return fixture
+
         return id.startsWith('\0stub:') ? stubSources.get(id.slice('\0stub:'.length, -'.ts'.length)) : undefined
       },
     }],
     resolve: { alias: { '~': `${repositoryRoot}src` } },
     build: { write: false, minify: false, lib: { entry: fixtureId, formats: ['iife'], name: 'browserControllerFixture' } },
   })
+
   const output = Array.isArray(result) ? result[0] : result
+
   if (!output || !('output' in output)) throw new Error('Expected a single fixture bundle.')
+
   const styles = output.output.flatMap((chunk) => (
     chunk.type === 'asset' && chunk.fileName.endsWith('.css') ? [String(chunk.source)] : []
   ))
+
   return `<!doctype html><head><meta charset="utf-8"><style>${styles.join('\n')}</style></head><body style="margin:0"><script>${output.output[0].code}</script>`
 }
 
@@ -259,26 +266,34 @@ const openFixture = async (name: string) => {
   await mkdir(directory, { recursive: true })
   await Bun.write(`${directory}/index.html`, await buildFixture())
   const session = `browser-controller-${name}-${crypto.randomUUID()}`
+
   const run = async (...args: string[]) => {
     const env = { ...process.env }
     delete env.AGENT_BROWSER_CDP
     delete env.AGENT_BROWSER_SESSION
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
     const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
+
     if (await child.exited !== 0) throw new Error(stderr || stdout)
+
     return stdout.trim()
   }
+
   await run('open', `file://${directory}/index.html`)
+
   const read = async <Schema extends z.ZodType>(schema: Schema, script: string): Promise<z.infer<Schema>> => (
     schema.parse(JSON.parse(await run('eval', `(async () => JSON.stringify(await ${script}))()`).then((text) => JSON.parse(text))))
   )
+
   const pointSchema = z.object({ x: z.number(), y: z.number() })
   const at = async (script: string) => read(pointSchema, script)
+
   const click = async (point: z.infer<typeof pointSchema>, button: 'left' | 'right' = 'left') => {
     await run('mouse', 'move', String(Math.round(point.x)), String(Math.round(point.y)))
     await run('mouse', 'down', button)
     await run('mouse', 'up', button)
   }
+
   return {
     directory,
     run,
@@ -302,12 +317,14 @@ const resultSchema = z.object({
   renameInput: z.object({ value: z.string(), disabled: z.boolean(), focused: z.boolean() }).nullable(),
   menuOpen: z.boolean(),
 })
+
 type FolderResult = z.infer<typeof resultSchema>
 
 test('browser folder failures show action-specific feedback and retry cleanly', async () => {
   const page = await openFixture('folder-failures')
   const results: Record<string, Record<string, FolderResult>> = {}
   const result = () => page.read(resultSchema, 'browserFixture.result()')
+
   try {
     for (const project of ['project:local-fixture', 'shared-fixture']) {
       const runs: Record<string, FolderResult> = {}
@@ -363,7 +380,9 @@ test('browser folder failures show action-specific feedback and retry cleanly', 
     console.log(`Browser folder failure evidence: ${page.directory}`)
     await page.close()
   }
+
   const original = ['folder-drums:Drums', 'folder-empty:Empty']
+
   for (const runs of Object.values(results)) {
     expect(runs.createFailed).toMatchObject({ notifications: [{ title: 'Folder creation failed', message: 'Disk is full' }], folders: original })
     expect(runs.createRetried).toMatchObject({ notifications: runs.createFailed?.notifications, folders: [...original, 'folder-1:New Folder'] })
@@ -393,8 +412,10 @@ const deviceSectionsSchema = z.array(z.object({ id: z.string(), leafCount: z.num
 test('built-in preset folders keep their row IDs, order, counts, and search wording', async () => {
   const page = await openFixture('preset-folders')
   const results: Record<string, z.infer<typeof deviceSectionsSchema>> = {}
+
   try {
     await page.evaluate('browserFixture.mount("project:local-fixture")')
+
     for (const [tab, query] of [
       ['effects', ''], ['effects', 'mixing'], ['effects', 'audio effect chains'], ['effects', 'space delay'], ['effects', 'fixture'],
       ['midi-instruments', ''], ['midi-instruments', 'synths'], ['midi-instruments', 'instrument presets'], ['midi-instruments', 'pluck'], ['midi-instruments', 'fixture'],
@@ -406,6 +427,7 @@ test('built-in preset folders keep their row IDs, order, counts, and search word
     console.log(`Preset folder evidence: ${page.directory}/results.json`)
     await page.close()
   }
+
   expect(results).toEqual(expectedPresetSections)
 }, 120_000)
 

@@ -32,11 +32,14 @@ type SpectrumCanvasProps = {
 function SpectrumCanvas(props: SpectrumCanvasProps) {
   let frame: HTMLDivElement | undefined
   let canvas: HTMLCanvasElement | undefined
+
   const paint = () => {
     const context = canvas?.getContext('2d')
+
     if (!canvas || !context || canvas.width === 0 || canvas.height === 0) return
     props.paint(context, canvas.width, canvas.height, canvas)
   }
+
   onMount(() => {
     // The canvas is out of flow so resizing its bitmap never changes the size being observed.
     const observer = new ResizeObserver(() => {
@@ -45,6 +48,7 @@ function SpectrumCanvas(props: SpectrumCanvasProps) {
       canvas.height = Math.max(1, Math.round(frame.clientHeight * devicePixelRatio))
       paint()
     })
+
     if (frame) observer.observe(frame)
     onCleanup(() => observer.disconnect())
   })
@@ -52,6 +56,7 @@ function SpectrumCanvas(props: SpectrumCanvasProps) {
     void props.frame
     paint()
   })
+
   return (
     <div ref={(element) => (frame = element)} class="relative min-h-0 flex-1" data-spectrum-canvas>
       <canvas ref={(element) => (canvas = element)} role="img" aria-label={props.label} class="absolute inset-0 size-full bg-device-graph-background" />
@@ -66,14 +71,17 @@ export default function SpectrumView(props: { frame: SpectrumFrame | null; view:
     if (props.frame) history.push(props.frame)
     else history.clear()
   })
+
   const curveColors = (canvas: HTMLCanvasElement) => {
     const style = getComputedStyle(canvas)
+
     return {
       background: style.getPropertyValue('--device-graph-background'),
       grid: style.getPropertyValue('--device-graph-grid'),
       line: style.getPropertyValue('--device-graph-accent'),
     }
   }
+
   return (
     <div class="flex h-full min-h-0 w-full flex-col gap-1" data-spectrum-view>
       <Show when={props.view !== 'spectrogram'}>

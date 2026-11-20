@@ -15,6 +15,7 @@ const createClip = (input = {}) => ({
 describe('calculateAudioLeftResizeTiming', () => {
   test('uses the immutable drag baseline for repeated left trims', () => {
     const baselineClip = createClip()
+
     const firstMove = calculateAudioLeftResizeTiming({
       baselineClip,
       fixedRightSec: 5,
@@ -22,6 +23,7 @@ describe('calculateAudioLeftResizeTiming', () => {
       bufferDurationSec: 5,
       projectBpm: 120,
     })
+
     const secondMove = calculateAudioLeftResizeTiming({
       baselineClip,
       fixedRightSec: 5,

@@ -12,6 +12,7 @@ const spectrum = (size: number, bin: number, magnitude = 1) => {
   const imaginary = new Float64Array(size)
   real[bin] = magnitude
   real[size - bin] = magnitude
+
   return { real, imaginary }
 }
 
@@ -42,9 +43,11 @@ describe('spectral core', () => {
   test('sqrt-Hann overlap normalization is constant in the interior', () => {
     const window = createSqrtHannWindow(1024)
     const sums = new Float64Array(1024)
+
     for (let shift = 0; shift < 4; shift += 1) {
       for (let index = 0; index < 1024; index += 1) sums[index] += window[(index + shift * 256) % 1024] ** 2
     }
+
     expect(Math.max(...sums) - Math.min(...sums)).toBeLessThan(1e-12)
   })
 

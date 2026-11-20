@@ -62,12 +62,15 @@ export function useTimelinePreferences(
   options: UseTimelinePreferencesOptions,
 ): UseTimelinePreferencesReturn {
   const [sidebarWidth, setSidebarWidth] = createSignal(TIMELINE_SIDEBAR_MIN_WIDTH)
+
   const loadLocalState = async <TValue,>(projectId: string, key: string) => (
     isLocalId('project', projectId) ? await loadLocalProjectState<TValue>(projectId, key) : undefined
   )
+
   const saveLocalState = async <TValue,>(projectId: string, key: string, value: TValue) => {
     if (isLocalId('project', projectId)) await saveLocalProjectState(projectId, key, value)
   }
+
   const onLocalSaveError = (projectId: string, cause: unknown) => {
     options.onLocalSaveFailed?.(projectId, cause instanceof Error ? cause.message : 'Local project settings could not be saved.')
   }
@@ -117,11 +120,13 @@ export function useTimelinePreferences(
     saveAsync: (projectId, value) => saveLocalState(projectId, 'loop', value),
     onSaveAsyncError: onLocalSaveError,
   })
+
   const scaleState = useProjectPersistedState<number>({
     projectId: options.projectId,
     createInitial: () => DEFAULT_PIXELS_PER_SECOND,
     load: (projectId) => {
       if (isLocalId('project', projectId)) return DEFAULT_PIXELS_PER_SECOND
+
       return loadTimelineScale(projectId)
     },
     loadAsync: (projectId) => loadLocalState<number>(projectId, 'timelineScale'),
@@ -136,40 +141,53 @@ export function useTimelinePreferences(
   const setSyncMix = syncMixState.setValue
   const cloudTimelineSettings = () => options.cloudTimelineSettings?.()
   const isLocalProject = () => isLocalId('project', options.projectId())
+
   const bpm = () => isLocalProject()
     ? bpmState.value()
     : cloudTimelineSettings()?.tempoBpm ?? 120
+
   const setBpm = (value: number) => {
     if (isLocalProject()) {
       bpmState.setValue(value)
+
       return
     }
+
     const projectId = options.projectId()
+
     if (projectId) options.onCloudTimelineSettingsChange?.(projectId, { tempoBpm: value })
   }
+
   const gridEnabled = () => gridState.value().enabled
   const gridDenominator = () => gridState.value().denominator
+
   const loopEnabled = () => isLocalProject()
     ? loopState.value().enabled
     : cloudTimelineSettings()?.loopEnabled ?? false
+
   const loopStartSec = () => isLocalProject()
     ? loopState.value().startSec
     : cloudTimelineSettings()?.loopStartSec ?? 0
+
   const loopEndSec = () => isLocalProject()
     ? loopState.value().endSec
     : cloudTimelineSettings()?.loopEndSec ?? 8
+
   const pixelsPerSecond = () => clampPixelsPerSecond(scaleState.value())
+
   const isBooleanUpdater = (
     value: boolean | ((current: boolean) => boolean),
   ): value is (current: boolean) => boolean => typeof value === 'function'
 
   const clampBpm = (value: number) => {
     if (!Number.isFinite(value)) return bpm()
+
     return Math.min(300, Math.max(30, Math.round(value)))
   }
 
   const toggleSyncMix = () => {
     const projectId = options.projectId()
+
     if (!projectId) return
     setSyncMix((current) => !current)
   }
@@ -190,9 +208,12 @@ export function useTimelinePreferences(
       const current = loopEnabled()
       const enabled = isBooleanUpdater(value) ? value(current) : value
       const projectId = options.projectId()
+
       if (projectId) options.onCloudTimelineSettingsChange?.(projectId, { loopEnabled: enabled })
+
       return
     }
+
     loopState.setValue((current) => ({
       ...current,
       enabled: isBooleanUpdater(value) ? value(current.enabled) : value,
@@ -202,20 +223,25 @@ export function useTimelinePreferences(
   const setLoopRegion = (start: number, end: number) => {
     const nextStart = Math.max(0, Math.min(start, end - 0.05))
     const nextEnd = Math.max(nextStart + 0.05, end)
+
     if (!isLocalProject()) {
       const projectId = options.projectId()
+
       if (projectId) options.onCloudTimelineSettingsChange?.(projectId, {
         loopStartSec: nextStart,
         loopEndSec: nextEnd,
       })
+
       return
     }
+
     loopState.setValue((current) => ({
       ...current,
       startSec: nextStart,
       endSec: nextEnd,
     }))
   }
+
   const previewPixelsPerSecond = (value: number) => {
     scaleState.setValueSilently(clampPixelsPerSecond(value))
   }

@@ -12,17 +12,21 @@ type Summary = { pending: number; failed: number };
 const actualOutbox = { ...(await import("~/lib/shared-outbox")) };
 const actualAssets = { ...(await import("~/lib/local-assets")) };
 const actualBackup = { ...(await import("~/lib/cloud-backup")) };
+
 type BackupResult = Awaited<ReturnType<typeof actualBackup.runProjectBackup>>;
+
 const actualAssetCache = { ...(await import("~/lib/cloud-asset-cache")) };
 const summaryReads: { projectId: string; userId: string; read: PromiseWithResolvers<Summary> }[] = [];
 const flushes: PromiseWithResolvers<Summary>[] = [];
 let setAssetDirectory = async (): Promise<void> => undefined;
+
 const cloud = {
   backup: async (): Promise<BackupResult> => ({ ok: true }),
   restore: async (): Promise<void> => undefined,
   duplicate: async (): Promise<string> => "project:duplicate",
   download: async (): Promise<number> => 0,
 };
+
 const defaultCloud = { ...cloud };
 
 mock.module("~/lib/shared-outbox", () => ({
@@ -30,18 +34,22 @@ mock.module("~/lib/shared-outbox", () => ({
   readSharedOutboxSummary: (projectId: string, userId: string) => {
     const read = Promise.withResolvers<Summary>();
     summaryReads.push({ projectId, userId, read });
+
     return read.promise;
   },
   flushSharedOutbox: () => {
     const flush = Promise.withResolvers<Summary>();
     flushes.push(flush);
+
     return flush.promise;
   },
 }));
+
 mock.module("~/lib/local-assets", () => ({
   ...actualAssets,
   setLocalProjectAssetDirectory: () => setAssetDirectory(),
 }));
+
 mock.module("~/lib/cloud-backup", () => ({
   ...actualBackup,
   runProjectBackup: () => cloud.backup(),
@@ -49,6 +57,7 @@ mock.module("~/lib/cloud-backup", () => ({
   restoreCloudBackupToLocalProject: () => cloud.restore(),
   duplicateCloudBackupAsLocalProject: () => cloud.duplicate(),
 }));
+
 mock.module("~/lib/cloud-asset-cache", () => ({
   ...actualAssetCache,
   downloadCloudAssetsForOffline: () => cloud.download(),
@@ -57,6 +66,7 @@ mock.module("~/lib/cloud-asset-cache", () => ({
 const { useLocalProjectActions } = await import("./useLocalProjectActions");
 
 const cleanups: (() => void)[] = [];
+
 afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup();
   setAssetDirectory = async () => undefined;
@@ -66,11 +76,15 @@ afterEach(() => {
 const settle = async () => {
   for (let index = 0; index < 10; index += 1) await Promise.resolve();
 };
+
 const lastRead = () => {
   const entry = summaryReads.at(-1);
+
   if (!entry) throw new Error("Expected an outbox summary read.");
+
   return entry;
 };
+
 const abortError = () => new DOMException("The user aborted a request.", "AbortError");
 
 type PickerWindow = {
@@ -83,8 +97,10 @@ const mount = (initial: { projectId: string; userId?: string }, browserWindow: P
   const [projectId, setProjectId] = createSignal(initial.projectId);
   const [userId, setUserId] = createSignal(initial.userId);
   const notices: { title: string; message: string }[] = [];
+
   const actions = createRoot((dispose) => {
     cleanups.push(dispose);
+
     return useLocalProjectActions({
       projectId,
       userId,
@@ -92,6 +108,7 @@ const mount = (initial: { projectId: string; userId?: string }, browserWindow: P
       notify: (title, message) => { notices.push({ title, message }); },
     });
   });
+
   return { actions, notices, setProjectId, setUserId };
 };
 

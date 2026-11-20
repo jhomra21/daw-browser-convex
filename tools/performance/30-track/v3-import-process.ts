@@ -28,27 +28,37 @@ raf:{sampleCount:state.raf.length,intervalsMs:stats(state.raf)},applicationWork:
 longTasks:{supported:state.observer!==null,count:state.observer?state.long.length:null,totalDurationMs:state.observer?state.long.reduce((a,b)=>a+b,0):null,maxDurationMs:state.observer&&state.long.length?Math.max(...state.long):null},
 droppedSamples:{raf:state.drop.raf,applicationWork:state.drop.work,longTasks:state.drop.long},
 attribution:{phases:state.phases,longFrames:state.longFrames,counters:state.counters,durations:durationStats,droppedLongFrames:state.drop.longFrames}}})()`
+
 export const matchesControlProjectUrl = (url: string, projectId: string) => {
   try {
     const parsed = new URL(url)
+
     return parsed.protocol === "daw:" && parsed.hostname === "app"
       && parsed.searchParams.get("projectId") === projectId
   } catch { return false }
 }
+
 type CdpTarget = { id: string; type: string; url: string; webSocketDebuggerUrl?: string }
+
 export const selectedProjectCdpTarget = (targets: readonly CdpTarget[], projectId: string) => {
   const matches = targets.filter((target) => target.type === "page" && target.webSocketDebuggerUrl
     && matchesControlProjectUrl(target.url, projectId))
+
   return matches.length === 1 ? matches[0] ?? null : null
 }
+
 export const probeProjectCdp = async (port: string, projectId: string): Promise<"responsive" | "target-absent" | "endpoint-mismatch" | "deadline" | "evaluation-failed"> => {
   const targets = z.array(z.object({ id: z.string(), type: z.string(), url: z.string(),
     webSocketDebuggerUrl: z.string().optional() }).passthrough()).max(64)
     .parse(await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(3_000) })).json())
+
   const target = selectedProjectCdpTarget(targets, projectId)
+
   if (!target?.webSocketDebuggerUrl) return "target-absent"
   const url = new URL(target.webSocketDebuggerUrl)
+
   if (!["127.0.0.1", "localhost"].includes(url.hostname) || url.port !== port) return "endpoint-mismatch"
+
   return new Promise((resolve) => {
     const socket = new WebSocket(url)
     const deadline = setTimeout(() => { socket.close(); resolve("deadline") }, 3_000)
@@ -59,47 +69,61 @@ export const probeProjectCdp = async (port: string, projectId: string): Promise<
         const message = z.object({ id: z.number().optional(), result: z.object({
           result: z.object({ value: z.string().optional() }).passthrough(),
         }).passthrough().optional() }).passthrough().parse(JSON.parse(String(event.data)))
+
         if (message.id !== 1) return
         clearTimeout(deadline)
         socket.close()
         resolve(matchesControlProjectUrl(message.result?.result.value ?? "", projectId) ? "responsive" : "evaluation-failed")
       } catch { clearTimeout(deadline); socket.close(); resolve("evaluation-failed") }
     }
+
     socket.onerror = () => { clearTimeout(deadline); socket.close(); resolve("evaluation-failed") }
   })
 }
+
 export const pingProjectCdp = async (port: string, projectId: string) =>
   (await probeProjectCdp(port, projectId)) === "responsive"
+
 export const parseBrowserProjectId = (output: string) => {
   const encoded = z.string().min(1).parse(JSON.parse(output))
+
   return z.string().regex(/^project:[A-Za-z0-9-]+$/).parse(JSON.parse(encoded))
 }
+
 export const rows = async () => {
   const child = Bun.spawn(["ps", "-axo", "pid=,ppid=,pgid=,time=,command="], { stdout: "pipe" })
   const text = await new Response(child.stdout).text()
+
   return text.split("\n").flatMap((line) => {
     const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/)
+
     if (!match) return []
     const [, pid, parentPid, processGroupId, cpuTime, command] = match
     const timeParts = cpuTime.split(":")
     const seconds = Number(timeParts.pop())
     const minutes = Number(timeParts.pop() ?? 0)
     const hours = Number(timeParts.pop() ?? 0)
+
     if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(seconds)) return []
+
     return [{
       pid: Number(pid), parentPid: Number(parentPid), processGroupId: Number(processGroupId),
       cpuTimeSec: hours * 3600 + minutes * 60 + seconds, command,
     }]
   })
 }
+
 type ProcessRow = Awaited<ReturnType<typeof rows>>[number]
+
 type ProcessIdentity = Pick<ProcessRow, "pid" | "parentPid" | "processGroupId" | "command">
+
 type ProcessCpuDistribution = {
   samples: number
   averagePercent: number | null
   p95Percent: number | null
   peakPercent: number | null
 }
+
 type NativeProcessGeneration = {
   index: number
   startElapsedMs: number
@@ -111,6 +135,7 @@ type NativeProcessGeneration = {
   aggregateWorkerCpu: ProcessCpuDistribution
   workersCpu: { generation: number; identity: ProcessIdentity; cpu: ProcessCpuDistribution }[]
 }
+
 type NativeProcessCpu = {
   status: "available" | "blocked"
   reason: string | null
@@ -131,12 +156,14 @@ type NativeProcessCpu = {
     replacementWaitMs: number
   }[]
 }
+
 const processCpuDistribution = (values: readonly number[]): ProcessCpuDistribution => {
   if (values.length === 0) return { samples: 0, averagePercent: null, p95Percent: null, peakPercent: null }
   const sorted = [...values].sort((left, right) => left - right)
   const position = (sorted.length - 1) * 0.95
   const lower = Math.floor(position)
   const upper = Math.ceil(position)
+
   return {
     samples: values.length,
     averagePercent: values.reduce((sum, value) => sum + value, 0) / values.length,
@@ -144,10 +171,12 @@ const processCpuDistribution = (values: readonly number[]): ProcessCpuDistributi
     peakPercent: sorted.at(-1)!,
   }
 }
+
 const processIdentity = (row: ProcessRow): ProcessIdentity => ({
   pid: row.pid, parentPid: row.parentPid, processGroupId: row.processGroupId,
   command: row.command.trim().split(/\s+/)[0]!,
 })
+
 export const createNativeProcessCpuSampler = async (
   appPid: number,
   durationMs: number,
@@ -156,50 +185,66 @@ export const createNativeProcessCpuSampler = async (
 ): Promise<{ stop: () => Promise<NativeProcessCpu> }> => {
   const sampleIntervalMs = 1_000
   const replacementGraceMs = 3_000
+
   const selectIdentities = (processes: readonly ProcessRow[]) => {
     const owned = new Set([appPid, ...descendantsOf(processes, appPid)])
+
     const hostCandidates = processes.filter((row) => owned.has(row.pid)
       && row.command.trim().split(/\s+/)[0]?.endsWith("/daw-audio-host-macos"))
+
     const workerCandidates = processes.filter((row) => owned.has(row.pid)
       && row.pid === row.processGroupId
       && row.command.trim().split(/\s+/)[0]?.endsWith("/daw-vst3-worker"))
+
     const hostIds = new Set(hostCandidates.map((row) => row.pid))
     const workersByHost = new Map<number, ProcessRow[]>()
+
     for (const worker of workerCandidates) {
       if (!hostIds.has(worker.parentPid)) continue
       const children = workersByHost.get(worker.parentPid) ?? []
       children.push(worker)
       workersByHost.set(worker.parentPid, children)
     }
+
     const activeWorkerGroup = [...workersByHost.values()].find((children) => children.length === 8)
     const singletonWorkers = [...workersByHost.values()].flatMap((children) => children.length === 1 ? [children[0]!] : [])
+
     const selectedWorkers = preferActiveWorkerGroup
       ? activeWorkerGroup ?? []
       : singletonWorkers.length === 8 ? singletonWorkers : activeWorkerGroup ?? []
+
     const workerParentIds = new Set(selectedWorkers.map((row) => row.parentPid))
     const selectedHosts = hostCandidates.filter((row) => workerParentIds.has(row.pid))
+
     return selectedHosts.length > 0 && selectedWorkers.length === 8
       ? { audioHosts: selectedHosts.map(processIdentity), workers: selectedWorkers.map(processIdentity) }
       : null
   }
+
   const sameIdentities = (
     left: { audioHosts: ProcessIdentity[]; workers: ProcessIdentity[] } | null,
     right: { audioHosts: ProcessIdentity[]; workers: ProcessIdentity[] } | null,
   ) => JSON.stringify(left) === JSON.stringify(right)
+
   const stabilityDeadline = Date.now() + 15_000
   let identities: { audioHosts: ProcessIdentity[]; workers: ProcessIdentity[] } | null = null
   let stableSince = 0
+
   while (Date.now() < stabilityDeadline && (stableSince === 0 || Date.now() - stableSince < 3_000)) {
     const observed = selectIdentities(await rows())
+
     if (observed !== null && sameIdentities(observed, identities)) {
       if (stableSince === 0) stableSince = Date.now()
     } else {
       identities = observed
       stableSince = observed === null ? 0 : Date.now()
     }
+
     await delay(250)
   }
+
   if (stableSince === 0 || Date.now() - stableSince < 3_000) identities = null
+
   const base: NativeProcessCpu = {
     status: identities ? "available" : "blocked",
     reason: identities ? null : "Expected owned runner descendants containing one native host generation and eight active VST workers stable for 3 seconds.",
@@ -210,7 +255,9 @@ export const createNativeProcessCpuSampler = async (
     workersCpu: identities?.workers.map((identity) => ({ generation: 0, identity, cpu: processCpuDistribution([]) })) ?? [],
     generations: [], identityLosses: [],
   }
+
   if (!identities) return { stop: async () => base }
+
   type ActiveGeneration = {
     index: number
     identities: { audioHosts: ProcessIdentity[]; workers: ProcessIdentity[] }
@@ -221,6 +268,7 @@ export const createNativeProcessCpuSampler = async (
     aggregateValues: number[]
     samples: number
   }
+
   const createGeneration = (
     nextIdentities: { audioHosts: ProcessIdentity[]; workers: ProcessIdentity[] },
     index: number,
@@ -230,6 +278,7 @@ export const createNativeProcessCpuSampler = async (
     hostValues: [], workerValues: new Map(nextIdentities.workers.map((identity) => [identity.pid, []])),
     aggregateValues: [], samples: 0,
   })
+
   const generationResults: NativeProcessGeneration[] = []
   const identityLosses: NativeProcessCpu["identityLosses"] = []
   const allHostValues: number[] = []
@@ -241,20 +290,25 @@ export const createNativeProcessCpuSampler = async (
   const startedAt = Date.now()
   onMeasurementStart?.(startedAt)
   let nextSampleAt = startedAt
+
   const sample = async () => {
     let current = await rows()
     let currentByPid = new Map(current.map((row) => [row.pid, row]))
     const targets = [...generation.identities.audioHosts, ...generation.identities.workers]
+
     const valid = targets.every((identity) => {
       const row = currentByPid.get(identity.pid)
+
       return row !== undefined && row.command.trim().split(/\s+/)[0] === identity.command
         && row.parentPid === identity.parentPid && row.processGroupId === identity.processGroupId
     })
+
     if (!valid) {
       const elapsedMs = Math.max(0, Date.now() - startedAt)
       const expected = targets
       let nextIdentities = selectIdentities(current)
       let replacementWaitMs = 0
+
       while (!nextIdentities && replacementWaitMs < replacementGraceMs && !stopped) {
         await delay(100)
         replacementWaitMs += 100
@@ -262,15 +316,19 @@ export const createNativeProcessCpuSampler = async (
         currentByPid = new Map(current.map((row) => [row.pid, row]))
         nextIdentities = selectIdentities(current)
       }
+
       identityLosses.push({
         elapsedMs, expected,
         observed: nextIdentities ? [...nextIdentities.audioHosts, ...nextIdentities.workers] : [],
         replacementWaitMs,
       })
+
       if (!nextIdentities) {
         reason = "An owned native process changed identity without a replacement generation."
+
         return
       }
+
       generationResults.push({
         index: generation.index, startElapsedMs: generation.startElapsedMs, endElapsedMs: elapsedMs,
         audioHosts: generation.identities.audioHosts, workers: generation.identities.workers, samples: generation.samples,
@@ -282,22 +340,29 @@ export const createNativeProcessCpuSampler = async (
       })
       generation = createGeneration(nextIdentities, generation.index + 1, elapsedMs)
     }
+
     if (reason !== null) return
     const targetsForSample = [...generation.identities.audioHosts, ...generation.identities.workers]
     const elapsedMs = Math.max(1, Date.now() - startedAt)
     const currentCpu = new Map(targetsForSample.map((identity) => [identity.pid, currentByPid.get(identity.pid)!.cpuTimeSec]))
+
     if (generation.previous.size > 0) {
       const intervalMs = Math.max(1, elapsedMs - (generation.previous.get(-1) ?? 0))
+
       const hostsCpu = generation.identities.audioHosts.map((identity) => (
         (currentCpu.get(identity.pid)! - generation.previous.get(identity.pid)!) * 100_000 / intervalMs
       ))
+
       const workersCpu = generation.identities.workers.map((identity) => (
         (currentCpu.get(identity.pid)! - generation.previous.get(identity.pid)!) * 100_000 / intervalMs
       ))
+
       if (hostsCpu.some((value) => value < 0) || workersCpu.some((value) => value < 0)) {
         reason = "Native process CPU time moved backwards during sampling."
+
         return
       }
+
       generation.hostValues.push(hostsCpu.reduce((sum, value) => sum + value, 0))
       workersCpu.forEach((value, index) => generation.workerValues.get(generation.identities.workers[index]!.pid)!.push(value))
       generation.aggregateValues.push(workersCpu.reduce((sum, value) => sum + value, 0))
@@ -306,9 +371,11 @@ export const createNativeProcessCpuSampler = async (
       generation.samples += 1
       actualSamples += 1
     }
+
     currentCpu.set(-1, elapsedMs)
     currentCpu.forEach((value, pid) => generation.previous.set(pid, value))
   }
+
   const sampling = (async () => {
     // This bounded benchmark sampler is intentionally process-level polling; it is not product runtime logic.
     while (!stopped && Date.now() - startedAt < durationMs) {
@@ -316,8 +383,10 @@ export const createNativeProcessCpuSampler = async (
       nextSampleAt += sampleIntervalMs
       await delay(Math.max(0, nextSampleAt - Date.now()))
     }
+
     await sample()
   })()
+
   const stop = async () => {
     stopped = true
     await sampling
@@ -333,6 +402,7 @@ export const createNativeProcessCpuSampler = async (
     })
     const allHosts = [...new Map(generationResults.flatMap((item) => item.audioHosts).map((identity) => [identity.pid, identity])).values()]
     const allWorkers = [...new Map(generationResults.flatMap((item) => item.workers).map((identity) => [identity.pid, identity])).values()]
+
     const finished = {
       ...base,
       status: reason === null && actualSamples >= Math.max(2, Math.floor(base.expectedSamples * 0.8)) ? "available" as const : "blocked" as const,
@@ -343,7 +413,9 @@ export const createNativeProcessCpuSampler = async (
       workersCpu: generationResults.flatMap((item) => item.workersCpu),
       generations: generationResults, identityLosses,
     }
+
     return finished
   }
+
   return { stop }
 }

@@ -14,10 +14,12 @@ test("coalesces native frames and cancels pending delivery on cleanup", () => {
   const nativePrepared = true;
   let nativeListener: ((value: SpectrumFrame | null) => void) | undefined;
   let nextId = 0;
+
   const unsubscribe = createSpectrumFrameDelivery({
     isNativePrepared: () => nativePrepared,
     subscribeNative: (listener) => {
       nativeListener = listener;
+
       return () => {
         nativeListener = undefined;
       };
@@ -27,6 +29,7 @@ test("coalesces native frames and cancels pending delivery on cleanup", () => {
       request: (callback) => {
         callbacks.push(callback);
         nextId += 1;
+
         return nextId;
       },
       cancel: (id) => cancelled.push(id),
@@ -53,10 +56,12 @@ test("owns one browser sampling frame and cancels it on native takeover", () => 
   const delivered: Array<SpectrumFrame | null> = [];
   let nativePrepared = false;
   let nativeListener: ((value: SpectrumFrame | null) => void) | undefined;
+
   const unsubscribe = createSpectrumFrameDelivery({
     isNativePrepared: () => nativePrepared,
     subscribeNative: (listener) => {
       nativeListener = listener;
+
       return () => {
         nativeListener = undefined;
       };
@@ -65,6 +70,7 @@ test("owns one browser sampling frame and cancels it on native takeover", () => 
     scheduler: {
       request: (callback) => {
         callbacks.push(callback);
+
         return callbacks.length;
       },
       cancel: (id) => cancelled.push(id),

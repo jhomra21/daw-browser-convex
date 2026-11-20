@@ -61,12 +61,14 @@ const safeGeometry = (input: TimelineViewportGeometry) => ({
 
 export const visibleDurationSec = (input: TimelineViewportGeometry) => {
   const geometry = safeGeometry(input)
+
   return geometry.viewportWidthPx / geometry.pixelsPerSecond
 }
 
 export const clampedVisibleStartSec = (input: TimelineViewportGeometry) => {
   const geometry = safeGeometry(input)
   const duration = visibleDurationSec(geometry)
+
   return Math.min(Math.max(0, geometry.visibleStartSec), Math.max(0, geometry.durationSec - duration))
 }
 
@@ -77,9 +79,11 @@ export const visibleEndSec = (input: TimelineViewportGeometry) => (
 export const visibleStartAfterScrollDelta = (input: TimelineViewportGeometry, deltaPx: number) => {
   const geometry = safeGeometry(input)
   const currentStart = clampedVisibleStartSec(geometry)
+
   const deltaSeconds = Number.isFinite(deltaPx)
     ? deltaPx / geometry.pixelsPerSecond
     : 0
+
   return Math.min(
     Math.max(0, currentStart + deltaSeconds),
     Math.max(0, geometry.durationSec - visibleDurationSec(geometry)),
@@ -98,7 +102,9 @@ export const projectTimelineTimeToViewport = (input: TimelineViewportGeometry, t
   const geometry = safeGeometry(input)
   const startSec = clampedVisibleStartSec(geometry)
   const endSec = startSec + visibleDurationSec(geometry)
+
   if (!Number.isFinite(timeSec) || timeSec < startSec || timeSec > endSec) return null
+
   return Math.max(0, Math.min(geometry.viewportWidthPx, (timeSec - startSec) * geometry.pixelsPerSecond))
 }
 
@@ -109,10 +115,12 @@ export const createTimelineViewport = (input: TimelineViewportGeometry): Timelin
   const endSec = Math.min(geometry.durationSec, startSec + visibleDuration)
   const overscan = TIMELINE_VIEWPORT_OVERSCAN_PX / geometry.pixelsPerSecond
   const visibleRange = { startSec, endSec }
+
   const overscanRange = {
     startSec: Math.max(0, startSec - overscan),
     endSec: Math.min(geometry.durationSec, endSec + overscan),
   }
+
   return {
     visibleRange,
     overscanRange,
@@ -132,14 +140,18 @@ export const visibleIntersectionWithOverscan = (
   const geometry = safeGeometry(input)
   const start = Math.min(range.startSec, range.endSec)
   const end = Math.max(range.startSec, range.endSec)
+
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null
   const overscan = finiteNonNegative(overscanPx) ? overscanPx : 0
   const startPx = Math.max(0, timeToViewportX(geometry, start) - overscan)
+
   const endPx = Math.min(
     geometry.viewportWidthPx,
     timeToViewportX(geometry, end) + overscan,
   )
+
   if (endPx <= startPx) return null
+
   return {
     startSec: viewportXToTime(geometry, startPx),
     endSec: viewportXToTime(geometry, endPx),
@@ -159,14 +171,18 @@ export const intersectTimelineRangeWithViewport = (input: {
   const pixelsPerSecond = safePixelsPerSecond(input.pixelsPerSecond)
   const rangeStartSec = Math.min(input.range.startSec, input.range.endSec)
   const rangeEndSec = Math.max(input.range.startSec, input.range.endSec)
+
   if (!Number.isFinite(rangeStartSec) || !Number.isFinite(rangeEndSec) || rangeEndSec <= rangeStartSec) return null
   const visibleEndSec = visibleStartSec + viewportWidthPx / pixelsPerSecond
   const startSec = Math.max(visibleStartSec, rangeStartSec)
   const endSec = Math.min(visibleEndSec, rangeEndSec)
+
   if (endSec <= startSec) return null
   const leftPx = Math.max(0, Math.min(viewportWidthPx, (startSec - visibleStartSec) * pixelsPerSecond))
   const rightPx = Math.max(leftPx, Math.min(viewportWidthPx, (endSec - visibleStartSec) * pixelsPerSecond))
+
   if (rightPx <= leftPx) return null
+
   return { leftPx, widthPx: rightPx - leftPx }
 }
 
@@ -179,8 +195,10 @@ export const getTimelineClipViewportSlice = (input: {
   const clipEndSec = input.clipStartSec + input.clipDurationSec
   const startSec = Math.max(input.clipStartSec, input.visibleRange.startSec)
   const endSec = Math.min(clipEndSec, input.visibleRange.endSec)
+
   if (!Number.isFinite(startSec) || !Number.isFinite(endSec) || endSec <= startSec) return null
   const pixelsPerSecond = safePixelsPerSecond(input.pixelsPerSecond)
+
   return {
     startSec,
     endSec,
@@ -199,14 +217,17 @@ export const scaleViewportAtPointer = (
   nextPixelsPerSecond: number,
 ): TimelineViewportGeometry => {
   const geometry = safeGeometry(input)
+
   const safePointerX = Math.min(
     geometry.viewportWidthPx,
     Math.max(0, Number.isFinite(pointerX) ? pointerX : geometry.viewportWidthPx / 2),
   )
+
   const anchorTime = viewportXToTime(geometry, safePointerX)
   const nextScale = safePixelsPerSecond(nextPixelsPerSecond)
   const nextDuration = geometry.viewportWidthPx / nextScale
   const nextStart = anchorTime - safePointerX / nextScale
+
   return {
     ...geometry,
     visibleStartSec: Math.min(

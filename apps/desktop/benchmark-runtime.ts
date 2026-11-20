@@ -34,20 +34,24 @@ export const installBenchmarkHeartbeat = (input: {
   input.ipcMain.on(benchmarkRendererPongChannel, (event, sequence) => {
     if (!input.allowed(event) || !Number.isSafeInteger(sequence)) return
     const request = pending.get(sequence)
+
     if (!request || request.senderId !== event.sender.id) return
     pending.delete(sequence)
     console.error(`[quiet-renderer-pong] sequence=${sequence} latencyMs=${Math.round(performance.now() - request.startedAt)}`)
   })
   input.app.on("browser-window-created", (_event, window) => {
     let sequence = 0
+
     const interval = setInterval(() => {
       if (window.isDestroyed() || window.webContents.isDestroyed()) return
       sequence += 1
+
       if (pending.size >= 8) pending.delete(pending.keys().next().value ?? -1)
       pending.set(sequence, { senderId: window.webContents.id, startedAt: performance.now() })
       console.error(`[quiet-renderer-ping] sequence=${sequence}`)
       window.webContents.send(benchmarkRendererPingChannel, sequence)
     }, 5_000)
+
     window.on("closed", () => clearInterval(interval))
   })
 }
@@ -59,6 +63,7 @@ export const installBenchmarkWindowTelemetry = (input: {
   sameAppOrigin: (url: string) => boolean
 }) => {
   const contents = input.window.webContents
+
   if (process.env.DAW_BENCHMARK_STARTUP_TRACE === "1") {
     contents.on("did-fail-load", (_event, code, _description, url) =>
       benchmarkLoadFailure(process.env.DAW_BENCHMARK_STARTUP_TRACE, code, url, console.error))
@@ -69,11 +74,13 @@ export const installBenchmarkWindowTelemetry = (input: {
         console.error,
       ))
   }
+
   if (process.env.DAW_BENCHMARK_QUIET_CAPTURE !== "1") return
   contents.on("console-message", (_event, _level, message) => {
     if (message.startsWith("[quiet-renderer-block-cost] ") && message.length < 256) console.error(message)
   })
   const startedAt = performance.now()
+
   const health = (name: string, url = contents.getURL(), reason = "") =>
     console.error(`[quiet-renderer-health] ${JSON.stringify({
       elapsedMs: Math.round(performance.now() - startedAt),
@@ -82,6 +89,7 @@ export const installBenchmarkWindowTelemetry = (input: {
       urlClass: classifyNavigationUrl(url),
       reason: reason.slice(0, 48),
     })}`)
+
   contents.on("unresponsive", () => health("unresponsive"))
   contents.on("responsive", () => health("responsive"))
   contents.on("render-process-gone", (_event, details) => health("render-process-gone", "", details.reason))
@@ -94,6 +102,7 @@ export const installBenchmarkWindowTelemetry = (input: {
     if (isMainFrame) health("did-navigate-in-page", url)
   })
   const metricIntervalMs = process.env.DAW_BENCHMARK_ZOOM_PROFILE === "1" ? 250 : 1_000
+
   const metricTimer = setInterval(() => {
     for (const metric of input.app.getAppMetrics()) {
       console.error(`[quiet-renderer-metric] ${JSON.stringify({
@@ -109,6 +118,7 @@ export const installBenchmarkWindowTelemetry = (input: {
       })}`)
     }
   }, metricIntervalMs)
+
   contents.on("destroyed", () => clearInterval(metricTimer))
   const generation = () => input.getGeneration()
   console.error(`[quiet-capture-lifecycle] stage=created webContentsId=${contents.id} rendererPid=${contents.getOSProcessId()} generation=${generation()}`)
@@ -136,8 +146,10 @@ export const createBenchmarkRecordingTelemetry = (
   let sessionId = -1n
   let observedCapture = false
   let lastStatus: NativeHostRecordingStatus | null = null
+
   const observeSession = (nextGeneration: number, nextSessionId: bigint) => {
     if (generation === nextGeneration && sessionId === nextSessionId) return
+
     // A new configuration may follow host cleanup without a final status.
     if (observedCapture) emit(performance.timeOrigin + performance.now())
     generation = nextGeneration
@@ -149,6 +161,7 @@ export const createBenchmarkRecordingTelemetry = (
     observedCapture = false
     lastStatus = null
   }
+
   const reportStatus = () => lastStatus ? {
     generation: lastStatus.generation,
     sessionId: lastStatus.sessionId.toString(),
@@ -164,8 +177,10 @@ export const createBenchmarkRecordingTelemetry = (
     active: lastStatus.active,
     configured: lastStatus.configured,
   } : null
+
   const emit = (now: number) => {
     const dump = delivery?.dump(now)
+
     if (!dump || !recording || !traffic) return null
     console.error(`[quiet-recording-ipc] ${JSON.stringify({
       blocks: recording.report(now),
@@ -173,8 +188,10 @@ export const createBenchmarkRecordingTelemetry = (
       status: reportStatus(),
       delivery: dump,
     })}`)
+
     return dump
   }
+
   return {
     recordStatus(status: NativeHostRecordingStatus) {
       if (!enabled) return
@@ -184,7 +201,9 @@ export const createBenchmarkRecordingTelemetry = (
       const now = performance.timeOrigin + performance.now()
       observedCapture ||= status.active || status.fatal
       delivery?.status(now, status.queuedBlocks, status.active, status.fatal, status.capturedFrames)
+
       if (status.fatal) delivery?.transition("native-fatal", now)
+
       if (observedCapture && !status.active && status.queuedBlocks === 0) emit(now)
     },
     recordTraffic(channel: string, estimatedBytes: number) {

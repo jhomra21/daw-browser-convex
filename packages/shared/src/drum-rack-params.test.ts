@@ -109,6 +109,7 @@ describe('Drum Rack params', () => {
 
   test('assigns sample data to a pad and selects it', () => {
     const params = createDefaultDrumRackParams()
+
     const updated = assignSampleToDrumRackPad(params, 'pad-37', {
       assetKey: 'samples/snare.wav',
       url: 'blob:snare',
@@ -130,6 +131,7 @@ describe('Drum Rack params', () => {
       sourceKind: 'upload',
       source: { durationSec: 0.5, sampleRate: 48000, channelCount: 2 },
     }
+
     const updated = assignSampleToDrumRackPad(createDefaultDrumRackParams(), 'pad-36', sample)
 
     expect(updated.pads[0]?.sample).toEqual(sample)
@@ -137,6 +139,7 @@ describe('Drum Rack params', () => {
 
   test('ignores sample assignment for missing pads', () => {
     const params = createDefaultDrumRackParams()
+
     const updated = assignSampleToDrumRackPad(params, 'missing', {
       assetKey: 'samples/snare.wav',
       url: 'blob:snare',

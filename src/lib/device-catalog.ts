@@ -108,6 +108,7 @@ const catalogCapabilities = (): DeviceCatalogCapabilities => ({
 
 const createAudioEffectEntry = (kind: AudioEffectKind): AudioEffectDeviceCatalogEntry => {
   const metadata = AUDIO_EFFECT_METADATA[kind];
+
   return {
     id: `builtin:audio-effect:${kind}`,
     category: "audio-effect",
@@ -143,6 +144,7 @@ const createMidiEffectEntry = (): MidiEffectDeviceCatalogEntry => ({
 
 const createInstrumentEntry = (kind: InstrumentKind): InstrumentDeviceCatalogEntry => {
   const metadata = INSTRUMENT_METADATA[kind];
+
   return {
     id: `builtin:midi-instrument:${kind}`,
     category: "midi-instrument",
@@ -197,7 +199,9 @@ const audioEffectByKind = new Map(AUDIO_EFFECT_DEVICE_CATALOG.map((entry) => [en
 
 export const getAudioEffectDeviceCatalogEntry = (kind: AudioEffectKind): AudioEffectDeviceCatalogEntry => {
   const entry = audioEffectByKind.get(kind);
+
   if (!entry) throw new Error(`Missing device catalog entry for audio effect "${kind}".`);
+
   return entry;
 };
 

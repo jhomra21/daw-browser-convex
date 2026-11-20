@@ -106,6 +106,7 @@ test('the Worker-compatible client honors cancellation before loading an artifac
 test('the Worker transfers a copy without detaching the cached Wasm artifact', async () => {
   const worker = new MockWorker()
   const bytes = new Uint8Array([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]).buffer
+
   const artifact: AudioCoreWasmArtifact = {
     bytes,
     module: new WebAssembly.Module(bytes),
@@ -121,7 +122,9 @@ test('the Worker transfers a copy without detaching the cached Wasm artifact', a
       wasmUrl: '/fixture.wasm',
     },
   }
+
   const client = new PortableExportWorker(worker, '/missing-manifest.json', artifact)
+
   const rendering = client.render({
     snapshot: {
       graph: {
@@ -143,6 +146,7 @@ test('the Worker transfers a copy without detaching the cached Wasm artifact', a
   })
 
   const message = worker.messages[0]
+
   if (!message || message.type !== 'render') throw new Error('Expected portable export render message.')
   expect(message.wasmBytes).not.toBe(bytes)
   expect(message.wasmBytes.byteLength).toBe(bytes.byteLength)
@@ -166,13 +170,16 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
     onmessage: ((event: MessageEvent<object>) => void) | null
     postMessage: (message: PortableExportWorkerResponse) => void
   }
+
   const responses: PortableExportWorkerResponse[] = []
   const pageRequests: Extract<PortableExportWorkerResponse, { type: 'page-request' }>[] = []
   const cancellation = { jobId: 0 }
+
   const harness: WorkerHarness = {
     onmessage: null,
     postMessage: (message) => {
       responses.push(message)
+
       if (message.type === 'page-request') {
         pageRequests.push(message)
         queueMicrotask(() => {
@@ -202,9 +209,11 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
       }
     },
   }
+
   const wasmUrl = new URL('../../../public/audio-core/daw-audio-core.wasm', import.meta.url)
   Object.defineProperty(globalThis, 'self', { configurable: true, value: harness, writable: true })
   await import(`${workerUrl.href}?render=${Date.now()}`)
+
   if (!harness.onmessage) throw new Error('Worker did not install its message handler.')
 
   harness.onmessage(new MessageEvent('message', {
@@ -279,14 +288,17 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
         }],
       },
   }
+
   harness.onmessage(new MessageEvent('message', { data: renderRequest }))
 
   for (let attempt = 0; attempt < 50 && !responses.some((response) => (
     response.type === 'complete'
   )); attempt += 1) await Bun.sleep(10)
+
   const chunk = responses.find((
     response,
   ): response is Extract<PortableExportWorkerResponse, { type: 'chunk' }> => response.type === 'chunk')
+
   if (!chunk) throw new Error(`Worker did not return PCM: ${JSON.stringify(responses)}`)
   expect(chunk.pcm.planes).toEqual([
     new Float32Array([0, 0.25, -0.5, 1]),
@@ -310,6 +322,7 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
       wasmBytes: renderRequest.wasmBytes.slice(0),
     },
   }))
+
   for (let attempt = 0; attempt < 50 && !responses.some((response) => (
     response.type === 'cancelled' && response.jobId === 3
   )); attempt += 1) await Bun.sleep(10)
@@ -333,6 +346,7 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
     pageFrames: 16_384,
     transferables: [],
   }
+
   const pagedEvent = (
     sequence: number,
     assetId: string,
@@ -353,6 +367,7 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
     fadeOutStartFrame: 1,
     fadeOutEndFrame: 1,
   })
+
   const pagedRequest = (
     jobId: number,
     assets: typeof pagedAsset[],
@@ -373,6 +388,7 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
       events,
     },
   })
+
   const waitForTerminalResponse = async (jobId: number) => {
     for (let attempt = 0; attempt < 200 && !responses.some((response) => (
       response.type !== 'disposed'
@@ -392,10 +408,12 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
   await waitForTerminalResponse(unionJobId)
 
   const distinctAssetJobId = 5
+
   const distinctAssets = Array.from({ length: 65 }, (_, index) => ({
     ...pagedAsset,
     asset: { ...pagedAsset.asset, assetId: `paged-fixture-${index}` },
   }))
+
   harness.onmessage(new MessageEvent('message', {
     data: pagedRequest(
       distinctAssetJobId,

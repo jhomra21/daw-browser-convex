@@ -43,7 +43,9 @@ export function useSampleDetailWaveformOverview(options: SampleDetailWaveformOve
   const view = createMemo<OverviewView | null>(() => {
     const clip = options.clip()
     const assetKey = clip.waveformAssetKey ?? clip.sourceAssetKey
+
     if (!assetKey || clip.midi) return null
+
     return { clip, assetKey }
   })
 
@@ -54,16 +56,22 @@ export function useSampleDetailWaveformOverview(options: SampleDetailWaveformOve
     const backingPixelsPerCssPixel = options.backingPixelsPerCssPixel()
     const currentRequestId = ++requestId
     const controller = new AbortController()
+
     if (!current) {
       setRenderSegments([])
+
       return
     }
+
     const source = options.source()
+
     if (!source) {
       setRenderSegments([])
       onCleanup(() => controller.abort())
+
       return
     }
+
     void Promise.resolve(source)
       .then(async (source) => {
         const layout = getAudioWaveformLayout(
@@ -72,6 +80,7 @@ export function useSampleDetailWaveformOverview(options: SampleDetailWaveformOve
           source.durationSec,
           projectBpm,
         )
+
         const segments: readonly AudioWaveformLayoutSegment[] = layout.segments
           ?? (layout.drawCols > 0
             ? [{
@@ -84,12 +93,14 @@ export function useSampleDetailWaveformOverview(options: SampleDetailWaveformOve
               canvasEndSec: layout.canvasEndSec ?? current.clip.startSec + current.clip.duration,
             }]
             : [])
+
         const plans = createWaveformRequestPlans({
           segments,
           sampleRate: source.sampleRate,
           sourceFrameCount: source.frameCount,
           backingPixelsPerCssPixel,
         })
+
         const results = await Promise.all(plans.requests.map(async (request) => {
           const data = await requestWaveformData({
             assetKey: current.assetKey,
@@ -100,11 +111,14 @@ export function useSampleDetailWaveformOverview(options: SampleDetailWaveformOve
             priority: request.priority,
             signal: controller.signal,
           })
+
           return data ? { key: request.key, data: retainWaveformData(data) } : null
         }))
+
         const retainedByKey = new Map(
           results.flatMap((result) => result ? [[result.key, result.data]] : []),
         )
+
         const map = getAudioClipTimeMap({
           clip: current.clip,
           bufferDurationSec: source.durationSec,
@@ -112,7 +126,9 @@ export function useSampleDetailWaveformOverview(options: SampleDetailWaveformOve
           rangeStartSec: current.clip.startSec,
           rangeEndSec: current.clip.startSec + current.clip.duration,
         })
+
         if (!map) return []
+
         return projectRetainedWaveformData({
           retainedByKey,
           segments: plans.segments,

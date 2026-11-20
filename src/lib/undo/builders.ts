@@ -26,6 +26,7 @@ export function buildControlRangeDeleteHistoryEntry(input: {
   recoveryId: string
 }): Extract<HistoryEntry, { type: 'control-range-delete' }> {
   const tracksById = new Map(input.tracks.map((track) => [track.id, track]))
+
   return {
     type: 'control-range-delete',
     projectId: input.projectId,
@@ -72,6 +73,7 @@ export function buildTrackClipCreateHistoryEntry(input: {
   clip: ClipCreateSnapshot
 }): Extract<HistoryEntry, { type: 'track-clip-create' }> {
   const trackRef = getTrackHistoryRef(input.track)
+
   return {
     type: 'track-clip-create',
     projectId: input.projectId,
@@ -106,17 +108,21 @@ export function buildTrackDeleteHistoryEntry(input: {
   const trackRef = getTrackHistoryRef(track)
   const trackRefById = new Map(tracks.map((entry) => [entry.id, getTrackHistoryRef(entry)]))
   const trackIndex = tracks.findIndex((entry) => entry.id === track.id)
+
   const inboundRouting = tracks
     .filter((entry) => entry.id !== track.id)
     .flatMap((entry) => {
       const sends = (entry.sends ?? []).filter((send) => send.targetId === track.id)
       const outputTargetId = entry.outputTargetId === track.id ? track.id : undefined
+
       if (sends.length === 0 && !outputTargetId) return []
+
       return [{
         sourceTrackRef: getTrackHistoryRef(entry),
         ...buildTrackRoutingHistorySnapshot({ sends, outputTargetId }, tracks),
       }]
     })
+
   const sidechainRoutes: SidechainRouteHistorySnapshot[] = (input.sidechainRoutes ?? [])
     .filter((route) => route.sourceTrackId === track.id || route.targetTrackId === track.id)
     .map((route) => ({
@@ -164,6 +170,7 @@ export function buildTrackGroupHistoryEntry(input: {
   const childIds = new Set(input.childTrackIds)
   const trackRefById = new Map(input.tracks.map((track) => [track.id, getTrackHistoryRef(track)]))
   trackRefById.set(input.groupTrack.id, getTrackHistoryRef(input.groupTrack))
+
   return {
     type: 'track-group',
     projectId: input.projectId,
@@ -181,6 +188,7 @@ export function buildTrackGroupHistoryEntry(input: {
           const nextOutputTargetId = input.nextOutputTargetIdsByTrackId?.has(track.id)
             ? input.nextOutputTargetIdsByTrackId.get(track.id)
             : input.groupTrack.id
+
           return {
             trackRef: getTrackHistoryRef(track),
             previousGroupRef: track.groupId ? trackRefById.get(track.groupId) : undefined,
@@ -204,6 +212,7 @@ export function buildTrackUngroupHistoryEntry(input: {
 }): Extract<HistoryEntry, { type: 'track-ungroup' }> {
   const childIds = new Set(input.childTrackIds)
   const trackRefById = new Map(input.tracks.map((track) => [track.id, getTrackHistoryRef(track)]))
+
   return {
     type: 'track-ungroup',
     projectId: input.projectId,
@@ -239,6 +248,7 @@ export function buildTrackUngroupHistoryEntry(input: {
         .filter((track) => childIds.has(track.id))
         .map((track) => {
           const nextOutputTargetId = input.nextOutputTargetIdsByTrackId?.get(track.id)
+
           return {
             trackRef: getTrackHistoryRef(track),
             previousGroupRef: getTrackHistoryRef(input.groupTrack),
@@ -258,16 +268,19 @@ export function buildTrackColorCascadeHistoryEntry(input: {
 }): Extract<HistoryEntry, { type: 'track-color-cascade' }> {
   const trackById = new Map(input.tracks.map((track) => [track.id, track]))
   const clipById = new Map(input.tracks.flatMap((track) => track.clips.map((clip) => [clip.id, clip] as const)))
+
   return {
     type: 'track-color-cascade',
     projectId: input.projectId,
     data: {
       tracks: input.trackUpdates.flatMap((update) => {
         const track = trackById.get(update.trackId)
+
         return track ? [{ trackRef: getTrackHistoryRef(track), from: update.from, to: update.to }] : []
       }),
       clips: input.clipUpdates.flatMap((update) => {
         const clip = clipById.get(update.clipId)
+
         return clip ? [{ clipRef: getClipHistoryRef(clip), from: update.from, to: update.to }] : []
       }),
     },
@@ -297,13 +310,16 @@ export function buildTrackReorderHistoryEntry(input: {
   patches: Array<{ trackId: Track['id']; index: number; groupId: Track['id'] | undefined; outputTargetId: Track['id'] | undefined }>
 }): Extract<HistoryEntry, { type: 'track-reorder' }> {
   const trackById = new Map(input.tracks.map((track, index) => [track.id, { track, index }]))
+
   return {
     type: 'track-reorder',
     projectId: input.projectId,
     data: {
       patches: input.patches.flatMap((patch) => {
         const entry = trackById.get(patch.trackId)
+
         if (!entry) return []
+
         return [{
           trackRef: getTrackHistoryRef(entry.track),
           fromIndex: entry.index,
@@ -385,6 +401,7 @@ export function buildEffectParamsHistoryEntry(input: EffectParamsHistoryEntryInp
   const track = input.tracks.find((entry) => entry.id === input.payload.targetId)
   const trackRef = track ? getTrackHistoryRef(track) : undefined
   const { targetId: _targetId, edit: _edit, ...data } = input.payload
+
   return {
     type: 'effect-params',
     projectId: input.projectId,
@@ -418,6 +435,7 @@ export function buildClipDeleteHistoryEntry(input: {
   recoveryOperationId?: string
 }): Extract<HistoryEntry, { type: 'clip-delete' }> {
   const selectedIds = new Set(input.clipIds)
+
   return {
     type: 'clip-delete',
     projectId: input.projectId,
@@ -447,6 +465,7 @@ export function buildClipsMoveHistoryEntry(input: {
   }>
 }): Extract<HistoryEntry, { type: 'clips-move' }> {
   const trackIndex = createTimelineTrackIndex(input.tracks)
+
   return {
     type: 'clips-move',
     projectId: input.projectId,
@@ -504,6 +523,7 @@ function diffMidiNotesById(from: MidiEditorNote[], to: MidiEditorNote[]): MidiNo
   const fromById = new Map<string, MidiEditorNote>(from.map((note) => [note.id, note]))
   const toById = new Map<string, MidiEditorNote>(to.map((note) => [note.id, note]))
   const ids = new Set([...fromById.keys(), ...toById.keys()])
+
   return Array.from(ids, (id) => ({ id, before: fromById.get(id), after: toById.get(id) }))
     .filter(({ before, after }) => !(before && after && midiNotesEqual(before, after)))
 }
@@ -515,7 +535,9 @@ export function buildClipMidiNotesHistoryEntry(input: {
   to: MidiEditorNote[]
 }): Extract<HistoryEntry, { type: 'clip-midi-notes' }> | undefined {
   const changes = diffMidiNotesById(input.from, input.to)
+
   if (changes.length === 0) return undefined
+
   return {
     type: 'clip-midi-notes',
     projectId: input.projectId,

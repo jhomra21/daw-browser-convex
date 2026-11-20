@@ -30,11 +30,15 @@ export const parseLocalControlRecoveryRow = <Value>(
 ): (LocalControlRecoveryRow & { recovery: RecoveryPayload }) | undefined => {
   try {
     const row = localControlRecoveryRowSchema.parse(value)
+
     if (hashRecoveryPayloadSyncV1(row.payload) !== row.payloadHash) return undefined
+
     const externalProcessors = row.externalProcessors === undefined
       ? undefined
       : validateLocalExternalProcessorRecoveryBundles(row.externalProcessors)
+
     if (externalProcessors !== undefined) localExternalRecoveryUsage(externalProcessors)
+
     if (
       externalProcessors !== undefined
       && (
@@ -43,6 +47,7 @@ export const parseLocalControlRecoveryRow = <Value>(
       )
     ) return undefined
     const recovery = parseStoredRecoveryPayload(row.payload)
+
     return recovery.kind === row.kind
       ? {
           id: row.id,

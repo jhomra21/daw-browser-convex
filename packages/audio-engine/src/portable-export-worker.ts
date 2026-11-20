@@ -40,6 +40,7 @@ export type PortableExportWorkerLike = {
 
 const createPortableExportWorkerLike = (): PortableExportWorkerLike => {
   const worker = new Worker(resolveWorkletModuleUrl('audio-workers/daw-portable-export-worker-v2.js'), { type: 'module' })
+
   return {
     get onmessage() {
       return worker.onmessage
@@ -89,9 +90,12 @@ export class PortableExportWorker {
 
   private onMessage(value: PortableExportWorkerResponse) {
     if (value.version !== portableExportWorkerProtocolVersion || value.type === 'disposed' || !this.active) return
+
     if (value.jobId !== this.active.jobId) return
+
     if (value.type === 'page-request') {
       const active = this.active
+
       if (active.pagePending || !active.request.readPage) {
         this.worker.postMessage({
           version: portableExportWorkerProtocolVersion,
@@ -103,8 +107,10 @@ export class PortableExportWorker {
           frameCount: value.frameCount,
           error: active.request.readPage ? 'Only one page request may be outstanding.' : 'No page provider was supplied.',
         }, [])
+
         return
       }
+
       active.pagePending = true
       void active.request.readPage({
         assetId: value.assetId,
@@ -139,15 +145,19 @@ export class PortableExportWorker {
       }).finally(() => {
         if (this.active === active) active.pagePending = false
       })
+
       return
     }
+
     if (value.type === 'chunk') {
       if (value.index !== this.active.nextChunkIndex
         || value.startFrame !== this.active.nextChunkStartFrame
         || value.frameCount !== value.pcm.frameCount) {
         this.fail(new Error('Portable export Worker returned a nonsequential chunk.'))
+
         return
       }
+
       this.active.nextChunkIndex += 1
       this.active.nextChunkStartFrame += value.frameCount
       Promise.resolve(this.active.request.onChunk(value.index, value.startFrame, value.pcm)).then(() => {
@@ -159,28 +169,37 @@ export class PortableExportWorker {
           index: value.index,
         }, [])
       }).catch((error: PortableWorkerFailure) => this.fail(error instanceof Error ? error : new Error(String(error))))
+
       return
     }
+
     if (value.type === 'progress') {
       this.active.request.onProgress?.(value.completedFrames, value.totalFrames)
+
       return
     }
+
     if (value.type === 'complete') {
       const active = this.active
       this.active = undefined
       active.resolve()
+
       return
     }
+
     if (value.type === 'cancelled') {
       this.fail(new DOMException('Portable export was cancelled.', 'AbortError'))
+
       return
     }
+
     if (value.type === 'error') this.fail(new Error(value.message))
   }
 
   private fail(error: Error) {
     const active = this.active
     this.active = undefined
+
     if (!active) return
     this.worker.postMessage({
       version: portableExportWorkerProtocolVersion,
@@ -194,14 +213,18 @@ export class PortableExportWorker {
   async render(request: PortableExportWorkerRenderRequest): Promise<void> {
     if (this.active) throw new Error('Portable export Worker already has an active render.')
     request.signal?.throwIfAborted()
+
     const artifact = this.artifact
       ? { available: true as const, artifact: this.artifact }
       : await loadAudioCoreWasmArtifact(this.manifestUrl)
+
     request.signal?.throwIfAborted()
+
     if (!artifact.available) throw new Error(artifact.message)
     const jobId = this.nextJobId
     this.nextJobId += 1
     const wasmBytes = artifact.artifact.bytes.slice(0)
+
     const message: PortableExportWorkerRequest = {
       version: portableExportWorkerProtocolVersion,
       type: 'render',
@@ -214,10 +237,12 @@ export class PortableExportWorker {
       wasmBytes,
       snapshot: request.snapshot,
     }
+
     const transfer = [
       wasmBytes,
       ...request.snapshot.assets.flatMap((entry) => entry.transferables),
     ]
+
     return new Promise<void>((resolve, reject) => {
       this.active = {
         jobId,

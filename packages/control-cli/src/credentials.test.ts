@@ -8,6 +8,7 @@ const directories: string[] = []
 const temporaryStore = async () => {
   const directory = await mkdtemp("/tmp/daw-control-cli-")
   directories.push(directory)
+
   return createCredentialStore(join(directory, "nested", "credentials.json"))
 }
 

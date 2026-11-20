@@ -21,6 +21,7 @@ describe('sampler automation contracts', () => {
 
   test('defines complete finite descriptor bounds and defaults', () => {
     expect(SAMPLER_AUTOMATION_PARAMETER_IDS).toHaveLength(14)
+
     for (const id of SAMPLER_AUTOMATION_PARAMETER_IDS) {
       const descriptor = SAMPLER_AUTOMATION_DESCRIPTORS[id]
       expect(Number.isFinite(descriptor.defaultValue)).toBe(true)

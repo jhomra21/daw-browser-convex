@@ -63,6 +63,7 @@ window.exportFixture = {
   restoreLocal: () => Object.defineProperty(localDb, 'getAll', { configurable: true, value: originalGet }),
 }
 `
+
   const result = await build({
     root: repositoryRoot,
     configFile: false,
@@ -75,12 +76,16 @@ window.exportFixture = {
         enforce: 'pre',
         resolveId: (id) => {
           if (id.endsWith(fixtureId)) return `\0${fixtureId}.ts`
+
           if (id.endsWith('lib/convex')) return '\0stub:convex.ts'
+
           if (id.endsWith('lib/clipboard')) return '\0stub:clipboard.ts'
+
           return undefined
         },
         load: (id) => {
           if (id === `\0${fixtureId}.ts`) return source
+
           if (id === '\0stub:convex.ts') return `export const convexApi = { exports: { listByRoom: {} } }
             export const useConvexQuery = () => ({
               get data() { return window.exportFixture.query().exports },
@@ -88,7 +93,9 @@ window.exportFixture = {
               get error() { return window.exportFixture.query().error },
               refetch: () => window.exportFixture.retry(),
             })`
+
           if (id === '\0stub:clipboard.ts') return `export const copyText = async () => {}`
+
           return undefined
         },
       },
@@ -96,11 +103,15 @@ window.exportFixture = {
     resolve: { alias: { '~': `${repositoryRoot}src` } },
     build: { write: false, minify: false, lib: { entry: fixtureId, formats: ['iife'], name: 'exportDashboardFixture' } },
   })
+
   const output = Array.isArray(result) ? result[0] : result
+
   if (!output || !('output' in output)) throw new Error('Expected one export dashboard bundle.')
+
   const styles = output.output.flatMap((chunk) => (
     chunk.type === 'asset' && chunk.fileName.endsWith('.css') ? [String(chunk.source)] : []
   ))
+
   return `<!doctype html><head><style>${styles.join('\n')}</style></head><body style="margin:0"><script>${output.output[0].code}</script>`
 }
 
@@ -120,12 +131,16 @@ test('export history separates loading, error, empty, populated, and project swi
   const env = { ...process.env }
   delete env.AGENT_BROWSER_CDP
   delete env.AGENT_BROWSER_SESSION
+
   const run = async (...args: string[]) => {
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
     const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
+
     if (await child.exited !== 0) throw new Error(stderr || stdout)
+
     return stdout.trim()
   }
+
   const read = async () => stateSchema.parse(JSON.parse(JSON.parse(await run('eval', `(async () => JSON.stringify({
     loading: document.body.innerText.includes('Loading export history...'),
     error: document.body.innerText.includes('Export history could not be loaded.'),
@@ -133,7 +148,9 @@ test('export history separates loading, error, empty, populated, and project swi
     exportVisible: document.body.innerText.includes('Final mix'),
     project: document.body.innerText.includes('shared-b') ? 'shared-b' : 'shared-a',
   }))()`))))
+
   await run('open', `file://${directory}/index.html`)
+
   try {
     await run('eval', 'exportFixture.mount()')
     expect(await read()).toMatchObject({ loading: true, error: false, empty: false, exportVisible: false })

@@ -24,6 +24,7 @@ test('persists final MIDI before deleting and navigating from the current cloud 
     settleActiveRecording: async () => { events.push('final-midi-persist') },
     deleteCurrentProject: async () => {
       events.push('delete')
+
       return { status: 'deleted', destinationProjectId: 'next-project' }
     },
     navigate: async () => { events.push('navigate') },
@@ -40,6 +41,7 @@ test('cancels current cloud project deletion when MIDI settlement fails', async 
     },
     deleteCurrentProject: async () => {
       events.push('delete')
+
       return { status: 'deleted', destinationProjectId: 'next-project' }
     },
     navigate: async () => { events.push('navigate') },
@@ -53,6 +55,7 @@ test('navigates to a prepared local replacement before deleting the current loca
     flushPendingWrites: async () => { events.push('flush') },
     createDestination: async () => {
       events.push('create')
+
       return 'next-project'
     },
     reloadProjects: async () => { events.push('reload') },
@@ -76,6 +79,7 @@ test('keeps the current local project when replacement navigation fails', async 
     flushPendingWrites: async () => { events.push('flush') },
     createDestination: async () => {
       events.push('create')
+
       return 'next-project'
     },
     reloadProjects: async () => { events.push('reload') },

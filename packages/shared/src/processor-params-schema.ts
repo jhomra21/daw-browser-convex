@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 const finiteNumber = z.number().finite()
 const identifier = z.string().min(1)
+
 const envelope = <State extends z.ZodObject>(state: State) => z.object({
   version: z.literal(1),
   state,
@@ -17,6 +18,7 @@ const eqBand = z.object({
 }).strict()
 
 const eq = z.object({ bands: z.array(eqBand), enabled: z.boolean(), channelMode: z.enum(['stereo', 'mono']) }).strict()
+
 const reverb = z.object({
   enabled: z.boolean(), wet: finiteNumber, decaySec: finiteNumber, preDelayMs: finiteNumber,
   reflections: finiteNumber, reflectionSpin: z.boolean(), reflectionModAmountMs: finiteNumber,
@@ -25,17 +27,20 @@ const reverb = z.object({
   highCutHz: finiteNumber, diffusionLowCutHz: finiteNumber, diffusionHighCutHz: finiteNumber,
   stereoWidth: finiteNumber,
 }).strict()
+
 const saturator = z.object({
   enabled: z.boolean(), driveDb: finiteNumber, curve: z.enum(['soft', 'medium', 'hard', 'clip']),
   color: z.boolean(), colorFrequencyHz: finiteNumber, colorAmount: finiteNumber,
   outputDb: finiteNumber, dryWet: finiteNumber,
 }).strict()
+
 const delay = z.object({
   enabled: z.boolean(), mode: z.enum(['sync', 'time']), timeMs: finiteNumber,
   syncDivision: z.enum(['1/16', '1/8', '1/4', '1/2', '1/1']), feedback: finiteNumber,
   dryWet: finiteNumber, pingPong: z.boolean(), filterEnabled: z.boolean(),
   lowCutHz: finiteNumber, highCutHz: finiteNumber,
 }).strict()
+
 const compressor = z.object({
   enabled: z.boolean(), thresholdDb: finiteNumber, ratio: finiteNumber, attackMs: finiteNumber,
   releaseMs: finiteNumber, autoRelease: z.boolean(), makeupDb: finiteNumber, outputDb: finiteNumber,
@@ -47,12 +52,14 @@ const compressor = z.object({
     frequencyHz: finiteNumber, q: finiteNumber,
   }).strict(),
 }).strict()
+
 const utility = envelope(z.object({
   enabled: z.boolean(), gainDb: finiteNumber, polarity: z.enum(['normal', 'invert']),
   inputMode: z.enum(['stereo', 'mono-sum']), pan: finiteNumber, balance: finiteNumber,
   width: finiteNumber, matrix: z.enum(['stereo', 'mid-side-encode', 'mid-side-decode']),
   swap: z.boolean(), dcBlock: z.boolean(),
 }).strict())
+
 const gate = envelope(z.object({
   enabled: z.boolean(), mode: z.enum(['gate', 'expander']), thresholdDb: finiteNumber,
   ratio: finiteNumber, attackMs: finiteNumber, holdMs: finiteNumber, releaseMs: finiteNumber,
@@ -62,10 +69,12 @@ const gate = envelope(z.object({
     enabled: z.boolean(), filterType: z.literal('highpass'), frequencyHz: finiteNumber, q: finiteNumber,
   }).strict(),
 }).strict())
+
 const limiter = envelope(z.object({
   enabled: z.boolean(), ceilingDbtp: finiteNumber, releaseMs: finiteNumber,
   lookaheadMs: finiteNumber, link: finiteNumber, detectorOversampling: z.literal(4),
 }).strict())
+
 const autoFilter = envelope(z.object({
   enabled: z.boolean(), mode: z.enum(['lowpass', 'highpass', 'bandpass', 'notch', 'peak']),
   frequencyHz: finiteNumber, resonance: finiteNumber, driveDb: finiteNumber, mix: finiteNumber,
@@ -76,29 +85,36 @@ const autoFilter = envelope(z.object({
   }).strict(),
   quality: z.literal('2x'),
 }).strict())
+
 const chorus = envelope(z.object({
   enabled: z.boolean(), delayMs: finiteNumber, depthMs: finiteNumber, rateHz: finiteNumber,
   feedback: finiteNumber, stereoPhase: finiteNumber, mix: finiteNumber,
 }).strict())
+
 const phaser = envelope(z.object({
   enabled: z.boolean(), stages: z.union([z.literal(4), z.literal(6), z.literal(8), z.literal(12)]),
   centerHz: finiteNumber, depthOctaves: finiteNumber, rateHz: finiteNumber,
   feedback: finiteNumber, stereoPhase: finiteNumber, mix: finiteNumber,
 }).strict())
+
 const tremolo = envelope(z.object({
   enabled: z.boolean(), waveform: z.enum(['sine', 'triangle']), rateHz: finiteNumber,
   depth: finiteNumber, 'shape': finiteNumber, phase: finiteNumber,
 }).strict())
+
 const ensemble = envelope(z.object({
   enabled: z.boolean(), voices: z.literal(3), delayMs: finiteNumber, depthMs: finiteNumber,
   rateHz: finiteNumber, spread: finiteNumber, mix: finiteNumber,
 }).strict())
+
 const spectrum = envelope(z.object({ enabled: z.boolean(), view: z.enum(['spectrum', 'spectrogram', 'both']) }).strict())
+
 const lofi = envelope(z.object({
   enabled: z.boolean(), bitDepth: finiteNumber, sampleRateRatio: finiteNumber, jitter: finiteNumber,
   noiseDb: finiteNumber, quantization: z.enum(['round', 'floor', 'truncate']),
   dither: z.enum(['off', 'rectangular', 'triangular']), mix: finiteNumber, seed: finiteNumber,
 }).strict())
+
 const spectral = envelope(z.object({
   enabled: z.boolean(), fftSize: z.union([z.literal(512), z.literal(1024), z.literal(2048), z.literal(4096)]),
   overlap: z.union([z.literal(2), z.literal(4)]),
@@ -112,6 +128,7 @@ const spectral = envelope(z.object({
 const synthEnvelope = z.object({
   attackSec: finiteNumber, decaySec: finiteNumber, sustain: finiteNumber, releaseSec: finiteNumber,
 }).strict()
+
 const synth = z.object({
   version: z.literal(2),
   oscillators: z.tuple([
@@ -132,6 +149,7 @@ const synth = z.object({
   noise: z.object({ enabled: z.boolean(), level: finiteNumber }).strict(),
   gain: finiteNumber, pan: finiteNumber, polyphony: finiteNumber, retrigger: z.boolean(),
 }).strict()
+
 const legacySynth = z.object({
   wave1: z.enum(['sine', 'square', 'sawtooth', 'triangle']),
   wave2: z.enum(['sine', 'square', 'sawtooth', 'triangle']),
@@ -139,11 +157,13 @@ const legacySynth = z.object({
   attackMs: finiteNumber.optional(),
   releaseMs: finiteNumber.optional(),
 }).strict()
+
 const sample = z.object({
   assetKey: identifier, url: identifier, name: z.string().optional(),
   sourceKind: z.enum(['upload', 'url', 'recording']),
   source: z.object({ durationSec: finiteNumber, sampleRate: finiteNumber, channelCount: finiteNumber }).strict(),
 }).strict()
+
 const samplerZone = z.object({
   id: identifier, sample, keyLow: finiteNumber, keyHigh: finiteNumber, velocityLow: finiteNumber,
   velocityHigh: finiteNumber, rootNote: finiteNumber, tuneCents: finiteNumber, gain: finiteNumber,
@@ -152,9 +172,11 @@ const samplerZone = z.object({
   endSec: finiteNumber.optional(), loopStartSec: finiteNumber.optional(), loopEndSec: finiteNumber.optional(),
   crossfadeSec: finiteNumber, chokeGroup: finiteNumber,
 }).strict()
+
 const samplerEnvelope = z.object({
   attackSec: finiteNumber, decaySec: finiteNumber, sustain: finiteNumber, releaseSec: finiteNumber, amount: finiteNumber,
 }).strict()
+
 const sampler = z.object({
   version: z.literal(1), zones: z.array(samplerZone), ampEnvelope: samplerEnvelope, filterEnvelope: samplerEnvelope,
   filterMode: z.enum(['lowpass', 'highpass', 'bandpass', 'notch']), filterFrequencyHz: finiteNumber,
@@ -164,12 +186,14 @@ const sampler = z.object({
   }).strict(),
   polyphony: finiteNumber, retrigger: z.boolean(), cachePolicy: z.enum(['preload', 'lazy']), maxDecodedBytes: finiteNumber,
 }).strict()
+
 const granular = z.object({
   version: z.literal(1), zone: samplerZone.optional(), grainSizeMs: finiteNumber, densityHz: finiteNumber,
   position: finiteNumber, spray: finiteNumber, pitchSemitones: finiteNumber, reverseProbability: finiteNumber,
   'windowShape': z.enum(['hann', 'tukey', 'gaussian']), stereoSpread: finiteNumber, freeze: z.boolean(),
   seed: finiteNumber, maxGrains: finiteNumber, maxDecodedBytes: finiteNumber,
 }).strict()
+
 const drumRack = z.object({
   pads: z.array(z.object({
     id: identifier, note: finiteNumber, name: z.string().optional(), sample: sample.optional(), gain: finiteNumber,
@@ -178,6 +202,7 @@ const drumRack = z.object({
   }).strict()),
   selectedPadId: identifier.optional(),
 }).strict()
+
 export const arpeggiatorParamsSchema = z.object({
   enabled: z.boolean(), pattern: z.enum(['up', 'down', 'updown', 'random']),
   rate: z.enum(['1/4', '1/8', '1/16', '1/32']), octaves: finiteNumber, gate: finiteNumber, hold: z.boolean(),

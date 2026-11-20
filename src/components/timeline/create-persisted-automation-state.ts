@@ -25,15 +25,18 @@ export function createPersistedAutomationState(options: PersistedAutomationState
 
   const mergeDrafts = (persisted: AutomationEnvelope[], drafts: Record<string, AutomationEnvelope | undefined>) => {
     const next = new Map(persisted.map((envelope) => [envelope.targetKey, envelope]))
+
     for (const [targetKey, draft] of Object.entries(drafts)) {
       if (draft) next.set(targetKey, draft)
       else next.delete(targetKey)
     }
+
     return Array.from(next.values())
   }
 
   const envelopes = createMemo(() => {
     const drafts = draftByTargetKey()
+
     return mergeDrafts(options.envelopes(), drafts)
   })
 
@@ -46,6 +49,7 @@ export function createPersistedAutomationState(options: PersistedAutomationState
       if (!prev.has(targetKey)) return prev
       const next = new Set(prev)
       next.delete(targetKey)
+
       return next
     })
   }
@@ -58,10 +62,14 @@ export function createPersistedAutomationState(options: PersistedAutomationState
 
   const hasEnvelopeSchedulingChanged = (previous: AutomationEnvelope | undefined, next: AutomationEnvelope) => {
     if (!previous) return true
+
     if (previous.updatedAt !== next.updatedAt || previous.enabled !== next.enabled || previous.parameterId !== next.parameterId) return true
+
     if (previous.points.length !== next.points.length) return true
+
     return next.points.some((point, index) => {
       const previousPoint = previous.points[index]
+
       return !previousPoint
         || previousPoint.id !== point.id
         || previousPoint.timeSec !== point.timeSec
@@ -74,20 +82,25 @@ export function createPersistedAutomationState(options: PersistedAutomationState
     const previousByTargetKey = new Map(lastAppliedEnvelopes.map((envelope) => [envelope.targetKey, envelope]))
     const nextByTargetKey = new Map(nextEnvelopes.map((envelope) => [envelope.targetKey, envelope]))
     const changed = new Set<string>()
+
     for (const [targetKey, next] of nextByTargetKey) {
       const previous = previousByTargetKey.get(targetKey)
+
       if (hasEnvelopeSchedulingChanged(previous, next)) {
         changed.add(targetKey)
       }
     }
+
     for (const targetKey of previousByTargetKey.keys()) {
       if (!nextByTargetKey.has(targetKey)) changed.add(targetKey)
     }
+
     return changed
   }
 
   const previewEnvelope = (envelope: AutomationEnvelope | undefined) => {
     const targetKey = envelope?.targetKey ?? options.targetKey()
+
     if (!targetKey) return
     markDirty(targetKey)
     const nextDrafts = { ...draftByTargetKey(), [targetKey]: envelope }
@@ -97,18 +110,22 @@ export function createPersistedAutomationState(options: PersistedAutomationState
 
   const commitEnvelope = async (envelope: AutomationEnvelope | undefined, explicitTargetKey?: string) => {
     const targetKey = envelope?.targetKey ?? explicitTargetKey ?? options.targetKey()
+
     if (!targetKey) return
     const previous = persistedByTargetKey().get(targetKey)
     const context = options.createPersistContext?.() ?? {}
+
     if (envelope) await options.persistEnvelope(envelope, context)
     else await options.deleteEnvelope(targetKey, context)
     const next = new Map(persistedByTargetKey())
+
     if (envelope) next.set(targetKey, envelope)
     else next.delete(targetKey)
     clearDirty(targetKey)
     setDraftByTargetKey((prev) => {
       const next = { ...prev }
       delete next[targetKey]
+
       return next
     })
     applyToEngine(Array.from(next.values()), new Set([targetKey]))
@@ -122,6 +139,7 @@ export function createPersistedAutomationState(options: PersistedAutomationState
       if (!(targetKey in prev)) return prev
       const next = { ...prev }
       delete next[targetKey]
+
       return next
     })
     applyToEngine(options.envelopes(), new Set([targetKey]))
@@ -130,11 +148,15 @@ export function createPersistedAutomationState(options: PersistedAutomationState
   const syncRemote = () => {
     const dirty = dirtyTargetKeys()
     const nextEnvelopes = options.envelopes()
+
     if (dirty.size === 0) {
       const changed = changedTargetKeysFromLastApplied(nextEnvelopes)
+
       if (changed.size > 0) applyToEngine(nextEnvelopes, changed)
+
       return
     }
+
     const merged = mergeDrafts(nextEnvelopes, draftByTargetKey())
     const changed = changedTargetKeysFromLastApplied(merged)
     applyToEngine(merged, new Set([...dirty, ...changed]))

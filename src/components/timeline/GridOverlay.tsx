@@ -20,6 +20,7 @@ const GridOverlay: Component<GridOverlayProps> = (props) => {
   const backgroundStyle = () => {
     const minor = gridStepPx()
     const major = barStepPx()
+
     // Two repeating gradients: minor (thin, faint) and major (thicker, brighter)
     // Use transparent background so underlying content remains visible
     return {

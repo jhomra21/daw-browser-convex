@@ -12,6 +12,7 @@ const sourceOffsetAfterTimelineTrim = (input: {
   const audioStartSec = input.clip.startSec + Math.max(0, input.clip.leftPadSec ?? 0)
   const oldTimelineSec = Math.max(input.map.timelineStartSec, audioStartSec)
   const newTimelineSec = Math.min(input.map.timelineEndSec, oldTimelineSec + input.timelineTrimSec)
+
   return Math.max(0, Math.min(input.bufferDurationSec, input.map.timelineToSourceSec(newTimelineSec)))
 }
 
@@ -23,12 +24,15 @@ const consumeWarpLeadingSilence = (input: {
   const sourceBeatOffset = input.audioWarp?.enabled === true
     ? Math.max(0, input.audioWarp.sourceBeatOffset ?? 0)
     : 0
+
   if (!input.audioWarp || sourceBeatOffset <= 0) {
     return { audioWarp: input.audioWarp, consumedTimelineSec: 0, changed: false }
   }
+
   const secondsPerBeat = 60 / Math.max(1e-6, input.projectBpm || 120)
   const consumedBeats = Math.min(sourceBeatOffset, input.timelineTrimSec / secondsPerBeat)
   const nextOffset = normalizeSourceBeatOffsetValue(sourceBeatOffset - consumedBeats)
+
   return {
     audioWarp: {
       ...input.audioWarp,
@@ -51,14 +55,18 @@ export const calculateAudioTimelineTrimOffsets = (input: {
   const consumedPad = Math.min(leftPadSec, input.timelineTrimSec)
   leftPadSec -= consumedPad
   const remaining = input.timelineTrimSec - consumedPad
+
   if (remaining > 0) {
     const warpTrim = consumeWarpLeadingSilence({
       audioWarp: input.clip.audioWarp,
       projectBpm: input.projectBpm,
       timelineTrimSec: remaining,
     })
+
     const sourceTrimSec = remaining - warpTrim.consumedTimelineSec
+
     if (warpTrim.changed) audioWarp = warpTrim.audioWarp
+
     if (sourceTrimSec > 0) {
       const baseline = {
         ...input.clip,
@@ -66,6 +74,7 @@ export const calculateAudioTimelineTrimOffsets = (input: {
         leftPadSec: 0,
         audioWarp: warpTrim.audioWarp,
       }
+
       const map = getAudioClipTimeMap({
         clip: baseline,
         bufferDurationSec: input.bufferDurationSec,
@@ -73,6 +82,7 @@ export const calculateAudioTimelineTrimOffsets = (input: {
         rangeStartSec: baseline.startSec,
         rangeEndSec: baseline.startSec + baseline.duration,
       })
+
       bufferOffsetSec = sourceOffsetAfterTimelineTrim({
         clip: baseline,
         bufferDurationSec: input.bufferDurationSec,
@@ -81,6 +91,7 @@ export const calculateAudioTimelineTrimOffsets = (input: {
       })
     }
   }
+
   return { leftPadSec, bufferOffsetSec, audioWarp } satisfies {
     leftPadSec: number
     bufferOffsetSec: number

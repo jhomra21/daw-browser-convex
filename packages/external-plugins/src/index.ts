@@ -33,6 +33,7 @@ export const vstLaunchReferenceSchema = z.object({
   stateHash: fingerprint.optional(),
   state: opaquePluginStateMetadataSchema.optional(),
 }).strict()
+
 export type VstLaunchReference = z.infer<typeof vstLaunchReferenceSchema>
 
 /* Legacy scanner rows can contain a local discovery path. Convert only their
@@ -50,6 +51,7 @@ export const migrateVstLaunchReference = (value: ExternalPluginJsonValue): VstLa
     stateHash: fingerprint.optional(),
     state: opaquePluginStateMetadataSchema.optional(),
   }).passthrough().parse(value)
+
   return vstLaunchReferenceSchema.parse({
     version: 1,
     classId: legacy.classId,
@@ -77,6 +79,7 @@ export const externalProcessorSchema = z.object({
   health: pluginHealthSchema,
   updatedAt: z.number().int().nonnegative(),
 }).strict()
+
 export type ExternalProcessor = z.infer<typeof externalProcessorSchema>
 
 const legacyExternalProcessorSchema = externalProcessorSchema.omit({ index: true }).extend({
@@ -95,24 +98,30 @@ const canonicalExternalProcessor = (processor: ExternalProcessor): ExternalProce
 
 export const parseExternalProcessorValue = (value: ExternalPluginJsonValue): ExternalProcessorParseResult => {
   const current = externalProcessorSchema.safeParse(value)
+
   if (current.success) {
     const data = canonicalExternalProcessor(current.data)
+
     return {
       success: true,
       data,
       migrated: data.index !== current.data.index,
     }
   }
+
   const legacy = legacyExternalProcessorSchema.safeParse(value)
+
   if (!legacy.success) return { success: false, error: current.error }
   const { chainIndex, ...processor } = legacy.data
   const data = canonicalExternalProcessor({ ...processor, index: chainIndex })
+
   return { success: true, data, migrated: true }
 }
 
 export const externalInstrumentSchema = externalProcessorSchema.extend({
   manifest: pluginManifestSchema.refine((manifest) => manifest.role === 'instrument', 'External instrument requires an instrument manifest.'),
 })
+
 export type ExternalInstrument = z.infer<typeof externalInstrumentSchema>
 
 export const externalPluginDegradedPlaceholder = (
@@ -135,6 +144,7 @@ export const resolveExternalPluginRuntime = (
   if (bridge.status !== 'unsupported') {
     return { kind: 'unavailable', processor, reason: 'A supported native audio bridge has not been integrated.' }
   }
+
   return {
     kind: 'degraded',
     processor: externalPluginDegradedPlaceholder(processor, {
@@ -157,6 +167,7 @@ export const getExternalEffectTiming = (processor: Pick<ExternalProcessor, 'late
 })
 
 export type BridgeCandidate = 'direct-native-mapping' | 'bounded-copy-transport' | 'browser-only-fallback'
+
 export type BridgeFeasibilityResult = {
   candidate: BridgeCandidate
   status: 'supported' | 'unsupported'
@@ -179,6 +190,7 @@ export const evaluateBridgeFeasibility = (input: {
       measuredAt: input.measuredAt,
     }
   }
+
   if (input.candidate === 'bounded-copy-transport') {
     if (!input.nativeAudioBridgeIntegrationPoint) {
       return {
@@ -188,6 +200,7 @@ export const evaluateBridgeFeasibility = (input: {
         measuredAt: input.measuredAt,
       }
     }
+
     return {
       candidate: input.candidate,
       status: 'unsupported',
@@ -196,6 +209,7 @@ export const evaluateBridgeFeasibility = (input: {
       integrationPoint: input.nativeAudioBridgeIntegrationPoint,
     }
   }
+
   return {
     candidate: input.candidate,
     status: 'unsupported',
@@ -228,10 +242,12 @@ export const scheduleExternalParameters = (input: {
 }) => {
   const startOffset = Math.max(0, Math.round(input.lookAheadSec * input.sampleRate))
   const byParameter = new Map<number, ScheduledPluginParameter>()
+
   for (const change of input.changes) {
     if (!Number.isFinite(change.value) || change.sampleOffset < startOffset) continue
     byParameter.set(change.id, change)
   }
+
   return [...byParameter.values()]
     .sort((a, b) => a.sampleOffset - b.sampleOffset || a.id - b.id)
     .slice(0, input.maxEvents)
@@ -247,6 +263,7 @@ export const scheduleExternalAutomation = (input: {
   maxEvents: number
 }) => {
   const scheduled: ScheduledPluginParameter[] = []
+
   for (const point of input.points) {
     if (
       !Number.isFinite(point.value)
@@ -254,12 +271,15 @@ export const scheduleExternalAutomation = (input: {
       || point.beat > input.windowEndBeat
     ) continue
     const sampleOffset = input.timelineToAbsoluteSample(input.beatsToTimelineSec(point.beat))
+
     const quantizedOffset = Math.max(
       0,
       Math.round(sampleOffset / Math.max(1, input.quantizationSamples)) * Math.max(1, input.quantizationSamples),
     )
+
     scheduled.push({ id: point.id, value: point.value, sampleOffset: quantizedOffset, gesture: point.gesture })
   }
+
   return scheduleExternalParameters({
     changes: scheduled,
     sampleRate: 1,
@@ -273,6 +293,7 @@ export const assertBrowserExportHasNoLiveExternalPlugins = (
   processors: readonly Pick<ExternalProcessor, 'instanceId' | 'bypassed' | 'health'>[],
 ) => {
   const unresolved = processors.find((processor) => !processor.bypassed)
+
   if (unresolved) {
     throw new Error(`External plugin ${unresolved.instanceId} must be frozen or bypassed before browser export.`)
   }
@@ -287,4 +308,5 @@ export const hybridFreezeJobSchema = z.object({
   nativeSegment: z.object({ startSample: z.number().int().nonnegative(), endSample: z.number().int().nonnegative() }).strict()
     .refine((segment) => segment.endSample > segment.startSample),
 }).strict()
+
 export type HybridFreezeJob = z.infer<typeof hybridFreezeJobSchema>

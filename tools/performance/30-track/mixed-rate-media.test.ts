@@ -13,11 +13,13 @@ test("WAV stream has correct header, bounded chunks and deterministic page joins
   expect(view.getUint32(40, true)).toBe(source.uncompressedBytes)
   let bytes = 0
   let pages = 0
+
   for await (const chunk of stream) {
     expect(chunk.byteLength).toBeLessThanOrEqual(16_384 * source.channelCount * 4)
     bytes += chunk.byteLength
     pages++
   }
+
   expect(bytes).toBe(source.uncompressedBytes)
   expect(pages).toBeGreaterThan(1)
   const adjacent = sampleThirtyTrackMixedRatePage(source, 16_383, 2)

@@ -15,9 +15,11 @@ type TrackMixWriteResult = { status?: 'access-denied' | 'applied' | 'noop' | 'no
 const readTrackMixWriteResult = (value: JsonValue): TrackMixWriteResult => {
   if (!isJsonObject(value)) return { status: 'applied' }
   const status = value.status
+
   if (status === 'access-denied' || status === 'applied' || status === 'noop' || status === 'not-found') {
     return { status }
   }
+
   return { status: 'applied' }
 }
 
@@ -29,7 +31,9 @@ export const createTimelineTrackWriteAdapter = (context: TrackWriteContext) => {
     if (isLocalId('project', context.projectId)) {
       return await context.writeLocalTrack(localInput)
     }
+
     if (!context.userId) return
+
     return await writeCloud(context.userId)
   }
 
@@ -67,12 +71,16 @@ export const createTimelineTrackWriteAdapter = (context: TrackWriteContext) => {
     ),
     setMix: async (trackId: string, patch: { muted?: boolean; soloed?: boolean }): Promise<TrackMixWriteResult | undefined> => {
       if (patch.muted === undefined && patch.soloed === undefined) return undefined
+
       if (isLocalId('project', context.projectId)) {
         await context.writeLocalTrack({ trackId, muted: patch.muted, soloed: patch.soloed })
+
         return { status: 'applied' }
       }
+
       if (!context.userId) return undefined
       const userId = context.userId
+
       const result = z.json().parse(await publishDurableSharedTimelineOperation({
         projectId: context.projectId,
         userId,
@@ -86,6 +94,7 @@ export const createTimelineTrackWriteAdapter = (context: TrackWriteContext) => {
         },
         queuedResult: { status: 'applied' },
       }))
+
       return readTrackMixWriteResult(result)
     },
   }

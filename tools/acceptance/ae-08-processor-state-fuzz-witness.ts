@@ -8,11 +8,14 @@ export default function createWitnessObserver() {
   let gain = 0
   let waiterIds: number[] = []
   let applied = 0
+
   const eventSchema = z.object({ event: z.string().optional(), site: z.string().optional(),
     kind: z.string().optional(), name: z.string().optional(), id: z.number().optional() })
+
   return {
     record<Value>(value: Value) {
       const parsed = eventSchema.safeParse(value)
+
       if (parsed.success) events.push(parsed.data)
     },
     capture(value: number, ids: number[], applicationCount: number) {

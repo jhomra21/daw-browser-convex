@@ -68,6 +68,7 @@ function About() {
   const session = useSessionQuery()
   const search = Route.useSearch()
   const redirectTarget = () => normalizeAppRedirect(search().redirect)
+
   return (
     <main class="about-page min-h-screen bg-gradient-to-b from-neutral-950 to-neutral-900 text-neutral-100">
       <section class="relative container mx-auto px-4 pt-20 pb-10 text-center">

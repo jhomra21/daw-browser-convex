@@ -20,22 +20,29 @@ import { setLocalEffectInstance } from "~/lib/local-effects";
 // The isolated bundler redirects only live-mixer's factory import here. Hold its actual set result,
 // after the real node write but before live-mixer can commit liveParams. No product seam or timer.
 let compressorHold: { reached: () => void; release: Promise<void> } | undefined;
+
 export const observeCompressorChainState = (...args: Parameters<typeof createCompressorChainState>) => {
   const state = createCompressorChainState(...args);
+
   return { ...state, set: async (...input: Parameters<typeof state.set>) => {
     const result = await state.set(...input);
+
     if (compressorHold && input[1].thresholdDb === -12) {
       const mine = compressorHold;
       mine.reached();
       await mine.release;
     }
+
     return result;
   } };
 };
 
 type Instance = Parameters<AudioEngine["setTrackFxInstances"]>[1][number];
+
 type Outcome = { disposition: EngineDisposition } | { rejected: string };
+
 type Check = { name: string; expected: string; actual: string; pass: boolean };
+
 type RowResult = { row: string; observed: Record<string, string | number>; checks: Check[] };
 
 // ───────────────────────── Recorders ─────────────────────────
@@ -50,22 +57,27 @@ let nodeConstructions = 0;
 let rejectNextCompressorModule = false;
 
 const originalPostMessage = MessagePort.prototype.postMessage;
+
 Object.defineProperty(MessagePort.prototype, "postMessage", {
   configurable: true,
   writable: true,
   value: function postMessage(this: MessagePort, ...args: Parameters<typeof originalPostMessage>) {
     const log = portLogs.get(this);
     const message = paramsMessage.safeParse(args[0]);
+
     if (log && message.success) log.push(message.data.params.thresholdDb);
+
     return originalPostMessage.apply(this, args);
   },
 });
 
 const OriginalWorkletNode = AudioWorkletNode;
+
 class RecordingWorkletNode extends OriginalWorkletNode {
   constructor(context: BaseAudioContext, name: string, options?: AudioWorkletNodeOptions) {
     super(context, name, options);
     nodeConstructions++;
+
     if (!name.includes("compressor")) return;
     const log: number[] = [];
     compressorLogs.push(log);
@@ -73,26 +85,33 @@ class RecordingWorkletNode extends OriginalWorkletNode {
     portLogs.set(this.port, log);
   }
 }
+
 window.AudioWorkletNode = RecordingWorkletNode;
 
 countFactoryCalls(BaseAudioContext.prototype, /^create(?!Buffer$|PeriodicWave$)/u, (name) => {
   nodeConstructions++;
   factoryCalls.set(name, (factoryCalls.get(name) ?? 0) + 1);
 });
+
 const originalCreateBiquad = BaseAudioContext.prototype.createBiquadFilter;
+
 BaseAudioContext.prototype.createBiquadFilter = function createBiquadFilter(this: BaseAudioContext) {
   const filter = originalCreateBiquad.call(this);
   biquads.push(filter);
+
   return filter;
 };
 
 // The next load of the compressor module rejects once: the worklet failing to register.
 const originalAddModule = AudioWorklet.prototype.addModule;
+
 AudioWorklet.prototype.addModule = function addModule(this: AudioWorklet, ...args: Parameters<typeof originalAddModule>) {
   if (rejectNextCompressorModule && String(args[0]).includes("compressor")) {
     rejectNextCompressorModule = false;
+
     return Promise.reject(new Error("Worklet module failed to load."));
   }
+
   return originalAddModule.apply(this, args);
 };
 
@@ -108,6 +127,7 @@ const resetRecorders = () => {
 const macrotask = () => new Promise<void>((resolve) => {
   const channel = new MessageChannel();
   channel.port1.onmessage = () => { channel.port1.close(); resolve(); };
+
   channel.port2.postMessage(null);
 });
 
@@ -118,17 +138,21 @@ const compressor = (thresholdDb: number, id = "compressor-1"): Instance => ({
   kind: "compressor",
   params: { ...AUDIO_EFFECT_CONTRACTS.compressor.createDefaultParams(), enabled: true, thresholdDb },
 });
+
 // The second default band is a peaking filter, so its gain is a parameter edit that keeps the node topology.
 const eq = (gainDb: number, id = "eq-1"): Instance => {
   const defaults = AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams();
+
   return { id, kind: "eq", params: { ...defaults, bands: defaults.bands.map((band, index) => index === 1 ? { ...band, gainDb } : band) } };
 };
 
 const track = "track-1";
+
 const outcome = (pending: Promise<EngineDisposition>): Promise<Outcome> => pending.then(
   (disposition) => ({ disposition }),
   (error) => ({ rejected: error instanceof Error ? error.message : String(error) }),
 );
+
 const label = (result: Outcome) => "rejected" in result ? "rejected" : result.disposition;
 const count = (results: readonly Outcome[], name: string) => results.filter((result) => label(result) === name).length;
 const heldThreshold = (index = 0) => compressorLogs[index]?.at(-1);
@@ -155,8 +179,10 @@ const withEngine = async (row: string, body: (engine: AudioEngine) => Promise<Om
   engine.ensureAudio();
   await macrotask();
   resetRecorders();
+
   try {
     const result = await body(engine);
+
     return { row, observed: { ...result.observed, audioNodesConstructed: nodeConstructions, audioNodeFactories: JSON.stringify(Object.fromEntries(factoryCalls)) }, checks: result.checks };
   } finally {
     engine.close();
@@ -177,12 +203,14 @@ const pendingBThenA = async (setter: ChainSetter, a: Instance, b: Instance, read
   const postsAfterRace = compressorLogs.reduce((total, log) => total + log.length, 0);
   const again = await outcome(setter([a]));
   await macrotask();
+
   return { results, held, again, racePosts: postsAfterRace - postsBefore, extraPosts: compressorLogs.reduce((total, log) => total + log.length, 0) - postsAfterRace };
 };
 
 const compressorRow = (row: string, master: boolean) => withEngine(row, async (engine) => {
   const setter: ChainSetter = master ? (instances) => engine.setMasterFxInstances(instances) : (instances) => engine.setTrackFxInstances(track, instances);
   const run = await pendingBThenA(setter, compressor(-18), compressor(-12), () => heldThreshold());
+
   return {
     observed: { heldThresholdDb: run.held ?? "none", ...tally([...run.results, run.again]), nodesConstructed: compressorLogs.length },
     checks: [
@@ -201,15 +229,20 @@ const panelCompressorCancelRow = () => withEngine("R4-5 compressor in-place pend
   await setLocalEffectInstance(projectId, track, "compressor", initial.params, { instanceId: initial.id });
   await engine.setTrackFxInstances(track, [initial]);
   let dispose = () => {};
+
   const f = createRoot(end => {
     dispose = end;
     const view = createLocalEffectsView({ projectId: () => projectId });
+
     const panel = createEffectsPanelAudioDevice({ audioEngine: () => engine, projectId: () => projectId,
       userId: () => undefined, roomEffects: () => undefined, localEffectsView: view,
       canWriteCurrentTargetEffects: () => true }, () => track, () => undefined);
+
     return { panel, view, gesture: panel.gestureOwner(initial.id, "compressor") };
   });
+
   const reached = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+
   try {
     await f.view.reload(); await f.panel.flushPending();
     const nodesBefore = compressorNodes.length;
@@ -228,6 +261,7 @@ const panelCompressorCancelRow = () => withEngine("R4-5 compressor in-place pend
     const finalHeld = heldThreshold();
     const postsBeforeEqual = compressorLogs[0]?.length;
     const again = await engine.setTrackFxInstances(track, [initial]);
+
     return { observed: { heldDuringTick: heldDuringTick ?? "none", finalHeld: finalHeld ?? "none",
       nodesBefore, nodesAfter: compressorNodes.length, again, drainedWhileHeld: String(drainedWhileHeld) },
       checks: [
@@ -245,6 +279,7 @@ const eqControlRow = () => withEngine("installed-A-pending-B-request-A-eq-contro
   await engine.setTrackFxInstances(track, [eq(0)]);
   const results = await Promise.all([outcome(engine.setTrackFxInstances(track, [eq(6)])), outcome(engine.setTrackFxInstances(track, [eq(0)]))]);
   await macrotask();
+
   return {
     observed: { heldGainDb: heldEqGain() ?? "none", biquads: biquads.length, ...tally(results) },
     checks: [
@@ -258,6 +293,7 @@ const equalPendingSuccessRow = () => withEngine("equal-pending-success", async (
   const results = await Promise.all([outcome(engine.setTrackFxInstances(track, [compressor(-18)])), outcome(engine.setTrackFxInstances(track, [compressor(-18)]))]);
   await macrotask();
   const summary = tally(results);
+
   return {
     observed: { ...summary, nodesConstructed: compressorLogs.length, heldThresholdDb: heldThreshold() ?? "none" },
     checks: [
@@ -278,6 +314,7 @@ const equalPendingFailureRow = () => withEngine("equal-pending-failure", async (
   const retry = await outcome(engine.setTrackFxInstances(track, [compressor(-18)]));
   await macrotask();
   const summary = tally(results);
+
   return {
     observed: { ...summary, nodesBuiltBeforeRetry: built, retry: label(retry), nodesBuiltAfterRetry: compressorLogs.length },
     checks: [
@@ -299,6 +336,7 @@ const externalWholeChainThenOldRow = () => withEngine("external-whole-chain-then
   await engine.setTrackFxInstances(track, [compressor(-10)]);
   const whole = await outcome(engine.setTrackFxInstances(track, [compressor(-24)]));
   await macrotask();
+
   return {
     observed: { singleDisposition: label(single), heldAfterSingleDb: heldAfterSingle ?? "none", wholeDisposition: label(whole), heldAfterWholeDb: heldThreshold() ?? "none" },
     checks: [
@@ -321,6 +359,7 @@ const resourceFaultThenEqualRow = () => withEngine("resource-fault-then-equal", 
   const equal = await outcome(engine.setTrackFxInstances(track, [compressor(-18)]));
   await macrotask();
   const summary = tally([first, equal]);
+
   return {
     observed: { ...summary, nodesBuilt: compressorLogs.length },
     checks: [
@@ -351,6 +390,7 @@ const sampledZone = (assetKey: string, startSec = 0, endSec = 1): SamplerParams[
   crossfadeSec: 0,
   chokeGroup: 0,
 });
+
 const decodePages = async function* (
   _source: Blob | string | URL | Request,
   options?: { startSec?: number; endSec?: number },
@@ -359,6 +399,7 @@ const decodePages = async function* (
   const frameCount = Math.round((options?.endSec ?? 1) * 48_000) - startFrame;
   yield { startFrame, frameCount, sampleRate: 48_000, channelCount: 2, planes: [new Float32Array(frameCount), new Float32Array(frameCount)] };
 };
+
 const samplerParams = () => ({ ...createDefaultSamplerParams(), zones: [sampledZone("sampled-a")] });
 
 const sampledEqualJoinRow = () => withEngine("sampled-equal-join", async (engine) => {
@@ -368,6 +409,7 @@ const sampledEqualJoinRow = () => withEngine("sampled-equal-join", async (engine
   const settled = await outcome(sync.syncTrack(engine, track, { ...params }, "sampler-instance"));
   const summary = tally([...results, settled]);
   sync.dispose();
+
   return {
     observed: { ...summary, instrumentKind: engine.getTrackInstrumentKind(track) ?? "none" },
     checks: [
@@ -388,6 +430,7 @@ const sampledRemovalReaddRow = () => withEngine("sampled-removal-readd", async (
   const readded = await outcome(sync.syncTrack(engine, track, { ...params }, "sampler-instance"));
   const summary = tally([first, readded]);
   sync.dispose();
+
   return {
     observed: { ...summary },
     checks: [
@@ -406,6 +449,7 @@ const sampledEngineLostRow = () => withEngine("sampled-engine-lost-then-equal", 
   const again = await outcome(sync.syncTrack(engine, track, { ...params }, "sampler-instance"));
   const kindAfterAgain = engine.getTrackInstrumentKind(track) ?? "none";
   sync.dispose();
+
   return {
     observed: { first: label(first), kindAfterClear, again: label(again), kindAfterAgain },
     checks: [
@@ -422,6 +466,7 @@ const sampledEvictionRow = () => withEngine("sampled-eviction-then-equal", async
   const source = { durationSec: 2, sampleRate: 8000, channelCount: 1 };
   const firstZone = { ...sampledZone("evicted-first", 0, 1), sample: { ...sampledZone("evicted-first").sample, source } };
   const secondZone = { ...sampledZone("evicted-second", 1, 2), sample: { ...sampledZone("evicted-second").sample, source } };
+
   const regionPages = async function* (
     _source: Blob | string | URL | Request,
     options?: { startFrame?: number; endFrame?: number },
@@ -430,10 +475,12 @@ const sampledEvictionRow = () => withEngine("sampled-eviction-then-equal", async
     const frameCount = (options?.endFrame ?? startFrame + 8000) - startFrame;
     yield { startFrame, frameCount, sampleRate: 8000, channelCount: 1, planes: [new Float32Array(frameCount)] };
   };
+
   const sync = createSamplerBufferSync({
     aggregateBudget: createSampledInstrumentRegionBudget(oneRegionBytes),
     decodePages: regionPages,
   });
+
   const firstParams: SamplerParams = { ...createDefaultSamplerParams(), cachePolicy: "preload", maxDecodedBytes: oneRegionBytes, zones: [firstZone] };
   const secondParams: SamplerParams = { ...createDefaultSamplerParams(), cachePolicy: "preload", maxDecodedBytes: oneRegionBytes, zones: [secondZone] };
   const first = await outcome(sync.syncTrack(engine, "evicted-track-a", firstParams, "instance-a"));
@@ -442,6 +489,7 @@ const sampledEvictionRow = () => withEngine("sampled-eviction-then-equal", async
   const again = await outcome(sync.syncTrack(engine, "evicted-track-a", { ...firstParams }, "instance-a"));
   const zoneState = sync.getStatus("evicted-track-a").zones.get(firstZone.id) ?? "none";
   sync.dispose();
+
   return {
     observed: { first: label(first), evictedState, againAfterEviction: label(again), againDetail: "rejected" in again ? again.rejected : "", zoneState },
     checks: [
@@ -467,6 +515,7 @@ const staleEnableRoutedRow = (row: string, processorName: string, make: (enabled
   window.AudioWorkletNode = class extends Previous {
     constructor(context: BaseAudioContext, name: string, options?: AudioWorkletNodeOptions) {
       super(context, name, options);
+
       if (name.includes(processorName)) processors.add(this);
     }
   };
@@ -476,14 +525,20 @@ const staleEnableRoutedRow = (row: string, processorName: string, make: (enabled
     value: function connect(this: AudioNode, ...args: Parameters<typeof originalConnect>) {
       const result = originalConnect.apply(this, args);
       const target = args[0];
+
       if (!routing) return result;
+
       if (processors.has(this) || (target instanceof AudioNode && processors.has(target))) processorConnections++;
+
       if (this instanceof BiquadFilterNode) equalizerRouted = true;
+
       // The master routing ends by connecting its last stage to the destination: that is the event the routing is done on.
       if (equalizerRouted && target instanceof AudioDestinationNode) finishRouting();
+
       return result;
     },
   });
+
   try {
     const disabled = make(false);
     await engine.setMasterFxInstances([disabled]);
@@ -492,6 +547,7 @@ const staleEnableRoutedRow = (row: string, processorName: string, make: (enabled
     await engine.setMasterFxInstances([disabled, eq(0)]);
     await routed;
     const equal = await engine.setMasterFxInstances([disabled, eq(0)]);
+
     return {
       observed: { results: results.join(","), equal, processorConnections },
       checks: [
@@ -523,6 +579,7 @@ const synthDroppedNoContextRow = async (): Promise<RowResult> => {
   resetRecorders();
   const context = new AudioContext();
   let available: AudioContext | null = null;
+
   const runtime = createSynthRuntime({
     ensureAudio: () => {},
     getAudioContext: () => available,
@@ -531,7 +588,9 @@ const synthDroppedNoContextRow = async (): Promise<RowResult> => {
     ensureTrackInput: () => context.createGain(),
     sources: createSourceRegistry(),
   });
+
   const engine = new AudioEngine();
+
   try {
     const params = { ...createDefaultSynthParams(), gain: 0.6 };
     const dropped = runtime.setTrackSynth(track, params, "synth-instance");
@@ -539,6 +598,7 @@ const synthDroppedNoContextRow = async (): Promise<RowResult> => {
     const equalWithContext = runtime.setTrackSynth(track, { ...params }, "synth-instance");
     const equalAgain = runtime.setTrackSynth(track, { ...params }, "synth-instance");
     const lazy = engine.setTrackSynth("lazy-track", params, "synth-instance");
+
     return {
       row: "synth-dropped-no-context",
       observed: { withoutContext: dropped, equalWithContext, equalAgain, engineWithoutPriorContext: lazy },

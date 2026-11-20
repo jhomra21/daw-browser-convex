@@ -63,6 +63,7 @@ export const rebaseTrackAutomationEnvelope = (
   const samplerKey = parseInstrumentAutomationKey(envelope.parameterId);
   const granularKey = parseGranularAutomationKey(envelope.parameterId);
   const synthKey = parseSynthAutomationKey(envelope.parameterId);
+
   const parameterId = samplerKey
     ? instrumentAutomationKey(trackId, samplerKey.instanceId, samplerKey.parameterId)
     : granularKey
@@ -70,10 +71,12 @@ export const rebaseTrackAutomationEnvelope = (
       : synthKey
         ? synthAutomationKey(trackId, synthKey.instanceId, synthKey.parameterId)
         : envelope.parameterId;
+
   const target: AutomationEnvelope["target"] = createAutomationTarget(
     { kind: "track", trackId },
     envelope.target.effectInstanceId,
   );
+
   return {
     ...envelope,
     target,
@@ -111,6 +114,7 @@ export const syncHistoryTrackCreateEntryId = (
   trackId: Track["id"],
 ) => {
   if (!trackRef) return;
+
   for (const entry of entries) {
     if (entry.type === "track-create" && entry.data.trackRef === trackRef) {
       entry.data.currentTrackId = trackId;
@@ -123,9 +127,11 @@ export const syncHistoryClipCreateEntryIds = (
   clipIdsByRef: ReadonlyMap<string, string>,
 ) => {
   if (clipIdsByRef.size === 0) return;
+
   for (const entry of entries) {
     if (entry.type !== "clip-create") continue;
     const clipId = clipIdsByRef.get(entry.data.clip.clipRef);
+
     if (clipId) {
       entry.data.clip.currentId = clipId;
     }
@@ -165,9 +171,12 @@ export const createHistoryTrack = async (
       color: track.color,
       sends: track.sends,
     });
+
     return { trackId: row.id, index: row.index };
   }
+
   const index = trackCreationIndex(deps.getTracks(), track.channelRole, track.index);
+
   const payload = buildTrackCreateMutationInput({
     projectId: deps.projectId,
     name: track.name,
@@ -176,6 +185,7 @@ export const createHistoryTrack = async (
     channelRole: track.channelRole,
     collapsed: track.collapsed,
   });
+
   const operation = buildSharedTrackCreateOperation({
     name: payload.name,
     index: payload.index,
@@ -184,8 +194,10 @@ export const createHistoryTrack = async (
     collapsed: track.collapsed,
     color: track.color,
   });
+
   const result = await publishSharedTimelineOperation(deps.projectId, operation);
   assert(isJsonString(result), "Failed to create history track");
+
   return { trackId: result, index };
 };
 
@@ -201,8 +213,10 @@ export const persistHistoryTrackGroup = async (
       groupId: groupId ?? null,
       outputTargetId: outputTargetId ?? null,
     });
+
     return;
   }
+
   await publishHistoryOperation(deps, { kind: "tracks.setGroup", payload: { trackId, groupId: groupId ?? null } });
   const track = deps.getTracks().find((entry) => entry.id === trackId);
   await publishHistoryOperation(deps, { kind: "tracks.setRouting", payload: { trackId, routing: { outputTargetId, sends: track?.sends ?? [] } } });
@@ -215,8 +229,10 @@ export const persistHistoryTrackColor = async (
 ) => {
   if (isLocalHistoryProject(deps)) {
     await createLocalTimelineRepository(deps.projectId).updateTrack({ trackId, color: color ?? null });
+
     return;
   }
+
   await publishHistoryOperation(deps, { kind: "tracks.setColor", payload: { trackId, color } });
 };
 
@@ -232,8 +248,10 @@ export const persistHistoryColorBatch = async (
       tracks: updates.tracks.map((update) => ({ trackId: update.trackId, color: update.color ?? null })),
       clips: updates.clips,
     });
+
     return;
   }
+
   await publishHistoryOperation(deps, {
     kind: "tracks.applyColorBatch",
     payload: {
@@ -249,16 +267,20 @@ export const persistHistoryTrackReorder = async (
 ) => {
   if (isLocalHistoryProject(deps)) {
     await createLocalTimelineRepository(deps.projectId).reorderAndGroup(updates);
+
     return;
   }
+
   await publishHistoryOperation(deps, { kind: "tracks.reorderAndGroup", payload: { updates } });
 };
 
 export const persistHistoryUngroup = async (deps: Deps, groupId: Track["id"]) => {
   if (isLocalHistoryProject(deps)) {
     await createLocalTimelineRepository(deps.projectId).ungroupTrack(groupId);
+
     return;
   }
+
   await publishHistoryOperation(deps, {
     kind: "tracks.ungroup",
     payload: { groupId, operationId: crypto.randomUUID() },
@@ -291,11 +313,17 @@ type RestoreUngroupInput = {
 const snapshotAudioEffects = (effects: TrackEffectSnapshot): TrackAudioEffectSnapshot[] => {
   if (effects.audioEffects?.length) return effects.audioEffects
   const audioEffects: TrackAudioEffectSnapshot[] = []
+
   if (effects.eq) audioEffects.push({ effect: "eq", params: effects.eq })
+
   if (effects.compressor) audioEffects.push({ effect: "compressor", params: effects.compressor })
+
   if (effects.saturator) audioEffects.push({ effect: "saturator", params: effects.saturator })
+
   if (effects.delay) audioEffects.push({ effect: "delay", params: effects.delay })
+
   if (effects.reverb) audioEffects.push({ effect: "reverb", params: effects.reverb })
+
   return audioEffects
 }
 
@@ -303,6 +331,7 @@ const localRestoreEffectRows = (trackId: Track["id"], effects: TrackEffectSnapsh
   if (!effects) return []
   const timestamp = Date.now()
   const audioEffects = snapshotAudioEffects(effects)
+
   return [
     ...audioEffects.map((effect) => ({
       id: localEffectRowId(trackId, effect.effect, effect.instanceId),
@@ -325,17 +354,23 @@ const sharedRestoreEffects = (effects: TrackEffectSnapshot | undefined): SharedR
   if (!effects) return []
   const audioEffects = snapshotAudioEffects(effects)
   const restored: SharedRestoreEffects = []
+
   for (const effect of audioEffects) {
     restored.push({ type: effect.effect, instanceId: effect.instanceId, index: effect.index, params: effect.params })
   }
+
   if (effects.instrument) restored.push({ type: 'instrument', params: effects.instrument })
+
   if (!effects.instrument && effects.synth) restored.push({ type: 'synth', params: effects.synth })
+
   if (effects.arp) restored.push({ type: 'arpeggiator', params: effects.arp })
+
   return restored
 }
 
 export const persistHistoryRestoreUngroup = async (deps: Deps, input: RestoreUngroupInput): Promise<Track["id"]> => {
   const groupId = input.groupId
+
   if (isLocalHistoryProject(deps)) {
     await createLocalTimelineRepository(deps.projectId).restoreUngroup({
       group: {
@@ -361,8 +396,10 @@ export const persistHistoryRestoreUngroup = async (deps: Deps, input: RestoreUng
       automation: (input.automation ?? []).map((envelope) => rebaseTrackAutomationEnvelope(envelope, groupId)),
       sidechainRoutes: input.sidechainRoutes,
     })
+
     return groupId
   }
+
   const result = await publishSharedTimelineOperation(
     deps.projectId,
     {
@@ -386,6 +423,7 @@ export const persistHistoryRestoreUngroup = async (deps: Deps, input: RestoreUng
         effects: sharedRestoreEffects(input.effects),
         automation: (input.automation ?? []).map((envelope) => {
           const rebased = rebaseTrackAutomationEnvelope(envelope, groupId)
+
           return {
             effectInstanceId: rebased.target.effectInstanceId,
             parameterId: rebased.parameterId,
@@ -399,9 +437,11 @@ export const persistHistoryRestoreUngroup = async (deps: Deps, input: RestoreUng
       },
     },
   )
+
   if (!isJsonObject(result) || result.status !== "applied" || !isJsonString(result.groupId)) {
     throw new Error("Failed to restore dissolved group.")
   }
+
   return result.groupId
 }
 
@@ -413,10 +453,12 @@ export const createHistoryClip = async (
   if (isLocalHistoryProject(deps)) {
     const clipRef = clip.clipRef ?? clip.currentId;
     const resolvedClipRef = assertDefined(clipRef, "Missing clip reference for local history clip creation");
+
     return (await createLocalTimelineRepository(deps.projectId).restoreHistoryClip(
       toHistoryCreateClipInput(trackId, buildLocalClip({ id: resolvedClipRef, clip })),
     )).id;
   }
+
   if (clip.legacyHistory) {
     const result = await deps.convexClient.mutation(deps.convexApi.clips.restoreLegacyHistory, {
       ...buildClipCreatePayload({
@@ -426,8 +468,10 @@ export const createHistoryClip = async (
       }),
       operationId: `legacy-history:${crypto.randomUUID()}`,
     });
+
     return isJsonString(result) ? result : null;
   }
+
   const operation = buildSharedClipCreateOperation(buildClipCreatePayload({
     projectId: deps.projectId,
     trackId,
@@ -436,14 +480,20 @@ export const createHistoryClip = async (
       midi: clip.midi ? sanitizeLegacyMidiClipForCreate(clip.midi) : undefined,
     },
   }));
+
   const result = await publishSharedTimelineOperation(deps.projectId, operation);
+
   return isJsonString(result) ? result : null;
 };
 
 type TrackDeleteEffects = NonNullable<Extract<HistoryEntry, { type: "track-delete" }>["data"]["effects"]>;
+
 type TrackDeleteAutomation = NonNullable<Extract<HistoryEntry, { type: "track-delete" }>["data"]["automation"]>;
+
 type EffectParamsEntry = Extract<HistoryEntry, { type: "effect-params" }>;
+
 type AutomationEnvelopeEntry = Extract<HistoryEntry, { type: "automation-envelope-change" }>;
+
 type HistoryDirection = "undo" | "redo";
 
 function pickDirectionalValue<T>(direction: HistoryDirection, from: T, to: T) {
@@ -462,12 +512,15 @@ export const persistHistoryTrackEffects = async (
 ) => {
   if (!effects) return;
   const audioEffects = effects.audioEffects ?? [];
+
   const restoredAudioEffects = audioEffects.flatMap((effect) => (
     effect.instanceId ? [{ id: effect.instanceId, kind: effect.effect, params: effect.params }] : []
   ));
+
   if (restoredAudioEffects.length !== audioEffects.length) {
     throw new Error("History effect restore is missing an audio effect instance ID.");
   }
+
   if (isLocalHistoryProject(deps)) {
     await restoreLocalTrackEffectChain(deps.projectId, trackId, {
       audioEffects: restoredAudioEffects,
@@ -475,8 +528,10 @@ export const persistHistoryTrackEffects = async (
       synth: effects.synth,
       arp: effects.arp,
     });
+
     return;
   }
+
   await publishHistoryOperation(deps, {
     kind: "effects.restoreChain",
     payload: {
@@ -487,6 +542,7 @@ export const persistHistoryTrackEffects = async (
       operationId: crypto.randomUUID(),
     },
   });
+
   if (!effects.instrument && effects.synth) {
     await publishHistoryOperation(deps, {
       kind: "effects.setSynthParams",
@@ -502,10 +558,13 @@ export const persistHistoryTrackAutomation = async (
 ) => {
   if (!envelopes || envelopes.length === 0) return;
   const rebased = envelopes.map((envelope) => rebaseTrackAutomationEnvelope(envelope, trackId));
+
   if (isLocalHistoryProject(deps)) {
     await Promise.all(rebased.map((envelope) => setLocalAutomationEnvelope(deps.projectId, envelope)));
+
     return;
   }
+
   await Promise.all(rebased.map((envelope) => publishHistoryOperation(deps, {
     kind: "automation.setEnvelope",
     payload: {
@@ -527,10 +586,13 @@ export const persistHistorySidechainRoutes = async (
 ) => {
   if (!routes || routes.length === 0) return;
   const index = buildHistoryRefIndex(deps.getHistoryEntries(), deps.getTracks());
+
   for (const route of routes) {
     const sourceTrackId = resolveTrackId(index, route.sourceTrackRef);
     const targetTrackId = resolveTrackId(index, route.targetTrackRef);
+
     if (!sourceTrackId || !targetTrackId || sourceTrackId === targetTrackId) continue;
+
     if (isLocalHistoryProject(deps)) {
       await createLocalTimelineRepository(deps.projectId).setSidechainRoute({
         sourceTrackId,
@@ -561,22 +623,30 @@ export const persistHistoryEffectParams = async (
   // not the multi-instance audio-effect row key (including older history).
   if (entry.data.effect === "instrument") {
     const instrument = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+
     if (isLocalHistoryProject(deps)) await setLocalEffect(deps.projectId, targetId, "instrument", instrument);
     else await publishHistoryOperation(deps, { kind: "instruments.setTrackInstrument", payload: { trackId: targetId, instrument } });
+
     return;
   }
+
   const instanceId = assertDefined(entry.data.instanceId, "Effect history requires an instance ID");
+
   if (isLocalHistoryProject(deps)) {
     if (entry.data.effect === "reverb" || entry.data.effect === "master-reverb") {
       const params = normalizeReverbParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
       await setLocalEffectInstance(deps.projectId, targetId, entry.data.effect, params, { instanceId: instanceId });
+
       return;
     }
+
     if (entry.data.effect === "spectral" || entry.data.effect === "master-spectral") {
       const params = normalizeSpectralParamsEnvelope(pickDirectionalValue(direction, entry.data.from, entry.data.to));
       await setLocalEffectInstance(deps.projectId, targetId, entry.data.effect, params, { instanceId: instanceId });
+
       return;
     }
+
     const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
     await setLocalEffectInstance(
       deps.projectId,
@@ -585,29 +655,39 @@ export const persistHistoryEffectParams = async (
       params,
       { instanceId: instanceId },
     );
+
     return;
   }
+
   switch (entry.data.effect) {
     case "master-utility": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setMasterUtilityParams", payload: { params, instanceId: instanceId } });
+
       return;
     }
+
     case "master-gate": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setMasterGateParams", payload: { params, instanceId: instanceId } });
+
       return;
     }
+
     case "master-limiter": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setMasterLimiterParams", payload: { params, instanceId: instanceId } });
+
       return;
     }
+
     case "master-spectral": {
       const params = normalizeSpectralParamsEnvelope(pickDirectionalValue(direction, entry.data.from, entry.data.to));
       await publishHistoryOperation(deps, { kind: "effects.setMasterSpectralParams", payload: { params, instanceId: instanceId } });
+
       return;
     }
+
     case "master-autofilter":
     case "master-chorus":
     case "master-flanger":
@@ -619,6 +699,7 @@ export const persistHistoryEffectParams = async (
     case "master-lofi": {
       const effect = entry.data.effect.slice(7);
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+
       if (effect === "autofilter") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(params), instanceId: instanceId } });
       else if (effect === "chorus") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(params), instanceId: instanceId } });
       else if (effect === "flanger") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(params), instanceId: instanceId } });
@@ -628,58 +709,80 @@ export const persistHistoryEffectParams = async (
       else if (effect === "ensemble") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(params), instanceId: instanceId } });
       else if (effect === "lofi") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(params), instanceId: instanceId } });
       else if (effect === "spectrum") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(params), instanceId: instanceId } });
+
       return;
     }
+
     case "master-eq": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setMasterEqParams", payload: { params, instanceId: instanceId } });
+
       return;
     }
+
     case "master-compressor": {
       const params = normalizeCompressorParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
       await publishHistoryOperation(deps, { kind: "effects.setMasterCompressorParams", payload: { params, instanceId: instanceId } });
+
       return;
     }
+
     case "master-reverb": {
       const params = normalizeReverbParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
       await publishHistoryOperation(deps, { kind: "effects.setMasterReverbParams", payload: { params, instanceId: instanceId } });
+
       return;
     }
+
     case "master-saturator": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setMasterSaturatorParams", payload: { params, instanceId: instanceId } });
+
       return;
     }
+
     case "master-delay": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setMasterDelayParams", payload: { params, instanceId: instanceId } });
+
       return;
     }
+
     case "eq": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setEqParams", payload: { trackId: targetId, params, instanceId: instanceId } });
+
       return;
     }
+
     case "utility": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setUtilityParams", payload: { trackId: targetId, params, instanceId: instanceId } });
+
       return;
     }
+
     case "gate": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setGateParams", payload: { trackId: targetId, params, instanceId: instanceId } });
+
       return;
     }
+
     case "limiter": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setLimiterParams", payload: { trackId: targetId, params, instanceId: instanceId } });
+
       return;
     }
+
     case "spectral": {
       const params = normalizeSpectralParamsEnvelope(pickDirectionalValue(direction, entry.data.from, entry.data.to));
       await publishHistoryOperation(deps, { kind: "effects.setSpectralParams", payload: { trackId: targetId, params, instanceId: instanceId } });
+
       return;
     }
+
     case "autofilter":
     case "chorus":
     case "flanger":
@@ -691,6 +794,7 @@ export const persistHistoryEffectParams = async (
     case "lofi": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       const instanceId = assertDefined(entry.data.instanceId, "Effect history requires an instance ID");
+
       if (entry.data.effect === "autofilter") await publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId: targetId, effect: "autofilter", params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(params), instanceId } });
       else if (entry.data.effect === "chorus") await publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId: targetId, effect: "chorus", params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(params), instanceId } });
       else if (entry.data.effect === "flanger") await publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId: targetId, effect: "flanger", params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(params), instanceId } });
@@ -700,36 +804,49 @@ export const persistHistoryEffectParams = async (
       else if (entry.data.effect === "ensemble") await publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId: targetId, effect: "ensemble", params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(params), instanceId } });
       else if (entry.data.effect === "spectrum") await publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId: targetId, effect: "spectrum", params: AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(params), instanceId } });
       else await publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId: targetId, effect: "lofi", params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(params), instanceId } });
+
       return;
     }
+
     case "compressor": {
       const params = normalizeCompressorParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
       await publishHistoryOperation(deps, { kind: "effects.setCompressorParams", payload: { trackId: targetId, params, instanceId: instanceId } });
+
       return;
     }
+
     case "reverb": {
       const params = normalizeReverbParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
       await publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId: targetId, params, instanceId: instanceId } });
+
       return;
     }
+
     case "saturator": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setSaturatorParams", payload: { trackId: targetId, params, instanceId: instanceId } });
+
       return;
     }
+
     case "delay": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setDelayParams", payload: { trackId: targetId, params, instanceId: instanceId } });
+
       return;
     }
+
     case "synth": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setSynthParams", payload: { trackId: targetId, params, instanceId: instanceId } });
+
       return;
     }
+
     case "arp": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setArpeggiatorParams", payload: { trackId: targetId, params } });
+
       return;
     }
   }
@@ -742,12 +859,16 @@ export const persistHistoryAutomationEnvelope = async (
 ) => {
   const envelope = pickDirectionalValue(direction, entry.data.before, entry.data.after);
   const targetKey = envelope?.targetKey ?? entry.data.before?.targetKey ?? entry.data.after?.targetKey;
+
   if (!targetKey) return;
+
   if (isLocalHistoryProject(deps)) {
     if (envelope) await setLocalAutomationEnvelope(deps.projectId, envelope);
     else await deleteLocalAutomationEnvelope(deps.projectId, targetKey);
+
     return;
   }
+
   if (envelope) {
     await publishHistoryOperation(deps, {
       kind: "automation.setEnvelope",
@@ -761,9 +882,12 @@ export const persistHistoryAutomationEnvelope = async (
         updatedAt: envelope.updatedAt,
       },
     });
+
     return;
   }
+
   const before = entry.data.before ?? entry.data.after;
+
   if (!before) return;
   await publishHistoryOperation(deps, {
     kind: "automation.deleteEnvelope",
@@ -783,21 +907,27 @@ export const removeHistoryClipIdsOrThrow = async (
   message: string,
 ) => {
   if (clipIds.length === 0) return new Map<string, string>();
+
   if (isLocalHistoryProject(deps)) {
     await createLocalTimelineRepository(deps.projectId).deleteClips(clipIds);
+
     return new Map<string, string>();
   }
+
   const result = await deps.convexClient.mutation(
     deps.convexApi.clips.removeMany,
     buildClipRemoveManyMutationInput({ projectId: deps.projectId, clipIds, operationId }),
   );
+
   const removedIds = new Set(
     Array.isArray(result?.removedClipIds)
     ? result.removedClipIds.map(String)
       : [],
   );
+
   assert(clipIds.every((clipId) => removedIds.has(String(clipId))), message);
   const recoveryIdsByClipId = new Map<string, string>();
+
   if (Array.isArray(result?.recoveries)) {
     for (const recovery of result.recoveries) {
       if (
@@ -806,18 +936,22 @@ export const removeHistoryClipIdsOrThrow = async (
       ) recoveryIdsByClipId.set(recovery.sourceClipId, recovery.recoveryId);
     }
   }
+
   return recoveryIdsByClipId;
 };
 
 export const removeHistoryTrackOrThrow = async (deps: Deps, trackId: Track["id"], message: string) => {
   if (isLocalHistoryProject(deps)) {
     await createLocalTimelineRepository(deps.projectId).deleteTrack(trackId);
+
     return;
   }
+
   const result = await deps.convexClient.mutation(
     deps.convexApi.tracks.remove,
     buildTrackDeleteMutationInput({ trackId }),
   );
+
   assert(result?.status === "deleted", message);
 };
 
@@ -839,10 +973,14 @@ export const persistHistoryClipTimingOrThrow = async (
       gain: timing.gain,
       fades: timing.fades,
     });
+
     assert(Boolean(applied), message);
+
     return;
   }
+
   const audioWarp = normalizeAudioWarp(timing.audioWarp);
+
   const applied = audioWarp
     ? await persistClipTimingAndAudioWarp(deps.convexClient, deps.convexApi, {
       clipId,
@@ -863,12 +1001,15 @@ export const persistHistoryClipTimingOrThrow = async (
       midiOffsetBeats: timing.midiOffsetBeats ?? 0,
       fades: timing.fades,
     });
+
   assert(Boolean(applied), message);
+
   if (timing.gain !== undefined) {
     const result = await publishSharedTimelineOperation(
       deps.projectId,
       { kind: "clips.setGain", payload: { clipId, gain: timing.gain } },
     );
+
     assert(isAppliedSharedTimelineOperationResult(result), message);
   }
 };
@@ -880,19 +1021,25 @@ export const persistHistoryClipAudioWarpOrThrow = async (
   message: string,
 ) => {
   const normalizedAudioWarp = normalizeAudioWarp(audioWarp);
+
   if (!normalizedAudioWarp) throw new Error(message);
+
   if (isLocalHistoryProject(deps)) {
     const applied = await createLocalTimelineRepository(deps.projectId).updateClip({
       clipId,
       audioWarp: normalizedAudioWarp,
     });
+
     assert(Boolean(applied), message);
+
     return;
   }
+
   const applied = await persistClipAudioWarp(deps.convexClient, deps.convexApi, {
     clipId,
     audioWarp: normalizedAudioWarp,
   });
+
   assert(Boolean(applied), message);
 };
 
@@ -903,17 +1050,22 @@ export const persistHistoryClipFadesOrThrow = async (
   message: string,
 ) => {
   const clip = deps.getTracks().flatMap((track) => track.clips).find((entry) => entry.id === clipId);
+
   if (!clip) throw new Error(message);
   const normalizedFades = normalizeClipFades(fades, clip.duration);
+
   if (isLocalHistoryProject(deps)) {
     const applied = await createLocalTimelineRepository(deps.projectId).updateClip({ clipId, fades: normalizedFades });
     assert(Boolean(applied), message);
+
     return;
   }
+
   const result = await publishSharedTimelineOperation(
     deps.projectId,
     { kind: "clips.setFades", payload: { clipId, fades: normalizedFades } },
   );
+
   assert(isAppliedSharedTimelineOperationResult(result), message);
 };
 
@@ -924,15 +1076,19 @@ export const persistHistoryClipColorOrThrow = async (
   message: string,
 ) => {
   if (!color) throw new Error(message);
+
   if (isLocalHistoryProject(deps)) {
     const applied = await createLocalTimelineRepository(deps.projectId).updateClip({ clipId, color });
     assert(Boolean(applied), message);
+
     return;
   }
+
   const result = await publishSharedTimelineOperation(
     deps.projectId,
     { kind: "clips.setColor", payload: { clipId, color } },
   );
+
   assert(isAppliedSharedTimelineOperationResult(result), message);
 };
 
@@ -942,10 +1098,13 @@ export const persistHistoryClipMovesOrThrow = async (
   message: string,
 ) => {
   if (moves.length === 0) return;
+
   if (isLocalHistoryProject(deps)) {
     await createLocalTimelineRepository(deps.projectId).moveClips(moves);
+
     return;
   }
+
   const result = await deps.convexClient.mutation(
     deps.convexApi.clips.moveMany,
     buildClipMoveManyMutationInput({
@@ -956,6 +1115,7 @@ export const persistHistoryClipMovesOrThrow = async (
       })),
     }),
   );
+
   assert(result?.status === "applied", message);
 };
 
@@ -966,8 +1126,10 @@ export const persistHistoryTrackRouting = async (deps: Deps, trackId: Track["id"
       outputTargetId: routing.outputTargetId ?? null,
       sends: routing.sends ?? [],
     });
+
     return;
   }
+
   await deps.convexClient.mutation(
     deps.convexApi.tracks.setRouting,
     buildTrackRoutingMutationInput({

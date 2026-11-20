@@ -41,6 +41,7 @@ test('round trips bounded VST state bytes and rejects hash or size mismatches', 
   const project = await createLocalProject(`VST state ${crypto.randomUUID()}`)
   const bytes = new Uint8Array([0, 1, 2, 255])
   const sha256Hex = Array.from(sha256(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
+
   const metadata = {
     artifactId: crypto.randomUUID(),
     sha256: sha256Hex,
@@ -51,6 +52,7 @@ test('round trips bounded VST state bytes and rejects hash or size mismatches', 
     bucket: 'local' as const,
     location: '',
   }
+
   const completeMetadata = {
     ...metadata,
     location: `plugin-artifacts/${metadata.artifactId}`,

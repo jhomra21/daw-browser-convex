@@ -79,8 +79,10 @@ const resolveVariantTokens = (variant: DawThemeVariant, mode: "light" | "dark") 
 
   for (const name of dawThemeTokenNames) {
     const value = variant.overrides[name]
+
     if (value) tokens[name] = value
   }
+
   return tokens
 }
 
@@ -97,10 +99,12 @@ export const themeTokensToCss = (tokens: ResolvedThemeTokens): string =>
 
 const ensureThemeStyleElement = (document: Document): HTMLStyleElement => {
   const existing = document.getElementById("daw-theme")
+
   if (existing instanceof HTMLStyleElement) return existing
   const element = document.createElement("style")
   element.id = "daw-theme"
   document.head.appendChild(element)
+
   return element
 }
 
@@ -112,12 +116,15 @@ type ApplyDawThemeResult = {
 export const applyDawTheme = (themeId: DawThemeId, mode: "light" | "dark"): ApplyDawThemeResult => {
   const tokens = resolveDawThemeById(themeId, mode)
   const document = globalThis.document
+
   if (!document) return { changed: false, tokens }
   const css = `:root {\n${themeTokensToCss(tokens)}\n}`
   const element = ensureThemeStyleElement(document)
   const changed = element.textContent !== css || document.documentElement.dataset.dawTheme !== themeId
+
   if (!changed) return { changed, tokens }
   element.textContent = css
   document.documentElement.dataset.dawTheme = themeId
+
   return { changed, tokens }
 }

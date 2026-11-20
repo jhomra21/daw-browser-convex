@@ -13,5 +13,6 @@ export const timelineGridPhasePx = (
 
   const remainderSec = Math.max(0, visibleStartSec) % stepSec
   const phasePx = remainderSec * pixelsPerSecond
+
   return Number.isFinite(phasePx) ? -phasePx : 0
 }

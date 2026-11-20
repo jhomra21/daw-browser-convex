@@ -38,21 +38,27 @@ test("labels a failed host diagnostic with its Tier 3 stage", () => {
 
 test("uses only the visible re-enable control and confirms it clears", async () => {
   const expressions: string[] = []
+
   const run = async (expression: string) => {
     expressions.push(expression)
+
     return expressions.length === 1 ? "true" : expressions.length === 2 ? "true" : "false"
   }
+
   expect(await reEnableAutomationBeforePlayback(run)).toBe("ui-re-enabled")
   expect(expressions).toHaveLength(3)
   expect(await reEnableAutomationBeforePlayback(async () => "false")).toBe("control-absent")
 })
+
 test("starts the diagnostic trace before reading the five-second host snapshot", async () => {
   const stages: string[] = []
   const read = async () => { stages.push("host-diagnostics") }
   const trace = async () => { stages.push("trace-start") }
+
   await startTraceBeforeRecordingDiagnostics(read, trace)
   expect(stages).toEqual(["trace-start", "host-diagnostics"])
 })
+
 test("samples after the eight-second real VST automation point", () => {
   expect(tierThreeAutomationObservationMs).toBe(9_000)
 })
@@ -105,11 +111,14 @@ test("retains playback native epoch and scheduled count before recording changes
   const failure = new TierThreeRecordingFailure("writer failure", null, "unknown", "No observation", null, null, playback)
   expect(failure.nativeAtPlayback).toEqual(playback)
 })
+
 test("preserves initial-playback evidence when recording startup fails before a status sample", () => {
   const playback = { transportEpoch: 7, callbacks: 123, submittedVstSegments: 9, state: "running" }
+
   const failure = retainTierThreeRecordingFailure(
     new Error("SAB worker unavailable"), "No matching worker observation", null, playback,
   )
+
   expect(failure.message).toBe("SAB worker unavailable")
   expect(failure.nativeAtPlayback).toEqual(playback)
 })
@@ -119,6 +128,7 @@ test("selects only the unique writable Mix parameter from the installed Valhalla
     { id: 4, title: "Mix", readOnly: false, hidden: false, currentValue: 0.5 },
     { id: 5, title: "Mix", readOnly: true, hidden: false, currentValue: 0.5 },
   ]
+
   expect(selectTierThreeParameter(parameters)).toEqual(parameters[0])
   expect(() => selectTierThreeParameter([{ ...parameters[0], hidden: true }])).toThrow()
   expect(() => selectTierThreeParameter([parameters[0], { ...parameters[0], id: 6 }])).toThrow()
@@ -129,18 +139,21 @@ test("selects a distinct visible writable Valhalla parameter for selective autom
     { id: 48, title: "Mix", readOnly: false, hidden: false, currentValue: 0.5 },
     { id: 49, title: "Width", readOnly: false, hidden: false, currentValue: 0.5 },
   ]
+
   expect(selectTierThreeSecondaryParameter(parameters, 48)).toEqual(parameters[1])
   expect(() => selectTierThreeSecondaryParameter([{ ...parameters[1], readOnly: true }], 48)).toThrow()
 })
 
 test("recording must add a real MIDI clip with the requested notes on the armed track", () => {
   const before = [{ id: "existing", trackId: "other", midi: { notes: [] } }]
+
   const after = [...before, {
     id: "recorded", trackId: "synth-track", midi: { notes: [
       { pitch: 60, velocity: 0.9, length: 0.5 },
       { pitch: 64, velocity: 0.9, length: 0.5 },
     ] },
   }]
+
   expect(validateTierThreeRecording(before, after, "synth-track", [60, 64])).toBe("recorded")
   expect(() => validateTierThreeRecording(before, before, "synth-track", [60, 64])).toThrow()
   expect(() => validateTierThreeRecording(before, after, "synth-track", [60, 67])).toThrow()

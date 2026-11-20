@@ -5,7 +5,9 @@ export const SPECTRAL_OVERLAPS = [2, 4] as const
 export const SPECTRAL_MODES = ['freeze', 'gate', 'morph', 'shift-blur', 'hpss', 'noise-reduce'] as const
 
 export type SpectralFftSize = typeof SPECTRAL_FFT_SIZES[number]
+
 export type SpectralOverlap = typeof SPECTRAL_OVERLAPS[number]
+
 export type SpectralMode = typeof SPECTRAL_MODES[number]
 
 export type SpectralParams = {
@@ -77,6 +79,7 @@ export const normalizeSpectralParamsEnvelope = (value: JsonValue): SpectralParam
   const envelope = objectValue(value)
   const state = objectValue(envelope.version === 1 ? envelope.state : value)
   const defaults = createDefaultSpectralParams()
+
   return {
     version: 1,
     state: {

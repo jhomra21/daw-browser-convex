@@ -57,15 +57,19 @@ type ChainApplication = { ids: string[]; disposition?: string };
 // Failure modes: an off-screen owner misses a row, a removed chain retains
 // live nodes/bindings, or project teardown only clears its bookkeeping.
 const b5c3FxKinds: AudioEffectKind[] = ["eq", "compressor", "reverb", "delay", "saturator"];
+
 const createB5c3FxFixture = async (local: boolean, master: boolean, kind: AudioEffectKind, subscribed = false, agent = false,
   native?: () => Awaited<ReturnType<typeof mountStep5Playback>> | undefined) => {
   const initialProject = agent && local ? (await createLocalProject("B5 FX agent")).id
     : `${local ? "project:" : "cloud-"}b5c3-fx-${crypto.randomUUID()}`;
+
   const [projectId, setProjectId] = createSignal(initialProject);
   const db = b5CloudDatabase();
+
   if (agent && !local) await db.withIdentity({ subject: "b5-agent" }).mutation(convexApi.projects.createOwnedRoom, { projectId: initialProject });
   const remoteTrack = await db.run(ctx => ctx.db.insert("tracks", { projectId: initialProject, index: 0, kind: "audio", name: "Unselected" }));
   const track: Track = { id: local ? "t" : remoteTrack, kind: "audio", name: "Unselected", volume: 1, clips: [] };
+
   if (agent) {
     if (local) await createLocalTimelineRepository(initialProject).createTrack({ id: track.id, kind: "audio" });
     else await db.run(async ctx => {
@@ -73,22 +77,26 @@ const createB5c3FxFixture = async (local: boolean, master: boolean, kind: AudioE
       await ctx.db.insert("mixerChannels", { projectId: initialProject, trackId: remoteTrack, volume: 1, channelRole: "track", sends: [] });
     });
   }
+
   const [tracks, setTracks] = createSignal<Track[]>([track]);
   const targetId = master ? "master" : track.id, instanceId = "b5c3-fx";
   const localKind: LocalEffectRow<JsonValue>["effect"] = master ? `master-${kind}` : kind;
   const initial = { ...AUDIO_EFFECT_CONTRACTS[kind].createDefaultParams(), enabled: true };
   let revision = 0;
   const readRows = () => db.run(ctx => ctx.db.query("effects").collect());
+
   const write = async (params: JsonValue | undefined) => {
     if (local) {
       if (params) await setLocalEffectInstance(initialProject, targetId, localKind, params, { instanceId, index: 0 });
       else await deleteLocalEffectInstance(initialProject, targetId, localKind, instanceId);
     } else await db.run(async ctx => {
       for (const row of await ctx.db.query("effects").collect()) await ctx.db.delete(row._id);
+
       if (params) await ctx.db.insert("effects", { projectId: initialProject, targetType: master ? "master" : "track",
         trackId: master ? undefined : remoteTrack, type: kind, instanceId, index: 0, params, revision: ++revision, createdAt: 1 });
     });
   };
+
   await write(initial);
   const [rows, setRows] = createSignal(await readRows());
   const subscription = subscribed ? b5SubscribeEffects(initialProject, readRows, setRows) : undefined;
@@ -96,22 +104,31 @@ const createB5c3FxFixture = async (local: boolean, master: boolean, kind: AudioE
   const runtime = createFxTransitionHarness(master ? "master" : "track");
   runtime.track.updateTrackGains([track]);
   const calls: { ids: string[]; type: string; disposition?: string }[] = [], applications: Promise<unknown>[] = [];
+
   const record = <Disposition extends EngineDisposition | "not-held">(
     instances: AudioEffectRuntimeInstance[], work: Promise<Disposition>, type = "chain",
   ) => {
     const call: typeof calls[number] = { ids: instances.map(instance => instance.id), type };
     calls.push(call);
-    const applied = work.then(disposition => { call.disposition = disposition; return disposition; });
+
+    const applied = work.then(disposition => { call.disposition = disposition;
+
+ return disposition; });
+
     applications.push(applied);
+
     return applied;
   };
+
   class Engine extends AudioEngine {
     override setTrackFxInstances(id: string, instances: AudioEffectRuntimeInstance[]) {
       const work = runtime.track.setTrackFxInstances(id, instances);
+
       return !master && id === targetId ? record(instances, work) : work;
     }
     override setTrackFxInstance(id: string, instance: AudioEffectRuntimeInstance) {
       const work = runtime.track.replaceTrackFxInstance(id, instance);
+
       return !master && id === targetId ? record([instance], work, "instance") : work;
     }
     private async master(instances: AudioEffectRuntimeInstance[]) {
@@ -119,23 +136,29 @@ const createB5c3FxFixture = async (local: boolean, master: boolean, kind: AudioE
     }
     override setMasterFxInstances(instances: AudioEffectRuntimeInstance[]) {
       const work = this.master(instances);
+
       return master ? record(instances, work) : work;
     }
     override setMasterFxInstance(instance: AudioEffectRuntimeInstance) {
       const retained = runtime.master.retainedInstances();
+
       const work = retained.some(entry => entry.id === instance.id)
         ? this.master(retained.map(entry => entry.id === instance.id ? instance : entry))
         : Promise.resolve<"not-held">("not-held");
+
       return master ? record([instance], work, "instance") : work;
     }
   }
+
   const engine = new Engine(), sampler = createSamplerBufferSync(), drum = createDrumRackBufferSync();
   const [legacyMode, setLegacyMode] = createSignal(!native);
   const errors: string[] = [];
   let dispose = () => {};
+
   const fixture = createRoot(end => {
     dispose = end;
     const view = createLocalEffectsView({ projectId });
+
     const audio = createEffectsPanelAudioDevice({
       audioEngine: () => engine, tracks, projectId, userId: () => undefined, roomEffects: rows,
       localEffectsView: view, usesLegacyAudioEngine: legacyMode, canWriteCurrentTargetEffects: () => true,
@@ -144,14 +167,17 @@ const createB5c3FxFixture = async (local: boolean, master: boolean, kind: AudioE
         ?? { receipt: { key: edit.id, serial: 0 }, settled: Promise.resolve({ state: "unavailable" }) },
       onEffectError: (_title, message) => errors.push(message),
     }, () => "selected-elsewhere", () => track);
+
     const sync = useEffectsPanelAudioSync({
       isOpen: () => false, currentTargetId: () => "selected-elsewhere", projectId, tracks,
       sidechainRoutes: () => [], audioEngine: () => engine, usesLegacyAudioEngine: legacyMode,
       roomEffects: rows, roomEffectsStatus: () => "success", roomEffectsError: () => undefined,
       localEffectsView: view, samplerBufferSync: sampler, drumRackBufferSync: drum,
     });
+
     return { view, audio, sync };
   });
+
   const drain = async () => {
     if (local) await fixture.view.reload();
     else if (subscription) await subscription.publish();
@@ -159,22 +185,28 @@ const createB5c3FxFixture = async (local: boolean, master: boolean, kind: AudioE
     await fixture.sync.flushPending();
     await fixture.audio.flushPending();
     await Promise.all(applications);
+
     for (let left = runtime.timers.pending.size; left > 0; left--) runtime.timers.run();
     expect(errors).toEqual([]);
   };
+
   const bindings = () => {
     const id = kind === "eq" ? `eq.${AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams().bands[0]?.id}.gainDb` : kind === "reverb" ? "reverb.wet"
       : kind === "delay" ? "delay.dryWet" : "saturator.driveDb";
+
     return master ? runtime.master.resolveMasterAutomationBindings(id, null, instanceId)
       : runtime.track.resolveTrackAutomationBindings(targetId, id, instanceId);
   };
+
   return {
     ...fixture, engine, track, targetId, instanceId, initial, initialProject, db, runtime, calls, write, drain, bindings,
     setLegacyMode, restoreTrack: () => setTracks([track]),
     processorId: async () => {
       const id = local ? (await listLocalEffects(initialProject)).find(row => row.instanceId === instanceId)?.id
         : (await readRows()).find(row => row.instanceId === instanceId)?._id;
+
       if (!id) throw new Error("Missing B5 agent effect row");
+
       return id;
     },
     removeTrack: () => setTracks([]),
@@ -192,21 +224,28 @@ for (const origin of ["another-surface", "remote-echo", "agent", "undo", "redo"]
       const local = origin !== "remote-echo";
       const f = await createB5c3FxFixture(local, false, "delay", !local, origin === "agent", () => native);
       let restore = () => {};
+
       try {
         await f.drain();
         const initial = AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams();
         const next = { ...initial, dryWet: 0.73 };
+
         if (origin === "undo") { await f.write(next); await f.drain(); }
+
         const inputs = () => ({ canonical: undefined, local: undefined, masterVolume: 1,
           effects: f.audio.snapshotExportProjection(), automation: [], sidechains: [] });
+
         const fx = (captured: ReturnType<typeof inputs>) => resolveDesiredPlaybackFx(
           { masterVolume: 1, masterFxInstances: [], trackFx: {} }, captured.effects, undefined);
+
         native = await mountStep5Playback({ projectId: f.initialProject, tracks: () => [f.track],
           playbackInputs: inputs, desiredFx: fx, renderState: async captured => ({ fx: fx(captured), automationEnvelopes: [] }) });
+
         if (transport === "playing") await native.playback.handlePlay([f.track]);
         await settleStep5Playback();
         const before = native.mark();
         const expected = origin === "undo" ? initial : next;
+
         if (origin === "agent") {
           await b5AgentCommit(local, f.initialProject, f.db, { kind: "effect.upsert",
             effect: { source: "persisted", id: await f.processorId() },
@@ -216,10 +255,13 @@ for (const origin of ["another-surface", "remote-echo", "agent", "undo", "redo"]
             if (!("params" in operation.payload)) throw new Error("Unexpected history operation");
             await f.write(operation.payload.params);
           });
+
           const entry: HistoryEntry = { type: "effect-params", projectId: f.initialProject,
             data: { trackRef: f.track.id, effect: "delay", instanceId: f.instanceId, from: initial, to: next } };
+
           const deps = b5HistoryDeps(f.initialProject, f.track, entry);
           deps.replayInstanceEffectParams = f.audio.replayInstanceParams;
+
           if (origin === "undo") await execUndo(entry, deps);
           else await execRedo(entry, deps);
         } else await f.write(next);
@@ -245,6 +287,7 @@ for (const origin of ["another-surface", "remote-echo", "agent", "undo", "redo"]
 for (const local of [true, false]) {
   test(`REVIEW FX legacy toggle local=${local}`, async () => {
     const f = await createB5c3FxFixture(local, false, "delay");
+
     try {
       await f.drain();
       f.setLegacyMode(false);
@@ -259,6 +302,7 @@ for (const local of [true, false]) {
   });
   test(`REVIEW FX track restore local=${local}`, async () => {
     const f = await createB5c3FxFixture(local, false, "delay");
+
     try {
       await f.drain();
       expect(f.bindings().length).toBeGreaterThan(0);
@@ -273,28 +317,37 @@ for (const local of [true, false]) {
 
 test("B5d delay and EQ reorder local track closed and unselected", async () => {
   const f = await createB5c3FxFixture(true, false, "delay");
+
   type FxRoutingNode = ReturnType<typeof f.runtime.audio.connections>[number]["source"];
+
   const reaches = (source: FxRoutingNode, target: FxRoutingNode) => {
     const edges = f.runtime.audio.connections(), seen = new Set<object>([source]), pending = [source];
+
     for (const node of pending) for (const edge of edges) {
       if (edge.source !== node || seen.has(edge.target)) continue;
+
       if (edge.target === target) return true;
       seen.add(edge.target);
       pending.push(edge.target);
     }
+
     return false;
   };
+
   try {
     await f.drain();
     await setLocalEffectInstance(f.initialProject, f.targetId, "eq", {
       ...AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams(), enabled: true,
     }, { instanceId: "eq:reorder", index: 1 });
     await f.drain();
+
     const eqParam = f.runtime.track.resolveTrackAutomationBindings(f.targetId,
       `eq.${AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams().bands[0]?.id}.gainDb`, "eq:reorder")[0]?.param;
+
     const eq = f.runtime.audio.biquads.find(node => node.gain === eqParam);
     const delayParam = f.runtime.track.resolveTrackAutomationBindings(f.targetId, "delay.timeMs", f.instanceId)[0]?.param;
     const delay = f.runtime.audio.delays.find(node => node.delayTime === delayParam);
+
     if (!delay || !eq) throw new Error("Missing heterogeneous runtime nodes");
     expect(reaches(delay, eq)).toBe(true);
     expect(reaches(eq, delay)).toBe(false);
@@ -314,21 +367,26 @@ for (const local of [true, false]) for (const master of [false, true]) for (cons
   for (const scenario of master ? ["project switch"] : ["track removal", "project switch"]) {
     test(`B5c3 FX teardown ${scenario}, ${kind}, local=${local}, master=${master}, closed and unselected`, async () => {
       const f = await createB5c3FxFixture(local, master, kind);
+
       try {
         await f.drain();
         expect(f.audio.snapshotExportRows([f.targetId]).map(row => row.instanceId)).toEqual([f.instanceId]);
         const node = f.runtime.audio.workletNode(0);
+
         if (kind === "compressor" || kind === "reverb") {
           expect(node?.closed).toBe(false);
         } else expect(f.bindings().length).toBeGreaterThan(0);
         const before = f.calls.length;
+
         if (scenario === "track removal") f.removeTrack();
         else f.switchProject();
         await f.drain();
         console.log("B5c3 FX matrix", JSON.stringify({ group: "teardown", scenario, family: kind, local,
           target: master ? "master" : "track", calls: f.calls.slice(before) }));
+
         if (kind === "compressor" || kind === "reverb") expect(node?.closed).toBe(true);
         else expect(f.bindings()).toEqual([]);
+
         if (master) expect(f.runtime.master.getMixerFx().masterFxInstances).toEqual([]);
       } finally { f.close(); }
     });
@@ -339,20 +397,25 @@ for (const local of [true, false]) for (const master of [false, true]) for (cons
   for (const scenario of ["initial load", "removal and re-add"]) {
     test(`B5c3 FX load ${scenario}, ${kind}, local=${local}, master=${master}, closed and unselected`, async () => {
       const f = await createB5c3FxFixture(local, master, kind);
+
       try {
         await f.drain();
         const before = scenario === "initial load" ? 0 : f.calls.length;
         const node = f.runtime.audio.workletNode(0);
+
         if (scenario === "removal and re-add") {
           await f.write(undefined);
           await f.drain();
           expect(f.audio.snapshotExportRows([f.targetId])).toEqual([]);
+
           if (kind === "compressor" || kind === "reverb") expect(node?.closed).toBe(true);
           else expect(f.bindings()).toEqual([]);
           await f.write(f.initial);
           await f.drain();
         }
+
         expect(f.audio.snapshotExportRows([f.targetId]).map(row => row.instanceId)).toEqual([f.instanceId]);
+
         if (kind === "compressor" || kind === "reverb") expect(f.runtime.audio.liveWorkletCount()).toBe(1);
         else expect(f.bindings().length).toBeGreaterThan(0);
         console.log("B5c3 FX matrix", JSON.stringify({ group: "load", scenario, family: kind, local,
@@ -368,12 +431,14 @@ for (const local of [true, false]) for (const master of [false, true]) for (cons
   for (const scenario of local ? ["another surface"] : ["another surface", "collaborator"]) {
     test(`B5c3 FX external ${scenario}, ${kind}, local=${local}, master=${master}, closed and unselected`, async () => {
       const f = await createB5c3FxFixture(local, master, kind, scenario === "collaborator");
+
       try {
         await f.drain();
         const next = { ...f.initial, enabled: false }, before = f.calls.length;
         await f.write(next);
         await f.drain();
         expect(f.audio.snapshotExportRows([f.targetId])[0]?.params).toEqual(next);
+
         if (kind === "compressor" || kind === "reverb") expect(f.runtime.audio.liveWorkletCount()).toBe(0);
         else if (kind === "delay") expect(f.bindings().map(binding => binding.param.value)).toEqual([1, 0]);
         else expect(f.bindings()).toEqual([]);
@@ -387,6 +452,7 @@ for (const local of [true, false]) for (const master of [false, true]) for (cons
 for (const local of [true, false]) for (const master of [false, true]) for (const kind of b5c3FxKinds) {
   test(`B5c3 FX agent commit, ${kind}, local=${local}, master=${master}, closed and unselected`, async () => {
     const f = await createB5c3FxFixture(local, master, kind, !local, true);
+
     try {
       await f.drain();
       const next = { ...f.initial, enabled: false }, before = f.calls.length;
@@ -397,6 +463,7 @@ for (const local of [true, false]) for (const master of [false, true]) for (cons
       });
       await f.drain();
       expect(f.audio.snapshotExportRows([f.targetId])[0]?.params).toEqual(next);
+
       if (kind === "compressor" || kind === "reverb") expect(f.runtime.audio.liveWorkletCount()).toBe(0);
       else if (kind === "delay") expect(f.bindings().map(binding => binding.param.value)).toEqual([1, 0]);
       else expect(f.bindings()).toEqual([]);
@@ -408,24 +475,34 @@ for (const local of [true, false]) for (const master of [false, true]) for (cons
 
 const b5c3FxHistoryEntry = (projectId: string, trackRef: string, master: boolean, kind: AudioEffectKind): HistoryEntry => {
   const common = { trackRef, instanceId: "b5c3-fx" };
+
   if (kind === "eq") {
     const from = { ...AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams(), enabled: true }, to = { ...from, enabled: false };
+
     return { type: "effect-params", projectId, data: { ...common, effect: master ? "master-eq" : "eq", from, to } };
   }
+
   if (kind === "compressor") {
     const from = { ...AUDIO_EFFECT_CONTRACTS.compressor.createDefaultParams(), enabled: true }, to = { ...from, enabled: false };
+
     return { type: "effect-params", projectId, data: { ...common, effect: master ? "master-compressor" : "compressor", from, to } };
   }
+
   if (kind === "reverb") {
     const from = { ...AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams(), enabled: true }, to = { ...from, enabled: false };
+
     return { type: "effect-params", projectId, data: { ...common, effect: master ? "master-reverb" : "reverb", from, to } };
   }
+
   if (kind === "delay") {
     const from = { ...AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams(), enabled: true }, to = { ...from, enabled: false };
+
     return { type: "effect-params", projectId, data: { ...common, effect: master ? "master-delay" : "delay", from, to } };
   }
+
   if (kind !== "saturator") throw new Error("Unsupported B5 history effect");
   const from = { ...AUDIO_EFFECT_CONTRACTS.saturator.createDefaultParams(), enabled: true }, to = { ...from, enabled: false };
+
   return { type: "effect-params", projectId, data: { ...common, effect: master ? "master-saturator" : "saturator", from, to } };
 };
 
@@ -433,11 +510,14 @@ for (const local of [true, false]) for (const master of [false, true]) for (cons
   test(`B5c3 FX history undo redo, ${kind}, local=${local}, master=${master}, closed and unselected`, async () => {
     const f = await createB5c3FxFixture(local, master, kind);
     const entry = b5c3FxHistoryEntry(f.initialProject, f.track.id, master, kind);
+
     if (entry.type !== "effect-params") throw new Error("Invalid history fixture");
+
     const restore = b5HistoryTransport(async operation => {
       if (!("params" in operation.payload)) throw new Error("Unexpected FX history operation");
       await f.write(operation.payload.params);
     });
+
     try {
       await f.drain();
       await f.write(entry.data.to);
@@ -446,12 +526,15 @@ for (const local of [true, false]) for (const master of [false, true]) for (cons
       // The product's audio-effect replay is retained. Row ingestion remains
       // independently checked by the snapshot and actual node/binding oracles.
       deps.replayInstanceEffectParams = f.audio.replayInstanceParams;
+
       for (const direction of ["undo", "redo"]) {
         const before = f.calls.length, enabled = direction === "undo";
+
         if (enabled) await execUndo(entry, deps);
         else await execRedo(entry, deps);
         await f.drain();
         expect(f.audio.snapshotExportRows([f.targetId])[0]?.params).toEqual(enabled ? entry.data.from : entry.data.to);
+
         if (kind === "compressor" || kind === "reverb") expect(f.runtime.audio.liveWorkletCount()).toBe(enabled ? 1 : 0);
         else if (kind === "delay") {
           const wet = AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams().dryWet;
@@ -478,6 +561,7 @@ for (const local of [true, false]) {
         const targetId = target === "master" ? "master" : track.id;
         const readRemoteRows = () => db.run(ctx => ctx.db.query("effects").collect());
         const localKind = target === "master" ? "master-compressor" : "compressor";
+
         const insert = async (id: string, index: number) => {
           if (local) await setLocalEffectInstance(projectId, targetId, localKind, params, { instanceId: id, index });
           else await db.run(ctx => ctx.db.insert("effects", {
@@ -486,27 +570,37 @@ for (const local of [true, false]) {
             type: "compressor", instanceId: id, index, params, revision: 1, createdAt: 1,
           }));
         };
+
         const initialIds = scenario === "empty-chain removal" ? [instanceId]
           : scenario === "middle removal" ? [instanceId, "compressor:b", "compressor:c"]
           : [instanceId, "compressor:b"];
+
         for (const [index, id] of initialIds.entries()) await insert(id, index);
         const [rows, setRows] = createSignal(await readRemoteRows());
         const runtime = createFxTransitionHarness(targetId === "master" ? "master" : "track");
         runtime.track.updateTrackGains([track]);
         const applications: Array<Promise<unknown>> = [];
         const chainCalls: ChainApplication[] = [];
+
         const record = (instances: AudioEffectRuntimeInstance[], work: ReturnType<AudioEngine["setMasterFxInstances"]>) => {
           const call: ChainApplication = { ids: instances.map(entry => entry.id) };
           chainCalls.push(call);
-          const applied = work.then(disposition => { call.disposition = disposition; return disposition; });
+
+          const applied = work.then(disposition => { call.disposition = disposition;
+
+ return disposition; });
+
           applications.push(applied);
+
           return applied;
         };
+
         // Thin AudioEngine boundary into the existing real track/master runtimes.
         // The oracle below reads the worklet's held params and resource closure, not setter calls.
         class RuntimeAudioEngine extends AudioEngine {
           override setTrackFxInstances(id: string, instances: AudioEffectRuntimeInstance[]) {
             const work = runtime.track.setTrackFxInstances(id, instances);
+
             return id === targetId ? record(instances, work) : work;
           }
           override setTrackFxInstance(id: string, instance: AudioEffectRuntimeInstance) {
@@ -519,26 +613,33 @@ for (const local of [true, false]) {
           }
           override setMasterFxInstances(instances: AudioEffectRuntimeInstance[]) {
             const work = this.applyMaster(instances);
+
             return targetId === "master" ? record(instances, work) : work;
           }
           override async setMasterFxInstance(instance: AudioEffectRuntimeInstance): ReturnType<AudioEngine["setMasterFxInstance"]> {
             const retained = runtime.master.retainedInstances();
+
             if (!retained.some(entry => entry.id === instance.id)) return "not-held";
+
             return this.applyMaster(retained.map(entry => entry.id === instance.id ? instance : entry));
           }
         }
+
         const engine = new RuntimeAudioEngine();
         const sampler = createSamplerBufferSync(), drum = createDrumRackBufferSync();
         let dispose = () => {};
         const [selectedTarget, setSelectedTarget] = createSignal("selected-elsewhere");
+
         const fixture = createRoot(end => {
           dispose = end;
           const view = createLocalEffectsView({ projectId: () => projectId });
+
           const audio = createEffectsPanelAudioDevice({
             audioEngine: () => engine, projectId: () => projectId, userId: () => undefined,
             roomEffects: rows, localEffectsView: view, usesLegacyAudioEngine: () => true,
             canWriteCurrentTargetEffects: () => true,
           }, selectedTarget, () => track);
+
           const sync = useEffectsPanelAudioSync({
             isOpen: () => false, currentTargetId: () => "selected-elsewhere",
             projectId: () => projectId, tracks: () => [track], sidechainRoutes: () => [],
@@ -546,45 +647,61 @@ for (const local of [true, false]) {
             roomEffects: rows, roomEffectsStatus: () => "success", roomEffectsError: () => undefined,
             localEffectsView: view, samplerBufferSync: sampler, drumRackBufferSync: drum,
           });
+
           return { view, audio, sync };
         });
+
         const drain = async (holding = false) => {
           if (local) await fixture.view.reload();
           await fixture.sync.flushPending();
+
           if (!holding) await fixture.audio.flushPending();
           await Promise.all(applications);
+
           // Existing deterministic transition fixture, no elapsed-time wait.
           for (let remaining = runtime.timers.pending.size; remaining > 0; remaining--) runtime.timers.run();
         };
+
         type HeldCompressor = NonNullable<ReturnType<typeof runtime.audio.workletNode>>;
+
         const reaches = (source: HeldCompressor, targetNode: HeldCompressor) => {
           const seen = new Set<object>([source]);
           const pending: object[] = [source];
           const edges = runtime.audio.connections();
+
           for (const node of pending) {
             for (const edge of edges) {
               if (edge.source !== node || seen.has(edge.target)) continue;
+
               if (edge.target === targetNode) return true;
               seen.add(edge.target); pending.push(edge.target);
             }
           }
+
           return false;
         };
+
         try {
           await drain();
           expect(fixture.audio.snapshotExportRows([targetId]).map(row => row.instanceId)).toEqual(initialIds);
           expect(runtime.audio.compressorThreshold()).toBe(-31);
           const node = runtime.audio.workletNode(0);
+
           if (!node) throw new Error("B5 compressor was not installed in the real FX runtime.");
           expect(node.closed).toBe(false);
+
           const nodes = initialIds.map((_, index) => {
             const held = runtime.audio.workletNode(index);
+
             if (!held) throw new Error("Missing initial compressor node.");
+
             return held;
           });
+
           const holding = scenario === "open gesture reorder";
           const gesture = fixture.audio.gestureOwner(instanceId, "compressor", targetId);
           const holder = new ParameterGestureHolder();
+
           if (holding) {
             // Establish the draft through the real card binding, then leave the target before changing structure.
             setSelectedTarget(targetId);
@@ -595,11 +712,14 @@ for (const local of [true, false]) {
             await Promise.all(applications);
             expect(gesture.isOpen(holder)).toBe(true);
           }
+
           const beforeCalls = chainCalls.length;
           let expectedIds: string[];
+
           if (scenario === "empty-chain removal" || scenario === "middle removal") {
             const removedId = scenario === "empty-chain removal" ? instanceId : "compressor:b";
             expectedIds = initialIds.filter(id => id !== removedId);
+
             if (local) await deleteLocalEffectInstance(projectId, targetId, localKind, removedId);
             else {
               await db.run(async ctx => {
@@ -611,6 +731,7 @@ for (const local of [true, false]) {
             await insert("compressor:c", 2);
           } else {
             expectedIds = [...initialIds].reverse();
+
             if (local) await reorderLocalAudioEffects(projectId, targetId, expectedIds.map(id => ({ id, kind: "compressor" })));
             else await db.run(async ctx => {
               for (const row of await ctx.db.query("effects").collect()) {
@@ -618,29 +739,38 @@ for (const local of [true, false]) {
               }
             });
           }
+
           if (!local) setRows(await readRemoteRows());
           await drain(holding);
           console.log("B5 applications", JSON.stringify({ scenario, local, target, calls: chainCalls.slice(beforeCalls) }));
           expect(untrack(selectedTarget)).toBe("selected-elsewhere");
           expect(fixture.audio.snapshotExportProjection().replaceAudioEffectTargets.flatMap(entry => entry.rows).map(row => row.instanceId)).toEqual(expectedIds);
+
           if (scenario === "empty-chain removal") expect(node.closed).toBe(true);
+
           if (scenario === "middle removal") expect(nodes[1]?.closed).toBe(true);
           expect(runtime.audio.liveWorkletCount()).toBe(expectedIds.length);
           const byId = new Map(initialIds.map((id, index) => [id, nodes[index]]));
+
           if (scenario === "addition control") byId.set("compressor:c", runtime.audio.workletNode(2));
+
           for (let index = 1; index < expectedIds.length; index++) {
             const from = byId.get(expectedIds[index - 1] ?? ""), to = byId.get(expectedIds[index] ?? "");
+
             if (!from || !to) throw new Error("Missing chain-order oracle node.");
             expect(reaches(from, to)).toBe(true);
             expect(reaches(to, from)).toBe(false);
           }
+
           if (targetId === "master") expect(runtime.master.getMixerFx().masterFxInstances?.map(entry => entry.id)).toEqual(expectedIds);
+
           if (holding) {
             expect(gesture.isOpen(holder)).toBe(true);
             expect(runtime.audio.compressorThreshold()).toBe(-12);
             gesture.cancel(holder);
             await fixture.audio.flushPending();
           }
+
           expect(chainCalls.slice(beforeCalls).filter(call => call.disposition === "applied")).toHaveLength(1);
         } finally {
           dispose(); sampler.dispose(); drum.dispose(); runtime.close();
@@ -658,22 +788,27 @@ type SpectrumProvider = (
 test("keeps the spectrum subscription across unrelated panel updates", () => {
   const events: string[] = [];
   const listeners = new Map<string, (frame: SpectrumFrame | null) => void>();
+
   const providerA: SpectrumProvider = (targetId, listener) => {
     events.push(`subscribe:a:${targetId}`);
     listeners.set(`a:${targetId}`, listener);
+
     return () => {
       events.push(`unsubscribe:a:${targetId}`);
       listeners.delete(`a:${targetId}`);
     };
   };
+
   const providerB: SpectrumProvider = (targetId, listener) => {
     events.push(`subscribe:b:${targetId}`);
     listeners.set(`b:${targetId}`, listener);
+
     return () => {
       events.push(`unsubscribe:b:${targetId}`);
       listeners.delete(`b:${targetId}`);
     };
   };
+
   const frames: Array<SpectrumFrame | null> = [];
   const frame: SpectrumFrame = { data: new Float32Array([1]), sampleRate: 44100 };
   const owner = createSpectrumSubscriptionOwner((frame) => frames.push(frame));
@@ -734,11 +869,14 @@ test("keeps the spectrum subscription across unrelated panel updates", () => {
 test("flushes persisted off-screen granular work before resolving", async () => {
   const owner = createPendingWorkOwner();
   let resolveGranular: (() => void) | undefined;
+
   const granularWork = new Promise<void>((resolve) => {
     resolveGranular = resolve;
   });
+
   owner.track("project:one", granularWork);
   let flushed = false;
+
   const flush = owner.flushPending("project:one").then(() => {
     flushed = true;
   });
@@ -755,19 +893,24 @@ test("drains same-project work created while flushing", async () => {
   const owner = createPendingWorkOwner();
   let resolveFirst: (() => void) | undefined;
   let resolveSecond: (() => void) | undefined;
+
   const first = new Promise<void>((resolve) => {
     resolveFirst = resolve;
   });
+
   const second = new Promise<void>((resolve) => {
     resolveSecond = resolve;
   });
+
   owner.track("project:one", first);
   void first.then(() => owner.track("project:one", second));
 
   let flushed = false;
+
   const flush = owner.flushPending("project:one").then(() => {
     flushed = true;
   });
+
   resolveFirst?.();
   await Promise.resolve();
   expect(flushed).toBe(false);
@@ -789,9 +932,11 @@ test("only flushes work for the current project", async () => {
   }));
 
   let flushed = false;
+
   const flush = owner.flushPending("project:current").then(() => {
     flushed = true;
   });
+
   resolveCurrent?.();
   await flush;
   expect(flushed).toBe(true);
@@ -811,22 +956,27 @@ const cloudOnlyLocalReady = () => Promise.reject(new Error("cloud readiness neve
 // A readiness owner over a real view owner; the test is the view's consumer and acknowledges publications itself.
 const localReadiness = (projectId: () => string, list: () => Promise<LocalEffectRow<JsonValue>[]>) => {
   const published: LocalEffectsView[] = [];
+
   const view = createLocalEffectsViewOwner({
     currentProjectId: projectId,
     list,
     publish: (next) => { if (next) published.push(next); },
     fail: () => undefined,
   });
+
   const readiness = createEffectsPanelReadinessOwner({ currentProjectId: projectId, localReady: view.ready });
+
   return { view, readiness, published, stop: () => { view.dispose(); readiness.dispose(); } };
 };
 
 test("keeps a local flush pending until rows are processed and sampled work is drained", async () => {
   const projectId = "project:local";
   let resolveRows: ((rows: never[]) => void) | undefined;
+
   const rowsLoaded = new Promise<never[]>((resolve) => {
     resolveRows = resolve;
   });
+
   const { view, readiness, published, stop } = localReadiness(() => projectId, () => rowsLoaded);
   view.sync();
   const flush = readiness.flushPending(projectId);
@@ -849,6 +999,7 @@ test("keeps a local flush pending until rows are processed and sampled work is d
 test("a local view publication can be processed before its load promise settles", async () => {
   const projectId = "project:published-before-settlement";
   const published: LocalEffectsView[] = [];
+
   const view = createLocalEffectsViewOwner({
     currentProjectId: () => projectId,
     list: async () => [],
@@ -859,6 +1010,7 @@ test("a local view publication can be processed before its load promise settles"
     },
     fail: () => undefined,
   });
+
   const readiness = createEffectsPanelReadinessOwner({ currentProjectId: () => projectId, localReady: view.ready });
   view.sync();
   const flushing = readiness.flushPending(projectId);
@@ -876,9 +1028,11 @@ test("an old publication identity cannot satisfy a newer successful read", async
   const projectId = "project:readiness-publication-identity";
   let releaseRead: (() => void) | undefined;
   let hold = false;
+
   const { view, readiness, published, stop } = localReadiness(() => projectId, () => hold
     ? new Promise<LocalEffectRow<JsonValue>[]>((resolve) => { releaseRead = () => resolve([]); })
     : Promise.resolve([]));
+
   view.sync();
   await view.reload();
   const oldPublication = published.at(-1)?.publicationId;
@@ -889,9 +1043,11 @@ test("an old publication identity cannot satisfy a newer successful read", async
   notifyLocalProjectChanged(projectId);
   const read = view.reload();
   let ready = false;
+
   const flush = readiness.flushPending(projectId).then(() => {
     ready = true;
   });
+
   view.acknowledge(oldPublication);
   releaseRead?.();
   await read;
@@ -907,9 +1063,11 @@ test("an old publication identity cannot satisfy a newer successful read", async
 
 test("an old local publication cannot acknowledge a newer held read", async () => {
   const projectId = `project:stale-publication-readiness-${crypto.randomUUID()}`;
+
   const tracks: Track[] = [
     { id: "track-a", kind: "instrument", name: "A", volume: 1, clips: [] },
   ];
+
   let setTracks: ((next: Track[]) => void) | undefined;
   let releaseRead: ((rows: LocalEffectRow<JsonValue>[]) => void) | undefined;
   let holdNextRead = false;
@@ -925,10 +1083,12 @@ test("an old local publication cannot acknowledge a newer held read", async () =
     const [currentTracks, writeTracks] = createSignal(tracks);
     setTracks = writeTracks;
     const [currentView, setCurrentView] = createSignal<LocalEffectsView | undefined>();
+
     const owner = createLocalEffectsViewOwner({
       currentProjectId,
       list: async () => {
         if (!holdNextRead) return [];
+
         return await new Promise<LocalEffectRow<JsonValue>[]>((resolve) => {
           releaseRead = resolve;
         });
@@ -936,8 +1096,10 @@ test("an old local publication cannot acknowledge a newer held read", async () =
       publish: setCurrentView,
       fail: () => undefined,
     });
+
     const localView = { view: currentView, reload: owner.reload, acknowledge: owner.acknowledge, ready: owner.ready };
     view = localView;
+
     const panel = useEffectsPanelAudioSync({
       isOpen: () => false,
       projectId: currentProjectId,
@@ -955,12 +1117,14 @@ test("an old local publication cannot acknowledge a newer held read", async () =
       samplerBufferSync,
       drumRackBufferSync,
     });
+
     flush = () => panel.flushPending();
     onCleanup(() => {
       owner.dispose();
     });
     owner.sync();
   });
+
   if (!view || !flush || !setTracks) throw new Error("The local panel owners were not created.");
   const localEffectsView = view;
   const flushPending = flush;
@@ -970,11 +1134,14 @@ test("an old local publication cannot acknowledge a newer held read", async () =
   holdNextRead = true;
   const heldRead = localEffectsView.reload();
   let ready = false;
+
   const flushing = flushPending().then(() => {
     ready = true;
   });
+
   for (let index = 0; index < 20; index += 1) await Promise.resolve();
   setTracks([...tracks]);
+
   for (let index = 0; index < 20; index += 1) await Promise.resolve();
   expect(releaseRead).toBeDefined();
   expect(ready).toBe(false);
@@ -997,6 +1164,7 @@ const mountLocalPanel = (initialProject: string, list: (projectId: string) => Pr
     const [projectId, writeProject] = createSignal(initialProject);
     setProject = writeProject;
     const [view, setView] = createSignal<LocalEffectsView | undefined>();
+
     const owner = createLocalEffectsViewOwner({
       currentProjectId: projectId,
       list,
@@ -1006,12 +1174,14 @@ const mountLocalPanel = (initialProject: string, list: (projectId: string) => Pr
       },
       fail: () => undefined,
     });
+
     createEffect(() => {
       projectId();
       untrack(owner.sync);
     });
     onCleanup(owner.dispose);
     source = { view, reload: owner.reload, acknowledge: owner.acknowledge, ready: owner.ready };
+
     const panel = useEffectsPanelAudioSync({
       isOpen: () => false,
       projectId,
@@ -1027,9 +1197,12 @@ const mountLocalPanel = (initialProject: string, list: (projectId: string) => Pr
       samplerBufferSync: createSamplerBufferSync(),
       drumRackBufferSync: createDrumRackBufferSync(),
     });
+
     flush = () => panel.flushPending();
   });
+
   if (!source) throw new Error("The local panel was not created.");
+
   return { source, flush: () => flush(), setProject: (id: string) => setProject(id), published, stop: () => stop() };
 };
 
@@ -1040,11 +1213,15 @@ const settleMicrotasks = async () => {
 test("a local flush rejects with the read error and recovers once a later read is processed", async () => {
   const projectId = `project:flush-read-error-${crypto.randomUUID()}`;
   let reads = 0;
+
   const panel = mountLocalPanel(projectId, async () => {
     reads += 1;
+
     if (reads === 2) throw new Error("local read failed");
+
     return [];
   });
+
   await panel.flush();
 
   notifyLocalProjectChanged(projectId);
@@ -1062,9 +1239,11 @@ test("a local flush waiting on a held read rejects when the project changes, and
   const second = `project:flush-switch-b-${crypto.randomUUID()}`;
   const held: Array<(rows: LocalEffectRow<JsonValue>[]) => void> = [];
   let hold = false;
+
   const panel = mountLocalPanel(first, (id) => id === first && hold
     ? new Promise((resolve) => held.push(resolve))
     : Promise.resolve([]));
+
   await panel.flush();
 
   hold = true;
@@ -1078,6 +1257,7 @@ test("a local flush waiting on a held read rejects when the project changes, and
   const returned = panel.flush().then(() => { ready = true; });
   await settleMicrotasks();
   expect(ready).toBe(false);
+
   for (const release of held.splice(0)) release([]);
   await returned;
   expect(ready).toBe(true);
@@ -1089,9 +1269,11 @@ test("a superseded read cannot make a local flush ready before the newer read is
   const projectId = `project:flush-superseded-${crypto.randomUUID()}`;
   const held: Array<(rows: LocalEffectRow<JsonValue>[]) => void> = [];
   let hold = false;
+
   const panel = mountLocalPanel(projectId, () => hold
     ? new Promise((resolve) => held.push(resolve))
     : Promise.resolve([]));
+
   await panel.flush();
 
   hold = true;
@@ -1104,6 +1286,7 @@ test("a superseded read cannot make a local flush ready before the newer read is
   held[0]?.([]);
   await settleMicrotasks();
   expect(ready).toBe(false);
+
   for (const release of held.slice(1)) release([]);
   await flushing;
   expect(ready).toBe(true);
@@ -1112,6 +1295,7 @@ test("a superseded read cannot make a local flush ready before the newer read is
 
 test("readiness follows empty and populated view loads, reload errors, recovery, and project return", async () => {
   let projectId = "project:readiness-view-a";
+
   const populated: LocalEffectRow<JsonValue>[] = [{
     id: "track-1:arp",
     targetId: "track-1",
@@ -1119,13 +1303,17 @@ test("readiness follows empty and populated view loads, reload errors, recovery,
     params: { enabled: true },
     updatedAt: 1,
   }];
+
   let reads = 0;
   const published: number[] = [];
+
   const view = createLocalEffectsViewOwner({
     currentProjectId: () => projectId,
     list: async () => {
       reads += 1;
+
       if (reads === 3) throw new Error("local read failed");
+
       return reads === 1 ? [] : populated;
     },
     publish: (next) => {
@@ -1135,6 +1323,7 @@ test("readiness follows empty and populated view loads, reload errors, recovery,
     },
     fail: () => undefined,
   });
+
   const readiness = createEffectsPanelReadinessOwner({ currentProjectId: () => projectId, localReady: view.ready });
   view.sync();
   await readiness.flushPending(projectId);
@@ -1176,6 +1365,7 @@ test("resolves an empty local row load and rejects a failed local row load clear
   const failed = localReadiness(() => "project:failed", async () => {
     throw new Error("database unavailable");
   });
+
   failed.view.sync();
   await expect(failed.view.reload()).rejects.toThrow("database unavailable");
   await expect(failed.readiness.flushPending("project:failed")).rejects.toThrow(
@@ -1187,6 +1377,7 @@ test("resolves an empty local row load and rejects a failed local row load clear
 test("republishes local rows when returning to a project", async () => {
   let currentProject = "project:local-a";
   const published: string[] = [];
+
   const view = createLocalEffectsViewOwner({
     currentProjectId: () => currentProject,
     list: async () => [],
@@ -1197,6 +1388,7 @@ test("republishes local rows when returning to a project", async () => {
     },
     fail: () => undefined,
   });
+
   const readiness = createEffectsPanelReadinessOwner({ currentProjectId: () => currentProject, localReady: view.ready });
   view.sync();
   await readiness.flushPending("project:local-a");
@@ -1216,10 +1408,12 @@ test("republishes local rows when returning to a project", async () => {
 
 test("routes each local publication to every instrument and arpeggiator owner", async () => {
   const projectId = `project:all-target-local-sync-${crypto.randomUUID()}`;
+
   const tracks: Track[] = [
     { id: "track-a", kind: "instrument", name: "A", volume: 1, clips: [] },
     { id: "track-b", kind: "instrument", name: "B", volume: 1, clips: [] },
   ];
+
   const instruments: Array<[string, TrackInstrumentParams | undefined]> = [];
   const arpeggiators: Array<[string, ArpeggiatorParams | undefined]> = [];
   const engine = new AudioEngine();
@@ -1232,6 +1426,7 @@ test("routes each local publication to every instrument and arpeggiator owner", 
     dispose = stop;
     const currentProjectId = () => projectId;
     view = createLocalEffectsView({ projectId: currentProjectId });
+
     const owner = useEffectsPanelAudioSync({
       isOpen: () => false,
       projectId: currentProjectId,
@@ -1249,8 +1444,10 @@ test("routes each local publication to every instrument and arpeggiator owner", 
       samplerBufferSync,
       drumRackBufferSync,
     });
+
     flush = () => owner.flushPending();
   });
+
   if (!view || !flush) throw new Error("The local sync owners were not created.");
   const localEffectsView = view;
   const flushPending = flush;
@@ -1284,15 +1481,18 @@ test("3B0 records the params-only unselected local arp route without claiming en
   const initial = { ...createDefaultArpeggiatorParams(), enabled: true };
   engine.setTrackArpeggiator("track-b", initial);
   let dispose = () => {};
+
   const fixture = createRoot(end => {
     dispose = end;
     const view = createLocalEffectsView({ projectId: () => projectId });
+
     const arp = createPersistedEffectState<undefined, ArpeggiatorParams>({
       targetId: () => "track-b", row: () => undefined, readQueryParams: () => undefined,
       createInitialParams: () => initial, serializeParams: JSON.stringify,
       applyToEngine: (target, params) => engine.setTrackArpeggiator(target, params),
       persistParams: () => ({ kind: "committed-unordered" }), isRemote: () => false,
     });
+
     const sync = useEffectsPanelAudioSync({
       isOpen: () => false, projectId: () => projectId, currentTargetId: () => "track-a",
       tracks: () => [{ id: "track-b", kind: "instrument", name: "B", volume: 1, clips: [] }],
@@ -1301,14 +1501,17 @@ test("3B0 records the params-only unselected local arp route without claiming en
       localEffectsView: view, syncArpeggiatorForTarget: arp.syncRemoteForTarget,
       samplerBufferSync: createSamplerBufferSync(), drumRackBufferSync: createDrumRackBufferSync(),
     });
+
     return { view, arp, sync };
   });
+
   await setLocalEffect(projectId, "track-b", "arp", { ...initial, enabled: false });
   await fixture.view.reload();
   await fixture.sync.flushPending();
   await fixture.arp.flushPending();
   expect(fixture.arp.readForTarget("track-b")?.enabled).toBe(false);
   expect(engine.getTrackArpeggiator("track-b")?.enabled).toBe(false);
+
   if (process.env.DV01_3B0_REPORT === "1") console.log(`DV01-3B0 ${JSON.stringify({
     name: "R2-B5 unselected local arp owner delivery",
     location: "src/components/timeline/create-persisted-effect-state.ts:125",
@@ -1337,12 +1540,16 @@ for (const legacy of [true, false]) test(`3B1 sampler normalization causes one s
     submitted.push(args[2].polyphony);
     const result = await syncTrack(...args);
     results.push(result);
+
     return result;
   };
+
   let dispose = () => {};
+
   const f = createRoot(end => {
     dispose = end;
     const view = createLocalEffectsView({ projectId: () => projectId });
+
     const device = createEffectsPanelInstrumentDevice({
       audioEngine: () => engine, projectId: () => projectId, userId: () => undefined, playheadSec: () => 0,
       samplerBufferSync: sampler, drumRackBufferSync: drum, localEffectsView: view,
@@ -1351,6 +1558,7 @@ for (const legacy of [true, false]) test(`3B1 sampler normalization causes one s
         if (next?.kind === "sampler") handoffs.push(next.params.polyphony);
       },
     }, () => track.id, () => track, () => track);
+
     const sync = useEffectsPanelAudioSync({
       isOpen: () => true, projectId: () => projectId, currentTargetId: () => track.id,
       tracks: () => [track], sidechainRoutes: () => [], audioEngine: () => engine,
@@ -1360,13 +1568,16 @@ for (const legacy of [true, false]) test(`3B1 sampler normalization causes one s
       syncArpeggiatorForTarget: device.arp.syncRemoteForTarget,
       samplerBufferSync: sampler, drumRackBufferSync: drum,
     });
+
     return { view, device, sync };
   });
+
   await f.view.reload(); await f.sync.flushPending(); await f.device.flushPending();
   submitted.length = 0; results.length = 0; handoffs.length = 0;
   const holder = new ParameterGestureHolder();
   f.device.gestureOwner.open(holder);
   f.device.gestureOwner.tick(holder, () => f.device.sampler.update({ polyphony: 64 }));
+
   for (let turn = 0; turn < 80; turn++) await Promise.resolve();
   f.device.gestureOwner.end(holder);
   await f.device.flushPending();
@@ -1387,21 +1598,29 @@ test("3B0 drum rack edit never uses the synth callback leg", async () => {
   const drum = createDrumRackBufferSync();
   let registry = 0, synth = 0, preview = 0, flush = 0, dispose = () => {};
   const setInstrument = engine.setTrackInstrument.bind(engine);
-  engine.setTrackInstrument = (...args) => { synth++; return setInstrument(...args); };
+  engine.setTrackInstrument = (...args) => { synth++;
+
+ return setInstrument(...args); };
+
   const device = createRoot(end => {
     dispose = end;
+
     return createEffectsPanelInstrumentDevice({
       audioEngine: () => engine, projectId: () => projectId, userId: () => undefined, playheadSec: () => 0,
       samplerBufferSync: sampler, drumRackBufferSync: drum,
-      allocateProcessorEdit: () => { registry++; return undefined; },
+      allocateProcessorEdit: () => { registry++;
+
+ return undefined; },
       deliverProcessor: () => { preview++; flush++; throw new Error("Sampled content must not enter the processor leg."); },
     }, () => track.id, () => track, () => track);
   });
+
   const params = createDefaultDrumRackParams();
   device.syncRemoteInstrumentForTarget(track.id, { kind: "drum-rack", instanceId: "drum", params });
   await device.flushPending();
   registry = 0; synth = 0;
   const pad = params.pads[0];
+
   if (!pad) throw new Error("Default drum rack has no pad");
   device.drumRack.updatePad(pad.id, { gain: 0.4 });
   await device.flushPending();
@@ -1409,6 +1628,7 @@ test("3B0 drum rack edit never uses the synth callback leg", async () => {
   // Current product still invokes allocateProcessorEdit for sampled content. The real registry rejects it;
   // v3 must not invoke the synth/registry leg at all.
   expect(registry).toBe(0);
+
   if (process.env.DV01_3B0_REPORT === "1") console.log(`DV01-3B0 ${JSON.stringify({
     name: "R5-3 sampled drum registry allocation",
     location: "src/components/timeline/create-effects-panel-state.ts:375",
@@ -1442,32 +1662,41 @@ test.each<[boolean, EngineDisposition]>([[false, "applied"], [false, "dropped"],
   // No AudioContext in bun: the browser leg records that it was asked and answers as the engine would.
   engine.setTrackInstrument = (_trackId, input) => {
     browser.push(input.instrument?.kind === "synth" ? input.instrument.params.filter.frequencyHz : -1);
+
     return "applied";
   };
+
   let dispose = () => {};
+
   const device = createRoot(end => {
     dispose = end;
+
     return createEffectsPanelInstrumentDevice({
       audioEngine: () => engine, projectId: () => projectId, userId: () => undefined, playheadSec: () => 0,
       samplerBufferSync: sampler, drumRackBufferSync: drum, usesLegacyAudioEngine: () => legacy,
       allocateProcessorEdit: createProcessorEditRegistry(() => 120).allocate,
       deliverProcessor: (edit, gesture) => {
         native.push(gesture?.holds ? "preview" : "flush");
+
         return { receipt: { key: edit.id, serial: 0 }, settled: Promise.resolve({ state: "unavailable" }) };
       },
       applyPortableProcessor: async (edit) => {
         portable.push(edit.content.values?.["synth.filterCutoffHz"] ?? -1);
+
         if (portableAnswer === "applied") taken = edit.content.params;
+
         return portableAnswer;
       },
       onEffectParamsCommitted: (payload) => { if (payload.effect === "instrument") history++; },
       onStructuralPlaybackChange: async (_target, next) => {
         if (next?.kind === "synth") announces.push(next.params.filter.frequencyHz);
+
         // Timeline rebuilds unless the prepared portable instrument already equals the announced one.
         if (JSON.stringify(taken) !== JSON.stringify(next)) rebuilds++;
       },
     }, () => track.id, () => track, () => track);
   });
+
   try {
     device.syncRemoteInstrumentForTarget(track.id, { kind: "synth", instanceId: "synth-p1", params: createDefaultSynthParams() });
     await device.flushPending();
@@ -1475,15 +1704,18 @@ test.each<[boolean, EngineDisposition]>([[false, "applied"], [false, "dropped"],
     browser.length = 0; native.length = 0; announces.length = 0; portable = []; history = 0; rebuilds = 0;
     const holder = new ParameterGestureHolder();
     device.gestureOwner.open(holder);
+
     for (let frame = 1; frame <= 5; frame++) {
       // Two pointer moves land in one frame; the owner coalesces them into one preview.
       device.gestureOwner.tick(holder, () => device.synth.change({ filter: { frequencyHz: 950 + frame * 100 } }));
       device.gestureOwner.tick(holder, () => device.synth.change({ filter: { frequencyHz: 1000 + frame * 100 } }));
+
       for (const callback of frames.splice(0)) callback?.(0);
       await settle();
       portableFrames.push(portable);
       portable = [];
     }
+
     device.gestureOwner.end(holder);
     await device.flushPending();
     await settle();
@@ -1496,11 +1728,14 @@ test.each<[boolean, EngineDisposition]>([[false, "applied"], [false, "dropped"],
     expect({ portableFrames, release: portable }).toEqual(legacy
       ? { portableFrames: [[], [], [], [], []], release: [] }
       : { portableFrames: cutoffs.map(cutoff => [cutoff]), release: [1500] });
+
     if (!legacy && portableAnswer === "applied") expect(rebuilds).toBe(0);
   } finally {
     dispose(); sampler.dispose(); drum.dispose();
+
     if (originalRaf) Object.defineProperty(globalThis, "requestAnimationFrame", originalRaf);
     else Reflect.deleteProperty(globalThis, "requestAnimationFrame");
+
     if (originalCancel) Object.defineProperty(globalThis, "cancelAnimationFrame", originalCancel);
     else Reflect.deleteProperty(globalThis, "cancelAnimationFrame");
   }
@@ -1531,36 +1766,53 @@ test.each<["synth" | "effect", number, boolean]>([
   const portable: number[][] = [], browser: number[] = [], nativePreview: number[] = [], nativeFlush: number[] = [];
   const held: Array<() => void> = [];
   const count = (list: number[]) => { list[window] = (list[window] ?? 0) + 1; };
-  engine.setTrackInstrument = () => { count(browser); return "applied"; };
+
+  engine.setTrackInstrument = () => { count(browser);
+
+ return "applied"; };
+
   type DeviceContext = Parameters<typeof createEffectsPanelAudioDevice>[0];
+
   const deliverProcessor: NonNullable<DeviceContext["deliverProcessor"]> = (edit, gesture) => {
     count(gesture?.holds ? nativePreview : nativeFlush);
+
     return { receipt: { key: edit.id, serial: 0 }, settled: Promise.resolve({ state: "unavailable" }) };
   };
+
   const applyPortableProcessor: NonNullable<DeviceContext["applyPortableProcessor"]> = (edit) => {
     (portable[window] ??= []).push(edit.content.values?.[valueKey] ?? Number.NaN);
+
     // The first gesture preview stalls until frame `stall`; every other acknowledgement is fast.
     if (window === 0 || ++gestureDispatches > 1) return Promise.resolve<EngineDisposition>("applied");
+
     return new Promise<EngineDisposition>(resolve => { held.push(() => resolve("applied")); });
   };
+
   const onEffectParamsCommitted = () => { history++; };
   let dispose = () => {};
+
   const device = createRoot(end => {
     dispose = end;
+
     const shared = { audioEngine: () => engine, projectId: () => projectId, userId: () => undefined, usesLegacyAudioEngine: () => false,
       allocateProcessorEdit: createProcessorEditRegistry(() => 120).allocate, deliverProcessor, applyPortableProcessor, onEffectParamsCommitted };
+
     if (kind === "synth") {
       const instrument = createEffectsPanelInstrumentDevice({ ...shared, playheadSec: () => 0, samplerBufferSync: sampler, drumRackBufferSync: drum },
         () => track.id, () => track, () => track);
+
       return {
         gesture: instrument.gestureOwner, flushPending: instrument.flushPending,
         install: async () => instrument.syncRemoteInstrumentForTarget(track.id, { kind: "synth", instanceId: "synth-opta", params: createDefaultSynthParams() }),
         change: (value: number) => instrument.synth.change({ filter: { frequencyHz: value } }),
       };
     }
+
     const view = createLocalEffectsView({ projectId: () => projectId });
+
     const audio = createEffectsPanelAudioDevice({ ...shared, roomEffects: () => [], localEffectsView: view, canWriteCurrentTargetEffects: () => true },
       () => track.id, () => undefined);
+
     return {
       gesture: audio.gestureOwner("utility-opta", "utility"), flushPending: audio.flushPending,
       install: async () => {
@@ -1570,6 +1822,7 @@ test.each<["synth" | "effect", number, boolean]>([
       change: (value: number) => audio.utility.changeInstance("utility-opta", params => ({ ...params, state: { ...params.state, gainDb: value } })),
     };
   });
+
   try {
     await device.install();
     await device.flushPending();
@@ -1577,15 +1830,20 @@ test.each<["synth" | "effect", number, boolean]>([
     const holder = new ParameterGestureHolder();
     device.gesture.open(holder);
     const lastFrame = releaseDuringStall ? stall - 1 : 8;
+
     for (window = 1; window <= lastFrame; window++) {
       device.gesture.tick(holder, () => device.change(valueAt(window, 1)));
       device.gesture.tick(holder, () => device.change(valueAt(window, 2)));
+
       for (const callback of frames.splice(0)) callback?.(0);
       await settle();
+
       if (window === stall) for (const acknowledge of held.splice(0)) { acknowledge(); await settle(); }
     }
+
     const writesBefore = localProjectChangeSequence(projectId);
     device.gesture.end(holder);
+
     for (const acknowledge of held.splice(0)) acknowledge();
     await device.flushPending();
     await settle();
@@ -1611,18 +1869,23 @@ test.each<["synth" | "effect", number, boolean]>([
     });
   } finally {
     dispose(); sampler.dispose(); drum.dispose();
+
     if (originalRaf) Object.defineProperty(globalThis, "requestAnimationFrame", originalRaf);
     else Reflect.deleteProperty(globalThis, "requestAnimationFrame");
+
     if (originalCancel) Object.defineProperty(globalThis, "cancelAnimationFrame", originalCancel);
     else Reflect.deleteProperty(globalThis, "cancelAnimationFrame");
   }
 });
+
 test("isolates project readiness and waits for remote query data", async () => {
   let currentProject = "cloud-project-a";
+
   const readiness = createEffectsPanelReadinessOwner({
     currentProjectId: () => currentProject,
     localReady: cloudOnlyLocalReady,
   });
+
   readiness.updateRemote("cloud-project-a", undefined, "pending", undefined);
   readiness.updateRemote("cloud-project-b", [], "success", undefined);
   readiness.markRowsProcessed("cloud-project-b");
@@ -1631,9 +1894,11 @@ test("isolates project readiness and waits for remote query data", async () => {
 
   currentProject = "cloud-project-a";
   let settled = false;
+
   const flushA = readiness.flushPending("cloud-project-a").then(() => {
     settled = true;
   });
+
   await Promise.resolve();
   expect(settled).toBe(false);
   readiness.updateRemote("cloud-project-a", [], "success", undefined);
@@ -1651,10 +1916,12 @@ test("isolates project readiness and waits for remote query data", async () => {
 
 test("rejects a remote readiness flush when the current project changes", async () => {
   let currentProject = "cloud-project-a";
+
   const readiness = createEffectsPanelReadinessOwner({
     currentProjectId: () => currentProject,
     localReady: cloudOnlyLocalReady,
   });
+
   readiness.updateRemote("cloud-project-a", undefined, "pending", undefined);
   const pending = readiness.flushPending("cloud-project-a");
   currentProject = "cloud-project-b";
@@ -1666,9 +1933,11 @@ test("rejects a remote readiness flush when the current project changes", async 
 test("rejects a local readiness flush when the current project changes", async () => {
   let currentProject = "project:readiness-a";
   let resolveLoad: ((rows: never[]) => void) | undefined;
+
   const { view, readiness, stop } = localReadiness(() => currentProject, () => new Promise<never[]>((resolve) => {
     resolveLoad = resolve;
   }));
+
   view.sync();
   const pending = readiness.flushPending("project:readiness-a");
   currentProject = "project:readiness-b";
@@ -1687,6 +1956,7 @@ const deferred = <T,>() => {
   let resolve = (_value: T) => {};
   let reject = (_cause: Error) => {};
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+
   return { promise, resolve, reject };
 };
 
@@ -1702,6 +1972,7 @@ const createStructuralReviewFixture = async (local: boolean, master: boolean, pe
   }));
   const templates = await db.run(ctx => ctx.db.query("effects").collect());
   const template = templates[0];
+
   if (!template) throw new Error("No row template");
   const [rows, setRows] = createSignal(templates);
   const [projectId, setProjectId] = createSignal<string | undefined>(pid);
@@ -1714,14 +1985,21 @@ const createStructuralReviewFixture = async (local: boolean, master: boolean, pe
   runtime.track.updateTrackGains([track]);
   const calls: Array<{ type: string; chain: AudioEffectRuntimeInstance[]; disposition?: string; error?: string }> = [];
   const promises: Promise<unknown>[] = [];
+
   const record = <Disposition extends EngineDisposition | "not-held">(type: string, chain: AudioEffectRuntimeInstance[], work: Promise<Disposition>) => {
     const item: typeof calls[number] = { type, chain };
     calls.push(item);
-    const result = work.then(disposition => { item.disposition = disposition; return disposition; },
+
+    const result = work.then(disposition => { item.disposition = disposition;
+
+ return disposition; },
       cause => { item.error = String(cause); throw cause; });
+
     promises.push(result.catch(() => undefined));
+
     return result;
   };
+
   class Engine extends AudioEngine {
     private async master(chain: AudioEffectRuntimeInstance[]) {
       return (await runtime.master.setFxInstances(runtime.audio.context, runtime.audio.masterInput, runtime.audio.context.destination, chain)).disposition;
@@ -1737,19 +2015,23 @@ const createStructuralReviewFixture = async (local: boolean, master: boolean, pe
     }
     override setMasterFxInstance(instance: AudioEffectRuntimeInstance) {
       const retained = runtime.master.retainedInstances();
+
       return record("instance", [instance], retained.some(entry => entry.id === instance.id)
         ? this.master(retained.map(entry => entry.id === instance.id ? instance : entry))
         : Promise.resolve("not-held"));
     }
   }
+
   const [engine, setEngine] = createSignal<AudioEngine>(new Engine());
   const errors: string[] = [];
   const localErrors: string[] = [];
   const history: unknown[] = [];
   let dispose = () => {};
   let through = 1;
+
   const publish = (chain: AudioEffectRuntimeInstance[]) => {
     through++;
+
     if (local) setView({
       projectId: projectId() ?? pid, lifetime: 1, through, publicationId: {},
       rows: chain.map((instance, index): LocalEffectRow<JsonValue> => ({
@@ -1761,11 +2043,16 @@ const createStructuralReviewFixture = async (local: boolean, master: boolean, pe
       ...template, projectId: projectId() ?? pid, instanceId: instance.id, type: instance.kind, index, params: instance.params, revision: through,
     })));
   };
+
   untrack(() => publish([compressorInstance(-31, "a"), compressorInstance(-25, "b")]));
+
   const audio = createRoot(end => {
     dispose = end;
+
     return createEffectsPanelAudioDevice({
-      audioEngine: engine, projectId: () => { uiNoise(); return projectId(); }, userId: () => undefined, projectGeneration: generation,
+      audioEngine: engine, projectId: () => { uiNoise();
+
+ return projectId(); }, userId: () => undefined, projectGeneration: generation,
       roomEffects: rows, localEffectsView: {
         view, reload: async () => view()?.rows ?? [], acknowledge: () => undefined, ready: async () => true,
       },
@@ -1776,19 +2063,24 @@ const createStructuralReviewFixture = async (local: boolean, master: boolean, pe
       persistAudioEffectOrder: persistOrder ?? (() => {}),
     }, selected, () => track);
   });
+
   const settle = async () => {
     await audio.flushPending();
     await Promise.all(promises);
+
     for (let left = runtime.timers.pending.size; left > 0; left--) runtime.timers.run();
   };
+
   await settle();
   const close = () => { dispose(); runtime.close(); };
+
   return { audio, publish, runtime, calls, promises, errors, localErrors, history, targetId, projectId, setProjectId, setGeneration, selected, setSelected, setLegacy, setEngine, engine, settle, close, setUiNoise };
 };
 
 for (const master of [false, true]) {
   test(`B5c3 simultaneous releases are each undoable, local track=${!master}, closed and unselected`, async () => {
     const f = await createStructuralReviewFixture(true, master);
+
     try {
       const a = f.audio.gestureOwner("a", "compressor", f.targetId);
       const b = f.audio.gestureOwner("b", "compressor", f.targetId);
@@ -1812,10 +2104,13 @@ for (const local of [true, false]) for (const master of [false, true]) {
   const label = `local=${local}, master=${master}`;
   test(`r2 two structural changes with first pending ${label}`, async () => {
     const f = await createStructuralReviewFixture(local, master);
+
     try {
       const held = deferred<void>(), started = deferred<void>();
       Object.defineProperty(f.runtime.audio.context.audioWorklet, "addModule", {
-        value: () => { started.resolve(); return held.promise; },
+        value: () => { started.resolve();
+
+ return held.promise; },
       });
       const first = [compressorInstance(-31, "a"), staticGateInstance(-22, 2, "g")];
       f.publish(first);
@@ -1832,6 +2127,7 @@ for (const local of [true, false]) for (const master of [false, true]) {
 
   test(`r2 remove re-add same ID while owner pending ${label}`, async () => {
     const f = await createStructuralReviewFixture(local, master);
+
     try {
       const h = new ParameterGestureHolder();
       const g = f.audio.gestureOwner("a", "compressor", f.targetId);
@@ -1843,20 +2139,26 @@ for (const local of [true, false]) for (const master of [false, true]) {
       f.publish([compressorInstance(-42, "a"), compressorInstance(-25, "b")]);
       await f.settle();
       expect(g.isOpen(h)).toBe(false);
+
       const active = [...Array(f.runtime.audio.compressorNodeCount()).keys()]
         .flatMap(i => {
           const node = f.runtime.audio.workletNode(i);
+
           return node && !node.closed ? [node] : [];
         });
+
       expect(active).toHaveLength(2);
+
       const values = [...Array(f.runtime.audio.compressorNodeCount()).keys()]
         .flatMap(i => f.runtime.audio.workletNode(i)?.closed ? [] : [f.runtime.audio.compressorThreshold(i)]);
+
       expect(values.sort()).toEqual([-42, -25].sort());
     } finally { f.close(); }
   });
 
   test(`r2 kind change same ID ${label}`, async () => {
     const f = await createStructuralReviewFixture(local, master);
+
     try {
       const before = f.calls.length;
       f.publish([staticGateInstance(-22, 2, "a"), compressorInstance(-25, "b")]);
@@ -1870,6 +2172,7 @@ for (const local of [true, false]) for (const master of [false, true]) {
 
   test(`r2 kind change with old kind gesture ${label}`, async () => {
     const f = await createStructuralReviewFixture(local, master);
+
     try {
       const g = f.audio.gestureOwner("a", "compressor", f.targetId), h = new ParameterGestureHolder();
       g.open(h);
@@ -1887,6 +2190,7 @@ for (const local of [true, false]) for (const master of [false, true]) {
 
   test(`r2 pruned disappeared target stays pruned on generation bump ${label}`, async () => {
     const f = await createStructuralReviewFixture(local, master);
+
     try {
       if (!master) f.runtime.track.updateTrackGains([]);
       f.publish([]);
@@ -1901,15 +2205,18 @@ for (const local of [true, false]) for (const master of [false, true]) {
 
   test(`r2 engine identity forces fresh install ${label}`, async () => {
     const f = await createStructuralReviewFixture(local, master);
+
     try {
       const before = f.calls.length;
       const prior = f.engine();
+
       class Replacement extends AudioEngine {
         override setTrackFxInstances(id: string, chain: AudioEffectRuntimeInstance[]) { return prior.setTrackFxInstances(id, chain); }
         override setTrackFxInstance(id: string, instance: AudioEffectRuntimeInstance) { return prior.setTrackFxInstance(id, instance); }
         override setMasterFxInstances(chain: AudioEffectRuntimeInstance[]) { return prior.setMasterFxInstances(chain); }
         override setMasterFxInstance(instance: AudioEffectRuntimeInstance) { return prior.setMasterFxInstance(instance); }
       }
+
       f.setEngine(new Replacement());
       await f.settle();
       expect(f.calls.slice(before).some(c => c.type === "chain")).toBe(true);
@@ -1918,6 +2225,7 @@ for (const local of [true, false]) for (const master of [false, true]) {
 
   test(`r2 project switch with unacknowledged reorder ${label}`, async () => {
     const f = await createStructuralReviewFixture(local, master);
+
     try {
       f.audio.reorder({ id: "a", kind: "compressor" }, 1);
       await f.settle();
@@ -1933,6 +2241,7 @@ for (const local of [true, false]) for (const master of [false, true]) {
 
   test(`r2 owner update races reorder ${label}`, async () => {
     const f = await createStructuralReviewFixture(local, master);
+
     try {
       const h = new ParameterGestureHolder();
       const g = f.audio.gestureOwner("a", "compressor", f.targetId);
@@ -1951,6 +2260,7 @@ for (const local of [true, false]) for (const master of [false, true]) {
 
   test(`r2 project and generation fences ${label}`, async () => {
     const f = await createStructuralReviewFixture(local, master);
+
     try {
       const h = new ParameterGestureHolder();
       const g = f.audio.gestureOwner("a", "compressor", f.targetId);
@@ -1976,6 +2286,7 @@ for (const local of [true, false]) for (const master of [false, true]) {
   test(`r3 stable lifetime survives unrelated props local=${local} master=${master}`, async () => {
     const held = deferred<void>();
     const f = await createStructuralReviewFixture(local, master, () => held.promise);
+
     try {
       const project = f.projectId();
       f.audio.reorder({ id: "a", kind: "compressor" }, 1);
@@ -1990,6 +2301,7 @@ for (const local of [true, false]) for (const master of [false, true]) {
 
   test(`r3 reset precedes observations when rows publish first local=${local} master=${master}`, async () => {
     const f = await createStructuralReviewFixture(local, master);
+
     try {
       f.audio.reorder({ id: "a", kind: "compressor" }, 1);
       await f.settle();
@@ -2011,25 +2323,31 @@ for (const master of [false, true]) {
     const f = await createStructuralReviewFixture(true, master);
     const held = deferred<void>(), installed = deferred<void>(), module = deferred<void>(), started = deferred<void>();
     let outcome: EngineDisposition | "not-held" | undefined;
+
     try {
       const prior = f.engine();
       let holding = true;
+
       const holdResult = async (work: Promise<EngineDisposition | "not-held">) => {
         const result = await work;
+
         if (holding) {
           holding = false;
           outcome = result;
           installed.resolve();
           await held.promise;
         }
+
         return result;
       };
+
       class CompletionBarrierEngine extends AudioEngine {
         override setTrackFxInstances(id: string, chain: AudioEffectRuntimeInstance[]) { return prior.setTrackFxInstances(id, chain); }
         override setTrackFxInstance(id: string, instance: AudioEffectRuntimeInstance) { return holdResult(prior.setTrackFxInstance(id, instance)); }
         override setMasterFxInstances(chain: AudioEffectRuntimeInstance[]) { return prior.setMasterFxInstances(chain); }
         override setMasterFxInstance(instance: AudioEffectRuntimeInstance) { return holdResult(prior.setMasterFxInstance(instance)); }
       }
+
       // Identity change produces equal-chain work, not owner row replacements.
       f.setEngine(new CompletionBarrierEngine());
       await f.settle();
@@ -2037,7 +2355,9 @@ for (const master of [false, true]) {
       await installed.promise;
       expect(outcome).toBe("applied");
       Object.defineProperty(f.runtime.audio.context.audioWorklet, "addModule", {
-        value: () => { started.resolve(); return module.promise; },
+        value: () => { started.resolve();
+
+ return module.promise; },
       });
       f.publish([compressorInstance(-31, "a"), compressorInstance(-25, "b"), staticGateInstance(-22, 2, "g")]);
       await started.promise;
@@ -2045,7 +2365,9 @@ for (const master of [false, true]) {
       await structuralMicrotaskCheckpoint();
       held.resolve();
       let failure: unknown;
+
       try { await f.audio.flushPending(); } catch (cause) { failure = cause; }
+
       expect(f.history).toHaveLength(1);
       expect(f.history[0]).toMatchObject({ instanceId: "a" });
       expect(String(failure)).toContain("new gate failed");
@@ -2057,6 +2379,7 @@ for (const master of [false, true]) {
 test("r3 native lifetime keeps equal-value order and ignores retired order in a row-first batch", async () => {
   const held = deferred<void>();
   const f = await createStructuralReviewFixture(true, false, () => held.promise);
+
   try {
     f.setLegacy(false);
     const before = f.calls.length;
@@ -2066,10 +2389,13 @@ test("r3 native lifetime keeps equal-value order and ignores retired order in a 
     await f.settle();
     expect(f.audio.orderedEffects().map(i => i.id)).toEqual(["b", "a"]);
     const observed: string[][] = [];
+
     const disposeObserver = createRoot(dispose => {
       createEffect(() => { observed.push(f.audio.orderedEffects().map(i => i.id)); });
+
       return dispose;
     });
+
     try {
       batch(() => { f.publish([compressorInstance(-42, "next")]); f.setGeneration(1); });
       await f.settle();
@@ -2087,7 +2413,11 @@ const structuralMicrotaskCheckpoint = () => Array.from({ length: 50 })
 for (const master of [false, true]) for (const lifetimeChange of ["project", "generation"]) {
   test(`r2 late add rollback cannot recreate old lifetime order ${lifetimeChange} master=${master}`, async () => {
     const held = deferred<void>(), started = deferred<void>();
-    const f = await createStructuralReviewFixture(true, master, () => { started.resolve(); return held.promise; });
+
+    const f = await createStructuralReviewFixture(true, master, () => { started.resolve();
+
+ return held.promise; });
+
     try {
       const adding = f.audio.addByKindToTarget(f.targetId, "compressor");
       await started.promise;
@@ -2112,9 +2442,12 @@ for (const local of [true, false]) for (const master of [false, true]) {
   test(`r2 current structural joined failure stays observable ${label}`, async () => {
     const f = await createStructuralReviewFixture(local, master);
     const held = deferred<void>(), started = deferred<void>();
+
     try {
       Object.defineProperty(f.runtime.audio.context.audioWorklet, "addModule", {
-        value: () => { started.resolve(); return held.promise; },
+        value: () => { started.resolve();
+
+ return held.promise; },
       });
       f.publish([compressorInstance(-31, "a"), staticGateInstance(-22, 2, "g")]);
       await started.promise;
@@ -2133,20 +2466,26 @@ for (const local of [true, false]) for (const master of [false, true]) {
   test(`r2 pending flush follows superseding structure ${label}`, async () => {
     const f = await createStructuralReviewFixture(local, master);
     const held = deferred<void>(), started = deferred<void>();
+
     try {
       const prior = f.engine();
       let hold = false;
+
       const wait = async (work: Promise<EngineDisposition>) => {
         const result = await work;
+
         if (hold) { started.resolve(); await held.promise; }
+
         return result;
       };
+
       class HeldStructuralEngine extends AudioEngine {
         override setTrackFxInstances(id: string, chain: AudioEffectRuntimeInstance[]) { return wait(prior.setTrackFxInstances(id, chain)); }
         override setTrackFxInstance(id: string, instance: AudioEffectRuntimeInstance) { return prior.setTrackFxInstance(id, instance); }
         override setMasterFxInstances(chain: AudioEffectRuntimeInstance[]) { return wait(prior.setMasterFxInstances(chain)); }
         override setMasterFxInstance(instance: AudioEffectRuntimeInstance) { return prior.setMasterFxInstance(instance); }
       }
+
       f.setEngine(new HeldStructuralEngine());
       await f.settle();
       hold = true;
@@ -2157,10 +2496,12 @@ for (const local of [true, false]) for (const master of [false, true]) {
       await structuralMicrotaskCheckpoint();
       hold = false;
       f.publish([compressorInstance(-31, "a"), compressorInstance(-25, "b")]);
+
       const completed = await Promise.race([
         flush.then(() => true),
         structuralMicrotaskCheckpoint().then(() => false),
       ]);
+
       expect(completed).toBe(true);
       expect(f.runtime.audio.liveWorkletCount()).toBe(2);
     } finally { held.resolve(); await f.settle(); f.close(); }
@@ -2168,6 +2509,7 @@ for (const local of [true, false]) for (const master of [false, true]) {
 
   test(`r2 pruning does not delete a readded target ${label}`, async () => {
     const f = await createStructuralReviewFixture(local, master);
+
     try {
       f.publish([]);
       f.publish([compressorInstance(-42, "a")]);
@@ -2183,6 +2525,7 @@ for (const local of [true, false]) for (const master of [false, true]) {
 
   test(`r2 kind retirement preserves another instance gesture ${label}`, async () => {
     const f = await createStructuralReviewFixture(local, master);
+
     try {
       const a = f.audio.gestureOwner("a", "compressor", f.targetId), ah = new ParameterGestureHolder();
       const b = f.audio.gestureOwner("b", "compressor", f.targetId), bh = new ParameterGestureHolder();
@@ -2194,8 +2537,10 @@ for (const local of [true, false]) for (const master of [false, true]) {
       await Promise.all(f.promises);
       expect(a.isOpen(ah)).toBe(false);
       expect(b.isOpen(bh)).toBe(true);
+
       const live = Array.from({ length: f.runtime.audio.compressorNodeCount() }, (_, i) => i)
         .filter(i => !f.runtime.audio.workletNode(i)?.closed);
+
       expect(live.some(i => f.runtime.audio.compressorThreshold(i) === -7)).toBe(true);
       b.cancel(bh);
       await f.settle();
@@ -2207,6 +2552,7 @@ for (const local of [true, false]) for (const master of [false, true]) {
       const held = deferred<void>();
       let writes = 0;
       const f = await createStructuralReviewFixture(local, master, () => ++writes === 1 ? held.promise : undefined);
+
       try {
         f.audio.reorder({ id: "a", kind: "compressor" }, 1);
         await f.settle();
@@ -2237,12 +2583,15 @@ for (const master of [false, true]) {
     Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
     const disabled = { ...AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams(), enabled: false, wet: 0.2 };
     const r: AudioEffectRuntimeInstance = { id: "r", kind: "reverb", params: disabled };
+
     try {
       f.publish([r]);
       await f.settle();
       const held = deferred<void>(), started = deferred<void>();
       Object.defineProperty(f.runtime.audio.context.audioWorklet, "addModule", {
-        value: () => { started.resolve(); return held.promise; },
+        value: () => { started.resolve();
+
+ return held.promise; },
       });
       const g = f.audio.gestureOwner("r", "reverb", f.targetId), h = new ParameterGestureHolder();
       g.open(h);
@@ -2255,19 +2604,25 @@ for (const master of [false, true]) {
       const flush = f.audio.flushPending();
       // Fixed microtask checkpoint to observe the existing owner lane, not a state-dependent poll.
       await structuralMicrotaskCheckpoint();
+
       const successfulReplacement = f.calls.slice(singleStart).find(c =>
         c.type === "instance" && c.chain[0]?.kind === "reverb" && c.chain[0].params.wet === 0.75 && c.disposition === "applied");
+
       expect(successfulReplacement).toBeDefined();
       // Join the existing project write lock after release admission, so IndexedDB completion is event-driven.
       await withExternalProcessorProjectWriteLock(f.projectId() ?? "", async () => {});
       await structuralMicrotaskCheckpoint();
+
       const completedBeforeObsoleteSettles = await Promise.race([
         flush.then(() => true),
         structuralMicrotaskCheckpoint().then(() => false),
       ]);
+
       held.reject(new Error("obsolete reverb module failed"));
       let failure: unknown;
+
       try { await flush; } catch (cause) { failure = cause; }
+
       expect(failure).toBeUndefined();
       expect(completedBeforeObsoleteSettles).toBe(true);
       expect(f.history).toHaveLength(1);
@@ -2276,6 +2631,7 @@ for (const master of [false, true]) {
     } finally {
       if (originalRaf) Object.defineProperty(globalThis, "requestAnimationFrame", originalRaf);
       else Reflect.deleteProperty(globalThis, "requestAnimationFrame");
+
       if (originalCancel) Object.defineProperty(globalThis, "cancelAnimationFrame", originalCancel);
       else Reflect.deleteProperty(globalThis, "cancelAnimationFrame");
       f.close();
@@ -2290,6 +2646,7 @@ for (const local of [true, false]) for (const master of [false, true]) {
   test(`r4 current lifetime reorder survives deferred cleanup local=${local} master=${master}`, async () => {
     const held=deferred<void>();
     const f=await createStructuralReviewFixture(local,master,()=>held.promise);
+
     try {
       const before=f.calls.length;
       batch(() => {
@@ -2306,6 +2663,7 @@ for (const local of [true, false]) for (const master of [false, true]) {
 
   test(`r4 retired export is guarded before effects local=${local} master=${master}`, async () => {
     const f=await createStructuralReviewFixture(local,master);
+
     try {
       f.audio.reorder({id:"a",kind:"compressor"},1);
       await f.settle();
@@ -2325,13 +2683,16 @@ for (const master of [false,true]) {
   test(`r4 native reorder failure is reported master=${master}`, async()=>{
     const f=await createStructuralReviewFixture(true,master);
     const failure=new Error("native explicit reorder failed");
+
     try {
       f.setLegacy(false);
       const prior=f.engine();
+
       class FailingEngine extends AudioEngine {
         override setTrackFxInstances(_id:string,_chain:AudioEffectRuntimeInstance[]):Promise<EngineDisposition> {return Promise.reject(failure);}
         override setMasterFxInstances(_chain:AudioEffectRuntimeInstance[]):Promise<EngineDisposition> {return Promise.reject(failure);}
       }
+
       f.setEngine(new FailingEngine());
       f.audio.reorder({id:"a",kind:"compressor"},1);
       await structuralMicrotaskCheckpoint();
@@ -2346,20 +2707,26 @@ for(const master of [false,true]) {
   test(`r4 owner must not adopt dropped successor over own success master=${master}`,async()=>{
     const f=await createStructuralReviewFixture(true,master);
     const held=deferred<void>(),installed=deferred<void>();
+
     try{
       const prior=f.engine();
       let once=true;
+
       const hold=async(work:Promise<EngineDisposition|"not-held">)=>{
         const result=await work;
+
         if(once){once=false;expect(result).toBe("applied");installed.resolve();await held.promise;}
+
         return result;
       };
+
       class BarrierEngine extends AudioEngine {
         override setTrackFxInstances(id:string,instances:AudioEffectRuntimeInstance[]){return prior.setTrackFxInstances(id,instances);}
         override setMasterFxInstances(instances:AudioEffectRuntimeInstance[]){return prior.setMasterFxInstances(instances);}
         override setTrackFxInstance(id:string,instance:AudioEffectRuntimeInstance){return hold(prior.setTrackFxInstance(id,instance));}
         override setMasterFxInstance(instance:AudioEffectRuntimeInstance){return hold(prior.setMasterFxInstance(instance));}
       }
+
       f.setEngine(new BarrierEngine());
       await f.settle();
       f.audio.compressor.changeInstance("a",p=>({...p,thresholdDb:-12}));
@@ -2381,6 +2748,7 @@ for (const local of [true,false]) for(const master of [false,true]) {
   test(`r4 stable lifetime continuation rolls back local=${local} master=${master}`,async()=>{
     const held=deferred<void>();
     const f=await createStructuralReviewFixture(local,master,()=>held.promise);
+
     try{
       f.audio.reorder({id:"a",kind:"compressor"},1);
       await f.settle();
@@ -2395,6 +2763,7 @@ for (const local of [true,false]) for(const master of [false,true]) {
 
   test(`r4 same lifetime retain prune only acknowledges matching order local=${local} master=${master}`,async()=>{
     const f=await createStructuralReviewFixture(local,master);
+
     try{
       f.audio.reorder({id:"a",kind:"compressor"},1);
       await f.settle();
@@ -2415,26 +2784,39 @@ for (const local of [true,false]) for(const master of [false,true]) {
 for(const master of [false,true]) for(const fallback of [false,true]) {
   test(`r4 distinct own ${fallback?"fallback":"replacement"} failure reports and repairs master=${master}`,async()=>{
     const f=await createStructuralReviewFixture(true,master);
+
     try{
       const prior=f.engine();
       let armed=false,once=true,restores=0;
       const failure=new Error("own unmarked failure");
+
       const chain=(target:string,instances:AudioEffectRuntimeInstance[]):Promise<EngineDisposition>=>{
-        if(armed&&fallback&&once){once=false;return Promise.reject(failure);}
+        if(armed&&fallback&&once){once=false;
+
+return Promise.reject(failure);}
+
         return target==="master"?prior.setMasterFxInstances(instances):prior.setTrackFxInstances(target,instances);
       };
+
       const single=(target:string,instance:AudioEffectRuntimeInstance):Promise<EngineDisposition|"not-held">=>{
-        if(armed&&once&&!fallback){once=false;return Promise.reject(failure);}
+        if(armed&&once&&!fallback){once=false;
+
+return Promise.reject(failure);}
+
         if(armed&&once&&fallback)return Promise.resolve("not-held");
+
         if(armed)restores++;
+
         return target==="master"?prior.setMasterFxInstance(instance):prior.setTrackFxInstance(target,instance);
       };
+
       class ReleaseEngine extends AudioEngine {
         override setTrackFxInstances(id:string,instances:AudioEffectRuntimeInstance[]){return chain(id,instances);}
         override setMasterFxInstances(instances:AudioEffectRuntimeInstance[]){return chain("master",instances);}
         override setTrackFxInstance(id:string,instance:AudioEffectRuntimeInstance){return single(id,instance);}
         override setMasterFxInstance(instance:AudioEffectRuntimeInstance){return single("master",instance);}
       }
+
       f.setEngine(new ReleaseEngine());await f.settle();armed=true;
       f.audio.compressor.changeInstance("a",p=>({...p,thresholdDb:-12}));
       await expect(f.audio.flushPending()).rejects.toThrow(failure.message);
@@ -2449,44 +2831,61 @@ for(const master of [false,true]) for(const own of ["success","failure"]) for(co
   test(`r4 completion ordering master=${master} own=${own} successor=${successor} first=${first}`,async()=>{
     const f=await createStructuralReviewFixture(true,master);
     const ownGate=deferred<void>(),successorGate=deferred<void>(),installed=deferred<void>(),successorInstalled=deferred<void>();
+
     try{
       const prior=f.engine();let holdOwn=true,holdSuccessor=false;
+
       const single=async(work:Promise<EngineDisposition|"not-held">)=>{
         const result=await work;
+
         if(holdOwn){holdOwn=false;expect(result).toBe("applied");installed.resolve();await ownGate.promise;}
+
         return result;
       };
+
       const chain=async(work:Promise<EngineDisposition>)=>{
         const result=await work;
+
         if(holdSuccessor){holdSuccessor=false;expect(["applied","joined","skipped"]).toContain(result);successorInstalled.resolve();await successorGate.promise;}
+
         return result;
       };
+
       class OrderedEngine extends AudioEngine {
         override setTrackFxInstances(id:string,instances:AudioEffectRuntimeInstance[]){return chain(prior.setTrackFxInstances(id,instances));}
         override setMasterFxInstances(instances:AudioEffectRuntimeInstance[]){return chain(prior.setMasterFxInstances(instances));}
         override setTrackFxInstance(id:string,instance:AudioEffectRuntimeInstance){return single(prior.setTrackFxInstance(id,instance));}
         override setMasterFxInstance(instance:AudioEffectRuntimeInstance){return single(prior.setMasterFxInstance(instance));}
       }
+
       f.setEngine(new OrderedEngine());await f.settle();
       f.audio.compressor.changeInstance("a",p=>({...p,thresholdDb:-12}));
       await installed.promise;
       holdSuccessor=true;f.audio.reorder({id:"b",kind:"compressor"},0);
       await successorInstalled.promise;
+
       const finish=(which:string)=>{
         const gate=which==="own"?ownGate:successorGate;
         const disposition=which==="own"?own:successor;
+
         if(disposition==="success")gate.resolve();else gate.reject(new Error(which+" failed"));
       };
+
       finish(first);await structuralMicrotaskCheckpoint();
       finish(first==="own"?"successor":"own");
-      let failure:unknown;try{await f.audio.flushPending();}catch(cause){failure=cause;}
+      let failure:unknown;
+
+try{await f.audio.flushPending();}catch(cause){failure=cause;}
+
       // An earlier own failure remains authoritative. A newer failure can never
       // veto own success; earlier successor success may satisfy a pending owner.
       const accepted=own==="success"||(successor==="success"&&first==="successor");
       console.log(JSON.stringify({probe:"outcome-order",master,own,successor,first,history:f.history.length,localErrors:f.localErrors,errors:f.errors,flush:String(failure)}));
       expect(f.history).toHaveLength(accepted?1:0);
       expect(f.localErrors).toEqual(accepted?[]:["own failed"]);
+
       if(successor==="failure")expect(f.errors.filter(e=>e==="successor failed")).toHaveLength(1);
+
       if(!accepted)expect(String(failure)).toContain("own failed");
     }finally{ownGate.resolve();successorGate.resolve();f.close();}
   });
@@ -2496,8 +2895,11 @@ for(const master of [false,true]) {
   test(`r4 different-content release with shared module failure preserves local failure signal master=${master}`,async()=>{
     const f=await createStructuralReviewFixture(true,master);
     const module=deferred<void>(),started=deferred<void>();
+
     try{
-      Object.defineProperty(f.runtime.audio.context.audioWorklet,"addModule",{value:()=>{started.resolve();return module.promise;}});
+      Object.defineProperty(f.runtime.audio.context.audioWorklet,"addModule",{value:()=>{started.resolve();
+
+return module.promise;}});
       f.publish([compressorInstance(-31,"a"),compressorInstance(-25,"b"),staticGateInstance(-22,2,"g")]);
       await started.promise;
       await structuralMicrotaskCheckpoint();
@@ -2507,7 +2909,10 @@ for(const master of [false,true]) {
       const submitted=f.calls.filter(c=>c.type==="instance"&&c.chain.some(i=>i.id==="a"&&i.kind==="compressor"&&i.params.thresholdDb===-9));
       expect(submitted.length).toBeGreaterThan(0);
       module.reject(new Error("shared module load failed"));
-      let failure:unknown;try{await f.audio.flushPending();}catch(cause){failure=cause;}
+      let failure:unknown;
+
+try{await f.audio.flushPending();}catch(cause){failure=cause;}
+
       console.log(JSON.stringify({probe:"different-content-shared-module",master,errors:f.errors,localErrors:f.localErrors,flush:String(failure),gateRequests:f.calls.filter(c=>c.chain.some(i=>i.id==="g")).map(c=>({type:c.type,gate:c.chain.find(i=>i.id==="g"),disposition:c.disposition,error:c.error}))}));
       expect(String(failure)).toContain("shared module load failed");
       expect(f.errors).toEqual(["shared module load failed"]);

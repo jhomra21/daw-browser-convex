@@ -26,7 +26,9 @@ type UploadToR2 = (
 ) => Promise<{ assetKey: string; url: string } | null>
 
 type ConvexClientType = typeof convexClient
+
 type ConvexApiType = typeof convexApi
+
 type ImportProjectContext = {
   projectId: () => string | undefined
   userId: () => string | undefined
@@ -108,9 +110,11 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
   const createServerClip = async (trackId: TrackId, clip: ClipCreateSnapshot) => {
     const projectId = context.project.projectId()
     const userId = context.project.userId()
+
     if (!projectId || !userId) return null
     const operation = buildSharedClipCreateOperation(buildClipCreatePayload({ projectId, trackId, clip }))
     const result = await publishDurableSharedTimelineOperation({ projectId, userId, operation, throwQueued: true })
+
     return isJsonString(result) ? result : null
   }
 
@@ -128,10 +132,13 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
     context.clips.insertLocalClip(input.source.trackId, buildLocalClip({ id: input.clipId, clip: input.clip }))
     preloadProjectedClip(input.projectId, input.source.trackId, input.clipId, input.sampleUrl)
     context.clips.selectClip(input.source.trackId, input.clipId)
+
     if (input.source.autoCreatedTrack) {
       context.clips.pushTrackClipCreateHistory(input.source.autoCreatedTrack, input.clipId, input.clip)
+
       return
     }
+
     pushClipCreateHistory({
       historyPush: context.clips.historyPush,
       projectId: input.projectId,
@@ -147,10 +154,13 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
     const userId = context.project.userId()
     const grantScope = projectId && userId ? { projectId, userId } : null
     const clipName = input.name?.trim()?.length ? input.name : 'Sample'
+
     const sampleUrl = projectId && isLocalId('project', projectId) && isLocalProjectAssetKey(input.assetKey)
       ? undefined
       : input.url
+
     const targetTrack = context.project.tracks().find((track) => track.id === input.trackId)
+
     const clipSnapshot: ClipCreateSnapshot = {
       startSec: input.startSec,
       duration: input.duration,
@@ -178,29 +188,37 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
           sourceChannelCount: input.source.channelCount,
           sampleUrl,
         })
+
         projectCreatedClip({ projectId, clipId: row.id, clip: clipSnapshot, source: input, sampleUrl })
+
         return row.id
       } catch (error) {
         if (input.autoCreatedTrack) {
           await context.rollback.removeLocalTrack(projectId, input.autoCreatedTrack)
         }
+
         throw error
       }
     }
 
     let createdClipId: string | null
+
     try {
       createdClipId = await createServerClip(input.trackId, clipSnapshot)
+
       if (!createdClipId) {
         await context.rollback.removeCloudTrack(input.autoCreatedTrack)
+
         return null
       }
     } catch (error) {
       if (!isSharedOutboxQueuedError(error)) {
         await context.rollback.removeCloudTrack(input.autoCreatedTrack)
       }
+
       throw error
     }
+
     context.clips.grantClipWrite?.(createdClipId, grantScope)
 
     if (projectId) projectCreatedClip({ projectId, clipId: createdClipId, clip: clipSnapshot, source: input, sampleUrl })
@@ -210,11 +228,15 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
 
   const createUploadedFileClip = async (input: UploadedFileClipInput): Promise<AudioImportResult> => {
     const sourceMetadata = input.source ?? (input.decoded ? getAudioSourceMetadata(input.decoded) : undefined)
+
     if (!sourceMetadata) return { status: 'failed', message: 'Audio metadata is required before clip creation.' }
     const projectId = input.projectId ?? context.project.projectId()
+
     if (!projectId) return { status: 'skipped' }
+
     const assertCurrentProject = () => {
       input.signal?.throwIfAborted()
+
       if (input.isCurrentProject?.() === false) {
         throw new DOMException('The audio import was canceled.', 'AbortError')
       }
@@ -222,6 +244,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
 
     if (isLocalId('project', projectId)) {
       let asset: Awaited<ReturnType<typeof createLocalAsset>> | undefined
+
       try {
         assertCurrentProject()
         asset = await createLocalAsset({
@@ -235,17 +258,24 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         if (asset && (input.signal?.aborted || input.isCurrentProject?.() === false)) {
           await deleteLocalAsset(projectId, asset.id).catch(() => null)
         }
+
         if (input.signal?.aborted) throw input.signal.reason ?? new DOMException('The audio import was canceled.', 'AbortError')
+
         if (input.isCurrentProject?.() === false) throw new DOMException('The audio import was canceled.', 'AbortError')
+
         const message = error instanceof LocalAssetWriteError
           ? error.message
           : 'Audio could not be saved to local project storage.'
+
         const guidance = `${message} Free project storage or choose another storage location, then retry the import.`
         context.onLocalSaveFailed?.(projectId, guidance)
         await context.rollback.removeLocalTrack(projectId, input.autoCreatedTrack)
+
         return { status: 'local-save-failed', message: guidance }
       }
+
       let created: Awaited<ReturnType<typeof createLocalAudioClip>> | undefined
+
       try {
         assertCurrentProject()
         created = await createLocalAudioClip({
@@ -269,9 +299,11 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
           onClipCreated: context.clips.onClipCreated,
         })
         assertCurrentProject()
+
         if (input.autoCreatedTrack && context.project.isActiveProjectTrack(projectId, input.track.id)) {
           context.clips.pushTrackClipCreateHistory(input.autoCreatedTrack, created.clipId, created.clip)
         }
+
         // A metadata-only import is projected without audio: request its decode, as a projected URL import does.
         if (!input.decoded) preloadProjectedClip(projectId, input.track.id, created.clipId)
       } catch (error) {
@@ -279,18 +311,22 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
           await createLocalTimelineRepository(projectId).deleteClip(created.clipId).catch(() => undefined)
           context.clips.removeLocalClips?.([created.clipId])
         }
+
         await deleteLocalAsset(projectId, asset.id).catch(() => null)
         await context.rollback.removeLocalTrack(projectId, input.autoCreatedTrack)
         throw error
       }
+
       return { status: 'created', assetId: asset.id, clipId: created.clipId }
     }
 
     const userId = context.project.userId()
+
     if (!userId) return { status: 'skipped' }
     const sourceAssetKey = createAudioAssetKey()
 
     let created: Awaited<ReturnType<typeof createUploadedAudioClip>>
+
     try {
       input.signal?.throwIfAborted()
       created = await createUploadedAudioClip({
@@ -308,10 +344,12 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         signal: input.signal,
         createServerClip: async (payload) => {
           assertCurrentProject()
+
           const result = await publishSharedTimelineOperation(projectId, {
             kind: 'clips.create',
             payload,
           })
+
           return isJsonString(result) ? result : null
         },
         insertLocalClip: context.clips.insertLocalClip,
@@ -328,6 +366,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         canCommit: input.isCurrentProject,
         onClipCreated: context.clips.onClipCreated,
       })
+
       if (input.autoCreatedTrack && context.project.isActiveProjectTrack(projectId, input.track.id)) {
         context.clips.pushTrackClipCreateHistory(input.autoCreatedTrack, created.clipId, created.clip)
       }
@@ -336,6 +375,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         await context.rollback.removeCloudTrack(input.autoCreatedTrack).catch(() => undefined)
         throw input.signal.reason ?? new DOMException('The audio import was canceled.', 'AbortError')
       }
+
       if (isSharedOutboxQueuedError(error)) {
         if (error.operationId) {
           return {
@@ -345,9 +385,12 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
           }
         }
       }
+
       await context.rollback.removeCloudTrack(input.autoCreatedTrack)
+
       return { status: 'failed', message: 'Audio could not be uploaded. Please retry the import.' }
     }
+
     return { status: 'created', assetId: sourceAssetKey, clipId: created.clipId }
   }
 
@@ -365,11 +408,13 @@ export async function removeAutoCreatedCloudTrack(input: {
   removeLocalTrack: (trackId: TrackId) => void
 }) {
   if (!input.track || !input.userId) return
+
   try {
     const result = await input.convexClient.mutation(
       input.convexApi.tracks.remove,
       buildTrackDeleteMutationInput({ trackId: input.track.id }),
     )
+
     if (result?.status === 'deleted') input.removeLocalTrack(input.track.id)
   } catch {}
 }

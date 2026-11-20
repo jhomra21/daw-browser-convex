@@ -4,9 +4,11 @@ export const createRecordingSpoolOrderEvidence = (flag: string | undefined, writ
   if (flag !== "1") return undefined
   let events = 0
   let ready = false
+
   const write = (line: string) => {
     try { writeLine(line) } catch { /* Diagnostic output cannot veto I/O or startup. */ }
   }
+
   return {
     ready() {
       if (ready) return

@@ -5,7 +5,9 @@ const parameters = [
   ['limiter.link', 1, 0, 1, 'a-rate'],
   ['limiter.detectorOversampling', 4, 4, 4, 'k-rate'],
 ]
+
 const isLimiterMessage = (message) => message !== null && Object.prototype.toString.call(message) === '[object Object]' && message.version === 1
+
 const isLimiterConfigureMessage = (message, revision) => isLimiterMessage(message)
   && message.type === 'configure'
   && Number.isInteger(message.revision)
@@ -18,6 +20,7 @@ const createFir = () => {
   const center = (taps - 1) / 2
   const coefficients = new Float64Array(taps)
   let sum = 0
+
   for (let index = 0; index < taps; index++) {
     const x = index - center
     const sinc = x === 0 ? 2 * cutoff : Math.sin(2 * Math.PI * cutoff * x) / (Math.PI * x)
@@ -25,7 +28,9 @@ const createFir = () => {
     coefficients[index] = sinc * window
     sum += coefficients[index]
   }
+
   for (let index = 0; index < taps; index++) coefficients[index] *= 4 / sum
+
   return coefficients
 }
 
@@ -46,15 +51,19 @@ class TargetWindow {
 
   minimum(target, window) {
     const capacity = this.values.length
+
     while (this.count > 0 && this.values[(this.head + this.count - 1) % capacity] >= target) this.count--
+
     while (this.count > 0 && this.now - this.frames[this.head] > window) {
       this.head = (this.head + 1) % capacity
       this.count--
     }
+
     const tail = (this.head + this.count) % capacity
     this.values[tail] = target
     this.frames[tail] = this.now++
     this.count++
+
     return this.values[this.head]
   }
 }
@@ -94,11 +103,15 @@ class DawLimiterProcessor extends AudioWorkletProcessor {
 
   onMessage(message) {
     if (!isLimiterMessage(message)) return this.fault('malformed-message')
+
     if (message.type === 'dispose') return this.port.close()
+
     if (message.type === 'metering' && (message.enabled === true || message.enabled === false)) {
       this.metering = message.enabled
+
       return
     }
+
     if (message.type === 'reset') {
       this.delayL.fill(0); this.delayR.fill(0)
       this.detectorDelayL.fill(0); this.detectorDelayR.fill(0)
@@ -107,11 +120,14 @@ class DawLimiterProcessor extends AudioWorkletProcessor {
       this.gainL = 1; this.gainR = 1
       this.targetsL.reset(); this.targetsR.reset()
       this.meterFrames = 0; this.minimumGain = 1
+
       return
     }
+
     if (!isLimiterConfigureMessage(message, this.revision)) {
       return this.fault('malformed-or-stale-configure')
     }
+
     this.revision = message.revision
     this.enabled = message.state.enabled !== false
     this.port.postMessage({ type: 'configured', version: 1, revision: this.revision })
@@ -123,17 +139,22 @@ class DawLimiterProcessor extends AudioWorkletProcessor {
 
   peak(history) {
     let peak = 0
+
     for (let phase = 0; phase < 4; phase++) {
       let value = 0
+
       for (let tap = 0; tap < 12; tap++) {
         const historyIndex = (this.historyWrite + 11 - tap) % 12
         value += history[historyIndex] * this.fir[tap * 4 + phase]
       }
+
       peak = Math.max(peak, Math.abs(value))
     }
+
     // Tap t reads the frame t + 1 behind historyWrite, so the centre taps interpolate between the frames 6 and 7
     // behind it, and no phase lands on an input frame. Include those raw frames: a sample on the grid is never read low.
     for (const framesBehind of [6, 7]) peak = Math.max(peak, Math.abs(history[(this.historyWrite + 12 - framesBehind) % 12]))
+
     return peak
   }
 
@@ -141,18 +162,22 @@ class DawLimiterProcessor extends AudioWorkletProcessor {
     const input = inputs[0] || []
     const output = outputs[0] || []
     const outL = output[0]
+
     if (!outL) return true
     const outR = output[1]
     const inL = input[0]
     const inR = input[1] || inL
     let blockMinimumGain = 1
+
     for (let frame = 0; frame < outL.length; frame++) {
       let left = inL ? inL[frame] : 0
       let right = inR ? inR[frame] : left
+
       if (!Number.isFinite(left) || !Number.isFinite(right)) {
         left = 0; right = 0
         this.fault('nonfinite-input')
       }
+
       this.delayL[this.write] = left
       this.delayR[this.write] = right
       this.detectorDelayL[this.write] = left
@@ -181,23 +206,29 @@ class DawLimiterProcessor extends AudioWorkletProcessor {
       const release = Math.exp(-1 / (releaseMs * 0.001 * sampleRate))
       this.gainL = Math.min(this.targetsL.minimum(linkedTargetL, lookaheadFrames), 1 + release * (this.gainL - 1))
       this.gainR = Math.min(this.targetsR.minimum(linkedTargetR, lookaheadFrames), 1 + release * (this.gainR - 1))
+
       if (!Number.isFinite(this.gainL) || !Number.isFinite(this.gainR)) {
         this.gainL = 1; this.gainR = 1
         this.fault('nonfinite-state')
       }
+
       const gainL = this.enabled ? this.gainL : 1
       const gainR = this.enabled ? this.gainR : 1
       outL[frame] = delayedL * gainL
+
       if (outR) outR[frame] = delayedR * gainR
       blockMinimumGain = Math.min(blockMinimumGain, gainL, gainR)
     }
+
     this.meterFrames += outL.length
     this.minimumGain = Math.min(this.minimumGain, blockMinimumGain)
+
     if (this.metering && this.meterFrames >= 2048) {
       this.meterFrames %= 2048
       this.port.postMessage({ type: 'meter', version: 1, gainReductionDb: -20 * Math.log10(Math.max(this.minimumGain, 1e-12)) })
       this.minimumGain = 1
     }
+
     return true
   }
 }

@@ -3,6 +3,7 @@ import { projectIdSchemaV1 } from "@daw-browser/desktop-protocol"
 
 export const unsigned32Schema = z.number().int().min(0).max(0xffff_ffff)
 const transactionTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/)
+
 // The renderer always sends both keys, so a missing one marks a malformed request.
 export const nativeSessionEnvelopeSchema = <Schema extends z.ZodType>(valueSchema: Schema) => z.object({
   value: valueSchema,
@@ -10,6 +11,7 @@ export const nativeSessionEnvelopeSchema = <Schema extends z.ZodType>(valueSchem
 }).passthrough().refine((value) => (
   Object.hasOwn(value, "value") && Object.hasOwn(value, "transactionToken")
 ))
+
 export const uuidSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
 
 const nativeEditorAnchorSchema = z.object({

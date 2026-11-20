@@ -36,6 +36,7 @@ export const getProjectSaveStatus = (input: ProjectSaveStatusInput) => {
   }
 
   const isLocalProject = isLocalId("project", input.projectId);
+
   if (isLocalProject && input.localTimelineWriteStatus === "failed") {
     return {
       label: "Some changes could not be saved",
@@ -44,6 +45,7 @@ export const getProjectSaveStatus = (input: ProjectSaveStatusInput) => {
       class: badgeClassByStatus.signedOut,
     };
   }
+
   if (isLocalProject && input.localTimelineWriteStatus === "saving") {
     return {
       label: "Saving locally",
@@ -52,6 +54,7 @@ export const getProjectSaveStatus = (input: ProjectSaveStatusInput) => {
       class: badgeClassByStatus.local,
     };
   }
+
   if (input.saveFailed) {
     return {
       label: "Some changes could not be saved",
@@ -63,6 +66,7 @@ export const getProjectSaveStatus = (input: ProjectSaveStatusInput) => {
 
   if (!isLocalProject && input.sharedOutboxFailure) {
     const failure = input.sharedOutboxFailure;
+
     return {
       label: `${failure.permanent ? "Shared change rejected" : "Shared change retrying"}: ${failure.reason}`,
       shortLabel: failure.permanent ? "Sync rejected" : "Sync retrying",
@@ -82,6 +86,7 @@ export const getProjectSaveStatus = (input: ProjectSaveStatusInput) => {
 
   const pending = input.sharedOutboxStatus?.pending ?? 0;
   const failed = input.sharedOutboxStatus?.failed ?? 0;
+
   if (pending + failed > 0) {
     return {
       label: `${pending} shared change${pending === 1 ? "" : "s"} pending, ${failed} failed`,
@@ -95,12 +100,15 @@ export const getProjectSaveStatus = (input: ProjectSaveStatusInput) => {
     if (input.cloudBackupStatus === "backing-up") {
       return { label: "Backing up to cloud", shortLabel: "Backing up", compactLabel: "Local", class: badgeClassByStatus.local };
     }
+
     if (input.cloudBackupStatus === "backed-up") {
       return { label: "Backed up to cloud", shortLabel: "Backed up", compactLabel: "Local", class: badgeClassByStatus.local };
     }
+
     if (input.cloudBackupStatus === "failed") {
       return { label: "Cloud backup failed", shortLabel: "Backup failed", compactLabel: "Local", class: badgeClassByStatus.local };
     }
+
     return { label: "Cloud backup enabled", shortLabel: "Backup enabled", compactLabel: "Local", class: badgeClassByStatus.local };
   }
 

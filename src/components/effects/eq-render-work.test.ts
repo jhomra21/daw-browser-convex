@@ -4,10 +4,12 @@ import { expect, test } from "bun:test";
 test("coalesces invalidations into one display frame and cancels pending work", () => {
   const callbacks: Array<(time: number) => void> = [];
   const cancelled: number[] = [];
+
   const scheduler = createOneShotEqFrameScheduler(
     {
       request: (callback) => {
         callbacks.push(callback);
+
         return callbacks.length;
       },
       cancel: (id) => cancelled.push(id),

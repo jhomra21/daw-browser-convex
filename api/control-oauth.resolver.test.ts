@@ -19,22 +19,27 @@ class Statement {
 
   bind(...values: unknown[]) {
     this.values = values;
+
     return this;
   }
 
   async first(column?: string) {
     const row = this.database.prepare(this.query).get(...this.values);
+
     if (!row || !column) return row;
+
     return row[column];
   }
 
   async all() {
     const results = this.database.prepare(this.query).all(...this.values);
+
     return { success: true, meta: { changes: 0 }, results };
   }
 
   async run() {
     const result = this.database.prepare(this.query).run(...this.values);
+
     return { success: true, meta: { changes: result.changes }, results: [] };
   }
 
@@ -52,10 +57,13 @@ class LocalD1 {
 
   async batch(statements: Statement[]) {
     this.database.exec("BEGIN");
+
     try {
       const results: Result[] = [];
+
       for (const statement of statements) results.push(await statement.run());
       this.database.exec("COMMIT");
+
       return results;
     } catch (error) {
       this.database.exec("ROLLBACK");
@@ -90,6 +98,7 @@ const now = () => Math.floor(Date.now() / 1000);
 const sha256 = async (value: string) => {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
+
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 };
 
@@ -97,6 +106,7 @@ const migration = (name: string) => Bun.file(new URL(`../migrations/${name}`, im
 
 const database = new Database(":memory:");
 const d1 = new LocalD1(database);
+
 const environment = {
   BETTER_AUTH_SECRET: "test-secret-that-is-long-enough-for-better-auth",
   BETTER_AUTH_URL: origin,
@@ -134,6 +144,7 @@ const sign = async <Payload extends object>(payload: Payload) => {
   const { token } = await createAuth(environment).api.signJWT({
     body: { payload: { ...payload, jti: crypto.randomUUID() } },
   });
+
   return token;
 };
 
@@ -147,9 +158,11 @@ const bind = async (token: string, options?: {
 }) => {
   const timestamp = now();
   const id = `binding-${crypto.randomUUID()}`;
+
   if (options?.compromised) {
     database.prepare("UPDATE controlOAuthTokenFamily SET compromisedAt = ? WHERE id = ?").run(timestamp, "family-1");
   }
+
   database.prepare(
     `INSERT INTO controlOAuthTokenBinding (
       id, accessTokenHash, familyId, userId, clientId, sessionId, resource, scopes, issuer,
@@ -170,6 +183,7 @@ const bind = async (token: string, options?: {
     timestamp,
     timestamp,
   );
+
   return id;
 };
 
@@ -232,6 +246,7 @@ describe("resolveControlBearer", () => {
         const accessToken = await sign({
           sub: raceUser, azp: raceClient, sid: raceSession, scope: "control:read offline_access", iat: now(), exp: now() + 900,
         });
+
         database.prepare(
           "INSERT INTO oauthAccessToken (id, token, clientId, sessionId, userId, expiresAt, createdAt, scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         ).run("race-access", "stored-access", raceClient, raceSession, raceUser, (now() + 900) * 1000, Date.now(), "control:read offline_access");
@@ -239,6 +254,7 @@ describe("resolveControlBearer", () => {
           "INSERT INTO oauthRefreshToken (id, token, clientId, sessionId, userId, expiresAt, createdAt, scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         ).run("race-refresh", "stored-refresh", raceClient, raceSession, raceUser, (now() + 3600) * 1000, Date.now(), "control:read offline_access");
         database.prepare("UPDATE controlOAuthTokenFamily SET compromisedAt = ? WHERE id = ?").run(now(), raceFamily);
+
         return Response.json({
           access_token: accessToken,
           refresh_token: "successor-refresh",
@@ -248,6 +264,7 @@ describe("resolveControlBearer", () => {
         });
       },
     }));
+
     if (!tokenHandler) throw new Error("OAuth token route was not registered");
 
     const response = await tokenHandler({
@@ -309,6 +326,7 @@ describe("resolveControlBearer", () => {
     database.prepare(
       "INSERT INTO oauthRefreshToken (id, token, clientId, sessionId, userId, expiresAt, createdAt, scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run("replay-refresh-row", "replay-stored-refresh", raceClient, raceSession, raceUser, (now() + 3600) * 1000, Date.now(), "control:read offline_access");
+
     const replayResponse = await tokenHandler({
       env: environment,
       req: {
@@ -325,6 +343,7 @@ describe("resolveControlBearer", () => {
         url: `${origin}/api/auth/oauth2/token`,
       },
     });
+
     expect(replayResponse.status).toBe(400);
     expect(database.prepare(
       "SELECT revokedAt FROM controlOAuthTokenBinding WHERE id = ?",
@@ -342,10 +361,12 @@ describe("resolveControlBearer", () => {
       iat: now(),
       exp: now() + 900,
     });
+
     const validBindingId = await bind(valid);
     expect((await resolveControlBearer(request(valid), environment, "control:read"))?.userId).toBe(userId);
 
     const [header, payload, signature] = valid.split(".");
+
     if (!header || !payload || !signature) throw new Error("Expected a signed JWT.");
     const signatureBytes = Buffer.from(signature, "base64url");
     signatureBytes[0] ^= 1;
@@ -356,24 +377,28 @@ describe("resolveControlBearer", () => {
     const wrongIssuer = await sign({
       sub: userId, azp: clientId, sid: sessionId, scope: "control:read", iss: "https://wrong.example.test", iat: now(), exp: now() + 900,
     });
+
     await bind(wrongIssuer);
     expect(await resolveControlBearer(request(wrongIssuer), environment, "control:read")).toBeNull();
 
     const wrongAudience = await sign({
       sub: userId, azp: clientId, sid: sessionId, scope: "control:read", aud: "https://wrong.example.test/api", iat: now(), exp: now() + 900,
     });
+
     await bind(wrongAudience);
     expect(await resolveControlBearer(request(wrongAudience), environment, "control:read")).toBeNull();
 
     const mismatchedClient = await sign({
       sub: userId, azp: clientId, sid: sessionId, scope: "control:read", iat: now(), exp: now() + 900,
     });
+
     await bind(mismatchedClient, { client: "other-client" });
     expect(await resolveControlBearer(request(mismatchedClient), environment, "control:read")).toBeNull();
 
     const revokedSuccessor = await sign({
       sub: userId, azp: clientId, sid: sessionId, scope: "control:read", iat: now(), exp: now() + 900,
     });
+
     const revokedSuccessorId = await bind(revokedSuccessor, { revokedAt: now() });
     database.prepare("UPDATE controlOAuthTokenBinding SET replacedById = ? WHERE id = ?")
       .run(revokedSuccessorId, validBindingId);
@@ -382,12 +407,14 @@ describe("resolveControlBearer", () => {
     const underscoped = await sign({
       sub: userId, azp: clientId, sid: sessionId, scope: "control:read", iat: now(), exp: now() + 900,
     });
+
     await bind(underscoped);
     expect(await resolveControlBearer(request(underscoped), environment, "control:write")).toBeNull();
 
     const expiredAccess = await sign({
       sub: userId, azp: clientId, sid: sessionId, scope: "control:read", iat: now() - 901, exp: now() - 1,
     });
+
     await bind(expiredAccess, { expiresAt: now() + 900 });
     expect(await resolveControlBearer(request(expiredAccess), environment, "control:read")).toBeNull();
 
@@ -403,6 +430,7 @@ describe("resolveControlBearer", () => {
     const mismatchedSession = await sign({
       sub: userId, azp: clientId, sid: sessionId, scope: "control:read", iat: now(), exp: now() + 900,
     });
+
     await bind(mismatchedSession, { session: "session-2" });
     expect(await resolveControlBearer(request(mismatchedSession), environment, "control:read")).toBeNull();
 
@@ -417,6 +445,7 @@ describe("resolveControlBearer", () => {
     const compromised = await sign({
       sub: userId, azp: clientId, sid: sessionId, scope: "control:read", iat: now(), exp: now() + 900,
     });
+
     await bind(compromised, { compromised: true });
     expect(await resolveControlBearer(request(compromised), environment, "control:read")).toBeNull();
 

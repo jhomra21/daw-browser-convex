@@ -1,15 +1,19 @@
 import { z } from "zod"
 
 type TaskSourceGap = { startEpochMs: number; endEpochMs: number }
+
 const gapSchema = z.object({
   startEpochMs: z.number().finite().nonnegative(), endEpochMs: z.number().finite().nonnegative(),
 }).strict()
+
 const sourceSchema = z.object({ samples: z.array(gapSchema).max(1024), total: z.number().int().nonnegative() }).strict()
+
 const evidenceSchema = z.object({
   supported: z.boolean(), message: sourceSchema, animation: sourceSchema, electron: sourceSchema,
   messageDelivery: sourceSchema, electronToMain: sourceSchema, electronMainToRenderer: sourceSchema,
   clockOffsetMs: z.number().finite(),
 }).strict()
+
 export type TaskSourceEvidence = z.infer<typeof evidenceSchema>
 
 export const diagnosticReturnInterval = (value: {
@@ -19,6 +23,7 @@ export const diagnosticReturnInterval = (value: {
 export const parseTaskSourceEvidence = (encoded: string): TaskSourceEvidence => {
   const first = z.string().max(500_000).parse(encoded)
   const second = z.string().max(500_000).parse(JSON.parse(first))
+
   return evidenceSchema.parse(JSON.parse(second))
 }
 
@@ -84,8 +89,10 @@ export const summarizeTaskSourceGaps = (gaps: readonly TaskSourceGap[]) => {
   if (gaps.length === 0) return null
   const durations = gaps.map((gap) => gap.endEpochMs - gap.startEpochMs).sort((a, b) => a - b)
   const quantile = (fraction: number) => durations[Math.ceil(fraction * durations.length) - 1] ?? 0
+
   const worst = gaps.reduce((current, gap) =>
     gap.endEpochMs - gap.startEpochMs > current.endEpochMs - current.startEpochMs ? gap : current)
+
   return {
     count: gaps.length, p50Ms: quantile(0.5), p95Ms: quantile(0.95),
     p99Ms: quantile(0.99), maxMs: quantile(1), worst,
@@ -103,48 +110,64 @@ export const analyzeTaskSourceEvidence = (
   const messageDelivery = summarizeTaskSourceGaps(evidence.messageDelivery.samples)
   const electronToMain = summarizeTaskSourceGaps(evidence.electronToMain.samples)
   const electronMainToRenderer = summarizeTaskSourceGaps(evidence.electronMainToRenderer.samples)
+
   const covers = (samples: TaskSourceGap[]) => samples.length > 0
     && samples[0]!.startEpochMs <= delayed!.returnedAtEpochMs
     && samples[samples.length - 1]!.endEpochMs >= delayed!.receivedAtEpochMs
     && samples.every((gap, index) => index === 0 || gap.startEpochMs === samples[index - 1]!.endEpochMs)
+
   const coverageDebug = (samples: TaskSourceGap[]) => ({
     startBeforeReturn: delayed !== null && (samples[0]?.startEpochMs ?? Infinity) <= delayed.returnedAtEpochMs,
     endAfterReceipt: delayed !== null && (samples[samples.length - 1]?.endEpochMs ?? -Infinity) >= delayed.receivedAtEpochMs,
     discontinuities: samples.reduce((total, gap, index) =>
       total + (index > 0 && gap.startEpochMs !== samples[index - 1]!.endEpochMs ? 1 : 0), 0),
   })
+
   const animationCovered = delayed !== null && covers(evidence.animation.samples)
+
   const dispatchBoundary = (() => {
     if (!delayed || !evidence.supported || !animationCovered) return "unknown" as const
+
     const overlapsMost = (gap: TaskSourceGap) =>
       Math.min(gap.endEpochMs, delayed.receivedAtEpochMs)
       - Math.max(gap.startEpochMs, delayed.returnedAtEpochMs)
       >= (delayed.receivedAtEpochMs - delayed.returnedAtEpochMs) * 0.65
+
     const animationBusy = evidence.animation.samples.some((gap) => overlapsMost(gap))
+
     const postedMessagesDelayed = evidence.messageDelivery.samples.some(overlapsMost)
       && evidence.electronMainToRenderer.samples.some(overlapsMost)
+
     const mainReachedQuickly = evidence.electronToMain.samples.some((gap) =>
       gap.startEpochMs >= delayed.returnedAtEpochMs && gap.endEpochMs <= delayed.receivedAtEpochMs
       && gap.endEpochMs - gap.startEpochMs <= 20)
+
     return !animationBusy && postedMessagesDelayed && mainReachedQuickly
       ? "renderer-message-delivery-delay" as const : "unknown" as const
   })()
+
   const coverage = { animation: coverageDebug(evidence.animation.samples),
     message: coverageDebug(evidence.message.samples),
     electron: coverageDebug(evidence.electron.samples) }
+
   if (!delayed || !evidence.supported || !covers(evidence.message.samples)
     || !covers(evidence.animation.samples) || !covers(evidence.electron.samples)) {
     return { message, animation, electron, messageDelivery, electronToMain, electronMainToRenderer,
       classification: "unknown" as const, dispatchBoundary, coverage }
   }
+
   const intersectingWorst = (samples: TaskSourceGap[]): TaskSourceGap | null => {
     let worst: TaskSourceGap | null = null
+
     for (const gap of samples) {
       if (gap.startEpochMs >= delayed.receivedAtEpochMs || gap.endEpochMs <= delayed.returnedAtEpochMs) continue
+
       if (!worst || gap.endEpochMs - gap.startEpochMs > worst.endEpochMs - worst.startEpochMs) worst = gap
     }
+
     return worst
   }
+
   return {
     message, animation, electron, messageDelivery, electronToMain, electronMainToRenderer, dispatchBoundary, coverage,
     classification: classifyTaskSourceGap(
@@ -161,13 +184,20 @@ export const classifyTaskSourceGap = (
   sources: { message: TaskSourceGap | null; animation: TaskSourceGap | null; electron: TaskSourceGap | null },
 ) => {
   if (!sources.message || !sources.animation || !sources.electron) return "unknown" as const
+
   const overlaps = (gap: TaskSourceGap) => gap.startEpochMs < delayed.endEpochMs
     && gap.endEpochMs > delayed.startEpochMs
+
   if (!overlaps(sources.message) || !overlaps(sources.animation) || !overlaps(sources.electron)) return "unknown" as const
+
   const stalled = (gap: TaskSourceGap) => gap.endEpochMs - gap.startEpochMs >=
     (delayed.endEpochMs - delayed.startEpochMs) * 0.75
+
   if (stalled(sources.message) && stalled(sources.animation) && stalled(sources.electron)) return "renderer-global-stall" as const
+
   if (!stalled(sources.message) && !stalled(sources.animation) && stalled(sources.electron)) return "electron-ipc-delay" as const
+
   if (!stalled(sources.message) && !stalled(sources.animation) && !stalled(sources.electron)) return "worker-message-starvation" as const
+
   return "unknown" as const
 }

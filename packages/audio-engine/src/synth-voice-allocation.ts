@@ -22,6 +22,7 @@ export const chooseSynthVoiceVictim = <Voice extends SynthVoiceAllocation>(
   let sounding = 0
   let oldestSounding: Voice | undefined
   let oldestReleased: Voice | undefined
+
   const isOlder = (candidate: Voice, current: Voice | undefined) => (
     !current
       || candidate.releaseTime < current.releaseTime
@@ -30,11 +31,15 @@ export const chooseSynthVoiceVictim = <Voice extends SynthVoiceAllocation>(
         || (candidate.scheduledStartTime === current.scheduledStartTime && candidate.id < current.id)
       ))
   )
+
   for (const voice of voices) {
     if (!isSynthVoiceSoundingAt(voice, when)) continue
     sounding += 1
+
     if (isOlder(voice, oldestSounding)) oldestSounding = voice
+
     if (voice.releaseTime <= when && isOlder(voice, oldestReleased)) oldestReleased = voice
   }
+
   return sounding < polyphony ? undefined : oldestReleased ?? oldestSounding
 }

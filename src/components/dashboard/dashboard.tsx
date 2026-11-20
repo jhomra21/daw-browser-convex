@@ -36,6 +36,7 @@ export function Dashboard(props: DashboardProps) {
   const selectedView = () => props.view;
   const desktopPluginCatalog = () => window.dawDesktop?.pluginCatalog;
   const canClose = () => props.canClose !== false;
+
   const close = () => {
     if (canClose()) props.setView(null);
   };

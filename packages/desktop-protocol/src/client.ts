@@ -29,6 +29,7 @@ import { createDesktopReplyReassembler, maxDesktopReplyFrameBytes } from "@daw-b
 import { defaultDesktopActorIdentityPath, loadDesktopActorIdentity } from "./client-identity"
 
 export type HostPlatform = "darwin" | "win32" | "linux"
+
 export type HostPaths = {
   platform: HostPlatform
   homeDirectory: string
@@ -37,18 +38,21 @@ export type HostPaths = {
   userDataDirectory?: string
   actorPath?: string
 }
+
 export class DesktopControlError extends Error {
   constructor(readonly data: ControlErrorV1) {
     super(data.message)
     this.name = "DesktopControlError"
   }
 }
+
 export class DesktopHostError extends Error {
   constructor(readonly data: HostErrorV1 | HostErrorV2) {
     super(data.message)
     this.name = "DesktopHostError"
   }
 }
+
 export class HostTargetUnavailableError extends Error {
   readonly data = {
     version: "v1" as const,
@@ -66,8 +70,11 @@ const maxRegistrationBytes = 4 * 1024
 
 const currentHostPlatform = (): HostPlatform => {
   const current = platform()
+
   if (current === "win32") return "win32"
+
   if (current === "darwin") return "darwin"
+
   return "linux"
 }
 
@@ -89,16 +96,21 @@ const registrationFile = (paths: HostPaths = {
 
 const privateFile = async (file: string, platform_: HostPlatform) => {
   const info = await lstat(file)
+
   if (info.isSymbolicLink() || !info.isFile()) throw new Error("Desktop host registration is not private.")
   const directoryPath = path.dirname(file)
   const resolvedDirectory = await realpath(directoryPath)
   const resolvedFile = await realpath(file)
+
   if (path.dirname(resolvedFile) !== resolvedDirectory) throw new Error("Desktop host registration is not contained by its directory.")
+
   if (platform_ !== "win32") {
     if ((info.mode & 0o077) !== 0) throw new Error("Desktop host registration is not private.")
     const directory = await stat(directoryPath)
+
     if (!directory.isDirectory() || (directory.mode & 0o077) !== 0) throw new Error("Desktop host directory is not private.")
   }
+
   return resolvedDirectory
 }
 
@@ -110,15 +122,20 @@ const readHostRegistration = async (paths?: HostPaths) => {
     xdgConfigDirectory: process.env.XDG_CONFIG_HOME,
     userDataDirectory: process.env.DAW_DESKTOP_USER_DATA,
   }
+
   const file = registrationFile(resolvedPaths)
   const resolvedDirectory = await privateFile(file, resolvedPaths.platform)
+
   const handle = await open(
     file,
     resolvedPaths.platform === "win32" ? "r" : constants.O_RDONLY | constants.O_NOFOLLOW,
   )
+
   let contents: string
+
   try {
     const info = await handle.stat()
+
     if (
       !info.isFile()
       || (resolvedPaths.platform !== "win32" && (info.mode & 0o077) !== 0)
@@ -126,32 +143,41 @@ const readHostRegistration = async (paths?: HostPaths) => {
     ) {
       throw new Error("Desktop host registration is not private.")
     }
+
     const buffer = Buffer.alloc(maxRegistrationBytes + 1)
     let bytesRead = 0
+
     while (bytesRead < buffer.byteLength) {
       const result = await handle.read(buffer, bytesRead, buffer.byteLength - bytesRead, bytesRead)
+
       if (result.bytesRead === 0) break
       bytesRead += result.bytesRead
     }
+
     if (bytesRead > maxRegistrationBytes) throw new Error("Desktop host registration is invalid.")
     contents = buffer.subarray(0, bytesRead).toString("utf8")
   } finally {
     await handle.close()
   }
+
   const registration = desktopRegistrationSchemaV1.parse(JSON.parse(contents))
+
   if (resolvedPaths.platform === "win32") {
     if (!registration.address.startsWith("\\\\.\\pipe\\")) throw new Error("Desktop host address is invalid.")
   } else if (!path.isAbsolute(registration.address)) {
     throw new Error("Desktop host address is invalid.")
   } else {
     let resolvedAddressDirectory: string
+
     try {
       resolvedAddressDirectory = await realpath(path.dirname(registration.address))
     } catch {
       throw new Error("Desktop host address is invalid.")
     }
+
     if (resolvedAddressDirectory !== resolvedDirectory) throw new Error("Desktop host address is invalid.")
   }
+
   return registration
 }
 
@@ -184,14 +210,18 @@ export const createDesktopHostClient = async (options: DesktopHostClientOptions 
           userDataDirectory: process.env.DAW_DESKTOP_USER_DATA,
         }), userDataDirectory: options.userDataDirectory },
   )
+
   const configuredActorPath = options.actorPath
     ?? options.paths?.actorPath
     ?? process.env.DAW_CONTROL_ACTOR_PATH
+
   const actorId = await loadDesktopActorIdentity(
     configuredActorPath ?? defaultDesktopActorIdentityPath(),
   )
+
   const connectWithVersion = async (protocolVersion: DesktopProtocolVersion): Promise<DesktopHostClient> => {
   const socket = connect(registration.address)
+
   type PendingRequest = {
     operation: DesktopOperationV1
     input: DesktopJsonValue
@@ -201,12 +231,14 @@ export const createDesktopHostClient = async (options: DesktopHostClientOptions 
     timeout: ReturnType<typeof setTimeout>
     reassembler: ReturnType<typeof createDesktopReplyReassembler>
   }
+
   const pending = new Map<string, PendingRequest>()
   let acceptHello: (() => void) | undefined
   let rejectHello: ((error: Error) => void) | undefined
   let closed = false
   let helloAccepted = false
   let capabilities = new Set<DesktopOperationV1>()
+
   const hello = new Promise<void>((resolve, reject) => {
     acceptHello = resolve
     rejectHello = reject
@@ -223,6 +255,7 @@ export const createDesktopHostClient = async (options: DesktopHostClientOptions 
     closed = true
     clearTimeout(handshakeTimer)
     rejectHello?.(error)
+
     for (const [id, request] of pending) {
       disposeRequest(id, request)
       request.reject(error)
@@ -251,10 +284,12 @@ export const createDesktopHostClient = async (options: DesktopHostClientOptions 
     reply: { result?: DesktopJsonValue; error?: DesktopJsonValue },
   ) => {
     disposeRequest(id, request)
+
     try {
       if (reply.error !== undefined) {
         const parsedError = parseDesktopReplyError(request.operation, reply.error, protocolVersion)
         const controlError = controlErrorSchemaV1.safeParse(parsedError)
+
         if (isDesktopControlOperation(request.operation) && controlError.success) {
           request.reject(new DesktopControlError(controlError.data))
         } else {
@@ -275,6 +310,7 @@ export const createDesktopHostClient = async (options: DesktopHostClientOptions 
       const validAck = protocolVersion === desktopProtocolVersionV2
         ? frame.version === desktopProtocolVersionV2 && "selectedVersion" in frame && frame.selectedVersion === desktopProtocolVersionV2
         : frame.version === desktopProtocolVersion
+
       if (helloAccepted || !validAck) closeConnection(new Error("Invalid desktop host handshake."))
       else {
         helloAccepted = true
@@ -282,45 +318,62 @@ export const createDesktopHostClient = async (options: DesktopHostClientOptions 
         clearTimeout(handshakeTimer)
         acceptHello?.()
       }
+
       return
     }
+
     if (!helloAccepted) {
       closeConnection(new Error("Desktop host sent a frame before the handshake acknowledgement."))
+
       return
     }
+
     if (frame.version !== protocolVersion) {
       closeConnection(new Error("Desktop host sent a mixed protocol frame."))
+
       return
     }
+
     if (frame.type !== "reply" && frame.type !== "replyChunk") return
     const request = pending.get(frame.id)
+
     if (!request) {
       closeConnection(new Error("Unsolicited desktop host reply."))
+
       return
     }
+
     if (payloadByteLength > maxDesktopReplyFrameBytes) {
       rejectInvalidReply(frame.id, request, new Error("Desktop reply exceeds the frame size limit."))
+
       return
     }
+
     if (frame.type === "replyChunk") {
       try {
         if (request.mode === "normal") throw new Error("Mixed desktop reply framing.")
         request.mode = "chunks"
         const reply = request.reassembler.push(frame, payloadByteLength)
+
         if (!reply) return
         settleReply(frame.id, request, reply)
       } catch (error) {
         rejectInvalidReply(frame.id, request, error instanceof Error ? error : new Error("Invalid desktop reply chunk."))
       }
+
       return
     }
+
     if (request.mode === "chunks") {
       rejectInvalidReply(frame.id, request, new Error("Mixed desktop reply framing."))
+
       return
     }
+
     request.mode = "normal"
     settleReply(frame.id, request, frame)
   })
+
   socket.on("data", (chunk: Buffer) => {
     try {
       decoder(chunk)
@@ -346,22 +399,30 @@ export const createDesktopHostClient = async (options: DesktopHostClientOptions 
     ))
   })
   await hello
+
   if (closed || socket.destroyed) throw new Error("Desktop host connection closed.")
+
   const request = (operation: DesktopOperationV1, input: DesktopJsonValue, deadlineMs = options.requestDeadlineMs ?? 10_000): Promise<DesktopJsonValue> => {
     if (closed || socket.destroyed) return Promise.reject(new Error("Desktop host connection closed."))
+
     if (!capabilities.has(operation)) return Promise.reject(new Error(`Desktop host does not advertise ${operation}.`))
     const id = randomBytes(16).toString("hex")
+
     return new Promise((resolve, reject) => {
       // A client deadline prevents a wedged renderer from retaining a CLI request.
       const timeout = setTimeout(() => {
         const pendingRequest = pending.get(id)
+
         if (!pendingRequest) return
         disposeRequest(id, pendingRequest)
+
         if (!closed && !socket.destroyed) {
           socket.write(encodeDesktopFrame({ version: protocolVersion, type: "cancel", id }))
         }
+
         reject(new Error("Desktop host request deadline exceeded."))
       }, deadlineMs)
+
       pending.set(id, {
         operation,
         input,
@@ -374,6 +435,7 @@ export const createDesktopHostClient = async (options: DesktopHostClientOptions 
       socket.write(encodeDesktopFrame({ version: protocolVersion, type: "request", id, operation, input, deadlineMs }))
     })
   }
+
   return {
     protocolVersion,
     capabilities: () => new Set(capabilities),
@@ -386,6 +448,7 @@ export const createDesktopHostClient = async (options: DesktopHostClientOptions 
           message: "Desktop host does not support protocol V2 control reads.",
         }))
       }
+
       const v2Input = operation === "control.capabilities"
         ? desktopControlCapabilitiesInputSchemaV2.parse({
             ...desktopControlCapabilitiesInputSchemaV1.parse(input),
@@ -395,6 +458,7 @@ export const createDesktopHostClient = async (options: DesktopHostClientOptions 
             ...desktopControlSnapshotInputSchemaV1.parse(input),
             readVersion: "v2",
           })
+
       return request(operation, v2Input, deadlineMs)
     },
     close: () => {
@@ -403,6 +467,7 @@ export const createDesktopHostClient = async (options: DesktopHostClientOptions 
     },
   }
   }
+
   try {
     return await connectWithVersion(desktopProtocolVersionV2)
   } catch {
@@ -419,6 +484,7 @@ export const createAvailableDesktopHostClient = async (
     if (cause instanceof DesktopControlError || cause instanceof DesktopHostError || cause instanceof HostTargetUnavailableError) {
       throw cause
     }
+
     throw new HostTargetUnavailableError()
   }
 }

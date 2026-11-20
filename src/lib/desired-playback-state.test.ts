@@ -7,11 +7,14 @@ import type { LocalEffectRow } from './local-effects'
 const row = (id: string, effect: 'delay' | 'spectrum', index: number, params: JsonValue): LocalEffectRow<JsonValue> => ({
   id, targetId: 'track-1', effect, instanceId: id, params, index, updatedAt: 1,
 })
+
 const delay = row('delay-1', 'delay', 0, AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams())
 const spectrum = row('spectrum-1', 'spectrum', 1, AUDIO_EFFECT_CONTRACTS.spectrum.createDefaultParams())
+
 const project = (rows: LocalEffectRow<JsonValue>[]) => {
   const fx: ExportFx = { masterFxInstances: [] }
   applyLocalEffectRowsToFx(fx, rows)
+
   return fx
 }
 

@@ -14,6 +14,7 @@ type ExportJob = {
 }
 
 type EnqueueTimelineExportRequest = TimelineExportInput
+
 type EnqueueStemExportRequest = TimelineStemExportInput
 
 type ExportContextValue = {
@@ -34,6 +35,7 @@ type ExportProviderProps = {
 export function ExportProvider(props: ExportProviderProps) {
   const [activeJob, setActiveJob] = createSignal<ExportJob | undefined>()
   const unsubscribe = untrack(() => props.queue.subscribe(setActiveJob))
+
   const outputTargets = import.meta.env.VITE_DESKTOP === 'true' && window.dawDesktop
     ? createDesktopRendererExportOutputTargetFactory(window.dawDesktop)
     : createBrowserExportOutputTargetFactory()
@@ -63,5 +65,6 @@ export function ExportProvider(props: ExportProviderProps) {
 
 export function useExportContext(): ExportContextValue {
   const context = useContext(ExportContext)
+
   return assertDefined(context, 'ExportProvider is missing')
 }

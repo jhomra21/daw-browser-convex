@@ -1,4 +1,5 @@
 type Boundary = "browser" | "control-cli"
+
 type Entry = {
   readonly boundary: Boundary
   readonly kind: string
@@ -12,6 +13,7 @@ const controlKinds = new Set(["host", "snapshot-v2"])
 
 export const createCommandTimings = (enabled: boolean) => {
   const entries: Entry[] = []
+
   return {
     record(boundary: Boundary, kind: string, startedAt: number, durationMs: number, exitCode: number | null) {
       if (!enabled) return
@@ -22,6 +24,7 @@ export const createCommandTimings = (enabled: boolean) => {
         durationMs,
         exitCode,
       })
+
       if (entries.length > 64) entries.shift()
     },
     snapshot: (): readonly Entry[] => [...entries],

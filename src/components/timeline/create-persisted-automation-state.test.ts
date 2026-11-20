@@ -33,6 +33,7 @@ describe('createPersistedAutomationState', () => {
     await createRoot(async (dispose) => {
       const applied: AutomationEnvelope[][] = []
       const persisted: AutomationEnvelope[] = []
+
       const state = createPersistedAutomationState({
         targetKey: () => envelope.targetKey,
         envelopes: () => [],
@@ -57,6 +58,7 @@ describe('createPersistedAutomationState', () => {
   test('cancels a draft preview back to persisted envelopes', async () => {
     await createRoot(async (dispose) => {
       const applied: AutomationEnvelope[][] = []
+
       const state = createPersistedAutomationState({
         targetKey: () => envelope.targetKey,
         envelopes: () => [],
@@ -81,6 +83,7 @@ describe('createPersistedAutomationState', () => {
         previous: AutomationEnvelope[]
         changed: string[]
       }> = []
+
       const state = createPersistedAutomationState({
         targetKey: () => envelope.targetKey,
         envelopes: () => [envelope],
@@ -125,11 +128,13 @@ describe('createPersistedAutomationState', () => {
   test('uses last applied envelopes when persistence mutates source state before deletion applies', async () => {
     await createRoot(async (dispose) => {
       let persisted: AutomationEnvelope[] = [envelope]
+
       const applied: Array<{
         next: AutomationEnvelope[]
         previous: AutomationEnvelope[]
         changed: string[]
       }> = []
+
       const state = createPersistedAutomationState({
         targetKey: () => envelope.targetKey,
         envelopes: () => persisted,
@@ -156,11 +161,13 @@ describe('createPersistedAutomationState', () => {
   test('uses last applied envelopes when remote sync deletes an envelope', async () => {
     await createRoot(async (dispose) => {
       let persisted: AutomationEnvelope[] = []
+
       const applied: Array<{
         next: AutomationEnvelope[]
         previous: AutomationEnvelope[]
         changed: string[]
       }> = []
+
       const state = createPersistedAutomationState({
         targetKey: () => envelope.targetKey,
         envelopes: () => persisted,
@@ -188,6 +195,7 @@ describe('createPersistedAutomationState', () => {
     await createRoot(async (dispose) => {
       let persisted: AutomationEnvelope[] = []
       const applied: AutomationEnvelope[][] = []
+
       const state = createPersistedAutomationState({
         targetKey: () => envelope.targetKey,
         envelopes: () => persisted,
@@ -212,6 +220,7 @@ describe('createPersistedAutomationState', () => {
     await createRoot(async (dispose) => {
       let persisted: AutomationEnvelope[] = []
       let writes = 0
+
       const state = createPersistedAutomationState({
         targetKey: () => trackEnvelope.targetKey,
         envelopes: () => persisted,
@@ -236,21 +245,25 @@ describe('createPersistedAutomationState', () => {
   test('applies remote point changes even when updatedAt is unchanged', async () => {
     await createRoot(async (dispose) => {
       let persisted: AutomationEnvelope[] = [envelope]
+
       const remotePoint: AutomationEnvelope['points'][number] = {
         id: 'point-1',
         timeSec: 1,
         value: 0.5,
         interpolation: 'linear',
       }
+
       const remoteEnvelope = {
         ...envelope,
         points: [remotePoint],
       }
+
       const applied: Array<{
         next: AutomationEnvelope[]
         previous: AutomationEnvelope[]
         changed: string[]
       }> = []
+
       const state = createPersistedAutomationState({
         targetKey: () => envelope.targetKey,
         envelopes: () => persisted,
@@ -279,11 +292,13 @@ describe('createPersistedAutomationState', () => {
       const draftEnvelope = { ...envelope, updatedAt: 2 }
       const remoteTrackEnvelope = { ...trackEnvelope, updatedAt: 2 }
       let persisted: AutomationEnvelope[] = [envelope, trackEnvelope]
+
       const applied: Array<{
         next: AutomationEnvelope[]
         previous: AutomationEnvelope[]
         changed: string[]
       }> = []
+
       const state = createPersistedAutomationState({
         targetKey: () => envelope.targetKey,
         envelopes: () => persisted,
@@ -313,6 +328,7 @@ type RemoteEffect = NonNullable<ReturnType<Parameters<typeof useTimelineAutomati
 
 describe('useTimelineAutomationController', () => {
   type Reply = { accepted: true; sequence: number } | { accepted: false; reason: 'bridge-error' }
+
   // Re-enabling the processor lane A is answered by the test; the track lane B has no processor and needs no reply.
   const mountReEnable = () => {
     const previousLocalStorage = globalThis.localStorage
@@ -328,8 +344,10 @@ describe('useTimelineAutomationController', () => {
     Reflect.set(audioEngine, 'setAutomationEnvelopes', (envelopes: AutomationEnvelope[]) => {
       installed.push(envelopes.map((installedEnvelope) => installedEnvelope.targetKey))
     })
+
     const controller = createRoot((dispose) => {
       onTestFinished(dispose)
+
       return useTimelineAutomationController({
         projectId: () => 'shared-project',
         userId: () => 'user-1',
@@ -349,6 +367,7 @@ describe('useTimelineAutomationController', () => {
         pushHistory: () => {},
       })
     })
+
     return { controller, targetA, targetB, replies, installed }
   }
 
@@ -405,13 +424,16 @@ describe('useTimelineAutomationController', () => {
     const previousLocalStorage = globalThis.localStorage
     Reflect.set(globalThis, 'localStorage', { getItem: () => null, setItem: () => {} })
     onTestFinished(() => Reflect.set(globalThis, 'localStorage', previousLocalStorage))
+
     const reverb = (instanceId: string): RemoteEffect => (
       { targetType: 'track', trackId: 'track-1', type: 'reverb', instanceId, index: 0, params: {} }
     )
+
     // Solid runs a root's effects after its body returns, so the hook is read from outside createRoot.
     const { controller, setRemoteEffects } = createRoot((dispose) => {
       onTestFinished(dispose)
       const [remoteEffects, setRemoteEffects] = createSignal([reverb('reverb-1')])
+
       return {
         setRemoteEffects,
         controller: useTimelineAutomationController({
@@ -421,6 +443,7 @@ describe('useTimelineAutomationController', () => {
         }),
       }
     })
+
     const lanes = controller.workspace().lanes
     expect(lanes.effectInstancesByOwnerKey['track-1']).toEqual([{ id: 'reverb-1', kind: 'reverb' }])
 

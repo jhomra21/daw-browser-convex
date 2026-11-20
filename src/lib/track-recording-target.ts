@@ -34,21 +34,28 @@ const targetClosure = (tracks: readonly ClosureTrack[], targetId: string) => {
   const ids = new Set<string>()
   const entries: string[] = []
   const pending = [targetId]
+
   for (const id of pending) {
     if (chain.has(id)) continue
     chain.add(id)
     ids.add(id)
     const track = trackById.get(id)
+
     if (!track) {
       entries.push(`${id}:missing`)
       continue
     }
+
     const sends = id === targetId ? (track.sends ?? []).map((send) => send.targetId).sort() : []
+
     for (const send of sends) ids.add(send)
     entries.push(`${id}|${track.groupId ?? ''}|${track.outputTargetId ?? ''}|${sends.map((send) => `${send}${trackById.has(send) ? '' : ':missing'}`).join(',')}`)
+
     if (track.groupId) pending.push(track.groupId)
+
     if (track.outputTargetId) pending.push(track.outputTargetId)
   }
+
   return { key: entries.join('\n'), ids }
 }
 
@@ -57,19 +64,27 @@ const targetClosure = (tracks: readonly ClosureTrack[], targetId: string) => {
 export const createRecordingTargetLock = (tracks: Accessor<readonly ClosureTrack[]>) => {
   const [state, setState] = createSignal<RecordingTargetLockState>('released')
   const [targetId, setTargetId] = createSignal<string | null>(null)
+
   const heldTrackIds = createMemo(() => {
     const target = targetId()
+
     return target === null ? new Set<string>() : targetClosure(tracks(), target).ids
   })
+
   const refuseTransition = (before: readonly ClosureTrack[], after: readonly ClosureTrack[]) => {
     const target = targetId()
+
     if (target === null || targetClosure(before, target).key === targetClosure(after, target).key) return undefined
+
     return RECORDING_TARGET_LOCKED_REASON
   }
+
   const refuseChange = (patches: readonly RoutingPatch[], removedTrackIds: Iterable<string> = []) => {
     const removed = new Set(removedTrackIds)
+
     return refuseTransition(tracks(), applyRoutingPatches(tracks(), patches).filter((track) => !removed.has(track.id)))
   }
+
   return {
     state,
     targetId,
@@ -77,6 +92,7 @@ export const createRecordingTargetLock = (tracks: Accessor<readonly ClosureTrack
       if (state() !== 'released') return false
       setTargetId(trackId)
       setState('starting')
+
       return true
     },
     recording: () => {
@@ -114,33 +130,42 @@ export async function ensureTrackForRecording(options: {
   emit: (message: string) => void
 }): Promise<RecordingTrackTarget | null> {
   const isLocalProject = options.projectId ? isLocalId('project', options.projectId) : false
+
   if (!options.projectId || (!isLocalProject && !options.userId)) {
     options.emit(isLocalProject ? 'Recording requires an open project.' : 'Recording is only available when signed in to a project.')
+
     return null
   }
 
   if (options.recordArmTrackId) {
     const armedTrack = options.tracks.find((track) => track.id === options.recordArmTrackId)
+
     if (armedTrack && canTrackReceiveAudioClip(armedTrack) && (isLocalProject || !armedTrack.lockedBy || armedTrack.lockedBy === options.userId)) {
       return { track: armedTrack, createdDuringSetup: false }
     }
   }
 
   const availableTrack = options.tracks.find((track) => canTrackReceiveAudioClip(track) && (isLocalProject || !track.lockedBy || track.lockedBy === options.userId))
+
   if (availableTrack) {
     options.setRecordArmTrackId(availableTrack.id)
+
     return { track: availableTrack, createdDuringSetup: false }
   }
 
   let newTrack: Track | null = null
+
   try {
     newTrack = await options.createTrackForRecording()
   } catch (error) {
     console.error('[useTrackRecording] failed to create track for recording', error)
     options.emit('Failed to create a new track for recording.')
+
     return null
   }
+
   if (!newTrack) return null
+
   return { track: newTrack, createdDuringSetup: true }
 }
 
@@ -163,22 +188,29 @@ async function discardAutoCreatedTrack(options: {
   clearRecordArmForTrack: (trackId: Track['id']) => void
 }): Promise<boolean> {
   options.clearRecordArmForTrack(options.trackId)
+
   try {
     if (options.projectId && isLocalId('project', options.projectId)) {
       await createLocalTimelineRepository(options.projectId).deleteTrack(options.trackId)
       options.removeLocalTrack(options.trackId)
+
       return true
     }
+
     if (!options.userId) return false
+
     const result = await options.convexClient.mutation(
       options.convexApi.tracks.remove,
       buildTrackDeleteMutationInput({ trackId: options.trackId }),
     )
+
     if (result?.status !== 'deleted') return false
     options.removeLocalTrack(options.trackId)
+
     return true
   } catch (error) {
     console.error('[useTrackRecording] failed to discard auto-created track', error)
+
     return false
   }
 }
@@ -197,7 +229,9 @@ export async function finalizeAutoCreatedTrackFailure(options: {
 }): Promise<void> {
   if (!options.track) return
   const currentTrack = options.tracks.find((entry) => entry.id === options.track?.id)
+
   if (!currentTrack) return
+
   if (currentTrack.clips.length > 0) {
     commitAutoCreatedTrack({
       historyPush: options.historyPush,
@@ -205,8 +239,10 @@ export async function finalizeAutoCreatedTrackFailure(options: {
       tracks: options.tracks,
       track: currentTrack,
     })
+
     return
   }
+
   const discarded = await discardAutoCreatedTrack({
     trackId: currentTrack.id,
     projectId: options.projectId,
@@ -216,6 +252,7 @@ export async function finalizeAutoCreatedTrackFailure(options: {
     removeLocalTrack: options.removeLocalTrack,
     clearRecordArmForTrack: options.clearRecordArmForTrack,
   })
+
   if (discarded) return
   commitAutoCreatedTrack({
     historyPush: options.historyPush,

@@ -19,11 +19,15 @@ export const registerVstEditorStateAckIpc = (dependencies: {
   dependencies.ipcMain.handle(vstEditorCapturedStateAckChannel, (event, value) => {
     if (!dependencies.allowed(event)) return { accepted: false };
     const parsed = editorStateAckSchema.safeParse(value);
+
     if (!parsed.success) return { accepted: false };
     const pending = dependencies.takePendingEditorStateAck(parsed.data.requestId);
+
     if (!pending) return { accepted: false };
+
     if (parsed.data.ok) pending.resolve();
     else pending.reject(new Error(parsed.data.error ?? "Editor state persistence failed."));
+
     return { accepted: true };
   });
 };

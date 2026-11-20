@@ -83,12 +83,16 @@ const mergeLocalHistoryState = (
   pending: PersistedHistory,
 ): PersistedHistory => {
   const seen = new Set(persisted.undo.map((entry) => JSON.stringify(entry)))
+
   const pendingUndo = pending.undo.filter((entry) => {
     const key = JSON.stringify(entry)
+
     if (seen.has(key)) return false
     seen.add(key)
+
     return true
   })
+
   return {
     undo: [...persisted.undo, ...pendingUndo].slice(-50),
     redo: pending.redo,
@@ -101,6 +105,7 @@ export function useTimelineHistory(
   const scopeContexts = new Map<string, HistoryScopeContext>()
   const [canUndo, setCanUndo] = createSignal(false)
   const [canRedo, setCanRedo] = createSignal(false)
+
   const publishAvailability = (manager?: UndoManager) => {
     setCanUndo(manager?.canUndo() ?? false)
     setCanRedo(manager?.canRedo() ?? false)
@@ -113,6 +118,7 @@ export function useTimelineHistory(
 
   const readCurrentScopeKey = () => {
     const scope = readCurrentScope()
+
     return scope ? buildOptimisticGrantScopeKey(scope) : null
   }
 
@@ -126,36 +132,49 @@ export function useTimelineHistory(
   const getScopeContext = (scope: OptimisticGrantScope) => {
     const scopeKey = buildOptimisticGrantScopeKey(scope)
     const existing = scopeContexts.get(scopeKey)
+
     if (existing) return existing
 
     const localProject = isLocalId('project', scope.projectId)
     let hydrating = false
+
     const manager = createUndoManager({
       onChange: (state) => {
         if (scopeKey === readCurrentScopeKey()) publishAvailability(manager)
+
         if (hydrating) return
+
         if (localProject) {
           const context = scopeContexts.get(scopeKey)
+
           if (context && !context.hydratedFromLocalDb) {
             context.pendingLocalHistoryState = state
+
             return
           }
+
           if (!context) {
             void saveLocalHistory(scope.projectId, state)
+
             return
           }
+
           saveLocalHistoryInOrder(context, scope.projectId, state)
+
           return
         }
+
         saveHistory(scope, state)
       },
     })
+
     if (!localProject) {
       try {
         hydrating = true
         manager.hydrate(loadHistory(scope))
       } catch {}
     }
+
     hydrating = false
 
     const context: HistoryScopeContext = {
@@ -164,7 +183,9 @@ export function useTimelineHistory(
       pendingRun: Promise.resolve(),
       pendingLocalHistorySave: Promise.resolve(),
     }
+
     scopeContexts.set(scopeKey, context)
+
     if (localProject) {
       context.unregisterLocalHistoryFlusher = registerPendingLocalProjectWriteFlusher(
         'history',
@@ -176,6 +197,7 @@ export function useTimelineHistory(
           if (context.hydratedFromLocalDb) return
           const pendingState = context.pendingLocalHistoryState
           hydrating = true
+
           if (state && pendingState) {
             const merged = mergeLocalHistoryState(state, pendingState)
             manager.hydrate(merged)
@@ -186,17 +208,20 @@ export function useTimelineHistory(
             manager.hydrate(pendingState)
             saveLocalHistoryInOrder(context, scope.projectId, pendingState)
           }
+
           context.pendingLocalHistoryState = undefined
           hydrating = false
           context.hydratedFromLocalDb = true
         })
         .catch(() => {
           const pendingState = context.pendingLocalHistoryState
+
           if (pendingState) saveLocalHistoryInOrder(context, scope.projectId, pendingState)
           context.pendingLocalHistoryState = undefined
           context.hydratedFromLocalDb = true
         })
     }
+
     return context
   }
 
@@ -210,6 +235,7 @@ export function useTimelineHistory(
 
   const pushHistory = (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => {
     const scope = readCurrentScope()
+
     if (!scope || scope.projectId !== entry.projectId) return
     getScopeContext(scope).manager.push(entry, mergeKey, mergeWindowMs)
     flushPendingSharedOutboxHistoryUpdates()
@@ -219,11 +245,15 @@ export function useTimelineHistory(
     if (update.kind === 'entry') {
       if (update.entry.projectId !== options.projectId()) return false
       pushHistory(update.entry)
+
       return true
     }
+
     if (update.projectId !== options.projectId()) return false
     const scope = readCurrentScope()
+
     if (!scope || scope.projectId !== update.projectId || scope.userId !== update.userId) return false
+
     return getScopeContext(scope).manager.mutate((history) => (
       attachClipDeletionRecoveriesToHistory(
         history,
@@ -232,6 +262,7 @@ export function useTimelineHistory(
       )
     ))
   })
+
   onCleanup(unregisterSharedOutboxHistory)
 
   const runHistoryAction = (
@@ -239,24 +270,32 @@ export function useTimelineHistory(
     executor: typeof execUndo | typeof execRedo,
   ) => {
     const scope = readCurrentScope()
+
     if (!scope) return
     const context = getScopeContext(scope)
     const scopeKey = buildOptimisticGrantScopeKey(scope)
     options.acceptance?.ui(mode === 'undo' ? 'ui-undo' : 'ui-redo', () => scopeKey)
+
     const run = async () => {
       const manager = context.manager
+
       if (mode === 'undo' && !manager.canUndo()) return
+
       if (mode === 'redo' && !manager.canRedo()) return
 
       const entry = mode === 'undo' ? manager.reserveUndo() : manager.reserveRedo()
+
       if (!entry) return
       const refusal = options.recordingTargetLock?.refuseHistory(entry, mode)
+
       if (refusal) {
         if (mode === 'undo') manager.restoreUndo(entry)
         else manager.restoreRedo(entry)
         options.notify?.(RECORDING_TARGET_LOCKED_BADGE, refusal)
+
         return
       }
+
       const initializeDeleteOperationId = (candidate: HistoryEntry): boolean => {
         if (candidate.type === 'section-edit') {
           return candidate.data.entries.reduce(
@@ -264,32 +303,45 @@ export function useTimelineHistory(
             false,
           )
         }
+
         if (candidate.type === 'control-range-delete') {
           if (mode === 'undo' && !candidate.data.restoreOperationId) {
             candidate.data.restoreOperationId = crypto.randomUUID()
+
             return true
           }
+
           if (mode === 'redo' && !candidate.data.deleteOperationId) {
             candidate.data.deleteOperationId = crypto.randomUUID()
+
             return true
           }
+
           return false
         }
+
         if (isLocalId('project', scope.projectId)) return false
+
         if (mode === 'undo' && candidate.type === 'clip-create' && !candidate.data.clip.deleteOperationId) {
           candidate.data.clip.deleteOperationId = crypto.randomUUID()
+
           return true
         }
+
         if (mode === 'redo' && candidate.type === 'clip-delete' && !candidate.data.deleteOperationId) {
           candidate.data.deleteOperationId = crypto.randomUUID()
+
           return true
         }
+
         return false
       }
+
       manager.mutate(() => initializeDeleteOperationId(entry))
 
       const sourceActions = options.getActions()
       const workingTracks = cloneHistoryTracks(context.tracks)
+
       const actions: TimelineHistoryActions = {
         insertLocalTrack: (track, index) => {
           insertTrackIntoHistoryModel(workingTracks, track, index)
@@ -379,6 +431,7 @@ export function useTimelineHistory(
           getTracks: () => workingTracks,
           getHistoryEntries: () => {
             const currentSnapshot = manager.snapshot()
+
             return [...currentSnapshot.undo, ...currentSnapshot.redo]
           },
           projectId: scope.projectId,
@@ -402,6 +455,7 @@ export function useTimelineHistory(
           actions,
         })
         context.tracks = workingTracks
+
         if (mode === 'undo') manager.completeUndo(entry)
         else manager.completeRedo(entry)
       } catch (error) {
@@ -433,10 +487,13 @@ export function useTimelineHistory(
   createEffect(() => {
     const scope = readCurrentScope()
     const tracks = options.getTracks()
+
     if (!scope) {
       publishAvailability()
+
       return
     }
+
     const context = getScopeContext(scope)
     context.tracks = cloneHistoryTracks(tracks)
     publishAvailability(context.manager)

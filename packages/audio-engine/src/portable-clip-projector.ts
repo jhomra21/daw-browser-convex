@@ -84,23 +84,29 @@ const projectClip = (
   diagnostic?: PortableStretchDiagnostic
 } => {
   if (clip.midi) return { reason: `${clip.id}: MIDI clips are not supported.` }
+
   const preparedStretch = clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch'
     ? input.preparedStretchAssets?.get(clip.id)
     : undefined
+
   if (clip.audioWarp?.enabled === true && clip.audioWarp.mode !== 'stretch') {
     const message = input.warpContext === 'offline'
       ? `${clip.id}: ${clip.audioWarp.mode} warp is not supported by portable export.`
       : `${clip.id}: realtime ${clip.audioWarp.mode} warp is not supported by the portable core.`
+
     return {
       reason: message,
       diagnostic: stretchDiagnostic(clip.id, 'warp-mode-unsupported', message),
     }
   }
+
   if (clip.audioWarp?.enabled === true && !preparedStretch) {
     const realtime = input.warpContext !== 'offline'
+
     const message = realtime
       ? `${clip.id}: realtime Stretch warp is not supported by the portable core.`
       : `${clip.id}: portable export requires a pre-rendered Stretch asset.`
+
     return {
       reason: message,
       diagnostic: stretchDiagnostic(
@@ -110,42 +116,54 @@ const projectClip = (
       ),
     }
   }
+
   if (!clip.sourceAssetKey && !preparedStretch) {
     return { reason: `${clip.id}: no decoded source asset is available.` }
   }
+
   if (preparedStretch) {
     const invalid = isPortablePreparedStretchAsset(preparedStretch)
       ? validatePortablePreparedStretchAsset(preparedStretch)
       : (() => {
         const message = validatePreparedStretchProjectionMetadata(preparedStretch)
+
         return message ? stretchDiagnostic(clip.id, 'stretch-metadata-mismatch', message) : undefined
       })()
+
     if (invalid) return { reason: invalid.message, diagnostic: invalid }
   }
+
   if (preparedStretch
     && input.projectGeneration !== undefined
     && preparedStretch.projectGeneration !== input.projectGeneration) {
     const message = `${clip.id}: pre-rendered Stretch asset belongs to a stale project generation.`
+
     return {
       reason: message,
       diagnostic: stretchDiagnostic(clip.id, 'stretch-asset-stale-generation', message),
     }
   }
+
   if (preparedStretch
     && (input.assetRatePolicy ?? 'match-session') === 'match-session'
     && preparedStretch.asset.sampleRateHz !== input.sampleRateHz) {
     const message = `${clip.id}: pre-rendered Stretch audio must match the portable session sample rate.`
+
     return {
       reason: message,
       diagnostic: stretchDiagnostic(clip.id, 'stretch-invalid-sample-rate', message),
     }
   }
+
   const asset = preparedStretch?.asset ?? (
     clip.sourceAssetKey ? input.assets.get(clip.sourceAssetKey) : undefined
   )
+
   if (!asset) return { reason: `${clip.id}: source asset is not registered.` }
+
   if (asset.channelCount > 2) return { reason: `${clip.id}: only mono and stereo assets are supported.` }
   const fades = normalizeClipFades(clip.fades, clip.duration)
+
   const map = getAudioClipTimeMap({
     clip,
     bufferDurationSec: preparedStretch?.sourceDurationSec ?? asset.frameCount / asset.sampleRateHz,
@@ -153,34 +171,45 @@ const projectClip = (
     rangeStartSec: input.rangeStartSec,
     rangeEndSec: input.rangeEndSec,
   })
+
   if (!map) return { skipped: true }
+
   if (map.mode !== 'raw' && !preparedStretch) return { reason: `${clip.id}: non-raw playback is not supported.` }
+
   const sourceOffsetSec = preparedStretch === undefined
     ? map.sourceStartSec
     : map.timelineStartSec - preparedStretch.timelineStartSec + preparedStretch.sourceStartSec
+
   if (preparedStretch) {
     const preparedEndSec = preparedStretch.timelineStartSec + preparedStretch.timelineDurationSec
+
     if (sourceOffsetSec < -0.5 / asset.sampleRateHz
       || map.timelineEndSec > preparedEndSec + 0.5 / asset.sampleRateHz) {
       const message = `${clip.id}: pre-rendered Stretch timing does not cover the requested schedule.`
+
       return {
         reason: message,
         diagnostic: stretchDiagnostic(clip.id, 'stretch-metadata-mismatch', message),
       }
     }
   }
+
   const sourcePosition = Math.max(0, sourceOffsetSec * asset.sampleRateHz)
   const sourceOffsetFrame = Math.floor(sourcePosition)
   const sourceOffsetFraction = sourcePosition - sourceOffsetFrame
+
   const sourceFrameCount = Math.min(
     asset.frameCount - sourceOffsetFrame,
     Math.max(0, Math.ceil(
       (preparedStretch ? map.timelineDurationSec : map.sourceDurationSec) * asset.sampleRateHz,
     )),
   )
+
   const startFrame = frameAt(map.timelineStartSec, input.sampleRateHz)
   const stopFrame = frameAt(map.timelineEndSec, input.sampleRateHz)
+
   if (sourceFrameCount < 1 || stopFrame <= startFrame) return { reason: `${clip.id}: resolves to an empty sample range.` }
+
   return {
     event: {
       version: audioCoreContractVersion,
@@ -212,36 +241,45 @@ export const stableSourceIdentity = (trackId: string, clipId: string) =>
 
 export const projectPortableClipEvents = (input: PortableClipProject): PortableClipProjection => {
   if (!finitePositiveInteger(input.sampleRateHz)) return unsupported(['The portable sample rate is invalid.'])
+
   if (!finitePositiveInteger(input.epoch) || !finitePositiveInteger(input.firstSequence)) return unsupported(['The portable transport epoch or event sequence is invalid.'])
+
   if (!Number.isFinite(input.bpm) || input.bpm <= 0) return unsupported(['The project tempo is invalid.'])
+
   if (!Number.isFinite(input.rangeStartSec) || (input.rangeEndSec !== undefined && (!Number.isFinite(input.rangeEndSec) || input.rangeEndSec <= input.rangeStartSec))) {
     return unsupported(['The portable scheduling range is invalid.'])
   }
+
   const loop = loopFramesForTransport(input.loop ?? {
     loopEnabled: false,
     loopStartSec: 0,
     loopEndSec: 0,
   }, input.sampleRateHz)
+
   if (loop && input.rangeEndSec !== undefined) {
     const startFrame = frameAt(input.rangeStartSec, input.sampleRateHz)
     const endFrame = frameAt(input.rangeEndSec, input.sampleRateHz)
     const events: PortableProjectedSourceEvent[] = []
     const diagnostics: PortableStretchDiagnostic[] = []
     const reasons: string[] = []
+
     for (const slice of splitLoopScheduleRange(startFrame, endFrame, loop)) {
       const arrangementStartSec = slice.arrangementStartFrame / input.sampleRateHz
       const arrangementEndSec = slice.arrangementEndFrame / input.sampleRateHz
+
       const projection = projectPortableClipEvents({
         ...input,
         loop: undefined,
         rangeStartSec: arrangementStartSec,
         rangeEndSec: arrangementEndSec,
       })
+
       if (!projection.supported) {
         reasons.push(...projection.reasons)
         diagnostics.push(...projection.diagnostics)
         continue
       }
+
       for (const event of projection.events) {
         const shift = slice.nativeStartFrame - slice.arrangementStartFrame
         events.push({
@@ -256,6 +294,7 @@ export const projectPortableClipEvents = (input: PortableClipProject): PortableC
         })
       }
     }
+
     return reasons.length === 0
       ? {
         supported: true,
@@ -266,24 +305,30 @@ export const projectPortableClipEvents = (input: PortableClipProject): PortableC
       }
       : unsupported(reasons, diagnostics)
   }
+
   const reasons: string[] = []
   const diagnostics: PortableStretchDiagnostic[] = []
   const events: AudioCoreSampleSourceEventDto[] = []
   let sequence = input.firstSequence
+
   for (const track of input.tracks) {
     if (track.kind === 'instrument') {
       if (!input.allowInstruments) reasons.push(`${track.id}: instrument tracks are not supported.`)
       continue
     }
+
     for (const clip of track.clips) {
       const result = projectClip(clip, input, sequence, track.id)
+
       if ('reason' in result) {
         reasons.push(result.reason)
+
         if (result.diagnostic) diagnostics.push(result.diagnostic)
       } else if ('skipped' in result) {
         continue
       } else {
         const emitRange = input.emitStartFrame
+
         if (emitRange === undefined) {
           events.push(result.event)
           sequence += 1
@@ -293,19 +338,25 @@ export const projectPortableClipEvents = (input: PortableClipProject): PortableC
         } else if (result.event.startFrame < emitRange.start && result.event.stopFrame > emitRange.start) {
           const timelineFrames = result.event.stopFrame - result.event.startFrame
           const elapsedFrames = emitRange.start - result.event.startFrame
+
           const sourceOffsetDelta = Math.min(
             result.event.sourceFrameCount,
             Math.max(0, result.event.sourceFrameCount * elapsedFrames / timelineFrames),
           )
+
           const sourcePosition = result.event.sourceOffsetFrame
             + (result.event.sourceOffsetFraction ?? 0)
             + sourceOffsetDelta
+
           const sourceOffsetFrame = Math.floor(sourcePosition)
           const sourceOffsetFraction = sourcePosition - sourceOffsetFrame
+
           const sourceEndPosition = result.event.sourceOffsetFrame
             + (result.event.sourceOffsetFraction ?? 0)
             + result.event.sourceFrameCount
+
           const sourceFrameCount = Math.ceil(sourceEndPosition - sourcePosition)
+
           if (sourceFrameCount > 0) {
             events.push({
               ...result.event,
@@ -320,5 +371,6 @@ export const projectPortableClipEvents = (input: PortableClipProject): PortableC
       }
     }
   }
+
   return reasons.length === 0 ? { supported: true, events } : unsupported(reasons, diagnostics)
 }

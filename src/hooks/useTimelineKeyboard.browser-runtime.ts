@@ -7,25 +7,43 @@ const calls: string[] = []
 const record = (name: string) => () => { calls.push(name) }
 const [open, setOpen] = createSignal(false)
 const arrangement = document.createElement('div')
+
 arrangement.tabIndex = 0
+
 arrangement.id = 'arrangement'
+
 const button = document.createElement('button')
+
 button.id = 'ordinary-button'
+
 button.textContent = 'Ordinary button'
+
 button.onclick = record('ordinary-click')
+
 const modalButton = document.createElement('button')
+
 modalButton.id = 'modal-button'
+
 modalButton.textContent = 'Modal button'
+
 modalButton.onclick = record('modal-click')
+
 const input = document.createElement('input')
+
 input.id = 'modal-input'
+
 const host = document.createElement('div')
 const shadow = host.attachShadow({ mode: 'open' })
 const shadowInput = document.createElement('input')
+
 shadow.append(shadowInput)
+
 const modalChildren = document.createElement('div')
+
 modalChildren.append(modalButton, input, host)
+
 const root = document.createElement('div')
+
 document.body.append(arrangement, button, root)
 
 const dispose = render(() => {
@@ -34,8 +52,12 @@ const dispose = render(() => {
     onSpace: record('space'),
     onDelete: record('delete'),
     onDuplicate: record('duplicate'),
-    onCopy: () => { calls.push('copy'); return true },
-    onPaste: () => { calls.push('paste'); return true },
+    onCopy: () => { calls.push('copy');
+
+ return true },
+    onPaste: () => { calls.push('paste');
+
+ return true },
     onAddAudioTrack: record('audio'),
     onAddReturnTrack: record('return'),
     onAddGroupTrack: record('group'),
@@ -44,10 +66,13 @@ const dispose = render(() => {
     onAddInstrumentTrack: record('instrument'),
     onOpenExport: record('export'),
     onToggleFollow: record('follow'),
-    executeExtensionShortcut: () => { calls.push('extension'); return true },
+    executeExtensionShortcut: () => { calls.push('extension');
+
+ return true },
     onUndo: record('undo'),
     onRedo: record('redo'),
   })
+
   return createComponent(Dialog.Root, {
     get open() { return open() },
     onOpenChange: setOpen,
@@ -64,19 +89,23 @@ const dispose = render(() => {
 const send = (target: Element, init: KeyboardEventInit) => {
   const event = new KeyboardEvent('keydown', { bubbles: true, composed: true, cancelable: true, ...init })
   target.dispatchEvent(event)
+
   return event.defaultPrevented
 }
 
 const scenarios = () => {
   const results: Record<string, boolean> = {}
+
   const check = (name: string, target: Element, init: KeyboardEventInit, expected: string[]) => {
     calls.length = 0
     const prevented = send(target, init)
     results[name] = JSON.stringify(calls) === JSON.stringify(expected)
       && prevented === (expected.length > 0)
   }
+
   setOpen(true)
   results.portalledDialog = modalButton.closest('[role="dialog"]') !== null && !root.contains(modalButton)
+
   for (const [name, target] of Object.entries({ button: modalButton, input, shadowInput })) {
     for (const init of [
       { key: 'Delete' }, { key: 'Backspace' }, { key: 'd', ctrlKey: true },
@@ -85,12 +114,15 @@ const scenarios = () => {
       { key: 'b', ctrlKey: true, altKey: true },
     ]) check(`modal-${name}-${JSON.stringify(init)}`, target, init, [])
   }
+
   setOpen(false)
+
   for (const modifier of [{ ctrlKey: true }, { metaKey: true }]) {
     check(`undo-${JSON.stringify(modifier)}`, arrangement, { key: 'z', ...modifier }, ['undo'])
     check(`redo-shift-${JSON.stringify(modifier)}`, arrangement, { key: 'Z', shiftKey: true, ...modifier }, ['redo'])
     check(`redo-y-${JSON.stringify(modifier)}`, arrangement, { key: 'y', ...modifier }, ['redo'])
   }
+
   check('delete', arrangement, { key: 'Delete' }, ['delete'])
   check('backspace', arrangement, { key: 'Backspace' }, ['delete'])
   check('duplicate', arrangement, { key: 'd', ctrlKey: true }, ['duplicate'])
@@ -108,6 +140,7 @@ const scenarios = () => {
   check('contenteditable', editable, { key: 'z', ctrlKey: true }, [])
   check('shadow-editable', shadowInput, { key: ' ', code: 'Space' }, [])
   calls.length = 0
+
   return results
 }
 

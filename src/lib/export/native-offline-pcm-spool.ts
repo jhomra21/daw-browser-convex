@@ -115,20 +115,24 @@ const validPositiveInteger = (value: number) => Number.isSafeInteger(value) && v
 const classifyFailure = (cause: unknown): NativeOfflinePcmSpoolFailure => {
   if (cause instanceof DOMException) {
     if (cause.name === 'QuotaExceededError') return 'quota-exceeded'
+
     if (cause.name === 'NotAllowedError' || cause.name === 'SecurityError') return 'permission-denied'
   }
+
   return 'write-failed'
 }
 
 const browserLockManager: NativeOfflinePcmSpoolLockManager = {
   request: (name, options, callback) => {
     const locks = globalThis.navigator?.locks
+
     if (!locks) {
       return Promise.reject(new NativeOfflinePcmSpoolError(
         'unsupported',
         'Web Locks are required for native offline PCM spools.',
       ))
     }
+
     return locks.request(name, options, async (lock) => (
       await callback(lock ? { name: lock.name, mode: 'exclusive' } : undefined)
     ))
@@ -139,12 +143,15 @@ const wrapDirectory = (directory: FileSystemDirectoryHandle): NativeOfflinePcmSp
   getDirectory: async (name, create) => wrapDirectory(await directory.getDirectoryHandle(name, { create })),
   getFile: async (name, create) => {
     const handle = await directory.getFileHandle(name, { create })
+
     return {
       createWritable: async () => {
         if (!handle.createWritable) {
           throw new Error('The native offline PCM spool filesystem cannot create writable files.')
         }
+
         const writable = await handle.createWritable()
+
         return {
           write: (data) => writable.write(data),
           close: () => writable.close(),
@@ -182,11 +189,13 @@ const lockName = (sessionId: string) => `daw-browser-native-export-spool:${sessi
 
 const readTextFile = async (file: NativeOfflinePcmSpoolFile): Promise<string> => {
   const bytes = await file.read(0, 64 * 1024)
+
   return new TextDecoder().decode(bytes)
 }
 
 const writeTextFile = async (file: NativeOfflinePcmSpoolFile, value: string): Promise<void> => {
   const writable = await file.createWritable()
+
   try {
     await writable.write(new TextEncoder().encode(value))
     await writable.close()
@@ -199,6 +208,7 @@ const writeTextFile = async (file: NativeOfflinePcmSpoolFile, value: string): Pr
 const parseMetadata = (value: string): NativeOfflinePcmSpoolMetadata | undefined => {
   try {
     const result = nativeOfflinePcmSpoolMetadataSchema.safeParse(JSON.parse(value))
+
     return result.success ? result.data : undefined
   } catch {
     return
@@ -212,26 +222,33 @@ const createBrowserSpoolLock = async (
   let releaseHeldLock: () => void = () => undefined
   let resolveAcquired: () => void = () => undefined
   let rejectAcquired: (error: Error) => void = () => undefined
+
   const acquired = new Promise<void>((resolve, reject) => {
     resolveAcquired = resolve
     rejectAcquired = reject
   })
+
   const held = new Promise<void>((resolve) => {
     releaseHeldLock = resolve
   })
+
   const request = lockManager.request(lockName(sessionId), { mode: 'exclusive' }, async (lock) => {
     if (!lock) {
       rejectAcquired(new NativeOfflinePcmSpoolError('write-failed', 'Could not acquire native offline PCM spool lock.'))
+
       return
     }
+
     resolveAcquired()
     await held
   })
+
   void request.catch((error) => {
     rejectAcquired(error instanceof Error ? error : new Error('Could not acquire native offline PCM spool lock.'))
   })
   await acquired
   let released = false
+
   return async () => {
     if (released) return
     released = true
@@ -247,6 +264,7 @@ const recoverStaleSessions = async (
   batchSize: number,
 ): Promise<void> => {
   let cursor: string | undefined
+
   try {
     cursor = (await readTextFile(await sessions.getFile(RECOVERY_CURSOR_FILE, false))).trim() || undefined
   } catch (error) {
@@ -256,31 +274,42 @@ const recoverStaleSessions = async (
   const collectCandidates = async (after: string | undefined) => {
     const candidates: string[] = []
     let foundCursor = after === undefined
+
     for await (const entry of sessions.entries()) {
       if (entry.kind !== 'directory') continue
+
       if (!foundCursor) {
         foundCursor = entry.name === after
         continue
       }
+
       candidates.push(entry.name)
+
       if (candidates.length >= batchSize) return candidates
     }
+
     if (after === undefined) return candidates
+
     for await (const entry of sessions.entries()) {
       if (entry.kind !== 'directory') continue
+
       if (foundCursor && entry.name === after) break
       candidates.push(entry.name)
+
       if (candidates.length >= batchSize) break
     }
+
     return candidates
   }
 
   const candidates = await collectCandidates(cursor)
+
   for (const sessionId of candidates) {
     try {
       await lockManager.request(lockName(sessionId), { mode: 'exclusive', ifAvailable: true }, async (lock) => {
         if (!lock) return
         let metadata: NativeOfflinePcmSpoolMetadata | undefined
+
         try {
           const directory = await sessions.getDirectory(sessionId, false)
           const metadataFile = await directory.getFile(METADATA_FILE, false)
@@ -288,17 +317,22 @@ const recoverStaleSessions = async (
         } catch {
           metadata = undefined
         }
+
         if (!metadata || metadata.sessionId !== sessionId) {
           await sessions.remove(sessionId, true).catch(() => undefined)
+
           return
         }
+
         if (now() - metadata.createdAt >= nativeOfflinePcmSpoolRecoveryTtlMs) {
           await sessions.remove(sessionId, true).catch(() => undefined)
         }
       })
     } catch {}
   }
+
   const nextCursor = candidates.at(-1)
+
   if (nextCursor !== undefined) {
     try {
       await writeTextFile(
@@ -311,28 +345,35 @@ const recoverStaleSessions = async (
 
 const encodeInterleaved = (chunk: NativeOfflinePcmChunk): Uint8Array<ArrayBuffer> => {
   const sampleCount = chunk.frameCount * chunk.channelCount
+
   if (!Number.isSafeInteger(sampleCount)) {
     throw new NativeOfflinePcmSpoolError('invalid-chunk', 'Native offline PCM chunk sample count is invalid.')
   }
+
   const interleaved = new Float32Array(sampleCount)
   let offset = 0
+
   for (let frame = 0; frame < chunk.frameCount; frame += 1) {
     for (let channel = 0; channel < chunk.channelCount; channel += 1) {
       interleaved[offset] = chunk.planes[channel]?.[frame] ?? 0
       offset += 1
     }
   }
+
   return new Uint8Array(interleaved.buffer)
 }
 
 const updateSamplePeak = (peak: number, chunk: NativeOfflinePcmChunk) => {
   let next = peak
+
   for (const plane of chunk.planes) {
     for (let frame = 0; frame < chunk.frameCount; frame += 1) {
       const sample = plane[frame] ?? 0
+
       if (Number.isFinite(sample)) next = Math.max(next, Math.abs(sample))
     }
   }
+
   return next
 }
 
@@ -342,15 +383,18 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
   const now = options.now ?? Date.now
   const replayFrames = options.replayFrames ?? nativeOfflinePcmSpoolReplayFrames
   const recoveryBatchSize = options.recoveryBatchSize ?? nativeOfflinePcmSpoolRecoveryBatchSize
+
   if (!validPositiveInteger(replayFrames)) {
     throw new NativeOfflinePcmSpoolError('invalid-session', 'Native offline PCM replay block size is invalid.')
   }
+
   if (!validPositiveInteger(recoveryBatchSize)) {
     throw new NativeOfflinePcmSpoolError('invalid-session', 'Native offline PCM recovery batch size is invalid.')
   }
 
   const spoolsDirectory = async () => {
     const root = await filesystem.root()
+
     return root.getDirectory(EXPORT_SPOOL_DIRECTORY, true)
   }
 
@@ -370,6 +414,7 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
     let file: NativeOfflinePcmSpoolFile | undefined
     let writable: NativeOfflinePcmSpoolWritable | undefined
     let createdDirectory = false
+
     try {
       try {
         await sessions.getDirectory(input.sessionId, false)
@@ -377,6 +422,7 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
       } catch (error) {
         if (!(error instanceof DOMException) || error.name !== 'NotFoundError') throw error
       }
+
       directory = await sessions.getDirectory(input.sessionId, true)
       createdDirectory = true
       const metadataFile = await directory.getFile(METADATA_FILE, true)
@@ -389,6 +435,7 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
       writable = await file.createWritable()
     } catch (error) {
       if (writable) await writable.abort().catch(() => undefined)
+
       if (createdDirectory) await sessions.remove(input.sessionId, true).catch(() => undefined)
       await releaseLock().catch(() => undefined)
       throw new NativeOfflinePcmSpoolError(
@@ -397,6 +444,7 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
         { cause: error },
       )
     }
+
     if (!directory || !file || !writable) {
       await releaseLock().catch(() => undefined)
       throw new NativeOfflinePcmSpoolError('write-failed', 'Could not create native offline PCM spool.')
@@ -411,11 +459,13 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
 
     const removeDirectory = async () => {
       if (state === 'removed') return
+
       try {
         await sessions.remove(input.sessionId, true)
       } catch (error) {
         if (!(error instanceof DOMException) || error.name !== 'NotFoundError') throw error
       }
+
       state = 'removed'
       await releaseLock()
     }
@@ -431,6 +481,7 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
         if (state !== 'open') {
           throw new NativeOfflinePcmSpoolError('write-failed', 'Native offline PCM spool is no longer writable.')
         }
+
         if (!validPositiveInteger(chunk.frameCount)
           || chunk.startFrame !== writtenFrames
           || chunk.channelCount !== input.channelCount
@@ -439,11 +490,14 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
           || chunk.startFrame > input.totalFrames - chunk.frameCount) {
           throw new NativeOfflinePcmSpoolError('invalid-chunk', 'Native offline PCM chunk is invalid or noncontiguous.')
         }
+
         const bytes = encodeInterleaved(chunk)
         const nextByteLength = byteLength + bytes.byteLength
+
         if (!Number.isSafeInteger(nextByteLength)) {
           throw new NativeOfflinePcmSpoolError('write-failed', 'Native offline PCM spool byte accounting exceeded exact integer range.')
         }
+
         try {
           await writable.write(bytes)
         } catch (error) {
@@ -453,6 +507,7 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
             { cause: error },
           )
         }
+
         writtenFrames += chunk.frameCount
         byteLength = nextByteLength
         samplePeak = updateSamplePeak(samplePeak, chunk)
@@ -461,21 +516,27 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
         await removeDirectory()
         throw error
       })
+
       operation = task.catch(() => undefined)
+
       return task
     }
 
     const finalize = async (): Promise<NativeOfflinePcmSpoolDescriptor> => {
       await operation
+
       if (descriptor) return descriptor
+
       if (state !== 'open') {
         throw new NativeOfflinePcmSpoolError('write-failed', 'Native offline PCM spool cannot be finalized.')
       }
+
       if (writtenFrames !== input.totalFrames) {
         await abortWritable()
         await removeDirectory()
         throw new NativeOfflinePcmSpoolError('invalid-chunk', 'Native offline PCM spool is incomplete.')
       }
+
       try {
         await writable.close()
       } catch (error) {
@@ -487,6 +548,7 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
           { cause: error },
         )
       }
+
       state = 'finalized'
       descriptor = {
         sessionId: input.sessionId,
@@ -496,6 +558,7 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
         byteLength,
         samplePeak,
       }
+
       return descriptor
     }
 
@@ -505,19 +568,24 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
       if (state !== 'finalized' || !descriptor) {
         throw new NativeOfflinePcmSpoolError('read-failed', 'Native offline PCM spool must be finalized before replay.')
       }
+
       const requestedStartFrame = replayOptions.startFrame ?? 0
       const requestedEndFrame = replayOptions.endFrame ?? descriptor.totalFrames
+
       if (!Number.isSafeInteger(requestedEndFrame)
         || requestedEndFrame <= 0
         || requestedEndFrame > descriptor.totalFrames) {
         throw new NativeOfflinePcmSpoolError('read-failed', 'Native offline PCM spool replay end frame is invalid.')
       }
+
       if (!Number.isSafeInteger(requestedStartFrame)
         || requestedStartFrame < 0
         || requestedStartFrame >= requestedEndFrame) {
         throw new NativeOfflinePcmSpoolError('read-failed', 'Native offline PCM spool replay start frame is invalid.')
       }
+
       const gain = replayOptions.gain ?? 1
+
       if (!Number.isFinite(gain) || gain < 0) {
         throw new NativeOfflinePcmSpoolError('read-failed', 'Native offline PCM spool replay gain is invalid.')
       }
@@ -528,33 +596,41 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
         const startByte = startFrame * descriptor.channelCount * FLOAT_BYTES
         const endByte = (startFrame + frameCount) * descriptor.channelCount * FLOAT_BYTES
         let bytes: ArrayBuffer
+
         try {
           bytes = await file.read(startByte, endByte)
         } catch (error) {
           throw new NativeOfflinePcmSpoolError('read-failed', 'Could not read native offline PCM spool data.', { cause: error })
         }
+
         if (bytes.byteLength !== endByte - startByte) {
           throw new NativeOfflinePcmSpoolError('read-failed', 'Native offline PCM spool data is truncated.')
         }
+
         replayOptions.signal?.throwIfAborted()
         const interleaved = new Float32Array(bytes)
+
         const buffer = new AudioBuffer({
           numberOfChannels: descriptor.channelCount,
           length: frameCount,
           sampleRate: descriptor.sampleRate,
         })
+
         for (let channel = 0; channel < descriptor.channelCount; channel += 1) {
           const destination = buffer.getChannelData(channel)
+
           for (let frame = 0; frame < frameCount; frame += 1) {
             destination[frame] = (interleaved[frame * descriptor.channelCount + channel] ?? 0) * gain
           }
         }
+
         yield buffer
       }
     }
 
     const abort = async () => {
       await operation
+
       if (state === 'removed') return
       await abortWritable()
       await removeDirectory()
@@ -562,6 +638,7 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
 
     const remove = async () => {
       await operation
+
       if (state === 'open') await abortWritable()
       await removeDirectory()
     }

@@ -10,6 +10,7 @@ type FilePickResult =
 test('reports the desktop save picker only while output selection is pending', async () => {
   exportOutputPickerStatus.set(false)
   let resolvePick: (result: FilePickResult) => void = () => undefined
+
   const bridge = {
     beginWrite: async (_requestId: string, _token: string, _relativePath?: string) => ({ writerId: 'writer-1' }),
     writeChunk: async (_requestId: string, _writerId: string, offset: number, chunk: Uint8Array) => ({
@@ -27,7 +28,9 @@ test('reports the desktop save picker only while output selection is pending', a
     pickOutputDirectory: async (_requestId: string) => ({ canceled: true as const }),
     releaseExportOutput: async (_requestId: string) => undefined,
   }
+
   const factory = createDesktopRendererExportOutputTargetFactory(bridge)
+
   const targetPromise = factory.createMixdownTarget({
     projectId: 'project:test-export-picker',
     localProject: true,

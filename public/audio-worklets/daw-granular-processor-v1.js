@@ -36,12 +36,16 @@ class DawGranularProcessor extends AudioWorkletProcessor {
     this.pan = new Float32Array(MAX_GRAINS)
     this.port.onmessage = (event) => {
       const data = event.data
+
       if (!data || data.version !== 1) return
+
       if (data.type === 'install') {
         if (!Number.isInteger(data.generation) || data.generation < this.generation || !Array.isArray(data.channels) || !(data.channels[0] instanceof Float32Array)) {
           this.port.postMessage({ type: 'error', version: 1, generation: data.generation || 0, code: 'invalid-install' })
+
           return
         }
+
         this.generation = data.generation
         this.channels[0] = data.channels[0]
         this.channels[1] = data.channels[1] instanceof Float32Array ? data.channels[1] : this.channels[0]
@@ -49,23 +53,30 @@ class DawGranularProcessor extends AudioWorkletProcessor {
         this.nextGrainFrame = 0
         this.active.fill(0)
         this.port.postMessage({ type: 'installed', version: 1, generation: data.generation })
+
         return
       }
+
       if (data.type === 'release' && Number.isInteger(data.generation) && data.generation >= this.generation) {
         this.generation = data.generation
         this.channels[0] = EMPTY
         this.channels[1] = EMPTY
         this.active.fill(0)
+
         return
       }
+
       if (data.type === 'reset-seed') {
         this.seed = (data.seed || 1) >>> 0
         this.nextGrainFrame = 0
         this.active.fill(0)
+
         return
       }
+
       if (data.type === 'freeze') {
         this.freeze = data.freeze === true
+
         if (!this.freeze) this.frozenPosition = -1
       }
     }
@@ -73,31 +84,41 @@ class DawGranularProcessor extends AudioWorkletProcessor {
 
   random() {
     this.seed = (Math.imul(this.seed, 1664525) + 1013904223) >>> 0
+
     return this.seed / 4294967296
   }
 
   window(phase) {
     if (this.windowType === 'tukey') {
       if (phase < 0.25) return 0.5 * (1 - Math.cos(4 * Math.PI * phase))
+
       if (phase > 0.75) return 0.5 * (1 - Math.cos(4 * Math.PI * (1 - phase)))
+
       return 1
     }
+
     if (this.windowType === 'gaussian') {
       const x = (phase - 0.5) / 0.18
+
       return Math.exp(-0.5 * x * x)
     }
+
     return 0.5 - 0.5 * Math.cos(2 * Math.PI * phase)
   }
 
   spawn(frame, parameters) {
     const sourceLength = this.channels[0].length
+
     if (sourceLength === 0) return
     let slot = -1
+
     for (let index = 0; index < this.maxGrains; index += 1) if (this.active[index] === 0) { slot = index; break }
+
     if (slot < 0) return
     const at = (name) => parameters[name].length === 1 ? parameters[name][0] : parameters[name][frame]
     const grainFrames = Math.max(1, Math.round(at('grainSizeMs') * 0.001 * sampleRate))
     const requestedPosition = at('position')
+
     if (this.freeze && this.frozenPosition < 0) this.frozenPosition = requestedPosition
     const position = this.frozenPosition >= 0 ? this.frozenPosition : requestedPosition
     const spread = this.freeze ? 0 : (this.random() * 2 - 1) * at('spray') * sourceLength
@@ -115,23 +136,28 @@ class DawGranularProcessor extends AudioWorkletProcessor {
     const output = outputs[0]
     const left = output[0]
     const right = output[1] || left
+
     for (let frame = 0; frame < left.length; frame += 1) {
       if (this.nextGrainFrame <= 0) {
         this.spawn(frame, parameters)
         const density = parameters.densityHz.length === 1 ? parameters.densityHz[0] : parameters.densityHz[frame]
         this.nextGrainFrame += Math.max(1, sampleRate / density)
       }
+
       this.nextGrainFrame -= 1
       let l = 0
       let r = 0
+
       for (let index = 0; index < this.maxGrains; index += 1) {
         if (this.active[index] === 0) continue
         const cursor = this.cursor[index]
         const base = Math.floor(cursor)
+
         if (base < 0 || base >= this.channels[0].length - 1 || this.age[index] >= this.length[index]) {
           this.active[index] = 0
           continue
         }
+
         const fraction = cursor - base
         const a = this.channels[0][base] * (1 - fraction) + this.channels[0][base + 1] * fraction
         const b = this.channels[1][base] * (1 - fraction) + this.channels[1][base + 1] * fraction
@@ -142,13 +168,16 @@ class DawGranularProcessor extends AudioWorkletProcessor {
         this.cursor[index] += this.step[index]
         this.age[index] += 1
       }
+
       const gate = parameters.gate.length === 1 ? parameters.gate[0] : parameters.gate[frame]
+
       if (right === left) left[frame] = (l + r) * 0.7071067811865476 * gate
       else {
         left[frame] = l * gate
         right[frame] = r * gate
       }
     }
+
     return true
   }
 }

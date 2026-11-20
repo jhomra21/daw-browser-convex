@@ -30,6 +30,7 @@ const nativeFixtureRunnerUrl = new URL('../../build/audio-core-debug/audio-core/
 const legacyModulationWorkletUrl = new URL('../../../public/audio-worklets/daw-modulation-processor-v1.js', import.meta.url)
 const legacyReverbWorkletUrl = new URL('../../../public/audio-worklets/daw-reverb-processor-v1.js', import.meta.url)
 const legacySpectralWorkletUrl = new URL('../../../public/audio-worklets/daw-spectral-processor-v1.js', import.meta.url)
+
 const legacyDynamicsWorkletUrls = {
   gate: new URL('../../../public/audio-worklets/daw-gate-processor-v1.js', import.meta.url),
   compressor: new URL('../../../public/audio-worklets/daw-compressor-processor-v1.js', import.meta.url),
@@ -88,6 +89,7 @@ const renderLegacyReverbFixture = async (
 ) => {
   const source = await Bun.file(legacyReverbWorkletUrl).text()
   const registered = new Map<string, LegacyReverbProcessorConstructor>()
+
   class FakeAudioWorkletProcessor {
     port: LegacyModulationPort = {
       onmessage: null,
@@ -95,40 +97,52 @@ const renderLegacyReverbFixture = async (
       close: () => {},
     }
   }
+
   new Function('AudioWorkletProcessor', 'registerProcessor', 'sampleRate', source)(
     FakeAudioWorkletProcessor,
     (name: string, processor: LegacyReverbProcessorConstructor) => registered.set(name, processor),
     fixture.sampleRateHz,
   )
   const Processor = registered.get('daw-reverb-processor')
+
   if (!Processor) throw new Error('Reverb worklet did not register.')
   const processor = new Processor()
   processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, state: reverb.state } })
+
   if (reset) processor.port.onmessage?.({ data: { type: 'reset', version: 1 } })
+
   const output = [
     new Float32Array(fixture.frames),
     new Float32Array(fixture.frames),
   ]
+
   const mono = new DataView(
     fixture.graph.buffer,
     fixture.graph.byteOffset,
     fixture.graph.byteLength,
   ).getUint32(24 + 12, true) === 1
+
   const input = mono
     ? [fixture.input.subarray(0, fixture.frames)]
     : [
         fixture.input.subarray(0, fixture.frames),
         fixture.input.subarray(fixture.frames, fixture.frames * 2),
       ]
+
   const blockPartitions = fixture.blockPartitions ?? [fixture.frames]
+
   const parameterBlock = (target: number, fallback: number, offset: number, frames: number) => {
     const values = delayParameterValues(fixture, target)
+
     if (!values) return new Float32Array(frames).fill(fallback)
+
     return values.length === 1
       ? new Float32Array(values)
       : Float32Array.from(values.slice(offset, offset + frames))
   }
+
   let offset = 0
+
   for (const blockFrames of blockPartitions) {
     const blockInput = mono
       ? [input[0].subarray(offset, offset + blockFrames)]
@@ -136,10 +150,12 @@ const renderLegacyReverbFixture = async (
           input[0].subarray(offset, offset + blockFrames),
           input[1].subarray(offset, offset + blockFrames),
         ]
+
     const blockOutput = [
       output[0].subarray(offset, offset + blockFrames),
       output[1].subarray(offset, offset + blockFrames),
     ]
+
     processor.process([blockInput], [blockOutput], {
       // The graph fixture ABI defaults an unbound wet target to 0.5.
       'reverb.wet': parameterBlock(10, 0.5, offset, blockFrames),
@@ -150,6 +166,7 @@ const renderLegacyReverbFixture = async (
     })
     offset += blockFrames
   }
+
   return output
 }
 
@@ -160,6 +177,7 @@ const renderLegacyModulationFixture = async (
 ) => {
   const source = await Bun.file(legacyModulationWorkletUrl).text()
   const registered = new Map<string, LegacyModulationProcessorConstructor>()
+
   class FakeAudioWorkletProcessor {
     port: LegacyModulationPort = {
       onmessage: null,
@@ -167,12 +185,14 @@ const renderLegacyModulationFixture = async (
       close: () => {},
     }
   }
+
   new Function('AudioWorkletProcessor', 'registerProcessor', 'sampleRate', source)(
     FakeAudioWorkletProcessor,
     (name: string, processor: LegacyModulationProcessorConstructor) => registered.set(name, processor),
     fixture.sampleRateHz,
   )
   const Constructor = registered.get('daw-modulation-processor')
+
   if (!Constructor) throw new Error('The legacy modulation processor did not register.')
   const processor = new Constructor({ processorOptions: { processorKind: modulation.kind } })
   processor.port.onmessage?.({
@@ -186,24 +206,32 @@ const renderLegacyModulationFixture = async (
   })
   const output = Array.from({ length: fixture.channelCount }, () => new Float32Array(fixture.frames))
   const partitions = fixture.blockPartitions ?? [fixture.frames]
+
   if (reset) {
     let dirtyOffset = 0
+
     for (const frames of partitions) {
       const input = Array.from({ length: fixture.channelCount }, (_, channel) =>
         fixture.input.subarray(channel * fixture.frames + dirtyOffset, channel * fixture.frames + dirtyOffset + frames))
+
       processor.process([input], [output.map(() => new Float32Array(frames))], {})
       dirtyOffset += frames
     }
+
     processor.port.onmessage?.({ data: { type: 'reset', version: 1 } })
   }
+
   let frameOffset = 0
+
   for (const frames of partitions) {
     const input = Array.from({ length: fixture.channelCount }, (_, channel) =>
       fixture.input.subarray(channel * fixture.frames + frameOffset, channel * fixture.frames + frameOffset + frames))
+
     const blockOutput = output.map((plane) => plane.subarray(frameOffset, frameOffset + frames))
     processor.process([input], [blockOutput], {})
     frameOffset += frames
   }
+
   return output
 }
 
@@ -224,6 +252,7 @@ type LegacyDynamicsProcessorConstructor = new () => LegacyDynamicsProcessor
 const legacyDynamicsParameters = (dynamics: PortableLegacyDynamicsFixture) => {
   if (dynamics.kind === 'gate') {
     const state = dynamics.state
+
     return {
       'gate.thresholdDb': Float32Array.of(state.thresholdDb),
       'gate.ratio': Float32Array.of(state.ratio),
@@ -236,8 +265,10 @@ const legacyDynamicsParameters = (dynamics: PortableLegacyDynamicsFixture) => {
       'gate.link': Float32Array.of(state.link),
     }
   }
+
   if (dynamics.kind === 'limiter') {
     const state = dynamics.state
+
     return {
       'limiter.ceiling': Float32Array.of(state.ceilingDbtp),
       'limiter.release': Float32Array.of(state.releaseMs),
@@ -246,6 +277,7 @@ const legacyDynamicsParameters = (dynamics: PortableLegacyDynamicsFixture) => {
       'limiter.detectorOversampling': Float32Array.of(state.detectorOversampling),
     }
   }
+
   return {}
 }
 
@@ -256,6 +288,7 @@ const renderLegacyDynamicsFixture = async (
 ) => {
   const source = await Bun.file(legacyDynamicsWorkletUrls[dynamics.kind]).text()
   const registered = new Map<string, LegacyDynamicsProcessorConstructor>()
+
   class FakeAudioWorkletProcessor {
     port: LegacyModulationPort = {
       onmessage: null,
@@ -263,17 +296,21 @@ const renderLegacyDynamicsFixture = async (
       close: () => {},
     }
   }
+
   new Function('AudioWorkletProcessor', 'registerProcessor', 'sampleRate', source)(
     FakeAudioWorkletProcessor,
     (name: string, processor: LegacyDynamicsProcessorConstructor) => registered.set(name, processor),
     fixture.sampleRateHz,
   )
+
   const processorName = dynamics.kind === 'gate'
     ? 'daw-gate-processor'
     : dynamics.kind === 'compressor'
       ? 'daw-compressor-processor'
       : 'daw-limiter-processor'
+
   const Constructor = registered.get(processorName)
+
   if (!Constructor) throw new Error(`The legacy ${dynamics.kind} processor did not register.`)
   const processor = new Constructor()
   processor.port.onmessage?.({
@@ -283,27 +320,34 @@ const renderLegacyDynamicsFixture = async (
   })
   const output = Array.from({ length: fixture.channelCount }, () => new Float32Array(fixture.frames))
   const partitions = fixture.blockPartitions ?? [fixture.frames]
+
   const render = (target: readonly Float32Array[]) => {
     let frameOffset = 0
+
     for (const frames of partitions) {
       const inputs = Array.from({ length: fixture.inputBusCount }, (_, bus) =>
         Array.from({ length: fixture.channelCount }, (_, channel) => {
           const plane = bus * fixture.channelCount + channel
+
           return fixture.input.subarray(
             plane * fixture.frames + frameOffset,
             plane * fixture.frames + frameOffset + frames,
           )
         }))
+
       const blockOutput = target.map((plane) => plane.subarray(frameOffset, frameOffset + frames))
       processor.process(inputs, [blockOutput], legacyDynamicsParameters(dynamics))
       frameOffset += frames
     }
   }
+
   if (reset && dynamics.kind !== 'compressor') {
     render(output.map(() => new Float32Array(fixture.frames)))
     processor.port.onmessage?.({ data: { type: 'reset', version: 1 } })
   }
+
   render(output)
+
   return output
 }
 
@@ -318,6 +362,7 @@ type LegacySpectralProcessorConstructor = new (
 
 const legacySpectralParameters = (spectral: PortableLegacySpectralFixture) => {
   const state = spectral.state
+
   return {
     'spectral.freeze': Float32Array.of(state.freeze),
     'spectral.gateThresholdDb': Float32Array.of(state.gateThresholdDb),
@@ -340,6 +385,7 @@ const renderLegacySpectralFixture = async (
 ) => {
   const source = await Bun.file(legacySpectralWorkletUrl).text()
   const registered = new Map<string, LegacySpectralProcessorConstructor>()
+
   class FakeAudioWorkletProcessor {
     port: LegacyModulationPort = {
       onmessage: null,
@@ -347,16 +393,20 @@ const renderLegacySpectralFixture = async (
       close: () => {},
     }
   }
+
   new Function('AudioWorkletProcessor', 'registerProcessor', 'sampleRate', source)(
     FakeAudioWorkletProcessor,
     (name: string, processor: LegacySpectralProcessorConstructor) => registered.set(name, processor),
     fixture.sampleRateHz,
   )
   const Constructor = registered.get('daw-spectral-processor')
+
   if (!Constructor) throw new Error('The legacy spectral processor did not register.')
+
   const processor = new Constructor({
     processorOptions: { fftSize: spectral.state.fftSize, overlap: spectral.state.overlap },
   })
+
   processor.port.onmessage?.({
     data: {
       type: 'configure',
@@ -366,34 +416,43 @@ const renderLegacySpectralFixture = async (
   })
   const output = Array.from({ length: fixture.channelCount }, () => new Float32Array(fixture.frames))
   const partitions = fixture.blockPartitions ?? [fixture.frames]
+
   const render = (sourceInput: Float32Array, target: readonly Float32Array[]) => {
     let frameOffset = 0
+
     for (const frames of partitions) {
       for (const edit of spectral.enabledEdits ?? []) {
         if (edit.frame === frameOffset) {
           processor.port.onmessage?.({ data: { type: 'configure', version: 1, state: { ...spectral.state, enabled: edit.enabled } } })
         }
       }
+
       const inputs = Array.from({ length: fixture.inputBusCount }, (_, bus) =>
         Array.from({ length: fixture.channelCount }, (_, channel) => {
           const plane = bus * fixture.channelCount + channel
+
           return sourceInput.subarray(
             plane * fixture.frames + frameOffset,
             plane * fixture.frames + frameOffset + frames,
           )
         }))
+
       const blockOutput = target.map((plane) => plane.subarray(frameOffset, frameOffset + frames))
       processor.process(inputs, [blockOutput], legacySpectralParameters(spectral))
       frameOffset += frames
     }
   }
+
   if (attemptStateRestore) {
     const dirtyInput = fixture.stateRestoreDirtyInput
+
     if (!dirtyInput) throw new Error(`${fixture.name} does not define state-restore dirty input.`)
     render(dirtyInput, output.map(() => new Float32Array(fixture.frames)))
     processor.port.onmessage?.({ data: { type: 'reset', version: 1 } })
   }
+
   render(fixture.input, output)
+
   return output
 }
 
@@ -422,6 +481,7 @@ const legacyBiquadCoefficients = (
   const alpha = Math.sin(omega) / (2 * 0.707)
   const a0 = 1 + alpha
   const highpass = type === 'highpass'
+
   return {
     b0: (highpass ? (1 + cosine) / 2 : (1 - cosine) / 2) / a0,
     b1: (highpass ? -(1 + cosine) : 1 - cosine) / a0,
@@ -441,10 +501,12 @@ const renderLegacyBiquad = (
     + coefficients.b2 * state.x2
     - coefficients.a1 * state.y1
     - coefficients.a2 * state.y2
+
   state.x2 = state.x1
   state.x1 = input
   state.y2 = state.y1
   state.y1 = output
+
   return output
 }
 
@@ -453,18 +515,23 @@ const delayParameterValues = (
   target: number,
 ) => {
   const parameters = fixture.parameters
+
   if (!parameters) return undefined
   const view = new DataView(parameters.buffer, parameters.byteOffset, parameters.byteLength)
   const envelopeCount = view.getUint32(0, true)
   let offset = 4
+
   for (let envelope = 0; envelope < envelopeCount; envelope += 1) {
     const frameCount = view.getUint32(offset + 8, true)
     const parameterTarget = view.getUint32(offset + 16, true)
+
     if (parameterTarget === target) {
       return Array.from({ length: frameCount }, (_, frame) => view.getFloat32(offset + 20 + frame * 4, true))
     }
+
     offset += 20 + frameCount * 4
   }
+
   return undefined
 }
 
@@ -472,6 +539,7 @@ const delayParameterValues = (
 const legacyDelayContext = () => {
   const param = () => ({ value: 0 })
   const node = () => Object.create(null)
+
   return Object.assign(Object.create(null), {
     createGain: () => Object.assign(node(), { gain: param() }),
     createDelay: () => Object.assign(node(), { delayTime: param() }),
@@ -494,6 +562,7 @@ const renderLegacyDelayFixture = (
   const state = delay.state
   const context = legacyDelayContext()
   const lifecycle = createDelayChainState()
+
   const setEnabled = (enabled: boolean) => lifecycle.set(context, {
     enabled,
     mode: 'time',
@@ -506,6 +575,7 @@ const renderLegacyDelayFixture = (
     lowCutHz: state.lowCutHz,
     highCutHz: state.highCutHz,
   }, 120)
+
   setEnabled(state.enabled)
   const delayValues = delayParameterValues(fixture, 5)
   const feedbackValues = delayParameterValues(fixture, 6)
@@ -514,33 +584,42 @@ const renderLegacyDelayFixture = (
   const highCutValues = delayParameterValues(fixture, 9)
   const maximumDelayMs = Math.max(state.delayMs, ...(delayValues ?? []))
   const bufferLength = Math.ceil(Math.min(3_000, maximumDelayMs) * fixture.sampleRateHz / 1_000) + 2
+
   const emptyHistory = () => ({
     buffers: Array.from({ length: fixture.channelCount }, () => new Float64Array(bufferLength)),
     highpassStates: Array.from({ length: fixture.channelCount }, (): BiquadState => ({ x1: 0, x2: 0, y1: 0, y2: 0 })),
     lowpassStates: Array.from({ length: fixture.channelCount }, (): BiquadState => ({ x1: 0, x2: 0, y1: 0, y2: 0 })),
   })
+
   let running = lifecycle.chain()
   let { buffers, highpassStates, lowpassStates } = emptyHistory()
   const output = Array.from({ length: fixture.channelCount }, () => new Float32Array(fixture.frames))
   let write = 0
+
   for (let frame = 0; frame < fixture.frames; frame += 1) {
     for (const edit of delay.enabledEdits ?? []) {
       if (edit.frame === frame) setEnabled(edit.enabled)
     }
+
     const chain = lifecycle.chain()
+
     // A chain the state built anew starts from empty lines.
     if (chain !== running) {
       running = chain
       ;({ buffers, highpassStates, lowpassStates } = emptyHistory())
       write = 0
     }
+
     if (!chain) {
       for (let channel = 0; channel < fixture.channelCount; channel += 1) {
         const plane = output[channel]
+
         if (plane) plane[frame] = fixture.input[channel * fixture.frames + frame] ?? 0
       }
+
       continue
     }
+
     const delayFrames = Math.max(1, Math.min(3_000, delayValues?.[frame] ?? state.delayMs) * fixture.sampleRateHz / 1_000)
     const delayBase = Math.floor(write - delayFrames)
     const delayFraction = write - delayFrames - delayBase
@@ -549,31 +628,40 @@ const renderLegacyDelayFixture = (
     const highCut = state.filterEnabled ? Math.max(1_000, Math.min(20_000, highCutValues?.[frame] ?? state.highCutHz)) : 20_000
     const highpass = legacyBiquadCoefficients('highpass', lowCut, fixture.sampleRateHz)
     const lowpass = legacyBiquadCoefficients('lowpass', highCut, fixture.sampleRateHz)
+
     const wet = buffers.map((buffer, channel) => {
       const raw = (buffer[readIndex(delayBase)] ?? 0)
         + ((buffer[readIndex(delayBase + 1)] ?? 0) - (buffer[readIndex(delayBase)] ?? 0)) * delayFraction
+
       return renderLegacyBiquad(
         renderLegacyBiquad(raw, highpass, highpassStates[channel]),
         lowpass,
         lowpassStates[channel],
       )
     })
+
     for (let channel = 0; channel < fixture.channelCount; channel += 1) {
       const dry = fixture.input[channel * fixture.frames + frame] ?? 0
       const feedbackChannel = state.pingPong ? (channel + 1) % fixture.channelCount : channel
       const feedback = wet[feedbackChannel] ?? 0
       const buffer = buffers[channel]
+
       if (buffer) buffer[write] = dry + feedback * Math.max(0, Math.min(0.95, feedbackValues?.[frame] ?? state.feedback))
       const plane = output[channel]
+
       // The chain's own gains: wet only while enabled, dry alone otherwise.
       const wetGain = chain.enabled
         ? Math.max(0, Math.min(1, dryWetValues?.[frame] ?? chain.wetGain.gain.value))
         : chain.wetGain.gain.value
+
       const dryGain = chain.enabled ? 1 - wetGain : chain.dryGain.gain.value
+
       if (plane) plane[frame] = dry * dryGain + (wet[channel] ?? 0) * wetGain
     }
+
     write = (write + 1) % bufferLength
   }
+
   return output
 }
 
@@ -581,6 +669,7 @@ test('the production Wasm artifact omits native and fixture-only exports', async
   const bytes = await Bun.file(artifactUrl).arrayBuffer()
   const instance = await WebAssembly.instantiate(bytes)
   const exports = Object.keys(instance.instance.exports)
+
   for (const absent of [
     'RegisterNativeGraphHook',
     'daw_audio_core_register_native_graph_hook',
@@ -601,6 +690,7 @@ test('the production Wasm artifact omits native and fixture-only exports', async
 test('the structs the browser host writes at literal offsets have the wasm32 layout it assumes', async () => {
   const instance = await WebAssembly.instantiate(await Bun.file(fixtureArtifactUrl).arrayBuffer())
   const layout = instance.instance.exports.daw_audio_core_wasm_harness_struct_layout
+
   if (!isWasmFunctionExport(layout)) throw new Error('The struct layout export is unavailable.')
   const reported = Array.from({ length: 28 }, (_, index) => layout(index))
   expect(layout(28)).toBe(-1)
@@ -619,10 +709,12 @@ test('the structs the browser host writes at literal offsets have the wasm32 lay
 test('the fixed-memory Wasm artifact matches the Utility fixture vector', async () => {
   const bytes = await Bun.file(artifactUrl).arrayBuffer()
   const manifest = wasmArtifactManifestSchema.parse(await Bun.file(manifestUrl).json())
+
   const hash = Array.from(
     new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)),
     (byte) => byte.toString(16).padStart(2, '0'),
   ).join('')
+
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
 
@@ -644,6 +736,7 @@ test('the fixed-memory Wasm artifact matches the Utility fixture vector', async 
   expect(new Uint8Array(await Bun.file(publicArtifactUrl).arrayBuffer())).toEqual(new Uint8Array(bytes))
   expect(await Bun.file(publicManifestUrl).json()).toEqual(manifest)
   expect(exports.memory).toBeInstanceOf(WebAssembly.Memory)
+
   if (!(exports.memory instanceof WebAssembly.Memory)
     || !isWasmFunctionExport(exports.malloc)
     || !isWasmFunctionExport(exports.free)
@@ -675,22 +768,28 @@ test('the fixed-memory Wasm artifact matches the Utility fixture vector', async 
   expect(exports.daw_audio_core_wasm_utility_initialize(48_000, 1)).toBe(0)
 
   const headroomExports = (await WebAssembly.instantiate(bytes)).instance.exports
+
   if (!isWasmFunctionExport(headroomExports.daw_audio_core_wasm_graph_initialize_planar)
     || !isWasmFunctionExport(headroomExports.malloc)
     || !isWasmFunctionExport(headroomExports.free)) {
     throw new Error('The Wasm artifact does not expose the headroom regression ABI.')
   }
+
   expect(headroomExports.daw_audio_core_wasm_graph_initialize_planar(48_000, 128, 2, 8, 64)).toBe(0)
   const postInitializeAsset = headroomExports.malloc(16_000_000)
+
   if (postInitializeAsset === 0) {
     throw new Error('The fixed-memory Wasm artifact could not allocate ordinary PCM asset headroom after graph initialization.')
   }
+
   headroomExports.free(postInitializeAsset)
 
   const inputBytes = Float32Array.BYTES_PER_ELEMENT * 4
   const stateBytes = 40
   const allocation = exports.malloc(inputBytes + stateBytes)
+
   if (allocation === 0) throw new Error('The Wasm artifact could not allocate its fixture buffers.')
+
   try {
     const memory = new DataView(exports.memory.buffer)
     const leftInput = allocation
@@ -723,6 +822,7 @@ test('the Wasm recording capture bridge keeps bounded block output and diagnosti
   const bytes = await Bun.file(artifactUrl).arrayBuffer()
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
+
   if (!(exports.memory instanceof WebAssembly.Memory)
     || !isWasmFunctionExport(exports.malloc)
     || !isWasmFunctionExport(exports.free)
@@ -733,8 +833,11 @@ test('the Wasm recording capture bridge keeps bounded block output and diagnosti
     || !isWasmFunctionExport(exports.daw_audio_core_wasm_recording_capture_get_diagnostics)) {
     throw new Error('The recording capture Wasm bridge exports are unavailable.')
   }
+
   const allocation = exports.malloc(56 + 8 + 3 * Float32Array.BYTES_PER_ELEMENT + 56 + 60)
+
   if (allocation === 0) throw new Error('Could not allocate recording capture fixture.')
+
   try {
     const config = allocation
     const pointers = config + 56
@@ -776,6 +879,7 @@ test('the Wasm graph bridge matches the portable processor envelope contract', a
   const bytes = await Bun.file(artifactUrl).arrayBuffer()
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
+
   if (!(exports.memory instanceof WebAssembly.Memory)
     || !isWasmFunctionExport(exports.malloc)
     || !isWasmFunctionExport(exports.free)
@@ -822,7 +926,9 @@ test('the Wasm graph bridge matches the portable processor envelope contract', a
   view.setFloat32(processor + 68, 0, true)
   view.setFloat32(processor + 72, 1, true)
   const allocation = exports.malloc(graph.byteLength + Float32Array.BYTES_PER_ELEMENT * 8)
+
   if (allocation === 0) throw new Error('The Wasm graph bridge could not allocate fixture buffers.')
+
   try {
     new Uint8Array(exports.memory.buffer, allocation, graph.byteLength).set(graph)
     expect(exports.daw_audio_core_wasm_graph_prepare(allocation, graph.byteLength - 1)).toBe(1)
@@ -847,6 +953,7 @@ test('the planar graph bridge validates bounded buses and forwards epoch-scoped 
   const bytes = await Bun.file(artifactUrl).arrayBuffer()
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
+
   if (!(exports.memory instanceof WebAssembly.Memory)
     || !isWasmFunctionExport(exports.malloc)
     || !isWasmFunctionExport(exports.free)
@@ -863,6 +970,7 @@ test('the planar graph bridge validates bounded buses and forwards epoch-scoped 
   graphView.setUint32(4, 1, true)
   graphView.setUint32(8, 2, true)
   graphView.setUint32(12, 1, true)
+
   const writeNode = (offset: number, id: bigint, kind: number, bus: number, instrument: boolean) => {
     graphView.setBigUint64(offset, id, true)
     graphView.setUint32(offset + 8, kind, true)
@@ -875,6 +983,7 @@ test('the planar graph bridge validates bounded buses and forwards epoch-scoped 
     graphView.setUint32(offset + 40, instrument ? 1 : 0, true)
     graphView.setUint32(offset + 44, 1, true)
   }
+
   writeNode(24, 1n, 2, 0, true)
   writeNode(132, 2n, 6, 0, false)
   const edge = 240
@@ -885,7 +994,9 @@ test('the planar graph bridge validates bounded buses and forwards epoch-scoped 
   graphView.setUint32(edge + 36, 3, true)
 
   const allocation = exports.malloc(graph.byteLength + 8 * 4 + 4 * Float32Array.BYTES_PER_ELEMENT + 4 + 48)
+
   if (allocation === 0) throw new Error('The planar graph bridge could not allocate fixture buffers.')
+
   try {
     new Uint8Array(exports.memory.buffer, allocation, graph.byteLength).set(graph)
     expect(exports.daw_audio_core_wasm_graph_prepare(allocation, graph.byteLength)).toBe(0)
@@ -894,6 +1005,7 @@ test('the planar graph bridge validates bounded buses and forwards epoch-scoped 
     const pointers = allocation + graph.byteLength
     const planes = pointers + 8 * 4
     const view = new DataView(exports.memory.buffer)
+
     for (let index = 0; index < 4; index += 1) view.setUint32(pointers + index * 4, planes + index * 4, true)
     view.setUint32(pointers + 4 * 4, planes + 2 * 4, true)
     view.setUint32(pointers + 5 * 4, planes + 3 * 4, true)
@@ -921,6 +1033,7 @@ test('the planar graph bridge preserves eager channels above the paged ABI limit
   const bytes = await Bun.file(artifactUrl).arrayBuffer()
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
+
   if (!(exports.memory instanceof WebAssembly.Memory)
     || !isWasmFunctionExport(exports.malloc)
     || !isWasmFunctionExport(exports.free)
@@ -935,6 +1048,7 @@ test('the planar graph bridge preserves eager channels above the paged ABI limit
     || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_process_planar)) {
     throw new Error('The planar eager-asset graph bridge exports are unavailable.')
   }
+
   expect(exports.daw_audio_core_wasm_graph_initialize_planar(48_000, 1, 1, 3, 2)).toBe(0)
 
   const graph = new Uint8Array(24 + 2 * 28 + 48)
@@ -958,7 +1072,9 @@ test('the planar graph bridge preserves eager channels above the paged ABI limit
   graphView.setUint32(116, 3, true)
 
   const allocation = exports.malloc(graph.byteLength + 3 * 4 + 3 * 4 + 8 + 3 * 4 + 3 * 4)
+
   if (allocation === 0) throw new Error('Could not allocate planar eager-asset buffers.')
+
   try {
     const graphOffset = allocation
     const asset0Offset = graphOffset + graph.byteLength
@@ -1013,6 +1129,7 @@ test('the production Wasm graph bridge renders curved fades and silence after a 
   const bytes = await Bun.file(artifactUrl).arrayBuffer()
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
+
   if (!(exports.memory instanceof WebAssembly.Memory)
     || !isWasmFunctionExport(exports.malloc)
     || !isWasmFunctionExport(exports.free)
@@ -1025,6 +1142,7 @@ test('the production Wasm graph bridge renders curved fades and silence after a 
     || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_process_planar)) {
     throw new Error('The sample-source graph bridge exports are unavailable.')
   }
+
   expect(exports.daw_audio_core_wasm_graph_initialize_planar(48_000, 4, 1, 2, 1)).toBe(0)
 
   const graph = new Uint8Array(24 + 2 * 108 + 48)
@@ -1049,13 +1167,16 @@ test('the production Wasm graph bridge renders curved fades and silence after a 
 
   const assetFrames = 8
   const processFrames = 4
+
   const allocation = exports.malloc(
     graph.byteLength
     + assetFrames * 2 * Float32Array.BYTES_PER_ELEMENT
     + 3 * BigUint64Array.BYTES_PER_ELEMENT
     + processFrames * 2 * Float32Array.BYTES_PER_ELEMENT,
   )
+
   if (allocation === 0) throw new Error('Could not allocate pause regression buffers.')
+
   try {
     const graphOffset = allocation
     const leftAssetOffset = graphOffset + graph.byteLength
@@ -1119,6 +1240,7 @@ test('the Wasm graph bridge renders asset-backed sampler voices', async () => {
   const bytes = await Bun.file(artifactUrl).arrayBuffer()
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
+
   if (!(exports.memory instanceof WebAssembly.Memory)
     || !isWasmFunctionExport(exports.malloc)
     || !isWasmFunctionExport(exports.free)
@@ -1127,6 +1249,7 @@ test('the Wasm graph bridge renders asset-backed sampler voices', async () => {
     || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_process_planar)) {
     throw new Error('The sampler graph bridge exports are unavailable.')
   }
+
   expect(exports.daw_audio_core_wasm_graph_initialize_planar(48_000, 4, 1, 2, 1)).toBe(0)
   const graph = new Uint8Array(24 + 2 * 108 + 48)
   const graphView = new DataView(graph.buffer)
@@ -1152,7 +1275,9 @@ test('the Wasm graph bridge renders asset-backed sampler voices', async () => {
   graphView.setFloat32(272, 1, true)
   graphView.setUint32(276, 3, true)
   const allocation = exports.malloc(graph.byteLength + 4 * 4 + 4 + 8 + 88 + 80 + 8 * 4 + 52)
+
   if (allocation === 0) throw new Error('Could not allocate sampler bridge fixture.')
+
   try {
     const graphOffset = allocation
     const sampleOffset = graphOffset + graph.byteLength
@@ -1164,6 +1289,7 @@ test('the Wasm graph bridge renders asset-backed sampler voices', async () => {
     const eventsOffset = pointersOffset + 8 * 4
     new Uint8Array(exports.memory.buffer, graphOffset, graph.byteLength).set(graph)
     const view = new DataView(exports.memory.buffer)
+
     for (let index = 0; index < 4; index += 1) view.setFloat32(sampleOffset + index * 4, 0.25 * (index + 1), true)
     view.setUint32(planesOffset, sampleOffset, true)
     expect(exports.daw_audio_core_wasm_graph_prepare(graphOffset, graph.byteLength)).toBe(0)
@@ -1228,6 +1354,7 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
   const bytes = await Bun.file(fixtureArtifactUrl).arrayBuffer()
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
+
   if (!(exports.memory instanceof WebAssembly.Memory)
     || !isWasmFunctionExport(exports.malloc)
     || !isWasmFunctionExport(exports.free)
@@ -1235,63 +1362,83 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
     || !isWasmFunctionExport(exports.daw_audio_core_run_graph_fixture)) {
     throw new Error('The shared graph fixture runner exports are unavailable.')
   }
+
   expect(exports.daw_audio_core_graph_fixture_protocol_version()).toBe(3)
 
   const characterizationPairs = new Map<string, readonly Float32Array[]>()
+
   for (const fixture of portableGraphParityFixtures) {
     const fixtureBytes = encodePortableGraphParityFixture(fixture)
     const pointerBytes = fixture.channelCount * Uint32Array.BYTES_PER_ELEMENT
     const outputBytes = fixture.channelCount * fixture.frames * Float32Array.BYTES_PER_ELEMENT
     const allocation = exports.malloc(fixtureBytes.byteLength + pointerBytes + outputBytes)
+
     if (allocation === 0) throw new Error(`Could not allocate ${fixture.name}.`)
+
     try {
       const fixtureOffset = allocation
       const pointersOffset = fixtureOffset + fixtureBytes.byteLength
       const outputOffset = pointersOffset + pointerBytes
       new Uint8Array(exports.memory.buffer, fixtureOffset, fixtureBytes.byteLength).set(fixtureBytes)
       const memory = new DataView(exports.memory.buffer)
+
       for (let channel = 0; channel < fixture.channelCount; channel += 1) {
         memory.setUint32(pointersOffset + channel * Uint32Array.BYTES_PER_ELEMENT,
           outputOffset + channel * fixture.frames * Float32Array.BYTES_PER_ELEMENT, true)
       }
+
       const result = exports.daw_audio_core_run_graph_fixture(fixtureOffset, fixtureBytes.byteLength, pointersOffset)
+
       if (fixture.expectedResult === 'reject') {
         expect(result).not.toBe(0)
+
         const native = Bun.spawnSync({
           cmd: [nativeFixtureRunnerUrl.pathname],
           stdin: fixtureBytes,
           stdout: 'pipe',
         })
+
         expect(native.exitCode).toBe(3)
         continue
       }
+
       if (result !== 0) throw new Error(`Graph fixture ${fixture.name} failed with result ${result}.`)
+
       if (fixture.expectedLatencyFrames !== undefined || fixture.expectedTailFrames !== undefined) {
         const graphView = new DataView(fixture.graph.buffer, fixture.graph.byteOffset, fixture.graph.byteLength)
         const nodeCount = graphView.getUint32(8, true)
         const edgeCount = graphView.getUint32(12, true)
         const processorOffset = 24 + nodeCount * 132 + edgeCount * 48
         const processorNodeId = graphView.getBigUint64(processorOffset, true)
+
         const processorNodeIndex = Array.from({ length: nodeCount }, (_, index) => index)
           .find((index) => graphView.getBigUint64(24 + index * 132, true) === processorNodeId)
+
         if (processorNodeIndex === undefined) throw new Error(`${fixture.name} processor node is unavailable.`)
         expect(graphView.getUint32(processorOffset + 40, true)).toBe(fixture.expectedLatencyFrames ?? 0)
         expect(graphView.getUint32(processorOffset + 44, true)).toBe(fixture.expectedTailFrames ?? 0)
         expect(graphView.getUint32(24 + processorNodeIndex * 132 + 24, true)).toBe(fixture.expectedLatencyFrames ?? 0)
       }
+
       const output = Array.from({ length: fixture.channelCount }, (_, channel) =>
         new Float32Array(exports.memory.buffer,
           outputOffset + channel * fixture.frames * Float32Array.BYTES_PER_ELEMENT, fixture.frames).slice())
+
       if (!fixture.assertOutput(output)) throw new Error(`Graph fixture ${fixture.name} produced an unexpected output: ${JSON.stringify(output.map((plane) => [...plane]))}`)
+
       if (fixture.characterizationPairKey) {
         const previous = characterizationPairs.get(fixture.characterizationPairKey)
+
         if (previous) {
           const difference = maximumDifference(previous, output)
           const minimum = fixture.characterizationPairDifferenceMinimum ?? 0
+
           if (difference < minimum) {
             throw new Error(`${fixture.name} characterization pair ${fixture.characterizationPairKey} difference ${difference} did not exceed ${minimum}.`)
           }
+
           const maximum = fixture.characterizationPairDifferenceMaximum
+
           if (maximum !== undefined && difference > maximum) {
             throw new Error(`${fixture.name} characterization pair ${fixture.characterizationPairKey} difference ${difference} exceeded ${maximum}.`)
           }
@@ -1299,17 +1446,21 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
           characterizationPairs.set(fixture.characterizationPairKey, output)
         }
       }
+
       if (fixture.assertReset) {
         expect(exports.daw_audio_core_run_graph_fixture(fixtureOffset, fixtureBytes.byteLength, pointersOffset)).toBe(0)
+
         for (let channel = 0; channel < fixture.channelCount; channel += 1) {
           const resetOutput = new Float32Array(
             exports.memory.buffer,
             outputOffset + channel * fixture.frames * Float32Array.BYTES_PER_ELEMENT,
             fixture.frames,
           )
+
           expect(resetOutput).toEqual(output[channel] ?? new Float32Array())
         }
       }
+
       const native = Bun.spawnSync({
         cmd: fixture.assertReset
           ? [nativeFixtureRunnerUrl.pathname, '--repeat']
@@ -1317,118 +1468,149 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
         stdin: fixtureBytes,
         stdout: 'pipe',
       })
+
       expect(native.exitCode).toBe(0)
       const nativeOutput = new Float32Array(native.stdout.buffer, native.stdout.byteOffset, native.stdout.byteLength / Float32Array.BYTES_PER_ELEMENT)
       expect(nativeOutput.length).toBe(fixture.channelCount * fixture.frames)
       let maximumNativeWasmDifference = 0
+
       for (let index = 0; index < nativeOutput.length; index += 1) {
         const wasmSample = output[Math.floor(index / fixture.frames)]?.[index % fixture.frames] ?? 0
         const nativeSample = nativeOutput[index] ?? 0
+
         if (fixture.nativeWasmTolerance !== undefined || fixture.processorKind === 'saturator' || fixture.processorKind === 'eq') {
           maximumNativeWasmDifference = Math.max(maximumNativeWasmDifference, Math.abs(wasmSample - nativeSample))
         } else {
           expect(wasmSample).toBeCloseTo(nativeSample, 6)
         }
       }
+
       const nativeWasmTolerance = fixture.nativeWasmTolerance ?? 5e-5
+
       if (maximumNativeWasmDifference > nativeWasmTolerance) {
         throw new Error(`${fixture.name} native/Wasm difference ${maximumNativeWasmDifference} exceeded ${nativeWasmTolerance}.`)
       }
+
       if (fixture.legacyModulation) {
         const legacyOutput = await renderLegacyModulationFixture(fixture, fixture.legacyModulation)
         const legacyDifference = maximumDifference(output, legacyOutput, fixture.legacyStartFrame)
         const legacyTolerance = fixture.legacyTolerance ?? 5e-4
+
         if (legacyDifference > legacyTolerance) {
           throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} exceeded ${legacyTolerance}.`)
         }
+
         if (fixture.assertReset) {
           expect(await renderLegacyModulationFixture(fixture, fixture.legacyModulation, true)).toEqual(legacyOutput)
         }
       }
+
       if (fixture.legacyDynamics) {
         const legacyOutput = await renderLegacyDynamicsFixture(fixture, fixture.legacyDynamics)
         const legacyDifference = maximumDifference(output, legacyOutput)
+
         if (fixture.legacyDifferenceMinimum !== undefined) {
           if (legacyDifference < fixture.legacyDifferenceMinimum) {
             throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} did not prove the expected mismatch ${fixture.legacyDifferenceMinimum}.`)
           }
         } else {
           const legacyTolerance = fixture.legacyTolerance ?? 5e-4
+
           if (legacyDifference > legacyTolerance) {
             throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} exceeded ${legacyTolerance}.`)
           }
         }
+
         if (fixture.assertReset && fixture.legacyDynamics.kind !== 'compressor') {
           expect(await renderLegacyDynamicsFixture(fixture, fixture.legacyDynamics, true)).toEqual(legacyOutput)
         }
       }
+
       if (fixture.legacyDelay) {
         const legacyOutput = renderLegacyDelayFixture(fixture, fixture.legacyDelay)
         const legacyDifference = maximumDifference(output, legacyOutput, fixture.legacyStartFrame)
         const legacyTolerance = fixture.legacyTolerance ?? 5e-4
+
         if (legacyDifference > legacyTolerance) {
           throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} exceeded ${legacyTolerance}.`)
         }
+
         if (fixture.assertReset) {
           expect(renderLegacyDelayFixture(fixture, fixture.legacyDelay)).toEqual(legacyOutput)
         }
       }
+
       if (fixture.legacyReverb) {
         const legacyOutput = await renderLegacyReverbFixture(fixture, fixture.legacyReverb)
         const legacyDifference = maximumDifference(output, legacyOutput)
         const legacyTolerance = fixture.legacyTolerance ?? 5e-4
+
         if (legacyDifference > legacyTolerance) {
           throw new Error(`${fixture.name} portable/browser-worklet difference ${legacyDifference} exceeded ${legacyTolerance}.`)
         }
+
         if (fixture.assertReset) {
           expect(await renderLegacyReverbFixture(fixture, fixture.legacyReverb, true)).toEqual(legacyOutput)
         }
       }
+
       if (fixture.legacySpectral) {
         const legacyOutput = await renderLegacySpectralFixture(fixture, fixture.legacySpectral)
         const legacyDifference = maximumDifference(output, legacyOutput, fixture.legacyStartFrame)
         const legacyTolerance = fixture.legacyTolerance ?? 5e-4
+
         if (legacyDifference > legacyTolerance) {
           throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} exceeded ${legacyTolerance}.`)
         }
+
         if (fixture.stateRestoreDirtyInput) {
           const stateRestoreOutput = await renderLegacySpectralFixture(fixture, fixture.legacySpectral, true)
           const stateRestoreDifference = maximumDifference(output, stateRestoreOutput)
+
           if (stateRestoreDifference > legacyTolerance) {
             throw new Error(`${fixture.name} portable/legacy state-restore difference ${stateRestoreDifference} exceeded ${legacyTolerance}.`)
           }
         }
       }
+
       if (fixture.blockPartitions) {
         // A graph edit lands before the block that starts at its frame, so the reference keeps one block per
         // stretch between edits; without edits it is a single block.
         const editBoundaries = [0, ...(fixture.graphEdits ?? []).map((edit) => edit.frame), fixture.frames]
+
         const referencePartitions = editBoundaries
           .slice(1)
           .flatMap((end, index) => {
             const length = end - (editBoundaries[index] ?? 0)
+
             return length > 0 ? [length] : []
           })
+
         const referenceBytes = encodePortableGraphParityFixture({
           ...fixture,
           maxFramesPerBlock: Math.max(...referencePartitions),
           blockPartitions: fixture.graphEdits ? referencePartitions : undefined,
         })
+
         new Uint8Array(exports.memory.buffer, fixtureOffset, referenceBytes.byteLength).set(referenceBytes)
         expect(exports.daw_audio_core_run_graph_fixture(fixtureOffset, referenceBytes.byteLength, pointersOffset)).toBe(0)
+
         for (let channel = 0; channel < fixture.channelCount; channel += 1) {
           const referenceOutput = new Float32Array(
             exports.memory.buffer,
             outputOffset + channel * fixture.frames * Float32Array.BYTES_PER_ELEMENT,
             fixture.frames,
           )
+
           expect(referenceOutput).toEqual(output[channel] ?? new Float32Array())
         }
+
         const nativeReference = Bun.spawnSync({
           cmd: [nativeFixtureRunnerUrl.pathname],
           stdin: referenceBytes,
           stdout: 'pipe',
         })
+
         expect(nativeReference.exitCode).toBe(0)
         expect(new Float32Array(
           nativeReference.stdout.buffer,
@@ -1446,6 +1628,7 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
 
 test('the shared graph fixture wire preserves portable tap, latency, and PDC declarations', () => {
   const fixture = portableGraphParityFixtures.find((candidate) => candidate.name === 'groups-returns-master-all-send-taps-sidechain-disabled-latency')
+
   if (!fixture) throw new Error('The topology fixture is unavailable.')
   const graph = fixture.graph
   const view = new DataView(graph.buffer, graph.byteOffset, graph.byteLength)
@@ -1464,51 +1647,64 @@ test('the shared graph fixture wire preserves portable tap, latency, and PDC dec
 
 test('the shared graph fixture runner rejects excess asset definitions on both targets', async () => {
   const fixture = portableGraphParityFixtures.find((candidate) => candidate.name === 'sampler-asset-loop-midi')
+
   if (!fixture) throw new Error('The sampler fixture is unavailable.')
   const fixtureBytes = encodePortableGraphParityFixture(fixture)
+
   const sectionOffset = 80 + fixture.graph.byteLength + fixture.input.byteLength
     + new DataView(fixtureBytes.buffer).getUint32(36, true)
     + new DataView(fixtureBytes.buffer).getUint32(40, true)
     + new DataView(fixtureBytes.buffer).getUint32(44, true)
+
   new DataView(fixtureBytes.buffer).setUint32(sectionOffset, 5, true)
 
   const bytes = await Bun.file(fixtureArtifactUrl).arrayBuffer()
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
+
   if (!(exports.memory instanceof WebAssembly.Memory)
     || !isWasmFunctionExport(exports.malloc)
     || !isWasmFunctionExport(exports.free)
     || !isWasmFunctionExport(exports.daw_audio_core_run_graph_fixture)) {
     throw new Error('The shared graph fixture runner exports are unavailable.')
   }
+
   const allocation = exports.malloc(fixtureBytes.byteLength + fixture.channelCount * Uint32Array.BYTES_PER_ELEMENT
     + fixture.channelCount * fixture.frames * Float32Array.BYTES_PER_ELEMENT)
+
   if (allocation === 0) throw new Error('Could not allocate malformed fixture.')
+
   try {
     const pointersOffset = allocation + fixtureBytes.byteLength
     const outputOffset = pointersOffset + fixture.channelCount * Uint32Array.BYTES_PER_ELEMENT
     new Uint8Array(exports.memory.buffer, allocation, fixtureBytes.byteLength).set(fixtureBytes)
     const memory = new DataView(exports.memory.buffer)
+
     for (let channel = 0; channel < fixture.channelCount; channel += 1) {
       memory.setUint32(pointersOffset + channel * Uint32Array.BYTES_PER_ELEMENT,
         outputOffset + channel * fixture.frames * Float32Array.BYTES_PER_ELEMENT, true)
     }
+
     expect(exports.daw_audio_core_run_graph_fixture(allocation, fixtureBytes.byteLength, pointersOffset)).not.toBe(0)
   } finally {
     exports.free(allocation)
   }
+
   const native = Bun.spawnSync({
     cmd: [nativeFixtureRunnerUrl.pathname],
     stdin: fixtureBytes,
     stdout: 'pipe',
   })
+
   expect(native.exitCode).toBe(3)
 })
 
 test('the backend capability matrix is covered by executable graph fixtures', () => {
   const capabilities = new Set(portableGraphParityFixtures.map((fixture) => fixture.capability))
+
   const processorKinds = new Set(portableGraphParityFixtures.flatMap((fixture) =>
     fixture.processorKind && fixture.portableEligible !== false ? [fixture.processorKind] : []))
+
   expect(portableWasmCapabilityMatrix.chains && capabilities.has('chains')).toBe(true)
   expect(portableWasmCapabilityMatrix.fullBlockAutomation && capabilities.has('fullBlockAutomation')).toBe(true)
   expect(portableWasmCapabilityMatrix.processorEvents && capabilities.has('fullBlockAutomation')).toBe(true)
@@ -1536,6 +1732,7 @@ test('the backend capability matrix is covered by executable graph fixtures', ()
 
 test('the reverb impulse characterization inspects each planar channel', () => {
   const fixture = portableGraphParityFixtures.find((candidate) => candidate.name === 'reverb-impulse-partitions-reset')
+
   if (!fixture) throw new Error('The reverb impulse fixture is unavailable.')
   expect(isPlanarImpulseFixtureInput(fixture.input, fixture.channelCount)).toBe(true)
   expect(fixture.input.slice(2).every((sample) => sample === 0)).toBe(false)
@@ -1544,14 +1741,17 @@ test('the reverb impulse characterization inspects each planar channel', () => {
 test('the browser reverb worklet stays bounded under sustained input and emits a tail', async () => {
   const base = portableGraphParityFixtures.find((candidate) => candidate.name === 'reverb-sine-48000')
   const state = base?.legacyReverb?.state
+
   if (!base || !state) throw new Error('The reverb worklet characterization state is unavailable.')
   const frames = 3 * 48_000
   const sustainedFrames = 2 * 48_000
   const input = new Float32Array(frames * 2)
+
   for (let frame = 0; frame < sustainedFrames; frame += 1) {
     input[frame] = 0.25
     input[frames + frame] = -0.125
   }
+
   const fixture: PortableGraphParityFixture = {
     ...base,
     name: 'reverb-worklet-sustained-bounded-tail',
@@ -1561,19 +1761,23 @@ test('the browser reverb worklet stays bounded under sustained input and emits a
     blockPartitions: [...Array.from({ length: 35 }, () => 4_096), 640],
     legacyReverb: { state: { ...state, decaySec: 2.2 } },
   }
+
   const output = await renderLegacyReverbFixture(fixture, fixture.legacyReverb)
   let peak = 0
   let energy = 0
   let tailPeak = 0
+
   for (const plane of output) {
     for (let frame = 0; frame < plane.length; frame += 1) {
       const sample = plane[frame] ?? 0
       expect(Number.isFinite(sample)).toBe(true)
       peak = Math.max(peak, Math.abs(sample))
       energy += sample * sample
+
       if (frame >= sustainedFrames) tailPeak = Math.max(tailPeak, Math.abs(sample))
     }
   }
+
   const rms = Math.sqrt(energy / (output.length * frames))
   expect(peak).toBeLessThan(2)
   expect(rms).toBeLessThan(0.75)

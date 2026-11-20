@@ -28,6 +28,7 @@ const clip = (id: string, startSec = 0): AudioStretchRuntimeClip => ({
 
 const artifactFor = (id: string, startSec = 0) => {
   const plan = createAudioStretchReadPlan({ clip: clip(id, startSec), source, projectBpm: 120 })
+
   return createPreparedStretchArtifact({
     source,
     plan,
@@ -59,6 +60,7 @@ test('artifact identity excludes clip placement and generation-like identifiers'
 
 test('artifact identity changes with source metadata, segments, and WSOLA configuration', () => {
   const baseline = artifactFor('clip-a')
+
   const changedConfig = createPreparedStretchArtifact({
     source,
     plan: createAudioStretchReadPlan({ clip: clip('clip-a'), source, projectBpm: 120 }),
@@ -67,6 +69,7 @@ test('artifact identity changes with source metadata, segments, and WSOLA config
     overlapFrameCount: 512,
     searchFrameCount: 256,
   })
+
   const changedSource = createPreparedStretchArtifact({
     source: { ...source, contentHash: 'b'.repeat(64) },
     plan: createAudioStretchReadPlan({ clip: clip('clip-a'), source: { ...source, contentHash: 'b'.repeat(64) }, projectBpm: 120 }),
@@ -75,6 +78,7 @@ test('artifact identity changes with source metadata, segments, and WSOLA config
     overlapFrameCount: 1_024,
     searchFrameCount: 512,
   })
+
   expect(changedConfig.artifactId).not.toBe(baseline.artifactId)
   expect(changedSource.artifactId).not.toBe(baseline.artifactId)
 })

@@ -3,6 +3,7 @@ import { isJsonBoolean, isJsonNumber, isJsonObject, isJsonString, type JsonValue
 
 export const GRANULAR_STATE_VERSION = 1
 export const GRANULAR_MAX_GRAINS = 128
+
 export type GranularWindowKind = 'hann' | 'tukey' | 'gaussian'
 
 export type GranularParams = {
@@ -48,6 +49,7 @@ export function createDefaultGranularParams(): GranularParams {
 const isZone = (value: JsonValue | undefined): value is SamplerZone => {
   if (!isJsonObject(value) || !isJsonObject(value.sample)) return false
   const sample = value.sample
+
   return isJsonString(sample.assetKey)
     && isJsonString(sample.url)
 }
@@ -55,6 +57,7 @@ const isZone = (value: JsonValue | undefined): value is SamplerZone => {
 export function normalizeGranularParams(input: GranularParamsInput): GranularParams {
   const defaults = createDefaultGranularParams()
   const value = isJsonObject(input) ? input : {}
+
   return {
     version: GRANULAR_STATE_VERSION,
     zone: isZone(value.zone) ? value.zone : undefined,

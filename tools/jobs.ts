@@ -6,8 +6,10 @@ import { availableParallelism } from "node:os"
 // else half of availableParallelism minus 1, never below 1. Shell build scripts get it from `bun tools/jobs.ts`.
 const positiveInteger = (value: string | undefined) => {
   const parsed = Number(value)
+
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined
 }
+
 const performanceCores = () => positiveInteger(spawnSync("sysctl", ["-n", "hw.perflevel0.logicalcpu"], { encoding: "utf8" }).stdout.trim())
 
 export const jobLimit = () => positiveInteger(process.env.DAW_JOBS) ?? Math.max(1, (performanceCores() ?? Math.floor(availableParallelism() / 2)) - 1)

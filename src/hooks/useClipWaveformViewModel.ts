@@ -100,10 +100,12 @@ const layoutSegmentsFor = (layout: ReturnType<typeof getAudioWaveformLayout>, cl
 
 export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) {
   const [source, setSource] = createSignal<Awaited<ReturnType<AudioPcmSourceResolver>> | null>(null)
+
   const [generation, setGeneration] = createSignal<WaveformState>({
     visible: null,
     replacement: null,
   })
+
   const [loading, setLoading] = createSignal(false)
   const [error, setError] = createSignal<string>()
   let sourceRequest = 0
@@ -116,12 +118,14 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     incrementPerformanceBenchmarkCounter('waveform.view-computations')
     const clip = options.clip()
     const assetKey = clip.waveformAssetKey ?? clip.sourceAssetKey ?? `clip:${clip.id}`
+
     const metadata = getPersistableAudioSourceMetadata({
       buffer: clip.buffer,
       sourceDurationSec: clip.sourceDurationSec,
       sourceSampleRate: clip.sourceSampleRate,
       sourceChannelCount: clip.sourceChannelCount,
     })
+
     const layout = getAudioWaveformLayout(
       clip,
       options.cssWidthPx(),
@@ -129,15 +133,20 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       options.projectBpm(),
       options.visibleRange?.(),
     )
+
     return { clip, assetKey, layout }
   }))
+
   const displaySegments = createMemo(() => layoutSegmentsFor(view().layout, view().clip))
+
   const plans = createMemo<WaveformRequestPlans>(() => {
     const current = view()
     const currentSource = source()
+
     if (current.clip.midi || current.layout.sourceDurationSec <= 0 || options.waveformVisible?.() === false) {
       return { requests: [], segments: [] }
     }
+
     return createWaveformRequestPlans({
       segments: displaySegments(),
       sampleRate: currentSource?.sampleRate ?? current.clip.sourceSampleRate ?? 48_000,
@@ -149,7 +158,9 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       priorityRange: options.priorityRange?.(),
     })
   })
+
   const planKey = createMemo(() => JSON.stringify(plans().requests))
+
   const sourceKey = createMemo(() => (
     `${sourceIdentityFor(view().assetKey, view().clip)}:${options.waveformVisible?.() ?? true}`
   ))
@@ -162,6 +173,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       sourceCleanup?.()
       dataCleanup?.()
       retainedEntries.clear()
+
       if (options.waveformVisible?.() === false) {
         batch(() => {
           setSource(null)
@@ -169,8 +181,10 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
           setLoading(false)
           setError(undefined)
         })
+
         return
       }
+
       const controller = new AbortController()
       sourceCleanup = () => controller.abort()
       batch(() => {
@@ -204,40 +218,53 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     ({ source: nextSource }) => {
       const plan = plans()
       const current = view()
+
       if (!nextSource || plan.requests.length === 0) {
         dataRequest += 1
         dataCleanup?.()
         dataCleanup = undefined
+
         if (plan.requests.length === 0) setGeneration({ visible: null, replacement: null })
         setLoading(false)
+
         return
       }
+
       const previousState = untrack(generation)
       const visible = previousState.visible
+
       const seed = visible?.sourceIdentity === nextSource.identity
         ? new Map([...retainedEntries, ...visible.entries])
         : retainedEntries
+
       const targetEntries = new Map<string, Retained>()
+
       for (const request of plan.requests) {
         const retained = seed.get(request.key)
+
         if (retained) targetEntries.set(request.key, retained)
       }
+
       const target: Generation = {
         entries: targetEntries,
         sourceIdentity: nextSource.identity,
       }
+
       const missing = plan.requests.filter((request) => !targetEntries.has(request.key))
       incrementPerformanceBenchmarkCounter('waveform.requests', plan.requests.length)
       incrementPerformanceBenchmarkCounter('waveform.cache-hits', targetEntries.size)
       incrementPerformanceBenchmarkCounter('waveform.cache-misses', missing.length)
+
       if (missing.length === 0) {
         dataRequest += 1
         dataCleanup?.()
         dataCleanup = undefined
         setGeneration({ visible: target, replacement: null })
         setLoading(false)
+
         return
       }
+
       const id = ++dataRequest
       dataCleanup?.()
       const controller = new AbortController()
@@ -251,6 +278,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       })
       void Promise.all(missing.map(async (request) => {
         incrementPerformanceBenchmarkCounter('waveform.requests-started')
+
         const data = await requestWaveformData({
           assetKey: current.assetKey,
           source: nextSource,
@@ -260,38 +288,53 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
           priority: request.priority,
           signal: controller.signal,
         })
+
         incrementPerformanceBenchmarkCounter(data ? 'waveform.requests-completed' : 'waveform.requests-empty')
+
         return data ? { key: request.key, data } : null
       })).then((results) => {
         if (id !== dataRequest || controller.signal.aborted) {
           incrementPerformanceBenchmarkCounter('waveform.requests-superseded', missing.length)
+
           return
         }
+
         const additions = new Map(target.entries)
+
         for (const result of results) {
           if (!result) continue
+
           const retained = {
             ...retainWaveformData(result.data),
           }
+
           additions.set(result.key, retained)
           retainedEntries.delete(result.key)
           retainedEntries.set(result.key, retained)
+
           while (retainedEntries.size > MAX_RETAINED_REQUESTS) {
             const oldest = retainedEntries.keys().next().value
+
             if (oldest === undefined) break
             retainedEntries.delete(oldest)
           }
         }
+
         if (additions.size === 0) {
           setLoading(false)
+
           return
         }
+
         if (additions.size < plan.requests.length) {
           setLoading(false)
           setError('Waveform loading failed.')
+
           return
         }
+
         const latest = untrack(source)
+
         if (!latest || latest.identity !== nextSource.identity) return
         setGeneration({
           visible: {
@@ -304,8 +347,10 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       }).catch((cause: unknown) => {
         if (id !== dataRequest || controller.signal.aborted) {
           incrementPerformanceBenchmarkCounter('waveform.requests-cancelled', missing.length)
+
           return
         }
+
         setLoading(false)
         setError(cause instanceof Error ? cause.message : 'Waveform loading failed.')
       }).finally(() => {
@@ -327,9 +372,11 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     const currentSource = source()
     const currentState = generation()
     const currentGeneration = currentState.visible
+
     if (!currentSource || !currentGeneration
       || currentGeneration.sourceIdentity !== currentSource.identity
       || current.clip.midi) return []
+
     const map = getAudioClipTimeMap({
       clip: current.clip,
       bufferDurationSec: current.layout.sourceDurationSec,
@@ -337,7 +384,9 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       rangeStartSec: current.clip.startSec,
       rangeEndSec: current.clip.startSec + current.clip.duration,
     })
+
     if (!map) return []
+
     return projectRetainedWaveformData({
       retainedByKey: currentGeneration.entries,
       segments: plans().segments,
@@ -346,6 +395,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     }).map((projected) => {
       const segmentWidth = Math.max(1, projected.endPx - projected.startPx)
       const frameSpan = Math.max(1, projected.sourceEndFrame - projected.sourceStartFrame)
+
       return {
         startPx: projected.startPx,
         endPx: projected.endPx,

@@ -11,6 +11,7 @@ const DialogTrigger = DialogPrimitive.Trigger
 
 const DialogPortal: Component<DialogPrimitive.DialogPortalProps> = (props) => {
   const [, rest] = splitProps(props, ["children"])
+
   return (
     <DialogPrimitive.Portal {...rest}>
       <div class="fixed inset-0 z-50 flex items-start justify-center sm:items-center">
@@ -30,6 +31,7 @@ function DialogOverlay(
   props: PolymorphicProps<ValidComponent, DialogOverlayProps<ValidComponent>>,
 ): JSX.Element {
   const [, rest] = splitProps(props, ["class"])
+
   return (
     <DialogPrimitive.Overlay
       class={cn(
@@ -55,6 +57,7 @@ function DialogContent(
   props: PolymorphicProps<ValidComponent, DialogContentProps<ValidComponent>>,
 ): JSX.Element {
   const [, rest] = splitProps(props, ["class", "children", "showCloseButton"])
+
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -91,6 +94,7 @@ function DialogContent(
 
 const DialogHeader: Component<ComponentProps<"div">> = (props) => {
   const [, rest] = splitProps(props, ["class"])
+
   return (
     <div class={cn("flex flex-col space-y-1.5 text-center sm:text-left", props.class)} {...rest} />
   )
@@ -98,6 +102,7 @@ const DialogHeader: Component<ComponentProps<"div">> = (props) => {
 
 const DialogFooter: Component<ComponentProps<"div">> = (props) => {
   const [, rest] = splitProps(props, ["class"])
+
   return (
     <div
       class={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2", props.class)}
@@ -117,6 +122,7 @@ function DialogTitle(
   props: PolymorphicProps<ValidComponent, DialogTitleProps<ValidComponent>>,
 ): JSX.Element {
   const [, rest] = splitProps(props, ["class"])
+
   return (
     <DialogPrimitive.Title
       class={cn("text-lg font-semibold leading-none tracking-tight", props.class)}
@@ -137,6 +143,7 @@ function DialogDescription(
   props: PolymorphicProps<ValidComponent, DialogDescriptionProps<ValidComponent>>,
 ): JSX.Element {
   const [, rest] = splitProps(props, ["class"])
+
   return (
     <DialogPrimitive.Description
       class={cn("text-sm text-muted-foreground", props.class)}

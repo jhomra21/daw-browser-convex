@@ -18,15 +18,20 @@ import type {
 
 test("staged sources reuse active page work and discard only staged registrations", async () => {
   const buffer = new EagerAudioBuffer()
+
   const descriptor = createAudioPcmSourceDescriptor({
     identity: "stable", durationSec: buffer.duration, frameCount: buffer.length,
     sampleRate: buffer.sampleRate, channelCount: 1, source: buffer,
   })
+
   const source = { sourceAssetKey: "active", sessionAssetId: 1, frameCount: buffer.length,
     sampleRateHz: buffer.sampleRate, channelCount: 1, descriptor }
+
   const writes: number[] = []
+
   const manager = createNativeTimelinePageManager({ sources: [source],
     writePage: async (page) => { writes.push(page.sessionAssetId) } })
+
   await manager.ensureRanges([{ sourceAssetKey: "active", startFrame: 0, endFrame: 5 }])
   const discard = manager.addSources([{ ...source, sourceAssetKey: "staged", sessionAssetId: 2 }])
   await manager.ensureRanges([
@@ -48,17 +53,24 @@ test("staged sources reuse active page work and discard only staged registration
 
 test("immutable replacement registrations hydrate both sides and retire only the old session", async () => {
   const buffer = new EagerAudioBuffer()
+
   const descriptor = createAudioPcmSourceDescriptor({ identity: "original", durationSec: buffer.duration,
     frameCount: buffer.length, sampleRate: buffer.sampleRate, channelCount: 1, source: buffer })
+
   const source = { sourceAssetKey: "asset", sessionAssetId: 1, frameCount: buffer.length,
     sampleRateHz: buffer.sampleRate, channelCount: 1, descriptor }
+
   const pages: NativeHostMappedAssetPage[] = []
+
   const manager = createNativeTimelinePageManager({ sources: [source],
     writePage: async (page) => { pages.push(page) } })
+
   const replacement = new EagerAudioBuffer()
   replacement.copyToChannel(new Float32Array([0.9]), 0)
+
   const replacementDescriptor = createAudioPcmSourceDescriptor({ identity: "replacement", durationSec: replacement.duration,
     frameCount: replacement.length, sampleRate: replacement.sampleRate, channelCount: 1, source: replacement })
+
   manager.addSources([{ ...source, sourceAssetKey: "asset:native-session:2", sessionAssetId: 2, descriptor: replacementDescriptor }])
   await manager.ensureRanges([
     { sourceAssetKey: "asset", startFrame: 0, endFrame: 5 },
@@ -140,19 +152,23 @@ class WideEagerAudioBuffer implements AudioBuffer {
 
   copyFromChannel(destination: Float32Array, channel: number, bufferOffset = 0) {
     const source = this.channels[channel]
+
     if (!source) throw new Error(`Missing channel ${channel}.`)
     destination.set(source.subarray(bufferOffset, bufferOffset + destination.length))
   }
 
   copyToChannel(source: Float32Array, channel: number, bufferOffset = 0) {
     const destination = this.channels[channel]
+
     if (!destination) throw new Error(`Missing channel ${channel}.`)
     destination.set(source, bufferOffset)
   }
 
   getChannelData(channel: number) {
     const source = this.channels[channel]
+
     if (!source) throw new Error(`Missing channel ${channel}.`)
+
     return source
   }
 }
@@ -179,7 +195,9 @@ class PatternAudioBuffer implements AudioBuffer {
 
   getChannelData(channel: number) {
     const source = this.channels[channel]
+
     if (!source) throw new Error(`Missing channel ${channel}.`)
+
     return source
   }
 }
@@ -213,6 +231,7 @@ const descriptorForBuffer = (buffer: AudioBuffer) => createAudioPcmSourceDescrip
 test("hydrates only the requested bounded source range", async () => {
   const pages: Array<{ startFrame: number; frameCount: number; bytes: number }> = []
   const prepared: Array<{ startFrame: number; frameCount: number }> = []
+
   const manager = createNativeTimelinePageManager({
     pageFrames: 2,
     sources: [{
@@ -248,6 +267,7 @@ test("hydrates only the requested bounded source range", async () => {
 
 test("uses a pre-resolved descriptor for persisted upload media", async () => {
   let writes = 0
+
   const manager = createNativeTimelinePageManager({
     sources: [{
       sourceAssetKey: "asset-a",
@@ -268,6 +288,7 @@ test("uses a pre-resolved descriptor for persisted upload media", async () => {
 
 test("keeps page identity integer-aligned across overlapping ranges", async () => {
   const pages: number[] = []
+
   const manager = createNativeTimelinePageManager({
     pageFrames: 2,
     sources: [{
@@ -292,6 +313,7 @@ test("keeps page identity integer-aligned across overlapping ranges", async () =
 
 test("cancels a range request before decoding begins", async () => {
   let writes = 0
+
   const manager = createNativeTimelinePageManager({
     pageFrames: 5,
     sources: [{
@@ -307,15 +329,18 @@ test("cancels a range request before decoding begins", async () => {
       writes += 1
     },
   })
+
   const controller = new AbortController()
   const range = [{ sourceAssetKey: "asset-a", startFrame: 1, endFrame: 4 }]
   controller.abort()
+
   try {
     await manager.ensureRanges(range, controller.signal)
     throw new Error("Expected the canceled range request to reject.")
   } catch (error) {
     expect(error).toBeInstanceOf(DOMException)
   }
+
   await manager.ensureRanges(range)
   expect(writes).toBe(1)
   manager.dispose()
@@ -323,6 +348,7 @@ test("cancels a range request before decoding begins", async () => {
 
 test("deduplicates concurrent range hydration and supports invalidation", async () => {
   let writes = 0
+
   const manager = createNativeTimelinePageManager({
     pageFrames: 5,
     sources: [{
@@ -338,6 +364,7 @@ test("deduplicates concurrent range hydration and supports invalidation", async 
       await Promise.resolve()
     },
   })
+
   const range = [{ sourceAssetKey: "asset-a", startFrame: 0, endFrame: 5 }]
   await Promise.all([manager.ensureRanges(range), manager.ensureRanges(range)])
   const firstWriteCount = writes
@@ -351,6 +378,7 @@ test("deduplicates concurrent range hydration and supports invalidation", async 
 test("rehydrates a range when host preparation reports an evicted page", async () => {
   let writes = 0
   let preparations = 0
+
   const manager = createNativeTimelinePageManager({
     pageFrames: 2,
     sources: [{
@@ -364,6 +392,7 @@ test("rehydrates a range when host preparation reports an evicted page", async (
     writePage: async () => { writes += 1 },
     prepareRange: async () => {
       preparations += 1
+
       if (preparations === 1) throw new Error("mapped range was evicted")
     },
   })
@@ -377,6 +406,7 @@ test("rehydrates a range when host preparation reports an evicted page", async (
 
 test("copies bounded pages from an eager buffer without a source URL", async () => {
   const pages: NativeHostMappedAssetPage[] = []
+
   const manager = createNativeTimelinePageManager({
     pageFrames: 2,
     sources: [{
@@ -393,11 +423,13 @@ test("copies bounded pages from an eager buffer without a source URL", async () 
   await manager.ensureRanges([{ sourceAssetKey: "asset-a", startFrame: 1, endFrame: 5 }])
 
   expect(pages.map((page) => page.startFrame)).toEqual([0, 2, 4])
+
   const eagerPageSamples = [...new Float32Array(
     pages[1]!.planarPcm.buffer,
     pages[1]!.planarPcm.byteOffset,
     pages[1]!.planarPcm.byteLength / Float32Array.BYTES_PER_ELEMENT,
   )]
+
   expect(eagerPageSamples[0]).toBeCloseTo(0.3, 5)
   expect(eagerPageSamples[1]).toBeCloseTo(0.4, 5)
   manager.dispose()
@@ -407,6 +439,7 @@ test("in-memory region pages are the channel planes back to back across channel 
   for (const channelCount of [1, 2, 3]) {
     const region = new PatternAudioBuffer(channelCount, 10)
     const pages: NativeHostMappedAssetPage[] = []
+
     const manager = createNativeTimelinePageManager({
       pageFrames: 4,
       sources: [{
@@ -423,14 +456,18 @@ test("in-memory region pages are the channel planes back to back across channel 
     await manager.ensureRanges([{ sourceAssetKey: "asset-a", startFrame: 5, endFrame: 10 }])
 
     expect(pages.map((page) => [page.startFrame, page.frameCount])).toEqual([[4, 4], [8, 2]])
+
     for (const page of pages) {
       const expected = new Uint8Array(channelCount * page.frameCount * Float32Array.BYTES_PER_ELEMENT)
+
       for (let channel = 0; channel < channelCount; channel += 1) {
         const plane = region.getChannelData(channel).slice(page.startFrame, page.startFrame + page.frameCount)
         expected.set(new Uint8Array(plane.buffer), channel * plane.byteLength)
       }
+
       expect(page.planarPcm).toEqual(expected)
     }
+
     manager.dispose()
   }
 })
@@ -439,6 +476,7 @@ test("bounds full instrument-region hydration to page and payload limits", async
   const frameCount = 20_000
   const region = new LongEagerAudioBuffer(frameCount)
   const pages: NativeHostMappedAssetPage[] = []
+
   const manager = createNativeTimelinePageManager({
     pageFrames: frameCount,
     sources: [{
@@ -472,6 +510,7 @@ test("uploads a whole immutable instrument in few wire-sized pages and prepares 
   const pages: NativeHostMappedAssetPage[] = []
   const covered: { startFrame: number; endFrame: number }[] = []
   let prepared: { startFrame: number; frameCount: number } | undefined
+
   const manager = createNativeTimelinePageManager({
     sources: [{
       sourceAssetKey: "instrument", sessionAssetId: 9, frameCount,
@@ -489,6 +528,7 @@ test("uploads a whole immutable instrument in few wire-sized pages and prepares 
       prepared = { startFrame, frameCount: count }
     },
   })
+
   await manager.ensureRanges([{ sourceAssetKey: "instrument", startFrame: 0, endFrame: frameCount }])
 
   const pageFrames = nativeAudioHostMaximumMappedAssetPageFramesForChannels(region.numberOfChannels)
@@ -503,6 +543,7 @@ test("never rewrites a fully prepared immutable instrument after upload hints ar
   const frameCount = 130 * 16_384
   const region = new LongEagerAudioBuffer(frameCount)
   let writes = 0
+
   const manager = createNativeTimelinePageManager({
     pageFrames: 16_384,
     sources: [{
@@ -513,6 +554,7 @@ test("never rewrites a fully prepared immutable instrument after upload hints ar
     writePage: async () => { writes += 1 },
     prepareRange: async () => undefined,
   })
+
   const ranges = [{ sourceAssetKey: "instrument", startFrame: 0, endFrame: frameCount }]
   await manager.ensureRanges(ranges)
   expect(writes).toBe(130)
@@ -524,10 +566,13 @@ test("never rewrites a fully prepared immutable instrument after upload hints ar
 
 test("detaches one canceled caller from shared page hydration", async () => {
   let releaseWrite: (() => void) | undefined
+
   const writeStarted = new Promise<void>((resolve) => {
     releaseWrite = resolve
   })
+
   let writes = 0
+
   const manager = createNativeTimelinePageManager({
     pageFrames: 5,
     sources: [{
@@ -543,6 +588,7 @@ test("detaches one canceled caller from shared page hydration", async () => {
       await writeStarted
     },
   })
+
   const firstController = new AbortController()
   const secondController = new AbortController()
   const range = [{ sourceAssetKey: "asset-a", startFrame: 0, endFrame: 5 }]
@@ -562,6 +608,7 @@ test("awaits an in-flight artifact read during disposal and closes its generator
   const readStarted = Promise.withResolvers<void>()
   const releaseRead = Promise.withResolvers<void>()
   let generatorClosed = false
+
   const manifest: PreparedStretchArtifactManifest = {
     artifactId: "artifact-a",
     writeId: "write-a",
@@ -581,12 +628,14 @@ test("awaits an in-flight artifact read during disposal and closes its generator
     committedAt: 1,
     lastAccessedAt: 1,
   }
+
   const read = async function* (
     _artifactId: string,
     _startFrame?: number,
     _endFrame?: number,
   ): AsyncGenerator<PreparedStretchArtifactPage> {
     readStarted.resolve()
+
     try {
       await releaseRead.promise
       yield {
@@ -606,6 +655,7 @@ test("awaits an in-flight artifact read during disposal and closes its generator
       generatorClosed = true
     }
   }
+
   const repository = {
     find: async () => manifest,
     acquireLease: async () => ({ artifactId: manifest.artifactId, writeId: manifest.writeId, release: async () => {} }),
@@ -613,6 +663,7 @@ test("awaits an in-flight artifact read during disposal and closes its generator
     read,
     cleanupSession: async () => {},
   } satisfies PreparedStretchArtifactRepository
+
   const manager = createNativeTimelinePageManager({
     sources: [{
       sourceAssetKey: "source-a",
@@ -625,6 +676,7 @@ test("awaits an in-flight artifact read during disposal and closes its generator
     }],
     writePage: async () => {},
   })
+
   const readPage = manager.readPage("source-a", 0, 4)
   await readStarted.promise
   const disposing = manager.dispose()
@@ -642,10 +694,13 @@ test("hydrates at most two pages concurrently and uses both slots", async () => 
   let active = 0
   let maximumActive = 0
   let releasePages: (() => void) | undefined
+
   const pagesStarted = new Promise<void>((resolve) => {
     releasePages = resolve
   })
+
   let started = 0
+
   const manager = createNativeTimelinePageManager({
     pageFrames: 5,
     sources: [0, 1, 2].map((index) => ({
@@ -660,6 +715,7 @@ test("hydrates at most two pages concurrently and uses both slots", async () => 
       active += 1
       maximumActive = Math.max(maximumActive, active)
       started += 1
+
       if (started === 2) releasePages?.()
       await pagesStarted
       active -= 1
@@ -675,6 +731,7 @@ test("hydrates at most two pages concurrently and uses both slots", async () => 
     startFrame: 0,
     endFrame: 5,
   }]))
+
   await pagesStarted
   expect(maximumActive).toBe(2)
   releasePages?.()
@@ -686,6 +743,7 @@ test("hydrates at most two pages concurrently and uses both slots", async () => 
 test("bounds uploaded-page bookkeeping independently of source duration", async () => {
   let writes = 0
   const frameCount = nativeTimelineMaximumUploadedPages + 1
+
   const manager = createNativeTimelinePageManager({
     pageFrames: 1,
     sources: [{
@@ -698,6 +756,7 @@ test("bounds uploaded-page bookkeeping independently of source duration", async 
     }],
     writePage: async () => { writes += 1 },
   })
+
   const ranges = Array.from({ length: frameCount }, (_, startFrame) => ({
     sourceAssetKey: "asset-a",
     startFrame,
@@ -717,6 +776,7 @@ test("hydrates only a bounded page at a late offset in a long source", async () 
   const frameCount = 600 * 48_000
   const pages: Array<{ startFrame: number; frameCount: number }> = []
   const prepared: Array<{ startFrame: number; frameCount: number }> = []
+
   const manager = createNativeTimelinePageManager({
     pageFrames,
     sources: [{
@@ -751,6 +811,7 @@ test("hydrates only a bounded page at a late offset in a long source", async () 
 
 test("keeps wide-channel mapped pages within the protocol payload limit", async () => {
   const pages: NativeHostMappedAssetPage[] = []
+
   const manager = createNativeTimelinePageManager({
     sources: [{
       sourceAssetKey: "wide",

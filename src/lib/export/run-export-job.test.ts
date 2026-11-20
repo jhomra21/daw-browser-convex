@@ -20,6 +20,7 @@ if (!globalThis.navigator?.locks) {
     },
   })
 }
+
 import type { SampledInstrumentBuffer } from "@daw-browser/audio-engine/sampled-instrument-region"
 import { sampledInstrumentRegion, sampledInstrumentRegionBytes, sampledInstrumentRegionIdentity } from "@daw-browser/audio-engine/sampled-instrument-region"
 
@@ -40,14 +41,17 @@ const render: ExportRenderSettings = {
   normalization: { mode: "none" },
   tail: { mode: "none" },
 }
+
 const encoding: ExportEncodingSettings = {
   bitrateByFormat: {},
   wav: { codec: "pcm-s16", dither: "none" },
 }
+
 const renderStateSnapshot = {
   fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
   automationEnvelopes: [],
 }
+
 const desktopLimits: NonNullable<ExportOutputTargetFactory["resourceLimits"]> = {
   maximumFiles: 1_024,
   streaming: true,
@@ -56,9 +60,11 @@ const desktopLimits: NonNullable<ExportOutputTargetFactory["resourceLimits"]> = 
 const createSilentWav = (channelCount = 2, sampleRate = 48_000, frameCount = sampleRate): ArrayBuffer => {
   const bytes = new ArrayBuffer(44 + frameCount * channelCount * 2)
   const view = new DataView(bytes)
+
   const writeAscii = (offset: number, value: string) => {
     for (let index = 0; index < value.length; index += 1) view.setUint8(offset + index, value.charCodeAt(index))
   }
+
   writeAscii(0, "RIFF")
   view.setUint32(4, bytes.byteLength - 8, true)
   writeAscii(8, "WAVE")
@@ -72,6 +78,7 @@ const createSilentWav = (channelCount = 2, sampleRate = 48_000, frameCount = sam
   view.setUint16(34, 16, true)
   writeAscii(36, "data")
   view.setUint32(40, bytes.byteLength - 44, true)
+
   return bytes
 }
 
@@ -93,6 +100,7 @@ const aliasLocalProject = async (source: Awaited<ReturnType<typeof createLocalPr
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
   })
+
   const transaction = db.transaction("projects", "readwrite")
   transaction.objectStore("projects").put({ ...source, id })
   await new Promise<void>((resolve, reject) => {
@@ -106,6 +114,7 @@ const aliasLocalProject = async (source: Awaited<ReturnType<typeof createLocalPr
 test("unsupported portable mixdown does not hydrate whole-buffer clips", async () => {
   let targetOpened = false
   let bufferHydrated = false
+
   const outcome = await runTimelineExport({
     getTracks: () => [{
       id: "track-1",
@@ -151,10 +160,12 @@ test("stem export preloads local sampled instruments for a cloud-shaped local pr
   const originalOfflineAudioContext = Object.getOwnPropertyDescriptor(globalThis, "OfflineAudioContext")
   const originalFetch = globalThis.fetch
   const files = new Map<string, File>()
+
   const assets = {
     getFileHandle: async (name: string) => ({
       createWritable: async () => {
         const chunks: Uint8Array[] = []
+
         return {
           write: async (chunk: Uint8Array) => {
             chunks.push(chunk)
@@ -162,10 +173,12 @@ test("stem export preloads local sampled instruments for a cloud-shaped local pr
           close: async () => {
             const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
             let offset = 0
+
             for (const chunk of chunks) {
               bytes.set(chunk, offset)
               offset += chunk.byteLength
             }
+
             files.set(name, new File([bytes], name))
           },
           abort: async () => undefined,
@@ -173,16 +186,20 @@ test("stem export preloads local sampled instruments for a cloud-shaped local pr
       },
       getFile: async () => {
         const file = files.get(name)
+
         if (!file) throw new Error(`Missing retained file ${name}`)
+
         return file
       },
     }),
   }
+
   const root = {
     getDirectoryHandle: async (name: string) => name === "assets" ? assets : root,
     // Mirrors FileSystemDirectoryHandle.resolve: [] for the same entry, null when unrelated.
     resolve: async (other: FileSystemDirectoryHandle) => other === root ? [] : null,
   }
+
   Object.defineProperty(navigator, "storage", {
     configurable: true,
     value: { getDirectory: async () => root },
@@ -201,12 +218,15 @@ test("stem export preloads local sampled instruments for a cloud-shaped local pr
   const sourceProject = await createLocalProject(`Stem ${crypto.randomUUID()}`)
   const projectId = `cloud-project-${crypto.randomUUID()}`
   await aliasLocalProject(sourceProject, projectId)
+
   const asset = await createLocalAsset({
     projectId,
     file: new File([createSilentWav(1)], "sample.wav", { type: "audio/wav" }),
   })
+
   const drumRack = createDefaultDrumRackParams()
   const firstPad = drumRack.pads[0]
+
   if (!firstPad) throw new Error("Expected a default drum-rack pad.")
 
   try {
@@ -287,8 +307,10 @@ test("stem export preloads local sampled instruments for a cloud-shaped local pr
     expect(TestOfflineAudioContext.decodeCalls).toBe(0)
   } finally {
     globalThis.fetch = originalFetch
+
     if (originalStorage) Object.defineProperty(navigator, "storage", originalStorage)
     else Reflect.deleteProperty(navigator, "storage")
+
     if (originalOfflineAudioContext) Object.defineProperty(globalThis, "OfflineAudioContext", originalOfflineAudioContext)
     else Reflect.deleteProperty(globalThis, "OfflineAudioContext")
     await deleteLocalProject(projectId)
@@ -310,7 +332,9 @@ test("stem preflight uses the renderer stem selection before opening output", as
       midi: { wave: "sine", notes: [] },
     }],
   }))
+
   let targetOpened = false
+
   const outcome = await runStemExport({
     getTracks: () => tracks,
     bpm: 120,
@@ -346,15 +370,18 @@ test("instrument hydration settles as canceled when its sample fetch stalls", as
   const audioContextDescriptor = Object.getOwnPropertyDescriptor(globalThis, "AudioContext")
   const fetchDescriptor = Object.getOwnPropertyDescriptor(globalThis, "fetch")
   let notifyFetchStarted: (() => void) | undefined
+
   const fetchStarted = new Promise<void>((resolve) => {
     notifyFetchStarted = resolve
   })
+
   class ExportAudioContext {
     async decodeAudioData(_data: ArrayBuffer) {
       throw new Error("stalled fetch should not decode")
     }
     async close() {}
   }
+
   Object.defineProperty(globalThis, "AudioContext", {
     configurable: true,
     value: ExportAudioContext,
@@ -363,13 +390,16 @@ test("instrument hydration settles as canceled when its sample fetch stalls", as
     configurable: true,
     value: async () => {
       notifyFetchStarted?.()
+
       return await new Promise<Response>(() => undefined)
     },
   })
   const drumRack = createDefaultDrumRackParams()
   const firstPad = drumRack.pads[0]
+
   if (!firstPad) throw new Error("Expected a default drum-rack pad.")
   const controller = new AbortController()
+
   try {
     const outcome = runTimelineExport({
       getTracks: () => [{
@@ -438,12 +468,14 @@ test("instrument hydration settles as canceled when its sample fetch stalls", as
         automationEnvelopes: [],
       },
     })
+
     await fetchStarted
     controller.abort()
     expect(await outcome).toEqual({ type: "canceled", outputs: [] })
   } finally {
     if (audioContextDescriptor) Object.defineProperty(globalThis, "AudioContext", audioContextDescriptor)
     else Reflect.deleteProperty(globalThis, "AudioContext")
+
     if (fetchDescriptor) Object.defineProperty(globalThis, "fetch", fetchDescriptor)
     else Reflect.deleteProperty(globalThis, "fetch")
   }
@@ -477,10 +509,13 @@ class TestDecodedAudioBuffer implements AudioBuffer {
 
   getChannelData(channel: number) {
     const data = this.channels[channel]
+
     if (!data) throw new Error("Missing channel")
+
     return data
   }
 }
+
 const sampled = (value: AudioBuffer): SampledInstrumentBuffer => ({ buffer: value, sourceStartFrame: 0 })
 
 class TestOfflineAudioContext {
@@ -497,6 +532,7 @@ class TestOfflineAudioContext {
 
   async decodeAudioData(_data: ArrayBuffer) {
     TestOfflineAudioContext.decodeCalls += 1
+
     return new TestDecodedAudioBuffer()
   }
 }
@@ -504,6 +540,7 @@ class TestOfflineAudioContext {
 const createStemSpoolProbe = (events: string[]) => {
   let removed = 0
   const source = new TestDecodedAudioBuffer(4, 44_100, 2)
+
   const session: nativeOfflinePcmSpool.NativeOfflinePcmSpoolSession = {
     append: async () => {
       events.push("append")
@@ -526,6 +563,7 @@ const createStemSpoolProbe = (events: string[]) => {
     },
     abort: async () => undefined,
   }
+
   return { session, removed: () => removed }
 }
 
@@ -536,14 +574,17 @@ const runStemSpoolProbe = async (input: {
   cancelEncoding?: boolean
 }) => {
   const probe = createStemSpoolProbe(input.events)
+
   const createSpool = spyOn(nativeOfflinePcmSpool, "createNativeOfflinePcmSpool").mockImplementation(() => ({
     createSession: async () => probe.session,
   }))
+
   const renderPortable = spyOn(exportMixdown, "renderPortableMixdownChunks").mockImplementation(async (_request, onChunk) => {
     await onChunk(0, 0, {
       frameCount: 4,
       planes: [new Float32Array(4), new Float32Array(4)],
     }, 4)
+
     return {
       frameCount: 4,
       latencyFrames: 0,
@@ -552,15 +593,20 @@ const runStemSpoolProbe = async (input: {
       cleanup: async () => undefined,
     }
   })
+
   let encodes = 0
+
   const encode = spyOn(exportMixdown, "encodeAudioChunks").mockImplementation(async (chunks) => {
     for await (const _chunk of chunks) input.events.push(`encode-${encodes}`)
     encodes += 1
+
     if (input.cancelEncoding) {
       input.controller.abort()
       input.controller.signal.throwIfAborted()
     }
+
     if (input.failEncoding) throw new Error("encoder failed")
+
     return {
       blob: undefined,
       format: "wav",
@@ -569,6 +615,7 @@ const runStemSpoolProbe = async (input: {
       sizeBytes: 8,
     }
   })
+
   try {
     const outcome = await runStemExport({
       getTracks: () => [{
@@ -627,6 +674,7 @@ const runStemSpoolProbe = async (input: {
       stemSelection: "all-tracks",
       stemMode: "dry-source",
     })
+
     return { outcome, removed: probe.removed() }
   } finally {
     encode.mockRestore()
@@ -648,8 +696,10 @@ test("multi-format stems replay their lazy spool before removing it after every 
 
 test("stem encoder failure and cancellation each remove their lazy spool once", async () => {
   const modes: readonly ("failure" | "cancel")[] = ["failure", "cancel"]
+
   for (const mode of modes) {
     const events: string[] = []
+
     const result = await runStemSpoolProbe({
       events,
       controller: new AbortController(),
@@ -669,10 +719,12 @@ test("instrument export preload reads local-asset bytes with the project context
   const originalOfflineAudioContext = Object.getOwnPropertyDescriptor(globalThis, "OfflineAudioContext")
   const originalFetch = globalThis.fetch
   const files = new Map<string, File>()
+
   const assets = {
     getFileHandle: async (name: string) => ({
       createWritable: async () => {
         const chunks: Uint8Array[] = []
+
         return {
           write: async (chunk: Uint8Array) => {
             chunks.push(chunk)
@@ -680,10 +732,12 @@ test("instrument export preload reads local-asset bytes with the project context
           close: async () => {
             const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
             let offset = 0
+
             for (const chunk of chunks) {
               bytes.set(chunk, offset)
               offset += chunk.byteLength
             }
+
             files.set(name, new File([bytes], name))
           },
           abort: async () => undefined,
@@ -691,16 +745,20 @@ test("instrument export preload reads local-asset bytes with the project context
       },
       getFile: async () => {
         const file = files.get(name)
+
         if (!file) throw new Error(`Missing retained file ${name}`)
+
         return file
       },
     }),
   }
+
   const root = {
     getDirectoryHandle: async (name: string) => name === "assets" ? assets : root,
     // Mirrors FileSystemDirectoryHandle.resolve: [] for the same entry, null when unrelated.
     resolve: async (other: FileSystemDirectoryHandle) => other === root ? [] : null,
   }
+
   Object.defineProperty(navigator, "storage", {
     configurable: true,
     value: { getDirectory: async () => root },
@@ -713,6 +771,7 @@ test("instrument export preload reads local-asset bytes with the project context
   TestOfflineAudioContext.decodeCalls = 0
   globalThis.fetch = Object.assign(async (input: RequestInfo | URL, _init?: RequestInit) => {
     fetchCalls.push(String(input))
+
     return new Response(createSilentWav(), { status: 200 })
   }, { preconnect: originalFetch.preconnect })
 
@@ -721,9 +780,11 @@ test("instrument export preload reads local-asset bytes with the project context
   const asset = await createLocalAsset({ projectId: project.id, file })
   const drumRack = createDefaultDrumRackParams()
   const firstPad = drumRack.pads[0]
+
   if (!firstPad) throw new Error("Expected a default drum-rack pad.")
   const instrumentKind = "drum-rack" as const
   const sampleSourceKind = "upload" as const
+
   const fx: ExportFx = {
     trackFx: {
       "track-local": {
@@ -757,8 +818,10 @@ test("instrument export preload reads local-asset bytes with the project context
     expect(TestOfflineAudioContext.decodeCalls).toBe(0)
 
     const entry = fx.trackFx?.["track-local"]
+
     if (!entry || entry.instrument?.kind !== "drum-rack") throw new Error("Expected the local drum-rack export entry.")
     const secondPad = entry.instrument.params.pads[1]
+
     if (!secondPad) throw new Error("Expected a second drum-rack pad.")
     const hydratedBuffer = new TestDecodedAudioBuffer()
     entry.instrument = {
@@ -785,6 +848,7 @@ test("instrument export preload reads local-asset bytes with the project context
       },
     }
     const hydratedSample = entry.instrument.params.pads[0]?.sample
+
     if (!hydratedSample) throw new Error("Expected a hydrated sample.")
     entry.drumRackBuffers = new Map([[
       firstPad.id,
@@ -807,6 +871,7 @@ test("instrument export preload reads local-asset bytes with the project context
     // descriptors need real duration/dimensions, so supply this fixture's exact
     // regional buffer instead of depending on that process-global constructor.
     const secondSample = entry.instrument.params.pads[1]?.sample
+
     if (!secondSample) throw new Error('Expected the second sample.')
     const nativeBuffers = new Map(entry.drumRackBuffers)
     nativeBuffers.set(secondPad.id, {
@@ -814,11 +879,13 @@ test("instrument export preload reads local-asset bytes with the project context
       sourceIdentity: sampledInstrumentRegionIdentity(secondSample, sampledInstrumentRegion(secondSample.source, 0, 1)),
     })
     entry.drumRackBuffers = nativeBuffers
+
     for (const mode of ['failure', 'cancel']) {
       let nativeAssetCount = 0
       const nativeBudget = createSampledInstrumentRegionBudget(16 * 1024 ** 2)
       const nativeScope = nativeBudget.createScope('native-export')
       const controller = new AbortController()
+
       const nativeOutcome = await runTimelineExport({
         nativeRendererRequired: true,
         getTracks: () => [{
@@ -861,14 +928,17 @@ test("instrument export preload reads local-asset bytes with the project context
         nativeOfflinePcmRenderer: async (plan, signal, _progress, providePage) => {
           nativeAssetCount = plan.assets.length
           const asset = plan.mappedAssets?.[0]
+
           if (!asset || !providePage) throw new Error('Expected instrument-only mapped provider.')
           expect(asset.ranges).toEqual([{ startFrame: 0, frameCount: hydratedBuffer.length }])
+
           if (mode === 'cancel') controller.abort()
           const page = await providePage({ asset, startFrame: 0, frameCount: 16_384, signal })
           expect(page.planarPcm.byteLength).toBe(16_384 * 2 * 4)
           throw new NativeOfflineRenderError("render reached with the captured sampled buffer")
         },
       })
+
       expect(nativeOutcome).toEqual(mode === 'cancel' ? { type: 'canceled', outputs: [] } : {
         type: "error",
         message: "render reached with the captured sampled buffer",
@@ -878,12 +948,15 @@ test("instrument export preload reads local-asset bytes with the project context
       expect(nativeAssetCount).toBe(0)
       expect(nativeBudget.totalBytes()).toBe(0)
     }
+
     expect(fetchCalls).toEqual(["https://samples.example/missing.wav"])
     expect(TestOfflineAudioContext.decodeCalls).toBe(0)
   } finally {
     globalThis.fetch = originalFetch
+
     if (originalStorage) Object.defineProperty(navigator, "storage", originalStorage)
     else Reflect.deleteProperty(navigator, "storage")
+
     if (originalOfflineAudioContext) Object.defineProperty(globalThis, "OfflineAudioContext", originalOfflineAudioContext)
     else Reflect.deleteProperty(globalThis, "OfflineAudioContext")
     await deleteLocalProject(project.id)
@@ -892,18 +965,21 @@ test("instrument export preload reads local-asset bytes with the project context
 
 test("instrument export reuses leased buffers at the exact cap and reserves only missing regions", async () => {
   const source = { durationSec: 1, sampleRate: 48_000, channelCount: 2 }
+
   const firstSample = {
     assetKey: "asset:leased",
     url: "https://samples.example/leased.wav",
     sourceKind: "url" as const,
     source,
   }
+
   const secondSample = {
     assetKey: "asset:missing",
     url: "https://samples.example/missing.wav",
     sourceKind: "url" as const,
     source,
   }
+
   const firstZone = {
     id: "zone-leased",
     sample: firstSample,
@@ -922,19 +998,25 @@ test("instrument export reuses leased buffers at the exact cap and reserves only
     crossfadeSec: 0,
     chokeGroup: 0,
   }
+
   const secondZone = { ...firstZone, id: "zone-missing", sample: secondSample }
+
   const bytes = sampledInstrumentRegionBytes(
     sampledInstrumentRegion(source, 0, source.durationSec),
     source.channelCount,
   )
+
   const leasedBuffer = new TestDecodedAudioBuffer(48_000, 48_000, 2)
+
   const identity = sampledInstrumentRegionIdentity(
     firstSample,
     sampledInstrumentRegion(source, 0, source.durationSec),
   )
+
   const exactCapBudget = createSampledInstrumentRegionBudget(bytes)
   const exactCapScope = exactCapBudget.createScope("exact-cap")
   const leased = exactCapScope.lease([{ key: identity, buffer: leasedBuffer, bytes }])
+
   const exactCapFx: ExportFx = {
     trackFx: {
       "track-exact-cap": {
@@ -953,6 +1035,7 @@ test("instrument export reuses leased buffers at the exact cap and reserves only
     masterFxInstances: [],
     masterVolume: 1,
   }
+
   await loadInstrumentExportBuffers(
     exactCapFx,
     new AbortController().signal,
@@ -972,6 +1055,7 @@ test("instrument export reuses leased buffers at the exact cap and reserves only
   const mixedBudget = createSampledInstrumentRegionBudget(bytes * 2)
   const mixedScope = mixedBudget.createScope("mixed")
   const mixedLease = mixedScope.lease([{ key: identity, buffer: leasedBuffer, bytes }])
+
   const mixedFx: ExportFx = {
     trackFx: {
       "track-mixed": {
@@ -990,6 +1074,7 @@ test("instrument export reuses leased buffers at the exact cap and reserves only
     masterFxInstances: [],
     masterVolume: 1,
   }
+
   Object.defineProperty(globalThis, "OfflineAudioContext", {
     configurable: true,
     value: TestOfflineAudioContext,
@@ -997,6 +1082,7 @@ test("instrument export reuses leased buffers at the exact cap and reserves only
   globalThis.fetch = Object.assign(async () => new Response(createSilentWav(2, 48_000)), {
     preconnect: originalFetch.preconnect,
   })
+
   try {
     await loadInstrumentExportBuffers(
       mixedFx,
@@ -1011,22 +1097,27 @@ test("instrument export reuses leased buffers at the exact cap and reserves only
   } finally {
     mixedLease.release()
     mixedScope.release()
+
     if (offlineAudioContextDescriptor) Object.defineProperty(globalThis, "OfflineAudioContext", offlineAudioContextDescriptor)
     else Reflect.deleteProperty(globalThis, "OfflineAudioContext")
+
     if (fetchDescriptor) Object.defineProperty(globalThis, "fetch", fetchDescriptor)
     else Reflect.deleteProperty(globalThis, "fetch")
   }
+
   expect(mixedBudget.totalBytes()).toBe(0)
 })
 
 test("granular export charges its decoded buffer and worklet PCM mirror at the exact cap", async () => {
   const source = { durationSec: 1, sampleRate: 48_000, channelCount: 2 }
+
   const sample = {
     assetKey: "asset:granular-exact",
     url: "https://samples.example/granular-exact.wav",
     sourceKind: "url" as const,
     source,
   }
+
   const zone = {
     id: "zone-granular-exact",
     sample,
@@ -1045,12 +1136,14 @@ test("granular export charges its decoded buffer and worklet PCM mirror at the e
     crossfadeSec: 0,
     chokeGroup: 0,
   }
+
   const buffer = new TestDecodedAudioBuffer(48_000, 48_000, 2)
   const region = sampledInstrumentRegion(source, 0, source.durationSec)
   const decodedBytes = sampledInstrumentRegionBytes(region, source.channelCount)
   const identity = sampledInstrumentRegionIdentity(sample, region)
   const budget = createSampledInstrumentRegionBudget(decodedBytes * 2)
   const scope = budget.createScope("granular-exact")
+
   const fx: ExportFx = {
     trackFx: {
       "track-granular-exact": {
@@ -1073,24 +1166,29 @@ test("granular export charges its decoded buffer and worklet PCM mirror at the e
   } finally {
     scope.release()
   }
+
   expect(budget.totalBytes()).toBe(0)
 })
 
 test("native export accounts shared live PCM plus distinct offline mappings and preserves live leases on pressure", async () => {
   const buffer = new TestDecodedAudioBuffer(8 * 48_000)
+
   const sample: SamplerZone['sample'] = {
     assetKey: 'native-overlap', url: 'https://example.test/native.wav', sourceKind: 'url',
     source: { durationSec: 8, sampleRate: 48_000, channelCount: 2 },
   }
+
   const zone: SamplerZone = {
     id: 'zone', sample, keyLow: 0, keyHigh: 127, velocityLow: 1, velocityHigh: 127, rootNote: 60,
     tuneCents: 0, gain: 1, pan: 0, roundRobinGroup: 0, roundRobinIndex: 0,
     playbackMode: 'one-shot', startSec: 0, crossfadeSec: 0, chokeGroup: 0,
   }
+
   const identity = sampledInstrumentRegionIdentity(sample, sampledInstrumentRegion(sample.source, 0, 8))
   const bytes = buffer.length * 2 * 4
   const liveMapping = bytes
   const exportCharges: number[] = []
+
   const runExport = async (capacity: number) => {
     exportCharges.length = 0
     const budget = createSampledInstrumentRegionBudget(capacity)
@@ -1098,6 +1196,7 @@ test("native export accounts shared live PCM plus distinct offline mappings and 
     live.lease([{ key: identity, buffer, bytes }], true)
     live.set('native-live', liveMapping, () => { throw new Error('Audible mapping was evicted.') })
     const scope = budget.createScope('export')
+
     // The export's mapping and staging charges are read off the scope it allocates through.
     const recordingScope = {
       ...scope,
@@ -1106,6 +1205,7 @@ test("native export accounts shared live PCM plus distinct offline mappings and 
         scope.set(key, charge, onEvict, physical)
       },
     }
+
     const fx: ExportFx = {
       masterFxInstances: [], masterVolume: 1,
       trackFx: { instrument: {
@@ -1113,8 +1213,10 @@ test("native export accounts shared live PCM plus distinct offline mappings and 
         granularBuffer: { assetKey: identity, buffer, sourceStartFrame: 0, sourceIdentity: identity },
       } },
     }
+
     let failure: unknown
     let held: number | undefined
+
     try {
       await loadInstrumentExportBuffers(fx, new AbortController().signal, undefined, undefined, recordingScope, nativeInstrumentExportMemory)
       held = budget.totalBytes()
@@ -1123,11 +1225,14 @@ test("native export accounts shared live PCM plus distinct offline mappings and 
     } finally {
       scope.release()
     }
+
     const afterExport = budget.totalBytes()
     const liveStillLeased = live.isLeased(buffer)
     live.release()
+
     return { failure, held, afterExport, liveStillLeased, afterLive: budget.totalBytes() }
   }
+
   const measured = await runExport(1024 ** 4)
   const exportCharge = exportCharges.reduce((sum, charge) => sum + charge, 0)
   expect(exportCharges.length).toBeGreaterThan(1)
@@ -1143,12 +1248,14 @@ test("native export accounts shared live PCM plus distinct offline mappings and 
 
 test("shared sampler and granular export consumers charge one physical region at the granular weight", async () => {
   const source = { durationSec: 1, sampleRate: 48_000, channelCount: 2 }
+
   const sample = {
     assetKey: "asset:shared-granular",
     url: "https://samples.example/shared-granular.wav",
     sourceKind: "url" as const,
     source,
   }
+
   const zone = {
     id: "zone-shared-granular",
     sample,
@@ -1167,12 +1274,14 @@ test("shared sampler and granular export consumers charge one physical region at
     crossfadeSec: 0,
     chokeGroup: 0,
   }
+
   const buffer = new TestDecodedAudioBuffer(48_000, 48_000, 2)
   const region = sampledInstrumentRegion(source, 0, source.durationSec)
   const decodedBytes = sampledInstrumentRegionBytes(region, source.channelCount)
   const identity = sampledInstrumentRegionIdentity(sample, region)
   const budget = createSampledInstrumentRegionBudget(decodedBytes * 2)
   const scope = budget.createScope("shared-granular")
+
   const fx: ExportFx = {
     trackFx: {
       "track-shared-sampler": {
@@ -1206,17 +1315,21 @@ test("shared sampler and granular export consumers charge one physical region at
   } finally {
     scope.release()
   }
+
   expect(budget.totalBytes()).toBe(0)
 })
 
 test("native export prepares Stretch after hydration as a mapped artifact", async () => {
   const originalAudioBuffer = Object.getOwnPropertyDescriptor(globalThis, "AudioBuffer")
+
   let preparedAsset: {
     sampleRateHz: number
     frameCount: number
     preparedStretchArtifactId: string | undefined
   } | undefined
+
   const source = new TestDecodedAudioBuffer()
+
   try {
     const outcome = await runTimelineExport({
       nativeRendererRequired: true,
@@ -1264,6 +1377,7 @@ test("native export prepares Stretch after hydration as a mapped artifact", asyn
       createBuffer: (channels, frames, sampleRate) => new TestDecodedAudioBuffer(frames, sampleRate, channels),
       nativeOfflinePcmRenderer: async (plan) => {
         const asset = plan.mappedAssets?.[0]
+
         if (asset) {
           preparedAsset = {
             sampleRateHz: asset.sampleRateHz,
@@ -1271,6 +1385,7 @@ test("native export prepares Stretch after hydration as a mapped artifact", asyn
             preparedStretchArtifactId: asset.preparedStretchArtifactId,
           }
         }
+
         throw new NativeOfflineRenderError("stop after native Stretch planning")
       },
     })
@@ -1292,6 +1407,7 @@ test("native export prepares Stretch after hydration as a mapped artifact", asyn
 
 test("native Stretch preparation hydrates first and surfaces structured diagnostics", async () => {
   const source = new TestDecodedAudioBuffer(48_000, 48_000, 3)
+
   const clip: RuntimeTrack["clips"][number] = {
     id: "clip-stretch-diagnostic",
     name: "Stretch clip",
@@ -1301,8 +1417,10 @@ test("native Stretch preparation hydrates first and surfaces structured diagnost
     sourceAssetKey: "asset:stretch",
     audioWarp: { enabled: true, mode: "stretch", sourceBpm: 120 },
   }
+
   let hydrated = false
   let opened = false
+
   const outcome = await runTimelineExport({
     nativeRendererRequired: true,
     getTracks: () => [{
@@ -1331,6 +1449,7 @@ test("native Stretch preparation hydrates first and surfaces structured diagnost
       resourceLimits: desktopLimits,
       async createMixdownTarget() {
         opened = true
+
         return {
           openFile: async () => undefined,
           saveBuffer: async () => ({ destination: "local", name: "unused.wav" }),
@@ -1358,6 +1477,7 @@ test("native Stretch preparation hydrates first and surfaces structured diagnost
 test("native custom-range export ignores out-of-range Stretch preparation", async () => {
   const source = new TestDecodedAudioBuffer(48_000, 48_000, 2)
   let hydrated = false
+
   const outcome = await runTimelineExport({
     nativeRendererRequired: true,
     getTracks: () => [{
@@ -1429,6 +1549,7 @@ test("native custom-range export ignores out-of-range Stretch preparation", asyn
 
 test("native Main mixdown reports metadata-only ordinary clips without a resolver", async () => {
   let loaderCalls = 0
+
   const outcome = await runTimelineExport({
     nativeRendererRequired: true,
     getTracks: () => [{
@@ -1493,10 +1614,12 @@ test("native Main mixdown reports metadata-only ordinary clips without a resolve
 test("native export rejects a stale project generation after Stretch preparation", async () => {
   const source = new TestDecodedAudioBuffer(48_000, 48_000, 2)
   let generation = 7
+
   const outcome = await runTimelineExport({
     nativeRendererRequired: true,
     getTracks: () => {
       generation = 8
+
       return [{
         id: "track-stretch-stale",
         name: "Stretch",
@@ -1556,7 +1679,9 @@ const IMPULSE_FRAME = Math.round(IMPULSE_SEC * ALIGN_RATE)
 
 const createImpulseSpool = (totalFrames: number, impulseFrame: number): nativeOfflinePcmSpool.NativeOfflinePcmSpoolSession => {
   const planes = [new Float32Array(totalFrames), new Float32Array(totalFrames)]
+
   for (const plane of planes) plane[impulseFrame] = 0.5
+
   return {
     append: async () => undefined,
     finalize: async () => ({
@@ -1581,18 +1706,23 @@ const createImpulseSpool = (totalFrames: number, impulseFrame: number): nativeOf
 
 const captureEncodedFile = () => {
   const encoded: { frames: number; impulseFrames: number[] }[] = []
+
   const encode = spyOn(exportMixdown, "encodeAudioChunks").mockImplementation(async (chunks) => {
     let frames = 0
     const impulseFrames: number[] = []
+
     for await (const chunk of chunks) {
       chunk.getChannelData(0).forEach((sample, frame) => {
         if (sample !== 0) impulseFrames.push(frames + frame)
       })
       frames += chunk.length
     }
+
     encoded.push({ frames, impulseFrames })
+
     return { blob: new Blob(), format: "wav", durationSec: frames / ALIGN_RATE, sampleRate: ALIGN_RATE, sizeBytes: 8 }
   })
+
   return { encoded, restore: () => encode.mockRestore() }
 }
 
@@ -1646,6 +1776,7 @@ test("a native mixdown with graph latency starts on the timeline and keeps the r
   const limiterFrames = Math.ceil(5 * ALIGN_RATE / 1000)
   const file = captureEncodedFile()
   let renderedFrames = 0
+
   try {
     const outcome = await runTimelineExport({
       ...alignMixdownInput,
@@ -1662,6 +1793,7 @@ test("a native mixdown with graph latency starts on the timeline and keeps the r
       createBuffer: (channels, frames, sampleRate) => new TestDecodedAudioBuffer(frames, sampleRate, channels),
       nativeOfflinePcmRenderer: async (plan) => {
         renderedFrames = plan.totalFrames
+
         return createImpulseSpool(plan.totalFrames, limiterFrames + IMPULSE_FRAME)
       },
     })
@@ -1677,6 +1809,7 @@ test("a native mixdown with graph latency starts on the timeline and keeps the r
 test("a native mixdown without graph latency renders and encodes the range unchanged", async () => {
   const file = captureEncodedFile()
   let renderedFrames = 0
+
   try {
     const outcome = await runTimelineExport({
       ...alignMixdownInput,
@@ -1686,6 +1819,7 @@ test("a native mixdown without graph latency renders and encodes the range uncha
       createBuffer: (channels, frames, sampleRate) => new TestDecodedAudioBuffer(frames, sampleRate, channels),
       nativeOfflinePcmRenderer: async (plan) => {
         renderedFrames = plan.totalFrames
+
         return createImpulseSpool(plan.totalFrames, IMPULSE_FRAME)
       },
     })
@@ -1702,17 +1836,22 @@ test("a portable mixdown spools the extra latency frames and encodes from the ra
   const latencyFrames = 777
   const file = captureEncodedFile()
   const spoolSizes: number[] = []
+
   const createSpool = spyOn(nativeOfflinePcmSpool, "createNativeOfflinePcmSpool").mockImplementation(() => ({
     createSession: async ({ totalFrames }) => {
       spoolSizes.push(totalFrames)
+
       return createImpulseSpool(totalFrames, latencyFrames + IMPULSE_FRAME)
     },
   }))
+
   const renderPortable = spyOn(exportMixdown, "renderPortableMixdownChunks").mockImplementation(async (_request, onChunk) => {
     const frameCount = ALIGN_FRAMES + latencyFrames
     await onChunk(0, 0, { frameCount: 1, planes: [new Float32Array(1), new Float32Array(1)] }, frameCount)
+
     return { frameCount, latencyFrames, sampleRate: ALIGN_RATE, numberOfChannels: 2, cleanup: async () => undefined }
   })
+
   try {
     const outcome = await runTimelineExport({
       ...alignMixdownInput,
@@ -1737,15 +1876,19 @@ test("each stem is aligned by the latency of its own graph", async () => {
   const latencyByTrack = new Map([["stem-a", 50], ["stem-b", 900]])
   const file = captureEncodedFile()
   let stemLatency = 0
+
   const createSpool = spyOn(nativeOfflinePcmSpool, "createNativeOfflinePcmSpool").mockImplementation(() => ({
     createSession: async ({ totalFrames }) => createImpulseSpool(totalFrames, stemLatency + IMPULSE_FRAME),
   }))
+
   const renderPortable = spyOn(exportMixdown, "renderPortableMixdownChunks").mockImplementation(async (request, onChunk) => {
     stemLatency = [...latencyByTrack].find(([id]) => request.trackIds?.has(id))?.[1] ?? 0
     const frameCount = ALIGN_FRAMES + stemLatency
     await onChunk(0, 0, { frameCount: 1, planes: [new Float32Array(1), new Float32Array(1)] }, frameCount)
+
     return { frameCount, latencyFrames: stemLatency, sampleRate: ALIGN_RATE, numberOfChannels: 2, cleanup: async () => undefined }
   })
+
   try {
     const outcome = await runStemExport({
       getTracks: () => [alignTrack("stem-a"), alignTrack("stem-b")],

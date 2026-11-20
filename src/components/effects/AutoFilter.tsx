@@ -13,8 +13,10 @@ type AutoFilterProps = {
   onAutomationParameterTouch?: (parameterId: string) => void
   onManualAutomationOverride?: (parameterId: string) => void
 }
+
 const defaults = createDefaultAutoFilterParams()
 const percent = formatDevicePercent
+
 export default function AutoFilter(props: AutoFilterProps) {
   return <EffectShell title="Auto Filter" typeLabel="2x" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="device-autofilter"><div class="device-autofilter-grid grid min-h-0 flex-1 gap-3 px-3 py-3">
     <div class="grid content-center gap-1 border-r border-border pr-3">

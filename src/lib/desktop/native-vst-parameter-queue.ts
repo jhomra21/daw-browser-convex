@@ -10,7 +10,9 @@ export type NativeVstParameterEvent = {
 }
 
 export type NativeVstParameterSender = (bytes: Uint8Array) => Promise<NativeSessionReply>
+
 export type NativeVstParameterQueueResult = "delivered" | "superseded" | "rejected"
+
 export type NativeVstParameterQueue = {
   enqueue: (event: NativeVstParameterEvent) => Promise<NativeVstParameterQueueResult>
   dispose: () => void
@@ -35,6 +37,7 @@ export const createNativeVstParameterQueue = (
   const resolveWaiters = (entry: PendingEntry, result: NativeVstParameterQueueResult) => {
     const waiters = entry.waiters
     entry.waiters = []
+
     for (const resolve of waiters) resolve(result)
   }
 
@@ -48,7 +51,9 @@ export const createNativeVstParameterQueue = (
         value: event.value,
         sampleOffset: 0,
       })))
+
       const reply = await send(bytes)
+
       return reply.ok ? "delivered" : "rejected"
     } catch {
       return "rejected"
@@ -58,25 +63,32 @@ export const createNativeVstParameterQueue = (
   const drain = async () => {
     if (inFlight || disposed) return
     inFlight = true
+
     try {
       while (!disposed && pending.size > 0) {
         const snapshot = [...pending.values()]
         pending.clear()
+
         for (const entry of snapshot) {
           activeByKey.set(keyFor(entry.event), entry)
         }
+
         const grouped = new Map<string, PendingEntry[]>()
+
         for (const entry of snapshot) {
           const events = grouped.get(entry.event.instanceId) ?? []
           events.push(entry)
           grouped.set(entry.event.instanceId, events)
         }
+
         for (const [instanceId, entries] of grouped) {
           for (let offset = 0; offset < entries.length; offset += maxVst3WorkerEventsPerBlock) {
             const chunk = entries.slice(offset, offset + maxVst3WorkerEventsPerBlock)
+
             const delivery = disposed
               ? "rejected"
               : await sendPayload(instanceId, chunk.map((entry) => entry.event))
+
             for (const entry of chunk) {
               activeByKey.delete(keyFor(entry.event))
               resolveWaiters(entry, delivery)
@@ -103,6 +115,7 @@ export const createNativeVstParameterQueue = (
     const key = keyFor(event)
     const current = pending.get(key)
     const active = activeByKey.get(key)
+
     const promise = new Promise<NativeVstParameterQueueResult>((resolve) => {
       if (current) {
         resolveWaiters(current, "superseded")
@@ -110,14 +123,19 @@ export const createNativeVstParameterQueue = (
           event,
           waiters: [resolve],
         })
+
         return
       }
+
       if (active) {
         resolveWaiters(active, "superseded")
       }
+
       pending.set(key, { event, waiters: [resolve] })
     })
+
     scheduleDrain()
+
     return promise
   }
 
@@ -126,7 +144,9 @@ export const createNativeVstParameterQueue = (
     dispose() {
       if (disposed) return
       disposed = true
+
       for (const entry of pending.values()) resolveWaiters(entry, "rejected")
+
       for (const entry of activeByKey.values()) resolveWaiters(entry, "rejected")
       pending.clear()
       activeByKey.clear()

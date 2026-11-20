@@ -204,27 +204,34 @@ window.timelineFailureResults = async () => {
 test('timeline failure paths roll back safely and preserve retry history', async () => {
   const directory = `/tmp/daw-timeline-failures-${crypto.randomUUID()}`
   const session = `timeline-failures-${crypto.randomUUID()}`
+
   const browser = async (...args: string[]) => {
     const env = { ...process.env }
     delete env.AGENT_BROWSER_CDP
     delete env.AGENT_BROWSER_SESSION
+
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], {
       env,
       stdout: 'pipe',
       stderr: 'pipe',
     })
+
     const [stdout, stderr] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
     ])
+
     if (await child.exited !== 0) throw new Error(stderr || stdout)
+
     return stdout.trim()
   }
 
   await mkdir(directory, { recursive: true })
+
   try {
     const entry = `${directory}/fixture.ts`
     await Bun.write(entry, fixture)
+
     const built = await Bun.build({
       entrypoints: [entry],
       target: 'browser',
@@ -241,14 +248,18 @@ test('timeline failure paths roll back safely and preserve retry history', async
         },
       }],
     })
+
     expect(built.success).toBe(true)
     const output = built.outputs[0]
+
     if (!output) throw new Error('Expected a browser fixture bundle.')
     await Bun.write(`${directory}/index.html`, `<!doctype html><body><script>${await output.text()}</script>`)
     await browser('open', `file://${directory}/index.html`)
+
     const parsed = z.record(z.string(), z.boolean()).parse(
       JSON.parse(await browser('eval', 'window.timelineFailureResults()')),
     )
+
     const resultPath = '/tmp/daw-timeline-failure-flows-results.json'
     await Bun.write(resultPath, JSON.stringify(parsed, null, 2))
     console.log(`Timeline failure-flow evidence: ${resultPath}`)

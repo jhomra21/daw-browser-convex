@@ -5,12 +5,14 @@ type DeliveryEventKind = "block" | "enqueue" | "status" | "writer" | RecordingTe
 
 export const createRecordingDeliveryTrace = (enabled: boolean, generation: number, sessionId: bigint, startedAtEpochMs: number) => {
   const capacity = 512
+
   const emptyEntry = (kind: DeliveryEventKind) => ({
     kind, atEpochMs: 0, sequence: -1, frameCount: 0, nativeQueuedBlocks: -1,
     outstanding: 0, sendEndEpochMs: 0, latencyMs: 0, deliveryMs: 0,
     returnedAtEpochMs: 0, returned: 0, active: 0, fatal: 0,
     mainArrivalEpochMs: 0, oldestAgeMs: 0, capturedFrames: 0,
   })
+
   const entries = enabled ? Array.from({ length: capacity }, () => emptyEntry("block")) : []
   let count = 0
   let dumped = false
@@ -20,6 +22,7 @@ export const createRecordingDeliveryTrace = (enabled: boolean, generation: numbe
   let firstTermination: { cause: RecordingTerminationCause; atEpochMs: number } | null = null
   let firstFatalStatus: { atEpochMs: number; queuedBlocks: number; capturedFrames: number } | null = null
   const clockOffsetAtStartMs = enabled ? Date.now() - (performance.timeOrigin + performance.now()) : null
+
   const append = (kind: DeliveryEventKind, atEpochMs: number) => {
     if (!enabled || dumped) return undefined
     const entry = entries[count % capacity]!
@@ -40,11 +43,14 @@ export const createRecordingDeliveryTrace = (enabled: boolean, generation: numbe
     entry.oldestAgeMs = 0
     entry.capturedFrames = 0
     count += 1
+
     return entry
   }
+
   return {
     block(sequence: number, frameCount: number, arrivalEpochMs: number, sendMs = 0, mainArrivalEpochMs = 0) {
       const entry = append("block", arrivalEpochMs)
+
       if (!entry) return
       observedFrames += frameCount
       entry.sequence = sequence
@@ -55,6 +61,7 @@ export const createRecordingDeliveryTrace = (enabled: boolean, generation: numbe
     enqueue(sequence: number, frameCount: number, atEpochMs: number, writerOutstanding: number) {
       outstanding = writerOutstanding
       const entry = append("enqueue", atEpochMs)
+
       if (!entry) return
       entry.sequence = sequence
       entry.frameCount = frameCount
@@ -62,6 +69,7 @@ export const createRecordingDeliveryTrace = (enabled: boolean, generation: numbe
     status(atEpochMs: number, nativeQueuedBlocks: number, active: boolean, fatal: boolean, capturedFrames: number) {
       if (!enabled || dumped) return
       queuedBlocks = nativeQueuedBlocks
+
       if (fatal && !firstFatalStatus) firstFatalStatus = { atEpochMs, queuedBlocks, capturedFrames }
       const entry = append("status", atEpochMs)!
       entry.capturedFrames = capturedFrames
@@ -72,6 +80,7 @@ export const createRecordingDeliveryTrace = (enabled: boolean, generation: numbe
       deliveryMs: number, returnedAtEpochMs: number, oldestAgeMs: number) {
       outstanding = writerOutstanding
       const entry = append("writer", atEpochMs)
+
       if (!entry) return
       entry.latencyMs = latencyMs
       entry.deliveryMs = deliveryMs
@@ -87,15 +96,18 @@ export const createRecordingDeliveryTrace = (enabled: boolean, generation: numbe
     },
     transition(cause: RecordingTerminationCause | "cleanup", atEpochMs: number) {
       if (!enabled || dumped) return
+
       if (cause !== "cleanup" && !firstTermination) firstTermination = { cause, atEpochMs }
       append(cause, atEpochMs)
     },
     dump(endedAtEpochMs: number) {
       if (!enabled || dumped) return null
       dumped = true
+
       const events = Array.from({ length: Math.min(count, capacity) }, (_, offset) => ({
         ...entries[(Math.max(0, count - capacity) + offset) % capacity]!,
       }))
+
       return {
         version: 1, capacity, generation, sessionId: sessionId.toString(),
         clock: "performance.timeOrigin+performance.now",

@@ -18,6 +18,7 @@ import { replaceEqualDeep } from "@tanstack/solid-query";
 // The wrapper forwards to the real controller and only records disposal calls.
 let observeDisposal: ((reason: string) => void) | undefined;
 let disposalSpyInstalled = false;
+
 const installDisposalSpy = async () => {
   if (disposalSpyInstalled) return;
   disposalSpyInstalled = true;
@@ -36,6 +37,7 @@ const installDisposalSpy = async () => {
 };
 
 const nativeTransactionToken = "native-playback-transaction-token-000000000";
+
 const createStep5NativeHost = () => {
   const calls: string[] = [];
   const progressListeners = new Set<(progress: NativeScheduleProgress) => void>();
@@ -46,15 +48,22 @@ const createStep5NativeHost = () => {
   let appliedUrgentSequence = 0n;
   const appliedParameters = new Map<string, number>();
   let transport = { epoch: 1, frame: 0, running: false, transitionId: 0n };
+
   type Accepted = { ok: true };
+
   const accepted: Accepted = { ok: true };
+
   const ok = (name: string) => async () => {
     calls.push(name);
+
     if (name === "begin") return { ...accepted, transactionToken: nativeTransactionToken };
+
     return accepted;
   };
+
   const emitProgress = () => {
     progressSequence++;
+
     for (const listener of progressListeners) {
       listener({
         revision: runtimeRevision, epoch: transport.epoch, progressSequence, renderedThroughFrame: BigInt(transport.frame),
@@ -64,10 +73,12 @@ const createStep5NativeHost = () => {
       });
     }
   };
+
   let revision = 1;
   let activeRevision = 1;
   let seam = 0n;
   let status: "prepared" | "published" = "prepared";
+
   const reply = async (): Promise<NativeRevisionReply> => ({
     ok: true, hostPid: 123, hostGeneration: 7,
     revision: {
@@ -76,15 +87,29 @@ const createStep5NativeHost = () => {
       transportEpoch: transport.epoch, publicationFrame: status === "published" ? seam : 0n, progressFrame: 0n,
     },
   });
+
   const revisions: NativeRevisionSession = {
-    prepare: async (request) => { calls.push("revision.prepare"); revision++; seam = request.requestedPublicationFrame ?? 0n; status = "prepared"; return reply(); },
-    publish: async () => { calls.push("revision.publish"); status = "published"; activeRevision = revision; runtimeRevision = revision; return reply(); },
-    inspect: async () => { calls.push("revision.inspect"); return reply(); },
-    rollback: async () => { calls.push("revision.rollback"); return reply(); },
-    retire: async () => { calls.push("revision.retire"); return reply(); },
+    prepare: async (request) => { calls.push("revision.prepare"); revision++; seam = request.requestedPublicationFrame ?? 0n; status = "prepared";
+
+ return reply(); },
+    publish: async () => { calls.push("revision.publish"); status = "published"; activeRevision = revision; runtimeRevision = revision;
+
+ return reply(); },
+    inspect: async () => { calls.push("revision.inspect");
+
+ return reply(); },
+    rollback: async () => { calls.push("revision.rollback");
+
+ return reply(); },
+    retire: async () => { calls.push("revision.retire");
+
+ return reply(); },
   };
+
   const session = {
-    configure: async () => { calls.push("configure"); return { ...accepted, hostIdentity: { pid: 123, generation: 7, configurationGeneration: 1 } }; },
+    configure: async () => { calls.push("configure");
+
+ return { ...accepted, hostIdentity: { pid: 123, generation: 7, configurationGeneration: 1 } }; },
     beginTransaction: ok("begin"),
     commitTransaction: ok("commit"),
     rollbackTransaction: ok("rollback"),
@@ -92,6 +117,7 @@ const createStep5NativeHost = () => {
     releaseAsset: ok("release"),
     publishGraph: (bytes: Uint8Array) => {
       runtimeRevision = Number(new DataView(bytes.buffer, bytes.byteOffset).getBigUint64(0, false));
+
       return ok("graph")();
     },
     createMappedAsset: ok("install"),
@@ -103,17 +129,21 @@ const createStep5NativeHost = () => {
       const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
       expect(view.getUint32(4, true)).toBe(runtimeRevision);
       expect(view.getUint32(8, true)).toBe(transport.epoch);
+
       for (let index = 0; index < view.getUint32(0, true); index++) {
         const offset = 20 + index * 20;
         appliedParameters.set(`${view.getUint32(offset, true)}:${view.getUint32(offset + 8, true)}`, view.getFloat32(offset + 16, true));
       }
+
       appliedProcessorSequence = view.getBigUint64(12, true);
       queueMicrotask(emitProgress);
+
       return accepted;
     },
     queueInstrumentEvents: async (bytes: Uint8Array) => {
       calls.push("instrument");
       const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
       for (let index = 0; index < view.getUint32(0, true); index++) {
         const offset = 4 + index * 48;
         expect(view.getUint32(offset + 24, true)).toBe(transport.epoch);
@@ -121,18 +151,22 @@ const createStep5NativeHost = () => {
         appliedParameters.set(`${view.getBigUint64(offset, true)}:${view.getUint32(offset + 40, true)}`,
           view.getFloat32(offset + 44, true));
       }
+
       queueMicrotask(emitProgress);
+
       return accepted;
     },
     queueSourceEvents: ok("source"),
     queueProcessorStatePatch: async () => {
       calls.push("queueProcessorStatePatch");
+
       return { ok: true, outcome: "applied" } satisfies NativeProcessorPatchReply;
     },
     queueScheduleWindow: (bytes: Uint8Array) => {
       const view = new DataView(bytes.buffer, bytes.byteOffset);
       acceptedFrames.set(view.getUint32(4, true), view.getBigUint64(24, true));
       queueMicrotask(emitProgress);
+
       return ok("schedule")();
     },
     setTransport: async (next: NativeHostTransport) => {
@@ -149,6 +183,7 @@ const createStep5NativeHost = () => {
           });
         }
       });
+
       return accepted;
     },
     configureRecording: ok("recording-configure"),
@@ -158,17 +193,23 @@ const createStep5NativeHost = () => {
     start: ok("start"),
     stop: ok("stop"),
     teardown: ok("teardown"),
-    configureInstrumentStates: async () => { calls.push("configureInstrumentStates"); return accepted; },
+    configureInstrumentStates: async () => { calls.push("configureInstrumentStates");
+
+ return accepted; },
     revisions,
     onLoss: () => () => undefined,
     onRecordingStatus: () => () => undefined,
     onScheduleProgress: (listener: (progress: NativeScheduleProgress) => void) => {
       progressListeners.add(listener);
+
       return () => { progressListeners.delete(listener); };
     },
   };
+
   type DefaultDeviceId = "coreaudio:default";
+
   const defaultDeviceId: DefaultDeviceId = "coreaudio:default";
+
   const audioHost = {
     instrumentBudgetPolicy: { deviceDecodedBytes: 8 * 1024 * 1024, aggregateBytes: 8 * 1024 * 1024 },
     resolveOutputDevice: async () => ({
@@ -178,6 +219,7 @@ const createStep5NativeHost = () => {
     resolveInputDevice: async () => ({ ...accepted, device: null }),
     session,
   };
+
   return { calls, audioHost, appliedParameters, epoch: () => transport.epoch };
 };
 
@@ -212,9 +254,12 @@ export const mountStep5Playback = async <Inputs extends {
   globalThis.requestAnimationFrame = callback => {
     const id = ++nextFrame;
     frames.set(id, callback);
+
     return id;
   };
+
   globalThis.cancelAnimationFrame = id => { frames.delete(id); };
+
   const host = createStep5NativeHost();
   Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: host.audioHost } } });
   const faults: string[] = [];
@@ -222,9 +267,11 @@ export const mountStep5Playback = async <Inputs extends {
   const compilations: { mode: string; renderState: ExportRenderStateSnapshot }[] = [];
   const disposals: string[] = [];
   observeDisposal = reason => { disposals.push(reason); };
+
   const processorEdits = createProcessorEditRegistry(() => 120);
   const instrumentBudget = createSampledInstrumentRegionBudget(8 * 1024 * 1024);
   let dispose = () => {};
+
   const engine = {
     currentTimelineSec: 0, ensureAudio: () => undefined,
     applyAutomationAtTimelineSec: () => undefined, cancelAutomationSchedules: () => undefined,
@@ -235,6 +282,7 @@ export const mountStep5Playback = async <Inputs extends {
     scheduleAutomationFromPlayhead: () => undefined, stopAllSources: () => undefined,
     subscribeStretchRenderState: () => () => true,
   } satisfies Parameters<typeof useTimelinePlayback>[0];
+
   const playback = createRoot(cleanup => {
     dispose = cleanup;
     const capturedInputs = createMemo(input.playbackInputs);
@@ -242,8 +290,10 @@ export const mountStep5Playback = async <Inputs extends {
       const fx = input.desiredFx(capturedInputs());
       untrack(() => processorEdits.observe(fx));
     });
+
     const playbackInputs = createMemo(() => {
       const captured = capturedInputs();
+
       return pickNativePlaybackInputs({
         timeSignature: input.compileInputs?.(captured)?.timeSignature ?? { numerator: 4, denominator: 4 },
         automationEnvelopes: captured.canonical?.automationEnvelopes,
@@ -251,6 +301,7 @@ export const mountStep5Playback = async <Inputs extends {
         processorStructure: processorEdits.structure(),
       });
     }, undefined, { equals: (previous, next) => replaceEqualDeep(previous, next) === previous });
+
     return useTimelinePlayback(engine, { getTracks: input.tracks, bpm: () => 120 }, {
       requiresNativeAudio: true, enabled: () => true, projectId: () => input.projectId,
       instrumentBudget,
@@ -264,25 +315,33 @@ export const mountStep5Playback = async <Inputs extends {
         const captured = input.playbackInputs();
         const renderState = await input.renderState(captured);
         compilations.push({ mode: transport.state, renderState });
+
         const result = compileLivePlaybackSnapshot({
           revision: input.revision?.() ?? 1, processorStateSequence: processorEdits.sequence(), bpm: 120, transport, tracks: input.tracks(),
           renderState, sidechainRoutes: [], ...input.compileInputs?.(captured),
         });
+
         if (!result.supported) throw new Error(`Step 5 fixture compile: ${JSON.stringify(result)}`);
+
         return result;
       },
     });
   });
+
   const frame = async () => {
     const pending = [...frames.values()];
     frames.clear();
+
     for (const callback of pending) callback(0);
     await settleStep5Playback();
   };
+
   const mark = () => ({ calls: host.calls.length, compilations: compilations.length, disposals: disposals.length });
+
   const counts = (before: ReturnType<typeof mark>) => {
     const calls = host.calls.slice(before.calls);
     const compiled = compilations.slice(before.compilations);
+
     return {
       scheduleCompiles: compiled.filter(row => row.mode === "playing").length,
       previewCompiles: compiled.filter(row => row.mode !== "playing").length,
@@ -292,16 +351,19 @@ export const mountStep5Playback = async <Inputs extends {
       previewDisposals: disposals.slice(before.disposals).filter(reason => reason === "paused-preview-structural-change").length,
     };
   };
+
   const close = async () => {
     dispose();
     await settleStep5Playback();
     instrumentBudget.dispose();
     observeDisposal = undefined;
+
     if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
     else Reflect.deleteProperty(globalThis, "window");
     globalThis.requestAnimationFrame = previousRequest;
     globalThis.cancelAnimationFrame = previousCancel;
   };
+
   try {
     await settleStep5Playback();
     await playback.awaitPlaybackPreparation();
@@ -311,5 +373,6 @@ export const mountStep5Playback = async <Inputs extends {
     await close();
     throw cause;
   }
+
   return { playback, host, faults, typedFaults, compilations, processorEdits, mark, counts, frame, close };
 };

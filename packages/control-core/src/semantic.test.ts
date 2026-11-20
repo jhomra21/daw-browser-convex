@@ -24,6 +24,7 @@ test('preserves expanded MIDI for legacy actions and replaces it when supplied',
     polyPressure: [],
     mappings: [{ id: 'mapping-1', source: { kind: 'cc' as const, controller: 1, channel: 2 }, target: { parameterId: 'gain' }, outputMin: 0, outputMax: 1 }],
   }
+
   expect(resolveControlMidiActionV1({
     wave: 'sine',
     gain: 0.5,
@@ -69,6 +70,7 @@ test('reconciles identical idless notes one-to-one and preserves omitted channel
       { id: 'second', beat: 0, length: 1, pitch: 60, velocity: 0.5, channel: 3 },
     ],
   }
+
   expect(resolveControlMidiActionV1({
     wave: 'sine',
     notes: [
@@ -93,7 +95,9 @@ test('edits one legacy MIDI note without rewriting unrelated historical state', 
     velocity: 0.5,
     channel: 1,
   }))
+
   notes[0] = { id: 'invalid-note', beat: -2, length: -1, pitch: 200, velocity: 2, channel: 1 }
+
   const current = {
     wave: 'custom-legacy',
     gain: 7,
@@ -101,6 +105,7 @@ test('edits one legacy MIDI note without rewriting unrelated historical state', 
     cc: [{ id: 'cc-1', beat: 0, controller: 1, value: 0.5, channel: 1 }],
     mappings: [{ id: 'mapping-1', source: { kind: 'cc' as const, controller: 1, channel: 1 }, target: { parameterId: 'gain' }, outputMin: 0, outputMax: 1 }],
   }
+
   const action = {
     kind: 'clip.midi.set' as const,
     clip: persisted('clip-1'),
@@ -110,7 +115,9 @@ test('edits one legacy MIDI note without rewriting unrelated historical state', 
       ? { ...note, beat: 0, length: 1, pitch: 60, velocity: 0.5 }
       : note),
   }
+
   const parsedAction = controlActionSchemaV1.parse(action)
+
   if (parsedAction.kind !== 'clip.midi.set') throw new Error('Expected MIDI set action.')
   expect(parsedAction.notes).toHaveLength(501)
   const resolved = resolveControlMidiActionV1(action, current)
@@ -175,6 +182,7 @@ test('projects only canonical, bounded external parameter overrides', () => {
     assets: [],
     assetFolders: [],
   })
+
   const external = projected.processors.find((processor) => processor.id === 'external-plugin:instance-1')
   expect(external?.processor).toMatchObject({
     kind: 'external-vst3',

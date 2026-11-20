@@ -20,34 +20,43 @@ export const useCloudSyncTick = (options: Options) => {
 
   const scheduleSync = (projectId: string) => {
     if (!options.enabled() || syncInFlight.has(projectId) || timers.has(projectId)) return
+
     // Debounce local edits per project so high-frequency changes coalesce without losing project identity.
     const timer = window.setTimeout(() => {
       timers.delete(projectId)
+
       if (!options.enabled()) {
         return
       }
+
       pendingChanges.delete(projectId)
       syncInFlight.add(projectId)
       void Promise.resolve(options.sync(projectId)).finally(() => {
         syncInFlight.delete(projectId)
+
         if (pendingChanges.has(projectId)) scheduleSync(projectId)
       })
     }, CLOUD_SYNC_DEBOUNCE_MS)
+
     timers.set(projectId, timer)
   }
 
   createEffect(() => {
     const projectId = options.projectId()
+
     if (!projectId) return
+
     const onProjectChanged = () => {
       const alreadyPending = pendingChanges.has(projectId)
       pendingChanges.add(projectId)
+
       if (options.enabled()) {
         scheduleSync(projectId)
       } else if (!alreadyPending) {
         setChangeVersion((version) => version + 1)
       }
     }
+
     const unsubscribeProjectChanges = subscribeToLocalProjectChanges(projectId, onProjectChanged)
     const unsubscribeProjectStateChanges = subscribeToLocalProjectStateChanges(projectId, onProjectChanged)
     onCleanup(() => {
@@ -60,6 +69,7 @@ export const useCloudSyncTick = (options: Options) => {
     const projectId = options.projectId()
     const enabled = options.enabled()
     changeVersion()
+
     if (!projectId || !enabled || !pendingChanges.has(projectId)) return
     scheduleSync(projectId)
   })

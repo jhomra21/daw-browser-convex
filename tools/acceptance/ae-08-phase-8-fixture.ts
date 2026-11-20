@@ -31,6 +31,7 @@ export const runPhase8Fixture = async (context: Phase5Context) => {
   await runtime(["import", "--path", retainedFile])
   await waitImportedClip(context, "retained")
   const retained = (await snapshot()).clips.find((clip) => clip.name.includes("retained"))
+
   if (!retained) throw new Error("Retained fixture import missing")
   await mutate([{ kind: "clip.move", clip: persisted(retained.id), track: persisted(retained.trackId), startSec: 0 },
     { kind: "clip.timing.set", clip: persisted(retained.id), duration: 180 },
@@ -43,6 +44,7 @@ export const runPhase8Fixture = async (context: Phase5Context) => {
   await runtime(["play"])
   await waitNativeFrame(context, sampleRate * 2)
   let pausedFrame: number | undefined
+
   if (row === "paused-structural") pausedFrame = await pauseWithSpace(context)
   const editStart = Date.now()
   await mark("phase8-edit-start", { row })
@@ -50,10 +52,12 @@ export const runPhase8Fixture = async (context: Phase5Context) => {
   const committed = await snapshot()
   const editEnd = Date.now()
   await mark("phase8-edit-end", { row })
+
   if (pausedFrame !== undefined) {
     await mark("phase8-resume")
     await runtime(["play"])
   }
+
   await waitNativeFrame(context, (pausedFrame ?? sampleRate * 2) + sampleRate * 3)
   await mark("capture-end")
   await writeFile(path.join(out, "diagnostics-active.json"), JSON.stringify(await runtime(["diagnostics-v2"]), null, 2))

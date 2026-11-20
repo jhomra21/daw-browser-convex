@@ -19,9 +19,11 @@ export const settlePopstateProjectTransition = async (input: {
       await input.settle()
     } catch {
       input.restore()
+
       return
     }
   }
+
   input.resolve()
 }
 
@@ -34,6 +36,7 @@ export const openProjectFromDashboard = async (input: {
 }) => {
   const request = ++input.latestRequest.current
   await input.open()
+
   if (request === input.latestRequest.current && input.mountedProjectId() === input.nextProjectId) {
     input.closeDashboard()
   }
@@ -46,7 +49,9 @@ export const createProjectFromDashboard = async <Outcome extends { status: 'succ
 }) => {
   const request = ++input.latestRequest.current
   const outcome = await input.create()
+
   if (request === input.latestRequest.current && outcome.status === 'success') input.closeDashboard()
+
   return outcome
 }
 
@@ -55,6 +60,7 @@ const updateRoomUrl = (projectId: string, mode: 'push' | 'replace') => {
     const url = new URL(window.location.href)
     url.searchParams.set('projectId', projectId)
     url.searchParams.delete('roomId')
+
     if (mode === 'replace') {
       history.replaceState(null, '', url.toString())
     } else {
@@ -76,6 +82,7 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
   const [mountedProjectGeneration, setMountedProjectGeneration] = createSignal(0)
   let settleProjectTransition: (() => Promise<void>) | undefined
   let historyTransition = 0
+
   const setMountedProjectId = (nextProjectId: string) => {
     if (projectId() !== nextProjectId) setMountedProjectGeneration((generation) => generation + 1)
     setProjectIdState(nextProjectId)
@@ -94,6 +101,7 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
     if (routeOptions?.history) {
       updateRoomUrl(nextProjectId, routeOptions.history)
     }
+
     batch(() => {
       setBootstrapProjectId(routeOptions?.bootstrap ?? null)
       setMountedProjectId(nextProjectId)
@@ -112,6 +120,7 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
   const navigateToRoom = async (nextProjectId: string) => {
     await settleBeforeRoomChange()
     resolveRoom(nextProjectId, { history: 'push' })
+
     if (isLocalId('project', nextProjectId)) options.onLocalProjectOpened(nextProjectId)
   }
 
@@ -127,6 +136,7 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
       const nextShareToken = readLocationSearchParam('shareToken')
       setAcceptingShareToken(nextShareToken)
       const transition = ++historyTransition
+
       if (fromHistory) {
         let resolved = false
         await settlePopstateProjectTransition({
@@ -136,16 +146,21 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
           resolve: () => { resolved = true },
           restore: () => updateRoomUrl(projectId(), 'replace'),
         })
+
         if (!resolved || transition !== historyTransition) return
       }
+
       if (nextProjectId) {
         resolveRoom(nextProjectId)
+
         return
       }
+
       batch(() => {
         setBootstrapProjectId(null)
         setMountedProjectId('')
       })
+
       if (nextShareToken || !options.bootstrapIfEmpty) return
       const generatedProjectId = crypto.randomUUID()
       resolveRoom(generatedProjectId, {
@@ -156,6 +171,7 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
 
     void syncLocationState()
     const syncRoomFromHistory = () => { void syncLocationState(true) }
+
     window.addEventListener('popstate', syncRoomFromHistory)
     onCleanup(() => {
       window.removeEventListener('popstate', syncRoomFromHistory)

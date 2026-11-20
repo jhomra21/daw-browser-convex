@@ -64,6 +64,7 @@ const largeControlReply = (actionCount = 60_000) => ({
     actionKinds: Array.from({ length: actionCount }, (_, index) => `軌道-${index}`),
   },
 })
+
 const controlReplyWithPayload = (size: number) => ({
   version: "v1",
   type: "reply",
@@ -73,6 +74,7 @@ const controlReplyWithPayload = (size: number) => ({
     actionKinds: ["x".repeat(size)],
   },
 })
+
 const controlV2Reply = (actionCount = 1) => ({
   version: "v1" as const,
   type: "reply" as const,
@@ -94,12 +96,15 @@ describe("desktop reply chunks", () => {
   test("round trips a large multibyte reply with bounded JSON frames", () => {
     const chunks = serializeDesktopReply("control.capabilities", largeControlReply())
     expect(chunks.length).toBeGreaterThan(1)
+
     for (const chunk of chunks) {
       expect(desktopReplyChunkSchemaV1.safeParse(chunk).success).toBe(true)
       expect(encodeDesktopFrame(chunk).byteLength).toBeLessThanOrEqual(maxDesktopReplyFrameBytes)
     }
+
     const reassembler = createDesktopReplyReassembler("control-1", "control.capabilities")
     let assembled: unknown
+
     for (const chunk of chunks) assembled = reassembler.push(chunk)
     expect(assembled).toEqual(desktopReplySchemaV1.parse(largeControlReply()))
     expect(reassembler.pending()).toBe(0)
@@ -109,18 +114,22 @@ describe("desktop reply chunks", () => {
     const v1 = serializeDesktopReply("control.capabilities", {}, {
       version: "v1", type: "reply", id: "control-1", result: localControlCapabilitiesV1,
     })
+
     expect(v1).toHaveLength(1)
 
     for (const actionCount of [1, 60_000]) {
       const reply = { ...controlV2Reply(actionCount), version: desktopProtocolVersionV2 }
       const input = { readVersion: "v2" }
       const frames = serializeDesktopReply("control.capabilities", input, reply, "v2")
+
       if (frames.length === 1) {
         expect(frames[0]).toEqual(reply)
         continue
       }
+
       const reassembler = createDesktopReplyReassembler("control-v2", "control.capabilities", input, "v2")
       let assembled: unknown
+
       for (const frame of frames) assembled = reassembler.push(frame)
       expect(assembled).toEqual(reply)
     }
@@ -159,11 +168,14 @@ describe("desktop reply chunks", () => {
       id: "boundary-1",
       result: { ...localControlCapabilitiesV1, actionKinds: [""] },
     }
+
     const emptyBytes = encodeDesktopFrame(desktopReplySchemaV1.parse(base)).byteLength
+
     const exact = {
       ...base,
       result: { ...base.result, actionKinds: ["x".repeat(maxDesktopReplyFrameBytes - emptyBytes)] },
     }
+
     const exactFrames = serializeDesktopReply("control.capabilities", exact)
     expect(exactFrames).toHaveLength(1)
     expect(encodeDesktopFrame(exactFrames[0]).byteLength).toBe(maxDesktopReplyFrameBytes)
@@ -172,8 +184,10 @@ describe("desktop reply chunks", () => {
       ...base,
       result: { ...base.result, actionKinds: ["x".repeat(maxDesktopReplyFrameBytes - emptyBytes + 1)] },
     }
+
     const chunks = serializeDesktopReply("control.capabilities", over)
     expect(chunks.length).toBeGreaterThan(1)
+
     for (const chunk of chunks) {
       expect(encodeDesktopFrame(chunk).byteLength).toBeLessThanOrEqual(maxDesktopReplyFrameBytes)
     }
@@ -232,6 +246,7 @@ describe("desktop reply chunks", () => {
   test("rejects duplicate, skipped, and reordered chunk indices", () => {
     const chunks = serializeDesktopReply("control.capabilities", largeControlReply())
       .map((value) => desktopReplyChunkSchemaV1.parse(value))
+
     expect(chunks.length).toBeGreaterThan(2)
 
     const duplicate = createDesktopReplyReassembler("control-1", "control.capabilities")
@@ -285,6 +300,7 @@ describe("desktop reply chunks", () => {
       sha256: sha256(new Uint8Array([0])),
       payload: "AB==",
     }
+
     expectRejectedAndCleared(
       createDesktopReplyReassembler("reply-1", "host.status"),
       noncanonical,
@@ -308,6 +324,7 @@ describe("desktop reply chunks", () => {
       id: "reply-1",
       result: status,
     }))
+
     expectRejectedAndCleared(
       createDesktopReplyReassembler("reply-1", "host.status"),
       chunkForBytes(replyBytes, "host.status", { byteLength: replyBytes.byteLength + 1 }),
@@ -335,12 +352,14 @@ describe("desktop reply chunks", () => {
 
   test("rejects operation-invalid results and cross-family errors", () => {
     const badResult = { version: "v1", type: "reply", id: "reply-1", result: {} }
+
     const badError = {
       version: "v1",
       type: "reply",
       id: "reply-1",
       error: { version: "v1", code: "validation", message: "Invalid." },
     }
+
     expect(() => serializeDesktopReply("host.status", badResult)).toThrow()
     expect(() => serializeDesktopReply("host.status", badError)).toThrow()
     expectRejectedAndCleared(
@@ -356,6 +375,7 @@ describe("desktop reply chunks", () => {
   test("dispose clears pending state", () => {
     const chunks = serializeDesktopReply("control.capabilities", largeControlReply())
       .map((value) => desktopReplyChunkSchemaV1.parse(value))
+
     const reassembler = createDesktopReplyReassembler("control-1", "control.capabilities")
     expect(reassembler.push(chunks[0])).toBeUndefined()
     expect(reassembler.pending()).toBeGreaterThan(0)

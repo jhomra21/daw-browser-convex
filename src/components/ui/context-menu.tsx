@@ -8,6 +8,7 @@ import { cn } from "~/lib/utils";
 const ContextMenu: Component<ContextMenuPrimitive.ContextMenuRootProps> = (props) => (
   <ContextMenuPrimitive.Root gutter={4} {...props} />
 );
+
 const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
 const ContextMenuPortal = ContextMenuPrimitive.Portal;
 const ContextMenuSub = ContextMenuPrimitive.Sub;
@@ -20,6 +21,7 @@ type ContextMenuContentProps = ContextMenuPrimitive.ContextMenuContentProps & {
 
 const ContextMenuContent: Component<ContextMenuContentProps> = (props) => {
   const [local, rest] = splitProps(props, ["class"]);
+
   return (
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Content
@@ -41,6 +43,7 @@ type ContextMenuItemProps = ContextMenuPrimitive.ContextMenuItemProps & {
 
 const ContextMenuItem: Component<ContextMenuItemProps> = (props) => {
   const [local, rest] = splitProps(props, ["class", "inset"]);
+
   return (
     <ContextMenuPrimitive.Item
       class={cn(
@@ -55,6 +58,7 @@ const ContextMenuItem: Component<ContextMenuItemProps> = (props) => {
 
 const ContextMenuShortcut: Component<ComponentProps<"span">> = (props) => {
   const [local, rest] = splitProps(props, ["class"]);
+
   return <span class={cn("ml-auto shrink-0 whitespace-nowrap pl-4 text-xxs tracking-wide opacity-60", local.class)} {...rest} />;
 };
 
@@ -65,6 +69,7 @@ type ContextMenuLabelProps = ComponentProps<"div"> & {
 
 const ContextMenuLabel: Component<ContextMenuLabelProps> = (props) => {
   const [local, rest] = splitProps(props, ["class", "inset"]);
+
   return (
     <div
       class={cn("px-2 py-1 text-xs font-semibold leading-5 text-foreground", local.inset && "pl-6", local.class)}
@@ -79,6 +84,7 @@ type ContextMenuSeparatorProps = ContextMenuPrimitive.ContextMenuSeparatorProps 
 
 const ContextMenuSeparator: Component<ContextMenuSeparatorProps> = (props) => {
   const [local, rest] = splitProps(props, ["class"]);
+
   return (
     <ContextMenuPrimitive.Separator
       class={cn("-mx-0.5 my-0.5 h-px border-0 bg-muted", local.class)}
@@ -95,6 +101,7 @@ type ContextMenuSubTriggerProps = ContextMenuPrimitive.ContextMenuSubTriggerProp
 
 const ContextMenuSubTrigger: Component<ContextMenuSubTriggerProps> = (props) => {
   const [local, rest] = splitProps(props, ["class", "children", "inset"]);
+
   return (
     <ContextMenuPrimitive.SubTrigger
       class={cn(
@@ -118,6 +125,7 @@ type ContextMenuSubContentProps = ContextMenuPrimitive.ContextMenuSubContentProp
 
 const ContextMenuSubContent: Component<ContextMenuSubContentProps> = (props) => {
   const [local, rest] = splitProps(props, ["class"]);
+
   return (
     <ContextMenuPrimitive.SubContent
       class={cn(

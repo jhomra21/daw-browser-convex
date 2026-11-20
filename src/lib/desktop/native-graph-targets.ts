@@ -16,12 +16,14 @@ export const sampledKindId = (kind: "sampler" | "granular" | "drum-rack") =>
 // whose track node carries an instrument.
 export const targetKinds = (graph: AudioCoreGraphSnapshot, snapshot: LivePlaybackSnapshot | undefined) => {
   const instrumentNodes = new Set(graph.nodes.flatMap((node) => node.instrument ? [node.id] : []))
+
   return new Map<string, number>([
     ...graph.nodes.flatMap((node) => node.processorOrder.map((processor): [string, number] => [processor.id, processor.kindId])),
     ...[...synthNodes(snapshot)].flatMap(([instanceId, nodeId]): [string, number][] =>
       instrumentNodes.has(nodeId) ? [[instanceId, SYNTH_KIND_ID]] : []),
     ...graph.nodes.flatMap((node): [string, number][] => {
       const instrument = snapshot?.mixer.fx.trackFx?.[node.id]?.instrument
+
       return instrument && instrument.kind !== "synth" && node.instrument
         ? [[instrument.instanceId, sampledKindId(instrument.kind)]]
         : []
@@ -50,6 +52,7 @@ export const sampledInstrumentTrackIds = (snapshot: LivePlaybackSnapshot): reado
     entry.instrument && entry.instrument.kind !== "synth" ? [trackId] : [])
 
 type GraphNode = AudioCoreGraphSnapshot["nodes"][number]
+
 const processorIndex = (graph: AudioCoreGraphSnapshot) => new Map(graph.nodes.flatMap((node) =>
   node.processorOrder.map((processor): [string, { node: GraphNode; kindId: number; targets: ReadonlySet<string> }] =>
     [processor.id, { node, kindId: processor.kindId, targets: new Set(processor.parameterTargets.map(({ id }) => id)) }])))
@@ -74,16 +77,20 @@ export const scheduledRetention = (
   const nodesBefore = synthNodes(synths.before)
   const nodesAfter = synthNodes(synths.after)
   let processors: { before: ReturnType<typeof processorIndex>; after: ReturnType<typeof processorIndex> } | undefined
+
   return (key, parameterIds) => {
     processors ??= { before: processorIndex(previous), after: processorIndex(next) }
     const was = processors.before.get(key)
     const now = processors.after.get(key)
+
     if (was || now) {
       return !!was && !!now && was.node.id === now.node.id && was.node.kind === now.node.kind
         && was.kindId === now.kindId && !configuredNodes.has(now.node.id) && [...parameterIds].every((id) => now.targets.has(id))
     }
+
     const nodeId = nodesBefore.get(key)
     const instrument = nodeId === undefined ? undefined : before.get(nodeId)?.instrument
+
     return nodeId !== undefined && !!instrument && nodesAfter.get(key) === nodeId
       && after.get(nodeId)?.instrument?.kind === instrument.kind && !configuredNodes.has(nodeId)
   }

@@ -7,6 +7,7 @@ import { DashboardRow, DashboardScrollView, DashboardSection } from "./dashboard
 
 export function DashboardAccountView() {
   const session = useSessionQuery();
+
   const signOut = async () => {
     try {
       await authClient.signOut();
@@ -14,7 +15,9 @@ export function DashboardAccountView() {
       queryClient.setQueryData(["session"], null);
     }
   };
+
   const user = () => session.data?.user;
+
   const loginUrl = () =>
     `/Login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`;
 

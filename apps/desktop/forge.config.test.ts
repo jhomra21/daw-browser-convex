@@ -42,9 +42,11 @@ test("loads the Forge config through Jiti in Node", () => {
     cwd: import.meta.dirname,
     encoding: "utf8",
   })
+
   if (result.status !== 0) {
     throw new Error(`Forge config Jiti subprocess failed:\n${result.stderr}`)
   }
+
   expect(result.stdout.trim()).toBe("loaded")
 })
 
@@ -61,6 +63,7 @@ test('pins all packaged native artifact identities in the release plan', () => {
     DAW_VST3_WORKER_PATH: `/artifacts/${nativeVst3WorkerArtifactId}`,
     DAW_AUDIO_HOST_PATH: `/artifacts/${nativeAudioHostArtifactName}`,
   })
+
   expect(plan.map((artifact) => artifact.name)).toEqual([
     nativeVst3ScannerArtifactName,
     nativeVst3WorkerArtifactId,
@@ -75,25 +78,31 @@ test('requires the native release artifact manifest for a gated package', async 
     DAW_VST3_WORKER_PATH: `/artifacts/${nativeVst3WorkerArtifactId}`,
     DAW_AUDIO_HOST_PATH: `/artifacts/${nativeAudioHostArtifactName}`,
   })
+
   await expect(validatePluginHostReleaseArtifactPlan(plan, undefined)).rejects.toThrow("DAW_NATIVE_ARTIFACT_MANIFEST_PATH")
 })
 
 test('validates exact native artifact names and hashes', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "daw-native-artifacts-"))
+
   const values = new Map([
     [nativeVst3ScannerArtifactName, "scanner"],
     [nativeVst3WorkerArtifactId, "worker"],
     [nativeAudioHostArtifactName, "audio-host"],
   ])
+
   const manifestPath = path.join(directory, nativeReleaseArtifactManifestName)
+
   try {
     for (const [name, value] of values) await writeFile(path.join(directory, name), value)
+
     const plan = getPluginHostReleaseArtifactPlan({
       DAW_ENABLE_VST3_HOSTING: '1',
       DAW_VST3_SCANNER_PATH: path.join(directory, nativeVst3ScannerArtifactName),
       DAW_VST3_WORKER_PATH: path.join(directory, nativeVst3WorkerArtifactId),
       DAW_AUDIO_HOST_PATH: path.join(directory, nativeAudioHostArtifactName),
     })
+
     await writeNativeReleaseArtifactManifest(plan, manifestPath)
     await expect(validatePluginHostReleaseArtifactPlan(plan, manifestPath)).resolves.toBeUndefined()
     await writeFile(path.join(directory, nativeVst3WorkerArtifactId), "tampered")
@@ -107,30 +116,36 @@ test("generates the packaged manifest only after signed artifact bytes are final
   const directory = await mkdtemp(path.join(tmpdir(), "daw-packaged-native-artifacts-"))
   const sourceDirectory = path.join(directory, "source")
   const resourcesDirectory = path.join(directory, "app", "Contents", "Resources")
+
   const names = [
     nativeVst3ScannerArtifactName,
     nativeVst3WorkerArtifactId,
     nativeAudioHostArtifactName,
   ]
+
   try {
     await mkdir(sourceDirectory)
     await mkdir(resourcesDirectory, { recursive: true })
+
     for (const name of names) {
       await writeFile(path.join(sourceDirectory, name), `unsigned-${name}`)
       await writeFile(path.join(resourcesDirectory, name), `unsigned-${name}`)
     }
+
     const sourcePlan = getPluginHostReleaseArtifactPlan({
       DAW_ENABLE_VST3_HOSTING: "1",
       DAW_VST3_SCANNER_PATH: path.join(sourceDirectory, nativeVst3ScannerArtifactName),
       DAW_VST3_WORKER_PATH: path.join(sourceDirectory, nativeVst3WorkerArtifactId),
       DAW_AUDIO_HOST_PATH: path.join(sourceDirectory, nativeAudioHostArtifactName),
     })
+
     const sourceManifestPath = path.join(directory, nativeReleaseArtifactManifestName)
     await writeNativeReleaseArtifactManifest(sourcePlan, sourceManifestPath)
     await writeFile(
       path.join(resourcesDirectory, nativeReleaseArtifactManifestName),
       await readFile(sourceManifestPath),
     )
+
     for (const name of names) await writeFile(path.join(resourcesDirectory, name), `signed-${name}`)
     await expect(validatePluginHostReleaseArtifactPlan(sourcePlan, sourceManifestPath)).resolves.toBeUndefined()
     await expect(
@@ -175,6 +190,7 @@ test("allows explicit signed packaging without notarization", () => {
     APPLE_SIGNING_IDENTITY: "Developer ID Application: Example",
     DAW_SKIP_NOTARIZATION: "1",
   })
+
   expect(configuration?.sign.identity).toBe("Developer ID Application: Example")
   expect(configuration?.notarize).toBeUndefined()
 })
@@ -182,6 +198,7 @@ test("allows explicit signed packaging without notarization", () => {
 test("maps Electron Packager extra-resource hook paths to the app resources directory", async () => {
   const buildPath = await mkdtemp(path.join(tmpdir(), "daw-mac-package-"))
   const resourcesPath = path.join(buildPath, "daw-browser.app", "Contents", "Resources")
+
   try {
     await mkdir(resourcesPath, { recursive: true })
     await expect(getPackagedMacResourcesPath(buildPath)).resolves.toBe(resourcesPath)
@@ -195,6 +212,7 @@ test("routes only isolated VST processes through the library-validation entitlem
     APPLE_SIGNING_IDENTITY: "Developer ID Application: Example",
     APPLE_NOTARY_KEYCHAIN_PROFILE: "release-notary",
   })
+
   expect(configuration?.sign.hardenedRuntime).toBeTrue()
   expect(configuration?.sign.optionsForFile(`/Resources/${nativeVst3ScannerArtifactName}`).entitlements).toEndWith("vst3-scanner.plist")
   expect(configuration?.sign.optionsForFile(`/Resources/${nativeVst3WorkerArtifactId}`).entitlements).toEndWith("vst3-worker.plist")
@@ -205,9 +223,11 @@ test("routes only isolated VST processes through the library-validation entitlem
 
 test("limits dynamic-load entitlement exceptions to isolated VST processes", async () => {
   const entitlements = path.join(import.meta.dirname, "entitlements")
+
   for (const name of ["vst3-scanner.plist", "vst3-worker.plist"]) {
     expect(await readFile(path.join(entitlements, name), "utf8")).toContain("com.apple.security.cs.disable-library-validation")
   }
+
   for (const name of ["app.plist", "helper.plist", "native.plist"]) {
     expect(await readFile(path.join(entitlements, name), "utf8")).not.toContain("com.apple.security.cs.disable-library-validation")
   }
@@ -218,17 +238,20 @@ test("removes recursive codesign verification from the pinned signing implementa
     path.resolve(import.meta.dirname, "../../node_modules/@electron/osx-sign/dist/cjs/sign.js"),
     "utf8",
   )
+
   expect(signingImplementation).not.toContain("['--verify', '--deep']")
 })
 
 test('requires generated portable Wasm assets to match their manifest hash', async () => {
   const publicDirectory = await mkdtemp(path.join(tmpdir(), "daw-public-assets-"))
+
   try {
     await mkdir(path.join(publicDirectory, "audio-core"))
     await writeFile(path.join(publicDirectory, "audio-core", "daw-audio-core.wasm"), "wasm")
     await expect(validatePortableWasmReleaseAssets(publicDirectory, repositoryRoot)).rejects.toThrow("daw-audio-core.manifest.json")
     const manifestPath = path.join(publicDirectory, "audio-core", "daw-audio-core.manifest.json")
     const sourceHash = await computePortableWasmSourceHash(repositoryRoot)
+
     const manifest = {
       artifactKind: "production",
       buildType: "Release",
@@ -238,6 +261,7 @@ test('requires generated portable Wasm assets to match their manifest hash', asy
       sha256: hash("wrong"),
       sourceHash,
     }
+
     await writeFile(manifestPath, JSON.stringify(manifest))
     await expect(validatePortableWasmReleaseAssets(publicDirectory, repositoryRoot)).rejects.toThrow("hash does not match")
     await writeFile(manifestPath, JSON.stringify({ ...manifest, sha256: hash("wasm"), sourceHash: hash("stale") }))

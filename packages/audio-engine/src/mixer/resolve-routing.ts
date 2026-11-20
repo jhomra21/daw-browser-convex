@@ -54,25 +54,30 @@ function pathTouchesSolo(path: string[], soloedIds: Set<string>) {
   for (const channelId of path) {
     if (soloedIds.has(channelId)) return true
   }
+
   return false
 }
 
 function resolveSoloRoutingState(channels: ResolvedChannelRouting[]): SoloRoutingState | null {
   const soloedIds = new Set(channels.flatMap(({ channel }) => channel.soloed ? [channel.id] : []))
+
   if (soloedIds.size === 0) return null
 
   const outputTargetByChannelId = new Map(
     channels.map(({ channel, outputTargetId }) => [channel.id, outputTargetId] as const),
   )
+
   const dryPathByChannelId = new Map(
     channels.map(({ channel }) => [channel.id, resolveDryPathChannelIds(channel.id, outputTargetByChannelId)] as const),
   )
+
   const activeOutputIds = new Set<string>()
   const activeSendTargetsByChannelId = new Map<string, Set<string>>()
 
   for (const { channel, sends } of channels) {
     const dryPath = dryPathByChannelId.get(channel.id) ?? [channel.id]
     const sourceOutputActive = pathTouchesSolo(dryPath, soloedIds)
+
     if (sourceOutputActive) {
       for (const pathChannelId of dryPath) {
         activeOutputIds.add(pathChannelId)
@@ -81,8 +86,10 @@ function resolveSoloRoutingState(channels: ResolvedChannelRouting[]): SoloRoutin
 
     for (const send of sends) {
       const targetPath = dryPathByChannelId.get(send.targetId)
+
       if (!targetPath) continue
       const targetOutputActive = pathTouchesSolo(targetPath, soloedIds)
+
       if (!sourceOutputActive && !targetOutputActive) continue
 
       const activeSendTargets = activeSendTargetsByChannelId.get(channel.id) ?? new Set<string>()
@@ -106,6 +113,7 @@ function isChannelOutputActive(
   soloRoutingState: SoloRoutingState | null,
 ) {
   if (!soloRoutingState) return true
+
   return soloRoutingState.activeOutputIds.has(channelId)
 }
 
@@ -116,10 +124,13 @@ function resolveActiveSends(
   soloRoutingState: SoloRoutingState | null,
 ) {
   if (muted) return []
+
   if (!soloRoutingState) return sends
 
   const activeTargets = soloRoutingState.activeSendTargetsByChannelId.get(channelId)
+
   if (!activeTargets) return []
+
   return sends.filter((send) => activeTargets.has(send.targetId))
 }
 
@@ -135,6 +146,7 @@ export function resolveMixerGraph(options: ResolveMixerGraphOptions): ResolvedMi
         const gain = !channel.muted && Number.isFinite(channel.volume) ? channel.volume : 0
         const outputGain = gain > 0 && isChannelOutputActive(channel.id, soloRoutingState) ? 1 : 0
         const activeSends = resolveActiveSends(channel.id, sends, channel.muted, soloRoutingState)
+
         return {
           channel,
           gain,

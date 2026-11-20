@@ -219,7 +219,9 @@ export type AudioCoreGraphNodeDto = {
 }
 
 export type AudioCoreGraphLayout = 'mono' | 'stereo'
+
 export type AudioCoreGraphNodeKind = 'source' | 'instrument' | 'mixer' | 'return' | 'group' | 'master'
+
 export type AudioCoreGraphTap = 'pre-fx' | 'pre-fader' | 'post-fader'
 
 export const audioCoreMaxInstrumentVoices = 32
@@ -466,11 +468,13 @@ export const encodeAudioCoreInstrumentState = (
   resolveAssetHandle: (assetId: string) => bigint,
 ): AudioCoreInstrumentBinaryState => {
   if (!isAudioCoreInstrumentState(state)) throw new Error('Invalid audio-core instrument state.')
+
   if (state.kind === 'synth') {
     const oscillators = state.oscillators ?? [
       { enabled: true, waveform: 0, level: 0.5, octave: 0, semitone: 0, detuneCents: 0 },
       { enabled: true, waveform: 0, level: 0.5, octave: 0, semitone: 0, detuneCents: 0 },
     ]
+
     const output = new Uint8Array(156)
     const view = new DataView(output.buffer)
     view.setUint32(0, state.version, true)
@@ -511,8 +515,10 @@ export const encodeAudioCoreInstrumentState = (
     view.setFloat32(144, state.lfoPan ?? 0, true)
     view.setFloat32(148, state.outputGain ?? 1, true)
     view.setFloat32(152, state.outputPan ?? 0, true)
+
     return { state: output }
   }
+
   if (state.kind === 'granular') {
     const output = new Uint8Array(60)
     const view = new DataView(output.buffer)
@@ -524,8 +530,10 @@ export const encodeAudioCoreInstrumentState = (
     view.setUint32(24, state.freeze ? 1 : 0, true)
     const values = [state.grainSizeMs, state.densityHz, state.position, state.spray, state.pitchSemitones, state.reverseProbability, state.stereoSpread]
     values.forEach((value, index) => view.setFloat32(28 + index * 4, value, true))
+
     return { state: output }
   }
+
   const binaryState = new Uint8Array(88)
   const stateView = new DataView(binaryState.buffer)
   stateView.setUint32(0, state.version, true)
@@ -560,6 +568,7 @@ export const encodeAudioCoreInstrumentState = (
     const tail = [zone.roundRobinGroup, zone.roundRobinIndex, zone.playbackMode === 'one-shot' ? 0 : zone.playbackMode === 'forward-loop' ? 1 : 2, zone.startFrame, zone.endFrame, zone.loopStartFrame, zone.loopEndFrame, zone.crossfadeFrameCount, zone.chokeGroup]
     tail.forEach((value, integerIndex) => zoneView.setUint32(offset + 40 + integerIndex * 4, value, true))
   })
+
   return { state: binaryState, zones }
 }
 
@@ -607,11 +616,13 @@ export const isAudioCoreSynthState = <Value>(value: Value): value is Value & Aud
   ])) return false
   const complete = value.oscillators !== undefined
   const oscillators = value.oscillators
+
   if (value.version !== audioCoreContractVersion || value.kind !== 'synth'
     || !isJsonNumber(value.voiceCapacity) || !Number.isSafeInteger(value.voiceCapacity)
     || value.voiceCapacity < 1 || value.voiceCapacity > audioCoreMaxInstrumentVoices
     || value.outputLayout !== 'stereo' || !Array.isArray(value.parameterTargets)
     || value.parameterTargets.length > audioCoreMaxInstrumentParameterTargets) return false
+
   if (complete && (
     !Array.isArray(value.oscillators) || value.oscillators.length !== 2
     || !isJsonBoolean(value.noiseEnabled) || !isFiniteNumber(value.noiseLevel)
@@ -637,18 +648,22 @@ export const isAudioCoreSynthState = <Value>(value: Value): value is Value & Aud
     || !isBoundedFloat(value.lfoPan, 0, 1)
     || !isBoundedFloat(value.outputGain, 0, 1.5)
     || !isBoundedFloat(value.outputPan, -1, 1))) return false
+
   if (complete && Array.isArray(oscillators) && !oscillators.every((oscillator) => (
     isAudioCoreSynthOscillator(oscillator)
   ))) return false
   const ids = new Set<string>()
   const targets = new Set<number>()
+
   return value.parameterTargets.every((parameter) => {
     if (!isRecord(parameter) || !isJsonString(parameter.id) || !isPositiveSafeInteger(parameter.target)
       || ids.has(parameter.id) || targets.has(parameter.target)) return false
     const entry = synthParameterRegistry.find((candidate) => candidate.id === parameter.id && candidate.target === parameter.target)
+
     if (entry === undefined || entry.tombstone) return false
     ids.add(parameter.id)
     targets.add(parameter.target)
+
     return true
   })
 }
@@ -717,6 +732,7 @@ export const encodeAudioCoreProcessorStateEnvelope = (envelope: AudioCoreProcess
   view.setUint32(36, envelope.tailFrames, true)
   output.set(envelope.state, audioCoreProcessorStateEnvelopeBytes)
   envelope.parameterTargets.forEach((target, index) => view.setUint32(audioCoreProcessorStateEnvelopeBytes + envelope.state.byteLength + index * 4, target.target, true))
+
   return output
 }
 
@@ -725,8 +741,10 @@ export const decodeAudioCoreProcessorStateEnvelope = (input: Uint8Array): AudioC
   const view = new DataView(input.buffer, input.byteOffset, input.byteLength)
   const stateBytes = view.getUint32(8, true)
   const parameterCount = view.getUint32(28, true)
+
   if (stateBytes > audioCoreMaxProcessorStateBytes || parameterCount > audioCoreMaxProcessorParameterTargets
     || input.byteLength !== audioCoreProcessorStateEnvelopeBytes + stateBytes + parameterCount * 4) throw new Error('Audio-core processor state envelope has invalid bounds.')
+
   const envelope: AudioCoreProcessorStateEnvelope = {
     kindId: view.getUint32(0, true),
     schemaVersion: view.getUint32(4, true),
@@ -742,7 +760,9 @@ export const decodeAudioCoreProcessorStateEnvelope = (input: Uint8Array): AudioC
       target: view.getUint32(audioCoreProcessorStateEnvelopeBytes + stateBytes + index * 4, true),
     })),
   }
+
   if (!isAudioCoreProcessorStateEnvelope(envelope)) throw new Error('Audio-core processor state envelope is invalid.')
+
   return envelope
 }
 
@@ -759,6 +779,7 @@ export const encodeUtilityProcessorState = (state: UtilityProcessorState): Uint8
   view.setUint32(28, state.matrix === 'mid-side-encode' ? 1 : state.matrix === 'mid-side-decode' ? 2 : 0, true)
   view.setUint32(32, state.swap ? 1 : 0, true)
   view.setUint32(36, state.dcBlock ? 1 : 0, true)
+
   return output
 }
 
@@ -780,6 +801,7 @@ export const encodeAutoFilterProcessorState = (state: AutoFilterProcessorState):
   view.setFloat32(48, state.lfo.depthOctaves, true)
   view.setFloat32(52, state.lfo.phaseOffset, true)
   view.setFloat32(56, state.lfo.stereoPhase, true)
+
   return output
 }
 
@@ -795,6 +817,7 @@ export const encodeLoFiProcessorState = (state: LoFiProcessorState): Uint8Array 
   view.setUint32(24, state.dither === 'rectangular' ? 1 : state.dither === 'triangular' ? 2 : 0, true)
   view.setFloat32(28, state.mix, true)
   view.setUint32(32, Math.max(1, Math.round(state.seed)) >>> 0, true)
+
   return output
 }
 
@@ -809,6 +832,7 @@ export const encodeSaturatorProcessorState = (state: SaturatorProcessorState): U
   view.setFloat32(20, state.colorAmount, true)
   view.setFloat32(24, state.outputDb, true)
   view.setFloat32(28, state.dryWet, true)
+
   return output
 }
 
@@ -826,6 +850,7 @@ export const encodeEqProcessorState = (state: EqProcessorState): Uint8Array => {
     view.setFloat32(offset + 12, band.gainDb, true)
     view.setFloat32(offset + 16, band.q, true)
   })
+
   return output
 }
 
@@ -839,6 +864,7 @@ const encodeDelayModulationProcessorState = (state: DelayModulationProcessorStat
   view.setFloat32(16, state.feedback, true)
   view.setFloat32(20, state.stereoPhase, true)
   view.setFloat32(24, state.mix, true)
+
   return output
 }
 
@@ -856,6 +882,7 @@ export const encodePhaserProcessorState = (state: PhaserProcessorState): Uint8Ar
   view.setFloat32(20, state.feedback, true)
   view.setFloat32(24, state.stereoPhase, true)
   view.setFloat32(28, state.mix, true)
+
   return output
 }
 
@@ -868,6 +895,7 @@ const encodeAmplitudeModulationProcessorState = (state: AmplitudeModulationProce
   view.setFloat32(12, state.depth, true)
   view.setFloat32(16, state['shape'], true)
   view.setFloat32(20, state.phase, true)
+
   return output
 }
 
@@ -884,6 +912,7 @@ export const encodeEnsembleProcessorState = (state: EnsembleProcessorState): Uin
   view.setFloat32(16, state.rateHz, true)
   view.setFloat32(20, state.spread, true)
   view.setFloat32(24, state.mix, true)
+
   return output
 }
 
@@ -905,6 +934,7 @@ export const encodeGateProcessorState = (state: GateProcessorState): Uint8Array 
   view.setUint32(48, state.sidechain.enabled ? 1 : 0, true)
   view.setFloat32(52, state.sidechain.frequencyHz, true)
   view.setFloat32(56, state.sidechain.q, true)
+
   return output
 }
 
@@ -929,6 +959,7 @@ export const encodeCompressorProcessorState = (state: CompressorProcessorState):
   view.setUint32(60, state.sidechain.filterType === 'lowpass' ? 1 : state.sidechain.filterType === 'bandpass' ? 2 : 0, true)
   view.setFloat32(64, state.sidechain.frequencyHz, true)
   view.setFloat32(68, state.sidechain.q, true)
+
   return output
 }
 
@@ -941,6 +972,7 @@ export const encodeLimiterProcessorState = (state: LimiterProcessorState): Uint8
   view.setFloat32(12, state.lookaheadMs, true)
   view.setFloat32(16, state.link, true)
   view.setUint32(20, state.detectorOversampling, true)
+
   return output
 }
 
@@ -955,6 +987,7 @@ export const encodeDelayProcessorState = (state: DelayProcessorState): Uint8Arra
   view.setUint32(20, state.filterEnabled ? 1 : 0, true)
   view.setFloat32(24, state.lowCutHz, true)
   view.setFloat32(28, state.highCutHz, true)
+
   return output
 }
 
@@ -979,6 +1012,7 @@ export const encodeReverbProcessorState = (state: ReverbProcessorState): Uint8Ar
   view.setFloat32(60, state.diffusionLowCutHz, true)
   view.setFloat32(64, state.diffusionHighCutHz, true)
   view.setFloat32(68, state.stereoWidth, true)
+
   return output
 }
 
@@ -1000,6 +1034,7 @@ export const encodeSpectralProcessorState = (state: SpectralProcessorState): Uin
   view.setFloat32(48, state.noiseReduction, true)
   view.setFloat32(52, state.profileLearn, true)
   view.setFloat32(56, state.mix, true)
+
   return output
 }
 
@@ -1123,6 +1158,7 @@ export const isPlanarPcmForAsset = (
 )
 
 type JsonValue = string | number | boolean | null | readonly JsonValue[] | JsonRecord
+
 type JsonRecord = { [key: string]: JsonValue }
 
 const isJsonString = <Value>(value: Value): value is Value & string => typeof value === 'string'
@@ -1150,6 +1186,7 @@ const eqBandTypeId = (type: EqProcessorBandState['type']) =>
 
 const isUtilityState = (value: JsonValue): value is UtilityProcessorState => {
   if (!isRecord(value) || !hasOnlyKeys(value, ['enabled', 'gainDb', 'polarity', 'inputMode', 'pan', 'balance', 'width', 'matrix', 'swap', 'dcBlock'])) return false
+
   return isJsonBoolean(value.enabled)
     && isFiniteNumber(value.gainDb)
     && (value.polarity === 'normal' || value.polarity === 'invert')
@@ -1171,12 +1208,14 @@ export const isUtilityProcessorContract = (value: JsonValue): value is UtilityPr
 
 export const parseUtilityProcessorContract = (value: JsonValue): UtilityProcessorContract => {
   if (!isUtilityProcessorContract(value)) throw new Error('Invalid audio-core utility processor contract.')
+
   return value
 }
 
 export const isAudioCoreGraphProcessor = <Value>(value: Value): value is Value & AudioCoreGraphProcessorDto => {
   if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'kind', 'kindId', 'instanceId', 'stateVersion', 'state', 'parameterTargets', 'latencyFrames', 'tailFrames', 'tailKind', 'bypassed'])) return false
   const registryEntry = processorRegistry.find((entry) => entry.name === value.kind && entry.id === value.kindId)
+
   return isJsonString(value.id)
     && value.id.length > 0
     && isJsonString(value.kind)
@@ -1246,13 +1285,17 @@ export const encodeAudioCoreWireEnvelope = (payload: string): Uint8Array => {
   output[0] = audioCoreContractVersion
   new DataView(output.buffer).setUint32(1, payloadBytes.byteLength, true)
   output.set(payloadBytes, wireHeaderBytes)
+
   return output
 }
 
 export const decodeAudioCoreWireEnvelope = (input: Uint8Array): AudioCoreWireEnvelope => {
   if (input.byteLength < wireHeaderBytes) throw new Error('Audio-core wire envelope is truncated.')
+
   if (input[0] !== audioCoreContractVersion) throw new Error('Audio-core wire envelope has an unsupported version.')
   const payloadBytes = new DataView(input.buffer, input.byteOffset, input.byteLength).getUint32(1, true)
+
   if (payloadBytes !== input.byteLength - wireHeaderBytes) throw new Error('Audio-core wire envelope has an invalid payload length.')
+
   return { version: audioCoreContractVersion, payload: new TextDecoder().decode(input.subarray(wireHeaderBytes)) }
 }

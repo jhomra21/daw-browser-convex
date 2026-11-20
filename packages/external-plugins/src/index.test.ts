@@ -17,6 +17,7 @@ describe('external plugin safety boundaries', () => {
       binaryFingerprint: 'a'.repeat(64),
       scannerProtocolVersion: 2,
     })
+
     expect(reference).toEqual({
       version: 1,
       classId: 'class-1',
@@ -73,6 +74,7 @@ describe('external plugin safety boundaries', () => {
     const states: Array<'ready' | 'degraded' | 'faulted' | 'architecture-mismatch'> = [
       'ready', 'degraded', 'faulted', 'architecture-mismatch',
     ]
+
     for (const state of states) {
       expect(() => assertBrowserExportHasNoLiveExternalPlugins([{
         instanceId: 'a7a0b9ac-7884-492c-8b68-80f15802442c',

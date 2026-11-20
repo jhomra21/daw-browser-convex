@@ -46,11 +46,14 @@ const SAMPLE_RATE = 48000
 const BLOCK = 512
 const LEAD_MIN_BLOCKS = 2
 const LEAD_MAX_BLOCKS = 3
+
 // Allowance for evidence with no pinned/graph latency on its graph-publish lines (runs from before the host logged them).
 const COMPLETE_BASE_FRAMES = 2048
 const COMPLETE_MAX_BLOCKS_BEFORE_BIND = 3
+
 // native deletion_fade_frames (audio_core.cpp:7775-7777): (sampleRate * 5 + 500) / 1000.
 const FADE_FRAMES = Math.round(SAMPLE_RATE * 5 / 1000)
+
 // A class with no frozen prepare-to-publish limit makes its row INCOMPLETE until the parent freezes one here.
 const LIMITS = {
   plain: { prepareToPublishMaxMs: 70, editToPublishMaxMs: 150 },
@@ -61,25 +64,33 @@ const LIMITS = {
   // max 203 ms (250 is about 23% over the max); prepare to publish p50 37, max 43 ms (the plain 70).
   "vst-insert": { prepareToPublishMaxMs: 70, editToPublishMaxMs: 250 },
 }
+
 // Frozen by parent ruling addendum 23 (PARENT-RULING-C2-FAIL-ITEMS.md) from PHASE8-ASSET-RECALIBRATION-ROUND.md: 60 packaged asset edits
 // (27, 100, 300 MiB, 20 each). T = 0.8 x the lowest throughput (409.1 MiB/s) rounded down = 320 MiB/s; F = 1.2 x the 27 MiB fixed
 // maximum (58 ms) rounded up = 70 ms. A first swap's prepare-to-publish limit is max(100, F + bytes / T).
 const ASSET_UPLOAD = { fixedMs: 70, bytesPerMs: 320 * 1024 * 1024 / 1000 }
+
 // Pooled over the plain and raise publications of the run.
 // Prep time is split by population (parent ruling, addendum 14 item 2): publications with spectralPredecessors = 0 hold 8 ms
 // (PARENT-RULING-LAT1-PREP-OVERHEAD.md); those with spectral predecessors hold their own frozen 12 ms (measured p50 9 to 10 ms).
 // Evidence without the field on its graph-publish lines keeps the old single pool at 8 ms.
 const POOLED = { prepareToPublishP99Ms: 60, prepP50Ms: 8, spectralPrepP50Ms: 12, editToPublishP50Ms: 100 }
+
 // The fewest publications a pooled gate is judged on (parent ruling, addendum 36 item 4, from /tmp/ae08-phase9-budget-plan.md section 5):
 // a spectral run median exceeded its 12 ms limit 4.4 % of the time at n = 20 and 0.7 % at n = 40 on the stored publications, and a p99
 // of fewer than 100 samples is the maximum. A smaller pool gives INCOMPLETE for its gate, never PASS or FAIL.
 const POOLED_MIN_N = { spectralPrepP50: 40, prepP50: 100, prepareToPublishP99: 100, editToPublishP50: 100 }
+
 type PooledMinimums = typeof POOLED_MIN_N
 
 type Class = keyof typeof LIMITS
+
 type Gate = "inputs" | "lead" | "rebase" | "prepare-to-publish" | "prep-time" | "edit-to-publish" | "completion"
+
 type Failure = { row: string; gate: Gate; detail: string }
+
 type Status = "PASS" | "INCOMPLETE" | "FAIL"
+
 type Publication = {
   row: string; revision: number; publicationFrame: number; asset: boolean; uploadedBytes: number; class: Class; raise: boolean; leadBlocks: number; seamBound: boolean; prepareToPublishMs: number; prepMs: number
   // The graph-publish line's spectral predecessor count; undefined on evidence from before the field.
@@ -88,6 +99,7 @@ type Publication = {
   // Largest read-head delay change of the publication (0 when the pinned budget grows); undefined without host latency evidence.
   headMoveFrames: number | undefined
 }
+
 type Analysis = { publications: Publication[]; failures: Failure[]; incomplete: string[]; rows: { row: string; status: Status }[]
   // Diagnostic only: each row's own prep p50 over the publications it adds to the pooled gates.
   rowPrep: { row: string; publications: number; spectral: number; prepP50Ms: number }[]; status: Status }
@@ -101,10 +113,13 @@ const hostEventSchema = z.object({
   blockSize: z.number().default(0), pinnedLatencyFrames: z.number().optional(), graphLatencyFrames: z.number().optional(),
   spectralPredecessors: z.number().optional(), bytes: z.number().default(0),
 })
+
 const editsSchema = z.object({ edits: z.array(z.object({
   name: z.string().optional(), index: z.number().optional(), wallMs: z.number(), fromLatencyFrames: z.number(), toLatencyFrames: z.number() })).default([]) })
+
 const classSchema = z.object({ class: z.enum(["plain", "raise", "asset", "vst-insert"]) })
 const continuitySchema = z.object({ assetPublicationFrame: z.number().optional() }).passthrough()
+
 type HostEvent = z.infer<typeof hostEventSchema>
 
 const readText = (file: string) => readFile(file, "utf8").catch(() => undefined)
@@ -114,14 +129,17 @@ const percentile = (values: readonly number[], fraction: number) => {
   const sorted = [...values].sort((a, b) => a - b)
   const position = (sorted.length - 1) * fraction
   const low = Math.floor(position), high = Math.ceil(position)
+
   return (sorted[low] ?? 0) + ((sorted[high] ?? 0) - (sorted[low] ?? 0)) * (position - low)
 }
 
 const findLast = (events: readonly HostEvent[], before: number, match: (event: HostEvent) => boolean) => {
   for (let index = before - 1; index >= 0; index--) {
     const event = events[index]
+
     if (event && match(event)) return { event, index }
   }
+
   return undefined
 }
 
@@ -131,10 +149,12 @@ const findLast = (events: readonly HostEvent[], before: number, match: (event: H
 // this: their stages hold the completion (:9141-9145), so it keeps COMPLETE_BASE_FRAMES.
 const headMoveFrames = (previous: HostEvent, current: HostEvent) => {
   if ((current.spectralPredecessors ?? 0) > 0) return undefined
+
   if (previous.pinnedLatencyFrames === undefined || previous.graphLatencyFrames === undefined
     || current.pinnedLatencyFrames === undefined || current.graphLatencyFrames === undefined) return undefined
   const before = previous.pinnedLatencyFrames - previous.graphLatencyFrames
   const after = current.pinnedLatencyFrames - current.graphLatencyFrames
+
   return current.pinnedLatencyFrames > previous.pinnedLatencyFrames || before === after ? 0 : Math.max(before, after)
 }
 
@@ -142,6 +162,7 @@ const headMoveFrames = (previous: HostEvent, current: HostEvent) => {
 const classOf = (declared: Class | undefined, insert: boolean, asset: boolean, raise: boolean, blocksBeforeBind: number): Class => {
   if (insert) return "vst-insert"
   const base = declared === undefined || declared === "vst-insert" ? (asset ? "asset" : raise ? "raise" : "plain") : declared
+
   return base === "raise" && blocksBeforeBind >= 2 ? "raise-merged" : base
 }
 
@@ -160,20 +181,28 @@ const analyzeRow = (row: string, events: readonly HostEvent[], edits: z.infer<ty
     if (publish.event !== "graph-publish" || publish.cause !== "block-boundary" || publish.publicationFrame === 0) return
     const revision = publish.revision
     const prepare = findLast(events, index, (event) => event.event === "graph-prepare" && event.pid === publish.pid && event.requestedRevision === revision)
+
     const requests = prepare ? events.slice(prepare.index + 1, index).filter((event) =>
       event.event === "graph-publish-request" && event.pid === publish.pid && event.requestedRevision === revision) : []
+
     const bind = requests[0]
     const armed = requests[requests.length - 1]
+
     if (!prepare || !bind || !armed) return void failures.push(inputFailure(row, `revision ${revision} has no prepare or publish request before its publication`))
     const session = findLast(events, index, (event) => event.event === "device-session")?.event
+
     if (session?.sampleRate !== SAMPLE_RATE || session.blockSize !== BLOCK)
       return void failures.push(inputFailure(row, `revision ${revision} runs at ${session?.sampleRate}/${session?.blockSize}, not ${SAMPLE_RATE}/${BLOCK}`))
+
     const complete = events.slice(index + 1).find((event) => event.event === "latency-move-complete" && event.pid === publish.pid
       && event.revision === revision && event.transportEpoch === publish.transportEpoch && event.frame >= publish.publicationFrame)
+
     const asset = events.some((event) => event.event === "asset-install" && event.pid === publish.pid
       && event.wallMs >= prepare.event.wallMs && event.wallMs <= publish.wallMs)
+
     const uploadedBytes = events.filter((event) => event.event === "asset-page-write" && event.pid === publish.pid
       && event.wallMs >= prepare.event.wallMs && event.wallMs <= publish.wallMs).reduce((sum, event) => sum + event.bytes, 0)
+
     const previousPublish = findLast(events, index, (event) => event.event === "graph-publish" && event.pid === publish.pid)?.event
     const blocksBeforeBind = Math.max(1, Math.round((bind.frame - prepare.event.frame) / BLOCK))
     const seamBound = !windowed || events.slice(prepare.index + 1, index).some((event) => event.event === "schedule-window" && event.revision === revision)
@@ -191,25 +220,32 @@ const analyzeRow = (row: string, events: readonly HostEvent[], edits: z.infer<ty
   // A step settles before the next one starts, so a publication after the next step's start is not this edit's: a step that publishes
   // nothing (the editor opening) owns none instead of being charged the publication of the edit after it.
   const stepStartMs = new Map<number, number>()
+
   for (const edit of edits) if (edit.index !== undefined) stepStartMs.set(edit.index, Math.min(stepStartMs.get(edit.index) ?? edit.wallMs, edit.wallMs))
   const nextStepMs = (index: number | undefined) => index === undefined ? Infinity : Math.min(...[...stepStartMs].flatMap(([step, wallMs]) => step > index ? wallMs : []))
+
   for (const edit of edits) {
     const stepEndMs = nextStepMs(edit.index)
     const owner = drafts.findIndex((draft) => draft.wallMs >= edit.wallMs && draft.wallMs < stepEndMs)
     const draft = drafts[owner]
+
     if (!draft) continue
     const startMs = editStartMs(events, edit.wallMs, draft.wallMs)
+
     // A VST insert is the row's declared insert step, or an edit the app marked with ui-device-insert before the publication.
     if (edit.name === "vst-insert" || events.some((event) => event.event === "ui-device-insert" && event.wallMs >= edit.wallMs && event.wallMs <= draft.wallMs))
       insertsVst[owner] = true
     netMove[owner] = (netMove[owner] ?? 0) + edit.toLatencyFrames - edit.fromLatencyFrames
     firstEditMs[owner] = Math.min(firstEditMs[owner] ?? startMs, startMs)
   }
+
   const publications = drafts.map(({ wallMs, ...draft }, index): Publication => {
     const raise = (netMove[index] ?? 0) > 0
     const editMs = firstEditMs[index]
+
     return { ...draft, raise, editToPublishMs: editMs === undefined ? undefined : wallMs - editMs, class: classOf(declared, insertsVst[index] === true, draft.asset, raise, draft.blocksBeforeBind) }
   })
+
   return { failures, publications }
 }
 
@@ -228,14 +264,19 @@ const assetEvidenceFailures = (row: string, assetFrame: number | undefined, publ
 const judgePublication = (publication: Publication): Failure[] => {
   const { row, revision, leadBlocks } = publication
   const classLimits = LIMITS[publication.class]
+
   const prepareMaxMs = publication.class === "asset" && classLimits.prepareToPublishMaxMs !== undefined
     ? Math.max(classLimits.prepareToPublishMaxMs, ASSET_UPLOAD.fixedMs + publication.uploadedBytes / ASSET_UPLOAD.bytesPerMs)
     : classLimits.prepareToPublishMaxMs
+
   const limits = { ...classLimits, prepareToPublishMaxMs: prepareMaxMs }
+
   const moveAllowance = publication.headMoveFrames === undefined ? COMPLETE_BASE_FRAMES
     : Math.ceil((publication.headMoveFrames + 2 * FADE_FRAMES) / BLOCK) * BLOCK
+
   const allowedComplete = moveAllowance + BLOCK * Math.min(publication.blocksBeforeBind, COMPLETE_MAX_BLOCKS_BEFORE_BIND)
   const fail = (gate: Gate, detail: string): Failure => ({ row, gate, detail: `rev ${revision} ${detail}` })
+
   return [
     ...(publication.seamBound && (!Number.isInteger(leadBlocks) || leadBlocks < LEAD_MIN_BLOCKS || leadBlocks > LEAD_MAX_BLOCKS)
       ? [fail("lead", `lead ${leadBlocks} blocks, want ${LEAD_MIN_BLOCKS}..${LEAD_MAX_BLOCKS}`)] : []),
@@ -253,23 +294,29 @@ const judgePublication = (publication: Publication): Failure[] => {
 const poolOf = (publications: readonly Publication[]) => {
   const pooled = publications.filter((publication) => publication.class === "plain" || publication.class === "raise")
   const spectral = pooled.filter((publication) => (publication.spectralPredecessors ?? 0) > 0)
+
   return { pooled, spectral, rest: pooled.filter((publication) => !spectral.includes(publication)) }
 }
 
 type PoolVerdict = { failure?: Failure; incomplete?: string }
+
 const judgePooled = (publications: readonly Publication[], minimums: PooledMinimums) => {
   const { pooled, spectral, rest } = poolOf(publications)
+
   const judge = (gate: Gate, label: string, values: readonly number[], fraction: number, limitMs: number, minimum: number): PoolVerdict => {
     if (values.length < minimum) return { incomplete: `${label}: ${values.length} publications, needs ${minimum}` }
     const value = values.length ? percentile(values, fraction) : 0
+
     return value > limitMs ? { failure: { row: "(pooled)", gate, detail: `${label} ${value} > ${limitMs} ms` } } : {}
   }
+
   const judged = [
     judge("prepare-to-publish", "pooled p99", pooled.map((publication) => publication.prepareToPublishMs), 0.99, POOLED.prepareToPublishP99Ms, minimums.prepareToPublishP99),
     judge("prep-time", "pooled prep p50", rest.map((publication) => publication.prepMs), 0.5, POOLED.prepP50Ms, minimums.prepP50),
     judge("prep-time", "pooled spectral prep p50", spectral.map((publication) => publication.prepMs), 0.5, POOLED.spectralPrepP50Ms, minimums.spectralPrepP50),
     judge("edit-to-publish", "pooled p50", pooled.flatMap((publication) => publication.editToPublishMs ?? []), 0.5, POOLED.editToPublishP50Ms, minimums.editToPublishP50),
   ]
+
   return { failures: judged.flatMap((entry) => entry.failure ?? []), incomplete: judged.flatMap((entry) => entry.incomplete ?? []) }
 }
 
@@ -278,21 +325,27 @@ const judgePooled = (publications: readonly Publication[], minimums: PooledMinim
 const analyzeRows = async (run: string, prefix: string) => {
   const phase = phaseOf(run)
   const names = (await readdir(run, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
+
   const analyses = await Promise.all(names.map(async (directory) => {
     const hostText = await readText(join(run, directory, "host.jsonl"))
+
     if (hostText === undefined) return undefined
     const row = `${prefix}${directory}`
     const editsText = await readText(join(run, directory, `phase${phase}-edits.json`))
     const classText = await readText(join(run, directory, "latency-class.json"))
     const declared = classText === undefined ? undefined : classSchema.safeParse(JSON.parse(classText))
+
     if (declared && !declared.success) return { row, publications: [], failures: [inputFailure(row, "latency-class.json names an unknown class")] }
     const edits = editsText === undefined ? [] : editsSchema.parse(JSON.parse(editsText)).edits
     const continuityText = await readText(join(run, directory, "analysis.json"))
     const analysis = analyzeRow(row, parseHost(hostText), edits, declared?.data.class)
+
     if (continuityText !== undefined)
       analysis.failures.push(...assetEvidenceFailures(row, continuitySchema.parse(JSON.parse(continuityText)).assetPublicationFrame, analysis.publications))
+
     return { row, ...analysis }
   }))
+
   return analyses.flatMap((analysis) => analysis ?? [])
 }
 
@@ -300,26 +353,35 @@ const analyzeRuns = async (runs: readonly string[], minimums: PooledMinimums): P
   const rows = (await Promise.all(runs.map((run) => analyzeRows(run, runs.length > 1 ? `${basename(dirname(run))}/` : "")))).flat()
   const publications = rows.flatMap((analysis) => analysis.publications)
   const pooled = judgePooled(publications, minimums)
+
   const failures = [
     ...(publications.length ? [] : [inputFailure("(run)", "no seam publications found")]),
     ...rows.flatMap((analysis) => [...analysis.failures, ...analysis.publications.flatMap(judgePublication)]),
     ...pooled.failures,
   ]
+
   const rowStatus = (row: { row: string; publications: Publication[] }): Status =>
     failures.some((failure) => failure.row === row.row) ? "FAIL"
       : row.publications.some((publication) => LIMITS[publication.class].prepareToPublishMaxMs === undefined) ? "INCOMPLETE" : "PASS"
+
   const rowStatuses = rows.map((row) => ({ row: row.row, status: rowStatus(row) }))
+
   const rowPrep = rows.flatMap((row) => {
     const { pooled: own, spectral } = poolOf(row.publications)
+
     return own.length ? [{ row: row.row, publications: own.length, spectral: spectral.length, prepP50Ms: percentile(own.map((publication) => publication.prepMs), 0.5) }] : []
   })
+
   const status: Status = failures.length ? "FAIL" : rowStatuses.some((entry) => entry.status === "INCOMPLETE") || pooled.incomplete.length ? "INCOMPLETE" : "PASS"
+
   return { publications, failures, incomplete: pooled.incomplete, rows: rowStatuses, rowPrep, status }
 }
 
 const phaseOf = (run: string) => {
   const phase = Number(/^phase(\d+)$/.exec(basename(run.replace(/\/$/, "")))?.[1])
+
   if (!Number.isInteger(phase)) throw new Error(`the run directory must end in phase<N>: ${run}`)
+
   return phase
 }
 
@@ -341,12 +403,15 @@ type Spec = {
   // An earlier step this many ms before the edit that publishes nothing (the editor opening), with a ui-editor-open mark at its start.
   precededByMs?: number
 }
+
 // `delivers` writes the continuity analysis.json naming the publication at that index as the asset's; `noAsset` writes one naming none.
 // `startLatency` is the latency of the session's first publication, before the first spec.
 type RowOptions = { sampleRate?: number; declare?: string; delivers?: number; noAsset?: true; windowed?: true; startLatency?: { pinned: number; graph: number } }
+
 const syntheticRow = (specs: readonly Spec[], options: RowOptions = {}) => {
   const base = { cause: "", pid: 1, transportEpoch: 5 }
   const lines: object[] = [{ event: "device-session", pid: 1, wallMs: 0, sampleRate: options.sampleRate ?? SAMPLE_RATE, blockSize: BLOCK }]
+
   if (options.startLatency)
     lines.push({ ...base, event: "graph-publish", cause: "configured-boundary", wallMs: 1, revision: 1, pinnedLatencyFrames: options.startLatency.pinned, graphLatencyFrames: options.startLatency.graph })
   const edits: object[] = []
@@ -359,25 +424,34 @@ const syntheticRow = (specs: readonly Spec[], options: RowOptions = {}) => {
     frames.push(publicationFrame)
     const request = (frame: number, wallMs: number) => ({ ...base, event: "graph-publish-request", wallMs, frame, revision: revision - 1, requestedRevision: revision })
     lines.push({ ...base, event: "graph-prepare", wallMs: wall, frame: prepareFrame, revision: revision - 1, requestedRevision: revision }, request(bindFrame, wall + 1))
+
     if (spec.install) lines.push({ ...base, event: "asset-install", wallMs: wall + 5 })
+
     if (spec.uploadBytes !== undefined) lines.push({ ...base, event: "asset-page-write", wallMs: wall + 6, bytes: spec.uploadBytes })
     lines.push(request(bindFrame + BLOCK, wall + (spec.prepMs ?? 4)))
+
     if (spec.resend) lines.push(request(publicationFrame - BLOCK, wall + 18))
+
     if (options.windowed && !spec.unbound) lines.push({ event: "schedule-window", wallMs: wall + 3, revision })
+
     if (spec.precededByMs !== undefined)
       lines.push({ event: "ui-editor-open", wallMs: wall + (spec.totalMs ?? 30) - (spec.editMs ?? 75) - spec.precededByMs + 5, pid: 1, key: "k" })
+
     if (spec.uiMarkMs !== undefined) lines.push({ event: spec.uiMark ?? "ui-parameter-commit", wallMs: wall + (spec.totalMs ?? 30) - spec.uiMarkMs, pid: 1, key: "k" })
     lines.push({ ...base, event: "graph-publish", cause: "block-boundary", wallMs: wall + (spec.totalMs ?? 30), frame: publicationFrame, publicationFrame, revision, requestedRevision: 0,
       pinnedLatencyFrames: spec.latency?.pinned, graphLatencyFrames: spec.latency?.graph,
       spectralPredecessors: spec.spectral })
+
     if (spec.completeFrames !== "none")
       lines.push({ ...base, event: "latency-move-complete", wallMs: wall + 100, frame: publicationFrame + (spec.completeFrames ?? COMPLETE_BASE_FRAMES + BLOCK * blocksBeforeBind), revision, requestedRevision: 0 })
     const editWallMs = wall + (spec.totalMs ?? 30) - (spec.editMs ?? 75)
+
     if (spec.precededByMs !== undefined) edits.push({ name: "editor-open", index: 2 * index + 1, wallMs: editWallMs - spec.precededByMs, fromLatencyFrames: 0, toLatencyFrames: 0 })
     edits.push({ name: spec.editName, index: 2 * index + 2, wallMs: editWallMs, fromLatencyFrames: 512, toLatencyFrames: spec.raise ? 4096 : 512 })
   })
   // An index past the last publication names frame 1, which no publication has.
   const delivered = options.delivers === undefined ? undefined : frames[options.delivers] ?? 1
+
   return { host: lines.map((line) => JSON.stringify(line)).join("\n"), edits: JSON.stringify({ edits }), declare: options.declare,
     continuity: delivered === undefined && !options.noAsset ? undefined : JSON.stringify(delivered === undefined ? {} : { assetPublicationFrame: delivered }) }
 }
@@ -391,7 +465,9 @@ const selfTest = async (c1Runs: readonly string[]) => {
   // The cases written before the minimums judge pools of 3 to 7 publications, so they run with none; the cases of the minimums name POOLED_MIN_N.
   const NO_MINIMUM: PooledMinimums = { spectralPrepP50: 0, prepP50: 0, prepareToPublishP99: 0, editToPublishP50: 0 }
   const many = (count: number, spec: Spec): Spec[] => Array.from({ length: count }, () => spec)
+
   type Rows = [string, readonly Spec[], RowOptions?][]
+
   const cases: { name: string; rows: Rows; second?: Rows; pools?: PooledMinimums; status: Status; fails: Gate[] }[] = [
     { name: "conforming: plain, single raise, merged k=3 raise, asset add", status: "PASS", fails: [],
       rows: [["two-tone", clean], ["add-paged-asset", [{ totalMs: 90, install: true }]]] },
@@ -511,9 +587,11 @@ const selfTest = async (c1Runs: readonly string[]) => {
     { name: "the first of two run directories alone is INCOMPLETE", status: "INCOMPLETE", fails: [], pools: POOLED_MIN_N,
       rows: [["two-tone", [...many(20, { prepMs: 9, spectral: 1 }), ...many(100, {})]]] },
   ]
+
   const root = await mkdtemp(join(tmpdir(), "ae08-latency-gates-"))
   let failed = 0
   const report = (ok: boolean, line: string) => { if (!ok) failed++; console.log(`${ok ? "ok  " : "BAD "} ${line}`) }
+
   try {
     const writeRun = async (run: string, rows: Rows) => {
       for (const [row, specs, options] of rows) {
@@ -521,11 +599,15 @@ const selfTest = async (c1Runs: readonly string[]) => {
         await mkdir(join(run, row), { recursive: true })
         await writeFile(join(run, row, "host.jsonl"), synthetic.host)
         await writeFile(join(run, row, "phase9-edits.json"), synthetic.edits)
+
         if (synthetic.declare) await writeFile(join(run, row, "latency-class.json"), synthetic.declare)
+
         if (synthetic.continuity) await writeFile(join(run, row, "analysis.json"), synthetic.continuity)
       }
+
       return run
     }
+
     for (const [index, testCase] of cases.entries()) {
       const runs = [await writeRun(join(root, `case-${index}`, "phase9"), testCase.rows), ...(testCase.second ? [await writeRun(join(root, `case-${index}-b`, "phase9"), testCase.second)] : [])]
       const analysis = await analyzeRuns(runs, testCase.pools ?? NO_MINIMUM)
@@ -533,6 +615,7 @@ const selfTest = async (c1Runs: readonly string[]) => {
       report(analysis.status === testCase.status && actual.join() === testCase.fails.join(),
         `${testCase.name}: want ${testCase.status} [${testCase.fails}], got ${analysis.status} [${actual}]`)
     }
+
     for (const run of c1Runs) {
       const analysis = await analyzeRuns([run], POOLED_MIN_N)
       const gates = [...new Set(analysis.failures.map((failure) => failure.gate))]
@@ -541,28 +624,39 @@ const selfTest = async (c1Runs: readonly string[]) => {
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+
   console.log(failed ? `self-test FAILED (${failed})` : `self-test passed (${cases.length} synthetic cases, ${c1Runs.length} negative controls)`)
+
   return failed === 0
 }
 
 const main = async () => {
   const args = process.argv.slice(2)
   const values = (flag: string) => args.flatMap((arg, index) => arg === flag ? args[index + 1] ?? [] : [])
+
   if (args.includes("--self-test")) {
     const c1Runs = values("--c1")
+
     if (!c1Runs.length) throw new Error("--self-test needs the C1 evidence as a negative control: --c1 <phaseDir> [--c1 <phaseDir>...]")
+
     return process.exit(await selfTest(c1Runs) ? 0 : 1)
   }
+
   const runs = values("--run")
   const [first] = runs
+
   if (!first) throw new Error("usage: ae-08-latency-gates.ts --run <phaseDir> [--run <phaseDir>...] [--out <file>] | --self-test --c1 <phaseDir>...")
   const analysis = await analyzeRuns(runs, POOLED_MIN_N)
   const out = values("--out")[0] ?? join(first, "latency-gates.json")
   await mkdir(dirname(out), { recursive: true })
   await writeFile(out, `${JSON.stringify({ runs, sampleRate: SAMPLE_RATE, blockSize: BLOCK, minimums: POOLED_MIN_N, ...analysis }, null, 2)}\n`)
+
   for (const row of analysis.rows) console.log(`${row.status} ${row.row}`)
+
   for (const row of analysis.rowPrep) console.log(`prep p50 ${row.row}: ${row.prepP50Ms} ms over ${row.publications} publications (${row.spectral} spectral)`)
+
   for (const failure of analysis.failures) console.log(`FAIL ${failure.row} ${failure.gate}: ${failure.detail}`)
+
   for (const pool of analysis.incomplete) console.log(`INCOMPLETE (pooled) ${pool}`)
   console.log(`${analysis.status} LAT1 gates: ${analysis.publications.length} publications -> ${out}`)
   process.exit(analysis.status === "PASS" ? 0 : 1)

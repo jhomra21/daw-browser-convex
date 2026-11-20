@@ -74,58 +74,76 @@ export function reconcileTimelineProjectionSnapshot<TTrackId extends string>(
 
   const committedClipEditsById = (() => {
     let next: Map<string, ClipTimelinePatch<TTrackId>> | null = null
+
     for (const [clipId, patch] of current.committedClipEditsById) {
       const serverClip = serverIndex.clipRowsById.get(clipId)
+
       if (!serverClip) continue
+
       if (!isClipPatchReflected(patch, serverClip)) continue
+
       if (!next) next = new Map(current.committedClipEditsById)
       next.delete(clipId)
     }
+
     return next ?? current.committedClipEditsById
   })()
 
   const pendingTrackEntriesById = (() => {
     let next: Map<TTrackId, PendingTrackEntry<TTrackId>> | null = null
+
     for (const [trackId, entry] of current.pendingTrackEntriesById) {
       const serverTrack = serverIndex.trackRowsById.get(trackId)
+
       if (!serverTrack || !isTrackEntryReflected(entry, serverTrack)) continue
+
       if (!next) next = new Map(current.pendingTrackEntriesById)
       next.delete(trackId)
     }
+
     return next ?? current.pendingTrackEntriesById
   })()
 
   const pendingClipCreatesById = (() => {
     let next: Map<string, PendingClipCreate<TTrackId>> | null = null
+
     for (const [clipId, pending] of current.pendingClipCreatesById) {
       const row = clipRows.get(clipId)
       const normalized = serverIndex.clipRowsById.get(clipId)
+
       if (!row || !normalized || pending.trackId !== row.trackId
         || JSON.stringify(normalizedPersistedClip({ ...row, id: row._id, fades: normalized.fades }))
           !== JSON.stringify(normalizedPersistedClip(pending.clip))) continue
+
       if (!next) next = new Map(current.pendingClipCreatesById)
       next.delete(clipId)
     }
+
     return next ?? current.pendingClipCreatesById
   })()
 
   const removedTrackIds = (() => {
     const next = new Set<TTrackId>(Array.from(current.removedTrackIds).filter((trackId) => serverIndex.trackIds.has(trackId)))
+
     return next.size === current.removedTrackIds.size ? current.removedTrackIds : next
   })()
 
   const removedClipIds = (() => {
     const next = new Set(Array.from(current.removedClipIds).filter((clipId) => serverIndex.clipIds.has(clipId)))
+
     return next.size === current.removedClipIds.size ? current.removedClipIds : next
   })()
 
   const pendingTrackLocksById = (() => {
     let next: Map<TTrackId, string | null> | null = null
+
     for (const [trackId, lockedBy] of current.pendingTrackLocksById) {
       if (serverIndex.trackLocksById.get(trackId) !== lockedBy) continue
+
       if (!next) next = new Map(current.pendingTrackLocksById)
       next.delete(trackId)
     }
+
     return next ?? current.pendingTrackLocksById
   })()
 
@@ -160,6 +178,7 @@ function collectTrackClipIds(options: {
   if (options.serverData) {
     for (const clip of options.serverData.clips) {
       const clipId = String(clip._id)
+
       if (options.removedClipIds.has(clipId)) continue
       assignClipTrack(clipId, clip.trackId)
     }
@@ -199,6 +218,7 @@ export const clearClipMovePatch = (patch: ClipTimelinePatch): ClipTimelinePatch 
   const remaining: ClipTimelinePatch = { ...patch }
   delete remaining.trackId
   delete remaining.startSec
+
   return hasClipTimelinePatchFields(remaining) ? remaining : null
 }
 
@@ -234,6 +254,7 @@ export function useTimelineProjectionState(
       removedClipIds: removedClipIds(),
       pendingTrackLocksById: pendingTrackLocksById(),
     }, data)
+
     setCommittedClipEditsById(next.committedClipEditsById)
     setPendingTrackEntriesById(next.pendingTrackEntriesById)
     setPendingClipCreatesById(next.pendingClipCreatesById)
@@ -244,6 +265,7 @@ export function useTimelineProjectionState(
 
   createEffect(() => {
     const data = options.serverData()
+
     if (data) reconcile(data)
   })
 
@@ -251,17 +273,22 @@ export function useTimelineProjectionState(
     const targetIds = new Set(clipIds)
     setDraftClipEditsById((current) => {
       let next: Map<string, ClipTimelinePatch> | null = null
+
       for (const clipId of targetIds) {
         const patch = current.get(clipId)
+
         if (!patch) continue
         const remaining = clearClipMovePatch(patch)
+
         if (!next) next = new Map(current)
+
         if (remaining) {
           next.set(clipId, remaining)
         } else {
           next.delete(clipId)
         }
       }
+
       return next ?? current
     })
   }
@@ -269,15 +296,18 @@ export function useTimelineProjectionState(
   const clearDraftClipAudioWarp = (clipId: string) => {
     setDraftClipEditsById((current) => {
       const patch = current.get(clipId)
+
       if (!patch?.audioWarp) return current
       const remaining: ClipTimelinePatch = { ...patch }
       delete remaining.audioWarp
       const next = new Map(current)
+
       if (hasClipTimelinePatchFields(remaining)) {
         next.set(clipId, remaining)
       } else {
         next.delete(clipId)
       }
+
       return next
     })
   }
@@ -295,29 +325,38 @@ export function useTimelineProjectionState(
 
   const removeLocalClips = (clipIds: Iterable<string>) => {
     const removed = new Set(clipIds)
+
     if (removed.size === 0) return
     setPendingClipCreatesById((current) => {
       let next: Map<string, PendingClipCreate> | null = null
+
       for (const clipId of removed) {
         if (!current.has(clipId)) continue
+
         if (!next) next = new Map(current)
         next.delete(clipId)
       }
+
       return next ?? current
     })
     setRemovedClipIds((current) => {
       const next = new Set(current)
+
       for (const clipId of removed) next.add(clipId)
+
       return next
     })
     clearDraftClipMoves(removed)
     setCommittedClipEditsById((current) => {
       let next: Map<string, ClipTimelinePatch> | null = null
+
       for (const clipId of removed) {
         if (!current.has(clipId)) continue
+
         if (!next) next = new Map(current)
         next.delete(clipId)
       }
+
       return next ?? current
     })
   }
@@ -349,11 +388,13 @@ export function useTimelineProjectionState(
         if (!current.has(track.id)) return current
         const next = new Set(current)
         next.delete(track.id)
+
         return next
       })
       setPendingTrackEntriesById((current) => {
         const next = new Map(current)
         next.set(track.id, { index, track })
+
         return next
       })
     },
@@ -363,11 +404,13 @@ export function useTimelineProjectionState(
         if (!current.has(clip.id)) return current
         const next = new Set(current)
         next.delete(clip.id)
+
         return next
       })
       setPendingClipCreatesById((current) => {
         const next = new Map(current)
         next.set(clip.id, { trackId, clip })
+
         return next
       })
     },
@@ -376,6 +419,7 @@ export function useTimelineProjectionState(
       setPendingClipCreatesById((current) => {
         const next = new Map(current)
         next.set(clip.id, { trackId, clip })
+
         return next
       })
     },
@@ -389,17 +433,21 @@ export function useTimelineProjectionState(
         committedClipEditsById: committedClipEditsById(),
         draftClipEditsById: draftClipEditsById(),
       })
+
       setPendingTrackEntriesById((current) => {
         if (!current.has(trackId)) return current
         const next = new Map(current)
         next.delete(trackId)
+
         return next
       })
       setRemovedTrackIds((current) => {
         const next = new Set(current)
         next.add(trackId)
+
         return next
       })
+
       if (clipIds.size > 0) {
         removeLocalClips(clipIds)
       }
@@ -417,17 +465,22 @@ export function useTimelineProjectionState(
             ...patch,
           },
         })
+
         return next
       })
     },
     setDraftClipTiming: (clipId, patch) => {
       setDraftClipEditsById((current) => {
         const next = new Map(current)
+
         if (!patch) {
           next.delete(clipId)
+
           return next
         }
+
         next.set(clipId, patch)
+
         return next
       })
     },
@@ -436,6 +489,7 @@ export function useTimelineProjectionState(
         if (!current.has(clipId)) return current
         const next = new Map(current)
         next.delete(clipId)
+
         return next
       })
       setCommittedClipEditsById((current) => {
@@ -444,6 +498,7 @@ export function useTimelineProjectionState(
           ...current.get(clipId),
           ...patch,
         })
+
         return next
       })
     },
@@ -455,6 +510,7 @@ export function useTimelineProjectionState(
           ...current.get(clipId),
           audioWarp,
         })
+
         return next
       })
     },
@@ -464,15 +520,21 @@ export function useTimelineProjectionState(
       const moveIds = new Set(moves.map((move) => move.clipId))
       setDraftClipEditsById((current) => {
         let next: Map<string, ClipTimelinePatch> | null = null
+
         for (const [clipId, patch] of current) {
           if (!moveIds.has(clipId)) continue
+
           if (patch.duration !== undefined || patch.leftPadSec !== undefined || patch.bufferOffsetSec !== undefined || patch.audioWarp !== undefined || patch.midiOffsetBeats !== undefined) continue
+
           if (!next) next = new Map(current)
           next.delete(clipId)
         }
+
         for (const move of moves) {
           const previous = current.get(move.clipId)
+
           if (previous?.trackId === move.trackId && previous.startSec === move.startSec) continue
+
           if (!next) next = new Map(current)
           next.set(move.clipId, {
             ...previous,
@@ -480,6 +542,7 @@ export function useTimelineProjectionState(
             startSec: move.startSec,
           })
         }
+
         return next ?? current
       })
     },
@@ -488,6 +551,7 @@ export function useTimelineProjectionState(
       clearDraftClipMoves(moves.map((move) => move.clipId))
       setCommittedClipEditsById((current) => {
         const next = new Map(current)
+
         for (const move of moves) {
           const previous = current.get(move.clipId)
           next.set(move.clipId, {
@@ -496,6 +560,7 @@ export function useTimelineProjectionState(
             startSec: move.startSec,
           })
         }
+
         return next
       })
     },
@@ -504,6 +569,7 @@ export function useTimelineProjectionState(
       setPendingTrackLocksById((current) => {
         const next = new Map(current)
         next.set(trackId, lockedBy)
+
         return next
       })
     },
@@ -512,6 +578,7 @@ export function useTimelineProjectionState(
         if (!current.has(trackId)) return current
         const next = new Map(current)
         next.delete(trackId)
+
         return next
       })
     },

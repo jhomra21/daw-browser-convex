@@ -8,10 +8,13 @@ function buildRoomShareUrl(
   shareToken?: string,
 ): string | undefined {
   const normalizedProjectId = normalizeProjectId(projectId)
+
   if (!normalizedProjectId) return undefined
   const url = new URL(href)
   url.searchParams.set('projectId', normalizedProjectId)
+
   if (shareToken) url.searchParams.set('shareToken', shareToken)
+
   return url.toString()
 }
 
@@ -20,7 +23,9 @@ export function getInviteShareUrl(
   shareToken: string,
 ): string | undefined {
   const currentWindow = globalThis.window
+
   if (!currentWindow) return normalizeProjectId(currentProjectId)
+
   try {
     return buildRoomShareUrl(currentProjectId, currentWindow.location.href, shareToken)
   } catch {
@@ -33,19 +38,24 @@ export const ensureRoomShareLink = (
   setProjectId: (projectId: string) => void,
 ): string | undefined => {
   const currentWindow = globalThis.window
+
   if (!currentWindow) return currentProjectId
+
   try {
     const url = new URL(currentWindow.location.href)
     const normalizedCurrentProjectId = normalizeProjectId(currentProjectId)
     const urlProjectId = normalizeProjectId(url.searchParams.get('projectId') ?? undefined)
     const rid = normalizedCurrentProjectId ?? urlProjectId ?? crypto.randomUUID()
     const shareUrl = buildRoomShareUrl(rid, window.location.href)
+
     if (shareUrl && shareUrl !== currentWindow.location.href) {
       history.replaceState(null, '', shareUrl)
     }
+
     if (rid !== normalizedCurrentProjectId) {
       setProjectId(rid)
     }
+
     return rid
   } catch {
     return currentProjectId

@@ -4,5 +4,6 @@
 export const takeTypedNumber = (input: HTMLInputElement, committed: number) => {
   const typed = input.value.trim() !== "" && Number.isFinite(input.valueAsNumber) ? input.valueAsNumber : undefined
   input.value = String(committed)
+
   return typed
 }

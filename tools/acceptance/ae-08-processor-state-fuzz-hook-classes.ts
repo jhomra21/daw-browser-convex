@@ -5,6 +5,7 @@ export const mutationSchema = z.enum(["stale-overwrite", "false-receipt", "early
   "drop-batch", "false-rejection", "lost-edit", "swallow-waiter", "never-wake-latency", "underfill",
   "real-timer", "native-rollback", "force-rebuild", "drop-dispatch", "drop-transport", "history-replay-on-failure",
   "captured-rollback", "skip-latest-edit", "no-undo", "retain-reservation", "no-release", "no-hold", "no-loop-end", "no-abort", "skip-swap", "dirty-flush", "clear-override", "allocate-only-replay", "wrong-latest", "same-stop-wrong-start", "two-sources"])
+
 export const hookClassTable = {
   classes,
   prefixes: [

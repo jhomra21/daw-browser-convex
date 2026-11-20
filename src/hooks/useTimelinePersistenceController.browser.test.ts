@@ -182,6 +182,7 @@ window.sharedOutboxFixture = {
   subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener) },
 }
 `
+
   const result = await build({
     root: repositoryRoot,
     configFile: false,
@@ -194,24 +195,36 @@ window.sharedOutboxFixture = {
         enforce: 'pre',
         resolveId: (id) => {
           if (id.endsWith(fixtureId)) return `\0${fixtureId}.ts`
+
           if (id.endsWith('lib/shared-outbox')) return '\0stub:outbox.ts'
+
           if (id.endsWith('lib/local-project-changes')) return '\0stub:changes.ts'
+
           if (id.endsWith('hooks/useCloudSyncTick') || id.endsWith('hooks/useCloudSyncTick.ts')) return '\0stub:cloud-tick.ts'
+
           if (id.endsWith('lib/timeline-clip-write-adapter')) return '\0stub:clip-adapter.ts'
+
           if (id.endsWith('hooks/useLocalTimelineMediaRecovery')) return '\0stub:recovery.ts'
+
           return undefined
         },
         load: (id) => {
           if (id === `\0${fixtureId}.ts`) return source
+
           if (id === '\0stub:outbox.ts') return `export * from '${repositoryRoot}src/lib/shared-outbox.ts'
             import * as real from '${repositoryRoot}src/lib/shared-outbox.ts'
             export const flushSharedOutbox = (...args) => window.sharedOutboxFixture.real() ? real.flushSharedOutbox(...args) : window.sharedOutboxFixture.flush()`
+
           if (id === '\0stub:changes.ts') return `export * from '${repositoryRoot}src/lib/local-project-changes.ts'
             import * as real from '${repositoryRoot}src/lib/local-project-changes.ts'
             export const subscribeToLocalProjectChanges = (projectId, listener) => window.sharedOutboxFixture.real() ? real.subscribeToLocalProjectChanges(projectId, listener) : window.sharedOutboxFixture.subscribe(listener)`
+
           if (id === '\0stub:cloud-tick.ts') return `export const useCloudSyncTick = () => {}`
+
           if (id === '\0stub:clip-adapter.ts') return `export const createTimelineClipWriteAdapter = () => ({ deleteClips: async () => ({ removedIds: new Set() }) })`
+
           if (id === '\0stub:recovery.ts') return `export const useMissingMediaRecovery = () => ({ reloadLocalTimeline: async () => {}, ensureMountedLocalMedia: async () => {} })`
+
           return undefined
         },
       },
@@ -219,11 +232,15 @@ window.sharedOutboxFixture = {
     resolve: { alias: { '~': `${repositoryRoot}src` } },
     build: { write: false, minify: false, lib: { entry: fixtureId, formats: ['iife'], name: 'sharedRetryFixture' } },
   })
+
   const output = Array.isArray(result) ? result[0] : result
+
   if (!output || !('output' in output)) throw new Error('Expected one persistence controller bundle.')
+
   const styles = output.output.flatMap((chunk) => (
     chunk.type === 'asset' && chunk.fileName.endsWith('.css') ? [String(chunk.source)] : []
   ))
+
   return `<!doctype html><head><style>${styles.join('\n')}</style></head><body style="margin:0"><script>${output.output[0].code}</script>`
 }
 
@@ -242,12 +259,16 @@ test('shared outbox schedules pending deadlines and clears project timers', asyn
   const env = { ...process.env }
   delete env.AGENT_BROWSER_CDP
   delete env.AGENT_BROWSER_SESSION
+
   const run = async (...args: string[]) => {
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
     const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
+
     if (await child.exited !== 0) throw new Error(stderr || stdout)
+
     return stdout.trim()
   }
+
   const read = async () => retryStateSchema.parse(JSON.parse(JSON.parse(
     await run('eval', `(async () => JSON.stringify({
       calls: syncProbe.publishCalls(),
@@ -256,7 +277,9 @@ test('shared outbox schedules pending deadlines and clears project timers', asyn
       subscriptions: syncProbe.flushStates(),
     }))()`),
   )))
+
   await run('open', `file://${directory}/index.html`)
+
   try {
     await run('eval', 'syncProbe.mount()')
     expect(await read()).toMatchObject({ calls: 1 })
@@ -284,6 +307,7 @@ test('shared outbox schedules pending deadlines and clears project timers', asyn
     expect(thirdFailure.delays[0]).toBeGreaterThan(secondFailure.delays[0] ?? 0)
     expect(thirdFailure.calls).toBe(0)
     const backoffDelays = [firstFailure.delays[0], secondFailure.delays[0], thirdFailure.delays[0]]
+
     for (let attempt = 0; attempt < 4; attempt += 1) {
       await run('eval', 'syncProbe.fireTimer(); syncProbe.waitTimer()')
       const failure = await read()
@@ -291,6 +315,7 @@ test('shared outbox schedules pending deadlines and clears project timers', asyn
       expect(failure.delays[0]).toBeLessThanOrEqual(60_000)
       backoffDelays.push(failure.delays[0])
     }
+
     expect(backoffDelays[5]).toBeGreaterThan(59_000)
     expect(backoffDelays[6]).toBeGreaterThan(59_000)
     await run('eval', 'syncProbe.restoreStorage(); syncProbe.preparePublication(); window.dispatchEvent(new Event("online")); syncProbe.waitPublished()')

@@ -16,16 +16,22 @@ export const createBenchmarkSabRecordingWriter = async (
 ) => {
   const { default: recordingWorkerAssetUrl } = await import('../../workers/recording-writer-worker.ts?worker&url')
   const asset = new URL(recordingWorkerAssetUrl, location.href)
+
   if (!packagedBenchmarkAsset(asset, new URL(location.href))) {
     throw new Error('SAB benchmark requires the packaged app origin.')
   }
+
   const response = await fetch(asset)
+
   if (!response.ok || !packagedBenchmarkAsset(new URL(response.url), new URL(location.href))) {
     throw new Error('SAB benchmark worker asset is unavailable.')
   }
+
   const objectUrl = URL.createObjectURL(new Blob([await response.blob()], { type: 'text/javascript' }))
+
   try {
     const worker = new Worker(objectUrl, { type: 'module' })
+
     return createNativeSabRecordingWriter({
       ...input,
       worker: createBrowserWorker(worker, () => URL.revokeObjectURL(objectUrl)),

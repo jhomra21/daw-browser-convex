@@ -38,12 +38,17 @@ export const rangeTrackIdsThroughDisplayOrder = (
 ) => {
   if (!targetTrackId) return rangeTrackIds;
   const targetIndex = displayTrackIds.indexOf(targetTrackId);
+
   const selectedIndexes = rangeTrackIds.flatMap((trackId) => {
     const index = displayTrackIds.indexOf(trackId);
+
     return index >= 0 ? [index] : [];
   });
+
   if (targetIndex < 0) return rangeTrackIds;
+
   if (selectedIndexes.length === 0) return [targetTrackId];
+
   return displayTrackIds.slice(
     Math.min(targetIndex, ...selectedIndexes),
     Math.max(targetIndex, ...selectedIndexes) + 1,
@@ -61,6 +66,7 @@ export const timelinePointerCoordinates = (
   includePhysicalScroll = true,
 ) => {
   const rect = element.getBoundingClientRect();
+
   return {
     x: event.clientX - rect.left + (includePhysicalScroll ? (element.scrollLeft || 0) : 0),
     y: event.clientY - rect.top + (element.scrollTop || 0) - rulerOffsetPx,
@@ -127,6 +133,7 @@ export function useTimelineSelection(
     width: number;
     height: number;
   } | null>(null);
+
   const [marqueeSurface, setMarqueeSurface] = createSignal<
     "scrolling" | "return" | null
   >(null);
@@ -144,12 +151,15 @@ export function useTimelineSelection(
     const rows = pointerOptions.rows ?? trackLayout();
     const rulerOffsetPx = pointerOptions.rulerOffsetPx ?? TIMELINE_HEADER_HEIGHT;
     const currentRange = selection.rangeSelection();
+
     if (!event.shiftKey || !currentRange || !scrollEl) return false;
     const { x, y } = timelinePointerCoordinates(event, scrollEl, rulerOffsetPx, false);
     const trackIndex = clickedTrackId ? -1 : trackIndexAtY(rows, y);
+
     const trackId =
       clickedTrackId ??
       (trackIndex >= 0 ? rows[trackIndex]?.trackId : undefined);
+
     const nextRange = extendTimelineRangeSelectionToPoint(currentRange, {
       timeSec: quantizeSecToGrid(
         (visibleStartSec?.() ?? 0) + x / options.pixelsPerSecond(),
@@ -163,9 +173,11 @@ export function useTimelineSelection(
       ),
       primaryTrackId: trackId ?? currentRange.primaryTrackId,
     });
+
     if (nextRange) selection.selectTimeRange(nextRange);
     event.stopPropagation();
     event.preventDefault();
+
     return true;
   };
 
@@ -175,6 +187,7 @@ export function useTimelineSelection(
   ) => {
     const { element: scrollEl, rows, rulerOffsetPx } = surface;
     const ts = tracks();
+
     if (ts.length === 0 || !scrollEl) return false;
     const trackById = new Map(ts.map((track) => [track.id, track]));
 
@@ -183,10 +196,12 @@ export function useTimelineSelection(
     const start = timelinePointerCoordinates(event, scrollEl, 0, false);
     startX = start.x;
     startY = start.y;
+
     if (!event.shiftKey) {
       const laneIndex = trackIndexAtY(rows, startY - rulerOffsetPx);
       const row = laneIndex >= 0 ? rows[laneIndex] : undefined;
       const track = row ? trackById.get(row.trackId) : undefined;
+
       if (track) {
         if (
           selection.selectedTrackId() !== track.id ||
@@ -209,8 +224,11 @@ export function useTimelineSelection(
         }
       }
     }
+
     marqueeActive = false;
+
     if (!options.isPlaying()) startScrub(event.clientX, { listen: false });
+
     return true;
   };
 
@@ -226,6 +244,7 @@ export function useTimelineSelection(
     ) {
       return;
     }
+
     if (!startLaneDrag(event, surface)) return;
     currentRows = surface.rows;
     currentRulerOffsetPx = surface.rulerOffsetPx;
@@ -236,6 +255,7 @@ export function useTimelineSelection(
   let currentScrollEl: HTMLDivElement | undefined;
   let currentRows: readonly TimelineTrackLayoutRow[] = [];
   let currentRulerOffsetPx = TIMELINE_HEADER_HEIGHT;
+
   const onLaneDragMove = (event: PointerEvent, scrollEl: HTMLDivElement) => {
     currentScrollEl = scrollEl;
 
@@ -252,6 +272,7 @@ export function useTimelineSelection(
 
     if (!marqueeActive) {
       if (!options.isPlaying()) moveScrub(event.clientX);
+
       return;
     }
 
@@ -264,14 +285,17 @@ export function useTimelineSelection(
     setMarqueeRect({ x, y: normY, width, height });
 
     const rangeTrackIds = trackIdsInYRange(currentRows, normY, normY + height);
+
     const primaryIndex = trackIndexAtY(
       currentRows,
       startY - currentRulerOffsetPx,
     );
+
     const primaryTrackId =
       primaryIndex >= 0
         ? currentRows[primaryIndex].trackId
         : (rangeTrackIds[0] ?? null);
+
     const snappedRange = snapTimeRangeToGridColumns(
       {
         startSec: timelineTimeAtViewportX(
@@ -288,18 +312,23 @@ export function useTimelineSelection(
       bpm(),
       gridDenominator(),
     );
+
     if (!snappedRange) {
       if (!event.shiftKey) selection.selectMasterTarget();
+
       return;
     }
+
     const range = normalizeTimelineRangeSelection({
       startSec: snappedRange.startSec,
       endSec: snappedRange.endSec,
       trackIds: rangeTrackIds,
       primaryTrackId,
     });
+
     if (range) {
       selection.selectTimeRange(range);
+
       return;
     }
 

@@ -29,6 +29,7 @@ export const createExportQueue = (
   let activeController: AbortController | undefined
   let disposed = false
   const listeners = new Set<(job: ExportJob | undefined) => void>()
+
   type PendingJob = {
     job: ExportJob
     run: (signal: AbortSignal, onProgress: (progress: ExportProgress) => void, jobId: string) => Promise<ExportOutcome>
@@ -36,28 +37,36 @@ export const createExportQueue = (
     canceled: boolean
     onCancel?: () => void
   }
+
   const pending: PendingJob[] = []
   let draining = false
+
   const setActive = (job: ExportJob | undefined) => {
     active = job
+
     for (const listener of listeners) listener(job)
   }
 
   const drain = async () => {
     if (draining) return
     draining = true
+
     try {
       while (pending.length > 0) {
         const next = pending.shift()
+
         if (!next) continue
+
         if (disposed || next.canceled) {
           next.onCancel?.()
           next.resolve({ type: "canceled", outputs: [] })
           continue
         }
+
         const controller = new AbortController()
         activeController = controller
         setActive(next.job)
+
         try {
           next.resolve(await next.run(controller.signal, (progress) => {
             if (active?.id === next.job.id) setActive({ ...next.job, progress })
@@ -66,6 +75,7 @@ export const createExportQueue = (
           next.resolve({ type: "error", message: error instanceof Error ? error.message : "Export failed", outputs: [] })
         } finally {
           if (activeController === controller) activeController = undefined
+
           if (active?.id === next.job.id) setActive(undefined)
         }
       }
@@ -73,24 +83,31 @@ export const createExportQueue = (
       draining = false
     }
   }
+
   const submit: ExportQueue['submit'] = (job, run, onCancel) => {
     if (disposed) {
       const id = createJobId()
+
       return { id, completion: Promise.resolve({ type: 'canceled', outputs: [] }), cancel: () => undefined }
     }
+
     const queuedJob: ExportJob = { id: createJobId(), name: job.name }
     let resolveCompletion: (outcome: ExportOutcome) => void = () => undefined
+
     const completion = new Promise<ExportOutcome>((resolve) => {
       resolveCompletion = resolve
     })
+
     const entry: PendingJob = { job: queuedJob, run, resolve: resolveCompletion, canceled: false, onCancel }
     pending.push(entry)
     queueMicrotask(() => { void drain() })
+
     return { id: queuedJob.id, completion, cancel: () => {
       if (active?.id === queuedJob.id) activeController?.abort()
       else {
         entry.canceled = true
         const index = pending.indexOf(entry)
+
         if (index >= 0) pending.splice(index, 1)
         entry.onCancel?.()
         entry.resolve({ type: "canceled", outputs: [] })
@@ -106,6 +123,7 @@ export const createExportQueue = (
       if (active?.id === jobId) activeController?.abort()
       else {
         const entry = pending.find((candidate) => candidate.job.id === jobId)
+
         if (entry) {
           entry.canceled = true
           pending.splice(pending.indexOf(entry), 1)
@@ -117,11 +135,13 @@ export const createExportQueue = (
     subscribe: (listener) => {
       listeners.add(listener)
       listener(active)
+
       return () => listeners.delete(listener)
     },
     dispose: () => {
       disposed = true
       activeController?.abort()
+
       for (const entry of pending.splice(0)) {
         entry.onCancel?.()
         entry.resolve({ type: "canceled", outputs: [] })

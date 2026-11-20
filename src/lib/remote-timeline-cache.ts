@@ -33,8 +33,10 @@ const storedRecordSchema = z.record(z.string(), z.custom<LocalProjectStoredValue
 
 const readSignature = (value: LocalProjectStoredValue, key: string) => {
   const parsed = storedRecordSchema.safeParse(value)
+
   if (!parsed.success) return undefined
   const signature = z.string().safeParse(parsed.data[key])
+
   return signature.success ? signature.data : undefined
 }
 
@@ -44,6 +46,7 @@ const normalizeTrackKind = (value: string | undefined): TimelineTrackRow['kind']
 
 const normalizeMidi = (value: FullTimelineView['clips'][number]['midi']): TimelineClipRow['midi'] => {
   if (!value) return undefined
+
   try {
     return normalizeLegacyMidiClip(value)
   } catch {
@@ -53,6 +56,7 @@ const normalizeMidi = (value: FullTimelineView['clips'][number]['midi']): Timeli
 
 const toTrackRow = (track: FullTimelineView['tracks'][number], index: number, updatedAt: number): TimelineTrackRow => {
   const trackId = String(track._id)
+
   return {
     id: trackId,
     historyRef: track.historyRef ?? trackId,
@@ -79,6 +83,7 @@ const toClipRow = (clip: FullTimelineView['clips'][number], updatedAt: number): 
   const clipId = String(clip._id)
   const sourceKind = sanitizeAudioSourceKind(clip.sourceKind)
   const midi = normalizeMidi(clip.midi)
+
   return {
     id: clipId,
     trackId: String(clip.trackId),
@@ -107,6 +112,7 @@ const toClipRow = (clip: FullTimelineView['clips'][number], updatedAt: number): 
 
 const toAssetRows = (clips: TimelineClipRow[], updatedAt: number): LocalProjectAssetRow[] => {
   const rowsById = new Map<string, LocalProjectAssetRow>()
+
   for (const clip of clips) {
     if (!clip.sourceAssetKey) continue
     rowsById.set(clip.sourceAssetKey, {
@@ -122,6 +128,7 @@ const toAssetRows = (clips: TimelineClipRow[], updatedAt: number): LocalProjectA
       updatedAt,
     })
   }
+
   return [...rowsById.values()]
 }
 
@@ -142,39 +149,47 @@ const cacheRemoteTimelineSnapshotUnlocked = async (
   const trackIds = new Set(tracks.map((track) => track.id))
   const clipsWithExistingTracks = clips.filter((clip) => trackIds.has(clip.trackId))
   const assets = toAssetRows(clipsWithExistingTracks, timestamp)
+
   const sidechainRoutes = data.sidechainRoutes.map((route) => ({
     sourceTrackId: String(route.sourceTrackId),
     targetTrackId: String(route.targetTrackId),
     effectInstanceId: route.effectInstanceId,
   }))
+
   const signatureTimestamp = 0
+
   const nextTracksSignature = timelineCacheSignature({
     tracks: data.tracks.map((track, index) => toTrackRow(track, index, signatureTimestamp)),
     clips: [],
     assets: [],
     sidechainRoutes,
   })
+
   const nextClipsSignature = timelineCacheSignature({
     tracks: [],
     clips: data.clips.map((clip) => toClipRow(clip, signatureTimestamp)).filter((clip) => trackIds.has(clip.trackId)),
     assets: [],
     sidechainRoutes: [],
   })
+
   const nextAssetsSignature = timelineCacheSignature({
     tracks: [],
     clips: [],
     assets: toAssetRows(clipsWithExistingTracks.map((clip) => ({ ...clip, createdAt: signatureTimestamp, updatedAt: signatureTimestamp })), signatureTimestamp),
     sidechainRoutes: [],
   })
+
   const db = await openLocalProjectDb(projectId)
   await withLocalStorageRootLock(async () => {
     const tx = db.transaction(['entities', 'assets', 'projectState', 'syncState'], 'readwrite')
     const cachedSummary = await tx.objectStore('syncState').get(REMOTE_CACHE_KEY)
     const cacheValue = cachedSummary?.value
+
     const shouldRewriteTimelineCache =
       readSignature(cacheValue, 'tracksSignature') !== nextTracksSignature ||
       readSignature(cacheValue, 'clipsSignature') !== nextClipsSignature ||
       readSignature(cacheValue, 'assetsSignature') !== nextAssetsSignature
+
     const timelineWrites = shouldRewriteTimelineCache
       ? await Promise.all([
           tx.objectStore('entities').index('by-kind').getAll(TRACK_KIND),
@@ -197,6 +212,7 @@ const cacheRemoteTimelineSnapshotUnlocked = async (
         : []),
         ])
       : []
+
     await Promise.all([
       ...timelineWrites,
       tx.objectStore('projectState').put({

@@ -24,6 +24,7 @@ export const useMidiTrackRecording = (options: Options) => {
   const midiAccess = useMidiAccess()
   const [isRecording, setIsRecording] = createSignal(false)
   const [recordingTrackId, setRecordingTrackId] = createSignal<string | null>(null)
+
   const controller = createMidiTrackRecordingController({
     ...options,
     isRecording,

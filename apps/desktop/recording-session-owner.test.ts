@@ -14,15 +14,20 @@ import { createRecordingStartDiagnostic } from "./recording-start-diagnostic"
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- the argument is a catch-clause value, as in main's failure projection
 const fail = (thrown?: unknown) => ({ ok: false as const, kind: nativeDeliveryFailureKind(thrown),
   error: thrown instanceof Error ? thrown.message : "unavailable" })
+
 const configuration: NativeHostRecordingConfiguration = {
   projectId: "local:owner", projectGeneration: 7, deviceUid: "device", generation: 5, sessionId: 6n, channelCount: 2,
   inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false, targetNodeId: 1n,
 }
+
 const request: RecordingConfigureRequest = { configuration, projectId: "local:owner", projectGeneration: 7,
   spoolImportVersion: nativeRecordingSpoolImportVersion }
+
 const startRequest = { projectId: "local:owner", projectGeneration: 7, generation: 5, sessionId: 6n }
+
 const spool = { state: 1, error: 0, systemError: 0, writtenFrames: 0, writtenBytes: 0, writtenBlocks: 0,
   published: false, partialRetained: false, sampleRateHz: 48000, channelCount: 2 }
+
 const ready: NativeHostRecordingStatus = { generation: 5, sessionId: 6n, capturedFrames: 0, droppedFrames: 0, droppedBlocks: 0,
   active: false, fatal: false, configured: true, availableBlocks: 32, queuedBlocks: 0, rms: 0, peak: 0, timelineFrame: 0, spool }
 
@@ -38,6 +43,7 @@ const fixture = async (options: { registry?: boolean; captureInhibited?: boolean
   let outcomeWait = Promise.resolve()
   let configureHook = () => {}
   const registry = createRecordingSpoolRegistry({ userData })
+
   const owner = createRecordingSessionOwner({
     diagnostic: createRecordingStartDiagnostic(true, (event) => events.push(event)),
     captureInhibited: options.captureInhibited ?? false,
@@ -48,23 +54,32 @@ const fixture = async (options: { registry?: boolean; captureInhibited?: boolean
     statusChannel: "status",
     failureChannel: "failure",
   })
+
   if (options.registry !== false) owner.attachRegistry(registry)
+
   const supervisor = {
     recordingAdmissionAvailable: () => options.admissionAvailable ?? true,
     async configureRecording(_input: NativeHostRecordingConfiguration, config: { rootPath: string; token: string }) {
       calls.push("configure")
       spoolConfig = config
       configureHook()
+
       return ready
     },
     async startRecording() { calls.push("start") },
     async stopRecording(frame?: number) { calls.push(`stop:${frame}`) },
-    waitForRecordingOutcome: () => { calls.push("outcome"); return outcomeWait },
+    waitForRecordingOutcome: () => { calls.push("outcome");
+
+ return outcomeWait },
   }
+
   const configure = () => owner.configure({ rendererGeneration: generation, hostGeneration: 1, senderAllowed: () => allowed, fail }, supervisor, request)
+
   const start = (value: typeof startRequest | null = startRequest) =>
     owner.start({ rendererGeneration: generation, fail }, supervisor, value ?? undefined)
+
   const stop = () => owner.stop({ fail }, supervisor, { endFrame: 12 })
+
   // The native Complete status the registry independently verifies against the written file.
   const completeStatus = async (): Promise<NativeMainRecordingStatus> => {
     if (!spoolConfig) throw new Error("configure first")
@@ -73,31 +88,39 @@ const fixture = async (options: { registry?: boolean; captureInhibited?: boolean
     bytes.writeUInt32LE(3)
     await writeFile(source, bytes, { mode: 0o600 })
     const stat = await lstat(source, { bigint: true })
+
     return { ...ready, capturedFrames: 3, timelineFrame: 3, fileDevice: stat.dev, fileInode: stat.ino,
       spool: { ...spool, state: 2, writtenFrames: 3, writtenBytes: 28, writtenBlocks: 1, published: true } }
   }
+
   return {
     userData, registry, owner, events, sent, calls, configure, start, stop, completeStatus,
     setGeneration: (value: number) => { generation = value },
     denySender: () => { allowed = false },
     onConfigure: (hook: () => void) => { configureHook = hook },
-    holdOutcome: () => { outcomeWait = new Promise<void>((resolve) => { releaseOutcome = resolve }); return () => releaseOutcome() },
+    holdOutcome: () => { outcomeWait = new Promise<void>((resolve) => { releaseOutcome = resolve });
+
+ return () => releaseOutcome() },
     cleanup: () => rm(userData, { recursive: true, force: true }),
   }
 }
 
 test("admission answers keep their text and the diagnostic order", async () => {
   const f = await fixture({ registry: false })
+
   try {
     expect(await f.configure()).toEqual({ ok: false, error: "Native recording storage is unavailable. Sources remain retained; check the desktop log." })
     expect(f.events.map((event) => event.kind)).toEqual(["configure-request", "backend", "configure-result"])
     expect(f.events[2]).toMatchObject({ outcome: "rejected", category: "admission-failed" })
     expect(f.calls).toEqual([])
   } finally { await f.cleanup() }
+
   const g = await fixture()
+
   try {
     const supervisor = { recordingAdmissionAvailable: () => true, configureRecording: async () => ready, startRecording: async () => {},
       stopRecording: async () => {}, waitForRecordingOutcome: async () => {} }
+
     const call = { rendererGeneration: 3, hostGeneration: 1, senderAllowed: () => true, fail }
     expect(await g.owner.configure(call, supervisor, undefined)).toEqual(fail())
     expect(g.events.map((event) => event.kind)).toEqual(["configure-request", "configure-result"])
@@ -105,12 +128,15 @@ test("admission answers keep their text and the diagnostic order", async () => {
       .toEqual({ ok: false, error: "Native recording import is not ready." })
     expect(await g.owner.configure(call, undefined, request)).toEqual(fail())
   } finally { await g.cleanup() }
+
   const busy = await fixture({ admissionAvailable: false })
+
   try { expect(await busy.configure()).toEqual(fail()) } finally { await busy.cleanup() }
 })
 
 test("a second configure while one is admitting is refused, and admission reopens afterwards", async () => {
   const f = await fixture()
+
   try {
     const first = f.configure()
     expect(await f.configure()).toEqual(fail())
@@ -121,12 +147,14 @@ test("a second configure while one is admitting is refused, and admission reopen
 
 test("configure binds the take, reports readiness and permits only the matching start", async () => {
   const f = await fixture()
+
   try {
     expect(await f.start()).toEqual(fail())
     const reply = await f.configure()
     expect(reply).toMatchObject({ ok: true, sampleRateHz: 48000, channelCount: 2 })
     expect(f.events.map((event) => `${event.kind}:${event.category ?? ""}`))
       .toEqual(["configure-request:", "backend:", "readiness:", "readiness:", "configure-result:success"])
+
     for (const wrong of [{ ...startRequest, sessionId: 7n }, { ...startRequest, generation: 6 }, { ...startRequest, projectGeneration: 8 },
       { ...startRequest, projectId: "local:other" }, null]) expect(await f.start(wrong)).toEqual(fail())
     expect(f.calls).toEqual(["configure"])
@@ -138,6 +166,7 @@ test("configure binds the take, reports readiness and permits only the matching 
 
 test("an inhibited capture answers diagnostic-capture-blocked without a native start", async () => {
   const f = await fixture({ captureInhibited: true })
+
   try {
     await f.configure()
     expect(await f.start()).toEqual({ ok: false, error: "diagnostic-capture-blocked" })
@@ -148,13 +177,16 @@ test("an inhibited capture answers diagnostic-capture-blocked without a native s
 
 test("a renderer replaced during native configure rejects the take and leaves it unbound for start", async () => {
   const f = await fixture()
+
   try {
     f.onConfigure(() => f.setGeneration(4))
     expect(await f.configure()).toMatchObject({ ok: false, error: "Recording renderer binding changed." })
     expect(f.events.at(-1)).toMatchObject({ kind: "configure-result", outcome: "rejected", category: "readiness-validation-failed" })
     expect(await f.start()).toEqual(fail())
   } finally { await f.cleanup() }
+
   const g = await fixture()
+
   try {
     g.denySender()
     expect(await g.configure()).toMatchObject({ ok: false, error: "Recording renderer binding changed." })
@@ -165,6 +197,7 @@ test("a renderer replaced during native configure rejects the take and leaves it
 
 test("Stop before Complete stops the host, waits for the outcome and returns after the proof", async () => {
   const f = await fixture()
+
   try {
     await f.configure()
     await f.start()
@@ -183,6 +216,7 @@ test("Stop before Complete stops the host, waits for the outcome and returns aft
 
 test("Complete before Stop is awaited once and Stop does not touch the host again", async () => {
   const f = await fixture()
+
   try {
     await f.configure()
     await f.start()
@@ -196,6 +230,7 @@ test("Complete before Stop is awaited once and Stop does not touch the host agai
 
 test("Stop without a Complete proof fails, and an unverifiable Complete sends the failure and fails Stop", async () => {
   const f = await fixture()
+
   try {
     await f.configure()
     expect(await f.stop()).toMatchObject({ ok: false, error: "Native recording Complete proof is unavailable." })
@@ -210,6 +245,7 @@ test("Stop without a Complete proof fails, and an unverifiable Complete sends th
 
 test("Stop with no binding at all fails after stopping the host", async () => {
   const f = await fixture()
+
   try {
     expect(await f.stop()).toMatchObject({ ok: false, error: "Native recording Complete proof is unavailable." })
     expect(f.calls).toEqual(["stop:12", "outcome"])
@@ -219,6 +255,7 @@ test("Stop with no binding at all fails after stopping the host", async () => {
 test("a status for another session passes through without starting Complete, and terminal states resolve the source", async () => {
   const f = await fixture()
   const warn = spyOn(console, "warn").mockImplementation(() => undefined)
+
   try {
     await f.configure()
     f.owner.onStatus({ ...await f.completeStatus(), sessionId: 9n })
@@ -232,6 +269,7 @@ test("a status for another session passes through without starting Complete, and
 
 test("quit waits for a Complete proof that is still being written", async () => {
   const f = await fixture()
+
   try {
     await f.configure()
     f.owner.onStatus(await f.completeStatus())
@@ -243,6 +281,7 @@ test("quit waits for a Complete proof that is still being written", async () => 
 
 test("a renderer invalidation ends the registry scope, so the same take can no longer start", async () => {
   const f = await fixture()
+
   try {
     await f.configure()
     f.owner.invalidateRenderer()
@@ -250,6 +289,8 @@ test("a renderer invalidation ends the registry scope, so the same take can no l
     expect(f.calls).toEqual(["configure"])
     expect(() => f.owner.spool()).not.toThrow()
   } finally { await f.cleanup() }
+
   const g = await fixture({ registry: false })
+
   try { expect(() => g.owner.spool()).toThrow("Recording spool is unavailable.") } finally { await g.cleanup() }
 })

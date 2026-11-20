@@ -73,11 +73,15 @@ export function normalizeMixerLockState(
 function buildMixerChannelStateRecord(fields: MixerChannelStateOverrides = {}, now = Date.now()) {
   const lockState = normalizeMixerLockState(fields.lockedBy, fields.lockedAt, now);
   let volume = fields.volume;
+
   if (volume === undefined) volume = 0.8;
   let channelRole = fields.channelRole;
+
   if (channelRole === undefined) channelRole = "track";
   let sends = fields.sends;
+
   if (sends === undefined) sends = [];
+
   return {
     volume,
     muted: fields.muted,
@@ -112,17 +116,20 @@ function removeRoutingReferencesToTracksFromFields(
 ) {
   const nextSends: MixerSend[] = [];
   let sendsChanged = false;
+
   for (const send of Array.isArray(fields.sends) ? fields.sends : []) {
     if (trackIds.has(String(send?.targetId))) {
       sendsChanged = true;
       continue;
     }
+
     nextSends.push(send);
   }
 
   const nextOutputTargetId = trackIds.has(String(fields.outputTargetId))
     ? undefined
     : fields.outputTargetId;
+
   const outputChanged = nextOutputTargetId !== fields.outputTargetId;
 
   if (!sendsChanged && !outputChanged) return null;
@@ -155,6 +162,7 @@ function mergeTrackWithMixerState(
   assert(definedChannel.channelRole !== undefined, `Missing mixer channel role for track ${String(track._id)}.`);
   assert(definedChannel.sends !== undefined, `Missing mixer channel sends for track ${String(track._id)}.`);
   const lockState = normalizeMixerLockState(definedChannel.lockedBy, definedChannel.lockedAt, now);
+
   const merged = {
     ...track,
     volume: definedChannel.volume,
@@ -166,6 +174,7 @@ function mergeTrackWithMixerState(
     outputTargetId: definedChannel.outputTargetId,
     sends: definedChannel.sends,
   };
+
   return includeMixerChannelId
     ? { ...merged, mixerChannelId: definedChannel._id }
     : merged;
@@ -180,6 +189,7 @@ export async function listMixerChannelsForTrack(ctx: MixerReadCtx, trackId: Id<"
 
 export async function deleteMixerStateForTrack(ctx: MutationCtx, trackId: Id<"tracks">) {
   const rows = await listMixerChannelsForTrack(ctx, trackId);
+
   for (const row of rows) {
     await ctx.db.delete(row._id);
   }
@@ -207,6 +217,7 @@ export async function removeTracksRoutingReferences(
     if (trackIds.has(String(roomChannel.trackId))) continue;
 
     const patch = removeRoutingReferencesToTracksFromFields(roomChannel, trackIds);
+
     if (!patch) continue;
     await ctx.db.patch(roomChannel._id, patch);
   }
@@ -215,6 +226,7 @@ export async function removeTracksRoutingReferences(
 export async function ensureMixerChannelForTrack(ctx: MixerReadCtx, track: Doc<"tracks">) {
   const rows = await listMixerChannelsForTrack(ctx, track._id);
   assert(rows.length === 1, `Expected exactly one mixer channel for track ${String(track._id)}.`);
+
   return assertDefined(rows[0], `Missing mixer channel for track ${String(track._id)}.`);
 }
 
@@ -236,19 +248,24 @@ export async function listProjectTracksWithMixerChannels(
     ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect(),
     ctx.db.query("mixerChannels").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect(),
   ]);
+
   const channelByTrackId = new Map<string, Doc<"mixerChannels">>();
+
   for (const channel of channels) {
     const trackId = String(channel.trackId);
     assert(!channelByTrackId.has(trackId), `Expected exactly one mixer channel for track ${trackId}.`);
     channelByTrackId.set(trackId, channel);
   }
+
   const now = Date.now();
+
   return tracks
     .map((track) => {
       const channel = assertDefined(
         channelByTrackId.get(String(track._id)),
         `Missing mixer channel for track ${String(track._id)}.`,
       );
+
       return includeMixerChannelIds
         ? mergeTrackWithMixerState(track, channel, now, true)
         : mergeTrackWithMixerState(track, channel, now, false);
@@ -258,7 +275,9 @@ export async function listProjectTracksWithMixerChannels(
 
 export async function getMergedTrack(ctx: MixerReadCtx, trackId: Id<"tracks">): Promise<MergedTrackDoc | null> {
   const track = await ctx.db.get(trackId);
+
   if (!track) return null;
   const channel = await ensureMixerChannelForTrack(ctx, track);
+
   return mergeTrackWithMixerState(track, channel, Date.now(), false);
 }

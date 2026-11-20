@@ -33,6 +33,7 @@ export default function EffectShell(props: EffectShellProps) {
   const canWrite = () => collapse?.canWrite() ?? true
   let touchPointerId: number | undefined
   let touchStart: { x: number; y: number } | undefined
+
   const clearTouchTracking = () => {
     window.removeEventListener('pointermove', handleTouchMove)
     window.removeEventListener('pointerup', clearTouchTracking)
@@ -40,6 +41,7 @@ export default function EffectShell(props: EffectShellProps) {
     touchPointerId = undefined
     touchStart = undefined
   }
+
   const handleTouchMove = (event: PointerEvent) => {
     if (event.pointerId !== touchPointerId || !touchStart) return
     lastTouchTap = cancelDeviceDoubleTapOnMove(
@@ -48,8 +50,10 @@ export default function EffectShell(props: EffectShellProps) {
       { x: event.clientX, y: event.clientY },
     )
   }
+
   onCleanup(clearTouchTracking)
   const isDisabled = () => props.disabled || !canWrite()
+
   const toggleFromHeader = (event: PointerEvent) => {
     if (!collapse || event.pointerType === 'mouse' || !isDeviceHeaderTarget(event.target) || isDeviceInteractiveTarget(event.target)) return
     clearTouchTracking()
@@ -58,6 +62,7 @@ export default function EffectShell(props: EffectShellProps) {
     window.addEventListener('pointermove', handleTouchMove)
     window.addEventListener('pointerup', clearTouchTracking)
     window.addEventListener('pointercancel', clearTouchTracking)
+
     const result = recognizeDeviceDoubleTap(lastTouchTap, {
       identity: collapse.contentId(),
       at: performance.now(),
@@ -66,12 +71,15 @@ export default function EffectShell(props: EffectShellProps) {
       pointerType: event.pointerType,
       deviceId: devicePointerIdentity(event),
     })
+
     lastTouchTap = result.next
+
     if (!result.recognized) return
     event.preventDefault()
     event.stopPropagation()
     collapse.toggle()
   }
+
   const toggleFromDoubleClick = (event: MouseEvent) => {
     if (!collapse || isDeviceInteractiveTarget(event.target)) return
     event.preventDefault()

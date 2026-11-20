@@ -7,6 +7,7 @@ export const nativeEditorAnchorFromRect = (rect: {
 }): NativeEditorAnchor | undefined => {
   const x = rect.left + rect.width / 2
   const y = rect.top
+
   return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : undefined
 }
 
@@ -32,9 +33,13 @@ export const nativeEditorCommand = (
 ): NativeEditorCommand => {
   const { serializedPlan, initialState, anchor, ...required } = input
   const command: NativeEditorCommand = required
+
   if (serializedPlan !== undefined) command.serializedPlan = serializedPlan
+
   if (initialState !== undefined) command.initialState = initialState
+
   if (anchor !== undefined) command.anchor = anchor
+
   return command
 }
 
@@ -50,8 +55,12 @@ export const nativeEditorAvailabilityMessage = (input: {
   liveSupportsEditor: boolean | undefined
 }): string => {
   if (!input.bridgeAvailable) return 'Native editor unavailable in this environment.'
+
   if (input.liveSupportsEditor === false) return 'This plug-in does not provide a native editor.'
+
   if (input.liveSupportsEditor) return 'Native editor available.'
+
   if (!input.preflightSupportsEditor) return 'Native editor availability has not been verified.'
+
   return 'Native editor available.'
 }

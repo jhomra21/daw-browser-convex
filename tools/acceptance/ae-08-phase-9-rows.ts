@@ -4,14 +4,17 @@
 
 // The class each row declares for ae-08-latency-gates.ts (its latency-class.json).
 export type LatencyClass = "plain" | "raise" | "asset" | "vst-insert"
+
 // What an edit that publishes no graph, or not the first one, settles on: the host's applied parameter sequence line, the publication
 // that carries a decoded asset (not the track-only one an import makes first), the publication whose schedule windows carry an automation lane ("lane") or none ("lane-free"), the host's editor-open or plug-in fault line, or, for a
 // commit the app refuses, the return of the refusal.
 // "returned" is for a transport command that is its own observation: the step settles when its edit returns.
 export type Settle = "sequence" | "asset" | "lane" | "lane-free" | "refused" | "editor-open" | "state-capture" | "plugin-fault" | "returned"
+
 // How a step is entered when it is not the analyzer's 6 ms crossfade: "ghost" (a removed track's node fades over 5 ms on top of its
 // source's 6 ms), "cut" (a restored track or a decoded asset sounds from its publication).
 export type Step = { edits: string[]; state: string; entry?: "ghost" | "cut"; settle?: Settle }
+
 // Which check judges a row's bursts: "states" compares the capture with an offline export of each state (the analyzer's judgeBurst),
 // "sustained" requires a held live note to stay unbroken, "delete" judges a clip delete on host evidence and its own capture,
 // "take" requires the in-app recording's take to equal the tone played into BlackHole,
@@ -25,6 +28,7 @@ export type Step = { edits: string[]; state: string; entry?: "ghost" | "cut"; se
 // "host-loss", "cancelled-start" and "output-device" judge the rows whose edits drive the transport (PackagedRun.transport) on host evidence and
 // the transport state each edit observed; they have no capture to compare.
 export type Judge = "states" | "sustained" | "delete" | "latency" | "lane" | "take" | "held" | "editor" | "fault" | "trust" | "host-loss" | "cancelled-start" | "output-device"
+
 export type PackagedRun = {
   // burst: the preset's (or --repetitions) edits. vst-burst: the preset's (or --vst-repetitions) edits. single: one pass of the cycle.
   // launch: one edit per launch, repeated the preset's (or --repetitions) times.
@@ -58,13 +62,19 @@ export type PackagedRun = {
   // The repetitions this row takes in a preset when no flag names them; a preset leaves unset what the row's repeat kind defaults.
   repetitions?: { cert?: number; extended?: number }
 }
+
 // `cert` is the certifying matrix (70 minutes), `extended` the overnight one.
 export type Preset = "cert" | "extended"
+
 // `--matrix` names a preset; `full` is the old name of the extended one.
 export const presetNamed = new Map<string, Preset>([["cert", "cert"], ["extended", "extended"], ["full", "extended"]])
+
 export type PortableRun = { from: string; to: string; latency: boolean }
+
 type BurstRow = { name: string; latencyClass: LatencyClass; packaged?: PackagedRun; portable?: PortableRun }
+
 export type Row = PackagedRun & { name: string; latencyClass: LatencyClass }
+
 export type PortableCampaignRow = PortableRun & { row: string; class: LatencyClass }
 
 // The effect-state devices with the Spectral on the master path, so a declared latency move reaches it.
@@ -190,9 +200,11 @@ export const burstRows: BurstRow[] = [
 ]
 
 const packagedRows: Row[] = burstRows.flatMap(({ name, latencyClass, packaged }) => packaged ? [{ name, latencyClass, ...packaged }] : [])
+
 export const phase9Presets = {
   cert: packagedRows.filter((row) => row.tier === undefined && row.calibration === undefined),
   extended: packagedRows,
 } satisfies Record<Preset, Row[]>
+
 export const phase9Rows = packagedRows.map((row) => row.name)
 export const portableCampaignRows: PortableCampaignRow[] = burstRows.flatMap(({ name, latencyClass, portable }) => portable ? [{ row: name, class: latencyClass, ...portable }] : [])

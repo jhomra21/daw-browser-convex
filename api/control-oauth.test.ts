@@ -115,12 +115,14 @@ describe("control OAuth policy", () => {
 
   test("requires public-client PKCE at token exchange", () => {
     const resource = "https://daw.example.test/api";
+
     const valid = new URLSearchParams({
       grant_type: "authorization_code",
       client_id: "public-client",
       resource,
       code_verifier: "a".repeat(43),
     });
+
     expect(validateControlTokenRequest(valid, resource)).toBeNull();
     expect(validateControlTokenRequest(new URLSearchParams({
       grant_type: "authorization_code",
@@ -148,6 +150,7 @@ describe("control OAuth policy", () => {
       expiresAt: 100,
       scopes: "control:read offline_access",
     };
+
     expect(isActiveControlBinding(binding, binding.resource, "control:read", 99)).toBeTrue();
     expect(isActiveControlBinding(binding, "https://other.example.test/api", "control:read", 99)).toBeFalse();
     expect(isActiveControlBinding(binding, binding.resource, "control:write", 99)).toBeFalse();
@@ -200,6 +203,7 @@ describe("control OAuth policy", () => {
       },
       body: "grant_type=authorization_code",
     });
+
     const forwarded = proxyWithoutCookies(request);
     expect(forwarded.headers.get("cookie")).toBeNull();
     expect(forwarded.headers.get("content-type")).toBe("application/x-www-form-urlencoded");
@@ -218,6 +222,7 @@ describe("control OAuth policy", () => {
   test("rejects forged or mismatched verified claim input", () => {
     const resource = "https://daw.example.test/api";
     const issuedAt = Math.floor(Date.now() / 1000);
+
     const valid = {
       sub: "user-id",
       azp: "client-id",
@@ -228,6 +233,7 @@ describe("control OAuth policy", () => {
       iat: issuedAt,
       exp: issuedAt + 900,
     };
+
     expect(normalizeVerifiedControlClaims(valid, resource)?.clientId).toBe("client-id");
     expect(normalizeVerifiedControlClaims({ ...valid, aud: "https://other.example.test/api" }, resource)).toBeNull();
     expect(normalizeVerifiedControlClaims({ ...valid, azp: 17 }, resource)).toBeNull();
@@ -243,6 +249,7 @@ describe("control OAuth policy", () => {
       refreshExpiresAt: 100,
       revokedAt: null,
     };
+
     expect(canConsumeControlRefresh(binding, "client-id", binding.resource, 99)).toBeTrue();
     expect(canConsumeControlRefresh({ ...binding, refreshConsumedAt: 99 }, "client-id", binding.resource, 99)).toBeFalse();
     expect(canConsumeControlRefresh({ ...binding, refreshExpiresAt: 99 }, "client-id", binding.resource, 99)).toBeFalse();

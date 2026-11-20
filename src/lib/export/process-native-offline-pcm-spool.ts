@@ -35,15 +35,18 @@ async function* applyGainToChunks(
 ): AsyncGenerator<AudioBuffer> {
   for await (const chunk of chunks) {
     signal.throwIfAborted()
+
     if (gain !== 1) {
       for (let channel = 0; channel < chunk.numberOfChannels; channel += 1) {
         const samples = chunk.getChannelData(channel)
+
         for (let frame = 0; frame < samples.length; frame += 1) {
           if ((frame & 16383) === 0) signal.throwIfAborted()
           samples[frame] = (samples[frame] ?? 0) * gain
         }
       }
     }
+
     yield chunk
   }
 }
@@ -59,6 +62,7 @@ export const processNativeOfflinePcmSpool = async (input: {
   input.signal.throwIfAborted()
   const descriptor = await input.spool.finalize()
   const latencyFrames = input.latencyFrames ?? 0
+
   if (descriptor.sampleRate !== input.render.sampleRate
     || descriptor.channelCount !== input.render.numberOfChannels
     || !Number.isFinite(input.sourceDurationSec)
@@ -68,15 +72,19 @@ export const processNativeOfflinePcmSpool = async (input: {
     || latencyFrames >= descriptor.totalFrames) {
     throw new Error('Native offline PCM spool does not match export settings.')
   }
+
   const metadata = {
     sampleRate: descriptor.sampleRate,
     channelCount: descriptor.channelCount,
   }
+
   const alignedFrames = descriptor.totalFrames - latencyFrames
+
   const sourceEndFrame = Math.min(
     alignedFrames,
     Math.ceil(input.sourceDurationSec * descriptor.sampleRate),
   )
+
   const endFrame = input.render.tail.mode === 'automatic'
     ? await findAutomaticTailEndFrameInChunks(input.spool.replay({ startFrame: latencyFrames, signal: input.signal }), {
       ...metadata,
@@ -92,24 +100,31 @@ export const processNativeOfflinePcmSpool = async (input: {
       endFrame: latencyFrames + endFrame,
       signal: input.signal,
     })
+
     const limiters: ReturnType<typeof createStreamingTruePeakLimiter>[] = []
+
     for (const stage of stages) {
       chunks = applyGainToChunks(chunks, stage.gain, input.signal)
+
       if (stage.truePeakCeilingDbtp === undefined) continue
+
       const limiter = createStreamingTruePeakLimiter({
         sampleRate: descriptor.sampleRate,
         channelCount: descriptor.channelCount,
         ceilingDbtp: stage.truePeakCeilingDbtp,
       })
+
       chunks = limiter.transform(chunks, input.signal)
       limiters.push(limiter)
     }
+
     return { chunks, limiters }
   }
 
   const analyze = async (stages: readonly ProcessingStage[]) => {
     const pipeline = createPipeline(stages)
     const analysis = await analyzeExportAudioChunks(pipeline.chunks, metadata, input.signal)
+
     return {
       analysis,
       limited: pipeline.limiters.some((limiter) => limiter.wasLimited()),
@@ -125,6 +140,7 @@ export const processNativeOfflinePcmSpool = async (input: {
 
   if (normalization.mode === 'sample-peak' && analysis.samplePeak > 0) {
     gainDb = normalization.targetDbfs - dbFromLinear(analysis.samplePeak)
+
     if (gainDb !== 0) {
       stages.push({ gain: linearFromDb(gainDb) })
       analyzed = await analyze(stages)
@@ -134,6 +150,7 @@ export const processNativeOfflinePcmSpool = async (input: {
   } else if (normalization.mode === 'loudness') {
     for (let pass = 0; pass < 4 && analysis.loudness.integratedLufs !== null; pass += 1) {
       const correctionDb = normalization.targetLufs - analysis.loudness.integratedLufs
+
       if (Math.abs(correctionDb) <= 0.2) break
       gainDb += correctionDb
       stages.push(normalization.limiting === 'true-peak'
@@ -146,9 +163,11 @@ export const processNativeOfflinePcmSpool = async (input: {
       analysis = analyzed.analysis
       limited = analyzed.limited
     }
+
     if (analysis.loudness.integratedLufs === null) {
       throw new Error(`Loudness normalization achieved no measurable LUFS, outside the 0.20 LU tolerance for ${normalization.targetLufs.toFixed(2)} LUFS.`)
     }
+
     if (normalization.limiting === 'true-peak'
       && analysis.loudness.truePeakDbtp !== null
       && analysis.loudness.truePeakDbtp > normalization.truePeakCeilingDbtp + 0.1) {

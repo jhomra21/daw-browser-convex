@@ -10,6 +10,7 @@ describe('owned processor audio descriptors', () => {
     for (const kind of OWNED_PROCESSOR_KINDS) {
       const bindings = ownedProcessorAudioParamValues(kind, {})
       expect(bindings.map((binding) => binding.parameterId)).toEqual([...OWNED_PROCESSOR_PARAMETER_IDS[kind]])
+
       for (const binding of bindings) expect(binding.value).toBeNumber()
     }
   })

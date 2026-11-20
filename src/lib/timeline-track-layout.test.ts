@@ -44,6 +44,7 @@ describe('timeline track layout grouping', () => {
       heightsByLaneOwnerKey: {},
       visibleParameterIdsByTrackId: {},
     })
+
     expect(rows.map((row) => row.trackId)).toEqual(['g', 'b'])
     expect(trackIndexAtY(rows, 1)).toBe(0)
     expect(trackIdsInYRange(rows, 0, 160)).toEqual(['g', 'b'])
@@ -53,6 +54,7 @@ describe('timeline track layout grouping', () => {
     const tracks = [track('b'), track('g', undefined, true), track('a', 'g'), track('c')]
     const tree = buildTrackTree(tracks)
     const visibleTrackIds = flattenVisibleTracks(tree, { g: true })
+
     const rows = buildTimelineTrackLayoutRows({
       tracks,
       visibleTrackIds,
@@ -76,6 +78,7 @@ describe('timeline track layout grouping', () => {
       heightsByLaneOwnerKey: { a: 48, b: 48 },
       visibleParameterIdsByTrackId: { a: ['volume'], b: ['volume'] },
     })
+
     expect(rows[0]?.heightPx).toBe(COLLAPSED_LANE_HEIGHT)
     expect(rows[0]?.clipLaneHeightPx).toBe(COLLAPSED_LANE_HEIGHT)
     expect(rows[0]?.automationHeightPx).toBe(0)
@@ -86,6 +89,7 @@ describe('timeline track layout grouping', () => {
   test('partitions Return tracks into an independent zero-based layout', () => {
     const normal = track('normal')
     const returnTrack: Track = { ...track('return', undefined, true), channelRole: 'return' }
+
     const layout = buildTimelineTrackLayout({
       tracks: [returnTrack, normal],
       visibleTrackIds: ['return', 'normal'],
@@ -109,6 +113,7 @@ describe('timeline track layout grouping', () => {
       heightsByLaneOwnerKey: automated ? { a: 48 } : {},
       visibleParameterIdsByTrackId: automated ? { a: ['volume'] } : {},
     })
+
     const before = layoutFor([track('a'), track('b')])
     const added = reuseTimelineTrackLayout(before, layoutFor([track('a'), track('b'), track('c')]))
     expect(added.scrollingRows.map((row) => row.trackId)).toEqual(['a', 'b', 'c'])
@@ -123,6 +128,7 @@ describe('timeline track layout grouping', () => {
   test('keeps expanded Return automation in the sticky layout', () => {
     const normal = track('normal')
     const returnTrack: Track = { ...track('return'), channelRole: 'return', collapsed: false }
+
     const layout = buildTimelineTrackLayout({
       tracks: [returnTrack, normal],
       visibleTrackIds: ['return', 'normal'],

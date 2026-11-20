@@ -67,6 +67,7 @@ test('projects complete deterministic clip timing, fades, and MIDI notes in V2',
     assets: [],
     assetFolders: [],
   })
+
   expect(snapshot.clips[0]?.leftPadSec).toBe(0.25)
   expect(snapshot.clips[0]?.fades?.fadeInCurvePosition).toBe(0.2)
   expect(snapshot.clips[0]?.midi?.notes.map((note) => note.pitch)).toEqual([60, 72])
@@ -101,6 +102,7 @@ test('projects legacy MIDI rows beyond new aggregate write limits in V2', () => 
     }],
     masterVolume: 1, effects: [], automationEnvelopes: [], sidechainRoutes: [], assets: [], assetFolders: [],
   })
+
   expect(snapshot.clips[0]?.midi?.notes).toHaveLength(500)
   expect(snapshot.clips[0]?.midi?.cc).toEqual([expect.objectContaining({ channel: 1 })])
 })
@@ -119,6 +121,7 @@ test('projects legacy wave and finite out-of-range gain without repairing persis
     }],
     masterVolume: 1, effects: [], automationEnvelopes: [], sidechainRoutes: [], assets: [], assetFolders: [],
   })
+
   expect(snapshot.clips[0]?.midi).toMatchObject({ wave: 'custom-legacy', gain: 7 })
 })
 
@@ -144,6 +147,7 @@ test('projects bounded asset metadata without object locators', () => {
     }],
     assetFolders: [],
   })
+
   expect(snapshot.assets[0]).toEqual(expect.objectContaining({ id: 'asset-a', contentSha256: 'a'.repeat(64) }))
   expect(JSON.stringify(snapshot)).not.toContain('r2Key')
   expect(snapshot.clips[0]?.source?.assetId).toBe('asset-a')

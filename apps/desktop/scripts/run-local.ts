@@ -39,7 +39,9 @@ export const createLocalPackageEnvironment = (
   manifestPath: string,
 ): NodeJS.ProcessEnv => {
   const environment = { ...sourceEnvironment }
+
   for (const key of signingEnvironmentKeys) delete environment[key]
+
   return {
     ...environment,
     DAW_LOCAL_UNSIGNED_PACKAGE: "1",
@@ -68,6 +70,7 @@ export const createLocalPackagePreparation = (
 export const assertNoSelfReferentialNodeModules = (projectRoot: string): void => {
   const modules = path.join(projectRoot, "node_modules")
   const nested = path.join(modules, "node_modules")
+
   if (lstatSync(nested, { throwIfNoEntry: false })?.isSymbolicLink() && realpathSync(nested) === realpathSync(modules)) {
     throw new Error(`${nested} links back to ${modules}. Remove that link (rm "${nested}"), then package again.`)
   }
@@ -89,6 +92,7 @@ const main = async (): Promise<void> => {
   if (process.platform !== "darwin") {
     fail("The local macOS packaging helper must run on macOS.")
   }
+
   const command = isLocalPackageCommand(commandArgument)
     ? commandArgument
     : fail("Usage: bun scripts/run-local.ts <start|package|make> [--dry-run|--diagnostic] [Forge arguments...]")
@@ -96,6 +100,7 @@ const main = async (): Promise<void> => {
   const desktopRoot = path.resolve(import.meta.dirname, "..")
   const projectRoot = path.resolve(desktopRoot, "../..")
   assertNoSelfReferentialNodeModules(projectRoot)
+
   if (!diagnostic) rebuildNativePackageArtifacts(projectRoot)
   const artifactPaths = resolveNativeArtifactPaths(projectRoot)
   const manifestPath = getNativeReleaseManifestPath(desktopRoot)
@@ -119,16 +124,20 @@ const main = async (): Promise<void> => {
       `audio host: ${artifactPaths.audioHostPath}`,
       `manifest: ${manifestPath}`,
     ].join("\n") + "\n")
+
     return
   }
 
   const forgeRunner = path.join(import.meta.dirname, "run-forge.ts")
+
   const result = spawnSync(process.execPath, [forgeRunner, preparation.command, ...forgeArguments], {
     cwd: desktopRoot,
     env: preparation.environment,
     stdio: "inherit",
   })
+
   if (result.error) throw result.error
+
   if (result.status !== 0) process.exitCode = result.status ?? 1
 }
 

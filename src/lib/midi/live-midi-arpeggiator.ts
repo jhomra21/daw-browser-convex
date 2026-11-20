@@ -47,6 +47,7 @@ export function createLiveMidiArpeggiator<Handle>(
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     clear: (timer) => window.clearTimeout(timer),
   }
+
   const sourceNotes = new Map<number, SourceNote<Handle>>()
   const emittedNotes = new Map<number, EmittedNote<Handle>>()
   let nextSourceId = 1
@@ -69,6 +70,7 @@ export function createLiveMidiArpeggiator<Handle>(
 
   const releaseEmission = (emissionId: number, force = false) => {
     const emitted = emittedNotes.get(emissionId)
+
     if (!emitted) return
     emittedNotes.delete(emissionId)
     scheduler.clear(emitted.releaseTimer)
@@ -92,11 +94,14 @@ export function createLiveMidiArpeggiator<Handle>(
 
   const rebuildSequence = () => {
     const params = currentConfig().params
+
     if (!params) {
       sequence = []
       sequenceIndex = 0
+
       return
     }
+
     sequence = arpeggiatorSequence(
       [...sourceNotes.values()].map((source) => source.pitch),
       params,
@@ -109,6 +114,7 @@ export function createLiveMidiArpeggiator<Handle>(
   const scheduleNextStep = (token: number, immediate: boolean) => {
     const config = currentConfig()
     const params = config.params
+
     if (
       token !== generation
       || !config.trackId
@@ -119,28 +125,38 @@ export function createLiveMidiArpeggiator<Handle>(
     const stepMs = arpeggiatorStepBeats(params.rate) * 60_000 / Math.max(1, config.bpm)
     nextStepTimer = scheduler.schedule(() => {
       nextStepTimer = undefined
+
       if (token !== generation) return
+
       if (configFingerprint(currentConfig()) !== configKey) {
         configure()
+
         return
       }
+
       const pitch = sequence[sequenceIndex % sequence.length]
       sequenceIndex += 1
+
       if (pitch !== undefined) {
         const velocity = Math.max(...[...sourceNotes.values()].map((source) => source.velocity))
         const trackId = config.trackId
+
         if (!trackId) return
         const handle = options.start({ trackId, pitch, velocity })
+
         if (handle !== undefined) {
           const emissionId = nextEmissionId
           nextEmissionId += 1
+
           const releaseTimer = scheduler.schedule(
             () => releaseEmission(emissionId),
             stepMs * Math.max(0, Math.min(1, params.gate)),
           )
+
           emittedNotes.set(emissionId, { handle, releaseTimer })
         }
       }
+
       scheduleNextStep(token, false)
     }, immediate ? 0 : stepMs)
   }
@@ -148,6 +164,7 @@ export function createLiveMidiArpeggiator<Handle>(
   const configure = () => {
     const nextConfig = currentConfig()
     const nextKey = configFingerprint(nextConfig)
+
     if (nextKey === configKey) return
     const hadConfig = previousConfig !== undefined
     const trackChanged = hadConfig && previousConfig?.trackId !== nextConfig.trackId
@@ -155,18 +172,23 @@ export function createLiveMidiArpeggiator<Handle>(
     const holdDisabled = latched && nextConfig.params?.hold !== true
     configKey = nextKey
     previousConfig = nextConfig
+
     if (trackChanged || holdDisabled) latched = false
     const sources = [...sourceNotes.entries()]
     stopArpeggiator()
+
     if (trackChanged || holdDisabled) {
       for (const source of sources) {
         if (source[1].handle !== undefined) {
           options.stop(source[1].handle, { force: true, reason: 'manual' })
         }
       }
+
       sourceNotes.clear()
+
       return
     }
+
     if (enabled() && sources.length > 0) {
       if (!wasEnabled) {
         for (const [sourceId, source] of sources) {
@@ -175,25 +197,31 @@ export function createLiveMidiArpeggiator<Handle>(
           sourceNotes.set(sourceId, { pitch: source.pitch, velocity: source.velocity })
         }
       }
+
       rebuildSequence()
       generation += 1
       scheduleNextStep(generation, true)
     } else if (!enabled()) {
       if (wasEnabled) {
         const trackId = nextConfig.trackId
+
         if (trackId && !latched) {
           for (const [sourceId, source] of sources) {
             if (source.handle !== undefined) continue
             const handle = options.start({ trackId, pitch: source.pitch, velocity: source.velocity, when: source.when })
+
             if (handle !== undefined) sourceNotes.set(sourceId, { ...source, handle })
           }
+
           return
         }
       }
+
       if (wasEnabled) {
         for (const source of sources) {
           if (source[1].handle !== undefined) options.stop(source[1].handle, { force: true, reason: 'manual' })
         }
+
         sourceNotes.clear()
       }
     }
@@ -202,9 +230,11 @@ export function createLiveMidiArpeggiator<Handle>(
   const reset = (force: boolean) => {
     latched = false
     stopArpeggiator(force)
+
     for (const source of sourceNotes.values()) {
       if (source.handle !== undefined) options.stop(source.handle, { force, reason: 'manual' })
     }
+
     sourceNotes.clear()
     configKey = ''
     previousConfig = undefined
@@ -215,47 +245,66 @@ export function createLiveMidiArpeggiator<Handle>(
     noteOn: (pitch: number, velocity: number, when?: number) => {
       configure()
       const config = currentConfig()
+
       if (!config.trackId) return undefined
+
       if (latched) {
         stopArpeggiator(true)
         sourceNotes.clear()
         latched = false
       }
+
       const sourceId = nextSourceId
       nextSourceId += 1
+
       if (!config.params?.enabled) {
         const handle = options.start({ trackId: config.trackId, pitch, velocity, when })
+
         if (handle === undefined) return undefined
         sourceNotes.set(sourceId, { pitch, velocity, when, handle })
+
         return sourceId
       }
+
       sourceNotes.set(sourceId, { pitch, velocity, when })
       rebuildSequence()
+
       if (nextStepTimer === undefined) {
         generation += 1
         scheduleNextStep(generation, true)
       }
+
       return sourceId
     },
     noteOff: (sourceId: number, force = false, when?: number) => {
       configure()
       const source = sourceNotes.get(sourceId)
+
       if (!source) return
+
       if (source.handle !== undefined) {
         sourceNotes.delete(sourceId)
         options.stop(source.handle, { force, reason: 'manual', when })
+
         return
       }
+
       const isFinalSource = sourceNotes.size === 1
+
       if (isFinalSource && currentConfig().params?.hold === true && !force) {
         latched = true
+
         return
       }
+
       sourceNotes.delete(sourceId)
+
       if (isFinalSource) {
         stopArpeggiator(force)
+
         return
       }
+
       rebuildSequence()
     },
     panic: () => reset(true),

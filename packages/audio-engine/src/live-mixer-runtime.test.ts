@@ -7,8 +7,10 @@ import { createLiveMixerRuntime, findExternalSidechainTarget, sidechainRouteIden
 
 const createTestAudio = () => {
   let failNextParameterWrite = false
+
   const createParam = (value = 1) => {
     let currentValue = value
+
     return {
       get value() {
         return currentValue
@@ -18,6 +20,7 @@ const createTestAudio = () => {
           failNextParameterWrite = false
           throw new Error('Audio parameter update failed.')
         }
+
         currentValue = nextValue
       },
       cancelScheduledValues: () => {},
@@ -29,14 +32,18 @@ const createTestAudio = () => {
       },
     }
   }
+
   const createNode = () => {
     const node = Object.assign(Object.create(null), {
       connect: () => {},
       disconnect: () => {},
     })
+
     return node
   }
+
   const createGain = () => Object.assign(createNode(), { gain: createParam() })
+
   const context = Object.assign(Object.create(null), {
     currentTime: 0,
     sampleRate: 48_000,
@@ -44,6 +51,7 @@ const createTestAudio = () => {
     createGain,
     createDelay: () => Object.assign(createNode(), { delayTime: createParam(0) }),
   })
+
   return {
     context,
     masterInput: createGain(),
@@ -55,6 +63,7 @@ const createTestAudio = () => {
 
 const createRuntime = () => {
   const audio = createTestAudio()
+
   const runtime = createLiveMixerRuntime({
     ensureAudio: () => {},
     getAudioContext: () => audio.context,
@@ -67,6 +76,7 @@ const createRuntime = () => {
     getFaultGeneration: () => 0,
     workletBudget: createLiveWorkletBudget(),
   })
+
   return { runtime, audio }
 }
 
@@ -90,6 +100,7 @@ describe('live mixer publication recovery transitions', () => {
     const f = createFxTransitionHarness('track')
     let fail = false
     const subscription = { unsubscribe: () => {} }
+
     try {
       const h = staticGateInstance(-40, 4, 'h')
       await f.set([staticGateInstance(-40, 4, 'g'), h, eqInstance(0, 'e')])
@@ -119,6 +130,7 @@ describe('live mixer publication recovery transitions', () => {
     let fail = false
     const subscription = { unsubscribe: () => {} }
     const frames: number[] = []
+
     try {
       const h = staticGateInstance(-40, 4, 'h')
       await f.set([staticGateInstance(-40, 4, 'g'), h, eqInstance(0, 'e')])
@@ -128,6 +140,7 @@ describe('live mixer publication recovery transitions', () => {
           fail = false
           throw new Error('Later meter reset failed.')
         }
+
         frames.push(frame.gainReductionDb)
       })
       await f.set([h, eqInstance(0, 'e')])
@@ -137,6 +150,7 @@ describe('live mixer publication recovery transitions', () => {
       f.timers.run()
       expect((await f.set(next)).disposition).toBe('applied')
       const onmessage = f.audio.workletNode(1)?.port.onmessage
+
       if (!onmessage) throw new Error('No meter port callback.')
       onmessage(new MessageEvent('message', { data: { type: 'meter', gainReductionDb: 7 } }))
       expect(frames).toContain(7)
@@ -149,6 +163,7 @@ describe('live mixer publication recovery transitions', () => {
 
   test('preserves the publication mark when a pending reconnect throws after an in-place edit', async () => {
     const f = createFxTransitionHarness('track')
+
     try {
       await f.set([staticGateInstance(-40, 4, 'g'), staticGateInstance(-40, 4, 'h'), eqInstance(0, 'e')])
       f.timers.run()
@@ -168,6 +183,7 @@ describe('live mixer publication recovery transitions', () => {
 
   test('preserves auxiliary publication work across a successful reconnect', async () => {
     const f = createFxTransitionHarness('track')
+
     try {
       await f.set([staticGateInstance(-40, 4, 'g'), eqInstance(0, 'e')])
       f.timers.run()
@@ -183,10 +199,13 @@ describe('live mixer publication recovery transitions', () => {
             fail = false
             throw new Error('Auxiliary connection failed.')
           }
+
           return connect(target)
         }
+
         return delay
       }
+
       const next = [staticGateInstance(-40, 4, 'h'), eqInstance(0, 'e')]
       expect((await Promise.allSettled([f.set(next)]))[0]?.status).toBe('rejected')
       f.timers.run()
@@ -201,10 +220,13 @@ describe('live mixer publication recovery transitions', () => {
   test('preserves spectral refresh work across a successful reconnect', async () => {
     let failAt = Number.POSITIVE_INFINITY
     let calls = 0
+
     const f = createFxTransitionHarness('track', () => {
       calls += 1
+
       if (calls === failAt) throw new Error('Spectral refresh latency failed.')
     })
+
     try {
       await f.set([staticGateInstance(-40, 4, 'g')])
       f.timers.run()
@@ -220,6 +242,7 @@ describe('live mixer publication recovery transitions', () => {
 
   test('fault bypass drains retirement owned by the superseded reconnect', async () => {
     const f = createFxTransitionHarness('track')
+
     try {
       await f.set([staticGateInstance(-40, 4, 'g'), staticGateInstance(-40, 4, 'h')])
       f.timers.run()
@@ -237,6 +260,7 @@ describe('live mixer publication recovery transitions', () => {
     const f = createFxTransitionHarness('track')
     let fail = false
     const subscription = { unsubscribe: () => {} }
+
     try {
       await f.set([staticGateInstance(-40, 4, 'g'), eqInstance(0, 'e')])
       f.timers.run()
@@ -264,6 +288,7 @@ describe('live mixer publication recovery transitions', () => {
     let fail = false
     const subscription = { unsubscribe: () => {} }
     const frames: number[] = []
+
     try {
       const h = staticGateInstance(-40, 4, 'h')
       await f.set([staticGateInstance(-40, 4, 'g'), h, eqInstance(0, 'e')])
@@ -273,6 +298,7 @@ describe('live mixer publication recovery transitions', () => {
           fail = false
           throw new Error('Meter rebind reset failed.')
         }
+
         frames.push(frame.gainReductionDb)
       })
       fail = true
@@ -280,6 +306,7 @@ describe('live mixer publication recovery transitions', () => {
       expect((await f.set([h, eqInstance(6, 'e')])).disposition).toBe('applied')
       f.timers.run()
       const onmessage = f.audio.workletNode(1)?.port.onmessage
+
       if (!onmessage) throw new Error('No meter port callback.')
       onmessage(new MessageEvent('message', { data: { type: 'meter', gainReductionDb: 7 } }))
       expect(frames).toContain(7)
@@ -292,6 +319,7 @@ describe('live mixer publication recovery transitions', () => {
 
   test('a fade-in ramp failure preserves the pending publication for an equal retry', async () => {
     const f = createFxTransitionHarness('track')
+
     try {
       await f.set([staticGateInstance(-40, 4, 'g'), eqInstance(0, 'e')])
       f.timers.run()
@@ -306,6 +334,7 @@ describe('live mixer publication recovery transitions', () => {
 
   test('a fade-out ramp failure keeps the publication retryable', async () => {
     const f = createFxTransitionHarness('track')
+
     try {
       await f.set([staticGateInstance(-40, 4, 'g'), eqInstance(0, 'e')])
       f.timers.run()
@@ -437,9 +466,11 @@ describe('track effect chain delivery', () => {
     restores.push(audio.restore)
     restores.push(timers.restore)
     const counting = createCountingBudget(refuseCommit)
+
     const workletBudget = ignoreBudgetCurrency
       ? { ...counting.budget, isCurrent: () => true, commit: () => true }
       : counting.budget
+
     const runtime = createLiveMixerRuntime({
       ensureAudio: () => {},
       getAudioContext: () => hasContext() ? audio.context : null,
@@ -453,6 +484,7 @@ describe('track effect chain delivery', () => {
       workletBudget,
       transitionScheduler: timers.scheduler,
     })
+
     return { audio, runtime, budget: counting.budget, begins: counting.begins, refuseCommits: counting.refuseCommits, timers }
   }
 
@@ -468,6 +500,7 @@ describe('track effect chain delivery', () => {
 
   test('a chain over the worklet limit rejects and keeps the installed chain', async () => {
     const f = createFxTransitionHarness('track')
+
     try {
       await f.set([eqInstance(0, 'e')])
       const gates = Array.from({ length: 9 }, (_, index) => staticGateInstance(-40, 4, `g${index}`))
@@ -482,10 +515,12 @@ describe('track effect chain delivery', () => {
     const f = createFxTransitionHarness('track')
     const frames: number[] = []
     const unsubscribe = f.track.subscribeTrackGateMeter('t', 'g', (frame) => frames.push(frame.gainReductionDb))
+
     try {
       await f.set([staticGateInstance(-40, 4, 'g')])
       f.timers.run()
       const onmessage = f.audio.workletNode(0)?.port.onmessage
+
       if (!onmessage) throw new Error('No meter port callback.')
       onmessage(new MessageEvent('message', { data: { type: 'meter', gainReductionDb: 5 } }))
       expect(frames).toContain(5)
@@ -552,6 +587,7 @@ describe('track effect chain delivery', () => {
     const rampsBeforeReconnect = audio.gainRampCount()
     const oldGate = audio.workletNode(0)
     const input = audio.connections().find((connection) => connection.target === oldGate)?.source
+
     if (!oldGate || !input) throw new Error('Missing connected gate input.')
 
     expect(await runtime.setTrackFxInstances('track-1', [eqInstance(0, 'eq')])).toBe('applied')
@@ -575,6 +611,7 @@ describe('track effect chain delivery', () => {
     await runtime.setTrackFxInstances('track-1', [staticGateInstance(-40, 4, 'gate'), eqInstance(0, 'eq')])
     timers.run()
     const input = audio.connections().find((connection) => connection.target === audio.workletNode(0))?.source
+
     if (!input) throw new Error('Missing connected gate input.')
     expect(await runtime.setTrackFxInstances('track-1', [eqInstance(0, 'eq')])).toBe('applied')
     const rampsAfterRequest = audio.gainRampCount()
@@ -742,6 +779,7 @@ describe('track effect chain delivery', () => {
       test(`${name}: a write that fails partway is repaired by returning to the previous value`, async () => {
         const { audio, runtime } = createChainRuntime()
         const edit = cases(audio, runtime).find((entry) => entry.name === name)
+
         if (!edit) throw new Error(`No case ${name}`)
         await runtime.setTrackFxInstances('track-1', [edit.before])
         edit.arm()
@@ -755,6 +793,7 @@ describe('track effect chain delivery', () => {
       test(`${name}: a write that fails partway is repaired by retrying the new value`, async () => {
         const { audio, runtime } = createChainRuntime()
         const edit = cases(audio, runtime).find((entry) => entry.name === name)
+
         if (!edit) throw new Error(`No case ${name}`)
         await runtime.setTrackFxInstances('track-1', [edit.before])
         edit.arm()
@@ -800,6 +839,7 @@ describe('track effect chain delivery', () => {
       runtime.ensureTrackInput('track-1')
       const gate = staticGateInstance(-40, 4, 'gate')
       const delay = syncedDelayInstance('delay')
+
       if (delay.kind !== 'delay') throw new Error('Expected delay fixture.')
       await runtime.setTrackFxInstances('track-1', [gate, delay])
       await runtime.setTrackFxInstances('track-1', [delay])
@@ -839,6 +879,7 @@ describe('track effect chain delivery', () => {
       timers.run()
       const oldGate = audio.workletNode(0)
       const input = audio.connections().find((connection) => connection.target === oldGate)?.source
+
       if (!oldGate || !input) throw new Error('Missing connected gate input.')
 
       audio.failNextParameterWrite(audio.biquads[2]?.gain)
@@ -857,6 +898,7 @@ describe('track effect chain delivery', () => {
       const audio = createFxTestAudio()
       const timers = captureFxTransitions()
       let failLatency = false
+
       const runtime = createLiveMixerRuntime({
         ensureAudio: () => {},
         getAudioContext: () => audio.context,
@@ -875,12 +917,14 @@ describe('track effect chain delivery', () => {
           throw new Error('Latency publication failed.')
         },
       })
+
       try {
         runtime.updateTrackGains([{ id: 'track-latency', name: 'track-latency', volume: 1, clips: [] }])
         await runtime.setTrackFxInstances('track-latency', [staticGateInstance(-40, 4, 'gate'), eqInstance(0, 'eq')])
         timers.run()
         const oldGate = audio.workletNode(0)
         const input = audio.connections().find((connection) => connection.target === oldGate)?.source
+
         if (!oldGate || !input) throw new Error('Missing connected gate input.')
         failLatency = true
 
@@ -903,6 +947,7 @@ describe('track effect chain delivery', () => {
       runtime.ensureTrackInput('track-1')
       const delay = syncedDelayInstance('delay')
       const gate = staticGateInstance(-20, 8, 'gate')
+
       if (delay.kind !== 'delay') throw new Error('Expected delay fixture.')
       await runtime.setTrackFxInstances('track-1', [staticGateInstance(-40, 4, 'gate'), delay])
       await runtime.setTrackFxInstances('track-1', [delay])
@@ -946,14 +991,17 @@ describe('track effect chain delivery', () => {
         const { audio, runtime } = createChainRuntime()
         const first = syncedDelayInstance('first')
         const second = syncedDelayInstance('second')
+
         if (first.kind !== 'delay' || second.kind !== 'delay') throw new Error('Expected delay fixtures.')
         const initial = wholeChain ? [first, second] : [first]
+
         const requested = wholeChain
           ? [
             { ...first, params: { ...first.params, feedback: 0.7 } },
             { ...second, params: { ...second.params, feedback: 0.7 } },
           ]
           : [{ ...first, params: { ...first.params, feedback: 0.7 } }]
+
         await runtime.setTrackFxInstances('track-1', initial)
         const pending = runtime.setTrackFxInstances('track-1', requested)
         audio.failNextParameterWrite(audio.delays[1]?.delayTime)
@@ -971,6 +1019,7 @@ describe('track effect chain delivery', () => {
       const audio = createFxTestAudio()
       const counting = createCountingBudget()
       const latencies: Array<number | null> = []
+
       const runtime = createLiveMixerRuntime({
         ensureAudio: () => {},
         getAudioContext: () => audio.context,
@@ -984,8 +1033,10 @@ describe('track effect chain delivery', () => {
         workletBudget: counting.budget,
         onGraphLatencyChange: (frames) => latencies.push(frames),
       })
+
       const failed = syncedDelayInstance('failed')
       const healthy = syncedDelayInstance('healthy')
+
       try {
         await runtime.setTrackFxInstances('track-1', [failed, healthy])
         const publicationsBeforeTempo = latencies.length
@@ -1028,6 +1079,7 @@ describe('track effect chain delivery', () => {
     const awaitingContext = () => {
       let hasContext = false
       const harness = createChainRuntime(() => hasContext)
+
       return { ...harness, grantContext: () => { hasContext = true } }
     }
 

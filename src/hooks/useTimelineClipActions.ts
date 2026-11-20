@@ -37,6 +37,7 @@ import type { TimelineSelectionController } from './useTimelineSelectionState'
 type ConvexClientType = typeof convexClient
 
 type ConvexApiType = typeof convexApi
+
 type TrackDeleteResult = FunctionReturnType<ConvexApiType['tracks']['remove']>
 
 const isString = (cause: unknown): cause is string => typeof cause === 'string'
@@ -119,15 +120,20 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     recordingTargetLock,
     notify,
   } = options
+
   const sectionClipboard = createTimelineSectionClipboard()
 
   const onClipPointerUp = (trackId: Track['id'], clipId: string, event: PointerEvent) => {
     event.stopPropagation()
+
     if (event.shiftKey && selection.rangeSelection()) return
+
     if (!event.shiftKey) {
       selection.selectPrimaryClip({ trackId, clipId })
+
       return
     }
+
     selection.appendClipToSelection({ trackId, clipId })
   }
 
@@ -140,42 +146,54 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
   const showTrackDeleteFailure = (result: TrackDeleteResult | null) => {
     if (result?.status === 'conflict') {
       notify('Track delete blocked', getTrackDeleteConflictMessage(result.reason))
+
       return
     }
+
     notify('Track delete failed', 'This track could not be deleted.')
   }
 
   const collectTrackDeleteIds = (snapshot: readonly RuntimeTrack[], trackId: Track['id']) => {
     const deletedTrackIds = collectTrackDescendantIds(snapshot, trackId)
     deletedTrackIds.add(trackId)
+
     return deletedTrackIds
   }
 
   const deleteSelectedClips = async () => {
     const selectedIds = selectedClipIds()
+
     if (selectedIds.size === 0) return
     const writableSelectedIds = getWritableSelectedClipIds(selectedIds)
+
     if (writableSelectedIds.size === 0) return
 
     const rid = projectId()
     const uid = userId()
+
     if (!rid || (!isLocalId('project', rid) && !uid)) return
     await flushMidiProjectWrites(rid)
     const snapshot = tracks()
+
     const reconcileSelectionAfterDelete = (removedIds: Set<string>) => {
       const remainingSelectedIds = new Set(Array.from(selectedIds).filter((clipId) => !removedIds.has(clipId)))
+
       const nextPrimary: SelectedClip = (() => {
         if (remainingSelectedIds.size === 0) return null
+
         for (const track of snapshot) {
           const clip = track.clips.find((entry) => remainingSelectedIds.has(entry.id))
+
           if (clip) return { trackId: track.id, clipId: clip.id }
         }
+
         return null
       })()
 
       batch(() => {
         selection.setSelectedClip(nextPrimary)
         selection.setSelectedClipIds(remainingSelectedIds)
+
         if (nextPrimary) {
           selection.setSelectedTrackId(nextPrimary.trackId)
           selection.setSelectedFXTarget(nextPrimary.trackId)
@@ -185,6 +203,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
     const deletion = await createTimelineClipWriteAdapter({ projectId: rid, userId: uid }).deleteClips(Array.from(writableSelectedIds))
     const removedIds = deletion.removedIds
+
     if (removedIds.size === 0) return
 
     try {
@@ -193,6 +212,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         recoveryIdsByClipId: deletion.recoveryIdsByClipId,
         recoveryOperationId: deletion.recoveryOperationId,
       })
+
       if (entry.data.items.length > 0) historyPush(entry)
     } catch {}
 
@@ -202,14 +222,18 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
   const duplicateSelectedClips = async () => {
     const selectedIds = selectedClipIds()
+
     if (selectedIds.size === 0) return
     const writableSelectedIds = getWritableSelectedClipIds(selectedIds)
+
     if (writableSelectedIds.size === 0) return
 
     const tsSnapshot = tracks()
     const byTrack = new Map<Track['id'], { track: RuntimeTrack; clips: RuntimeClip[] }>()
+
     for (const track of tsSnapshot) {
       const selected = track.clips.filter(clip => writableSelectedIds.has(clip.id))
+
       if (selected.length > 0) byTrack.set(track.id, { track, clips: selected })
     }
 
@@ -226,9 +250,11 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         if (!isClipCompatibleWithTrack(track, clip)) continue
         const offset = clip.startSec - groupStart
         const desiredStart = baseStart + offset
+
         const safeStart = gridEnabled()
           ? calcNonOverlapStartGridAligned(simulatedClips, null, desiredStart, clip.duration, bpm(), gridDenominator())
           : calcNonOverlapStart(simulatedClips, null, desiredStart, clip.duration)
+
         pending.push({
           trackId,
           buffer: clip.buffer ?? audioBufferCache.getBuffer(clip.id) ?? null,
@@ -242,6 +268,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     }
 
     const rid = projectId()
+
     if (rid && isLocalId('project', rid) && pending.length > 0) {
       const created = await createProjectedLocalClips({
         projectId: rid,
@@ -251,10 +278,13 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         audioBufferCache: audioBufferCache.writer,
         canProject: () => projectId() === rid,
       })
+
       const nextSelection = buildCreatedClipSelection(created)
+
       if (nextSelection) {
         selection.selectClipGroup(nextSelection)
       }
+
       for (const item of created) {
         pushClipCreateHistory({
           historyPush,
@@ -265,10 +295,12 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
           clip: item.clip,
         })
       }
+
       return
     }
 
     const uid = userId()
+
     if (!rid || !uid || pending.length === 0) return
 
     const created = await createProjectedClips({
@@ -276,6 +308,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       items: pending,
       createMany: async (items, operationId) => {
         const result = await publishSharedTimelineOperation(rid, buildSharedClipCreateManyOperation({ items }, operationId))
+
         return Array.isArray(result) ? result.map((item) => isString(item) ? item : null) : []
       },
       insertLocalClip,
@@ -296,6 +329,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     }
 
     const nextSelection = buildCreatedClipSelection(created)
+
     if (nextSelection) {
       selection.selectClipGroup(nextSelection)
     }
@@ -303,9 +337,11 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
   const rangeAutomationFragments = (trackIds: Track['id'][], range: { startSec: number; endSec: number }) => {
     const selectedTrackIds = new Set(trackIds)
+
     return automationEnvelopes().flatMap((envelope): SectionAutomationFragment[] => {
       if (envelope.target.kind !== 'track' || !selectedTrackIds.has(envelope.target.trackId)) return []
       const fragment = buildAutomationFragment(envelope, range)
+
       return fragment ? [fragment] : []
     })
   }
@@ -326,6 +362,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
   const writeTimelineClipboard = (clipboard: TimelineSectionClipboard) => {
     sectionClipboard.write(clipboard)
     setHasTimelineClipboard(true)
+
     return true
   }
 
@@ -333,11 +370,14 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
   const buildSelectedClipsClipboard = (clipIds: Set<string>): TimelineSectionClipboard => {
     const selectedTracks = tracks().flatMap((track) => {
       const clips = track.clips.filter((clip) => clipIds.has(clip.id))
+
       return clips.length > 0 ? [{ ...track, clips }] : []
     })
+
     const startSec = Math.min(...selectedTracks.flatMap((track) => track.clips.map((clip) => clip.startSec)))
     const endSec = Math.max(...selectedTracks.flatMap((track) => track.clips.map((clip) => clip.startSec + clip.duration)))
     const trackIds = selectedTracks.map((track) => track.id)
+
     return {
       durationSec: endSec - startSec,
       trackIds,
@@ -348,21 +388,26 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
   const copyTimelineSelection = () => {
     const range = selection.rangeSelection()
+
     if (range) return writeTimelineClipboard(buildTimelineSectionClipboard(range))
     const clipIds = getWritableSelectedClipIds(selectedClipIds())
+
     if (clipIds.size === 0) return false
+
     return writeTimelineClipboard(buildSelectedClipsClipboard(clipIds))
   }
 
   const writableTimelineClipEntries = () => {
     const entries = tracks().flatMap((track) => track.clips.map((clip) => ({ trackId: track.id, clipId: clip.id })))
     const writableIds = getWritableSelectedClipIds(new Set(entries.map((entry) => entry.clipId)))
+
     return entries.filter((entry) => writableIds.has(entry.clipId))
   }
 
   const selectAllTimelineClips = () => {
     const entries = writableTimelineClipEntries()
     const first = entries[0]
+
     if (!first) return
     selection.selectClipGroup({
       trackId: first.trackId,
@@ -373,8 +418,10 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
   const pasteTimelineSectionAt = async (clipboard: TimelineSectionClipboard | null, destinationStartSec: number) => {
     const rid = projectId()
+
     if (!clipboard || !rid) return
     const historyEntries: HistoryEntry[] = []
+
     const pending: BatchClipCreateItem[] = clipboard.clips.map((fragment) => ({
       trackId: fragment.targetTrackId,
       buffer: fragment.buffer,
@@ -383,9 +430,11 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         startSec: destinationStartSec + fragment.startOffsetSec,
       },
     }))
+
     const tsSnapshot = tracks()
     let created: Array<{ trackId: Track['id']; clipId: string; clip: BatchClipCreateItem['clip'] }> = []
     const uid = userId()
+
     if (isLocalId('project', rid)) {
       created = await createProjectedLocalClips({
         projectId: rid,
@@ -401,6 +450,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         items: pending,
         createMany: async (items, operationId) => {
           const result = await publishSharedTimelineOperation(rid, buildSharedClipCreateManyOperation({ items }, operationId))
+
           return Array.isArray(result) ? result.map((item) => isString(item) ? item : null) : []
         },
         insertLocalClip,
@@ -409,6 +459,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         grantScope: { projectId: rid, userId: uid },
       })
     }
+
     for (const item of created) {
       const trackRef = getTrackHistoryRef(tsSnapshot.find((entry) => entry.id === item.trackId))
       historyEntries.push({
@@ -428,8 +479,10 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     const automationWriter = createTimelineAutomationWriteAdapter({ projectId: rid, userId: uid })
     const envelopesByTargetKey = new Map(automationEnvelopes().map((envelope) => [envelope.targetKey, envelope]))
     const updatedAt = Date.now()
+
     for (const fragment of clipboard.automation) {
       const existing = envelopesByTargetKey.get(fragment.sourceTargetKey)
+
       const next = pasteAutomationFragment({
         envelope: existing,
         fragment,
@@ -437,19 +490,24 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         destinationStartSec,
         updatedAt,
       })
+
       if (await automationWriter.setEnvelope(next)) {
         historyEntries.push(buildAutomationEnvelopeHistoryEntry({ projectId: rid, before: existing ?? null, after: next }))
         applyAutomationEnvelope(next, next.targetKey)
       }
     }
+
     const historyEntry = buildSectionHistoryEntry(rid, historyEntries)
+
     if (historyEntry) historyPush(historyEntry)
+
     const destinationRange = {
       startSec: destinationStartSec,
       endSec: destinationStartSec + clipboard.durationSec,
       trackIds: clipboard.trackIds,
       primaryTrackId: clipboard.trackIds[0] ?? null,
     }
+
     selection.selectTimeRange(destinationRange)
   }
 
@@ -459,10 +517,13 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
   const duplicateTimelineSelection = async () => {
     const range = selection.rangeSelection()
+
     if (!range) {
       await duplicateSelectedClips()
+
       return
     }
+
     await pasteTimelineSectionAt(buildTimelineSectionClipboard(range), range.endSec)
   }
 
@@ -470,47 +531,61 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     if (!sectionClipboard.read() || !projectId()) return false
     const range = selection.rangeSelection()
     void pasteTimelineSelectionAt(range?.startSec ?? playheadSec())
+
     return true
   }
 
   const deleteTimelineSelection = async () => {
     const range = selection.rangeSelection()
+
     if (!range) {
       if (selectedClipIds().size > 0) {
         await deleteSelectedClips()
+
         return
       }
+
       const trackId = selection.selectedTrackId()
+
       if (trackId) requestDeleteTrack(trackId)
+
       return
     }
+
     const rid = projectId()
     const uid = userId()
+
     if (!rid || (!isLocalId('project', rid) && !uid)) return
     await flushMidiProjectWrites(rid)
     const control = createProjectControlClient({ projectId: rid, userId: uid, convexClient, convexApi })
     const snapshotTracks = tracks()
+
     const runDelete = async () => {
       const snapshot = await control.snapshotV2()
+
       const action: Extract<ControlActionV1, { kind: 'timeline.range.delete' }> = {
         kind: 'timeline.range.delete',
         tracks: range.trackIds.map((id) => ({ source: 'persisted', id })),
         startSec: range.startSec,
         endSec: range.endSec,
       }
+
       const preview = await control.previewV1({
         version: 'v1',
         projectId: rid,
         expectedRevision: snapshot.project.revision,
         actions: [action],
       })
+
       if (!preview.applied) return
+
       const approval = await control.requestApprovalV1({
         version: 'v1',
         projectId: rid,
         expectedRevision: snapshot.project.revision,
         actions: [action],
       })
+
       const commitRequest: ControlCommitRequestV1 = {
         version: 'v1',
         projectId: rid,
@@ -519,14 +594,18 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         approvalToken: approval.approvalToken,
         actions: [action],
       }
+
       let commit
+
       try {
         commit = await control.commitV1(commitRequest)
       } catch (error) {
         if (isProjectControlError(error)) throw error
         commit = await control.commitV1(commitRequest)
       }
+
       const recovery = commit.recoveries.find((entry) => entry.actionIndex === 0 && entry.kind === 'timeline.range.delete')
+
       if (!recovery) throw new Error('Range deletion did not return a recovery descriptor.')
       historyPush(buildControlRangeDeleteHistoryEntry({
         projectId: rid,
@@ -537,13 +616,16 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         recoveryId: recovery.id,
       }))
     }
+
     try {
       await runDelete()
     } catch (error) {
       if (!isProjectControlRevisionConflict(error)) {
         notify('Section delete failed', error instanceof Error ? error.message : 'This selected range could not be deleted.')
+
         return
       }
+
       try {
         await runDelete()
       } catch (retryError) {
@@ -555,25 +637,34 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
   // Synchronous, so a refused delete neither opens the confirmation nor stops the take.
   const refuseLockedTrackDelete = (snapshot: readonly RuntimeTrack[], trackId: Track['id']) => {
     const refusal = recordingTargetLock?.refuseDelete(collectTrackDeleteIds(snapshot, trackId))
+
     if (refusal) notify(RECORDING_TARGET_LOCKED_BADGE, refusal)
+
     return refusal !== undefined
   }
 
   const performDeleteTrack = async (trackId: Track['id']) => {
     const rid = projectId()
+
     if (!rid || refuseLockedTrackDelete(tracks(), trackId)) return
     await flushMidiProjectWrites(rid)
     const snapshot = tracks()
     const track = snapshot.find(entry => entry.id === trackId)
+
     if (!track) return
     const deletedTrackIds = collectTrackDeleteIds(snapshot, trackId)
+
     const trackAutomation = automationEnvelopes().filter((envelope) => (
       envelope.target.kind === 'track' && deletedTrackIds.has(envelope.target.trackId)
     ))
+
     const completeDeletedTrack = (historyEntries: ReturnType<typeof buildTrackDeleteHistoryEntry>[]) => {
       const sectionEntry = buildSectionHistoryEntry(rid, historyEntries)
+
       if (sectionEntry) historyPush(sectionEntry)
+
       for (const envelope of trackAutomation) applyAutomationEnvelope(undefined, envelope.targetKey)
+
       for (const deletedTrackId of deletedTrackIds) removeLocalTrack(deletedTrackId)
       const next = snapshot.filter(entry => !deletedTrackIds.has(entry.id))
       batch(() => {
@@ -587,6 +678,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
     if (rid && isLocalId('project', rid)) {
       const historyEntries: ReturnType<typeof buildTrackDeleteHistoryEntry>[] = []
+
       try {
         for (const deletedTrack of snapshot.filter((entry) => deletedTrackIds.has(entry.id))) {
           historyEntries.push(buildTrackDeleteHistoryEntry({
@@ -600,20 +692,27 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         }
       } catch {
         showTrackDeleteFailure(null)
+
         return
       }
+
       if (refuseLockedTrackDelete(tracks(), trackId)) return
+
       for (const deletedTrackId of deletedTrackIds) {
         await createLocalTimelineRepository(rid).deleteTrack(deletedTrackId)
       }
+
       completeDeletedTrack(historyEntries)
+
       return
     }
 
     const uid = userId()
+
     if (!uid) return
 
     const historyEntries: ReturnType<typeof buildTrackDeleteHistoryEntry>[] = []
+
     try {
       if (rid) {
         for (const deletedTrack of snapshot.filter((entry) => deletedTrackIds.has(entry.id))) {
@@ -629,32 +728,40 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       }
     } catch {
       showTrackDeleteFailure(null)
+
       return
     }
 
     // A take can start while the delete is being prepared; the durable write must see the lock as it is now.
     if (refuseLockedTrackDelete(tracks(), trackId)) return
+
     const result = await convexClient.mutation(
       convexApi.tracks.remove,
       buildTrackDeleteMutationInput({ trackId }),
     )
+
     if (result.status !== 'deleted') {
       showTrackDeleteFailure(result)
+
       return
     }
+
     completeDeletedTrack(historyEntries)
   }
 
   const requestDeleteTrack = (trackId: Track['id']) => {
     const snapshot = tracks()
     const track = snapshot.find(entry => entry.id === trackId)
+
     if (!track || refuseLockedTrackDelete(snapshot, trackId)) return
 
     const deletedTrackIds = collectTrackDeleteIds(snapshot, trackId)
     const hasDeletedClips = snapshot.some((entry) => deletedTrackIds.has(entry.id) && entry.clips.length > 0)
+
     if (hasDeletedClips) {
       setPendingDeleteTrackId(trackId)
       setConfirmOpen(true)
+
       return
     }
 

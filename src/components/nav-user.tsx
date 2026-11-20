@@ -18,6 +18,7 @@ export const NavUser: Component = () => {
 
   const getInitials = (name: string) => {
     if (!name || name === "Guest") return name.charAt(0).toUpperCase() || "G";
+
     return name
       .split(' ')
       .map(part => part[0]?.toUpperCase() || '')

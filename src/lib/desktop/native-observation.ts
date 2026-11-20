@@ -55,12 +55,16 @@ export const createNativeObservation = (host: NativeObservationHost) => {
 
   const resetMeters = () => {
     const next = new Map<string, TrackStereoLevels>()
+
     for (const nodeId of meterNodeIds.values()) {
       if (nodeId !== "master") next.set(nodeId, { left: 0, right: 0 })
     }
+
     levels = next
     masterLevels = { left: 0, right: 0 }
+
     for (const listener of meterListeners) listener(next)
+
     for (const listener of masterMeterListeners) listener(masterLevels)
   }
 
@@ -71,15 +75,20 @@ export const createNativeObservation = (host: NativeObservationHost) => {
     // A target absent from the active map may be a candidate-only node. Keep
     // the request pending until publication promotes its observation map.
     const nodeId = spectrumDesiredNodeId
+
     if (nodeId === undefined) return
+
     const supersedesRequest = spectrumSelectionRequest !== undefined
       && spectrumSelectionRequest.nodeId !== nodeId
+
     if (nodeId === spectrumSelectedNodeId && !supersedesRequest) return
+
     if (!ownershipReleased && spectrumSelectionRequest?.nodeId === nodeId) return
     const session = host.session
     const requested = host.state()
     const selectionGeneration = ++spectrumSelectionGeneration
     spectrumSelectionRequest = { generation: selectionGeneration, nodeId }
+
     const finish = (reply: NativeSessionReply | undefined) => {
       if (spectrumSelectionRequest?.generation !== selectionGeneration) {
         // A stale successful command still changed the host. Reassert the
@@ -89,27 +98,33 @@ export const createNativeObservation = (host: NativeObservationHost) => {
           spectrumSelectedNodeId = undefined
           reconcileSpectrumSelection(true)
         }
+
         return
       }
+
       spectrumSelectionRequest = undefined
       const now = host.state()
+
       if (!reply?.ok || selectionGeneration !== spectrumSelectionGeneration
         || requested.sessionGeneration !== now.sessionGeneration || !now.prepared || !now.sessionStarted
         || now.preparedProjectId !== requested.projectId || now.preparedProjectGeneration !== requested.projectGeneration
         || requested.projectId !== now.projectId || requested.projectGeneration !== now.projectGeneration) return
       spectrumSelectedNodeId = nodeId
     }
+
     void session?.setSpectrumNode?.(nodeId).then(finish, () => finish(undefined))
   }
 
   const handleSpectrumFrame = (frame: NativeHostSpectrumFrame) => {
     const nodeId = spectrumNodeIds.get(spectrumTarget ?? "")
+
     if (
       !nodeId || frame.graphRevision !== meterRevision
       || frame.transportEpoch !== host.transportEpoch() || frame.nodeId !== nodeId
       || frame.sequence <= latestSpectrumSequence
     ) return
     latestSpectrumSequence = frame.sequence
+
     const next: SpectrumFrame = {
       data: frame.data,
       sampleRate: frame.sampleRateHz,
@@ -120,6 +135,7 @@ export const createNativeObservation = (host: NativeObservationHost) => {
       fftSize: frame.fftSize,
       binCount: frame.binCount,
     }
+
     for (const listener of spectrumListeners) listener(next)
   }
 
@@ -129,28 +145,37 @@ export const createNativeObservation = (host: NativeObservationHost) => {
     latestMeterSequence = batch.sequence
     const changed = new Map<string, TrackStereoLevels>()
     let master: TrackStereoLevels | undefined
+
     for (const entry of batch.entries) {
       const nodeId = meterNodeIds.get(entry.nodeId)
+
       if (!nodeId) continue
+
       const next = {
         left: Math.min(1, Math.max(0, entry.leftRms)),
         right: Math.min(1, Math.max(0, entry.rightRms)),
       }
+
       if (nodeId === "master") master = next
       else changed.set(nodeId, next)
     }
+
     if (changed.size > 0) {
       levels = new Map([...levels, ...changed])
+
       for (const listener of meterListeners) listener(changed)
     }
+
     if (master) {
       masterLevels = master
+
       for (const listener of masterMeterListeners) listener(master)
     }
   }
 
   const clearSpectrumFrame = () => {
     latestSpectrumSequence = 0n
+
     for (const listener of spectrumListeners) listener(null)
   }
 
@@ -170,38 +195,48 @@ export const createNativeObservation = (host: NativeObservationHost) => {
       const nextTracks = new Set([...candidate.meters.values()].filter((id) => id !== "master"))
       const changed = new Map<string, TrackStereoLevels>()
       const next = new Map(levels)
+
       for (const id of previousTracks) {
         if (nextTracks.has(id)) continue
         next.delete(id)
         changed.set(id, { left: 0, right: 0 })
       }
+
       for (const id of nextTracks) {
         if (previousTracks.has(id)) continue
         next.set(id, { left: 0, right: 0 })
         changed.set(id, { left: 0, right: 0 })
       }
+
       const target = spectrumTarget
       const wasSelected = target !== undefined && spectrumNodeIds.has(target)
       const nextNodeId = target === undefined ? undefined : candidate.spectrum.get(target)
       meterRevision = revision
       meterNodeIds = candidate.meters
       spectrumNodeIds = candidate.spectrum
+
       if (target !== undefined && candidate.spectrum.has(target)) {
         spectrumDesiredNodeId = candidate.spectrum.get(target)
         reconcileSpectrumSelection(true)
       }
+
       levels = next
+
       if (changed.size > 0) {
         for (const listener of meterListeners) listener(changed)
       }
 
       if (target === undefined) return
+
       if (nextNodeId !== undefined) return
+
       if (!wasSelected) return
       spectrumTarget = undefined
       spectrumDesiredNodeId = null
       latestSpectrumSequence = 0n
+
       for (const listener of spectrumListeners) listener(null)
+
       if (host.state().sessionStarted) reconcileSpectrumSelection(true)
     },
     // A new prepared graph: its meters start at zero and its analyser has no frame yet.
@@ -218,6 +253,7 @@ export const createNativeObservation = (host: NativeObservationHost) => {
         ["master", nativeMasterNodeId] as const,
       ])
       latestSpectrumSequence = 0n
+
       for (const listener of spectrumListeners) listener(null)
     },
     attach: () => {
@@ -242,6 +278,7 @@ export const createNativeObservation = (host: NativeObservationHost) => {
       spectrumDesiredNodeId = undefined
       spectrumSelectedNodeId = undefined
       spectrumSelectionRequest = undefined
+
       for (const listener of spectrumListeners) listener(null)
     },
     setMeterRevision: (revision: number) => { meterRevision = revision },
@@ -249,21 +286,27 @@ export const createNativeObservation = (host: NativeObservationHost) => {
     reconcileSpectrumSelection,
     subscribeTrackMeters: (listener: (levels: TrackStereoLevelsBatch) => void) => {
       meterListeners.add(listener)
+
       if (levels.size > 0) listener(new Map(levels))
+
       return () => meterListeners.delete(listener)
     },
     subscribeMasterMeter: (listener: (levels: TrackStereoLevels) => void) => {
       masterMeterListeners.add(listener)
       listener(masterLevels)
+
       return () => masterMeterListeners.delete(listener)
     },
     subscribeSpectrum: (targetId: string, listener: (frame: SpectrumFrame | null) => void) => {
       spectrumListeners.add(listener)
       spectrumTarget = targetId
+
       if (host.state().prepared) reconcileSpectrumSelection()
       listener(null)
+
       return () => {
         spectrumListeners.delete(listener)
+
         if (spectrumListeners.size === 0) {
           spectrumTarget = undefined
           reconcileSpectrumSelection(true)

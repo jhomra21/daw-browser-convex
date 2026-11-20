@@ -14,12 +14,14 @@ test("suppresses only manually overridden external-plugin automation and clears 
     { kind: "track", trackId: "track:one" },
     "vst:supermassive",
   );
+
   const mixParameterId = externalAutomationParameterId("vst:supermassive", 48);
   const widthParameterId = externalAutomationParameterId("vst:supermassive", 49);
   const mixTargetKey = automationTargetKey(target, mixParameterId);
   const widthTargetKey = automationTargetKey(target, widthParameterId);
   const unrelatedTarget = createAutomationTarget({ kind: "track", trackId: "track:two" });
   const unrelatedTargetKey = automationTargetKey(unrelatedTarget, "volume");
+
   const envelope = (
     id: string,
     envelopeTarget: AutomationEnvelope["target"],
@@ -35,6 +37,7 @@ test("suppresses only manually overridden external-plugin automation and clears 
     points: [],
     updatedAt: 1,
   });
+
   const envelopes = [
     envelope("mix", target, mixTargetKey, mixParameterId),
     envelope("width", target, widthTargetKey, widthParameterId),

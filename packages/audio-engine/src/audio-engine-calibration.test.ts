@@ -3,9 +3,11 @@ import { AudioEngine } from "./audio-engine"
 
 const deferred = () => {
   let resolve = () => {}
+
   const promise = new Promise<void>((next) => {
     resolve = next
   })
+
   return { promise, resolve }
 }
 
@@ -34,6 +36,7 @@ const installAudioContext = (resume: () => Promise<void>, setSinkId: () => Promi
     readonly resume = resume
     readonly setSinkId = setSinkId
   }
+
   Object.defineProperty(globalThis, "AudioContext", {
     configurable: true,
     value: FakeAudioContext,
@@ -62,6 +65,7 @@ describe("AudioEngine recording calibration reservation", () => {
     installAudioContext(() => resume.promise, () => Promise.resolve())
     const engine = new AudioEngine()
     const controller = new AbortController()
+
     const calibration = engine.calibrateRecording({
       stream,
       inputDeviceId: "input",
@@ -88,6 +92,7 @@ describe("AudioEngine recording calibration reservation", () => {
     installAudioContext(() => resume.promise, () => Promise.resolve())
     const engine = new AudioEngine()
     const controller = new AbortController()
+
     const calibration = engine.calibrateRecording({
       stream,
       inputDeviceId: "input",
@@ -111,6 +116,7 @@ describe("AudioEngine recording calibration reservation", () => {
     installAudioContext(() => Promise.resolve(), () => output.promise)
     const engine = new AudioEngine()
     const controller = new AbortController()
+
     const calibration = engine.calibrateRecording({
       stream,
       inputDeviceId: "input",

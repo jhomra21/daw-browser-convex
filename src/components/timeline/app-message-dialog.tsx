@@ -38,6 +38,7 @@ export default function AppMessageDialog(props: AppMessageDialogProps) {
 
   createEffect(() => {
     const state = props.state;
+
     if (state === previousState) return;
     previousState = state;
     setBusy(false);
@@ -46,9 +47,11 @@ export default function AppMessageDialog(props: AppMessageDialogProps) {
 
   const runAction = async () => {
     const action = props.state?.action;
+
     if (!action || busy()) return;
     setBusy(true);
     setActionError("");
+
     try {
       await action.onAction();
     } catch (error: unknown) {
@@ -63,6 +66,7 @@ export default function AppMessageDialog(props: AppMessageDialogProps) {
   };
 
   const trustAcknowledgement = () => props.state?.trustAcknowledgement;
+
   const actionEnabled = () => (
     props.state?.action !== undefined
     && (props.state.action.enabled?.() ?? true)

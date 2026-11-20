@@ -29,36 +29,47 @@ export function createLiveWorkletBudget(limit: number = PROCESSOR_RESOURCE_LIMIT
       if (!Number.isInteger(candidateConstructionCount) || candidateConstructionCount < 0) {
         throw new Error('Live worklet construction count must be a non-negative integer.')
       }
+
       if (committedCount() + pendingCount() + candidateConstructionCount > limit) {
         throw new Error(`Live processing is limited to ${limit} static worklets.`)
       }
+
       const transaction = { owner, id: ++nextId }
       pending.set(transaction.id, { ...transaction, count: candidateConstructionCount })
       latestTransactionByOwner.set(owner, transaction.id)
+
       return transaction
     },
     commit: (transaction: LiveWorkletTransaction, nextCommittedCount: number) => {
       if (!Number.isInteger(nextCommittedCount) || nextCommittedCount < 0) {
         throw new Error('Committed live worklet count must be a non-negative integer.')
       }
+
       const current = pending.get(transaction.id)
+
       if (!current || current.owner !== transaction.owner) return false
       pending.delete(transaction.id)
+
       if (latestTransactionByOwner.get(transaction.owner) !== transaction.id) return false
       latestTransactionByOwner.delete(transaction.owner)
+
       if (nextCommittedCount === 0) committed.delete(transaction.owner)
       else committed.set(transaction.owner, nextCommittedCount)
+
       return true
     },
     isCurrent: (transaction: LiveWorkletTransaction) => {
       const current = pending.get(transaction.id)
+
       return current?.owner === transaction.owner &&
         latestTransactionByOwner.get(transaction.owner) === transaction.id
     },
     rollback: (transaction: LiveWorkletTransaction) => {
       const current = pending.get(transaction.id)
+
       if (!current || current.owner !== transaction.owner) return
       pending.delete(transaction.id)
+
       if (latestTransactionByOwner.get(transaction.owner) === transaction.id) {
         latestTransactionByOwner.delete(transaction.owner)
       }
@@ -66,6 +77,7 @@ export function createLiveWorkletBudget(limit: number = PROCESSOR_RESOURCE_LIMIT
     releaseOwner: (owner: string) => {
       committed.delete(owner)
       latestTransactionByOwner.delete(owner)
+
       for (const [id, transaction] of pending) {
         if (transaction.owner === owner) pending.delete(id)
       }

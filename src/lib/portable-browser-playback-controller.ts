@@ -53,18 +53,26 @@ import { createAudioEffectParameterPayload } from "~/lib/audio-effect-parameter-
 import { movedSynthLiveFields } from "~/lib/processor-edit-semantics"
 
 type PortableStartResult = "started" | "unavailable"
+
 // A locate the session cannot take without having failed (nothing was touched) is the caller's to rebuild.
 type PortableSeekResult = PortableStartResult | "rebuild"
+
 export type PortableAdoptionResult = "adopted" | "unchanged" | "failed" | "unavailable"
+
 // Content the session cannot carry at a seam fails without a resubmit; callers see it as "failed".
 type PortableAdoptionAttemptResult = PortableAdoptionResult | "unsupported"
+
 type PortablePreparedStretch = PortablePreparedStretchAsset | PortablePagedStretchAsset
+
 type PortableOrdinaryDescriptor = {
   asset: AudioAssetRef
   descriptor: AudioPcmSourceDescriptor
 }
+
 type PortableScheduleRange = Extract<PreparedPortableSession, { supported: true }>["scheduleRange"]
+
 type PortableSchedule = Extract<PreparedPortableSession, { supported: true }>["schedule"]
+
 type PortableSessionFault = {
   error?: Error
 }
@@ -104,19 +112,23 @@ type PortableBackend = {
 
 const portableRecordingControlTimeoutMs = 2_000
 const maxAdoptionResubmits = 8
+
 // The native portable core reserves this fixed preparation table. It is not
 // part of the wire capability payload, so the backend exposes the local
 // default alongside the runtime paged capabilities.
 const portablePagedPreparationCapacity = portableWasmPagedPreparationCount
+
 export type PortableRecordingDiagnostics = Extract<PortableWasmStatusMessage, { type: "recording-capture-diagnostics" }>
 
 const deferred = <T>() => {
   let resolve = (_value: T) => {}
   let reject = (_error: Error) => {}
+
   const promise = new Promise<T>((onResolve, onReject) => {
     resolve = onResolve
     reject = onReject
   })
+
   return { promise, resolve, reject }
 }
 
@@ -143,12 +155,15 @@ const instrumentAssetKeys = (snapshot: LivePlaybackSnapshot) => new Set(
     if (entry.instrument?.kind === 'sampler') {
       return entry.instrument.params.zones.map((zone) => zone.sample.assetKey)
     }
+
     if (entry.instrument?.kind === 'drum-rack') {
       return entry.instrument.params.pads.flatMap((pad) => pad.sample ? [pad.sample.assetKey] : [])
     }
+
     if (entry.instrument?.kind === 'granular' && entry.instrument.params.zone) {
       return [entry.instrument.params.zone.sample.assetKey]
     }
+
     return []
   }),
 )
@@ -169,10 +184,12 @@ const isInstalledSnapshotAsset = (
     && clip.audioWarp?.enabled === true
     && clip.audioWarp.mode === 'stretch'
   )))
+
   const usedByInstalledSource = snapshot.tracks.some((track) => track.clips.some((clip) => (
     clip.sourceAssetKey === assetId
     && !(clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')
   )))
+
   return !usedByStretch || usedByInstalledSource || instrumentKeys.has(assetId)
 }
 
@@ -186,6 +203,7 @@ const positionSegmentIndex = (segments: readonly PositionSegment[], frame: numbe
 
 const arrangementFrameAt = (segments: readonly PositionSegment[], frame: number) => {
   const segment = segments[positionSegmentIndex(segments, frame)]
+
   return segment ? arrangementFrameForLoop(frame, segment.loop) - segment.deltaFrames : frame
 }
 
@@ -205,11 +223,15 @@ const assetRegistry = (
   assets: [
     ...(() => {
       const instrumentKeys = instrumentAssetKeys(snapshot)
+
       return snapshot.assets.flatMap((asset) => {
         const buffer = asset.buffer
         const descriptor = ordinaryDescriptors.get(asset.assetId)
+
         if ((!buffer && !descriptor) || !isInstalledSnapshotAsset(snapshot, asset.assetId, instrumentKeys)) return []
+
         if (!buffer && instrumentKeys.has(asset.assetId)) return []
+
         return [{
           projectAssetId: asset.assetId,
           portableAssetId: asset.assetId,
@@ -243,8 +265,10 @@ const installedSnapshotAssetCount = (
   ordinaryDescriptors: ReadonlyMap<string, PortableOrdinaryDescriptor> = new Map(),
 ) => {
   const instrumentKeys = instrumentAssetKeys(snapshot)
+
   return snapshot.assets.reduce((count, asset) => {
     if (!asset.buffer && !ordinaryDescriptors.has(asset.assetId)) return count
+
     return count + (isInstalledSnapshotAsset(snapshot, asset.assetId, instrumentKeys) ? 1 : 0)
   }, 0)
 }
@@ -257,6 +281,7 @@ const resolveOrdinaryDescriptors = async (
   known: ReadonlyMap<string, PortableOrdinaryDescriptor> = new Map(),
 ) => {
   const clipsByAsset = new Map<string, LivePlaybackSnapshot["tracks"][number]["clips"][number]>()
+
   for (const track of snapshot.tracks) {
     for (const clip of track.clips) {
       if (clip.sourceAssetKey
@@ -266,22 +291,29 @@ const resolveOrdinaryDescriptors = async (
       }
     }
   }
+
   const descriptors = new Map<string, PortableOrdinaryDescriptor>()
+
   for (const asset of snapshot.assets) {
     if (asset.buffer || !clipsByAsset.has(asset.assetId)) continue
     const resolved = known.get(asset.assetId)
+
     if (resolved) {
       descriptors.set(asset.assetId, resolved)
       continue
     }
+
     if (!resolveSource) throw new Error(`Audio asset "${asset.assetId}" has no source resolver.`)
     const clip = clipsByAsset.get(asset.assetId)
+
     if (!clip) continue
     signal?.throwIfAborted()
     const descriptor = await resolveSource(clip, signal)
+
     if (descriptor.frameCount <= 0 || descriptor.channelCount > portableWasmPagedMaxChannels) {
       throw new Error(`Portable audio asset "${asset.assetId}" has incompatible paged metadata.`)
     }
+
     if (asset.source && (
       descriptor.sampleRate !== asset.source.sampleRate
       || descriptor.channelCount !== asset.source.channelCount
@@ -298,6 +330,7 @@ const resolveOrdinaryDescriptors = async (
       descriptor,
     })
   }
+
   return descriptors
 }
 
@@ -342,15 +375,19 @@ const withAcceptedLiveSynthValues = (
   snapshot: LivePlaybackSnapshot, since: LivePlaybackSnapshot, accepted: LivePlaybackSnapshot,
 ): LivePlaybackSnapshot => {
   const fx = snapshot.mixer.fx
+
   const trackFx = Object.fromEntries(Object.entries(fx.trackFx ?? {}).map(([id, entry]) => {
     const now = accepted.mixer.fx.trackFx?.[id]?.instrument
     const before = since.mixer.fx.trackFx?.[id]?.instrument
     const compiled = entry.instrument
+
     if (now?.kind !== "synth" || before?.kind !== "synth" || compiled?.kind !== "synth"
       || now.instanceId !== before.instanceId || now.instanceId !== compiled.instanceId) return [id, entry]
     const update = movedSynthLiveFields(before.params, now.params)
+
     return [id, { ...entry, instrument: { ...compiled, params: mergeSynthParams(compiled.params, update) } }]
   }))
+
   return { ...snapshot, mixer: { ...snapshot.mixer, fx: { ...fx, trackFx } } }
 }
 
@@ -359,23 +396,31 @@ const withAcceptedLiveSynthValues = (
 // that taken from `previous` fingerprints as `previous` exactly when nothing else changed.
 const withLiveContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const previousTracks = new Map(previous.tracks.map((track) => [track.id, track]))
+
   const liveInstance = (targetId: string, instance: AudioEffectRuntimeInstance, before: readonly AudioEffectRuntimeInstance[] = []) => {
     const installed = before.find((entry) => entry.id === instance.id)
+
     if (!installed || JSON.stringify({ ...installed, params: null }) !== JSON.stringify({ ...instance, params: null })) return instance
+
     return isLiveParameterChange(createAudioEffectParameterPayload(
       { targetId, instanceId: instance.id, kind: instance.kind }, installed.params, instance.params), next.bpm) ? installed : instance
   }
+
   const trackFx = next.mixer.fx.trackFx && Object.fromEntries(Object.entries(next.mixer.fx.trackFx).map(([id, entry]) => {
     const installed = previous.mixer.fx.trackFx?.[id]
+
     const instrument = installed?.instrument && entry.instrument && installed.instrument.instanceId === entry.instrument.instanceId
       && isLiveParameterChange({ targetId: id, effect: "instrument", from: installed.instrument, to: entry.instrument }, next.bpm)
       ? installed.instrument : entry.instrument
+
     return [id, { ...entry, instrument, instances: entry.instances.map((instance) => liveInstance(id, instance, installed?.instances)) }]
   }))
+
   return {
     ...next,
     tracks: next.tracks.map((track) => {
       const installed = previousTracks.get(track.id)
+
       return installed ? { ...track, volume: installed.volume, muted: installed.muted, soloed: installed.soloed,
         sends: installed.sends, outputTargetId: installed.outputTargetId } : track
     }),
@@ -399,11 +444,15 @@ const hasStretchClips = (snapshot: LivePlaybackSnapshot) => snapshot.tracks.some
 // Stretch artifact is prepared for the candidate before the seam, so its placement and warp are carried like any other.
 const withSeamClips = (next: readonly SnapshotClip[], installed: readonly SnapshotClip[]): SnapshotClip[] => {
   const incoming = new Map(next.map((clip) => [clip.id, clip]))
+
   return installed.map((clip) => {
     const edited = incoming.get(clip.id)
+
     if (clip.midi || !edited) return clip
+
     const { startSec, duration, bufferOffsetSec, gain, fades, audioWarp, sourceAssetKey, sourceKind, sourceDurationSec, sourceSampleRate,
       sourceChannelCount, sampleUrl, buffer } = clip
+
     return { ...edited, startSec, duration, bufferOffsetSec, gain, fades, audioWarp, sourceAssetKey, sourceKind, sourceDurationSec,
       sourceSampleRate, sourceChannelCount, sampleUrl, buffer }
   })
@@ -416,6 +465,7 @@ const withSeamClips = (next: readonly SnapshotClip[], installed: readonly Snapsh
 // fresh stage of the new size starts (`replaced_by_spectral_size_change`).
 const withInstalledEffectParams = (next: readonly AudioEffectRuntimeInstance[], installed: readonly AudioEffectRuntimeInstance[] = []): AudioEffectRuntimeInstance[] => {
   const installedByKey = new Map(installed.map((instance) => [effectKey(instance), instance]))
+
   return next.map((instance) => installedByKey.get(effectKey(instance)) ?? instance)
 }
 
@@ -429,10 +479,13 @@ const withInstalledEffectParams = (next: readonly AudioEffectRuntimeInstance[], 
 // sample that becomes or ceases to be available.
 const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const previousTracks = new Map(previous.tracks.map((track) => [track.id, track]))
+
   const trackFx = next.mixer.fx.trackFx && Object.fromEntries(Object.entries(next.mixer.fx.trackFx).map(([id, entry]) => {
     const installed = previous.mixer.fx.trackFx?.[id]
+
     return [id, installed ? { ...entry, instrument: installed.instrument, instances: withInstalledEffectParams(entry.instances, installed.instances) } : entry]
   }))
+
   return {
     ...next,
     assets: previous.assets,
@@ -445,6 +498,7 @@ const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSna
     },
     tracks: next.tracks.map((track) => {
       const installed = previousTracks.get(track.id)
+
       return installed ? { ...track, channelRole: installed.channelRole, groupId: installed.groupId, clips: withSeamClips(track.clips, installed.clips) } : track
     }),
     mixer: { ...next.mixer, fx: { ...next.mixer.fx, masterFxInstances: withInstalledEffectParams(next.mixer.fx.masterFxInstances, previous.mixer.fx.masterFxInstances), trackFx } },
@@ -454,6 +508,7 @@ const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSna
 const onSharedTracks = (snapshot: LivePlaybackSnapshot, other: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const shared = new Set(other.tracks.map((track) => track.id))
   const trackFx = snapshot.mixer.fx.trackFx && Object.fromEntries(Object.entries(snapshot.mixer.fx.trackFx).filter(([id]) => shared.has(id)))
+
   return { ...snapshot, tracks: snapshot.tracks.filter((track) => shared.has(track.id)), mixer: { ...snapshot.mixer, fx: { ...snapshot.mixer.fx, trackFx } } }
 }
 
@@ -468,11 +523,14 @@ const effectKey = (instance: AudioEffectRuntimeInstance) => `${instance.id}\0${i
 const onKeptEffects = (snapshot: LivePlaybackSnapshot, other: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const own = snapshot.mixer.fx.trackFx ?? {}
   const theirs = other.mixer.fx.trackFx ?? {}
+
   const trackFx = Object.fromEntries(snapshot.tracks.map(({ id }) => {
     const entry = own[id]
     const kept = new Set((theirs[id]?.instances ?? []).map(effectKey))
+
     return [id, { ...entry, instances: (entry?.instances ?? []).filter((instance) => kept.has(effectKey(instance))).sort((left, right) => left.id.localeCompare(right.id)) }]
   }))
+
   return { ...snapshot, mixer: { ...snapshot.mixer, fx: { ...snapshot.mixer.fx, trackFx } } }
 }
 
@@ -481,11 +539,15 @@ const onKeptEffects = (snapshot: LivePlaybackSnapshot, other: LivePlaybackSnapsh
 const inSessionOrder = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const ranked = <T>(items: readonly T[], id: (item: T) => string, before: readonly string[]) => {
     const rank = new Map(before.map((entry, index) => [entry, index]))
+
     return [...items].sort((left, right) => (rank.get(id(left)) ?? rank.size) - (rank.get(id(right)) ?? rank.size))
   }
+
   const trackIds = previous.tracks.map((track) => track.id)
+
   const trackFx = next.mixer.fx.trackFx
     && Object.fromEntries(ranked(Object.entries(next.mixer.fx.trackFx), ([id]) => id, Object.keys(previous.mixer.fx.trackFx ?? {})))
+
   return {
     ...next,
     tracks: ranked(next.tracks, (track) => track.id, trackIds),
@@ -510,10 +572,13 @@ const scheduleLeadSec = (horizonSec: number) => Math.min(5, Math.max(0.05, horiz
 const maxAdoptionSeamLeadSec = 0.25
 const renderQuantumFrames = 128
 const recentSeamRoundTripCount = 32
+
 // What a session's first adoption assumes, as the native bound lead does (25 ms).
 const coldSeamRoundTripMs = 25
+
 const adoptionSeamLeadFrames = (sampleRate: number, roundTripsMs: readonly number[]) => {
   const slowest = [...roundTripsMs].sort((a, b) => a - b)[Math.ceil(0.99 * roundTripsMs.length) - 1] ?? coldSeamRoundTripMs
+
   return Math.min(
     Math.round(maxAdoptionSeamLeadSec * sampleRate),
     Math.floor(sampleRate / 20) + Math.ceil(slowest * sampleRate / 1000) + 2 * renderQuantumFrames,
@@ -542,23 +607,30 @@ const reconcileAtSeam = (input: {
   const { previous, next, seamFrame } = input
   const noteKey = (event: { target: { trackId: string }; noteId: number }) => `${event.target.trackId}\0${event.noteId}`
   const sounding = new Map<string, Extract<PortableSchedule["events"][number], { type: "note-on" }>>()
+
   for (const event of previous.events) {
     if (event.frame >= seamFrame) continue
+
     if (event.type === "note-on") sounding.set(noteKey(event), event)
     else if (event.type === "note-off") sounding.delete(noteKey(event))
   }
+
   const continued = new Set<PortableSchedule["events"][number]>()
+
   for (const event of next.events) {
     if (event.type !== "note-on" || event.frame !== seamFrame) continue
     const held = sounding.get(noteKey(event))
+
     if (held && held.pitch === event.pitch && held.velocity === event.velocity && input.keepsVoices(event.target.trackId)) {
       continued.add(event)
       sounding.delete(noteKey(event))
     }
   }
+
   const releases = [...sounding.values()].flatMap((held): PortableSchedule["events"][number][] => input.hasTrack(held.target.trackId) ? [{
     type: "note-off", target: held.target, noteId: held.noteId, pitch: held.pitch, frame: seamFrame, sequence: 0,
   }] : [])
+
   // `next` starts at the seam, so the releases go first: a release precedes a note-on at the same frame.
   return {
     ...next,
@@ -594,6 +666,7 @@ const pagedSourceCoverage = (
   const sourceOffset = source.sourceOffsetFrame + (source.sourceOffsetFraction ?? 0)
   const lastPosition = sourceOffset + source.sourceFrameCount - 1
   const coverageEnd = Math.min(asset.asset.frameCount, Math.floor(lastPosition) + 2)
+
   if (
     !Number.isFinite(sourceOffset)
     || !Number.isSafeInteger(source.sourceOffsetFrame)
@@ -606,10 +679,12 @@ const pagedSourceCoverage = (
   ) return undefined
   const firstPage = Math.floor(source.sourceOffsetFrame / asset.pageFrames)
   const lastPage = Math.floor((coverageEnd - 1) / asset.pageFrames)
+
   const pageKeys = Array.from(
     { length: lastPage - firstPage + 1 },
     (_, index) => `${asset.asset.assetId}:${firstPage + index}`,
   )
+
   return { firstPage, lastPage, coverageEnd, pageKeys }
 }
 
@@ -635,16 +710,22 @@ const requiredPagedPagePlan = (
       artifactId: asset.artifactId,
     }] as const] : []),
   ])
+
   const keys = new Set<string>()
   let preparationCount = 0
+
   for (const source of sources) {
     const asset = pagedAssets.get(source.assetId)
+
     if (!asset) continue
     const coverage = pagedSourceCoverage(asset, source)
+
     if (!coverage) return undefined
     preparationCount += 1
+
     for (const key of coverage.pageKeys) keys.add(key)
   }
+
   return { pageKeys: keys, preparationCount }
 }
 
@@ -661,7 +742,9 @@ const pagedCapacityError = (input: {
         + `but only ${input.pageCapacity} are available.`,
     )
   }
+
   const totalPreparations = input.preparationCount + (input.baselinePreparationCount ?? 0)
+
   if (totalPreparations > input.preparationCapacity) {
     if (input.baselinePreparationCount === undefined) {
       return new Error(
@@ -669,12 +752,14 @@ const pagedCapacityError = (input: {
           + `but only ${input.preparationCapacity} are available.`,
       )
     }
+
     return new Error(
       `Portable paged playback refresh requires ${totalPreparations} prepared ranges `
         + `(${input.baselinePreparationCount ?? 0} active baseline + ${input.preparationCount} continuation), `
         + `but only ${input.preparationCapacity} are available.`,
     )
   }
+
   return undefined
 }
 
@@ -693,6 +778,7 @@ const fitPortableStartupHorizon = (input: {
 }) => {
   const pageFrames = portableWasmPagedPageFrames
   const requestedFrames = Math.max(pageFrames, Math.round(input.requestedHorizonSec * input.sampleRateHz))
+
   for (
     let horizonFrames = requestedFrames;
     horizonFrames >= pageFrames;
@@ -700,6 +786,7 @@ const fitPortableStartupHorizon = (input: {
   ) {
     input.signal?.throwIfAborted()
     const horizonSec = horizonFrames / input.sampleRateHz
+
     const prepared = preparedSession(
       input.snapshot,
       input.sampleRateHz,
@@ -711,18 +798,23 @@ const fitPortableStartupHorizon = (input: {
       undefined,
       input.ordinaryDescriptors,
     )
+
     if (!prepared.supported) continue
+
     const plan = requiredPagedPagePlan(
       prepared.sources,
       input.preparedStretchAssets,
       input.ordinaryDescriptors,
     )
+
     if (!plan) throw new Error("Portable paged source range is outside its prepared asset.")
+
     if (
       plan.pageKeys.size <= input.pageSlotCapacity
       && plan.preparationCount <= input.preparationCapacity
     ) return prepared
   }
+
   const minimumPrepared = preparedSession(
     input.snapshot,
     input.sampleRateHz,
@@ -734,19 +826,24 @@ const fitPortableStartupHorizon = (input: {
     undefined,
     input.ordinaryDescriptors,
   )
+
   if (!minimumPrepared.supported) throw new Error("Portable paged playback minimum horizon is unsupported.")
+
   const minimumPlan = requiredPagedPagePlan(
     minimumPrepared.sources,
     input.preparedStretchAssets,
     input.ordinaryDescriptors,
   )
+
   if (!minimumPlan) throw new Error("Portable paged source range is outside its prepared asset.")
+
   const capacityError = pagedCapacityError({
     pageCount: minimumPlan.pageKeys.size,
     pageCapacity: input.pageSlotCapacity,
     preparationCount: minimumPlan.preparationCount,
     preparationCapacity: input.preparationCapacity,
   })
+
   if (capacityError) throw capacityError
   throw new Error(
     `Portable paged playback requires ${minimumPlan.preparationCount} prepared ranges, `
@@ -768,6 +865,7 @@ const readPortableWasmPages = async function* (input: {
 
   for await (const page of descriptor.readPages({ startFrame, endFrame, signal })) {
     signal?.throwIfAborted()
+
     if (
       !Number.isSafeInteger(page.startFrame)
       || !Number.isSafeInteger(page.frameCount)
@@ -781,29 +879,37 @@ const readPortableWasmPages = async function* (input: {
     ) {
       throw new Error("Portable ordinary source page metadata or coverage is invalid.")
     }
+
     const planes = accumulatedPlanes ?? Array.from(
       { length: descriptor.channelCount },
       () => new Float32Array(pageFrames),
     )
+
     accumulatedPlanes = planes
     let pageOffset = 0
+
     while (pageOffset < page.frameCount) {
       signal?.throwIfAborted()
       const copyFrames = Math.min(page.frameCount - pageOffset, pageFrames - accumulatedFrames)
+
       for (let channel = 0; channel < descriptor.channelCount; channel += 1) {
         const sourcePlane = page.planes[channel]
         const destinationPlane = planes[channel]
+
         if (!sourcePlane || !destinationPlane) {
           throw new Error("Portable ordinary source page channel metadata is invalid.")
         }
+
         destinationPlane.set(
           sourcePlane.subarray(pageOffset, pageOffset + copyFrames),
           accumulatedFrames,
         )
       }
+
       pageOffset += copyFrames
       accumulatedFrames += copyFrames
       expectedStartFrame += copyFrames
+
       if (accumulatedFrames === pageFrames) {
         yield {
           startFrame: expectedStartFrame - pageFrames,
@@ -817,10 +923,13 @@ const readPortableWasmPages = async function* (input: {
       }
     }
   }
+
   signal?.throwIfAborted()
+
   if (expectedStartFrame !== endFrame) {
     throw new Error("Portable ordinary source pages do not cover the requested range exactly.")
   }
+
   if (accumulatedFrames > 0) {
     if (!accumulatedPlanes) throw new Error("Portable ordinary source page accumulator is missing.")
     yield {
@@ -845,20 +954,27 @@ const registerGraphAsset = async (
 ) => {
   const source = snapshot.assets.find((candidate) => candidate.assetId === asset.assetId)
   const preparedSource = preparedStretchAssets.find((candidate) => candidate.asset.assetId === asset.assetId)
+
   if ((preparedSource && isPagedStretchAsset(preparedSource)) || ordinaryDescriptors.has(asset.assetId)) {
     if (preparedSource && isPagedStretchAsset(preparedSource) && preparedSource.manifest.pageFrames !== portableWasmPagedPageFrames) {
       throw new Error(`Portable Stretch artifact "${preparedSource.artifactId}" has an incompatible page size.`)
     }
+
     if (!session.registerPagedAsset) throw new Error("Portable playback backend does not expose paged asset support.")
     const registration = await session.registerPagedAsset(asset, generation)
+
     if (registration.status !== "registered") {
       throw new Error(`Portable paged audio asset "${asset.assetId}" was rejected (${registration.status}).`)
     }
+
     return
   }
+
   const pcm = preparedSource?.pcm ?? (source?.buffer ? planarPcm(source.buffer) : undefined)
+
   if (!pcm) throw new Error(`Portable playback asset "${asset.assetId}" is not hydrated.`)
   const result = await session.registerAsset(asset, pcm, generation)
+
   if (result.status !== "registered") throw new Error(`Portable audio asset "${asset.assetId}" was rejected.`)
 }
 
@@ -869,6 +985,7 @@ const releasePreparations = async (session: PortableSession, preparations: reado
   await Promise.all(preparations.map(async (preparation) => {
     if (preparation.released) return
     const result = await Promise.resolve(session.releaseAssetPreparation?.(preparation.id, generation)).catch(() => undefined)
+
     if (result === "released") preparation.released = true
   }))
 }
@@ -908,16 +1025,21 @@ const preparePagedSources = async (input: {
       artifactId: asset.artifactId,
     }] as const),
   ])
+
   if (pagedAssets.size === 0) return { events: [], preparations: [] }
+
   if (!input.session.prepareAssetRange || !input.session.writeAssetPage || !input.session.releaseAssetPreparation) {
     throw new Error("Portable playback backend does not expose paged asset support.")
   }
+
   const requiredPages = new Map<string, Set<number>>()
   const pagePlan = requiredPagedPagePlan(input.sources, input.preparedStretchAssets, input.ordinaryDescriptors)
+
   if (!pagePlan) throw new Error("Portable Stretch source range is outside its prepared asset.")
   const pageKeys = pagePlan.pageKeys
   const pinnedPageKeys = input.pinnedPageKeys ?? new Set<string>()
   const unionPageCount = new Set([...pinnedPageKeys, ...pageKeys]).size
+
   const capacityError = pagedCapacityError({
     pageCount: unionPageCount,
     pageCapacity: input.session.pagedCapabilities?.slotCount ?? portableWasmPagedSlotCount,
@@ -925,43 +1047,61 @@ const preparePagedSources = async (input: {
     preparationCapacity: input.preparationCapacity,
     baselinePreparationCount: input.baselinePreparationCount,
   })
+
   if (capacityError) throw capacityError
   const spare = new Map<string, PortablePagedPreparation[]>()
+
   for (const preparation of input.reusable ?? []) {
     const key = preparedRangeKey(preparation.assetId, preparation.sourceOffsetFrame, preparation.coverageEnd)
     spare.set(key, [...spare.get(key) ?? [], preparation])
   }
+
   const reused = new Map<typeof input.sources[number], PortablePagedPreparation>()
+
   for (const source of input.sources) {
     const asset = pagedAssets.get(source.assetId)
+
     if (!asset) continue
     const coverage = pagedSourceCoverage(asset, source)
+
     if (!coverage) throw new Error(`Portable Stretch source range for "${source.sourceIdentity}" is invalid.`)
     const held = spare.get(preparedRangeKey(source.assetId, source.sourceOffsetFrame, coverage.coverageEnd))?.pop()
+
     if (held) {
       reused.set(source, held)
       continue
     }
+
     const pages = requiredPages.get(source.assetId) ?? new Set<number>()
+
     for (let page = coverage.firstPage; page <= coverage.lastPage; page += 1) pages.add(page)
     requiredPages.set(source.assetId, pages)
   }
+
   const availableSlots = input.session.pagedCapabilities?.slotCount ?? portableWasmPagedSlotCount
+
   if (unionPageCount > availableSlots) {
     throw new Error(`Portable paged playback requires ${unionPageCount} resident pages, but only ${availableSlots} are available.`)
   }
+
   const preparations: PortablePagedPreparation[] = []
   const created: PortablePagedPreparation[] = []
+
   try {
     input.signal?.throwIfAborted()
+
     for (const [assetId, pages] of requiredPages) {
       const asset = pagedAssets.get(assetId)
+
       if (!asset) continue
+
       for (const pageIndex of pages) {
         input.signal?.throwIfAborted()
         const pageStart = pageIndex * asset.pageFrames
         const pageEnd = Math.min(asset.asset.frameCount, pageStart + asset.pageFrames)
+
         if (pageEnd <= pageStart) throw new Error(`Portable Stretch page ${pageIndex} is outside its asset.`)
+
         const range = await input.session.prepareAssetRange(
           assetId,
           input.generation,
@@ -969,16 +1109,21 @@ const preparePagedSources = async (input: {
           pageEnd - pageStart,
           0,
         )
+
         if (range.status === "prepared") {
           const release = await input.session.releaseAssetPreparation(range.preparationId, input.generation)
+
           if (release !== "released") throw new Error(`Portable Stretch page preparation could not be released (${release}).`)
           continue
         }
+
         if (range.status !== "missing-page" || range.firstMissingPage === undefined) {
           throw new Error(`Portable Stretch page range for "${assetId}" was rejected (${range.status}).`)
         }
+
         const firstFrame = range.firstMissingPage * asset.pageFrames
         const endFrame = Math.min(asset.asset.frameCount, firstFrame + asset.pageFrames)
+
         const pages = asset.descriptor
           ? readPortableWasmPages({
             descriptor: asset.descriptor,
@@ -989,10 +1134,13 @@ const preparePagedSources = async (input: {
           : asset.artifactId
             ? input.repository.read(asset.artifactId, firstFrame, endFrame)
             : undefined
+
         if (!pages) throw new Error(`Portable asset "${assetId}" has no page source.`)
+
         for await (const page of pages) {
           input.signal?.throwIfAborted()
           const pageIndex = page.startFrame / asset.pageFrames
+
           if (
             !Number.isSafeInteger(pageIndex)
             || pageIndex < 0
@@ -1007,23 +1155,31 @@ const preparePagedSources = async (input: {
           ) throw new Error(`Portable asset "${assetId}" page metadata or coverage is invalid.`)
           const result = await input.session.writeAssetPage(assetId, input.generation, pageIndex, page.frameCount, page.planes)
           input.signal?.throwIfAborted()
+
           if (result.status !== "written") throw new Error(`Portable page ${pageIndex} was rejected (${result.status}).`)
         }
       }
     }
+
     const events: PortableWasmPreparedSourceEvent[] = []
+
     for (const source of input.sources) {
       input.signal?.throwIfAborted()
       const asset = pagedAssets.get(source.assetId)
+
       if (!asset) continue
       const held = reused.get(source)
+
       if (held) {
         events.push({ ...source, preparationId: held.id })
         preparations.push({ ...held, stopFrame: source.stopFrame })
         continue
       }
+
       const coverage = pagedSourceCoverage(asset, source)
+
       if (!coverage) throw new Error(`Portable Stretch source range for "${source.sourceIdentity}" is invalid.`)
+
       const range = await input.session.prepareAssetRange(
         source.assetId,
         input.generation,
@@ -1031,14 +1187,18 @@ const preparePagedSources = async (input: {
         coverage.coverageEnd - source.sourceOffsetFrame,
         0,
       )
+
       input.signal?.throwIfAborted()
+
       if (range.status !== "prepared") {
         throw new Error(`Portable Stretch source range for "${source.sourceIdentity}" was rejected (${range.status}).`)
       }
+
       events.push({
         ...source,
         preparationId: range.preparationId,
       })
+
       const preparation = {
         id: range.preparationId,
         assetId: source.assetId,
@@ -1048,9 +1208,11 @@ const preparePagedSources = async (input: {
         stopFrame: source.stopFrame,
         released: false,
       }
+
       preparations.push(preparation)
       created.push(preparation)
     }
+
     return { events, preparations }
   } catch (error) {
     await Promise.all(created.map((preparation) => input.session.releaseAssetPreparation?.(preparation.id, input.generation)))
@@ -1092,16 +1254,20 @@ const fitPagedWindow = async (input: {
   paged: Awaited<ReturnType<typeof preparePagedSources>>
 } | "refused" | "no-fit"> => {
   const { isNew } = input
+
   for (let horizonSec = input.horizonSec; horizonSec >= input.pageSec; horizonSec -= input.pageSec) {
     const candidate = input.compile(horizonSec)
+
     if (!candidate) return "refused"
     const sources = isNew ? candidate.sources.filter(isNew) : candidate.sources
+
     try {
       return { candidate, sources, paged: await input.prepare(sources) }
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes("requires ")) throw error
     }
   }
+
   return "no-fit"
 }
 
@@ -1115,28 +1281,39 @@ const scheduleSourcesInGlobalOrder = async (input: {
   const ordinaryBySequence = new Map(input.ordinary.map((source) => [source.sequence, source]))
   const preparedBySequence = new Map(input.prepared.map((source) => [source.sequence, source]))
   const sequences = [...new Set([...ordinaryBySequence.keys(), ...preparedBySequence.keys()])].sort((left, right) => left - right)
+
   if (sequences.length === 0) {
     await input.session.scheduleSources(input.revision, input.epoch, [])
+
     return
   }
+
   let index = 0
+
   while (index < sequences.length) {
     const firstSequence = sequences[index]
+
     if (firstSequence === undefined) break
     const isPrepared = preparedBySequence.has(firstSequence)
+
     if (isPrepared) {
       if (!input.session.schedulePreparedSources) {
         throw new Error("Portable playback backend does not expose paged asset support.")
       }
+
       const group: PortableWasmPreparedSourceEvent[] = []
+
       while (index < sequences.length) {
         const sequence = sequences[index]
+
         if (sequence === undefined || !preparedBySequence.has(sequence)) break
         const event = preparedBySequence.get(sequence)
+
         if (!event) throw new Error(`Portable source sequence ${sequence} is missing from its schedule group.`)
         group.push(event)
         index += 1
       }
+
       await input.session.schedulePreparedSources(
         input.revision,
         input.epoch,
@@ -1144,14 +1321,18 @@ const scheduleSourcesInGlobalOrder = async (input: {
       )
     } else {
       const group: Extract<PreparedPortableSession, { supported: true }>["sources"][number][] = []
+
       while (index < sequences.length) {
         const sequence = sequences[index]
+
         if (sequence === undefined || preparedBySequence.has(sequence)) break
         const event = ordinaryBySequence.get(sequence)
+
         if (!event) throw new Error(`Portable source sequence ${sequence} is missing from its schedule group.`)
         group.push(event)
         index += 1
       }
+
       await input.session.scheduleSources(
         input.revision,
         input.epoch,
@@ -1170,8 +1351,10 @@ const replaceSourcesAtomically = async (input: {
 }) => {
   if (input.session.replaceSources) {
     await input.session.replaceSources(input.revision, input.epoch, input.ordinary, input.prepared)
+
     return
   }
+
   await scheduleSourcesInGlobalOrder(input)
 }
 
@@ -1218,8 +1401,10 @@ export const createPortableBrowserPlaybackController = (input: {
 }) => {
   const backend = input.backend ?? new WasmAudioWorkletBackend()
   const select = input.select ?? ((project) => selectPortableWasmAudioWorkletBackend(undefined, project))
+
   const safeProjectGeneration = (generation: number) =>
     Number.isSafeInteger(generation) && generation > 0 ? generation : 1
+
   let active: PortableSession | undefined
   let activeProjectGeneration: number | undefined
   let activeTransport: LivePlaybackTransport | undefined
@@ -1251,6 +1436,7 @@ export const createPortableBrowserPlaybackController = (input: {
   let activeOrdinaryDescriptors: ReadonlyMap<string, PortableOrdinaryDescriptor> = new Map()
   let activePreparedSources: readonly PortablePreparedSource[] = []
   let activePreparations: readonly PortablePagedPreparation[] = []
+
   // The preparations, registered assets and Stretch artifacts (with their leases) a failed adoption attempt made stay for
   // the resubmit of the same desired state (UD 8), so a slow preparation converges instead of starting over. They go when
   // the desired state changes, when the resubmits run out, and with the session.
@@ -1260,6 +1446,7 @@ export const createPortableBrowserPlaybackController = (input: {
     assets: readonly string[]
     stretch: readonly PortablePreparedStretch[] | undefined
   }
+
   let adoptionCache: AdoptionCache | undefined
   // Assets and Stretch leases an adoption replaced: the old sources stop at the seam, so they go once the position has
   // reached it and the core no longer reads them.
@@ -1286,6 +1473,7 @@ export const createPortableBrowserPlaybackController = (input: {
   let startupAbortController: AbortController | undefined
   const stretchRepository = input.createPreparedStretchRepository?.() ?? createPreparedStretchArtifactRepository()
   let repositoryDisposed = false
+
   const releasePreparedStretchAssets = async (assets: readonly PortablePreparedStretch[]) => {
     const leases = new Set(assets.flatMap((asset) => isPagedStretchAsset(asset) ? [asset.lease] : []))
     await Promise.all([...leases].map((lease) => lease.release().catch(() => undefined)))
@@ -1303,18 +1491,23 @@ export const createPortableBrowserPlaybackController = (input: {
   const prepareCandidateStretch = async (snapshot: LivePlaybackSnapshot, projectGeneration: number) => {
     if (!hasStretchClips(snapshot)) return []
     const preparation = await prepareStretch(snapshot, projectGeneration)
+
     if (!preparation.supported) throw new Error(preparation.message)
+
     return preparation.assets
   }
 
   const disposeAdoptionCache = async (session: PortableSession | undefined) => {
     const cache = adoptionCache
     adoptionCache = undefined
+
     if (!cache) return
+
     if (session) {
       await releasePreparations(session, cache.preparations, assetGeneration)
       await Promise.all(cache.assets.map((assetId) => session.releaseAsset?.(assetId, assetGeneration).catch(() => undefined)))
     }
+
     await releasePreparedStretchAssets(cache.stretch ?? [])
   }
 
@@ -1332,6 +1525,7 @@ export const createPortableBrowserPlaybackController = (input: {
     activeSnapshot = undefined
     activeFrameSchedule = undefined
     retries.clear()
+
     if (session?.releaseAssetPreparation) {
       for (const preparation of activePreparations) {
         if (!preparation.released) {
@@ -1341,6 +1535,7 @@ export const createPortableBrowserPlaybackController = (input: {
         }
       }
     }
+
     activePreparations = []
     retiredAssets = []
     cleanup.push(releasePreparedStretchAssets(retiredStretch.flatMap((retired) => retired.assets)))
@@ -1351,6 +1546,7 @@ export const createPortableBrowserPlaybackController = (input: {
     cleanup.push(releasePreparedStretchAssets(activePreparedStretchAssets))
     activePreparedStretchAssets = []
     playing = false
+
     return Promise.all(cleanup)
   }
 
@@ -1364,17 +1560,21 @@ export const createPortableBrowserPlaybackController = (input: {
   ): Promise<LivePlaybackSnapshotCompilation> => {
     const compilation = await input.compileSnapshot(transport, context)
     const fingerprint = input.fingerprintSnapshot
+
     if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation
     const next = inSessionOrder(compilation.snapshot, activeSnapshot)
+
     // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a
     // refresh or a start does not: they extend the graph that plays.
     const [compared, installed] = context?.liveAdoption
       ? [onKeptEffects(onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), activeSnapshot),
         onKeptEffects(onSharedTracks(activeSnapshot, next), next)]
       : [next, activeSnapshot]
+
     if (fingerprint(withLiveContentOf(compared, activeSnapshot)) !== fingerprint(installed)) {
       return { supported: false, reasons: ["Portable playback requires a schedule rebuild."] }
     }
+
     return { ...compilation, snapshot: { ...next, revision: activeRevision } }
   }
 
@@ -1382,9 +1582,11 @@ export const createPortableBrowserPlaybackController = (input: {
     if (!runtime || runtime.released) return
     runtime.released = true
     const releases: Promise<unknown>[] = []
+
     for (const preparation of runtime.preparations) {
       if (!preparation.released) {
         const release = runtime.session.releaseAssetPreparation?.(preparation.id, runtime.assetGeneration)
+
         if (release) {
           releases.push(release.then((result) => {
             if (result === "released") preparation.released = true
@@ -1392,6 +1594,7 @@ export const createPortableBrowserPlaybackController = (input: {
         }
       }
     }
+
     await Promise.all(releases)
     await releasePreparedStretchAssets(runtime.preparedStretchAssets)
     runtime.unsubscribeFault()
@@ -1400,23 +1603,29 @@ export const createPortableBrowserPlaybackController = (input: {
 
   const releaseExpiredPreparations = async (session: PortableSession, frame: number) => {
     const expired = activePreparations.filter((preparation) => !preparation.released && preparation.stopFrame <= frame)
+
     if (session.releaseAssetPreparation && expired.length > 0) {
       const results = await Promise.all(expired.map(async (preparation) => ({
         preparation,
         result: await session.releaseAssetPreparation?.(preparation.id, assetGeneration),
       })))
+
       const released = new Set(
         results.filter((entry) => entry.result === "released").map((entry) => entry.preparation.id),
       )
+
       for (const preparation of expired) {
         if (released.has(preparation.id)) preparation.released = true
       }
+
       activePreparations = activePreparations.filter((preparation) => !released.has(preparation.id))
     }
+
     // After the preparations: a paged asset answers asset-in-use while one holds it, and a release that throws is still
     // owed. Both are asked again at the next report.
     const due = retiredAssets.filter((retired) => retired.seamFrame <= frame)
     retiredAssets = retiredAssets.filter((retired) => !due.includes(retired))
+
     const answers = await Promise.all(due.map(async (retired) => {
       try {
         return { retired, owed: (await session.releaseAsset?.(retired.assetId, assetGeneration))?.status === "asset-in-use" }
@@ -1424,6 +1633,7 @@ export const createPortableBrowserPlaybackController = (input: {
         return { retired, owed: true }
       }
     }))
+
     retiredAssets = [...retiredAssets, ...answers.filter((answer) => answer.owed).map((answer) => answer.retired)]
     // The leases go with the assets: nothing reads the old artifacts once the position is past the seam.
     const expiredStretch = retiredStretch.filter((retired) => retired.seamFrame <= frame)
@@ -1437,6 +1647,7 @@ export const createPortableBrowserPlaybackController = (input: {
     const session = active
     const cleanup = clearActiveSessionState()
     session?.dispose()
+
     return cleanup
   }
 
@@ -1444,21 +1655,27 @@ export const createPortableBrowserPlaybackController = (input: {
     if (recording === session) recording = undefined
     session.unsubscribeStatus()
     session.unsubscribeTrack()
+
     try { session.disconnectInput() } catch {}
+
     try { session.source.disconnect() } catch {}
   }
 
   const failRecording = (session: PortableRecordingSession, error: Error) => {
     if (session.terminal) return
     session.terminal = true
+
     try {
       active?.postRecordingControl({ version: portableWasmProtocolVersion, type: "recording-capture-cancel" })
     } catch {}
+
     void session.writer.abort().catch(() => undefined)
     session.writer.terminate()
+
     if (session.phase === "configuring" && session.configurationPending) session.configured.reject(error)
     else if (session.phase === "finalizing") session.finalized.reject(error)
     else if (session.phase === "cancelling") session.cancelled.reject(error)
+
     if (session.phase !== "configuring") session.onFailure?.(error)
     clearRecording(session)
   }
@@ -1472,8 +1689,10 @@ export const createPortableBrowserPlaybackController = (input: {
     startupAbortController?.abort()
     startupAbortController = undefined
     const recordingSession = recording
+
     if (recordingSession) failRecording(recordingSession, new Error("Portable recording stopped with playback."))
     const sessionCleanup = teardownSession()
+
     if (!repositoryDisposed) {
       repositoryDisposed = true
       void sessionCleanup
@@ -1501,6 +1720,7 @@ export const createPortableBrowserPlaybackController = (input: {
     preparedSources: readonly PortablePreparedSource[]
     released: boolean
   }
+
   const prepareRuntime = async (
     transport: LivePlaybackTransport,
     generation: number,
@@ -1511,11 +1731,14 @@ export const createPortableBrowserPlaybackController = (input: {
     compileContext?: LivePlaybackCompileContext,
   ): Promise<PreparedRuntime | undefined> => {
     const context = input.getAudioContext()
+
     if (!context) return undefined
     const preparationAbortController = new AbortController()
+
     const cancelled = () => generation !== lifecycleGeneration
       || projectGeneration !== (input.getProjectGeneration?.() ?? 0)
       || preparationAbortController.signal.aborted
+
     const requestedFrame = Math.round(transport.playheadSec * context.sampleRate)
     let session: PortableSession | undefined
     let unsubscribeSessionFault: (() => void) | undefined
@@ -1524,25 +1747,36 @@ export const createPortableBrowserPlaybackController = (input: {
     const sessionFault: PortableSessionFault = {}
     let transferredStretchOwnership = false
     startupAbortController = preparationAbortController
+
     try {
       const compilation = await compileSnapshot(transport, compileContext)
+
       if (cancelled()) return undefined
+
       if (!compilation.supported) return undefined
+
       if (hasStretchClips(compilation.snapshot)) {
         const preparation = await prepareStretch(compilation.snapshot, projectGeneration, preparationAbortController.signal)
+
         if (!preparation.supported) {
           input.reportFault?.(preparation.message)
+
           return undefined
         }
+
         preparedStretchAssets = preparation.assets
       }
+
       if (cancelled()) return undefined
+
       const ordinaryDescriptors = await resolveOrdinaryDescriptors(
         compilation.snapshot,
         input.resolveSource,
         preparationAbortController.signal,
       )
+
       if (cancelled()) return undefined
+
       const prepared = preparedSession(
         compilation.snapshot,
         context.sampleRate,
@@ -1554,24 +1788,31 @@ export const createPortableBrowserPlaybackController = (input: {
         undefined,
         ordinaryDescriptors,
       )
+
       if (!prepared.supported) return undefined
       const selection = await select(prepared.qualification)
+
       if (cancelled()) return undefined
+
       if (!selection.selected) return undefined
       const playbackSession = await backend.createPlaybackSession(context, selection.capability, 8_192)
       session = playbackSession
       unsubscribeSessionFault = playbackSession.onFault((error: Error) => {
         if (active !== playbackSession) {
           sessionFault.error = error
+
           return
         }
+
         const recordingSession = recording
+
         if (recordingSession) failRecording(recordingSession, error)
         input.reportFault?.(error.message)
         unsubscribeFault = undefined
         clearActiveSessionState()
       })
       const hasPagedAssets = preparedStretchAssets.some(isPagedStretchAsset) || ordinaryDescriptors.size > 0
+
       const startupPrepared = hasPagedAssets
         ? fitPortableStartupHorizon({
           snapshot: compilation.snapshot,
@@ -1587,8 +1828,11 @@ export const createPortableBrowserPlaybackController = (input: {
           signal: preparationAbortController.signal,
         })
         : prepared
+
       await playbackSession.prepareGraph(startupPrepared.graph)
+
       if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
+
       if (hasPagedAssets && (
         !playbackSession.registerPagedAsset
         || !playbackSession.writeAssetPage
@@ -1599,16 +1843,23 @@ export const createPortableBrowserPlaybackController = (input: {
       )) {
         throw new Error("Portable playback backend does not expose paged asset support.")
       }
+
       for (const asset of startupPrepared.graph.assets) {
         await registerGraphAsset(playbackSession, asset, compilation.snapshot, preparedStretchAssets, ordinaryDescriptors, nextEpoch)
+
         if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
       }
+
       await playbackSession.publishGraph(startupPrepared.graph.revision)
+
       if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
       await playbackSession.setTransport(nextEpoch, false, startupPrepared.schedule.timeOrigin.frame)
+
       if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
       await playbackSession.installSchedule(startupPrepared.schedule)
+
       if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
+
       const paged = await preparePagedSources({
         session: playbackSession,
         sources: startupPrepared.sources,
@@ -1619,6 +1870,7 @@ export const createPortableBrowserPlaybackController = (input: {
         preparationCapacity: playbackSession.pagedCapabilities?.preparationCount ?? portablePagedPreparationCapacity,
         signal: preparationAbortController.signal,
       })
+
       const preparedSourceEvents = paged.events
       const preparations = paged.preparations
       runtimePreparations = preparations
@@ -1630,7 +1882,9 @@ export const createPortableBrowserPlaybackController = (input: {
         ordinary: ordinarySources,
         prepared: preparedSourceEvents,
       })
+
       if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
+
       if (runTransport) {
         if (
           !Number.isSafeInteger(requestedFrame)
@@ -1639,7 +1893,9 @@ export const createPortableBrowserPlaybackController = (input: {
         ) throw new Error("Portable browser playback requested transport is outside its prepared schedule.")
         await playbackSession.setTransport(nextEpoch, true, requestedFrame)
       }
+
       if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
+
       if (sessionFault.error) throw sessionFault.error
       playbackSession.onTransportPosition?.((position) => {
         if (
@@ -1648,10 +1904,12 @@ export const createPortableBrowserPlaybackController = (input: {
           || position.epoch !== epoch
           || position.sequence <= positionSequence
         ) return
+
         if (position.frame < positionFrame && position.running) return
         positionSequence = position.sequence
         positionFrame = position.frame
         void releaseExpiredPreparations(playbackSession, position.frame).catch(() => undefined)
+
         for (const [kind, retry] of retries) {
           if (--retry.wait > 0) continue
           retries.delete(kind)
@@ -1659,7 +1917,9 @@ export const createPortableBrowserPlaybackController = (input: {
         }
       })
       playbackSession.onGraphContinuity?.((message) => input.onGraphContinuity?.(message))
+
       if (runTransport) playbackSession.markActive()
+
       const runtime = {
         session: playbackSession,
         prepared: startupPrepared,
@@ -1678,25 +1938,31 @@ export const createPortableBrowserPlaybackController = (input: {
         preparedSources: withPreparations(preparedSourceEvents, preparations),
         released: false,
       }
+
       transferredStretchOwnership = true
+
       return runtime
     } catch (error) {
       unsubscribeSessionFault?.()
       await Promise.all(runtimePreparations.map(async (preparation) => {
         if (!preparation.released) {
           const result = await session?.releaseAssetPreparation?.(preparation.id, nextEpoch)
+
           if (result === "released") preparation.released = true
         }
       }))
       session?.dispose()
+
       if (!cancelled()) {
         input.reportFault?.(error instanceof Error ? error.message : "Portable browser playback could not start.")
       }
+
       return undefined
     } finally {
       if (startupAbortController === preparationAbortController) {
         startupAbortController = undefined
       }
+
       if (!transferredStretchOwnership) await releasePreparedStretchAssets(preparedStretchAssets)
     }
   }
@@ -1736,27 +2002,36 @@ export const createPortableBrowserPlaybackController = (input: {
     compileContext?: LivePlaybackCompileContext,
   ): Promise<PortableStartResult> => {
     const context = input.getAudioContext()
+
     if (!context) return "unavailable"
+
     const transport = effectiveLoopForStart(
       configuredTransport,
       Math.round(configuredTransport.playheadSec * context.sampleRate),
       context.sampleRate,
     )
+
     const cancelled = () => generation !== lifecycleGeneration
       || projectGeneration !== (input.getProjectGeneration?.() ?? 0)
+
     // A kept session resumes where it stands, with the loop a start would run: a locate to the playhead, then the run.
     if (active && activeProjectGeneration === projectGeneration) {
       const resumed = await seek(configuredTransport.playheadSec, configuredTransport, runTransport)
+
       if (resumed !== "rebuild") {
         if (!cancelled()) return resumed
         void teardownSession()
+
         return "unavailable"
       }
     }
+
     if (active) {
       void teardownSession()
     }
+
     const nextEpoch = epoch + 1
+
     const runtime = await prepareRuntime(
       transport,
       generation,
@@ -1766,11 +2041,15 @@ export const createPortableBrowserPlaybackController = (input: {
       1,
       compileContext,
     )
+
     if (!runtime || cancelled()) {
       if (runtime) await releaseRuntime(runtime)
+
       return "unavailable"
     }
+
     commitRuntime(runtime, runTransport)
+
     return "started"
   }
 
@@ -1778,11 +2057,13 @@ export const createPortableBrowserPlaybackController = (input: {
     // An adoption in flight owns the session's revision and schedule; the next tick refreshes after it.
     if (!playing || !active || refreshPromise || adopting || pendingSeeks > 0) return refreshPromise ?? Promise.resolve<PortableStartResult>("started")
     const context = input.getAudioContext()
+
     if (!context) return Promise.resolve("started")
     const horizonSec = input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC
     const leadSec = scheduleLeadSec(horizonSec)
     const currentFrame = positionFrame
     const endFrame = activeScheduleRange?.endFrame
+
     if (failedRefreshEndFrame !== undefined && currentFrame >= failedRefreshEndFrame) {
       const session = active
       playing = false
@@ -1790,16 +2071,20 @@ export const createPortableBrowserPlaybackController = (input: {
       activeTransport = activeTransport ? { ...activeTransport, state: "paused" } : undefined
       void session?.setTransport(epoch, false, currentFrame).catch(() => undefined)
       input.reportFault?.("Portable playback reached the end of its active schedule after refresh failed.")
+
       return Promise.resolve("unavailable")
     }
+
     if (endFrame === undefined || endFrame - currentFrame > Math.round(leadSec * context.sampleRate)) {
       return Promise.resolve("started")
     }
+
     const previousSession = active
     const generation = lifecycleGeneration
     const projectGeneration = input.getProjectGeneration?.() ?? 0
     const intent = transportIntent
     const arrangementNow = arrangementFrame()
+
     const transport: LivePlaybackTransport = {
       ...(activeTransport ?? {
         state: "playing",
@@ -1810,18 +2095,22 @@ export const createPortableBrowserPlaybackController = (input: {
       state: "playing",
       playheadSec: arrangementNow / context.sampleRate,
     }
+
     // The window plays the arrangement from here at the raw frame the session stands on, with the loop shifted by how far
     // raw runs ahead of the arrangement, as an adoption's schedule does.
     const runLoop = effectiveLoopForStart(transport, arrangementNow, context.sampleRate)
     const deltaSec = (currentFrame - arrangementNow) / context.sampleRate
+
     const windowTransport: LivePlaybackTransport = {
       ...transport,
       loopEnabled: runLoop.loopEnabled,
       loopStartSec: runLoop.loopStartSec + deltaSec,
       loopEndSec: runLoop.loopEndSec + deltaSec,
     }
+
     const refreshAbortController = new AbortController()
     startupAbortController = refreshAbortController
+
     const request: Promise<PortableStartResult> = (async (): Promise<PortableStartResult> => {
       const nextEpoch = epoch
       await releaseExpiredPreparations(previousSession, currentFrame)
@@ -1834,6 +2123,7 @@ export const createPortableBrowserPlaybackController = (input: {
       const baselinePreparations = activePreparations
       const baselineEndFrame = activeScheduleRange?.endFrame ?? currentFrame
       const compilation = await compileSnapshot(transport)
+
       if (
         generation !== lifecycleGeneration
         || intent !== transportIntent
@@ -1849,6 +2139,7 @@ export const createPortableBrowserPlaybackController = (input: {
       // An adoption shortens the window its schedule covers, not the sources the session holds: those reach past
       // `extensionStartFrame`, and the compile from there lists them again.
       const held = new Set([...baselineOrdinarySources, ...baselinePreparedSources].map((source) => `${source.sourceNodeId}:${source.startFrame}`))
+
       const restoreBaseline = async () => {
         if (!baselineSchedule) throw new Error("Portable scheduler cannot roll back a failed refresh.")
         await replaceSourcesAtomically({
@@ -1860,9 +2151,11 @@ export const createPortableBrowserPlaybackController = (input: {
         })
         await previousSession.installSchedule(baselineSchedule)
       }
+
       let prepared: Extract<PreparedPortableSession, { supported: true }> | undefined
       let paged: Awaited<ReturnType<typeof preparePagedSources>> | undefined
       let extensionSources: Extract<PreparedPortableSession, { supported: true }>["sources"] = []
+
       try {
         const fit = await fitPagedWindow({
           horizonSec: requestedExtensionSec,
@@ -1881,6 +2174,7 @@ export const createPortableBrowserPlaybackController = (input: {
               activeOrdinaryDescriptors,
               currentFrame,
             )
+
             return candidate.supported
               && candidate.graph.revision === activeRevision
               && !candidate.graph.assets.some((asset) => !activeGraph?.assets.some((current) => current.assetId === asset.assetId))
@@ -1899,7 +2193,9 @@ export const createPortableBrowserPlaybackController = (input: {
             pinnedPageKeys: new Set(baselinePreparations.flatMap((preparation) => preparation.pageKeys)),
           }),
         })
+
         if (fit === "refused") return "unavailable"
+
         if (fit === "no-fit") throw new Error("Portable schedule refresh could not fit the pinned page horizon.")
         prepared = fit.candidate
         paged = fit.paged
@@ -1916,6 +2212,7 @@ export const createPortableBrowserPlaybackController = (input: {
           })), ...paged.events],
         })
         await previousSession.installSchedule(prepared.schedule)
+
         if (
           generation !== lifecycleGeneration
           || intent !== transportIntent
@@ -1932,6 +2229,7 @@ export const createPortableBrowserPlaybackController = (input: {
           ? activeSourceSequence
           : extensionSources[extensionSources.length - 1]?.sequence ?? activeSourceSequence
         activeTransport = { ...transport }
+
         return "started"
       } catch (error) {
         try {
@@ -1944,33 +2242,41 @@ export const createPortableBrowserPlaybackController = (input: {
         } catch (rollbackError) {
           void teardownSession()
           input.reportFault?.(rollbackError instanceof Error ? rollbackError.message : "Portable schedule refresh rollback failed.")
+
           return "unavailable"
         }
+
         if (paged) {
           await Promise.all(paged.preparations.map(async (preparation) => {
             if (!preparation.released) {
               const result = await previousSession.releaseAssetPreparation?.(preparation.id, assetGeneration)
+
               if (result === "released") preparation.released = true
             }
           }))
         }
+
         failedRefreshEndFrame = activeScheduleRange?.endFrame
         input.reportFault?.(error instanceof Error ? error.message : "Portable schedule refresh failed.")
+
         return "unavailable"
       }
     })().catch((cause: unknown): PortableStartResult => {
       failedRefreshEndFrame = activeScheduleRange?.endFrame
       input.reportFault?.(cause instanceof Error ? cause.message : "Portable schedule refresh failed.")
+
       return "unavailable"
     }).finally(() => {
       if (startupAbortController === refreshAbortController) {
         startupAbortController = undefined
       }
     })
+
     refreshPromise = request
     void request.finally(() => {
       if (refreshPromise === request) refreshPromise = undefined
     })
+
     return request
   }
 
@@ -1981,6 +2287,7 @@ export const createPortableBrowserPlaybackController = (input: {
   const adoptLive = async (loop: AdoptionLoop): Promise<PortableAdoptionAttemptResult> => {
     // A locate rebuilds the schedule the adoption would reconcile against; the follow adopts again after it.
     if (pendingSeeks > 0) return "unavailable"
+
     while (refreshPromise) await refreshPromise
     const session = active
     const audioContext = input.getAudioContext()
@@ -1990,39 +2297,51 @@ export const createPortableBrowserPlaybackController = (input: {
     const transport = activeTransport
     const revision = activeRevision
     const fingerprint = input.fingerprintSnapshot
+
     if (!session || !audioContext || !previous || !schedule || !range || !transport || revision === undefined) return "unavailable"
+
     if (!fingerprint) {
       console.error("[portable-playback] defect: the controller has no fingerprintSnapshot, so no edit can be adopted")
+
       return "unavailable"
     }
+
     const generation = lifecycleGeneration
     const intent = transportIntent
     const wasPlaying = playing
     const current = () => active === session && playing === wasPlaying && generation === lifecycleGeneration && intent === transportIntent
+
     // A compile that throws has changed nothing, and an edit that cannot be installed leaves the old graph playing for
     // the next adoption to retry; a rebuild would end the take and gap the audio for an edit the user expects to hear
     // without either.
     const failed = (result: "failed" | "unsupported" = "failed"): PortableAdoptionAttemptResult =>
       current() ? result : "unavailable"
+
     const sampleRate = audioContext.sampleRate
     const projectGeneration = safeProjectGeneration(activeProjectGeneration ?? 0)
     const publishing = Promise.withResolvers<PortableAdoptionAttemptResult>()
     let attempt: AdoptionCache | undefined
     let committed = false
     adopting = true
+
     try {
       // A run keeps its loop off while the playhead is at or past the loop's end, as a start would. A take keeps the loop
       // it runs with: its refresh reads raw frames as arrangement frames and stops at a loop, so the follow adopts the
       // loop edit once the take has ended.
       const arrangementNow = arrangementFrame()
+
       const compilation = await compileSnapshot({
         ...transport, ...effectiveLoopForStart(recording ? previous.transport : loop, arrangementNow, sampleRate), state: wasPlaying ? "playing" : "paused", playheadSec: arrangementNow / sampleRate,
       }, { liveAdoption: true })
+
       if (!current()) return "unavailable"
+
       if (!compilation.supported) return failed("unsupported")
       const next = compilation.snapshot
       const desired = fingerprint(next)
+
       if (adoptionCache && adoptionCache.fingerprint !== desired) await disposeAdoptionCache(session)
+
       if (desired === fingerprint(previous)) return "unchanged"
       // This attempt owns what the failed one kept; a failed attempt hands it on again.
       const owned: AdoptionCache = { fingerprint: desired, preparations: adoptionCache?.preparations ?? [], assets: adoptionCache?.assets ?? [], stretch: adoptionCache?.stretch }
@@ -2031,49 +2350,64 @@ export const createPortableBrowserPlaybackController = (input: {
       // The candidate's Stretch artifacts are prepared at its tempo and placement, as native prepares them (C:3289-3305). The
       // seam is chosen after this, so a slow preparation spends none of its lead.
       owned.stretch ??= await prepareCandidateStretch(next, projectGeneration)
+
       if (!current()) return "unavailable"
+
       // The candidate's assets: the Stretch artifacts it prepared, and the session's own with what the edit added.
       const resources = {
         preparedStretchAssets: owned.stretch,
         ordinaryDescriptors: await resolveOrdinaryDescriptors(next, input.resolveSource, undefined, activeOrdinaryDescriptors),
       }
+
       if (!current()) return "unavailable"
       // From here live sends wait for the publish (R2) and so reach the revision that carries them; sends already in
       // flight settle first, so the candidate holds every live value the session accepted while the compile ran.
       adoptionPublish = publishing.promise
       await Promise.all(liveInstrumentSends)
+
       if (!current()) return "unavailable"
       const folded = withAcceptedLiveSynthValues(next, previous, activeSnapshot ?? previous)
+
       // The schedule plays the arrangement from `arrangementAt` at raw frame `rawFrame`, with the loop as given.
       const compileFrom = (rawFrame: number, arrangementAt: number, scheduleLoop: AdoptionLoop, horizonFrames: number) => preparedSession(
         { ...folded, revision: revision + 1, transport: { ...folded.transport, ...scheduleLoop, playheadSec: arrangementAt / sampleRate } },
         sampleRate, epoch, projectGeneration, horizonFrames / sampleRate, 1, resources.preparedStretchAssets, undefined, resources.ordinaryDescriptors, rawFrame)
+
       // The graph does not depend on the origin, so it is prepared first and the seam is chosen after that round trip.
       const provisional = compileFrom(positionFrame, arrangementNow, folded.transport, range.endFrame - positionFrame)
+
       if (!provisional.supported) return failed("unsupported")
       await session.prepareGraph(provisional.graph)
+
       if (!current()) return "unavailable"
       // The worklet resolves instrument zones and sources by asset id when it publishes, so what the edit added is
       // registered before the seam is chosen: registering takes time the seam's lead must not lose. The old assets stay
       // registered while the old sources play, and are released after the seam (retiredAssets).
       const registered = new Set([...(activeGraph?.assets ?? []).map((asset) => asset.assetId), ...owned.assets])
+
       for (const asset of provisional.graph.assets) {
         if (registered.has(asset.assetId)) continue
         await registerGraphAsset(session, asset, next, resources.preparedStretchAssets, resources.ordinaryDescriptors, assetGeneration)
         owned.assets = [...owned.assets, asset.assetId]
+
         if (!current()) return "unavailable"
       }
+
       const leadFrames = Math.round(scheduleLeadSec(input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC) * sampleRate)
       // A stopped transport has no publish race: the seam is where it stands and the publish below is immediate.
       const seamLeadFrames = adoptionSeamLeadFrames(sampleRate, seamRoundTripsMs)
       const seamChosenAt = performance.now()
       const seamFrame = wasPlaying ? positionFrame + seamLeadFrames : positionFrame
+
       const recordSeamRoundTrip = () => {
         seamRoundTripsMs = [...seamRoundTripsMs, performance.now() - seamChosenAt].slice(-recentSeamRoundTripCount)
       }
+
       if (wasPlaying) console.debug(`[portable-playback] adoption seam ${seamLeadFrames} frames ahead of the last report (clamp ${Math.round(maxAdoptionSeamLeadSec * sampleRate)})`)
+
       const keepsVoices = (trackId: string) =>
         keepsInstrumentVoices(previous.mixer.fx.trackFx?.[trackId]?.instrument, folded.mixer.fx.trackFx?.[trackId]?.instrument)
+
       const candidateTrackIds = new Set(folded.tracks.map((track) => track.id))
       const hasTrack = (trackId: string) => candidateTrackIds.has(trackId)
       // Raw frames run on through a loop, so the seam's arrangement position is rarely its raw frame. The schedule is
@@ -2082,11 +2416,13 @@ export const createPortableBrowserPlaybackController = (input: {
       const seamArrangement = arrangementFrameAt(positionSegments, seamFrame)
       const deltaFrames = seamFrame - seamArrangement
       const runLoop = effectiveLoopForStart(folded.transport, seamArrangement, sampleRate)
+
       const scheduleLoop: AdoptionLoop = {
         loopEnabled: runLoop.loopEnabled,
         loopStartSec: runLoop.loopStartSec + deltaFrames / sampleRate,
         loopEndSec: runLoop.loopEndSec + deltaFrames / sampleRate,
       }
+
       // The recording refresh reads raw frames as arrangement frames.
       if (recording && deltaFrames !== 0) return failed()
       // The window shrinks until the schedule fits what the worklet installs and its paged sources fit the pages and
@@ -2098,16 +2434,22 @@ export const createPortableBrowserPlaybackController = (input: {
       const oldWindowFrames = range.endFrame - seamFrame
       const startWindowFrames = oldWindowFrames > leadFrames ? oldWindowFrames : Math.round((input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC) * sampleRate)
       let unsupported = false
+
       const fitted = await (async () => {
         for (let horizonFrames = startWindowFrames; horizonFrames > leadFrames; horizonFrames = Math.floor(horizonFrames / 2)) {
           const compiled = compileFrom(seamFrame, seamArrangement, scheduleLoop, horizonFrames)
+
           if (!compiled.supported) {
             unsupported = true
+
             return undefined
           }
+
           if (JSON.stringify(compiled.graph) !== JSON.stringify(provisional.graph)) return undefined
           const reconciled = reconcileAtSeam({ previous: schedule, next: compiled.schedule, seamFrame, keepsVoices, hasTrack })
+
           if (reconciled.events.length > maxScheduleEvents) continue
+
           try {
             const paged = await preparePagedSources({
               session,
@@ -2120,13 +2462,16 @@ export const createPortableBrowserPlaybackController = (input: {
               pinnedPageKeys: new Set(activePreparations.flatMap((preparation) => preparation.pageKeys)),
               reusable,
             })
+
             return { candidate: compiled, adopted: reconciled, paged }
           } catch (error) {
             if (!(error instanceof Error) || !error.message.includes("requires ")) throw error
           }
         }
+
         return undefined
       })()
+
       if (!fitted) return failed(unsupported ? "unsupported" : "failed")
       const { candidate, adopted, paged } = fitted
       // The commit keeps these preparations; a failed attempt leaves them to the resubmit.
@@ -2134,6 +2479,7 @@ export const createPortableBrowserPlaybackController = (input: {
       const reusedIds = new Set(paged.preparations.map((preparation) => preparation.id))
       await releasePreparations(session, reusable.filter((preparation) => !reusedIds.has(preparation.id)), assetGeneration)
       await session.installSchedule(adopted)
+
       if (!current()) return "unavailable"
       // Once posted, the publish decides which revision the worklet plays, whatever the transport did meanwhile.
       const graph = activeGraph
@@ -2143,6 +2489,7 @@ export const createPortableBrowserPlaybackController = (input: {
       // The sources travel with the publish: the worklet swaps them in with the graph, so no block plays one without the other.
       const sources = { epoch, ordinary, prepared: paged.events }
       recordSeamRoundTrip()
+
       const published = session.publishGraph(candidate.graph.revision, wasPlaying ? { requireContinuity: true, publicationFrame: seamFrame, sources } : { requireContinuity: true, sources }).then((): PortableAdoptionAttemptResult => {
         if (active !== session) return "unavailable"
         // The compiled schedule, not the installed one: it still holds the note-on of a voice that continues from before
@@ -2178,19 +2525,24 @@ export const createPortableBrowserPlaybackController = (input: {
         activeOrdinaryDescriptors = resources.ordinaryDescriptors
         committed = true
         void releaseExpiredPreparations(session, positionFrame).catch(() => undefined)
+
         return "adopted"
       }, (): PortableAdoptionAttemptResult => {
         // A refusal, or a publication that came too late, leaves the worklet on the revision it plays; so does the session.
         // A late answer arrives after the seam: the time it took is what the seam had to cover, so the resubmit's seam
         // is chosen with it.
         recordSeamRoundTrip()
+
         if (active === session) {
           activeRevision = revision
           activeGraph = graph
         }
+
         return failed()
       })
+
       publishing.resolve(published)
+
       return await published
     } catch {
       return failed()
@@ -2199,6 +2551,7 @@ export const createPortableBrowserPlaybackController = (input: {
         if (active === session) adoptionCache = attempt
         else void releasePreparedStretchAssets(attempt.stretch ?? [])
       }
+
       adopting = false
       publishing.resolve("unavailable")
       adoptionPublish = undefined
@@ -2208,13 +2561,18 @@ export const createPortableBrowserPlaybackController = (input: {
   // At most one adoption runs and one waits; the waiting one compiles when it starts, so it carries the newest edit.
   const adoptQueued = (loop: AdoptionLoop): Promise<PortableAdoptionAttemptResult> => {
     latestLoop = loop
+
     if (adoptionQueued) return adoptionQueued
+
     const run = adoptionTail.then(() => {
       adoptionQueued = undefined
+
       return adoptLive(latestLoop)
     })
+
     adoptionQueued = run
     adoptionTail = run.catch(() => undefined)
+
     return run
   }
 
@@ -2225,14 +2583,18 @@ export const createPortableBrowserPlaybackController = (input: {
 
   const settleAdoption = (result: PortableAdoptionAttemptResult, resubmits: number) => {
     retries.delete("adoption")
+
     if (result !== "failed") return
+
     if (resubmits >= maxAdoptionResubmits) {
       const message = `instrument adoption failed after ${maxAdoptionResubmits} resubmits; the edit applies on the next successful publication`
       console.error(`[portable-playback] defect: ${message}`)
       input.reportFault?.(`Playback could not apply an edit: ${message}`)
       void disposeAdoptionCache(active)
+
       return
     }
+
     console.warn(`[portable-playback] instrument adoption failed; resubmit ${resubmits + 1} of ${maxAdoptionResubmits} at a later block boundary`)
     retries.set("adoption", { resubmits, wait: retryWaitReports(resubmits), run: resubmitAdoption })
   }
@@ -2240,12 +2602,14 @@ export const createPortableBrowserPlaybackController = (input: {
   const adoptSchedule = async (loop: AdoptionLoop): Promise<PortableAdoptionResult> => {
     const result = await adoptQueued(loop)
     settleAdoption(result, 0)
+
     return result === "unsupported" ? "failed" : result
   }
 
   const resubmitAdoption = async (resubmits: number) => {
     const result = await adoptQueued(latestLoop)
     settleAdoption(result, resubmits + 1)
+
     if (result !== "failed" && result !== "unsupported") input.onAdoptionResubmitted?.(result)
   }
 
@@ -2260,6 +2624,7 @@ export const createPortableBrowserPlaybackController = (input: {
     const audioContext = input.getAudioContext()
     const snapshot = activeSnapshot
     const revision = activeRevision
+
     if (!session || !audioContext || !snapshot || revision === undefined
       || activeProjectGeneration !== (input.getProjectGeneration?.() ?? 0)) return "rebuild"
     const generation = lifecycleGeneration
@@ -2270,18 +2635,25 @@ export const createPortableBrowserPlaybackController = (input: {
     const running = playing
     const target = effectiveLoopForStart({ ...snapshot.transport, ...loop, playheadSec: sec }, frame, sampleRate)
     const horizonSec = Math.max(input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC, portableWasmPagedPageFrames / sampleRate)
+
     const compile = (windowSec: number) => {
       const candidate = preparedSession({ ...snapshot, transport: target }, sampleRate, nextEpoch, safeProjectGeneration(activeProjectGeneration ?? 0),
         windowSec, 1, activePreparedStretchAssets, undefined, activeOrdinaryDescriptors)
+
       return candidate.supported && candidate.graph.revision === revision ? candidate : undefined
     }
+
     if (!compile(horizonSec)) {
       console.warn("[portable-playback] seek refused: the active snapshot does not compile at the target")
+
       return "rebuild"
     }
+
     let paged: Awaited<ReturnType<typeof preparePagedSources>> | undefined
+
     try {
       await session.setTransport(nextEpoch, false, frame)
+
       if (superseded()) return "unavailable"
       epoch = nextEpoch
       positionFrame = frame
@@ -2290,6 +2662,7 @@ export const createPortableBrowserPlaybackController = (input: {
       // The core cleared its sources at the epoch change, so every preparation has ended.
       await releaseExpiredPreparations(session, Number.POSITIVE_INFINITY)
       const held = activePreparations
+
       const fit = await fitPagedWindow({
         horizonSec,
         pageSec: portableWasmPagedPageFrames / sampleRate,
@@ -2306,11 +2679,13 @@ export const createPortableBrowserPlaybackController = (input: {
           pinnedPageKeys: new Set(held.flatMap((preparation) => preparation.pageKeys)),
         }),
       })
+
       if (fit === "refused" || fit === "no-fit") throw new Error("Portable playback could not fit the window at the seek target.")
       paged = fit.paged
       await session.installSchedule(fit.candidate.schedule)
       const ordinary = ordinarySourcesOf(fit.sources, activePreparedStretchAssets, activeOrdinaryDescriptors)
       await replaceSourcesAtomically({ session, revision, epoch: nextEpoch, ordinary, prepared: fit.paged.events })
+
       if (superseded()) return "unavailable"
       activeFrameSchedule = fit.candidate.schedule
       activeScheduleRange = fit.candidate.scheduleRange
@@ -2321,12 +2696,14 @@ export const createPortableBrowserPlaybackController = (input: {
       activeTransport = { ...target, state: running || resume ? "playing" : "paused" }
       activeSnapshot = { ...snapshot, transport: { ...snapshot.transport, loopEnabled: target.loopEnabled, loopStartSec: target.loopStartSec, loopEndSec: target.loopEndSec } }
       failedRefreshEndFrame = undefined
+
       // A newer locate or a pause leaves the session stopped at the schedule this one installed.
       if ((running || resume) && intent === transportIntent) {
         await session.setTransport(nextEpoch, true, frame)
         session.markActive()
         playing = true
       }
+
       return "started"
     } catch (cause) {
       if (superseded()) return "unavailable"
@@ -2334,19 +2711,24 @@ export const createPortableBrowserPlaybackController = (input: {
       // the locate. Once the transport stands at the new epoch, the old schedule belongs to the old epoch and what was
       // installed may be partial: nothing may refresh, adopt or resume on it until a locate completes.
       const stopped = epoch === nextEpoch
+
       if (stopped) {
         activeScheduleRange = undefined
         activeFrameSchedule = undefined
       }
+
       if (paged) {
         activePreparations = [...new Set([...activePreparations, ...paged.preparations])]
         await releaseExpiredPreparations(session, Number.POSITIVE_INFINITY)
       }
+
       const failure = cause instanceof Error ? cause : new Error("Portable playback could not seek.")
+
       // Rendered-frame reports are the retry clock, so a running transport keeps running while it waits: after the stop,
       // it plays whatever of the target's content was installed.
       const waiting = running && resubmits < maxAdoptionResubmits
         && (!stopped || await session.setTransport(epoch, true, frame).then(() => true, () => false))
+
       if (waiting) {
         session.markActive()
         console.warn(`[portable-playback] seek failed; resubmit ${resubmits + 1} of ${maxAdoptionResubmits} at a later block boundary`)
@@ -2359,41 +2741,51 @@ export const createPortableBrowserPlaybackController = (input: {
             })
             : Promise.resolve(),
         })
+
         return "unavailable"
       }
+
       console.error(`[portable-playback] defect: seek failed${running ? ` after ${resubmits} resubmits` : ""}: ${failure.message}`)
       input.reportFault?.(failure.message)
       void teardownSession()
+
       return "unavailable"
     }
   }
 
   const queueSeek = (sec: number, loop: AdoptionLoop, intent: number, resubmits: number, resume: boolean): Promise<PortableSeekResult> => {
     pendingSeeks += 1
+
     const run = seekTail
       .then((): Promise<PortableSeekResult> | PortableSeekResult =>
         intent === transportIntent ? seekAttempt(sec, loop, intent, resubmits, resume) : active ? "started" : "unavailable")
       .finally(() => { pendingSeeks -= 1 })
+
     seekTail = run.catch(() => undefined)
+
     return run
   }
 
   const seek = async (sec: number, loop: AdoptionLoop, resume = false): Promise<PortableSeekResult> => {
     if (recording) throw new Error("Portable recording must stop before playback can seek.")
     retries.delete("seek")
+
     return queueSeek(sec, loop, ++transportIntent, 0, resume)
   }
 
   const start = (transport: LivePlaybackTransport, compileContext?: LivePlaybackCompileContext): Promise<PortableStartResult> => {
     if (playing) return Promise.resolve("started")
+
     if (pendingStart) {
       if (pendingStartMode === "play") return pendingStart
       const previewRequest = pendingStart
       const generation = lifecycleGeneration
       const projectGeneration = input.getProjectGeneration?.() ?? 0
+
       const request = previewRequest.then((result) => result === "started"
         ? startAttempt(transport, generation, projectGeneration, true, compileContext)
         : result)
+
       pendingStart = request
       pendingStartMode = "play"
       void request.finally(() => {
@@ -2402,8 +2794,10 @@ export const createPortableBrowserPlaybackController = (input: {
           pendingStartMode = undefined
         }
       })
+
       return request
     }
+
     const generation = lifecycleGeneration
     const projectGeneration = input.getProjectGeneration?.() ?? 0
     const request = startAttempt(transport, generation, projectGeneration, true, compileContext)
@@ -2415,6 +2809,7 @@ export const createPortableBrowserPlaybackController = (input: {
         pendingStartMode = undefined
       }
     })
+
     return request
   }
 
@@ -2423,13 +2818,17 @@ export const createPortableBrowserPlaybackController = (input: {
     // A paused session is prepared only where it stands: another playhead seeks it in place.
     const context = input.getAudioContext()
     const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context
+
     if (keptPaused && positionFrame === Math.round(transport.playheadSec * keptPaused.sampleRate)) {
       return Promise.resolve("started")
     }
+
     const generation = lifecycleGeneration
     const projectGeneration = input.getProjectGeneration?.() ?? 0
+
     const request = keptPaused ? seek(transport.playheadSec, transport).then((result): PortableStartResult => result === "rebuild" ? "unavailable" : result)
       : startAttempt(transport, generation, projectGeneration, false, compileContext)
+
     pendingStart = request
     pendingStartMode = "preview"
     void request.finally(() => {
@@ -2438,6 +2837,7 @@ export const createPortableBrowserPlaybackController = (input: {
         pendingStartMode = undefined
       }
     })
+
     return request
   }
 
@@ -2451,6 +2851,7 @@ export const createPortableBrowserPlaybackController = (input: {
     startupAbortController?.abort()
     startupAbortController = undefined
     await teardownSession()
+
     return ensurePrepared(transport, compileContext)
   }
 
@@ -2461,21 +2862,27 @@ export const createPortableBrowserPlaybackController = (input: {
     // A locate in flight finishes its burst without running; the pause then stops it at the epoch it left.
     await seekTail
     const session = active
+
     if (!session || !playing) return
+
     if (recording) throw new Error("Portable recording must stop before playback can pause.")
     const context = input.getAudioContext()
+
     if (!context) throw new Error("Portable audio context is unavailable.")
+
     try {
       await session.setTransport(epoch, false, Math.round(playheadSec * context.sampleRate))
       positionFrame = Math.round(playheadSec * context.sampleRate)
       // The transport now stands at the arrangement frame itself.
       positionSegments = []
+
       if (active === session) playing = false
     } catch (error) {
       if (active === session) {
         input.reportFault?.(error instanceof Error ? error.message : "Portable browser playback could not pause.")
         await teardownSession()
       }
+
       throw error
     }
   }
@@ -2485,11 +2892,14 @@ export const createPortableBrowserPlaybackController = (input: {
     const context = input.getAudioContext()
     const baselineSchedule = activeFrameSchedule
     const baselineScheduleRange = activeScheduleRange
+
     if (!context || !baselineSchedule || !baselineScheduleRange || activeRevision === undefined || !activeGraph) {
       throw new Error("Portable recording requires an active schedule.")
     }
+
     await releaseExpiredPreparations(playbackSession, positionFrame)
     const projectGeneration = input.getProjectGeneration?.() ?? 0
+
     const transport: LivePlaybackTransport = {
       ...(activeTransport ?? {
         state: "playing",
@@ -2501,7 +2911,9 @@ export const createPortableBrowserPlaybackController = (input: {
       state: "playing",
       playheadSec: positionFrame / context.sampleRate,
     }
+
     const compilation = await compileSnapshot(transport)
+
     if (
       !compilation.supported
       || compilation.snapshot.transport.loopEnabled
@@ -2509,8 +2921,10 @@ export const createPortableBrowserPlaybackController = (input: {
     ) {
       throw new Error("Portable recording is unavailable because playback requires a schedule rebuild.")
     }
+
     const pageFrames = portableWasmPagedPageFrames
     const extensionStartFrame = baselineScheduleRange.endFrame
+
     const minimum = preparedSession(
       compilation.snapshot,
       context.sampleRate,
@@ -2522,16 +2936,21 @@ export const createPortableBrowserPlaybackController = (input: {
       extensionStartFrame / context.sampleRate,
       activeOrdinaryDescriptors,
     )
+
     if (!minimum.supported) {
       throw new Error("Portable recording is unavailable because its minimum continuation horizon is unsupported.")
     }
+
     const continuationSources = minimum.sources.filter((source) => source.startFrame >= extensionStartFrame)
+
     const plan = requiredPagedPagePlan(
       continuationSources,
       activePreparedStretchAssets,
       activeOrdinaryDescriptors,
     )
+
     if (!plan) throw new Error("Portable recording is unavailable because a continuation source range is invalid.")
+
     const capacityError = pagedCapacityError({
       pageCount: new Set([
         ...activePreparations.flatMap((preparation) => preparation.pageKeys),
@@ -2542,6 +2961,7 @@ export const createPortableBrowserPlaybackController = (input: {
       preparationCapacity: playbackSession.pagedCapabilities?.preparationCount ?? portablePagedPreparationCapacity,
       baselinePreparationCount: activePreparations.length,
     })
+
     if (capacityError) {
       throw new Error(`Portable recording is unavailable: ${capacityError.message}`)
     }
@@ -2562,17 +2982,23 @@ export const createPortableBrowserPlaybackController = (input: {
   }) => {
     const playbackSession = active
     const context = input.getAudioContext()
+
     if (!playbackSession || !playing || !context || recording) throw new Error("Portable playback is not active for recording.")
     const track = recordingInput.stream.getAudioTracks()[0]
+
     if (!track || track.readyState === "ended") throw new Error("Portable recording input is unavailable.")
     const channelCount = recordingInput.layout === "stereo" ? 2 : 1
+
     const inputChannels = channelCount === 2
       ? [recordingInput.inputChannel, recordingInput.inputChannel + 1]
       : [recordingInput.inputChannel]
+
     const availableChannels = Math.min(track.getSettings().channelCount ?? 1, 2)
+
     if (inputChannels.some((channel) => channel < 0 || channel >= availableChannels)) {
       throw new Error("Selected portable recording input channels are unavailable.")
     }
+
     await ensureRecordingRefreshCapacity(playbackSession)
     const numericSessionId = nextRecordingSessionId
     nextRecordingSessionId += 1
@@ -2580,6 +3006,7 @@ export const createPortableBrowserPlaybackController = (input: {
     let writerQueuedFrames = 0
     let coreDrainPending = false
     let requestNextDrain = () => {}
+
     const writer = (input.createRecordingWriter ?? createPortableRecordingWriter)({
       generation: epoch,
       sessionId: recordingInput.appSessionId,
@@ -2605,10 +3032,12 @@ export const createPortableBrowserPlaybackController = (input: {
         requestNextDrain()
       },
     })
+
     const source = context.createMediaStreamSource(recordingInput.stream)
     const configured = deferred<number>()
     const finalized = deferred<void>()
     const cancelled = deferred<void>()
+
     const session: PortableRecordingSession = {
       numericSessionId,
       source,
@@ -2624,6 +3053,7 @@ export const createPortableBrowserPlaybackController = (input: {
       configurationPending: false,
       terminal: false,
     }
+
     requestNextDrain = () => {
       if (recording === session && session.phase !== "cancelling" && coreDrainPending
         && writerQueuedFrames < RECORDER_BLOCK_FRAMES * RECORDER_MAX_QUEUED_BLOCKS) {
@@ -2631,32 +3061,42 @@ export const createPortableBrowserPlaybackController = (input: {
         playbackSession.postRecordingControl({ version: portableWasmProtocolVersion, type: "recording-capture-drain" })
       }
     }
+
     session.unsubscribeStatus = playbackSession.onRecordingStatus((message) => {
       if (!("generation" in message) || !("sessionId" in message)
         || message.generation !== epoch || message.sessionId !== numericSessionId) return
+
       if (message.type === "recording-capture-available") {
         coreDrainPending = true
         requestNextDrain()
+
         return
       }
+
       if (message.type === "recording-capture-block") {
         try {
           writer.write(message)
         } catch (error) {
           failRecording(session, error instanceof Error ? error : new Error("Portable recording writer failed."))
         }
+
         return
       }
+
       if (message.type === "recording-capture-diagnostics") {
         latestDiagnostics = message
         coreDrainPending = message.queuedBlocks > 0
         session.diagnostics = message
         recordingInput.onDiagnostics?.(message)
+
         if (message.fatal) failRecording(session, new Error("Portable recording capture overflowed."))
         else requestNextDrain()
+
         return
       }
+
       if (message.type !== "recording-capture-applied") return
+
       if (message.action === "configured") configured.resolve(message.frame)
       else if (message.action === "finalized") finalized.resolve()
       else cancelled.resolve()
@@ -2665,6 +3105,7 @@ export const createPortableBrowserPlaybackController = (input: {
     track.addEventListener("ended", onEnded, { once: true })
     session.unsubscribeTrack = () => track.removeEventListener("ended", onEnded)
     recording = session
+
     try {
       await writer.ready
       session.disconnectInput = playbackSession.connectInput(source)
@@ -2685,6 +3126,7 @@ export const createPortableBrowserPlaybackController = (input: {
       const startFrame = await boundedControl(configured.promise, "Portable recording configuration timed out.")
       session.configurationPending = false
       session.phase = "recording"
+
       return { sampleRate: context.sampleRate, channelCount, startFrame }
     } catch (error) {
       session.configurationPending = false
@@ -2696,6 +3138,7 @@ export const createPortableBrowserPlaybackController = (input: {
   const stopRecording = async () => {
     const session = recording
     const playbackSession = active
+
     if (!session || !playbackSession || session.terminal) throw new Error("Portable recording is not active.")
     session.terminal = true
     session.phase = "finalizing"
@@ -2704,11 +3147,13 @@ export const createPortableBrowserPlaybackController = (input: {
       type: "recording-capture-finalize",
       stopFrame: null,
     })
+
     try {
       await boundedControl(session.finalized.promise, "Portable recording finalization timed out.")
       const capturedFrames = session.diagnostics?.capturedFrames ?? 0
       const result = await session.writer.finalize(capturedFrames)
       clearRecording(session)
+
       return result
     } catch (error) {
       session.terminal = false
@@ -2720,10 +3165,12 @@ export const createPortableBrowserPlaybackController = (input: {
   const cancelRecording = async () => {
     const session = recording
     const playbackSession = active
+
     if (!session || !playbackSession || session.terminal) return
     session.terminal = true
     session.phase = "cancelling"
     playbackSession.postRecordingControl({ version: portableWasmProtocolVersion, type: "recording-capture-cancel" })
+
     try {
       await boundedControl(session.cancelled.promise, "Portable recording cancellation timed out.")
     } finally {
@@ -2745,54 +3192,72 @@ export const createPortableBrowserPlaybackController = (input: {
   ): Promise<LiveProcessorControlResult> => {
     // A start in flight may have compiled before this edit: it reaches the session that start commits.
     if (!active && pendingStart) await pendingStart.catch(() => undefined)
+
     // An adoption publish decides which revision the worklet plays; a send waits for its answer.
     if (adoptionPublish) await adoptionPublish
+
     if (!active || activeRevision === undefined || activeGraph === undefined) {
       return { accepted: false, reason: "unprepared" }
     }
+
     if (request.revision !== undefined && request.revision !== activeRevision
       || request.epoch !== undefined && request.epoch !== epoch) {
       return { accepted: false, reason: "stale" }
     }
+
     const snapshot = activeSnapshot
+
     const instrumentEntry = Object.entries(snapshot?.mixer.fx.trackFx ?? {})
       .find(([, fx]) => fx.instrument?.instanceId === request.instanceId)
+
     if (snapshot && instrumentEntry) {
       const session = active
       const node = activeGraph.nodes.find((entry) => entry.id === instrumentEntry[0])
+
       if (node?.instrument?.kind !== "synth" || !session.queueInstrumentEvents) return { accepted: false, reason: "unsupported" }
       // The live events carry the eight live parameters; every other change to the instrument reaches the session
       // through the published configuration of the next adoption, so it stays out of the prepared snapshot until then.
       const prepared = instrumentEntry[1].instrument
       const edited = request.edit && normalizeTrackInstrumentParams(parseJsonValue(request.edit.content.params) ?? null)
+
       if (request.edit && !(prepared && edited
         && isLiveParameterChange({ targetId: node.id, effect: "instrument", from: prepared, to: edited }, snapshot.bpm))) {
         return { accepted: false, reason: "unsupported" }
       }
+
       if (request.values.length === 0) {
         const sequence = ++nextLiveProcessorSequence
+
         return { accepted: true, sequence, appliedSequence: sequence }
       }
+
       const targets = new Map(node.instrument.parameterTargets.map((entry) => [entry.id, entry.target]))
+
       const events = request.values.map((value) => {
         const target = targets.get(value.parameterId)
+
         return target === undefined || !Number.isFinite(value.value) ? undefined : {
           nodeId: node.id, type: "parameter", noteId: 1, sequence: ++nextLiveProcessorSequence,
           frameOffset: 0, channel: 0, note: target, value: value.value,
         } satisfies PortableWasmInstrumentEvent
       })
+
       if (events.some((event) => event === undefined)) return { accepted: false, reason: "unsupported" }
       const revision = activeRevision
       const deliveryEpoch = epoch
       const sequence = nextLiveProcessorSequence
       const settled = Promise.withResolvers<void>()
       liveInstrumentSends.add(settled.promise)
+
       try {
         const acceptedEvents = events.flatMap(event => event === undefined ? [] : [event])
         await session.queueInstrumentEvents(deliveryEpoch, acceptedEvents, { revision, sequence })
+
         if (active !== session || activeRevision !== revision || epoch !== deliveryEpoch) return { accepted: false, reason: "stale" }
+
         // The session now plays the edit; the prepared snapshot follows, so the release announce finds nothing to rebuild.
         if (edited && prepared && isLiveEventOnlyInstrumentChange(prepared, edited)) rememberInstrumentParameters(node.id, edited)
+
         return { accepted: true, sequence, appliedSequence: sequence }
       } catch (error) {
         return { accepted: false, reason: "bridge-error", error: String(error) }
@@ -2801,23 +3266,31 @@ export const createPortableBrowserPlaybackController = (input: {
         settled.resolve()
       }
     }
+
     if (!active.queueProcessorEvents) return { accepted: false, reason: "unsupported" }
     const processor = resolveGraphProcessor(activeGraph, request.instanceId)
+
     if (!processor) return { accepted: false, reason: "unsupported" }
+
     if (request.edit) {
       const targetId = processor.node.id === activeGraph.masterNodeId ? "master" : processor.node.id
+
       const installed = (targetId === "master" ? activeSnapshot?.mixer.fx.masterFxInstances
         : activeSnapshot?.mixer.fx.trackFx?.[targetId]?.instances)?.find(instance => instance.id === request.instanceId)
+
       const timing = request.edit.content.timing
       const values = Object.fromEntries(request.values.map(value => [value.parameterId, value.value]))
+
       if (!installed || !timing || request.edit.target.nodeId !== targetId
         || request.edit.target.kindId !== processor.processor.kindId
         || !nativeBuiltInLiveStateCovered({ enabled: !processor.processor.bypassed, input: installed }, timing, values)) {
         return { accepted: false, reason: "unsupported" }
       }
     }
+
     const events = request.values.map((value) => {
       const target = processor.parameterTargets.get(value.parameterId)
+
       return target === undefined || !Number.isFinite(value.value)
         ? undefined
         : {
@@ -2827,9 +3300,11 @@ export const createPortableBrowserPlaybackController = (input: {
             value: value.value,
           }
     })
+
     if (events.some((event) => event === undefined)) return { accepted: false, reason: "unsupported" }
     const sequence = Math.max(nextLiveProcessorSequence + 1, request.sequence ?? 0)
     nextLiveProcessorSequence = sequence
+
     try {
       await active.queueProcessorEvents(
         activeRevision,
@@ -2837,6 +3312,7 @@ export const createPortableBrowserPlaybackController = (input: {
         sequence,
         events.flatMap((event) => event === undefined ? [] : [event]),
       )
+
       return { accepted: true, sequence, appliedSequence: sequence }
     } catch (error) {
       return { accepted: false, reason: "bridge-error", error: error instanceof Error ? error.message : String(error) }
@@ -2848,31 +3324,41 @@ export const createPortableBrowserPlaybackController = (input: {
     flush: queueLiveProcessorControl,
     reenableAutomation: async (instanceId, parameterIds, revision, transportEpoch) => {
       if (adoptionPublish) await adoptionPublish
+
       if (revision !== activeRevision || transportEpoch !== epoch) return { accepted: false, reason: "stale" }
+
       if (!active || !active.reenableProcessorAutomation) return { accepted: false, reason: "unsupported" }
       const processor = activeGraph === undefined ? undefined : resolveGraphProcessor(activeGraph, instanceId)
+
       if (!processor || parameterIds.some((parameterId) => !processor.parameterTargets.has(parameterId))) {
         return { accepted: false, reason: "unsupported" }
       }
+
       const targets = parameterIds.map((parameterId) => processor.parameterTargets.get(parameterId))
         .filter((target): target is number => target !== undefined)
+
       const sequence = ++nextLiveProcessorSequence
+
       try {
         await active.reenableProcessorAutomation(revision, transportEpoch, processor.processor.instanceId, targets)
+
         return { accepted: true, sequence, appliedSequence: sequence }
       } catch (error) {
         return { accepted: false, reason: "bridge-error", error: error instanceof Error ? error.message : String(error) }
       }
     },
   }
+
   const reenableProcessorAutomation = async (
     instanceId: string,
     parameterIds: readonly string[],
   ): Promise<LiveProcessorControlResult> => {
     if (adoptionPublish) await adoptionPublish
+
     if (activeRevision === undefined || activeGraph === undefined) {
       return { accepted: false, reason: "unprepared" }
     }
+
     return liveProcessorControl.reenableAutomation(instanceId, parameterIds, activeRevision, epoch)
   }
 
@@ -2888,6 +3374,7 @@ export const createPortableBrowserPlaybackController = (input: {
     preparedInstrumentIdentity: (targetId: string) => {
       if (!active || !activeGraph) return undefined
       const instrument = activeSnapshot?.mixer.fx.trackFx?.[targetId]?.instrument
+
       return instrument ? { kind: instrument.kind, instanceId: instrument.instanceId } : null
     },
     preparedInstrument: (targetId: string) => activeSnapshot?.mixer.fx.trackFx?.[targetId]?.instrument,
@@ -2903,6 +3390,7 @@ export const createPortableBrowserPlaybackController = (input: {
     seek,
     currentPositionSec: () => {
       const context = input.getAudioContext()
+
       return context
         ? arrangementFrame() / context.sampleRate
         : undefined

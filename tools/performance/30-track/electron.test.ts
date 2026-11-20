@@ -46,6 +46,7 @@ test("computes native callback and rejection deltas without fabricating timing d
       rejectedBlocks: 2,
     },
   )
+
   expect(delta.callbackIncrease).toBe(25)
   expect(delta.rejectedBlocksIncrease).toBe(0)
   expect(nativeCallbacksIncreased(delta)).toBe(true)
@@ -69,6 +70,7 @@ test("classifies all descendants of the runner-owned Electron PID", () => {
 
 test("creates private benchmark directories and artifacts", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "electron-artifact-test-"))
+
   try {
     const runDirectory = await createPrivateRunDirectory(root)
     const artifactPath = path.join(runDirectory, "result.json")
@@ -82,6 +84,7 @@ test("creates private benchmark directories and artifacts", async () => {
 
 test("restricts an existing external result file", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "electron-output-test-"))
+
   try {
     const output = path.join(root, "result.json")
     await mkdir(path.dirname(output), { recursive: true })
@@ -157,12 +160,14 @@ test("plans cleanup only for recorded runner descendants", () => {
     { pid: 44, parentPid: 43, processGroupId: 42, command: "/package/App Helper" },
     { pid: 99, parentPid: 1, processGroupId: 99, command: "/package/App" },
   ]
+
   const plan = createCleanupPlan(before, 42)
   expect(plan).toEqual({
     rootPid: 42,
     processGroupId: 42,
     recordedProcesses: before.slice(0, 3),
   })
+
   if (!plan) throw new Error("Cleanup plan missing.")
   expect(cleanupSurvivors(plan, [
     { pid: 44, parentPid: 1, processGroupId: 42, command: "/package/App Helper" },

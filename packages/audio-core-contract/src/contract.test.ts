@@ -50,6 +50,7 @@ test('generated processor contract artifacts are current and hash-identical', as
     cwd: repositoryRoot,
     stderr: 'pipe',
   })
+
   expect(output.exitCode).toBe(0)
   const header = await readFile(resolve(repositoryRoot, 'native/audio-core/generated/processor_contract_generated.h'), 'utf8')
   expect(header).toContain(processorContractHash)
@@ -74,6 +75,7 @@ test('utility processor contract accepts only the versioned canonical shape', ()
       dcBlock: false,
     },
   }
+
   expect(isUtilityProcessorContract(contract)).toBe(true)
   expect(isUtilityProcessorContract({ ...contract, kind: 'gate' })).toBe(false)
   expect(isUtilityProcessorContract({ ...contract, unexpected: true })).toBe(false)
@@ -98,6 +100,7 @@ test('granular instrument contract bounds immutable assets and grain state', () 
     reverseProbability: 0,
     stereoSpread: 0.5,
   }
+
   expect(isAudioCoreGranularState(state)).toBe(true)
   expect(isAudioCoreGranularState({ ...state, maxGrains: 129 })).toBe(false)
   expect(isAudioCoreGranularState({ ...state, seed: 0 })).toBe(false)
@@ -136,12 +139,14 @@ test('sample instrument codecs resolve asset identities only at the ABI boundary
       startFrame: 0, endFrame: 128, loopStartFrame: 8, loopEndFrame: 120, crossfadeFrameCount: 0, chokeGroup: 2,
     }],
   }
+
   expect(isAudioCoreSamplerInstrumentState(state)).toBe(true)
   expect(isAudioCoreDrumRackState({ ...state, kind: 'drum-rack', zones: [{ ...state.zones[0], keyHigh: 36, roundRobinGroup: 0 }] })).toBe(true)
   expect(isAudioCoreDrumRackState({ ...state, kind: 'drum-rack' })).toBe(false)
   const binary = encodeAudioCoreInstrumentState(state, (assetId) => assetId === 'asset:1' ? 0x100000001n : 0n)
   expect(binary.state.byteLength).toBe(88)
   expect(binary.zones?.byteLength).toBe(80)
+
   if (!binary.zones) throw new Error('Sampler state did not encode zones.')
   expect(new DataView(binary.zones.buffer).getBigUint64(0, true)).toBe(0x100000001n)
 })
@@ -174,6 +179,7 @@ test('accepts the shared minimum filter resonance and rejects values below it', 
     retrigger: true,
     zones: [],
   }
+
   expect(isAudioCoreSamplerInstrumentState(state)).toBe(true)
   expect(isAudioCoreSamplerInstrumentState({ ...state, filterResonance: 0.00009 })).toBe(false)
 })
@@ -205,6 +211,7 @@ test('empty sampled instrument states use silent portable sentinels', () => {
     retrigger: true,
     zones: [],
   }
+
   const sampler = { ...base, kind: 'sampler' as const }
   const drums = { ...base, kind: 'drum-rack' as const }
   expect(isAudioCoreSamplerInstrumentState(sampler)).toBe(true)
@@ -234,10 +241,13 @@ test('empty sampled instrument states use silent portable sentinels', () => {
     reverseProbability: 0,
     stereoSpread: 0,
   }
+
   expect(isAudioCoreGranularState(granular)).toBe(true)
+
   const binary = encodeAudioCoreInstrumentState(granular, () => {
     throw new Error('empty granular should not resolve an asset')
   })
+
   expect(new DataView(binary.state.buffer).getBigUint64(4, true)).toBe(0n)
 })
 
@@ -250,6 +260,7 @@ test('synth instrument codec emits the fixed native default profile', () => {
     ampReleaseMs: 60_000,
     parameterTargets: [{ id: 'synth.outputGain', target: 1 }],
   }, () => 0n)
+
   expect(binary.state.byteLength).toBe(156)
   const view = new DataView(binary.state.buffer)
   expect(view.getUint32(0, true)).toBe(1)
@@ -295,14 +306,17 @@ test('dynamics codecs preserve portable little-endian state layouts', () => {
     hysteresisDb: 6, rangeDb: -80, lookaheadMs: 0, detector: 'rms', link: 1,
     sidechain: { enabled: true, frequencyHz: 80, q: 0.707 },
   })
+
   expect(gate.byteLength).toBe(60)
   expect(new DataView(gate.buffer).getUint32(4, true)).toBe(1)
+
   const compressor = encodeCompressorProcessorState({
     enabled: true, thresholdDb: -24, ratio: 4, attackMs: 10, releaseMs: 120, autoRelease: true,
     makeupDb: 0, outputDb: 0, dryWet: 1, kneeDb: 6, lookaheadMs: 0, detectorMode: 'rms',
     dynamicsMode: 'compress', envelopeCurve: 'log',
     sidechain: { enabled: true, filterType: 'bandpass', frequencyHz: 120, q: 0.707 },
   })
+
   expect(compressor.byteLength).toBe(72)
   expect(new DataView(compressor.buffer).getUint32(60, true)).toBe(2)
   expect(encodeLimiterProcessorState({ enabled: true, ceilingDbtp: -1, releaseMs: 100, lookaheadMs: 5, link: 1, detectorOversampling: 4 }).byteLength).toBe(24)
@@ -324,8 +338,10 @@ test('delay and reverb codecs preserve portable state without claiming browser c
     enabled: true, delayMs: 250, feedback: 0.25, dryWet: 0.2, pingPong: false,
     filterEnabled: false, lowCutHz: 120, highCutHz: 8000,
   })
+
   expect(delay.byteLength).toBe(32)
   expect(new DataView(delay.buffer).getFloat32(4, true)).toBe(250)
+
   const reverb = encodeReverbProcessorState({
     enabled: true, wet: 0.25, decaySec: 2.2, preDelayMs: 20, reflections: 0,
     reflectionSpin: true, reflectionModAmountMs: 17.5, reflectionModRateHz: 0.3,
@@ -333,6 +349,7 @@ test('delay and reverb codecs preserve portable state without claiming browser c
     lowCutHz: 20, highCutHz: 20_000, diffusionLowCutHz: 20,
     diffusionHighCutHz: 20_000, stereoWidth: 1,
   })
+
   expect(reverb.byteLength).toBe(72)
   expect(new DataView(reverb.buffer).getFloat32(8, true)).toBeCloseTo(2.2)
 })
@@ -342,6 +359,7 @@ test('LoFi codec preserves deterministic state and portable controls', () => {
     enabled: true, bitDepth: 12, sampleRateRatio: 0.5, jitter: 0.25, noiseDb: -80,
     quantization: 'truncate', dither: 'triangular', mix: 0.75, seed: 123,
   })
+
   expect(lofi.byteLength).toBe(36)
   const view = new DataView(lofi.buffer)
   expect(view.getUint32(4, true)).toBe(12)
@@ -357,6 +375,7 @@ test('spectral codec preserves bounded STFT state and generic automation metadat
     binShift: 0, blur: 0, harmonicPercussiveBalance: 0, noiseReduction: 0.5,
     profileLearn: 1, mix: 1,
   })
+
   expect(spectral.byteLength).toBe(60)
   const view = new DataView(spectral.buffer)
   expect(view.getUint32(4, true)).toBe(2048)
@@ -369,6 +388,7 @@ test('processor state envelopes are little-endian, bounded, and kind-neutral', (
     enabled: true, driveDb: 6, curve: 'soft', color: false,
     colorFrequencyHz: 1200, colorAmount: 0, outputDb: 0, dryWet: 1,
   })
+
   const wire = encodeAudioCoreProcessorStateEnvelope({
     kindId: 2,
     schemaVersion: 1,
@@ -381,6 +401,7 @@ test('processor state envelopes are little-endian, bounded, and kind-neutral', (
     tailFrames: 4,
     parameterTargets: [],
   })
+
   expect(decodeAudioCoreProcessorStateEnvelope(wire)).toMatchObject({
     kindId: 2, schemaVersion: 1, state, instanceId: 9, latencyFrames: 3, tailFrames: 4,
   })
@@ -394,6 +415,7 @@ test('processor state envelopes allow the explicit generic automation capacity',
     { length: audioCoreMaxProcessorParameterTargets },
     (_, target) => ({ id: `reserved.${target}`, target: target + 1 }),
   )
+
   const envelope: AudioCoreProcessorStateEnvelope = {
     kindId: 2,
     schemaVersion: 1,
@@ -409,6 +431,7 @@ test('processor state envelopes allow the explicit generic automation capacity',
     tailFrames: 0,
     parameterTargets,
   }
+
   expect(decodeAudioCoreProcessorStateEnvelope(encodeAudioCoreProcessorStateEnvelope(envelope)).parameterTargets).toHaveLength(
     audioCoreMaxProcessorParameterTargets,
   )
@@ -423,8 +446,10 @@ test('Saturator and eight-band EQ codecs preserve their portable state profiles'
     enabled: true, driveDb: 18, curve: 'hard', color: true,
     colorFrequencyHz: 2500, colorAmount: 0.5, outputDb: -3, dryWet: 0.75,
   })
+
   expect(saturator.byteLength).toBe(32)
   expect(new DataView(saturator.buffer).getFloat32(4, true)).toBe(18)
+
   const eq = encodeEqProcessorState({
     enabled: true,
     channelMode: 'stereo',
@@ -436,6 +461,7 @@ test('Saturator and eight-band EQ codecs preserve their portable state profiles'
       q: 1,
     })),
   })
+
   expect(eq.byteLength).toBe(200)
   expect(new DataView(eq.buffer).getFloat32(16, true)).toBe(100)
   expect(() => encodeEqProcessorState({ enabled: true, channelMode: 'mono', bands: [] })).toThrow('exactly eight')
@@ -459,6 +485,7 @@ test('audio asset references are portable identities with exact planar PCM metad
     sampleRateHz: 48_000,
     channelCount: 2,
   }
+
   expect(isAudioAssetRef(asset)).toBe(true)
   expect(isAudioAssetRef({ ...asset, url: 'https://example.test/audio.wav' })).toBe(false)
   expect(isPlanarPcmForAsset(asset, {
@@ -482,6 +509,7 @@ test('portable synth states use a stable bounded parameter registry', () => {
       { id: 'synth.ampReleaseMs', target: 8 },
     ],
   }
+
   expect(isAudioCoreSynthState(state)).toBe(true)
   expect(isAudioCoreSynthState({ ...state, parameterTargets: [...state.parameterTargets, state.parameterTargets[0]] })).toBe(false)
   expect(isAudioCoreSynthState({ ...state, parameterTargets: [{ id: 'synth.reserved', target: 9 }] })).toBe(false)

@@ -6,6 +6,7 @@ import type { Clip } from '@daw-browser/timeline-core/types'
 describe('unified waveform painter', () => {
   test('submits one geometry path for a signed interval', () => {
     let fills = 0
+
     const ctx = {
       fillStyle: '',
       beginPath() {},
@@ -14,6 +15,7 @@ describe('unified waveform painter', () => {
       fill() { fills += 1 },
       arc() {},
     }
+
     drawWaveformSignal(ctx, {
       data: {
         kind: 'intervals',
@@ -45,6 +47,7 @@ describe('unified waveform painter', () => {
       sourceDurationSec: 8,
       color: '#fff',
     }
+
     const cases: readonly {
       readonly clip: Clip
       readonly sourceStartSec: number
@@ -77,6 +80,7 @@ describe('unified waveform painter', () => {
         mode: 'stretch',
       },
     ]
+
     for (const item of cases) {
       const map = getAudioClipTimeMap({
         clip: item.clip,
@@ -85,6 +89,7 @@ describe('unified waveform painter', () => {
         rangeStartSec: 10,
         rangeEndSec: 14,
       })
+
       expect(map?.mode).toBe(item.mode)
       expect(map?.sourceStartSec).toBe(item.sourceStartSec)
       expect(map?.sourceEndSec).toBe(item.sourceEndSec)
@@ -110,6 +115,7 @@ describe('unified waveform painter', () => {
         ],
       },
     }
+
     const map = getAudioClipTimeMap({
       clip,
       bufferDurationSec: 2,
@@ -117,13 +123,16 @@ describe('unified waveform painter', () => {
       rangeStartSec: 0,
       rangeEndSec: 4,
     })
+
     if (!map) throw new Error('Expected marker map')
+
     const segments = getMarkerWarpTimelineSegments({
       clip,
       map,
       projectBpm: 120,
       timelineEndSec: 4,
     })
+
     expect(segments).toHaveLength(3)
     expect(segments[0]?.timelineEndSec).toBe(segments[1]?.timelineStartSec)
     expect(segments[1]?.timelineEndSec).toBe(segments[2]?.timelineStartSec)
@@ -135,6 +144,7 @@ describe('unified waveform painter', () => {
       for (const channelCount of [1, 2]) {
         const sourceBeatOffset = 0.5
         const sourceBpm = 120
+
         const clip: Clip = {
           id: `stretch-${sampleRate}-${channelCount}`,
           name: 'stretch precision',
@@ -154,6 +164,7 @@ describe('unified waveform painter', () => {
             ],
           },
         }
+
         const map = getAudioClipTimeMap({
           clip,
           bufferDurationSec: 4,
@@ -161,6 +172,7 @@ describe('unified waveform painter', () => {
           rangeStartSec: 0,
           rangeEndSec: 2,
         })
+
         if (!map) throw new Error('Expected offset marker map')
         const expectedSourceFrame = Math.round(sourceBeatOffset * 60 / sourceBpm * sampleRate)
         const mappedSourceFrame = Math.round(map.timelineToSourceSec(0) * sampleRate)

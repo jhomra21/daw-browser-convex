@@ -69,10 +69,12 @@ export const createRuntimeFaultCounter = (limit = 256) => {
       const key = `${fault.kind}\0${fault.code}\0${fault.context ?? ''}`
       eventCount += 1
       byKind[fault.kind] += 1
+
       if (!seen.has(key) && seen.size < limit) {
         seen.add(key)
         last = fault
       }
+
       return true
     },
     reset() {
@@ -81,6 +83,7 @@ export const createRuntimeFaultCounter = (limit = 256) => {
       byKind = emptyCounts()
       last = null
       seen.clear()
+
       return generation
     },
     snapshot: () => ({

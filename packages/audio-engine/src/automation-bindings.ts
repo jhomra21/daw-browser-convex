@@ -11,11 +11,16 @@ export const resolveEqAutomationBindings = (
   parameterId: string,
 ): AutomationAudioBinding[] => {
   const eq = parseEqBandParameterId(parameterId)
+
   if (!eq) return []
   const node = nodesByBand.get(eq.bandId)
+
   if (!node) return []
+
   if (eq.property === 'frequencyHz') return [{ param: node.frequency, valueToAudioValue: (value) => value }]
+
   if (eq.property === 'gainDb') return [{ param: node.gain, valueToAudioValue: (value) => value }]
+
   return [{ param: node.Q, valueToAudioValue: (value) => value }]
 }
 
@@ -24,14 +29,20 @@ export const resolveSaturatorAutomationBindings = (
   parameterId: string,
 ): AutomationAudioBinding[] => {
   const saturator = chain && 'chain' in chain ? chain.chain() : chain
+
   if (!saturator) return []
+
   if (parameterId === 'saturator.driveDb') return [{ param: saturator.driveGain.gain, valueToAudioValue: linearFromDb }]
+
   if (parameterId === 'saturator.outputDb') return [{ param: saturator.outputGain.gain, valueToAudioValue: linearFromDb }]
+
   if (parameterId === 'saturator.dryWet') return [
     { param: saturator.dryGain.gain, valueToAudioValue: (value) => 1 - value },
     { param: saturator.wetGain.gain, valueToAudioValue: (value) => value },
   ]
+
   if (parameterId === 'saturator.colorFrequencyHz') return [{ param: saturator.colorFilter.frequency, valueToAudioValue: (value) => value }]
+
   return []
 }
 
@@ -40,27 +51,34 @@ export const resolveDelayAutomationBindings = (
   parameterId: string,
 ): AutomationAudioBinding[] => {
   const delay = chain && 'chain' in chain ? chain.chain() : chain
+
   if (!delay) return []
+
   if (parameterId === 'delay.timeMs') return [
     { param: delay.delayLeft.delayTime, valueToAudioValue: (value) => value / 1000 },
     { param: delay.delayRight.delayTime, valueToAudioValue: (value) => value / 1000 },
   ]
+
   if (parameterId === 'delay.feedback') return [
     { param: delay.feedbackLeft.gain, valueToAudioValue: (value) => value },
     { param: delay.feedbackRight.gain, valueToAudioValue: (value) => value },
   ]
+
   if (parameterId === 'delay.dryWet') return [
     { param: delay.dryGain.gain, valueToAudioValue: (value) => 1 - value },
     { param: delay.wetGain.gain, valueToAudioValue: (value) => value },
   ]
+
   if (parameterId === 'delay.lowCutHz') return [
     { param: delay.lowCutLeft.frequency, valueToAudioValue: (value) => value },
     { param: delay.lowCutRight.frequency, valueToAudioValue: (value) => value },
   ]
+
   if (parameterId === 'delay.highCutHz') return [
     { param: delay.highCutLeft.frequency, valueToAudioValue: (value) => value },
     { param: delay.highCutRight.frequency, valueToAudioValue: (value) => value },
   ]
+
   return []
 }
 
@@ -69,8 +87,11 @@ export const resolveReverbAutomationBindings = (
   parameterId: string,
 ): AutomationAudioBinding[] => {
   const reverb = chain && 'chain' in chain ? chain.chain() : chain
+
   if (!reverb) return []
   const param = reverb.workletNode.parameters.get(parameterId)
+
   if (param) return [{ param, valueToAudioValue: (value) => value }]
+
   return []
 }

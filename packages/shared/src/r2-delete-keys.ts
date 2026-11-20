@@ -33,9 +33,13 @@ export const isValidR2DeleteKey = (
 ) => {
   if (kind === "project-prefix") {
     if (!isSafeR2PathSegment(projectId) || !isSafeR2PathSegment(storageNamespace)) return false;
+
     return projectR2DeletePrefixes(projectId, storageNamespace).includes(key);
   }
+
   if (kind === "backup-asset") return isValidCloudBackupAssetKey(projectId, key);
+
   if (kind === "export") return key.startsWith(`projects/${projectId}/exports/`);
+
   return isValidControlAssetKey(storageNamespace, key);
 };

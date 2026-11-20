@@ -25,9 +25,11 @@ const readProjectControlSnapshot = async <Snapshot>(
     ctx.db.query("assetFolders").withIndex("by_project", (query) => query.eq("projectId", projectId))
       .take(controlLimitsV1.maxAssetFoldersPerSnapshot + 1),
   ]);
+
   if (assets.length > controlLimitsV1.maxAssetsPerSnapshot || assetFolders.length > controlLimitsV1.maxAssetFoldersPerSnapshot) {
     throw new Error("Project asset snapshot limit exceeded.");
   }
+
   return projectSnapshot({
     project,
     tracks,

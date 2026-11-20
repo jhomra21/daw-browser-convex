@@ -16,6 +16,7 @@ export async function primeClipSourceAsset(input: {
   if (!record) {
     if (input.buffer) {
       const metadata = getAudioSourceMetadata(input.buffer)
+
       return {
         assetKey: input.sourceAssetKey,
         durationSec: metadata.durationSec,
@@ -23,6 +24,7 @@ export async function primeClipSourceAsset(input: {
         channelCount: metadata.channelCount,
       }
     }
+
     return null
   }
 

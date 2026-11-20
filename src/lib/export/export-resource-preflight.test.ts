@@ -8,11 +8,14 @@ const render: ExportRenderSettings = {
   normalization: { mode: "none" },
   tail: { mode: "none" },
 }
+
 const encoding: ExportEncodingSettings = {
   bitrateByFormat: {},
   wav: { codec: "pcm-s16", dither: "none" },
 }
+
 const tracks = [{ clips: [{ startSec: 0, duration: 1 }] }]
+
 const desktopLimits = {
   maximumFiles: 1_024,
   streaming: true as const,
@@ -59,6 +62,7 @@ test("preflight accounts for tail and conservative aggregate bytes", () => {
     encoding,
     stemCount: 1,
   })
+
   expect(result.renderEndSec).toBe(3)
   expect(result.aggregateBytes).toBeGreaterThan(0)
 })
@@ -86,6 +90,7 @@ test("preflight accounts for the automatic tail maximum and unique formats", () 
     encoding,
     stemCount: 3,
   })
+
   expect(result.renderEndSec).toBe(13)
   expect(result.outputCount).toBe(6)
 })
@@ -105,7 +110,9 @@ test("desktop preflight accepts a logical render beyond the former host envelope
 test("native preflight admits a logical render beyond the former in-memory PCM boundary", () => {
   const totalFrames = 512 * 1024 * 1024
     / (2 * Float32Array.BYTES_PER_ELEMENT) + 1
+
   const endSec = (totalFrames + 0.5) / 96_000
+
   const result = preflightExportResources({
     tracks,
     range: { mode: "custom", startSec: 0, endSec },
@@ -114,8 +121,10 @@ test("native preflight admits a logical render beyond the former in-memory PCM b
     encoding,
     stemCount: 1,
   })
+
   expect(result.renderEndSec).toBe(endSec)
 })
+
 test("desktop preflight reports a conservative aggregate output estimate without rejecting it", () => {
   expect(preflightExportResources({
     tracks,
@@ -137,6 +146,7 @@ test("lossy estimates use the selected bitrate metadata", () => {
     encoding: { ...encoding, bitrateByFormat: { mp3: 32_000 } },
     stemCount: 1,
   })
+
   const high = preflightExportResources({
     tracks,
     range: { mode: "custom", startSec: 0, endSec: 600 },
@@ -145,5 +155,6 @@ test("lossy estimates use the selected bitrate metadata", () => {
     encoding: { ...encoding, bitrateByFormat: { mp3: 320_000 } },
     stemCount: 1,
   })
+
   expect(high.aggregateBytes).toBeGreaterThan(low.aggregateBytes)
 })

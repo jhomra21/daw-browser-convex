@@ -41,6 +41,7 @@ export const createNativeStatePatches = (host: NativeStatePatchHost) => {
   // The typed reply of one patch send. The answer decides nothing here: the ledger's fence and policy do.
   const patchReplyOf = (reply: NativeProcessorPatchReply): PatchReply => {
     if (!reply.ok) return reply.kind === "refused" ? { kind: "refused", refusal: "native-refused", transient: false } : { kind: reply.kind }
+
     switch (reply.outcome) {
       case "applied": return { kind: "applied" }
       case "claimed": return { kind: "claimed", token: BigInt(reply.token) }
@@ -49,6 +50,7 @@ export const createNativeStatePatches = (host: NativeStatePatchHost) => {
         // A refusal over a prepare, a publication or a transition this controller has outstanding is offered again at
         // that operation's end; with none outstanding it is definite.
         const transient = (reply.refusal === "preparing" || reply.refusal === "stale-revision") && host.outstandingOperation()
+
         return { kind: "refused", refusal: reply.refusal, transient, ...(reply.token !== undefined && { token: BigInt(reply.token) }) }
       }
     }
@@ -59,18 +61,23 @@ export const createNativeStatePatches = (host: NativeStatePatchHost) => {
     const unsent = (outcome?: ProcessorDeliveryOutcome) => host.executeReconcile(processorState.abandon(execution, outcome))
     const bridge = host.bridge
     const { prepared, graph, snapshot } = host.session()
+
     if (!bridge || !prepared || !graph || !snapshot) return unsent()
     const queueProcessorStatePatch = bridge.session.queueProcessorStatePatch
     const { instanceId } = materialized.target
+
     if (host.isRetiredTarget(execution.edit, instanceId)) return host.executeReconcile(processorState.cancel(execution, true))
     const match = resolveGraphProcessor(graph, instanceId)
+
     if (!match) return unsent()
     const { state } = materialized.content
     const layouts = nativeProcessorLayoutsForState(match.node, instanceId, state)
+
     if (!layouts || materialized.bypassed !== match.processor.bypassed
       || layouts.output !== nativeProcessorLayoutsForState(match.node, instanceId, match.processor.state)?.output) {
       return unsent({ state: "refused", reason: "unsupported" })
     }
+
     if (nativeProcessorLatencyForState(match.processor, state) !== match.processor.latencyFrames) {
       // The publication folds the ledger, which holds this patch's newest content, and settles its record. A transport
       // that cancels it requeues the record, which can be dispatched again before this answer: only this dispatch acts.
@@ -81,9 +88,12 @@ export const createNativeStatePatches = (host: NativeStatePatchHost) => {
             ? processorState.abandon(execution)
             : processorState.patchReplied(execution, { kind: "refused", refusal: "stage-failed", transient: false }))
       })
+
       return
     }
+
     if (!queueProcessorStatePatch) return unsent()
+
     const patch = serializeNativeProcessorStatePatch({
       graphRevision: graph.revision,
       nodeId: match.node.id,
@@ -98,12 +108,15 @@ export const createNativeStatePatches = (host: NativeStatePatchHost) => {
       latencyFrames: match.processor.latencyFrames,
       tailFrames: materialized.tailFrames,
     })
+
     const reply = await queueProcessorStatePatch(patch).catch((error): NativeProcessorPatchReply => ({
       ok: false,
       kind: "unconfirmed",
       error: error instanceof Error ? error.message : "Native built-in processor state patch failed.",
     }))
+
     const current = host.session().graph
+
     if (reply.ok && reply.outcome === "applied" && current) {
       host.setPreparedGraph({
         ...current,
@@ -112,12 +125,14 @@ export const createNativeStatePatches = (host: NativeStatePatchHost) => {
           processorOrder: node.processorOrder.map((processor) => {
             if (processor.id !== instanceId) return processor
             const { tailKind: _tailKind, ...withoutTailKind } = processor
+
             return { ...withoutTailKind, state: state.slice(), tailFrames: materialized.tailFrames,
               ...(materialized.tailKind && { tailKind: materialized.tailKind }) }
           }),
         })),
       })
     }
+
     host.executeReconcile(processorState.patchReplied(execution, patchReplyOf(reply)))
   }
 
@@ -132,16 +147,22 @@ export const createNativeStatePatches = (host: NativeStatePatchHost) => {
       const { graph, snapshot, sampleRate } = host.session()
       const match = graph && resolveGraphProcessor(graph, desired.target.instanceId)
       const pending = processorState.compiling() || processorState.adoptionRunning()
+
       if (pending && !!match
         && nativeProcessorLatencyForState(match.processor, desired.content.state) !== match.processor.latencyFrames) return undefined
+
       // Its parameters give the enabled flag and tail at the tempo now, not those of the edit it was queued for.
       return snapshot ? timedProcessorDesired(desired, sampleRate, snapshot.bpm) : desired
     })
+
     if (!next) {
       draining = false
+
       return false
     }
+
     await runBuiltInStatePatch(next)
+
     return true
   }
 
@@ -152,6 +173,7 @@ export const createNativeStatePatches = (host: NativeStatePatchHost) => {
     drain: async () => {
       if (draining) return
       draining = true
+
       while (await host.queueTransition(runNext)) continue
     },
   }

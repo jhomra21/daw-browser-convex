@@ -9,7 +9,9 @@ import { z } from "zod";
 const root = resolve(import.meta.dir, "../..");
 const outputIndex = process.argv.indexOf("--out");
 const outputArgument = outputIndex < 0 ? undefined : process.argv[outputIndex + 1];
+
 if (outputIndex >= 0 && (!outputArgument || outputArgument.startsWith("--"))) throw new Error("--out requires a directory");
+
 const outDir = outputArgument ? resolve(outputArgument) : `${root}/acceptance-reports/device-control-cost-2026-10-31`;
 const testFile = "tools/acceptance/device-control-cost.browser.test.ts";
 
@@ -23,7 +25,9 @@ const run = async (name: string, rawDir: string, extraArgs: string[]) => {
       stderr: "pipe",
     },
   );
+
   const [out, err, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+
   if (exit !== 0) throw new Error(`bun test "${name}" failed (${exit}):\n${out}\n${err}`);
 };
 
@@ -35,6 +39,7 @@ const record = z.looseObject({
   applicable: z.boolean(),
   layer: z.literal("dom"),
 });
+
 const boundaryCounts = z.object({
   calls: z.number().int().nonnegative(), applications: z.number().int().nonnegative(),
   skips: z.number().int().nonnegative(), joins: z.number().int().nonnegative(),
@@ -43,6 +48,7 @@ const boundaryCounts = z.object({
   unproven: z.number().int().nonnegative(),
 }).refine(count => count.calls === count.applications + count.skips + count.joins + count.dropped
   + count.superseded + count.notHeld + count.rejected + count.unproven, "Every portable call needs exactly one truthful outcome");
+
 const truthfulCounters = z.object({
   portableBoundaries: z.record(z.string(), boundaryCounts),
   nativeSubmitted: z.number().int().nonnegative(),
@@ -50,7 +56,9 @@ const truthfulCounters = z.object({
   nativeSubmissions: z.array(z.string()),
 }).refine(row => row.nativeSubmitted === Object.values(row.nativeOutcomes).reduce((sum, count) => sum + count, 0)
   && row.nativeSubmitted === row.nativeSubmissions.length, "Every native submission needs its actual registration outcome");
+
 type Rec = z.infer<typeof record>;
+
 const numberOrNull = z.number().nullable().catch(null);
 const scheduleWork = z.object({ scheduleWork: z.record(z.string(), z.unknown()) });
 const partBCase = z.looseObject({ id: z.string() });
@@ -58,34 +66,44 @@ const partBCase = z.looseObject({ id: z.string() });
 const num = (rec: Rec | undefined, field: string) => {
   return numberOrNull.parse(rec?.[field]);
 };
+
 const order = (left: Rec, right: Rec) =>
   [left.device.localeCompare(right.device), left.engine.localeCompare(right.engine), left.gesture.localeCompare(right.gesture), left.cadence.localeCompare(right.cadence)].find((value) => value !== 0) ?? 0;
 
 await mkdir(outDir, { recursive: true });
+
 const rawDir = await mkdtemp(`${outDir}/device-control-cost-raw-`);
+
 try {
   await run("part A", rawDir, []);
   await run("part B", rawDir, ["--conditions=browser"]);
   const partA = z.array(record).parse(await Bun.file(`${rawDir}/part-a.json`).json()).sort(order);
+
   for (const row of partA) {
     if (row.applicable && row.gesture !== "collapsed-spectrum-decay") truthfulCounters.parse(row);
   }
+
   const partB = z.array(partBCase).parse(await Bun.file(`${rawDir}/part-b.json`).json());
   const a8 = z.array(z.looseObject({ name: z.string(), status: z.enum(["green", "expected-red"]) })).parse(await Bun.file(`${rawDir}/a8.json`).json());
+
   const engineControls = z.array(z.looseObject({
     row: z.string(), checks: z.array(z.looseObject({ pass: z.literal(true) })),
   })).parse(await Bun.file(`${rawDir}/engine-controls.json`).json());
+
   await mkdir(outDir, { recursive: true });
   await Bun.write(`${outDir}/results.json`, `${JSON.stringify({ partA, partB, a8 }, null, 1)}\n`);
   await Bun.write(`${outDir}/engine-controls.json`, `${JSON.stringify(engineControls, null, 2)}\n`);
 
   const find = (device: string, engine: string, gesture: string, cadence: string) =>
     partA.find((rec) => rec.device === device && rec.engine === engine && rec.gesture === gesture && rec.cadence === cadence);
+
   const cell = (rec: Rec | undefined, fields: string[]) => rec?.applicable ? fields.map((field) => num(rec, field) ?? "-").join("/") : "n/a";
   const devices = [...new Set(partA.map((rec) => rec.device))];
   const header = "| device | engine | drag w/h/s | wheel w/h/s | key w/h/s | reset w/h/s | toggle w/h/s |\n|---|---|---|---|---|---|---|";
+
   const rows = devices.flatMap((device) => (["legacy", "native"] as const).map((engine) => {
     const f = ["persistenceWrites", "historyEntries", "legacyEngineSubmits"];
+
     const cells = [
       cell(find(device, engine, "pointer-drag-20", "per-frame"), f),
       cell(find(device, engine, "wheel-20", "per-frame"), f),
@@ -93,14 +111,18 @@ try {
       cell(find(device, engine, "double-click-reset", "single"), f),
       cell(find(device, engine, "toggle-or-select", "single"), f),
     ];
+
     return `| ${device} | ${engine} | ${cells.join(" | ")} |`;
   }));
+
   const nativeRows = devices.map((device) => {
     const f = ["nativePreviewCalls", "nativeFlushCalls"];
     const instrument = ["instrumentEngineCalls"];
     const legacy = (gesture: string, cadence: string) => cell(find(device, "legacy", gesture, cadence), instrument);
+
     return `| ${device} | ${cell(find(device, "native", "pointer-drag-20", "per-frame"), f)} | ${cell(find(device, "native", "pointer-drag-20", "burst"), f)} | ${cell(find(device, "native", "wheel-20", "per-frame"), f)} | ${cell(find(device, "native", "key-hold-20", "per-frame"), f)} | ${legacy("pointer-drag-20", "per-frame")} | ${legacy("wheel-20", "per-frame")} |`;
   });
+
   const nativeHeader = "| device | native drag p/f | native drag burst p/f | native wheel p/f | native key p/f | instrument calls drag (legacy) | instrument calls wheel (legacy) |\n|---|---|---|---|---|---|---|";
 
   const n = (device: string, engine: string, gesture: string, cadence: string, field: string) => num(find(device, engine, gesture, cadence), field);
@@ -110,17 +132,22 @@ try {
   const nativeLegacySubmits = Math.max(...partA.filter((rec) => rec.engine === "native" && rec.applicable).map((rec) => num(rec, "legacyEngineSubmits") ?? 0));
   const spectrum = find("eq", "legacy", "collapsed-spectrum-decay", "single");
   const b = (id: string) => partB.find((entry) => entry.id === id);
+
   const bv = (id: string, field: string) => {
     return numberOrNull.parse(b(id)?.[field]);
   };
+
   const sw = (id: string, key: string) => {
     const work = scheduleWork.safeParse(b(id));
+
     return work.success ? numberOrNull.parse(work.data.scheduleWork[key]) : null;
   };
+
   const dom = partA.length;
   const applicable = partA.filter((rec) => rec.applicable).length;
   const notApplicable = partA.filter((rec) => !rec.applicable);
   const reasons = [...new Set(notApplicable.map((rec) => String(rec.reason).replace(/ on (delay|reverb)$/u, "").replace(/^no graph-drag-[a-z-]+$/u, "no such graph on this device")))].sort();
+
   const readme = `# Device control cost, 2026-10-31
 
 Measured cost of one built-in device control edit, replacing the earlier null-only artifact.
@@ -185,6 +212,7 @@ The audit-time numbers (before DV-01) are archived in \`dv01-parent/baseline/res
 - Part B hand-builds the effects projection (\`replaceAudioEffectTargets\` rows from \`createDefaultDelayParams\`) in the shape of \`snapshotExportProjection\`; the host is a fake that logs each call, and \`createNativePlaybackController\` is wrapped read-only to record \`dispose\` reasons and controller calls. Part B is unchanged by DV-01: its rows are identical to the pre-DV-01 baseline.
 - Not applicable cells (${notApplicable.length}, reasons): ${reasons.map((reason) => `"${reason}"`).join("; ")}. Sampler and Granular have no Knob or value strip, drum-rack has no number input, and graph handles exist only on Delay, Reverb and EQ. No cell is null for an untried approach.
 `;
+
   await Bun.write(`${outDir}/README.md`, readme);
   const sha = new Bun.CryptoHasher("sha256").update(await Bun.file(`${outDir}/results.json`).arrayBuffer()).digest("hex");
   console.log(`results.json sha256 ${sha}`);

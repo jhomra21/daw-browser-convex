@@ -18,11 +18,13 @@ export type MixerChannel = {
 
 export function getMixerChannelRole(channel: Pick<MixerChannel, 'role'> | null | undefined): MixerChannelRole {
   if (channel?.role === 'return' || channel?.role === 'group' || channel?.role === 'master') return channel.role
+
   return 'track'
 }
 
 function createMixerChannel(track: Track): MixerChannel {
   const role: MixerChannelRole = track.channelRole === 'return' || track.channelRole === 'group' ? track.channelRole : 'track'
+
   return {
     id: track.id,
     sourceTrackId: track.id,

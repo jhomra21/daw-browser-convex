@@ -26,6 +26,7 @@ export async function getProjectMixerSettings(
     .query("projectMixerSettings")
     .withIndex("by_room", (q) => q.eq("projectId", projectId))
     .first();
+
   return {
     masterVolume: effectiveProjectMasterVolume(row?.masterVolume),
   };
@@ -38,25 +39,32 @@ export async function setProjectMasterVolumeRow(
 ): Promise<ProjectMasterVolumeRowResult> {
   const masterVolume = effectiveProjectMasterVolume(volume);
   const state = { masterVolume };
+
   const row = await ctx.db
     .query("projectMixerSettings")
     .withIndex("by_room", (q) => q.eq("projectId", projectId))
     .first();
+
   if (row) {
     if (effectiveProjectMasterVolume(row.masterVolume) === masterVolume) {
       return { changed: false, value: { ...state, status: "noop" } };
     }
+
     await ctx.db.patch(row._id, { masterVolume, updatedAt: Date.now() });
+
     return { changed: true, value: { ...state, status: "applied" } };
   }
+
   if (masterVolume === effectiveProjectMasterVolume(undefined)) {
     return { changed: false, value: { ...state, status: "noop" } };
   }
+
   await ctx.db.insert("projectMixerSettings", {
     projectId,
     masterVolume,
     updatedAt: Date.now(),
   });
+
   return { changed: true, value: { ...state, status: "applied" } };
 }
 
@@ -65,6 +73,7 @@ export const get = query({
   handler: async (ctx, { projectId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectAccess(ctx, projectId, userId);
+
     return await getProjectMixerSettings(ctx, projectId);
   },
 });
@@ -75,7 +84,9 @@ export const setMasterVolume = mutation({
     const userId = await requireAuthenticatedUserId(ctx);
     await requireMasterBusWriteAccess(ctx, projectId, userId);
     const result = await setProjectMasterVolumeRow(ctx, projectId, volume);
+
     if (result.changed) await advanceProjectRevision(ctx, projectId);
+
     return { status: result.value.status };
   },
 });

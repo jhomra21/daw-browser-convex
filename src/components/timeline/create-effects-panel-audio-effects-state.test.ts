@@ -22,6 +22,7 @@ import { createLocalEffectsView } from "./create-local-effects-view";
 import { z } from "zod";
 
 type PersistOrder = (targetId: string, order: AudioEffectInstance[]) => void | Promise<void>;
+
 type EffectsPanelContext = Parameters<typeof createEffectsPanelAudioDevice>[0];
 
 class SpyAudioEngine extends AudioEngine {
@@ -32,23 +33,27 @@ class SpyAudioEngine extends AudioEngine {
 
   override async setTrackFxInstances(trackId: string, instances: AudioEffectRuntimeInstance[]): Promise<EngineDisposition> {
     this.trackFxCalls.push({ trackId, instances });
+
     return "applied";
   }
 
   override async setMasterFxInstances(instances: AudioEffectRuntimeInstance[]) {
     this.masterFxCalls.push(instances);
     await this.waitForMasterFxRelease();
+
     return super.setMasterFxInstances(instances);
   }
 
   override async setMasterFxInstance(instance: AudioEffectRuntimeInstance) {
     this.masterFxCalls.push([instance]);
     await this.waitForMasterFxRelease();
+
     return super.setMasterFxInstance(instance);
   }
 
   override async setTrackFxInstance(trackId: string, instance: AudioEffectRuntimeInstance) {
     this.trackFxCalls.push({ trackId, instances: [instance] });
+
     return super.setTrackFxInstance(trackId, instance);
   }
 
@@ -87,6 +92,7 @@ const createDevice = (
   const [projectGeneration, setProjectGeneration] = createSignal(options.projectGeneration ?? 0);
   const [canWriteCurrentTargetEffects, setCanWriteCurrentTargetEffects] = createSignal(options.canWrite ?? true);
   const [sidechainRoutes, setSidechainRoutes] = createSignal(options.sidechainRoutes ?? []);
+
   const device = createEffectsPanelAudioDevice(
     {
       audioEngine: () => engine,
@@ -107,6 +113,7 @@ const createDevice = (
     currentTargetId,
     () => undefined,
   );
+
   return {
     device,
     setCanWriteCurrentTargetEffects,
@@ -122,6 +129,7 @@ type NonKeyedEffectShowProps = {
   keyed?: false;
   children: (effect: Accessor<{ id: string }>) => JSX.Element;
 };
+
 const renderNonKeyedEffectShow = (props: NonKeyedEffectShowProps) => (
   createComponent<NonKeyedEffectShowProps>(Show, props)
 );
@@ -138,21 +146,26 @@ describe("effects panel instance engine synchronization", () => {
     const registrations: { key: string; serial: number }[] = [];
     let answered = false;
     let dispose = () => {};
+
     const fixture = createRoot(end => {
       dispose = end;
       const view = createLocalEffectsView({ projectId: () => projectId });
+
       return { view, ...createDevice(new SpyAudioEngine(), { projectId, usesLegacyAudioEngine: false,
         localEffectsView: view,
         deliverProcessor: () => {
           registered.resolve();
           const receipt = { key: instanceId, serial: registrations.length + 1 };
           registrations.push(receipt);
+
           return { receipt, settled: terminal.promise };
         },
         onEffectParamsCommitted: payload => { history.push(payload); },
       }) };
     });
+
     void terminal.promise.then(() => { answered = true; });
+
     try {
       await fixture.view.reload();
       fixture.device.spectral.changeInstance(instanceId, params => ({
@@ -189,17 +202,23 @@ describe("effects panel instance engine synchronization", () => {
     const started = new Promise<void>((resolve) => { entered = resolve; });
     const history: number[] = [];
     let dispose = () => {};
+
     const fixture = createRoot((end) => {
       dispose = end;
       const view = createLocalEffectsView({ projectId: () => projectId });
+
       const device = createDevice(new SpyAudioEngine(), {
         projectId, usesLegacyAudioEngine: false,
         localEffectsView: view,
-        deliverProcessor: () => { entered(); return { receipt: { key: instanceId, serial: 1 }, settled: held }; },
+        deliverProcessor: () => { entered();
+
+ return { receipt: { key: instanceId, serial: 1 }, settled: held }; },
         onEffectParamsCommitted: () => { history.push(1); },
       });
+
       return { ...device, view };
     });
+
     // Join the shared local reader's publication instead of waiting on elapsed time.
     await fixture.view.reload();
     fixture.device.compressor.changeInstance(instanceId, (params) => ({ ...params, thresholdDb: -33 }));
@@ -230,11 +249,13 @@ describe("effects panel instance engine synchronization", () => {
         stdout: "pipe",
         stderr: "pipe",
       });
+
       const [stdout, stderr, code] = await Promise.all([
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
         child.exited,
       ]);
+
       if (code !== 0) throw new Error(`${stdout}\n${stderr}`);
       expect(code).toBe(0);
     },
@@ -255,6 +276,7 @@ describe("effects panel instance engine synchronization", () => {
       ], {
         env: { ...process.env, EFFECT_CARD_CLEANUP_BROWSER_CHILD: "1" },
       });
+
       expect(result.exitCode).toBe(0);
     },
   );
@@ -264,6 +286,7 @@ describe("effects panel instance engine synchronization", () => {
     () => {
       const canceled: Array<{ effectId: string; targetId: string | undefined }> = [];
       let activeEffectId: string | undefined;
+
       const audioEffects = {
         beginInteraction: (effectId: string, _targetId?: string) => {
           activeEffectId = effectId;
@@ -272,10 +295,13 @@ describe("effects panel instance engine synchronization", () => {
           canceled.push({ effectId, targetId });
         },
       };
+
       const [effect, setEffect] = createSignal<{ id: string } | undefined>({ id: "effect-show" });
       let dispose = () => {};
+
       createRoot((disposeRoot) => {
         dispose = disposeRoot;
+
         return renderNonKeyedEffectShow({
           get when() {
             return effect();
@@ -289,6 +315,7 @@ describe("effects panel instance engine synchronization", () => {
                 ownerKey: () => `project:1:${shownEffect().id}`,
               });
               createRenderEffect(() => audioEffects.beginInteraction(shownEffect().id, "track-show"));
+
               return "";
             };
           },
@@ -307,6 +334,7 @@ describe("effects panel instance engine synchronization", () => {
     () => {
       const events: string[] = [];
       let activeEffectId: string | undefined;
+
       const audioEffects = {
         beginInteraction: (effectId: string) => {
           activeEffectId = effectId;
@@ -316,10 +344,13 @@ describe("effects panel instance engine synchronization", () => {
           events.push(`cancel:${effectId}:${targetId}`);
         },
       };
+
       const [effect, setEffect] = createSignal<{ id: string } | undefined>({ id: "effect-old" });
       let dispose = () => {};
+
       createRoot((disposeRoot) => {
         dispose = disposeRoot;
+
         return renderNonKeyedEffectShow({
           get when() {
             return effect();
@@ -333,6 +364,7 @@ describe("effects panel instance engine synchronization", () => {
                 ownerKey: () => `project:1:${shownEffect().id}`,
               });
               createRenderEffect(() => audioEffects.beginInteraction(shownEffect().id));
+
               return "";
             };
           },
@@ -355,14 +387,17 @@ describe("effects panel instance engine synchronization", () => {
     await createRoot(async (dispose) => {
       const engine = new SpyAudioEngine();
       const commits: EffectParamsCommitPayload[] = [];
+
       const { device } = createDevice(engine, {
         projectId: `project:reverb-${crypto.randomUUID()}`,
         onEffectParamsCommitted: (payload) => {
           commits.push(payload);
         },
       });
+
       await device.addByKindToTarget("track-1", "reverb");
       const inserted = engine.trackFxCalls.at(-1)?.instances[0];
+
       if (!inserted || inserted.kind !== "reverb") throw new Error("Expected an inserted reverb instance.");
 
       device.reverb.changeInstance(inserted.id, (params) => ({ ...params, wet: 0.35 }));
@@ -383,6 +418,7 @@ describe("effects panel instance engine synchronization", () => {
     await createRoot(async (dispose) => {
       const engine = new SpyAudioEngine();
       const commits: EffectParamsCommitPayload[] = [];
+
       const { device, setProjectGeneration, setProjectId } = createDevice(engine, {
         projectId: "project:stale-effect-commit",
         targetId: "master",
@@ -390,8 +426,10 @@ describe("effects panel instance engine synchronization", () => {
           commits.push(payload);
         },
       });
+
       await device.addByKindToTarget("master", "delay");
       const inserted = engine.masterFxCalls.at(-1)?.[0];
+
       if (!inserted) throw new Error("Expected an inserted delay instance.");
       await device.flushPending();
       commits.length = 0;
@@ -418,6 +456,7 @@ describe("effects panel instance engine synchronization", () => {
       const addPromise = device.addByKindToTarget("track-1", "delay");
       const inserted = engine.trackFxCalls.find((call) => call.instances.length === 1);
       const instanceId = inserted?.instances[0]?.id;
+
       if (!instanceId) throw new Error("Expected an inserted delay instance.");
       const before = engine.trackFxCalls.length;
 
@@ -425,12 +464,15 @@ describe("effects panel instance engine synchronization", () => {
       await addPromise;
 
       expect(engine.trackFxCalls.length).toBeGreaterThan(before);
+
       const hasUpdatedFeedback = (params: AudioEffectRuntimeInstance["params"]) => (
         "feedback" in params && params.feedback === 0.8
       );
+
       const updated = engine.trackFxCalls
         .flatMap((call) => call.instances)
         .find((instance) => instance.kind === "delay" && hasUpdatedFeedback(instance.params));
+
       if (!updated) throw new Error("Expected the updated delay parameters.");
       expect(updated.params).toMatchObject({ feedback: 0.8 });
       dispose();
@@ -451,11 +493,13 @@ describe("effects panel instance engine synchronization", () => {
       const flushes: Array<{ sequence: number | undefined; gainDb: number }> = [];
       const commits: EffectParamsCommitPayload[] = [];
       const events: string[] = [];
+
       const { device } = createDevice(engine, {
         projectId,
         usesLegacyAudioEngine: false,
         deliverProcessor: (edit, gesture): DeliveryRegistration => {
           const params = z.object({ state: z.object({ gainDb: z.number() }) }).parse(edit.content.params);
+
           if (gesture?.holds) {
             events.push(`preview:${edit.order}`);
             previews.push({ sequence: edit.order, gainDb: params.state.gainDb });
@@ -463,6 +507,7 @@ describe("effects panel instance engine synchronization", () => {
             events.push(`flush:${edit.order}`);
             flushes.push({ sequence: edit.order, gainDb: params.state.gainDb });
           }
+
           return { receipt: { key: edit.target.instanceId, serial: edit.order }, settled: Promise.resolve({ state: "applied" }) };
         },
         onEffectParamsCommitted: (payload) => {
@@ -470,6 +515,7 @@ describe("effects panel instance engine synchronization", () => {
           commits.push(payload);
         },
       });
+
       // Wait for the real persisted row, not an optimistic insertion with an empty query.
       await new Promise<void>((resolve) => {
         createRenderEffect(() => {
@@ -512,6 +558,7 @@ describe("effects panel instance engine synchronization", () => {
       await Promise.all([firstAdd, secondAdd]);
       const inserted = engine.trackFxCalls.find((call) => call.instances.length === 2);
       const delay = inserted?.instances.find((instance) => instance.kind === "delay");
+
       if (!delay) throw new Error("Expected an inserted delay instance.");
       device.reorder({ id: delay.id, kind: "delay" } satisfies AudioEffectInstance, 1);
 
@@ -528,6 +575,7 @@ describe("effects panel instance engine synchronization", () => {
       const addPromise = device.addByKindToTarget("track-1", "delay");
       const inserted = engine.trackFxCalls.find((call) => call.instances.length === 1);
       const instanceId = inserted?.instances[0]?.id;
+
       if (!instanceId) throw new Error("Expected an inserted delay instance.");
       setCanWriteCurrentTargetEffects(false);
       const before = engine.trackFxCalls.length;
@@ -542,12 +590,15 @@ describe("effects panel instance engine synchronization", () => {
   test("rolls back only the rejected target and reapplies its persisted engine order", async () => {
     await createRoot(async (dispose) => {
       const engine = new SpyAudioEngine();
+
       const persistAudioEffectOrder: PersistOrder = (targetId, order) => {
         if (targetId === "track-a" && order[0]?.kind === "chorus") {
           return Promise.reject(new Error("track-a persistence rejected"));
         }
+
         return Promise.resolve();
       };
+
       const { device, setCurrentTargetId } = createDevice(engine, { persistAudioEffectOrder });
       await Promise.all([
         device.addChainToTarget("track-a", [
@@ -561,9 +612,11 @@ describe("effects panel instance engine synchronization", () => {
       ]);
       const trackACurrent = engine.trackFxCalls.find((call) => call.trackId === "track-a" && call.instances.length === 2);
       const trackBCurrent = engine.trackFxCalls.find((call) => call.trackId === "track-b" && call.instances.length === 2);
+
       if (!trackACurrent || !trackBCurrent) throw new Error("Expected both target chains.");
       const delay = trackACurrent.instances.find((instance) => instance.kind === "delay");
       const eq = trackBCurrent.instances.find((instance) => instance.kind === "eq");
+
       if (!delay || !eq) throw new Error("Expected target instances.");
 
       setCurrentTargetId("track-a");
@@ -583,9 +636,11 @@ describe("effects panel instance engine synchronization", () => {
   test("keeps successful concurrent reorders for independent targets", async () => {
     await createRoot(async (dispose) => {
       const engine = new SpyAudioEngine();
+
       const { device, setCurrentTargetId } = createDevice(engine, {
         persistAudioEffectOrder: () => Promise.resolve(),
       });
+
       await Promise.all([
         device.addChainToTarget("track-a", [
           { kind: "delay", params: AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams() },
@@ -598,9 +653,11 @@ describe("effects panel instance engine synchronization", () => {
       ]);
       const trackACurrent = engine.trackFxCalls.find((call) => call.trackId === "track-a" && call.instances.length === 2);
       const trackBCurrent = engine.trackFxCalls.find((call) => call.trackId === "track-b" && call.instances.length === 2);
+
       if (!trackACurrent || !trackBCurrent) throw new Error("Expected both target chains.");
       const delay = trackACurrent.instances.find((instance) => instance.kind === "delay");
       const eq = trackBCurrent.instances.find((instance) => instance.kind === "eq");
+
       if (!delay || !eq) throw new Error("Expected target instances.");
 
       setCurrentTargetId("track-a");
@@ -618,6 +675,7 @@ describe("effects panel instance engine synchronization", () => {
     await createRoot(async (dispose) => {
       const engine = new SpyAudioEngine();
       const { device } = createDevice(engine);
+
       const results = await Promise.all(Array.from({ length: 17 }, () => (
         device.addByKindToTarget("track-1", "delay")
       )));
@@ -662,6 +720,7 @@ describe("effects panel instance engine synchronization", () => {
   test("rolls back drafts, order, and engine state when an inserted chain reorder fails", async () => {
     await createRoot(async (dispose) => {
       const engine = new SpyAudioEngine();
+
       const { device } = createDevice(engine, {
         persistAudioEffectOrder: () => Promise.reject(new Error("reorder failed")),
       });
@@ -683,10 +742,12 @@ describe("effects panel instance engine synchronization", () => {
       const engine = new SpyAudioEngine();
       let sequence = 0;
       const commits: Array<{ feedback: number }> = [];
+
       const { device } = createDevice(engine, {
         projectId: `project:effects-export-projection-${crypto.randomUUID()}`,
         allocateProcessorEdit: (payload) => {
           const order = ++sequence;
+
           return {
             id: `test-edit-${order}`,
             order,
@@ -710,6 +771,7 @@ describe("effects panel instance engine synchronization", () => {
 
       const delay = device.snapshotExportRows(["track-1"])
         .find((row) => row.effect === "delay");
+
       if (!delay?.instanceId) throw new Error("Expected a projected delay.");
       device.delay.changeInstance(delay.instanceId, (params) => ({ ...params, feedback: 0.8 }));
       const firstSequence = sequence;
@@ -747,16 +809,20 @@ describe("effects panel instance engine synchronization", () => {
     await createRoot(async (dispose) => {
       const engine = new SpyAudioEngine();
       let rejectReorder = false;
+
       const { device } = createDevice(engine, {
         projectId: "project:effects-export-removal-rollback",
         persistAudioEffectOrder: () => rejectReorder
           ? Promise.reject(new Error("reorder failed"))
           : Promise.resolve(),
       });
+
       await device.addByKindToTarget("track-1", "delay");
       await device.addByKindToTarget("track-1", "chorus");
+
       const delay = device.snapshotExportRows(["track-1"])
         .find((row) => row.effect === "delay");
+
       if (!delay?.instanceId) throw new Error("Expected a projected delay.");
 
       rejectReorder = true;
@@ -773,6 +839,7 @@ describe("effects panel instance engine synchronization", () => {
       const engine = new SpyAudioEngine();
       let resolvePersist: (() => void) | undefined;
       let rejectNext = false;
+
       const { device, setSidechainRoutes } = createDevice(engine, {
         projectId: "project:sidechain-export",
         sidechainRoutes: [{
@@ -795,9 +862,11 @@ describe("effects panel instance engine synchronization", () => {
         effectInstanceId: "gate-1",
       }]);
       let flushed = false;
+
       const flush = device.flushPending().then(() => {
         flushed = true;
       });
+
       await Promise.resolve();
       expect(flushed).toBeFalse();
       resolvePersist?.();
@@ -834,21 +903,25 @@ describe("effects panel instance engine synchronization", () => {
     const utilityParams = AUDIO_EFFECT_CONTRACTS.utility.normalizeParams({ version: 1, state: { gainDb: -7 } });
     const utilityKind: AudioEffectKind = "utility";
     const delayKind: AudioEffectKind = "delay";
+
     const firstRow = {
       targetId: "track-1",
       instanceId: "duplicate",
       kind: utilityKind,
       params: utilityParams,
     };
+
     const laterRow = {
       ...firstRow,
       params: AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams(),
     };
+
     const differentKindRow = {
       ...firstRow,
       kind: delayKind,
       params: AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams(),
     };
+
     const index = indexFirstAudioEffectRowsByKind([firstRow, laterRow, differentKindRow]);
 
     expect(index.get("track-1:duplicate:utility")).toBe(firstRow);
@@ -857,26 +930,32 @@ describe("effects panel instance engine synchronization", () => {
 });
 
 const loadViewModule = () => import("./create-local-effects-view");
+
 const utilityRow = (id: string, value = 0): LocalEffectRow<JsonValue> => ({
   id: `track-1:effect:${id}`, targetId: "track-1", effect: "utility", instanceId: id, params: { value }, index: 0, updatedAt: 1,
 });
+
 const deferred = <T,>() => {
   let resolve: (value: T) => void = () => undefined;
   let reject: (cause: Error) => void = () => undefined;
   const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+
   return { promise, resolve, reject };
 };
+
 const createViewHarness = async (list: (projectId: string) => Promise<LocalEffectRow<JsonValue>[]>, initialProject: string | undefined) => {
   const { createLocalEffectsViewOwner } = await loadViewModule();
   let project = initialProject;
   const publications: Array<{ through: number; ids: string[] } | undefined> = [];
   const errors: Array<string | undefined> = [];
+
   const owner = createLocalEffectsViewOwner({
     currentProjectId: () => project,
     list,
     publish: (view) => publications.push(view && { through: view.through, ids: view.rows.map((row) => row.id) }),
     fail: (error) => errors.push(error?.message),
   });
+
   return {
     owner, publications, errors,
     switchProject: (next: string | undefined) => { project = next; owner.sync(); },
@@ -936,10 +1015,12 @@ describe("local effects row sequence and lifetime-fenced view", () => {
     const projectA = `project:view-a-${crypto.randomUUID()}`;
     const projectB = `project:view-b-${crypto.randomUUID()}`;
     const pendingA = deferred<LocalEffectRow<JsonValue>[]>();
+
     const harness = await createViewHarness(
       (projectId) => projectId === projectA ? pendingA.promise : Promise.resolve([utilityRow("from-b")]),
       projectA,
     );
+
     harness.switchProject(projectA);
     harness.switchProject(projectB);
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -960,11 +1041,15 @@ describe("local effects row sequence and lifetime-fenced view", () => {
   test("a failed query keeps the last good view and reports the error instead of removing rows", async () => {
     const projectId = `project:view-error-${crypto.randomUUID()}`;
     let attempt = 0;
+
     const harness = await createViewHarness(async () => {
       attempt += 1;
+
       if (attempt === 2) throw new Error("local read failed");
+
       return [utilityRow(`read-${attempt}`)];
     }, projectId);
+
     harness.switchProject(projectId);
     await harness.owner.reload();
     await expect(harness.owner.reload()).rejects.toThrow("local read failed");
@@ -991,7 +1076,11 @@ describe("local effects row sequence and lifetime-fenced view", () => {
     const { listLocalEffects } = await import("~/lib/local-effects");
     const projectId = `project:view-shared-${crypto.randomUUID()}`;
     let reads = 0;
-    const harness = await createViewHarness(async (id) => { reads += 1; return await listLocalEffects(id); }, projectId);
+
+    const harness = await createViewHarness(async (id) => { reads += 1;
+
+ return await listLocalEffects(id); }, projectId);
+
     harness.switchProject(projectId);
     await harness.owner.reload();
     const written = await setLocalEffectInstance(projectId, "track-1", "utility", { value: 1 }, { instanceId: "utility:1", index: 0 });
@@ -1030,12 +1119,14 @@ describe("local effects row sequence and lifetime-fenced view", () => {
 
 test("effects publication preserves applied, admitted, and rejected outcomes", async () => {
   const originalFetch = globalThis.fetch;
+
   const publication = (status: number, result: JsonValue) => {
     globalThis.fetch = Object.assign(
       async () => new Response(JSON.stringify(result), { status }),
       { preconnect: originalFetch.preconnect },
     );
   };
+
   const operation: SharedTimelineOperation = {
     kind: "effects.setDelayParams",
     payload: {
@@ -1044,6 +1135,7 @@ test("effects publication preserves applied, admitted, and rejected outcomes", a
       params: AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams(),
     },
   };
+
   try {
     publication(200, { status: "applied", effectId: "effect-1", revision: 3 });
     expect(await publishEffects(`publisher-applied-${crypto.randomUUID()}`, "user-1", operation))
@@ -1073,11 +1165,13 @@ describe("effect edits the engine did not install", () => {
 
     override async setTrackFxInstances(trackId: string, instances: AudioEffectRuntimeInstance[]): Promise<EngineDisposition> {
       this.trackFxCalls.push({ trackId, instances });
+
       return this.outcome;
     }
 
     override async setTrackFxInstance(trackId: string, instance: AudioEffectRuntimeInstance): Promise<EngineDisposition | "not-held"> {
       this.trackFxCalls.push({ trackId, instances: [instance] });
+
       return this.outcome;
     }
   }
@@ -1090,6 +1184,7 @@ describe("effect edits the engine did not install", () => {
         const { device } = createDevice(engine, { projectId: `project:portable-outcome-${crypto.randomUUID()}`, onEffectParamsCommitted: (payload) => { commits.push(payload); } });
         expect(await device.addByKindToTarget("track-1", "delay")).toBe(true);
         const delay = engine.trackFxCalls[0]?.instances[0];
+
         if (!delay) throw new Error("Expected delay");
         await device.flushPending();
         engine.trackFxCalls.length = 0;

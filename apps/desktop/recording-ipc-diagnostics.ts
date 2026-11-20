@@ -1,5 +1,6 @@
 const percentile = (values: readonly number[], ratio: number) => {
   const sorted = [...values].sort((left, right) => left - right)
+
   return sorted[Math.max(0, Math.ceil(sorted.length * ratio) - 1)] ?? 0
 }
 
@@ -18,11 +19,13 @@ export const createRecordingIpcDiagnostics = (startedAt: number) => {
   let sends = 0
   let totalPayloadBytes = 0
   let count = 0
+
   return {
     recordBlock(input: { frameCount: number; channelCount: number; payloadBytes: number }) {
       frameCounts[count % 512] = input.frameCount
       payloadBytes[count % 512] = input.payloadBytes
       count += 1
+
       if (input.channelCount === 1 || input.channelCount === 2) channelCounts[input.channelCount] = 1
       totalPayloadBytes += input.payloadBytes
     },
@@ -33,6 +36,7 @@ export const createRecordingIpcDiagnostics = (startedAt: number) => {
     report(at: number) {
       const seconds = Math.max(0.001, (at - startedAt) / 1_000)
       const durations = Array.from(sendDurations.subarray(0, Math.min(sends, 512)))
+
       return {
         seconds,
         count,
@@ -55,15 +59,18 @@ export const createRecordingIpcDiagnostics = (startedAt: number) => {
 export const createRendererTrafficDiagnostics = (startedAt: number) => {
   const channels = new Map(["recording-block", "recording-status", "meter-batch", "spectrum-frame", "schedule-progress"]
     .map((channel) => [channel, { count: 0, bytes: 0 }]))
+
   return {
     record(channel: string, estimatedBytes: number) {
       const current = channels.get(channel)
+
       if (!current) return
       current.count += 1
       current.bytes += Math.max(0, estimatedBytes)
     },
     report(at: number) {
       const seconds = Math.max(0.001, (at - startedAt) / 1_000)
+
       return {
         seconds,
         channels: Object.fromEntries([...channels].flatMap(([channel, value]) => value.count > 0 ? [[channel, {

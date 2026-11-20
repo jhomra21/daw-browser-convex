@@ -7,6 +7,7 @@ const publicRoot = new URL('../../../public/', import.meta.url)
 
 test('instrument parameter delivery waits for an applied ack and rejects retirement', async () => {
   const posted: PortableWasmControlMessage[] = []
+
   const node: AudioWorkletNode = Object.assign(Object.create(null), {
     port: {
       onmessage: null,
@@ -16,12 +17,15 @@ test('instrument parameter delivery waits for an applied ack and rejects retirem
     disconnect: () => undefined,
     onprocessorerror: null,
   })
+
   const session = new PortableWasmPlaybackSession(node)
   const events = [{ nodeId: 'track', type: 'parameter', noteId: 1, sequence: 1, frameOffset: 0, channel: 0, note: 3, value: 913 }] satisfies Parameters<typeof session.queueInstrumentEvents>[1]
   let settled = false
+
   const delivery = session.queueInstrumentEvents(2, events,
     process.env.DAW_INSTRUMENT_R21_ACK_BASELINE === '1' ? undefined : { revision: 3, sequence: 4 })
     .then(() => { settled = true })
+
   await Promise.resolve()
   expect(settled).toBe(false)
   expect(posted[0]).toEqual({ version: 2, type: 'instrument-parameters', requestId: 1, revision: 3, epoch: 2, sequence: 4, events })
@@ -51,11 +55,14 @@ type WorkletMessage = {
   events?: object[]
   schedule?: { revision: number; transportEpoch: number; events: object[] }
 }
+
 type AudioBlocks = Float32Array[][]
+
 type RegisteredHost = {
   handleMessage: (message: WorkletMessage) => void
   process: (inputs: AudioBlocks, outputs: AudioBlocks) => boolean
 }
+
 type RegisteredProcessor = {
   host: RegisteredHost
   port: { onmessage: ((event: { data: WorkletMessage }) => void) | null; postMessage: () => void; close: () => void }
@@ -69,48 +76,67 @@ const observeRealtimeAllocations = (run: () => void) => {
   // Recording must not go through the Array methods being observed.
   const record = (call: string) => { calls[calls.length] = call }
   const restores: Array<() => void> = []
+
   const counted = (name: string, constructor: typeof Float32Array | typeof Uint32Array | typeof Uint8Array | typeof Map | typeof Set | typeof DataView) => {
     const original = Object.getOwnPropertyDescriptor(globalThis, name)
+
     const proxy = new Proxy(constructor, {
       construct(target, args, newTarget) {
         record(`new ${name}`)
+
         return Reflect.construct(target, args, newTarget)
       },
     })
+
     Object.defineProperty(globalThis, name, { value: proxy, configurable: true, writable: true })
+
     if (original) restores[restores.length] = () => Object.defineProperty(globalThis, name, original)
   }
+
   counted('Float32Array', Float32Array)
   counted('Uint32Array', Uint32Array)
   counted('Uint8Array', Uint8Array)
   counted('Map', Map)
   counted('Set', Set)
   counted('DataView', DataView)
+
   for (const name of ['map', 'filter', 'push', 'slice', 'concat']) {
     const original = Object.getOwnPropertyDescriptor(Array.prototype, name)
-    Object.defineProperty(Array.prototype, name, { value: () => { record(`.${name}()`); return [] }, configurable: true, writable: true })
+    Object.defineProperty(Array.prototype, name, { value: () => { record(`.${name}()`);
+
+ return [] }, configurable: true, writable: true })
+
     if (original) restores[restores.length] = () => Object.defineProperty(Array.prototype, name, original)
   }
+
   for (const name of ['log', 'warn', 'error']) {
     const original = Object.getOwnPropertyDescriptor(console, name)
     Object.defineProperty(console, name, { value: () => record(`console.${name}`), configurable: true, writable: true })
+
     if (original) restores[restores.length] = () => Object.defineProperty(console, name, original)
   }
+
   try {
     run()
   } finally {
     restores.reverse().forEach((restore) => restore())
   }
+
   return calls
 }
 
 const stubWebAssembly = (calls: string[], names: Array<'instantiate' | 'compile'>) => {
   const originals = names.map((name) => Object.getOwnPropertyDescriptor(WebAssembly, name))
+
   for (const name of names) {
-    Object.defineProperty(WebAssembly, name, { value: () => { calls[calls.length] = `WebAssembly.${name}`; return new Promise(() => undefined) }, configurable: true, writable: true })
+    Object.defineProperty(WebAssembly, name, { value: () => { calls[calls.length] = `WebAssembly.${name}`;
+
+ return new Promise(() => undefined) }, configurable: true, writable: true })
   }
+
   return () => names.forEach((name, index) => {
     const original = originals[index]
+
     if (original) Object.defineProperty(WebAssembly, name, original)
   })
 }
@@ -126,16 +152,19 @@ const readyPortableHost = async () => {
     leftOutput: new Float32Array(128), rightOutput: new Float32Array(128),
     eventOffset: 1, eventBufferView: new DataView(new ArrayBuffer(4)),
   })
+
   return { host, messages }
 }
 
 test('portable Wasm worklet defers initialization and keeps process allocation-free', async () => {
   let registered: (new (options: { processorOptions: { wasmModule: object } }) => RegisteredProcessor) | undefined
+
   const scope = {
     AudioWorkletProcessor: class { port = { onmessage: null, postMessage: () => undefined, close: () => undefined } },
     registerProcessor: (_name: string, processor: typeof registered) => { registered = processor },
     sampleRate: 48_000,
   }
+
   const previous = Object.fromEntries(Object.keys(scope).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
   Object.assign(globalThis, scope)
   // Construction compiles nothing: Wasm is instantiated only when the main thread sends `initialize`.
@@ -143,21 +172,26 @@ test('portable Wasm worklet defers initialization and keeps process allocation-f
   const compiles: string[] = []
   let processor: RegisteredProcessor
   const restoreWasm = stubWebAssembly(compiles, ['instantiate'])
+
   try {
     await import(new URL(portableAudioCoreWorklet.modulePath, publicRoot).href)
+
     if (!registered) throw new Error('The portable worklet did not register its processor.')
     processor = new registered({ processorOptions: { wasmModule } })
   } finally {
     restoreWasm()
+
     for (const [key, descriptor] of Object.entries(previous)) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor)
       else Reflect.deleteProperty(globalThis, key)
     }
   }
+
   expect(compiles).toEqual([])
 
   const received: WorkletMessage[] = []
   processor.host.handleMessage = (message) => { received.push(message) }
+
   processor.port.onmessage?.({ data: { type: 'initialize', abiVersion: 1 } })
   processor.port.onmessage?.({ data: { type: 'transport', epoch: 2 } })
   expect(received).toEqual([{ type: 'initialize', abiVersion: 1, wasmModule }, { type: 'transport', epoch: 2 }])
@@ -165,22 +199,30 @@ test('portable Wasm worklet defers initialization and keeps process allocation-f
   const inputs = [[new Float32Array(1)]]
   const outputs = [[new Float32Array(1)]]
   const processed: AudioBlocks[][] = []
-  processor.host.process = (...args) => { processed.push(args); return false }
+  processor.host.process = (...args) => { processed.push(args);
+
+ return false }
+
   expect(processor.process(inputs, outputs)).toBe(false)
   expect(processed).toEqual([[inputs, outputs]])
 
   // A running host renders through the core for the output block size without compiling, allocating or logging.
   const { host } = await readyPortableHost()
   const rendered: number[] = []
-  host.coreProcess = (frames: number) => { rendered[rendered.length] = frames; return 0 }
+  host.coreProcess = (frames: number) => { rendered[rendered.length] = frames;
+
+ return 0 }
+
   const block = [[new Float32Array(128), new Float32Array(128)]]
   const touched: string[] = []
   const restoreCompile = stubWebAssembly(touched, ['instantiate', 'compile'])
+
   try {
     touched.push(...observeRealtimeAllocations(() => { host.process([], block) }))
   } finally {
     restoreCompile()
   }
+
   expect(rendered).toEqual([128])
   expect(touched).toEqual([])
 })
@@ -248,6 +290,7 @@ test('B6f5 the portable worklet stages schedules, refuses discontinuous adoption
   Object.assign(host, {
     graphPrepare: (allocation: number, byteLength: number) => {
       preparedBytes.push([...new Uint8Array(host.memory.buffer, allocation, byteLength)])
+
       return 0
     },
     graphPublish: () => 0,
@@ -256,6 +299,7 @@ test('B6f5 the portable worklet stages schedules, refuses discontinuous adoption
     coreProcess: () => {
       host.leftOutput.fill(0.25)
       host.rightOutput.fill(-0.25)
+
       return 0
     },
   })

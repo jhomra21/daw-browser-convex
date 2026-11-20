@@ -5,6 +5,7 @@ export {
   planControlRequestV1,
   rebaseRecoveryAutomationParameterIdV1,
 } from './planner'
+
 export type {
   ControlPlannerCapabilities,
   ControlPlanError,
@@ -16,15 +17,20 @@ export {
   normalizeControlMidiActionV1,
   resolveControlMidiActionV1,
 } from './midi'
+
 export { buildTimelineRangeDeletePatchV1 } from './timeline-range-delete'
+
 export type { TimelineRangeDeletePatchV1 } from './timeline-range-delete'
+
 export {
   collectDeletedTrackIdsV1,
   collectTrackDeletionAffectedIdsV1,
   deriveTrackDeletionAfterStatesV1,
   deriveTrackUngroupAfterStatesV1,
 } from './trackDeletion'
+
 export type { NormalizedTrackControlStateV1 } from './trackDeletion'
+
 export { mergeRecoveryTrackOrderV1 } from './recovery-track-order'
 
 export {
@@ -32,6 +38,7 @@ export {
   projectControlSnapshotCoreV1,
   projectControlSnapshotCoreV2,
 } from './projection'
+
 export type { ControlProjectSnapshotInput } from './projection'
 
 import {
@@ -47,6 +54,7 @@ import {
 export const projectControlSnapshotV1 = (input: ControlProjectSnapshotInput) => (
   projectControlSnapshotCoreV1(input, projectSnapshotSchemaV1)
 )
+
 export const projectControlSnapshotV2 = (input: ControlProjectSnapshotInput) => (
   projectControlSnapshotCoreV2(input, projectSnapshotSchemaV2)
 )

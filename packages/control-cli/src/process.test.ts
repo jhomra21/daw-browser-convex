@@ -56,10 +56,12 @@ describe("control CLI processes", () => {
         },
       },
     ] satisfies ReadonlyArray<{ name: string; prepare: (directory: string) => Promise<void> }>
+
     for (const scenario of cases) {
       const directory = await mkdtemp("/tmp/daw-control-cli-")
       directories.push(directory)
       await scenario.prepare(directory)
+
       const child = Bun.spawn(["bun", entrypoint, "rpc", "--target", "host"], {
         env: {
           ...process.env,
@@ -70,11 +72,14 @@ describe("control CLI processes", () => {
         stdout: "pipe",
         stderr: "pipe",
       })
+
       child.stdin.end()
+
       const [stdout, stderr] = await Promise.all([
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
       ])
+
       expect(await child.exited, scenario.name).toBe(1)
       expect(stdout, scenario.name).toBe("")
       expect(JSON.parse(stderr), scenario.name).toMatchObject({
@@ -107,11 +112,13 @@ describe("control CLI processes", () => {
     directories.push(directory)
     const credentialsPath = join(directory, "credentials.json")
     await Bun.write(credentialsPath, "{")
+
     const child = Bun.spawn(["bun", mcpEntrypoint], {
       env: { ...process.env, DAW_CONTROL_AUTH_PATH: credentialsPath },
       stdout: "pipe",
       stderr: "pipe",
     })
+
     await Bun.sleep(50)
     expect(child.exitCode).toBeNull()
     child.kill()
@@ -126,6 +133,7 @@ describe("control CLI processes", () => {
     const socketPath = join(hostDirectory, "control.sock")
     await mkdir(hostDirectory, { recursive: true, mode: 0o700 })
     await chmod(hostDirectory, 0o700)
+
     const snapshot = projectSnapshotSchemaV1.parse({
       version: "v1",
       project: {
@@ -146,15 +154,18 @@ describe("control CLI processes", () => {
       assets: [],
       assetFolders: [],
     })
+
     const receivedFrames: string[] = []
     let releaseFirstRequest: (() => void) | undefined
     const firstRequest = new Promise<void>((resolve) => { releaseFirstRequest = resolve })
     let firstRequestStarted: (() => void) | undefined
     const firstRequestStartedPromise = new Promise<void>((resolve) => { firstRequestStarted = resolve })
     let delayFirstRequest = true
+
     const server = createServer((socket: Socket) => {
       const decoder = createDesktopFrameDecoder((frame: DesktopFrame) => {
         receivedFrames.push(`${frame.version}:${frame.type}`)
+
         if (frame.type === "hello") {
           if (frame.version === "v2") {
             socket.write(encodeDesktopFrame(desktopFrameSchemaV1.parse({
@@ -171,18 +182,23 @@ describe("control CLI processes", () => {
               capabilities: ["host.status", "control.snapshot"],
             })))
           }
+
           return
         }
+
         if (frame.type !== "request") return
+
         const result = frame.operation === "host.status"
           ? { project: { id: "project-1", kind: "local" }, ready: true, transport: "stopped", capabilities: { playback: true, diagnostics: true } }
           : snapshot
+
         const sendReply = () => socket.write(encodeDesktopFrame(desktopFrameSchemaV1.parse({
           version: "v1",
           type: "reply",
           id: frame.id,
           result,
         })))
+
         if (delayFirstRequest && frame.operation !== "host.status") {
           delayFirstRequest = false
           firstRequestStarted?.()
@@ -191,8 +207,10 @@ describe("control CLI processes", () => {
           sendReply()
         }
       })
+
       socket.on("data", decoder)
     })
+
     servers.push(server)
     await new Promise<void>((resolve, reject) => server.once("error", reject).listen(socketPath, resolve))
     await writeFile(join(hostDirectory, "registration-v1.json"), JSON.stringify({
@@ -204,6 +222,7 @@ describe("control CLI processes", () => {
       secret: "b".repeat(64),
     }), { mode: 0o600 })
     await chmod(join(hostDirectory, "registration-v1.json"), 0o600)
+
     const child = Bun.spawn(["bun", entrypoint, "rpc", "--target", "host"], {
       env: {
         ...process.env,
@@ -214,6 +233,7 @@ describe("control CLI processes", () => {
       stdout: "pipe",
       stderr: "pipe",
     })
+
     child.stdin.write('{"jsonrpc":"2.0","method":"project.current","params":{}}\n')
     const oversized = `{"jsonrpc":"2.0","id":99,"method":"project.list","params":{"value":"${"x".repeat(maxJsonlLineBytes)}`
     child.stdin.write(oversized.slice(0, 17))
@@ -224,11 +244,14 @@ describe("control CLI processes", () => {
     child.stdin.end()
     await firstRequestStartedPromise
     releaseFirstRequest?.()
+
     const [stdout, stderr] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
     ])
+
     const exitCode = await child.exited
+
     if (exitCode !== 0) throw new Error(`${stderr}frames=${receivedFrames.join(",")}`)
     expect(stderr).toBe("")
     const responses = stdout.trimEnd().split("\n").map((line) => JSON.parse(line))

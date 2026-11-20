@@ -22,9 +22,11 @@ const HIGH_CONFIDENCE = 0.62
 const readChannels = (buffer: AudioBuffer) => {
   const analysisFrames = getBpmAnalysisFrameCount(buffer.length, buffer.sampleRate)
   const channels: Float32Array[] = []
+
   for (let channelIndex = 0; channelIndex < buffer.numberOfChannels; channelIndex++) {
     channels.push(buffer.getChannelData(channelIndex).subarray(0, analysisFrames))
   }
+
   return channels
 }
 
@@ -45,8 +47,10 @@ export function createBpmDetectionService() {
 
   const analyzeClip = async (input: AnalyzeClipInput) => {
     const buffer = input.clip.buffer
+
     if (!buffer) {
       setState(input.clip.id, { status: 'failed', message: 'Audio buffer is not loaded.' })
+
       return null
     }
 
@@ -56,14 +60,17 @@ export function createBpmDetectionService() {
     setState(input.clip.id, { status: 'analyzing' })
 
     await Promise.resolve()
+
     const result = detectLoopBpm({
       channels: readChannels(buffer),
       sampleRate: buffer.sampleRate,
     })
 
     if (tokens.get(input.clip.id) !== token) return result
+
     if (!result) {
       setState(input.clip.id, { status: 'failed', message: 'No confident loop tempo was found.' })
+
       return null
     }
 
@@ -73,17 +80,21 @@ export function createBpmDetectionService() {
         sourceBpm: result.bpm,
         mode: 'stretch',
       })
+
       const applied = audioWarp ? await input.autoApply(audioWarp) : false
       setState(input.clip.id, applied ? { status: 'applied', result } : { status: 'suggested', result })
+
       return result
     }
 
     setState(input.clip.id, { status: 'suggested', result })
+
     return result
   }
 
   const markApplied = (clipId: string) => {
     const state = states.get(clipId)
+
     if (state?.status !== 'suggested') return
     setState(clipId, { status: 'applied', result: state.result })
   }
@@ -94,6 +105,7 @@ export function createBpmDetectionService() {
     getState: (clipId: string) => states.get(clipId) ?? { status: 'idle' },
     subscribe: (listener: BpmSuggestionListener) => {
       listeners.add(listener)
+
       return () => listeners.delete(listener)
     },
   }

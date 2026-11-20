@@ -19,6 +19,7 @@ describe("desktop preload request queue", () => {
     const queue = createRequestQueue({ reply: () => undefined, queueLimit: 32 })
     queue.setRequestHandler(async (request) => {
       received = request
+
       return { id: request.id, result: {} }
     })
 
@@ -40,6 +41,7 @@ describe("desktop preload request queue", () => {
     const queue = createRequestQueue({ reply: () => undefined, queueLimit: 32 })
     queue.setRequestHandler(async (request) => {
       received = request
+
       return { id: request.id, result: {} }
     })
 
@@ -64,6 +66,7 @@ describe("desktop preload request queue", () => {
     queue.dispatch(1, { version: "v1", type: "request", id: "stale", operation: "transport.status", input: {} })
     queue.setRequestHandler(async (request) => {
       requests.push(request.id)
+
       return { id: request.id, result: {} }
     })
 
@@ -73,6 +76,7 @@ describe("desktop preload request queue", () => {
   test("a newer generation cancels queued work once before accepting new work", () => {
     const replies: Reply[] = []
     const requests: string[] = []
+
     const queue = createRequestQueue({
       reply: (generation, response) => replies.push({ generation, response }),
       queueLimit: 32,
@@ -82,6 +86,7 @@ describe("desktop preload request queue", () => {
     queue.dispatch(2, { version: "v1", type: "request", id: "new", operation: "transport.status", input: {} })
     queue.setRequestHandler(async (request) => {
       requests.push(request.id)
+
       return { id: request.id, result: {} }
     })
 
@@ -97,10 +102,12 @@ describe("desktop preload request queue", () => {
     const oldRequest = Promise.withResolvers<PreloadHostResponse>()
     const newRequest = Promise.withResolvers<PreloadHostResponse>()
     let canceledId: string | undefined
+
     const queue = createRequestQueue({
       reply: (generation, response) => replies.push({ generation, response }),
       queueLimit: 32,
     })
+
     queue.setRequestHandler((request) => {
       return request.id === "old" ? oldRequest.promise : newRequest.promise
     }, (requestId) => {
@@ -127,10 +134,12 @@ describe("desktop preload request queue", () => {
     const replies: Reply[] = []
     const pending = Promise.withResolvers<PreloadHostResponse>()
     let canceledId: string | undefined
+
     const queue = createRequestQueue({
       reply: (generation, response) => replies.push({ generation, response }),
       queueLimit: 32,
     })
+
     queue.setRequestHandler((_request) => {
       return pending.promise
     }, (requestId) => {
@@ -157,10 +166,12 @@ describe("desktop preload request queue", () => {
 
   test("removing the handler cancels queued and active requests exactly once", () => {
     const queuedReplies: PreloadHostResponse[] = []
+
     const queuedQueue = createRequestQueue({
       reply: (_generation, response) => queuedReplies.push(response),
       queueLimit: 32,
     })
+
     queuedQueue.dispatch(1, { version: "v1", type: "request", id: "queued", operation: "transport.play", input: {} })
     queuedQueue.setRequestHandler(undefined)
     queuedQueue.setRequestHandler(undefined)
@@ -168,10 +179,12 @@ describe("desktop preload request queue", () => {
     const activeReplies: PreloadHostResponse[] = []
     const pending = Promise.withResolvers<PreloadHostResponse>()
     let canceledId: string | undefined
+
     const activeQueue = createRequestQueue({
       reply: (_generation, response) => activeReplies.push(response),
       queueLimit: 32,
     })
+
     activeQueue.setRequestHandler((_request) => {
       return pending.promise
     }, (requestId) => {
@@ -190,10 +203,12 @@ describe("desktop preload request queue", () => {
 
   test("explicit cancellation settles queued and active requests exactly once", () => {
     const replies: PreloadHostResponse[] = []
+
     const queue = createRequestQueue({
       reply: (_generation, response) => replies.push(response),
       queueLimit: 32,
     })
+
     queue.dispatch(1, { version: "v1", type: "request", id: "queued", operation: "transport.play", input: {} })
     queue.cancel("queued")
     queue.cancel("queued")
@@ -219,10 +234,12 @@ describe("desktop preload request queue", () => {
     const replies: PreloadHostResponse[] = []
     const resolved = Promise.withResolvers<PreloadHostResponse>()
     const rejected = Promise.withResolvers<PreloadHostResponse>()
+
     const queue = createRequestQueue({
       reply: (_generation, response) => replies.push(response),
       queueLimit: 32,
     })
+
     queue.setRequestHandler((request) => request.id === "resolve" ? resolved.promise : rejected.promise)
 
     queue.dispatch(1, { version: "v1", type: "request", id: "resolve", operation: "transport.play", input: {} })
@@ -241,6 +258,7 @@ describe("desktop preload request queue", () => {
     const replies: PreloadHostResponse[] = []
     const requests: PreloadHostRequest[] = []
     let dispatchFinal: (() => void) | undefined
+
     const queue = createRequestQueue({
       reply: (_generation, response) => {
         replies.push(response)
@@ -248,8 +266,10 @@ describe("desktop preload request queue", () => {
       },
       queueLimit: 32,
     })
+
     queue.setRequestHandler(async (request) => {
       requests.push(request)
+
       return { id: request.id, result: request.input }
     })
     dispatchFinal = () => {
@@ -297,12 +317,15 @@ describe("desktop preload request queue", () => {
     const pending = Promise.withResolvers<PreloadHostResponse>()
     let received: PreloadHostRequest | undefined
     let canceledId: string | undefined
+
     const queue = createRequestQueue({
       reply: (_generation, response) => replies.push(response),
       queueLimit: 32,
     })
+
     queue.setRequestHandler((request) => {
       received = request
+
       return pending.promise
     }, (requestId) => {
       canceledId = requestId
@@ -329,6 +352,7 @@ describe("desktop preload request queue", () => {
     let now = 0
     const replies: PreloadHostResponse[] = []
     let calls = 0
+
     const queue = createRequestQueue({
       reply: (_generation, response) => replies.push(response),
       now: () => now,
@@ -339,6 +363,7 @@ describe("desktop preload request queue", () => {
     now = 10
     queue.setRequestHandler(async () => {
       calls += 1
+
       return { id: "seek", result: {} }
     })
 
@@ -352,6 +377,7 @@ describe("desktop preload request queue", () => {
   test("rejects requests beyond the queue limit without replacing queued work", () => {
     const replies: PreloadHostResponse[] = []
     const requests: string[] = []
+
     const queue = createRequestQueue({
       reply: (_generation, response) => replies.push(response),
       queueLimit: 1,
@@ -361,6 +387,7 @@ describe("desktop preload request queue", () => {
     queue.dispatch(1, { version: "v1", type: "request", id: "second", operation: "transport.status", input: {} })
     queue.setRequestHandler(async (request) => {
       requests.push(request.id)
+
       return { id: request.id, result: {} }
     })
 
@@ -375,6 +402,7 @@ describe("desktop preload request queue", () => {
     const replies: PreloadHostResponse[] = []
     const requests: PreloadHostRequest[] = []
     const pending = Promise.withResolvers<PreloadHostResponse>()
+
     const queue = createRequestQueue({
       reply: (_generation, response) => replies.push(response),
       queueLimit: 32,
@@ -384,6 +412,7 @@ describe("desktop preload request queue", () => {
     queue.dispatch(1, { version: "v1", type: "request", id: "duplicate", operation: "transport.seek", input: { seconds: 2 } })
     queue.setRequestHandler((request) => {
       requests.push(request)
+
       return pending.promise
     })
     queue.dispatch(1, { version: "v1", type: "request", id: "duplicate", operation: "transport.seek", input: { seconds: 3 } })
@@ -408,11 +437,13 @@ describe("desktop preload request queue", () => {
   test("emits host transport errors for control queue failures", async () => {
     const replies: PreloadHostResponse[] = []
     let now = 0
+
     const deadlineQueue = createRequestQueue({
       reply: (_generation, response) => replies.push(response),
       now: () => now,
       queueLimit: 32,
     })
+
     deadlineQueue.dispatch(1, {
       version: "v1",
       type: "request",
@@ -429,6 +460,7 @@ describe("desktop preload request queue", () => {
       reply: (_generation, response) => replies.push(response),
       queueLimit: 32,
     })
+
     cancelQueue.dispatch(1, {
       version: "v1",
       type: "request",
@@ -443,6 +475,7 @@ describe("desktop preload request queue", () => {
       reply: (_generation, response) => replies.push(response),
       queueLimit: 0,
     })
+
     unavailableQueue.dispatch(1, {
       version: "v1",
       type: "request",
@@ -456,6 +489,7 @@ describe("desktop preload request queue", () => {
       reply: (_generation, response) => replies.push(response),
       queueLimit: 32,
     })
+
     failedQueue.setRequestHandler(async () => {
       throw new Error("host failure")
     })
@@ -470,12 +504,15 @@ describe("desktop preload request queue", () => {
     await flushPromises()
 
     expect(replies).toHaveLength(4)
+
     for (const reply of replies) {
       const error = reply.error
+
       if (!error) throw new Error("Expected a queue failure reply.")
       expect(() => parseDesktopReplyError("control.capabilities", error)).not.toThrow()
       expect(["deadline-exceeded", "cancelled", "unavailable", "internal"]).toContain(error.code)
     }
+
     expect(replies.map((reply) => reply.error?.message)).toEqual([
       "The request deadline elapsed.",
       "The request was cancelled.",
@@ -487,11 +524,13 @@ describe("desktop preload request queue", () => {
   test("retains host error codes for queue failures", async () => {
     const replies: PreloadHostResponse[] = []
     let now = 0
+
     const deadlineQueue = createRequestQueue({
       reply: (_generation, response) => replies.push(response),
       now: () => now,
       queueLimit: 32,
     })
+
     deadlineQueue.dispatch(1, {
       version: "v1",
       type: "request",
@@ -507,6 +546,7 @@ describe("desktop preload request queue", () => {
       reply: (_generation, response) => replies.push(response),
       queueLimit: 32,
     })
+
     cancelQueue.dispatch(1, { version: "v1", type: "request", id: "cancel", operation: "transport.status", input: {} })
     cancelQueue.cancel("cancel")
 
@@ -514,12 +554,14 @@ describe("desktop preload request queue", () => {
       reply: (_generation, response) => replies.push(response),
       queueLimit: 0,
     })
+
     unavailableQueue.dispatch(1, { version: "v1", type: "request", id: "unavailable", operation: "transport.status", input: {} })
 
     const failedQueue = createRequestQueue({
       reply: (_generation, response) => replies.push(response),
       queueLimit: 32,
     })
+
     failedQueue.setRequestHandler(async () => {
       throw new Error("host failure")
     })
@@ -532,8 +574,10 @@ describe("desktop preload request queue", () => {
       "unavailable",
       "internal",
     ])
+
     for (const reply of replies) {
       const error = reply.error
+
       if (!error) throw new Error("Expected a queue failure reply.")
       expect(() => parseDesktopReplyError("transport.status", error)).not.toThrow()
     }

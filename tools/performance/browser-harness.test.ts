@@ -15,6 +15,7 @@ test("streamed fixture rejects payloads over the fixed byte budget", async () =>
   const input = new ReadableStream<Uint8Array>({
     start(controller) { controller.enqueue(Uint8Array.of(1, 2)); controller.enqueue(Uint8Array.of(3)); controller.close() },
   })
+
   const seen: number[] = []
   await expect((async () => {
     for await (const chunk of boundedFixtureStream(input, 2)) seen.push(chunk.byteLength)
@@ -54,10 +55,13 @@ test("streamed fixture upload passes bounded chunks and rejects a second request
       const seen: number[] = []
       server.uploadStream = async (source) => {
         for await (const chunk of source) seen.push(chunk.byteLength)
+
         return new Response('ok')
       }
+
       const url = new URL('/fixture-stream', server.url)
       url.searchParams.set('token', server.uploadToken)
+
       const send = () => fetch(url, {
         method: 'POST',
         body: new ReadableStream<Uint8Array>({
@@ -65,6 +69,7 @@ test("streamed fixture upload passes bounded chunks and rejects a second request
         }),
         duplex: 'half',
       })
+
       expect((await send()).status).toBe(200)
       expect(seen.reduce((sum, size) => sum + size, 0)).toBe(3)
       expect((await send()).status).toBe(409)
@@ -78,14 +83,18 @@ test("stream route accepts a body over the legacy 40 MiB budget", async () => {
   await withBrowserServer(name, async (server) => {
     server.uploadStream = async (body) => {
       for await (const _chunk of body) { /* consume the bounded stream */ }
+
       return new Response("ok")
     }
+
     const url = new URL("/fixture-stream", server.url)
     url.searchParams.set("token", server.uploadToken)
+
     const response = await fetch(url, {
       method: "POST",
       body: new Uint8Array(129 * 1024 * 1024),
     })
+
     expect(response.status).toBe(200)
   })
 })

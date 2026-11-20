@@ -429,6 +429,7 @@ test("a mapped page reaches the host as the same frame bytes as a joined header 
   expect(frame?.subarray(0, 16).readUInt32BE(12)).toBe(32)
 
   const fixture = await fixtureSupervisor("mapped-page-frame")
+
   try {
     await fixture.supervisor.writeMappedAssetPage({ sessionAssetId: 7, startFrame: 5, frameCount: 2, planarPcm })
   } finally {
@@ -442,11 +443,14 @@ test("carries the bounded Stop reason on protocol and control diagnostics", asyn
   process.env.DAW_AE08_EVIDENCE_DIR = tmpdir()
   const fixture = await fixtureSupervisor("stop-reason")
   const info = spyOn(console, "info").mockImplementation(() => undefined)
+
   try {
     await fixture.supervisor.stopAudio("project-switch")
+
     const stopLogs = info.mock.calls
       .map(([prefix, line]) => prefix === "[native-audio-host-control]" ? line : "")
       .filter((line) => line.includes('"request":"stop"'))
+
     expect(stopLogs.some((line) => line.includes('"phase":"enqueue"') && line.includes('"reason":"project-switch"'))).toBeTrue()
     expect(stopLogs.some((line) => line.includes('"phase":"write"') && line.includes('"reason":"project-switch"'))).toBeTrue()
     expect(stopLogs.some((line) => line.includes('"phase":"ack"') && line.includes('"reason":"project-switch"'))).toBeTrue()
@@ -467,6 +471,7 @@ test("propagates bounded offline renderer stderr and exit diagnostics", async ()
   const hostPath = path.join(directory, "host.mjs")
   await writeFile(hostPath, '#!/bin/sh\necho "offline child failed to start" >&2\nexit 1\n')
   await chmod(hostPath, 0o755)
+
   try {
     await expect(renderNativeOffline({
       hostPath,
@@ -556,6 +561,7 @@ test("offline mailbox terminal failure wins over queued frames", async () => {
 
 test("preserves required and unknown response queue overflow protection at four frames", async () => {
   const mailbox = createNativeOfflineFrameMailbox()
+
   const frames = [
     nativeAudioHostControlTypes.ack,
     nativeAudioHostControlTypes.offlineComplete,
@@ -579,6 +585,7 @@ test("drops more than four schedule progress frames before the response mailbox"
   await writeFile(scriptPath, hostScript)
   await writeFile(hostPath, `#!/bin/sh\nMODE=offline-schedule-burst exec ${process.execPath} ${scriptPath}\n`)
   await chmod(hostPath, 0o755)
+
   try {
     const chunks: number[] = []
     await renderNativeOffline({
@@ -610,6 +617,7 @@ test("drops mixed proven offline telemetry while preserving acknowledgement and 
   await writeFile(scriptPath, hostScript)
   await writeFile(hostPath, `#!/bin/sh\nMODE=offline-telemetry exec ${process.execPath} ${scriptPath}\n`)
   await chmod(hostPath, 0o755)
+
   try {
     const chunks: number[] = []
     await renderNativeOffline({
@@ -641,6 +649,7 @@ test("preserves the exact native offline error after telemetry", async () => {
   await writeFile(scriptPath, hostScript)
   await writeFile(hostPath, `#!/bin/sh\nMODE=offline-error-after-telemetry exec ${process.execPath} ${scriptPath}\n`)
   await chmod(hostPath, 0o755)
+
   try {
     await expect(renderNativeOffline({
       hostPath,
@@ -670,6 +679,7 @@ test("consumes offline PCM bursts while waiting for the start acknowledgement", 
   await writeFile(scriptPath, hostScript.replaceAll('process.env.MODE === "offline-burst"', "true"))
   await writeFile(hostPath, `#!/bin/sh\nexec ${process.execPath} ${scriptPath}\n`)
   await chmod(hostPath, 0o755)
+
   try {
     const chunks: number[] = []
     await renderNativeOffline({
@@ -703,9 +713,11 @@ test("cancels mapped-page rendering without leaving a provider rejection unhandl
   await writeFile(scriptPath, hostScript)
   await writeFile(hostPath, `#!/bin/sh\nexec ${process.execPath} ${scriptPath}\n`)
   await chmod(hostPath, 0o755)
+
   try {
     const controller = new AbortController()
     const providerCalled = Promise.withResolvers<void>()
+
     const render = renderNativeOffline({
       hostPath,
       plan: {
@@ -731,9 +743,11 @@ test("cancels mapped-page rendering without leaving a provider rejection unhandl
       onChunk: () => undefined,
       onMappedPage: async () => {
         providerCalled.resolve()
+
         return new Promise<NativeHostMappedAssetPage>(() => {})
       },
     })
+
     await providerCalled.promise
     controller.abort()
     await expect(render).rejects.toMatchObject({ name: "AbortError" })
@@ -749,6 +763,7 @@ test("keeps mapped offline page requests within the bounded provider page size",
   await writeFile(scriptPath, hostScript)
   await writeFile(hostPath, `#!/bin/sh\nMODE=offline-mapped-pages exec ${process.execPath} ${scriptPath}\n`)
   await chmod(hostPath, 0o755)
+
   try {
     const totalFrames = 6 * 60 * 48_000
     const pageFrames = defaultDecodedAudioPageFrames
@@ -781,7 +796,9 @@ test("keeps mapped offline page requests within the bounded provider page size",
         if (request.frameCount > pageFrames) {
           throw new Error('Native audio asset "asset:local-6-minute" page is invalid.')
         }
+
         pages.push({ startFrame: request.startFrame, frameCount: request.frameCount })
+
         return {
           sessionAssetId: request.asset.sessionAssetId,
           startFrame: request.startFrame,
@@ -807,11 +824,13 @@ test("offline instrument provider failures, invalid pages and native errors neve
   const hostPath = path.join(directory, "host.mjs")
   const scriptPath = path.join(directory, "fixture.mjs")
   await writeFile(scriptPath, hostScript)
+
   try {
     for (const failure of ['read', 'identity', 'coverage', 'native', 'schedule']) {
       await writeFile(hostPath, `#!/bin/sh\nMODE=${failure === 'native' ? 'offline-instrument-rejected' : failure === 'schedule' ? 'offline-schedule-rejected' : 'offline-mapped-pages'} exec ${process.execPath} ${scriptPath}\n`)
       await chmod(hostPath, 0o755)
       let chunks = 0
+
       const rendering = renderNativeOffline({
         hostPath,
         plan: {
@@ -824,6 +843,7 @@ test("offline instrument provider failures, invalid pages and native errors neve
         signal: new AbortController().signal, onChunk: () => { chunks += 1 },
         onMappedPage: async (request) => {
           if (failure === 'read') throw new Error('Instrument source could not be read.')
+
           return {
             sessionAssetId: failure === 'identity' ? 2 : 1, startFrame: request.startFrame,
             frameCount: request.frameCount,
@@ -831,6 +851,7 @@ test("offline instrument provider failures, invalid pages and native errors neve
           }
         },
       })
+
       await expect(rendering).rejects.toThrow(failure === 'read' ? 'could not be read'
         : failure === 'native' ? 'Reload samples and retry'
         : failure === 'schedule' ? 'Native export could not schedule playback: instrument target is missing or its parameter is unsupported. Reload the project and retry; no export was completed.'
@@ -846,25 +867,30 @@ test("serializes the offline PCM sink and keeps completion behind the final sink
   const deferred = Promise.withResolvers<void>()
   const delivered: string[] = []
   const pauses: string[] = []
+
   const pump = createNativeOfflineStdoutPump({
     isPcmFrame: (frame) => frame.readUInt32BE(8) === 54,
     onFrame: (frame) => delivered.push(frame.readUInt32BE(8) === 55 ? "complete" : "other"),
     onPcmFrame: async (frame) => {
       delivered.push(`pcm-${frame.readBigUInt64BE(16).toString()}`)
+
       if (frame.readBigUInt64BE(16) === 0n) await deferred.promise
     },
     onError: (error) => { throw error },
     pause: () => pauses.push("pause"),
     resume: () => pauses.push("resume"),
   })
+
   const pcmFrame = (startFrame: number) => {
     const payload = Buffer.alloc(20)
     payload.writeBigUInt64BE(BigInt(startFrame), 0)
     payload.writeUInt32BE(1, 8)
     payload.writeUInt32BE(1, 12)
     payload.writeFloatBE(startFrame + 0.25, 16)
+
     return encodeNativeAudioHostControlFrame(54, payload) ?? Buffer.alloc(0)
   }
+
   pump.push(Buffer.concat([
     pcmFrame(0),
     pcmFrame(1),
@@ -883,26 +909,31 @@ test("serializes the offline PCM sink and keeps completion behind the final sink
 test("preserves split frames and partial following PCM while one sink is pending", async () => {
   const deferred = Promise.withResolvers<void>()
   const delivered: number[] = []
+
   const pump = createNativeOfflineStdoutPump({
     isPcmFrame: (frame) => frame.readUInt32BE(8) === 54,
     onFrame: () => delivered.push(99),
     onPcmFrame: async (frame) => {
       const startFrame = Number(frame.readBigUInt64BE(16))
       delivered.push(startFrame)
+
       if (startFrame === 0) await deferred.promise
     },
     onError: (error) => { throw error },
     pause: () => undefined,
     resume: () => undefined,
   })
+
   const pcmFrame = (startFrame: number, frameCount: number) => {
     const payload = Buffer.alloc(16 + frameCount * 4)
     payload.writeBigUInt64BE(BigInt(startFrame), 0)
     payload.writeUInt32BE(frameCount, 8)
     payload.writeUInt32BE(1, 12)
     payload.fill(startFrame, 16)
+
     return encodeNativeAudioHostControlFrame(54, payload) ?? Buffer.alloc(0)
   }
+
   const first = pcmFrame(0, 32)
   const second = pcmFrame(32, 1_024)
   const completion = encodeNativeAudioHostControlFrame(55) ?? Buffer.alloc(0)
@@ -920,6 +951,7 @@ test("preserves split frames and partial following PCM while one sink is pending
 
 test("fails and stops when the asynchronous offline sink rejects", async () => {
   const deferred = Promise.withResolvers<Error>()
+
   const pump = createNativeOfflineStdoutPump({
     isPcmFrame: (frame) => frame.readUInt32BE(8) === 54,
     onFrame: () => undefined,
@@ -928,6 +960,7 @@ test("fails and stops when the asynchronous offline sink rejects", async () => {
     pause: () => undefined,
     resume: () => undefined,
   })
+
   const payload = Buffer.alloc(20)
   payload.writeUInt32BE(1, 8)
   payload.writeUInt32BE(1, 12)
@@ -940,6 +973,7 @@ test("fails and stops when the asynchronous offline sink rejects", async () => {
 test("does not resume or process buffered PCM after abort stops the render", async () => {
   const deferred = Promise.withResolvers<void>()
   const delivered: number[] = []
+
   const pump = createNativeOfflineStdoutPump({
     isPcmFrame: (frame) => frame.readUInt32BE(8) === 54,
     onFrame: () => undefined,
@@ -951,6 +985,7 @@ test("does not resume or process buffered PCM after abort stops the render", asy
     pause: () => undefined,
     resume: () => { delivered.push(100) },
   })
+
   const payload = Buffer.alloc(20)
   payload.writeUInt32BE(1, 8)
   payload.writeUInt32BE(1, 12)
@@ -972,6 +1007,7 @@ test("moves 128 MiB through one bounded asynchronous sink without loss or duplic
   let renderedFrames = 0
   let renderedBytes = 0
   let complete = false
+
   const pump = createNativeOfflineStdoutPump({
     isPcmFrame: (frame) => frame.readUInt32BE(8) === 54,
     onFrame: (frame) => {
@@ -993,6 +1029,7 @@ test("moves 128 MiB through one bounded asynchronous sink without loss or duplic
     pause: () => undefined,
     resume: () => undefined,
   })
+
   for (let index = 0; index < expectedChunks; index += 1) {
     const payload = Buffer.alloc(16 + framesPerChunk * Float32Array.BYTES_PER_ELEMENT)
     payload.writeBigUInt64BE(BigInt(index * framesPerChunk), 0)
@@ -1002,6 +1039,7 @@ test("moves 128 MiB through one bounded asynchronous sink without loss or duplic
     pump.push(encodeNativeAudioHostControlFrame(54, payload) ?? Buffer.alloc(0))
     await new Promise((resolve) => setTimeout(resolve, 0))
   }
+
   pump.push(encodeNativeAudioHostControlFrame(55) ?? Buffer.alloc(0))
   await new Promise((resolve) => setTimeout(resolve, 0))
   expect(renderedFrames).toBe(frameCount)
@@ -1061,14 +1099,18 @@ test("allows offline completion after the aggregate deadline while valid PCM con
   await writeFile(scriptPath, hostScript)
   await writeFile(hostPath, `#!/bin/sh\nMODE=offline-periodic exec ${process.execPath} ${scriptPath}\n`)
   await chmod(hostPath, 0o755)
+
   try {
     const chunks: number[] = []
     let stageCount = 0
+
     const schedule = (callback: () => void, delayMs: number) => {
       if (delayMs !== 10_000) return setTimeout(callback, delayMs)
       stageCount += 1
+
       return setTimeout(callback, stageCount >= 7 ? 50 : 500)
     }
+
     await renderNativeOffline({
       hostPath,
       plan: {
@@ -1102,6 +1144,7 @@ test("times out stalled offline completion with the completion stage", async () 
   await writeFile(scriptPath, hostScript)
   await writeFile(hostPath, `#!/bin/sh\nMODE=offline-stalled exec ${process.execPath} ${scriptPath}\n`)
   await chmod(hostPath, 0o755)
+
   try {
     await expect(renderNativeOffline({
       hostPath,
@@ -1132,23 +1175,29 @@ test("cleans the offline completion watchdog on abort", async () => {
   await writeFile(scriptPath, hostScript)
   await writeFile(hostPath, `#!/bin/sh\nMODE=offline-stalled exec ${process.execPath} ${scriptPath}\n`)
   await chmod(hostPath, 0o755)
+
   try {
     const controller = new AbortController()
     const completionWatchdog = Promise.withResolvers<void>()
     const canceled: ReturnType<typeof setTimeout>[] = []
     let completionTimer: ReturnType<typeof setTimeout> | undefined
+
     const schedule = (callback: () => void, delayMs: number) => {
       const timer = setTimeout(callback, delayMs === 20 ? 1_000 : delayMs)
+
       if (delayMs === 20) {
         completionTimer = timer
         completionWatchdog.resolve()
       }
+
       return timer
     }
+
     const cancelScheduled = (timer: ReturnType<typeof setTimeout>) => {
       canceled.push(timer)
       clearTimeout(timer)
     }
+
     const render = renderNativeOffline({
       hostPath,
       plan: {
@@ -1168,6 +1217,7 @@ test("cleans the offline completion watchdog on abort", async () => {
       schedule,
       cancelScheduled,
     })
+
     await completionWatchdog.promise
     controller.abort()
     await expect(render).rejects.toMatchObject({ name: "AbortError" })
@@ -1182,9 +1232,11 @@ type ScheduleProgressMode =
   | "schedule-resolution" | "schedule-resolution-none"
   | "schedule-bad-length-80" | "schedule-bad-length-88" | "schedule-bad-length-96"
   | "schedule-bad-length" | "schedule-bad-length-104" | "schedule-bad-length-120" | "schedule-bad-reserved"
+
 type PatchStatusMode =
   | "patch-applied" | "patch-claimed" | "patch-refused-pending" | "patch-refused-stage" | "patch-bad-claim-token"
   | "patch-bad-refusal" | "patch-bad-core" | "patch-bad-length"
+
 const fixtureSupervisor = async (
   mode?: ScheduleProgressMode | PatchStatusMode | "device-loss" | "transition-pending" | "offline-instrument-rejected" | "spool-failed-finish" | "spool-slow-stop" | "spool-bad-pool" | "spool-bad-meter" | "spool-bad-active" | "spool-bad-identity" | "spool-bad-totals" | "spool-reserved" | "spool" | "incompatible" | "loss" | "wrong-ack" | "rejected-ack" | "unavailable-ack" | "bad-ack-status" | "state-rejected" | "state-malformed" | "state-mismatch" | "notification" | "meter" | "schedule" | "editor-interaction" | "parameter-edit" | "silent" | "editor-anchor" | "editor-queued" | "ignore-teardown" | "rollback-rejected" | "begin-delayed" | "commit-delayed" | "close-on-configure" | "stop-reason" | "mapped-page-frame",
   onSpawn?: () => void,
@@ -1194,15 +1246,19 @@ const fixtureSupervisor = async (
   const directory = await mkdtemp(path.join(tmpdir(), "daw-audio-host-"))
   const executable = path.join(directory, "host.mjs")
   await writeFile(executable, hostScript)
+
   return {
     supervisor: createNativeAudioHostSupervisor(executable, (hostPath) => {
       onSpawn?.()
+
       const child = spawn(
         process.execPath,
         [hostPath],
         { env: { ...process.env, MODE: mode ? mode : undefined }, stdio: ["pipe", "pipe", "pipe"] },
       )
+
       onChild?.(child)
+
       return child
     }, {
       ...supervisorOptions,
@@ -1256,9 +1312,11 @@ test("reports an unavailable CoreAudio host without launching a device", async (
 test("planned suspend invalidates the handshake without reporting host loss", async () => {
   const fixture = await fixtureSupervisor()
   let lossCount = 0
+
   const removeLoss = fixture.supervisor.onLoss(() => {
     lossCount += 1
   })
+
   const start = fixture.supervisor.start()
   await fixture.supervisor.suspend()
   await expect(start).rejects.toThrow("startup was cancelled")
@@ -1274,6 +1332,7 @@ test("normal teardown and planned suspend retain parser and child until native F
   for (const shutdown of ["teardown", "suspend"]) {
     let child: ChildProcessWithoutNullStreams | undefined
     const fixture = await fixtureSupervisor("spool", undefined, undefined, (value) => { child = value })
+
     try {
       await fixture.supervisor.configureRecording({
         deviceUid: "coreaudio:fixture-input", generation: 1, sessionId: 1n, channelCount: 2,
@@ -1283,8 +1342,10 @@ test("normal teardown and planned suspend retain parser and child until native F
       await fixture.supervisor.stopRecording()
       expect(fixture.supervisor.recordingFinalizationPending()).toBeTrue()
       let settled = false
+
       const stopping = (shutdown === "teardown" ? fixture.supervisor.teardown() : fixture.supervisor.suspend())
         .then(() => { settled = true })
+
       await Promise.resolve()
       expect(settled).toBeFalse()
       expect(child?.killed).toBeFalse()
@@ -1303,6 +1364,7 @@ test("normal teardown and planned suspend retain parser and child until native F
 test("the control timeout cannot kill persistence behind a blocked Stop ACK", async () => {
   let child: ChildProcessWithoutNullStreams | undefined
   const fixture = await fixtureSupervisor("spool-slow-stop", undefined, undefined, (value) => { child = value })
+
   try {
     await fixture.supervisor.configureRecording({
       deviceUid: "coreaudio:fixture-input", generation: 1, sessionId: 1n, channelCount: 2,
@@ -1324,9 +1386,11 @@ test("the control timeout cannot kill persistence behind a blocked Stop ACK", as
     await fixture.dispose()
   }
 })
+
 test("resume waits for pending Finish suspend and starts a fresh host afterwards", async () => {
   let child: ChildProcessWithoutNullStreams | undefined
   const fixture = await fixtureSupervisor("spool", undefined, undefined, (value) => { child = value })
+
   try {
     await fixture.supervisor.configureRecording({
       deviceUid: "coreaudio:fixture-input", generation: 1, sessionId: 1n, channelCount: 2,
@@ -1347,12 +1411,15 @@ test("resume waits for pending Finish suspend and starts a fresh host afterwards
     await fixture.dispose()
   }
 })
+
 test("rejects malformed native final status and reserved PCM frames instead of finalizing", async () => {
   const modes: NonNullable<Parameters<typeof fixtureSupervisor>[0]>[] =
     ["spool-bad-pool", "spool-bad-meter", "spool-bad-active", "spool-bad-identity", "spool-bad-totals", "spool-reserved"]
+
   for (const mode of modes) {
     let child: ChildProcessWithoutNullStreams | undefined
     const fixture = await fixtureSupervisor(mode, undefined, undefined, (value) => { child = value })
+
     try {
       await fixture.supervisor.configureRecording({
         deviceUid: "coreaudio:fixture-input", generation: 1, sessionId: 1n, channelCount: 2,
@@ -1370,9 +1437,11 @@ test("rejects malformed native final status and reserved PCM frames instead of f
     }
   }
 })
+
 test("actual native loss interrupts finalization rather than fabricating successful persistence", async () => {
   let child: ChildProcessWithoutNullStreams | undefined
   const fixture = await fixtureSupervisor("spool", undefined, undefined, (value) => { child = value })
+
   try {
     await fixture.supervisor.configureRecording({
       deviceUid: "coreaudio:fixture-input", generation: 1, sessionId: 1n, channelCount: 2,
@@ -1391,9 +1460,11 @@ test("actual native loss interrupts finalization rather than fabricating success
 
 test("starts a fresh native host after suspend and resume", async () => {
   let spawnCount = 0
+
   const fixture = await fixtureSupervisor(undefined, () => {
     spawnCount += 1
   })
+
   try {
     await fixture.supervisor.start()
     await fixture.supervisor.suspend()
@@ -1418,9 +1489,11 @@ test("starts configuration identity at zero for each respawned host generation",
 
 test("waits for bounded old-host termination before spawning after resume", async () => {
   let spawnCount = 0
+
   const fixture = await fixtureSupervisor("ignore-teardown", () => {
     spawnCount += 1
   })
+
   try {
     await fixture.supervisor.start()
     const suspend = fixture.supervisor.suspend()
@@ -1439,9 +1512,11 @@ test("waits for bounded old-host termination before spawning after resume", asyn
 
 test("teardown cancels pending resume recovery without respawning", async () => {
   let spawnCount = 0
+
   const fixture = await fixtureSupervisor("ignore-teardown", () => {
     spawnCount += 1
   })
+
   try {
     await fixture.supervisor.start()
     const suspend = fixture.supervisor.suspend()
@@ -1458,6 +1533,7 @@ test("teardown cancels pending resume recovery without respawning", async () => 
 test("fails recovery when SIGKILL does not produce a close event", async () => {
   let oldChild: ChildProcessWithoutNullStreams | undefined
   let spawnCount = 0
+
   const fixture = await fixtureSupervisor(
     "ignore-teardown",
     () => {
@@ -1473,6 +1549,7 @@ test("fails recovery when SIGKILL does not produce a close event", async () => {
       if (spawnCount === 1) oldChild = child
     },
   )
+
   try {
     await fixture.supervisor.start()
     const suspend = fixture.supervisor.suspend()
@@ -1488,6 +1565,7 @@ test("fails recovery when SIGKILL does not produce a close event", async () => {
 
 test("serializes suspend-resume-suspend without reviving the old child", async () => {
   const fixture = await fixtureSupervisor("ignore-teardown")
+
   try {
     await fixture.supervisor.start()
     const firstSuspend = fixture.supervisor.suspend()
@@ -1506,9 +1584,11 @@ test("serializes suspend-resume-suspend without reviving the old child", async (
 test("rejects a native host with incompatible contract identity before use", async () => {
   const closed = Promise.withResolvers<void>()
   const errors = spyOn(console, "error").mockImplementation(() => undefined)
+
   const fixture = await fixtureSupervisor("incompatible", undefined, undefined, (child) => {
     child.once("close", () => closed.resolve())
   })
+
   try {
     await expect(fixture.supervisor.start()).rejects.toThrow("incompatible protocol response")
     await closed.promise
@@ -1523,9 +1603,11 @@ test("rejects a native host with incompatible contract identity before use", asy
 
 test("shares one native host startup across concurrent callers", async () => {
   let spawns = 0
+
   const fixture = await fixtureSupervisor(undefined, () => {
     spawns += 1
   })
+
   try {
     const first = fixture.supervisor.start()
     const second = fixture.supervisor.start()
@@ -1542,6 +1624,7 @@ test("shares one native host startup across concurrent callers", async () => {
 test("teardown cancels an in-flight native host handshake without reporting loss", async () => {
   const spawned = Promise.withResolvers<void>()
   const fixture = await fixtureSupervisor("silent", () => spawned.resolve())
+
   try {
     const losses: string[] = []
     fixture.supervisor.onLoss((error) => losses.push(error.message))
@@ -1564,16 +1647,19 @@ test("teardown cancels an in-flight native host handshake without reporting loss
 
 test("serializes scoped native host transactions and remains usable after rollback", async () => {
   const fixture = await fixtureSupervisor()
+
   try {
     const calls: string[] = []
     const firstAttached = Promise.withResolvers<void>()
     const releaseFirst = Promise.withResolvers<void>()
+
     const first = fixture.supervisor.runTransaction(async (transaction) => {
       calls.push("first")
       await transaction.attachVst(vstAttachment("11111111-1111-4111-8111-111111111111"))
       firstAttached.resolve()
       await releaseFirst.promise
     })
+
     const second = fixture.supervisor.runTransaction(async (transaction) => {
       calls.push("second")
       await transaction.attachVst(vstAttachment("22222222-2222-4222-8222-222222222222"))
@@ -1601,9 +1687,11 @@ test("serializes scoped native host transactions and remains usable after rollba
 
 test("manual transaction invalidation is a no-op without spawning a host", async () => {
   let spawnCount = 0
+
   const fixture = await fixtureSupervisor(undefined, () => {
     spawnCount += 1
   })
+
   try {
     await fixture.supervisor.invalidateManualTransaction()
     expect(spawnCount).toBe(0)
@@ -1617,11 +1705,13 @@ test("manual transaction invalidation is a no-op without spawning a host", async
 test("manual invalidation after host loss does not respawn", async () => {
   let spawnCount = 0
   let child: ChildProcessWithoutNullStreams | undefined
+
   const fixture = await fixtureSupervisor(undefined, () => {
     spawnCount += 1
   }, undefined, (current) => {
     child = current
   })
+
   try {
     const lost = new Promise<void>((resolve) => fixture.supervisor.onLoss(() => resolve()))
     await fixture.supervisor.start()
@@ -1639,6 +1729,7 @@ test("manual invalidation after host loss does not respawn", async () => {
 
 test("invalidates an open manual transaction and allows a fresh transaction", async () => {
   const fixture = await fixtureSupervisor()
+
   try {
     await fixture.supervisor.start()
     const first = await fixture.supervisor.beginTransaction()
@@ -1655,6 +1746,7 @@ test("invalidates an open manual transaction and allows a fresh transaction", as
 
 test("rollback failure still releases manual transaction ownership", async () => {
   const fixture = await fixtureSupervisor("rollback-rejected")
+
   try {
     await fixture.supervisor.start()
     await fixture.supervisor.beginTransaction()
@@ -1670,6 +1762,7 @@ test("rollback failure still releases manual transaction ownership", async () =>
 
 test("invalidating an in-flight begin cannot publish a token", async () => {
   const fixture = await fixtureSupervisor("begin-delayed")
+
   try {
     await fixture.supervisor.start()
     const beginning = fixture.supervisor.beginTransaction()
@@ -1687,6 +1780,7 @@ test("invalidating an in-flight begin cannot publish a token", async () => {
 
 test("invalidating an in-flight commit cannot publish a committed renderer state", async () => {
   const fixture = await fixtureSupervisor("commit-delayed")
+
   try {
     await fixture.supervisor.start()
     const token = await fixture.supervisor.beginTransaction()
@@ -1703,13 +1797,16 @@ test("invalidating an in-flight commit cannot publish a committed renderer state
 
 test("manual invalidation does not interrupt an internal transaction", async () => {
   const fixture = await fixtureSupervisor()
+
   try {
     const entered = Promise.withResolvers<void>()
     const release = Promise.withResolvers<void>()
+
     const transaction = fixture.supervisor.runTransaction(async () => {
       entered.resolve()
       await release.promise
     })
+
     await entered.promise
     await fixture.supervisor.invalidateManualTransaction()
     expect(fixture.supervisor.transactionOpen()).toBeTrue()
@@ -1724,6 +1821,7 @@ test("manual invalidation does not interrupt an internal transaction", async () 
 
 test("correlates acknowledgements to the requested native session operation", async () => {
   const fixture = await fixtureSupervisor("wrong-ack")
+
   try {
     await fixture.supervisor.start()
     await expect(fixture.supervisor.configure({
@@ -1741,10 +1839,12 @@ test("correlates acknowledgements to the requested native session operation", as
 
 test("keeps the host alive after a recoverable negative acknowledgement", async () => {
   const fixture = await fixtureSupervisor("rejected-ack")
+
   try {
     const losses: string[] = []
     fixture.supervisor.onLoss((error) => losses.push(error.message))
     await fixture.supervisor.start()
+
     const rejection = fixture.supervisor.configure({
       deviceId: "coreaudio:fixture",
       sampleRateHz: 48_000,
@@ -1752,6 +1852,7 @@ test("keeps the host alive after a recoverable negative acknowledgement", async 
       channelCount: 2,
       revision: 1,
     })
+
     await expect(rejection).rejects.toBeInstanceOf(NativeAudioHostCommandError)
     await expect(rejection).rejects.toMatchObject({
       requestType: nativeAudioHostControlTypes.deviceConfigure,
@@ -1775,6 +1876,7 @@ test("keeps the host alive after a recoverable negative acknowledgement", async 
 
 test("captures VST state and correlates the response identity", async () => {
   const fixture = await fixtureSupervisor()
+
   try {
     await fixture.supervisor.start()
     await expect(fixture.supervisor.getVstState("11111111-1111-4111-8111-111111111111")).resolves.toEqual({
@@ -1790,6 +1892,7 @@ test("captures VST state and correlates the response identity", async () => {
 test("every request that names an attachment encodes its instance id the way the host reads it", async () => {
   const instanceId = "11111111-1111-4111-8111-111111111111"
   const fixture = await fixtureSupervisor()
+
   try {
     await fixture.supervisor.start()
     await expect(fixture.supervisor.detachVst(instanceId)).resolves.toEqual({ status: "detached" })
@@ -1811,6 +1914,7 @@ test("every request that names an attachment encodes its instance id the way the
 test("preserves live instrument preparation rejection text without losing the host", async () => {
   const fixture = await fixtureSupervisor("offline-instrument-rejected")
   const supervisor = fixture.supervisor
+
   try {
     await supervisor.start()
     await expect(supervisor.configureInstrumentStates(new Uint8Array(4))).rejects.toMatchObject({
@@ -1832,6 +1936,7 @@ test("preserves live instrument preparation rejection text without losing the ho
 test("keeps the host usable after VST state rejection or malformed response", async () => {
   for (const mode of ["state-rejected", "state-malformed", "state-mismatch"] as const) {
     const fixture = await fixtureSupervisor(mode)
+
     try {
       await fixture.supervisor.start()
       await expect(fixture.supervisor.getVstState("11111111-1111-4111-8111-111111111111"))
@@ -1857,6 +1962,7 @@ test("round-trips a bounded native VST editor command and signed anchor", async 
     command: "status",
   })
   const fixture = await fixtureSupervisor("editor-anchor")
+
   try {
     await fixture.supervisor.start()
     await expect(fixture.supervisor.executeVstEditorCommand({
@@ -1893,8 +1999,10 @@ test("round-trips a bounded native VST editor command and signed anchor", async 
 
 test("queues editor commands behind an in-flight native host request", async () => {
   const fixture = await fixtureSupervisor("editor-queued")
+
   try {
     await fixture.supervisor.start()
+
     const configure = fixture.supervisor.configure({
       deviceId: "coreaudio:fixture",
       sampleRateHz: 48_000,
@@ -1902,12 +2010,14 @@ test("queues editor commands behind an in-flight native host request", async () 
       channelCount: 2,
       revision: 1,
     })
+
     const editor = fixture.supervisor.executeVstEditorCommand({
       instanceId: "11111111-1111-4111-8111-111111111111",
       command: "open",
       width: 640,
       height: 480,
     })
+
     await expect(Promise.all([configure, editor])).resolves.toEqual([
       undefined,
       {
@@ -1927,6 +2037,7 @@ test("queues editor commands behind an in-flight native host request", async () 
 
 test("starts diagnostic workers without using the playback start request", async () => {
   const fixture = await fixtureSupervisor()
+
   try {
     await expect(fixture.supervisor.startDiagnosticAudio()).resolves.toBeUndefined()
   } finally {
@@ -1937,10 +2048,12 @@ test("starts diagnostic workers without using the playback start request", async
 
 test("notifies subscribers when the native host is lost", async () => {
   const fixture = await fixtureSupervisor("loss")
+
   try {
     const lost = new Promise<string>((resolve) => {
       fixture.supervisor.onLoss((error) => resolve(error.message))
     })
+
     await fixture.supervisor.start()
     await expect(lost).resolves.toBe("The native audio host stopped.")
   } finally {
@@ -1951,11 +2064,14 @@ test("notifies subscribers when the native host is lost", async () => {
 
 test("names the pending request when the native host closes", async () => {
   const fixture = await fixtureSupervisor("close-on-configure")
+
   try {
     const lost = new Promise<string>((resolve) => {
       fixture.supervisor.onLoss((error) => resolve(error.message))
     })
+
     await fixture.supervisor.start()
+
     const configure = fixture.supervisor.configure({
       deviceId: "coreaudio:fixture",
       sampleRateHz: 48_000,
@@ -1963,6 +2079,7 @@ test("names the pending request when the native host closes", async () => {
       channelCount: 2,
       revision: 1,
     })
+
     await expect(configure).rejects.toThrow("native audio host stopped during deviceConfigure request 3")
     await expect(lost).resolves.toBe("The native audio host stopped during deviceConfigure request 3.")
   } finally {
@@ -1973,6 +2090,7 @@ test("names the pending request when the native host closes", async () => {
 
 test("acknowledges diagnostics and tears down the session without stopping its process", async () => {
   const fixture = await fixtureSupervisor()
+
   try {
     const losses: string[] = []
     fixture.supervisor.onLoss((error) => losses.push(error.message))
@@ -2034,6 +2152,7 @@ test("acknowledges diagnostics and tears down the session without stopping its p
 
 test("decodes revision statuses and event-driven worker notification identity", async () => {
   const fixture = await fixtureSupervisor("notification")
+
   try {
     const notification = new Promise((resolve) => fixture.supervisor.onWorkerNotification(resolve))
     await fixture.supervisor.start()
@@ -2070,6 +2189,7 @@ test("decodes revision statuses and event-driven worker notification identity", 
 
 test("pending graph replies leave diagnostics and Stop available without host loss", async () => {
   const fixture = await fixtureSupervisor("transition-pending")
+
   try {
     const losses: string[] = []
     fixture.supervisor.onLoss((error) => losses.push(error.message))
@@ -2092,6 +2212,7 @@ test("pending graph replies leave diagnostics and Stop available without host lo
 
 test("a revision request that was never sent is unavailable, a lost reply is unconfirmed", async () => {
   const notStarted = await fixtureSupervisor("transition-pending")
+
   try {
     // No child process yet, and an invalid revision: nothing reached native in either case.
     const unsent = await Promise.allSettled([
@@ -2099,6 +2220,7 @@ test("a revision request that was never sent is unavailable, a lost reply is unc
       notStarted.supervisor.publishGraphRevision(0),
       notStarted.supervisor.inspectGraphRevision(2),
     ])
+
     for (const result of unsent) {
       expect(result.status).toBe("rejected")
       expect(nativeDeliveryFailureKind(result.status === "rejected" ? result.reason : undefined)).toBe("unavailable")
@@ -2107,8 +2229,10 @@ test("a revision request that was never sent is unavailable, a lost reply is unc
     await notStarted.supervisor.teardown()
     await notStarted.dispose()
   }
+
   // Another control request is pending: the second queues and is sent after the first reply.
   const busy = await fixtureSupervisor("transition-pending")
+
   try {
     await busy.supervisor.start()
     const graph = new Uint8Array(13)
@@ -2125,6 +2249,7 @@ test("a revision request that was never sent is unavailable, a lost reply is unc
 
 test("decodes bounded native meter batches", async () => {
   const fixture = await fixtureSupervisor("meter")
+
   try {
     const batch = new Promise((resolve) => fixture.supervisor.onMeterBatch(resolve))
     await fixture.supervisor.start()
@@ -2147,6 +2272,7 @@ test("device loss diagnostics terminate pending revision work without waiting fo
   const fixture = await fixtureSupervisor("device-loss")
   const errors: string[] = []
   const unsubscribe = fixture.supervisor.onLoss((error) => errors.push(error.message))
+
   try {
     await fixture.supervisor.start()
     await expect(fixture.supervisor.prepareGraphRevision(new Uint8Array(13)))
@@ -2162,6 +2288,7 @@ test("device loss diagnostics terminate pending revision work without waiting fo
 
 test("decodes schedule progress notifications", async () => {
   const fixture = await fixtureSupervisor("schedule")
+
   try {
     const progress = new Promise((resolve) => fixture.supervisor.onScheduleProgress(resolve))
     await fixture.supervisor.start()
@@ -2200,16 +2327,20 @@ for (const mode of [
     const losses = Promise.withResolvers<string>()
     fixture.supervisor.onLoss((error) => losses.resolve(error.message))
     fixture.supervisor.onScheduleProgress((progress) => received.push(progress))
+
     try {
       if (mode.startsWith("schedule-bad-")) {
         await fixture.supervisor.start().catch(() => undefined)
         expect(await losses.promise).toContain("invalid schedule progress")
         expect(received).toHaveLength(0)
+
         return
       }
+
       await fixture.supervisor.start()
       await fixture.supervisor.diagnostics()
       expect(received).toHaveLength(1)
+
       if (mode === "schedule-resolution") {
         // The token is above Number.MAX_SAFE_INTEGER and crosses the process boundary as decimal text.
         expect(received[0]).toMatchObject({
@@ -2234,6 +2365,7 @@ const patchStatusPayload = (outcome: number, refusal: number, core: number, toke
   payload.writeUInt32BE(refusal, 4)
   payload.writeUInt32BE(core, 8)
   payload.writeBigUInt64BE(token, 12)
+
   return payload
 }
 
@@ -2244,9 +2376,11 @@ test("validates every processor patch status outcome, refusal, core result and t
     .toEqual({ outcome: "refused", refusal: "claim-pending", coreResult: 0, token: 2n ** 64n - 1n })
   expect(decodeNativeProcessorPatchStatus(patchStatusPayload(2, 6, 17, 0n))).toEqual({ outcome: "refused", refusal: "stage-failed", coreResult: 17 })
   expect(decodeNativeProcessorPatchStatus(patchStatusPayload(2, 8, 4, 0n))).toEqual({ outcome: "refused", refusal: "apply-failed", coreResult: 4 })
+
   for (const refusal of [1, 2, 4, 5, 7]) {
     expect(decodeNativeProcessorPatchStatus(patchStatusPayload(2, refusal, 0, 0n))).toMatchObject({ outcome: "refused" })
   }
+
   for (const invalid of [
     patchStatusPayload(1, 1, 0, 0n), patchStatusPayload(1, 0, 1, 0n), patchStatusPayload(1, 0, 0, 1n),
     patchStatusPayload(3, 0, 0, 0n), patchStatusPayload(3, 4, 0, 1n), patchStatusPayload(3, 0, 2, 1n),
@@ -2262,10 +2396,14 @@ for (const mode of [
 ] satisfies PatchStatusMode[]) {
   test(`answers a processor patch with the typed status ${mode} and a lossless token`, async () => {
     const fixture = await fixtureSupervisor(mode)
+
     try {
       const status = await fixture.supervisor.queueProcessorStatePatch(new Uint8Array(56))
+
       if (mode === "patch-applied") expect(status).toEqual({ outcome: "applied" })
+
       if (mode === "patch-refused-stage") expect(status).toEqual({ outcome: "refused", refusal: "stage-failed", coreResult: 17 })
+
       if (mode === "patch-claimed" || mode === "patch-refused-pending") {
         expect(status).toMatchObject({ token: 9007199254740993n })
         // Supervisor (bigint) -> main (decimal text) -> structured-clone IPC -> preload hands the renderer the same object.
@@ -2288,6 +2426,7 @@ for (const mode of [
     const fixture = await fixtureSupervisor(mode)
     const losses = Promise.withResolvers<string>()
     fixture.supervisor.onLoss((error) => losses.resolve(error.message))
+
     try {
       await expect(fixture.supervisor.queueProcessorStatePatch(new Uint8Array(56))).rejects.toThrow()
       expect(await losses.promise).toContain("invalid processor patch status")
@@ -2302,6 +2441,7 @@ test("treats an ACK for a processor patch as a protocol error, never as proof it
   const fixture = await fixtureSupervisor()
   const losses = Promise.withResolvers<string>()
   fixture.supervisor.onLoss((error) => losses.resolve(error.message))
+
   try {
     await expect(fixture.supervisor.queueProcessorStatePatch(new Uint8Array(56))).rejects.toThrow()
     expect(await losses.promise).toContain("acknowledged a processor patch")
@@ -2314,6 +2454,7 @@ test("treats an ACK for a processor patch as a protocol error, never as proof it
 test("classifies delivery failures as refused, unconfirmed or unavailable", async () => {
   const refused = await fixtureSupervisor("rejected-ack")
   let thrownRefusedWithUnavailableText: unknown
+
   try {
     const thrown = await refused.supervisor.queueParameterEvents(new Uint8Array(4)).catch((error: Error) => error)
     thrownRefusedWithUnavailableText = thrown
@@ -2323,11 +2464,13 @@ test("classifies delivery failures as refused, unconfirmed or unavailable", asyn
     await refused.supervisor.teardown()
     await refused.dispose()
   }
+
   // The same text under a refused status is a refusal: only the ACK status word classifies.
   expect(thrownRefusedWithUnavailableText).toBeInstanceOf(NativeAudioHostCommandError)
   expect(thrownRefusedWithUnavailableText instanceof Error && thrownRefusedWithUnavailableText.message).toBe("audio session is unavailable")
   expect(nativeDeliveryFailureKind(thrownRefusedWithUnavailableText)).toBe("refused")
   const unavailableAck = await fixtureSupervisor("unavailable-ack")
+
   try {
     const thrown = await unavailableAck.supervisor.queueParameterEvents(new Uint8Array(4)).catch((error: Error) => error)
     expect(thrown).toBeInstanceOf(NativeAudioHostCommandError)
@@ -2336,7 +2479,9 @@ test("classifies delivery failures as refused, unconfirmed or unavailable", asyn
     await unavailableAck.supervisor.teardown()
     await unavailableAck.dispose()
   }
+
   const badStatus = await fixtureSupervisor("bad-ack-status")
+
   try {
     const losses = Promise.withResolvers<string>()
     badStatus.supervisor.onLoss((error) => losses.resolve(error.message))
@@ -2346,10 +2491,12 @@ test("classifies delivery failures as refused, unconfirmed or unavailable", asyn
     await badStatus.supervisor.teardown()
     await badStatus.dispose()
   }
+
   expect(nativeDeliveryFailureKind(new NativeAudioHostNotSentError("full"))).toBe("unavailable")
   expect(nativeDeliveryFailureKind(undefined)).toBe("unavailable")
   expect(nativeDeliveryFailureKind(new Error("The native audio host control request timed out."))).toBe("unconfirmed")
   const unavailable = await fixtureSupervisor()
+
   try {
     await unavailable.supervisor.teardown()
     const thrown = await unavailable.supervisor.queueParameterEvents(new Uint8Array(4)).catch((error: Error) => error)
@@ -2361,6 +2508,7 @@ test("classifies delivery failures as refused, unconfirmed or unavailable", asyn
 
 test("decodes editor interaction notifications without treating them as faults", async () => {
   const fixture = await fixtureSupervisor("editor-interaction")
+
   try {
     const notification = new Promise((resolve) => fixture.supervisor.onWorkerNotification(resolve))
     await fixture.supervisor.start()
@@ -2379,6 +2527,7 @@ test("decodes editor interaction notifications without treating them as faults",
 
 test("decodes bounded native VST parameter edit notifications", async () => {
   const fixture = await fixtureSupervisor("parameter-edit")
+
   try {
     const notification = new Promise((resolve) => fixture.supervisor.onWorkerNotification(resolve))
     await fixture.supervisor.start()
@@ -2398,6 +2547,7 @@ test("decodes bounded native VST parameter edit notifications", async () => {
 
 test("validates bounded planar PCM installs and allows idempotent releases", async () => {
   const fixture = await fixtureSupervisor()
+
   try {
     await fixture.supervisor.start()
     await expect(fixture.supervisor.installAsset({
@@ -2439,6 +2589,7 @@ test("validates bounded planar PCM installs and allows idempotent releases", asy
 
 test("resolves the host default output device and rejects foreign device namespaces", async () => {
   const fixture = await fixtureSupervisor()
+
   try {
     await expect(fixture.supervisor.resolveOutputDevice()).resolves.toEqual({
       deviceId: "coreaudio:fixture",
@@ -2454,8 +2605,10 @@ test("resolves the host default output device and rejects foreign device namespa
     await fixture.dispose()
   }
 })
+
 test("round-trips the native device inventory with both channel directions", async () => {
   const fixture = await fixtureSupervisor()
+
   try {
     await expect(fixture.supervisor.listDevices()).resolves.toEqual([
       {
@@ -2480,8 +2633,10 @@ test("round-trips the native device inventory with both channel directions", asy
     await fixture.dispose()
   }
 })
+
 test("queues the device inventory behind a control request that is awaiting its reply", async () => {
   const fixture = await fixtureSupervisor()
+
   try {
     await fixture.supervisor.start()
     const diagnostics = fixture.supervisor.diagnostics()
@@ -2493,18 +2648,22 @@ test("queues the device inventory behind a control request that is awaiting its 
     await fixture.dispose()
   }
 })
+
 test("probes an output device through an isolated native host", async () => {
   const fixture = await fixtureSupervisor()
   let probe: ReturnType<typeof createNativeAudioHostSupervisor> | undefined
+
   try {
     const device = await probeNativeAudioOutputDevice(
       "isolated-probe",
       undefined,
       () => {
         probe = fixture.supervisor
+
         return fixture.supervisor
       },
     )
+
     expect(device?.nominalSampleRateHz).toBe(48_000)
   } finally {
     if (!probe) await fixture.supervisor.teardown()
@@ -2515,6 +2674,7 @@ test("probes an output device through an isolated native host", async () => {
 test("resolves the host default recording input and sends bounded recording controls", async () => {
   let child: ChildProcessWithoutNullStreams | undefined
   const fixture = await fixtureSupervisor("spool", undefined, undefined, (value) => { child = value })
+
   try {
     await expect(fixture.supervisor.resolveInputDevice()).resolves.toEqual({
       deviceId: "coreaudio:fixture-input",
@@ -2569,8 +2729,10 @@ test("resolves the host default recording input and sends bounded recording cont
 
 test("keeps deterministic host lifecycle attachments control-only", async () => {
   const fixture = await fixtureSupervisor()
+
   try {
     const transactionToken = await fixture.supervisor.beginTransaction()
+
     const attachment: ResolvedVst3Attachment & { playbackEnabled: true } = {
       graphNodeId: 17n,
       stageIndex: 0,
@@ -2596,6 +2758,7 @@ test("keeps deterministic host lifecycle attachments control-only", async () => 
         maximumEventsPerBlock: 128,
       },
     }
+
     await expect(fixture.supervisor.startAudio()).rejects.toThrow("transaction")
     await expect(fixture.supervisor.attachVst(attachment, "wrong-token")).rejects.toThrow("transaction")
     await fixture.supervisor.attachVst(attachment, transactionToken)
@@ -2646,6 +2809,7 @@ test("keeps deterministic host lifecycle attachments control-only", async () => 
 test("M2 failed Finish outcome does not permanently veto playback stop or teardown", async () => {
   let child: ChildProcessWithoutNullStreams | undefined
   const fixture = await fixtureSupervisor("spool-failed-finish", undefined, undefined, (value) => { child = value })
+
   try {
     await fixture.supervisor.configureRecording({ deviceUid: "coreaudio:fixture-input", generation: 1,
       sessionId: 1n, channelCount: 2, inputChannels: [0, 1], gain: 1, polarity: 1,
@@ -2678,6 +2842,7 @@ test("M2 failed Finish outcome does not permanently veto playback stop or teardo
 const recordingFinishFixture = async (blocked?: "patch" | "graph", refused = false) => {
   const directory = await mkdtemp(path.join(tmpdir(), "daw-recording-finish-"))
   const executable = path.join(directory, "host.mjs")
+
   const script = hostScript
     .replace('process.on("SIGUSR2", () => process.stdout.write(recordingBlock()))',
       'process.on("SIGUSR2", () => process.stdout.write(spoolStatus(2)))\nprocess.on("SIGWINCH", () => process.stdout.write(ack(30)))\nprocess.on("SIGURG", () => process.stdout.write(patchStatus(1, 0, 0, 0)))')
@@ -2688,6 +2853,7 @@ const recordingFinishFixture = async (blocked?: "patch" | "graph", refused = fal
       `    } else if (type === 30 && process.env.MODE?.startsWith("spool")) {
       process.stderr.write("recording-stop-dispatched\\n")
       ${refused ? 'process.stdout.write(ack(type, 0, "fixture Stop refused")); continue' : ""}`)
+
   await writeFile(executable, script)
   const blockedControl = Promise.withResolvers<void>()
   const stopDispatched = Promise.withResolvers<void>()
@@ -2695,48 +2861,59 @@ const recordingFinishFixture = async (blocked?: "patch" | "graph", refused = fal
   let child: ChildProcessWithoutNullStreams | undefined
   let stopWrites = 0
   let terminated = false
+
   const supervisor = createNativeAudioHostSupervisor(executable, hostPath => {
     const spawned = spawn(process.execPath, [hostPath], {
       env: { ...process.env, MODE: "spool-slow-stop" }, stdio: ["pipe", "pipe", "pipe"],
     })
+
     child = spawned
     terminated = false
     const kill = spawned.kill.bind(spawned)
     spyOn(spawned, "kill").mockImplementation(signal => {
       if (signal === undefined || signal === "SIGTERM" || signal === "SIGKILL") terminated = true
+
       return kill(signal)
     })
     let stderr = ""
     spawned.stderr.on("data", chunk => {
       stderr += String(chunk)
+
       if (stderr.includes("recording-control-blocked")) blockedControl.resolve()
+
       if (stderr.includes("recording-stop-dispatched")) stopDispatched.resolve()
     })
     spawned.stdin.on("error", () => undefined)
     const write = spawned.stdin.write.bind(spawned.stdin)
     spyOn(spawned.stdin, "write").mockImplementation(chunk => {
       if (Buffer.isBuffer(chunk) && chunk.readUInt32BE(8) === nativeAudioHostControlTypes.recordingStop) stopWrites += 1
+
       return write(chunk)
     })
+
     return spawned
   }, {
     evidence: createAe08Evidence(directory),
     hostEnvironment: { DAW_AE08_EVIDENCE_DIR: directory },
   })
+
   await supervisor.configureRecording({
     deviceUid: "coreaudio:fixture-input", generation: 1, sessionId: 1n, channelCount: 2,
     inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false, targetNodeId: 1n,
   }, { rootPath: directory, rootDevice: 1n, rootInode: 2n, token: "a".repeat(64) })
   await supervisor.startRecording()
   const timers = spyOn(globalThis, "setTimeout")
+
   const logs = spyOn(console, "info").mockImplementation((prefix, line) => {
     if (prefix === "[native-audio-host-control]" && String(line).includes('"request":"recordingStop"')
       && String(line).includes('"phase":"enqueue"')) stopEnqueued.resolve()
   })
+
   const completeStackCapture = () => {
     const sample = timers.mock.calls.findLast(([, delay]) => delay === nativeAudioHostStackCaptureDeadlineMs)
     sample?.[0]()
   }
+
   return {
     supervisor, blockedControl: blockedControl.promise, stopDispatched: stopDispatched.promise,
     stopEnqueued: stopEnqueued.promise,
@@ -2750,8 +2927,10 @@ const recordingFinishFixture = async (blocked?: "patch" | "graph", refused = fal
     completeStackCapture,
     fireDeadline: (completeCapture = true) => {
       const timer = timers.mock.calls.findLast(([, delay]) => delay === nativeAudioHostControlWatchdogMs)
+
       if (!timer) throw new Error("Missing dispatched control deadline")
       timer[0]()
+
       if (completeCapture) completeStackCapture()
     },
     dispose: async () => {
@@ -2773,6 +2952,7 @@ test("recording Finish watchdog: D6 queued Stop cannot mask a lost patch status"
       lossState = { pending: supervisor.recordingFinalizationPending(),
         admission: supervisor.recordingAdmissionAvailable(), running: supervisor.status().running }
     })
+
     try {
       const patch = supervisor.queueProcessorStatePatch(new Uint8Array(56))
       void patch.catch(() => undefined)
@@ -2805,6 +2985,7 @@ test("recording Finish watchdog: dispatched Stop retains persistence before ACK"
   const fixture = await recordingFinishFixture()
   let losses = 0
   fixture.supervisor.onLoss(() => { losses += 1 })
+
   try {
     let stopped = false
     const stop = fixture.supervisor.stopRecording().then(() => { stopped = true })
@@ -2832,6 +3013,7 @@ test("recording Finish watchdog: dispatched Stop retains persistence before ACK"
 
 test("recording Finish watchdog: acknowledged Stop retains persistence behind another control", async () => {
   const fixture = await recordingFinishFixture("patch")
+
   try {
     const stop = fixture.supervisor.stopRecording()
     await fixture.stopDispatched
@@ -2854,6 +3036,7 @@ test("recording Finish watchdog: acknowledged Stop retains persistence behind an
 
 test("recording Finish watchdog: refused Stop retains admission and allows cancellation", async () => {
   const fixture = await recordingFinishFixture(undefined, true)
+
   try {
     const stop = fixture.supervisor.stopRecording()
     const outcome = fixture.supervisor.waitForRecordingOutcome()
@@ -2871,6 +3054,7 @@ test("recording Finish watchdog: refused Stop retains admission and allows cance
 
 test("recording Finish watchdog: double Stop preserves the original Finish", async () => {
   const fixture = await recordingFinishFixture()
+
   try {
     const stop = fixture.supervisor.stopRecording()
     await fixture.stopDispatched
@@ -2887,6 +3071,7 @@ test("recording Finish watchdog: double Stop preserves the original Finish", asy
 
 test("recording Finish watchdog: teardown waits for dispatched persistence", async () => {
   const fixture = await recordingFinishFixture()
+
   try {
     const stop = fixture.supervisor.stopRecording()
     await fixture.stopDispatched
@@ -2908,6 +3093,7 @@ test("recording Finish watchdog: teardown waits for dispatched persistence", asy
 
 test("recording Finish watchdog: Stop during teardown is rejected without releasing recording data", async () => {
   const fixture = await recordingFinishFixture()
+
   try {
     const teardown = fixture.supervisor.teardown()
     const stop = fixture.supervisor.stopRecording()
@@ -2927,6 +3113,7 @@ test("recording Finish watchdog: Stop during teardown is rejected without releas
 
 test("recording Finish watchdog: queued Stop advances after graph reply deadline", async () => {
   const fixture = await recordingFinishFixture("graph")
+
   try {
     const graph = fixture.supervisor.prepareGraphRevision(new Uint8Array(13))
     void graph.catch(() => undefined)
@@ -2951,6 +3138,7 @@ test("recording Finish watchdog: queued Stop advances after graph reply deadline
 
 test("recording Finish watchdog: actual host loss rejects queued Stop without dispatch", async () => {
   const fixture = await recordingFinishFixture("patch")
+
   try {
     const patch = fixture.supervisor.queueProcessorStatePatch(new Uint8Array(56))
     void patch.catch(() => undefined)
@@ -2975,11 +3163,13 @@ test("recording Finish watchdog: actual host loss rejects queued Stop without di
 test("recording Finish watchdog: loss notification cannot let an old Stop retire a replacement Finish", async () => {
   const fixture = await recordingFinishFixture("patch")
   let replacement: Promise<void> | undefined
+
   const remove = fixture.supervisor.onLoss(() => {
     remove()
     replacement = fixture.supervisor.stopRecording()
     void replacement.catch(() => undefined)
   })
+
   try {
     const patch = fixture.supervisor.queueProcessorStatePatch(new Uint8Array(56))
     void patch.catch(() => undefined)
@@ -3012,6 +3202,7 @@ test("recording Finish watchdog: late patch reply during stack capture preserves
   const fixture = await recordingFinishFixture("patch")
   let losses = 0
   fixture.supervisor.onLoss(() => { losses += 1 })
+
   try {
     const patch = fixture.supervisor.queueProcessorStatePatch(new Uint8Array(56))
     void patch.catch(() => undefined)

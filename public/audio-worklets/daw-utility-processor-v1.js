@@ -1,11 +1,14 @@
 const SQRT_HALF = Math.SQRT1_2
+
 const PARAMS = [
   ['utility.gainDb', 0, -60, 24],
   ['utility.pan', 0, -1, 1],
   ['utility.balance', 0, -1, 1],
   ['utility.width', 1, 0, 2],
 ]
+
 const isUtilityMessage = (message) => message !== null && Object.prototype.toString.call(message) === '[object Object]' && message.version === 1
+
 const isUtilityConfigureMessage = (message, revision) => isUtilityMessage(message)
   && message.type === 'configure'
   && Number.isInteger(message.revision)
@@ -33,12 +36,16 @@ class DawUtilityProcessor extends AudioWorkletProcessor {
 
   onMessage(message) {
     if (!isUtilityMessage(message)) return this.fault('malformed-message')
+
     if (message.type === 'dispose') return this.port.close()
+
     if (message.type === 'reset') {
       this.x1L = this.x1R = this.y1L = this.y1R = 0
       this.bypass = this.state.enabled ? 0 : 1
+
       return
     }
+
     if (!isUtilityConfigureMessage(message, this.revision)) return this.fault('malformed-or-stale-configure')
     this.revision = message.revision
     this.state = message.state
@@ -52,6 +59,7 @@ class DawUtilityProcessor extends AudioWorkletProcessor {
   process(inputs, outputs, parameters) {
     const input = inputs[0]
     const output = outputs[0]
+
     if (!output || output.length === 0) return true
     const leftIn = input && input[0]
     const rightIn = input && (input[1] || input[0])
@@ -60,17 +68,23 @@ class DawUtilityProcessor extends AudioWorkletProcessor {
     const frames = leftOut.length
     const dcR = Math.exp(-2 * Math.PI * 10 / sampleRate)
     const bypassStep = 1 / Math.max(1, Math.round(0.01 * sampleRate))
+
     for (let i = 0; i < frames; i++) {
       let l = leftIn ? leftIn[i] : 0
       let r = rightIn ? rightIn[i] : l
+
       if (!Number.isFinite(l) || !Number.isFinite(r)) {
         l = r = 0
         this.fault('nonfinite-input')
       }
+
       const dryL = l
       const dryR = r
+
       if (this.state.inputMode === 'mono-sum') l = r = 0.5 * l + 0.5 * r
+
       if (this.state.polarity === 'invert') { l = -l; r = -r }
+
       if (this.state.matrix === 'mid-side-encode') {
         const m = (l + r) * SQRT_HALF
         r = (l - r) * SQRT_HALF
@@ -80,7 +94,9 @@ class DawUtilityProcessor extends AudioWorkletProcessor {
         l = (m + r) * SQRT_HALF
         r = (m - r) * SQRT_HALF
       }
+
       if (this.state.swap) { const swap = l; l = r; r = swap }
+
       const mid = (l + r) * SQRT_HALF
       const side = (l - r) * SQRT_HALF * parameters['utility.width'][parameters['utility.width'].length === 1 ? 0 : i]
       l = (mid + side) * SQRT_HALF
@@ -94,22 +110,27 @@ class DawUtilityProcessor extends AudioWorkletProcessor {
       const gain = 10 ** (parameters['utility.gainDb'][parameters['utility.gainDb'].length === 1 ? 0 : i] / 20)
       l *= gain
       r *= gain
+
       if (this.state.dcBlock) {
         const nextL = l - this.x1L + dcR * this.y1L
         const nextR = r - this.x1R + dcR * this.y1R
         this.x1L = l; this.x1R = r; this.y1L = nextL; this.y1R = nextR
         l = nextL; r = nextR
       }
+
       if (!Number.isFinite(l) || !Number.isFinite(r)) {
         l = r = 0
         this.x1L = this.x1R = this.y1L = this.y1R = 0
         this.fault('nonfinite-state')
       }
+
       const targetBypass = this.state.enabled ? 0 : 1
       this.bypass += Math.max(-bypassStep, Math.min(bypassStep, targetBypass - this.bypass))
       leftOut[i] = l + (dryL - l) * this.bypass
+
       if (rightOut) rightOut[i] = r + (dryR - r) * this.bypass
     }
+
     return true
   }
 }

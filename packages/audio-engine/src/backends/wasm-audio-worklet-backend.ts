@@ -79,6 +79,7 @@ type PendingPortableRequest = {
 const portableControlTimeoutMs = 2_000
 
 type PortableWorkletNode = AudioNode & Pick<AudioWorkletNode, 'port' | 'onprocessorerror'>
+
 type PortableWireValue =
   | null
   | boolean
@@ -128,6 +129,7 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
   if (!isWireObject(value)
     || value.version !== portableWasmProtocolVersion
     || !isPositiveInteger(value.requestId)) return null
+
   if (value.type === 'graph-prepared'
     && isPositiveInteger(value.revision)
     && (value.result === 'prepared' || value.result === 'rejected')) {
@@ -139,6 +141,7 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
       result: value.result,
     }
   }
+
   if (value.type === 'graph-published' && isPositiveInteger(value.revision)) {
     if (value.result === 'published' || value.result === 'rejected' || value.result === 'late') {
       return {
@@ -150,6 +153,7 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
       }
     }
   }
+
   if (value.type === 'asset-registered'
     && isPositiveInteger(value.generation)
     && isString(value.assetId)) {
@@ -164,6 +168,7 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
         handle: value.handle,
       }
     }
+
     if (value.result === 'capacity-exceeded'
       || value.result === 'stale-generation'
       || value.result === 'invalid-pcm') {
@@ -177,6 +182,7 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
       }
     }
   }
+
   if (value.type === 'asset-released'
     && isPositiveInteger(value.generation)
     && isString(value.assetId)
@@ -190,16 +196,19 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
       result: value.result,
     }
   }
+
   if (value.type === 'paged-asset-registered'
     && isPositiveInteger(value.generation)
     && isString(value.assetId)) {
     if (value.result === 'registered' && isRegisteredAssetHandle(value.handle)) {
       return { version: portableWasmProtocolVersion, type: value.type, requestId: value.requestId, generation: value.generation, assetId: value.assetId, result: value.result, handle: value.handle }
     }
+
     if (value.result === 'capacity-exceeded' || value.result === 'stale-generation' || value.result === 'invalid-asset') {
       return { version: portableWasmProtocolVersion, type: value.type, requestId: value.requestId, generation: value.generation, assetId: value.assetId, result: value.result }
     }
   }
+
   if (value.type === 'asset-page-written'
     && isPositiveInteger(value.generation)
     && isString(value.assetId)
@@ -208,29 +217,34 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
       || value.result === 'invalid-page' || value.result === 'stale-generation')) {
     return { version: portableWasmProtocolVersion, type: value.type, requestId: value.requestId, generation: value.generation, assetId: value.assetId, pageIndex: value.pageIndex, result: value.result }
   }
+
   if (value.type === 'asset-range-prepared'
     && isPositiveInteger(value.generation)
     && isString(value.assetId)) {
     if (value.result === 'prepared' && isPositiveInteger(value.preparationId)) {
       return { version: portableWasmProtocolVersion, type: value.type, requestId: value.requestId, generation: value.generation, assetId: value.assetId, result: value.result, preparationId: value.preparationId }
     }
+
     if (value.result === 'missing-page' && isNonNegativeInteger(value.firstMissingPage)
       || value.result === 'capacity-exceeded' || value.result === 'invalid-range' || value.result === 'stale-generation') {
       return { version: portableWasmProtocolVersion, type: value.type, requestId: value.requestId, generation: value.generation, assetId: value.assetId, result: value.result, firstMissingPage: isNonNegativeInteger(value.firstMissingPage) ? value.firstMissingPage : undefined }
     }
   }
+
   if (value.type === 'prepared-sources-scheduled'
     && isPositiveInteger(value.revision)
     && isPositiveInteger(value.epoch)
     && (value.result === 'scheduled' || value.result === 'rejected')) {
     return { version: portableWasmProtocolVersion, type: value.type, requestId: value.requestId, revision: value.revision, epoch: value.epoch, result: value.result }
   }
+
   if (value.type === 'asset-preparation-released'
     && isPositiveInteger(value.generation)
     && isPositiveInteger(value.preparationId)
     && (value.result === 'released' || value.result === 'asset-in-use' || value.result === 'stale-preparation')) {
     return { version: portableWasmProtocolVersion, type: value.type, requestId: value.requestId, generation: value.generation, preparationId: value.preparationId, result: value.result }
   }
+
   if (value.type === 'asset-pages-trimmed'
     && isPositiveInteger(value.generation)
     && isString(value.assetId)
@@ -239,6 +253,7 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
     && (value.result === 'trimmed' || value.result === 'asset-in-use' || value.result === 'stale-generation')) {
     return { version: portableWasmProtocolVersion, type: value.type, requestId: value.requestId, generation: value.generation, assetId: value.assetId, firstPage: value.firstPage, pageCount: value.pageCount, result: value.result }
   }
+
   if (value.type === 'transport-applied'
     && isPositiveInteger(value.epoch)
     && (value.result === 'applied' || value.result === 'rejected')) {
@@ -250,6 +265,7 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
       result: value.result,
     }
   }
+
   if (value.type === 'schedule-installed'
     && isPositiveInteger(value.revision)
     && isPositiveInteger(value.epoch)
@@ -263,6 +279,7 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
       result: value.result,
     }
   }
+
   if (value.type === 'sources-scheduled'
     && isPositiveInteger(value.revision)
     && isPositiveInteger(value.epoch)
@@ -276,6 +293,7 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
       result: value.result,
     }
   }
+
   if (value.type === 'sources-replaced'
     && isPositiveInteger(value.revision)
     && isPositiveInteger(value.epoch)
@@ -289,6 +307,7 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
       result: value.result,
     }
   }
+
   if (value.type === 'sources-reset'
     && isPositiveInteger(value.revision)
     && isPositiveInteger(value.epoch)
@@ -302,6 +321,7 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
       result: value.result,
     }
   }
+
   if ((value.type === 'processor-events-applied' || value.type === 'instrument-events-applied')
     && isPositiveInteger(value.revision)
     && isPositiveInteger(value.epoch)
@@ -317,6 +337,7 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
       result: value.result,
     }
   }
+
   if (value.type === 'processor-automation-reenabled'
     && isPositiveInteger(value.revision)
     && isPositiveInteger(value.epoch)
@@ -330,6 +351,7 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
       result: value.result,
     }
   }
+
   return null
 }
 
@@ -356,13 +378,16 @@ const hasSharedQueueSupport = (
 const disposePortableWorkletNode = (node: PortableWorkletNode, output?: AudioNode) => {
   node.port.onmessage = null
   node.onprocessorerror = null
+
   try {
     node.port.postMessage({ version: portableWasmProtocolVersion, type: 'dispose' })
   } catch {}
+
   try {
     if (output) node.disconnect(output)
     else node.disconnect()
   } catch {}
+
   try {
     node.port.close()
   } catch {}
@@ -397,17 +422,21 @@ export class PortableWasmPlaybackSession {
   ) {
     node.port.onmessage = (event) => this.onMessage(event.data)
     node.onprocessorerror = () => this.fail(new Error('Portable audio-core AudioWorklet processing failed.'))
+
     if (output) node.connect(output)
   }
 
   private fail(error: Error) {
     if (this.disposed) return
     this.active = false
+
     for (const request of this.pending.values()) {
       clearTimeout(request.deadline)
       request.reject(error)
     }
+
     this.pending.clear()
+
     for (const listener of this.faultListeners) listener(error)
     this.dispose()
   }
@@ -415,26 +444,39 @@ export class PortableWasmPlaybackSession {
   private onMessage(value: PortableWireValue) {
     if (isPortableFault(value)) {
       this.fail(new Error('Portable audio-core AudioWorklet control request failed.'))
+
       return
     }
+
     const recordingMessage = readPortableWasmRecordingStatusMessage(value)
+
     if (recordingMessage) {
       for (const listener of this.recordingListeners) listener(recordingMessage)
+
       return
     }
+
     const graphContinuity = readPortableWasmGraphContinuityMessage(value)
+
     if (graphContinuity) {
       for (const listener of this.graphContinuityListeners) listener(graphContinuity)
+
       return
     }
+
     const transportPosition = readPortableWasmTransportPositionMessage(value)
+
     if (transportPosition) {
       for (const listener of this.transportPositionListeners) listener(transportPosition)
+
       return
     }
+
     const response = readPortableRequestStatus(value)
+
     if (!response) return
     const request = this.pending.get(response.requestId)
+
     if (!request) return
     this.pending.delete(response.requestId)
     clearTimeout(request.deadline)
@@ -447,21 +489,29 @@ export class PortableWasmPlaybackSession {
     return new Promise((resolve, reject) => {
       if (this.disposed) {
         reject(new Error('Portable playback session was disposed.'))
+
         return
       }
+
       const requestId = this.nextRequestId
       this.nextRequestId += 1
+
       const deadline = setTimeout(() => {
         const request = this.pending.get(requestId)
+
         if (!request) return
         this.pending.delete(requestId)
+
         if (expire) {
           request.reject(expire())
+
           return
         }
+
         request.reject(new Error('Portable playback control request timed out.'))
         this.fail(new Error('Portable playback control request timed out.'))
       }, this.controlTimeoutMs)
+
       this.pending.set(requestId, { resolve, reject, deadline })
       this.node.port.postMessage({ ...message, version: portableWasmProtocolVersion, requestId }, transfer)
     })
@@ -471,6 +521,7 @@ export class PortableWasmPlaybackSession {
     // The worklet prepares on the audio rendering thread, so the envelope is encoded here and its bytes transferred.
     const envelope = encodePortableGraphEnvelope(snapshot)
     const response = await this.request({ type: 'prepare-graph', snapshot, envelope }, [envelope.buffer])
+
     if (response.type !== 'graph-prepared' || response.result !== 'prepared') {
       throw new Error('Portable playback graph-prepared was rejected.')
     }
@@ -485,8 +536,10 @@ export class PortableWasmPlaybackSession {
   async publishGraph(revision: number, options?: { requireContinuity: true; publicationFrame?: number; sources?: PortableWasmSourceTable }) {
     const response = await this.request({ type: 'publish-graph', revision, ...options }, [], options?.publicationFrame === undefined ? undefined : () => {
       this.node.port.postMessage({ version: portableWasmProtocolVersion, type: 'cancel-publication', revision })
+
       return new Error('Portable playback graph-published was late.')
     })
+
     if (response.type !== 'graph-published' || response.result !== 'published') {
       throw new Error(`Portable playback graph-published was ${response.type === 'graph-published' ? response.result : 'rejected'}.`)
     }
@@ -495,20 +548,27 @@ export class PortableWasmPlaybackSession {
   async registerAsset(asset: AudioAssetRef, pcm: PlanarPcm, generation: number): Promise<AudioAssetRegistration> {
     if (!isPlanarPcmForAsset(asset, pcm)) return { status: 'invalid-pcm' }
     const response = await this.request({ type: 'register-asset', generation, asset, planes: pcm.planes })
+
     if (response.type !== 'asset-registered') return { status: 'stale-generation' }
+
     if (response.result === 'registered') {
       return { status: 'registered', handle: { slot: response.handle.slot, generation: response.handle.generation } }
     }
+
     if (response.result === 'capacity-exceeded' || response.result === 'invalid-pcm' || response.result === 'stale-generation') {
       return { status: response.result }
     }
+
     return { status: 'stale-generation' }
   }
 
   async registerPagedAsset(asset: AudioAssetRef, generation: number) {
     const response = await this.request({ type: 'register-paged-asset', generation, asset })
+
     if (response.type !== 'paged-asset-registered') return { status: 'stale-generation' as const }
+
     if (response.result === 'registered') return { status: 'registered' as const, handle: response.handle }
+
     return { status: response.result }
   }
 
@@ -520,7 +580,9 @@ export class PortableWasmPlaybackSession {
     planes: readonly Float32Array[],
   ) {
     const response = await this.request({ type: 'write-asset-page', assetId, generation, pageIndex, validFrames, planes })
+
     if (response.type !== 'asset-page-written') return { status: 'stale-generation' as const }
+
     return { status: response.result }
   }
 
@@ -539,8 +601,11 @@ export class PortableWasmPlaybackSession {
       sourceFrameCount,
       interpolationGuardFrames,
     })
+
     if (response.type !== 'asset-range-prepared') return { status: 'stale-generation' as const }
+
     if (response.result === 'prepared') return { status: 'prepared' as const, preparationId: response.preparationId }
+
     return { status: response.result, firstMissingPage: response.firstMissingPage }
   }
 
@@ -550,6 +615,7 @@ export class PortableWasmPlaybackSession {
     events: readonly PortableWasmPreparedSourceEvent[],
   ) {
     const response = await this.request({ type: 'schedule-prepared-sources', revision, epoch, events })
+
     if (response.type !== 'prepared-sources-scheduled' || response.result !== 'scheduled') {
       throw new Error('Portable playback prepared-sources-scheduled was rejected.')
     }
@@ -557,7 +623,9 @@ export class PortableWasmPlaybackSession {
 
   async releaseAssetPreparation(preparationId: number, generation: number) {
     const response = await this.request({ type: 'release-asset-preparation', preparationId, generation })
+
     if (response.type !== 'asset-preparation-released') return 'stale-preparation' as const
+
     return response.result
   }
 
@@ -568,16 +636,20 @@ export class PortableWasmPlaybackSession {
     pageCount: number,
   ) {
     const response = await this.request({ type: 'trim-asset-pages', assetId, generation, firstPage, pageCount })
+
     if (response.type !== 'asset-pages-trimmed') return 'stale-generation' as const
+
     return response.result
   }
 
   async releaseAsset(assetId: string, generation: number): Promise<AudioAssetRelease> {
     const response = await this.request({ type: 'release-asset', generation, assetId })
+
     if (response.type === 'asset-released'
       && (response.result === 'released' || response.result === 'stale-generation' || response.result === 'asset-in-use')) {
       return { status: response.result }
     }
+
     return { status: 'stale-generation' }
   }
 
@@ -592,6 +664,7 @@ export class PortableWasmPlaybackSession {
 
   async scheduleSources(revision: number, epoch: number, events: readonly AudioCoreSampleSourceEventDto[]) {
     const response = await this.request({ type: 'schedule-sources', revision, epoch, events })
+
     if (response.type !== 'sources-scheduled' || response.result !== 'scheduled') {
       throw new Error('Portable playback sources-scheduled was rejected.')
     }
@@ -604,6 +677,7 @@ export class PortableWasmPlaybackSession {
     prepared: readonly PortableWasmPreparedSourceEvent[],
   ) {
     const response = await this.request({ type: 'replace-sources', revision, epoch, ordinary, prepared })
+
     if (response.type !== 'sources-replaced' || response.result !== 'replaced') {
       throw new Error('Portable playback sources-replaced was rejected.')
     }
@@ -611,6 +685,7 @@ export class PortableWasmPlaybackSession {
 
   async resetSources(revision: number, epoch: number) {
     const response = await this.request({ type: 'reset-sources', revision, epoch })
+
     if (response.type !== 'sources-reset' || response.result !== 'reset') {
       throw new Error('Portable playback sources-reset was rejected.')
     }
@@ -618,14 +693,17 @@ export class PortableWasmPlaybackSession {
 
   async setTransport(epoch: number, running: boolean, frame: number) {
     const response = await this.request({ type: 'transport', epoch, running, frame })
+
     if (response.type !== 'transport-applied' || response.result !== 'applied') {
       throw new Error('Portable playback transport-applied was rejected.')
     }
+
     this.active = running
   }
 
   async installSchedule(schedule: PortableFrameSchedule) {
     const response = await this.request({ type: 'install-schedule', schedule })
+
     if (response.type !== 'schedule-installed' || response.result !== 'installed') {
       throw new Error('Portable playback schedule-installed was rejected.')
     }
@@ -638,6 +716,7 @@ export class PortableWasmPlaybackSession {
     events: readonly PortableWasmProcessorEvent[],
   ) {
     if (this.disposed) throw new Error('Portable playback session was disposed.')
+
     const response = await this.request({
       type: 'processor-events',
       revision,
@@ -645,6 +724,7 @@ export class PortableWasmPlaybackSession {
       sequence,
       events,
     })
+
     if (response.type !== 'processor-events-applied' || response.result !== 'applied') {
       throw new Error('Portable playback processor-events-applied was rejected.')
     }
@@ -652,14 +732,18 @@ export class PortableWasmPlaybackSession {
 
   async queueInstrumentEvents(epoch: number, events: readonly PortableWasmInstrumentEvent[], batch?: { revision: number; sequence: number }) {
     if (this.disposed) throw new Error('Portable playback session was disposed.')
+
     if (batch) {
       const response = await this.request({ type: 'instrument-parameters', ...batch, epoch, events })
+
       if (response.type !== 'instrument-events-applied' || response.result !== 'applied'
         || response.revision !== batch.revision || response.epoch !== epoch || response.sequence !== batch.sequence) {
         throw new Error('Portable playback instrument-events-applied was rejected.')
       }
+
       return
     }
+
     this.node.port.postMessage({ version: portableWasmProtocolVersion, type: 'instrument-events', epoch, events })
   }
 
@@ -676,6 +760,7 @@ export class PortableWasmPlaybackSession {
       processorInstanceId,
       parameterTargets,
     })
+
     if (response.type !== 'processor-automation-reenabled' || response.result !== 'applied') {
       throw new Error('Portable playback processor-automation-reenabled was rejected.')
     }
@@ -687,21 +772,25 @@ export class PortableWasmPlaybackSession {
 
   onFault(listener: (error: Error) => void) {
     this.faultListeners.add(listener)
+
     return () => this.faultListeners.delete(listener)
   }
 
   onRecordingStatus(listener: (message: PortableWasmStatusMessage) => void) {
     this.recordingListeners.add(listener)
+
     return () => this.recordingListeners.delete(listener)
   }
 
   onGraphContinuity(listener: (message: Extract<PortableWasmStatusMessage, { type: 'graph-continuity' }>) => void) {
     this.graphContinuityListeners.add(listener)
+
     return () => this.graphContinuityListeners.delete(listener)
   }
 
   onTransportPosition(listener: (message: Extract<PortableWasmStatusMessage, { type: 'transport-position' }>) => void) {
     this.transportPositionListeners.add(listener)
+
     return () => this.transportPositionListeners.delete(listener)
   }
 
@@ -713,6 +802,7 @@ export class PortableWasmPlaybackSession {
   connectInput(source: AudioNode) {
     if (this.disposed) throw new Error('Portable playback session was disposed.')
     source.connect(this.node)
+
     return () => source.disconnect(this.node)
   }
 
@@ -720,10 +810,12 @@ export class PortableWasmPlaybackSession {
     if (this.disposed) return
     this.disposed = true
     this.active = false
+
     for (const request of this.pending.values()) {
       clearTimeout(request.deadline)
       request.reject(new Error('Portable playback session was disposed.'))
     }
+
     this.pending.clear()
     this.faultListeners.clear()
     this.recordingListeners.clear()
@@ -759,11 +851,15 @@ export const detectPortableWasmCapability = async (
   if (!('AudioWorkletNode' in environment) || !('AudioContext' in environment)) {
     return { available: false, reason: 'AudioWorklet is unavailable.' }
   }
+
   const artifact = await loadAudioCoreWasmArtifact(manifestUrl)
+
   if (!artifact.available) return { available: false, reason: artifact.message }
+
   const sharedQueue = hasSharedQueueSupport(environment)
     ? 'available'
     : 'unavailable-without-cross-origin-isolation'
+
   return { available: true, artifact: artifact.artifact, sharedQueue }
 }
 
@@ -774,6 +870,7 @@ export const selectPortableWasmAudioWorkletBackend = async (
 ): Promise<PortableWasmBackendSelection> => {
   if (!supportsTestedProject(project)) return { selected: false, reason: 'The portable Wasm backend requires a project fully covered by the graph parity capability matrix.' }
   const capability = await detectPortableWasmCapability(manifestUrl ?? resolvePortableWasmManifestUrl(), environment)
+
   return capability.available
     ? { selected: true, capability }
     : { selected: false, reason: capability.reason }
@@ -791,13 +888,16 @@ export class WasmAudioWorkletBackend {
     maxFramesPerBlock: number,
   ): Promise<AudioWorkletNode> {
     await loadWorkletModule(context, resolveWorkletModuleUrl(portableAudioCoreWorklet.modulePath))
+
     const node = new AudioWorkletNode(context, portableAudioCoreWorklet.processorName, {
       numberOfInputs: 1,
       numberOfOutputs: 1,
       outputChannelCount: [2],
       processorOptions: { wasmModule: capability.artifact.module },
     })
+
     let deadline: ReturnType<typeof setTimeout> | undefined
+
     try {
       await new Promise<void>((resolve, reject) => {
         deadline = setTimeout(
@@ -818,18 +918,23 @@ export class WasmAudioWorkletBackend {
                 preparationCount: portableWasmPagedPreparationCount,
               })
             }
+
             resolve()
+
             return
           }
+
           if (isPortableFault(event.data)) {
             reject(new Error('Portable audio-core AudioWorklet initialization failed.'))
           }
         }
+
         node.port.postMessage(createPortableWasmInitializeMessage(
           processorContractHash,
           maxFramesPerBlock,
         ))
       })
+
       if (deadline !== undefined) clearTimeout(deadline)
       node.port.onmessage = null
     } catch (error) {
@@ -837,6 +942,7 @@ export class WasmAudioWorkletBackend {
       disposePortableWorkletNode(node)
       throw error
     }
+
     return node
   }
 
@@ -847,6 +953,7 @@ export class WasmAudioWorkletBackend {
     output: AudioNode = context.destination,
   ) {
     const node = await this.createNode(context, capability, maxFramesPerBlock)
+
     return new PortableWasmPlaybackSession(
       node,
       output,

@@ -24,6 +24,7 @@ const createFloatStereoWav = (sampleRate: number, frameCount: number) => {
   view.setUint16(34, 32, true)
   writeAscii(view, 36, 'data')
   view.setUint32(40, dataBytes, true)
+
   return buffer
 }
 
@@ -38,6 +39,7 @@ class TestOfflineAudioContext {
     const sourceRate = new DataView(arrayBuffer).getUint32(24, true)
     const sourceFrames = new DataView(arrayBuffer).getUint32(40, true) / (2 * Float32Array.BYTES_PER_ELEMENT)
     const outputFrames = Math.round(sourceFrames * this.sampleRate / sourceRate)
+
     return new TestDecodedAudioBuffer(this.sampleRate, outputFrames)
   }
 }

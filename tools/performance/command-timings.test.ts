@@ -7,9 +7,11 @@ test("command timings remain opt-in and bound completed entries", () => {
   expect(disabled.snapshot()).toEqual([])
 
   const enabled = createCommandTimings(true)
+
   for (let index = 0; index < 65; index += 1) {
     enabled.record("browser", "eval", index, index + 2, index === 64 ? null : 0)
   }
+
   const entries = enabled.snapshot()
   expect(entries).toHaveLength(64)
   expect(entries[0]).toEqual({ boundary: "browser", kind: "eval", startedAt: new Date(1).toISOString(), durationMs: 3, exitCode: 0 })

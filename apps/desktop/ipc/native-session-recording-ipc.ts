@@ -17,9 +17,11 @@ import type { nativeSessionFailure } from "../audio-host"
 import type { NativeSessionEvent, NativeSessionIpcHandler } from "./native-session-access"
 
 export type RecordingSessionOwner = Pick<ReturnType<typeof createRecordingSessionOwner>, "configure" | "start" | "stop">
+
 type RecordingSupervisor = Parameters<ReturnType<typeof createRecordingSessionOwner>["configure"]>[1]
 
 const positiveUnsigned32Schema = unsigned32Schema.min(1)
+
 const recordingConfigurationSchema = z.object({
   projectId: projectIdSchemaV1,
   projectGeneration: unsigned32Schema,
@@ -39,13 +41,16 @@ const recordingConfigurationSchema = z.object({
   value.inputChannels.length === value.channelCount
   && (value.punchEndFrame === null || value.punchEndFrame >= value.punchStartFrame)
 ))
+
 const configureEnvelope = nativeSessionEnvelopeSchema(recordingConfigurationSchema)
+
 const startEnvelope = nativeSessionEnvelopeSchema(z.object({
   projectId: projectIdSchemaV1,
   projectGeneration: unsigned32Schema,
   generation: unsigned32Schema,
   sessionId: z.bigint().positive(),
 }).strict())
+
 const stopEnvelope = nativeSessionEnvelopeSchema(z.number().int().safe().min(0).optional())
 
 const recordingConfiguration = (value: z.infer<typeof recordingConfigurationSchema>): NativeHostRecordingConfiguration => ({
@@ -77,6 +82,7 @@ export const registerNativeSessionRecordingIpc = (dependencies: {
   dependencies.ipcMain.handle(sessionConfigureRecordingChannel, (event, value) => {
     const supervisor = dependencies.allowed(event) ? dependencies.supervisor() : undefined
     const envelope = configureEnvelope.safeParse(value)
+
     const request: RecordingConfigureRequest | undefined = envelope.success
       && envelope.data.transactionToken === undefined
       && event.senderFrame === event.sender.mainFrame
@@ -87,6 +93,7 @@ export const registerNativeSessionRecordingIpc = (dependencies: {
         spoolImportVersion: envelope.data.value.spoolImportVersion,
       }
       : undefined
+
     return dependencies.owner.configure({
       rendererGeneration: dependencies.rendererGeneration(),
       hostGeneration: dependencies.hostGeneration(),
@@ -97,11 +104,13 @@ export const registerNativeSessionRecordingIpc = (dependencies: {
   dependencies.ipcMain.handle(sessionStartRecordingChannel, (event, value) => {
     const supervisor = dependencies.allowed(event) ? dependencies.supervisor() : undefined
     const envelope = startEnvelope.safeParse(value)
+
     const request: RecordingStartRequest | undefined = envelope.success
       && envelope.data.transactionToken === undefined
       && event.senderFrame === event.sender.mainFrame
       ? envelope.data.value
       : undefined
+
     return dependencies.owner.start({
       rendererGeneration: dependencies.rendererGeneration(),
       fail: dependencies.fail,
@@ -110,9 +119,11 @@ export const registerNativeSessionRecordingIpc = (dependencies: {
   dependencies.ipcMain.handle(sessionStopRecordingChannel, (event, value) => {
     const supervisor = dependencies.allowed(event) ? dependencies.supervisor() : undefined
     const envelope = stopEnvelope.safeParse(value)
+
     const request = envelope.success && envelope.data.transactionToken === undefined
       ? { endFrame: envelope.data.value }
       : undefined
+
     return dependencies.owner.stop({ fail: dependencies.fail }, supervisor, request)
   })
 }

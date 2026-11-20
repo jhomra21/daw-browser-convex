@@ -19,24 +19,32 @@ const readCloudAssetReference = async (
   assetId: string,
 ): Promise<CloudAssetReference | undefined> => {
   const db = await openLocalProjectDb(projectId)
+
   const [urlRow, sourceRow, mappingRow] = await Promise.all([
     db.get('syncState', `cloud-url:asset:${assetId}`),
     db.get('syncState', `cloud-source:asset:${assetId}`),
     db.get('syncState', assetCloudIdMappingKey(assetId)),
   ])
+
   const parsedUrl = z.string().safeParse(urlRow?.value)
   const url = parsedUrl.success ? parsedUrl.data : undefined
+
   if (url) return { kind: 'url', value: url }
   const parsedSource = z.string().safeParse(sourceRow?.value)
   const source = parsedSource.success ? parsedSource.data : undefined
+
   if (source) return { kind: 'key', value: source }
+
   if (isCloudIdMappingValue(mappingRow?.value)) return { kind: 'key', value: mappingRow.value.cloudId }
+
   return undefined
 }
 
 const parseCloudAssetKey = (key: string) => {
   const match = /^projects\/([^/]+)\/assets\/([^/]+)\//.exec(key)
+
   if (!match) return null
+
   return { projectId: match[1], assetId: match[2] }
 }
 
@@ -46,20 +54,26 @@ const readCloudAssetFile = async (
   metadata?: { name?: string; mimeType?: string },
 ): Promise<CloudAssetReadResult> => {
   const cloudRef = await readCloudAssetReference(projectId, assetId)
+
   if (!cloudRef) return { status: 'missing' }
   let url = cloudRef.value
+
   if (cloudRef.kind === 'key') {
     const parsed = parseCloudAssetKey(cloudRef.value)
+
     if (!parsed) return { status: 'missing' }
     url = `/api/samples/${encodeURIComponent(parsed.projectId)}/${encodeURIComponent(parsed.assetId)}?key=${encodeURIComponent(cloudRef.value)}`
   }
 
   const response = await fetch(url)
+
   if (response.status === 403 || response.status === 401) return { status: 'permission-denied' }
+
   if (!response.ok) return { status: 'missing' }
 
   const row = metadata ?? await getLocalAsset(projectId, assetId)
   const blob = await response.blob()
+
   return {
     status: 'ready',
     file: new File([blob], row?.name ?? assetId, { type: row?.mimeType || blob.type || 'application/octet-stream' }),
@@ -72,11 +86,13 @@ export const readLocalOrCloudAssetFile = async (
   assetId: string,
 ): Promise<CloudAssetReadResult> => {
   const local = await readLocalAssetBytes(projectId, assetId)
+
   if (local.status === 'ready') {
     return { status: 'ready', file: local.file, source: 'local' }
   }
 
   const cloud = await readCloudAssetFile(projectId, assetId)
+
   return cloud.status === 'missing' ? local : cloud
 }
 
@@ -85,13 +101,18 @@ const cacheCloudAssetForOffline = async (
   assetId: string,
 ): Promise<boolean> => {
   const row = await getLocalAsset(projectId, assetId)
+
   if (!row) throw new Error('Asset metadata is missing.')
   const result = await readCloudAssetFile(projectId, assetId, row)
+
   if (result.status !== 'ready') throw new Error('Cloud asset could not be downloaded.')
+
   return withLocalProjectAssetLock(projectId, async () => {
     const current = await getLocalAsset(projectId, assetId)
+
     if (!current || current.storagePath !== row.storagePath) return false
     await writeLocalAssetFileUnlocked(projectId, current.storagePath, result.file)
+
     return true
   })
 }
@@ -104,8 +125,11 @@ export const downloadCloudAssetsForOffline = async (
   let downloaded = 0
   await runWithConcurrency(rows, 3, async (asset) => {
     const before = await readLocalAssetBytes(projectId, asset.id)
+
     if (before.status === 'ready') return
+
     if (await cacheCloudAssetForOffline(projectId, asset.id)) downloaded += 1
   })
+
   return downloaded
 }

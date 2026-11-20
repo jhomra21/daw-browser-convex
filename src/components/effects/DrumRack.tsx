@@ -57,7 +57,9 @@ const sampleToAssignment = (sample: SampleDragData): DrumRackSampleAssignment =>
 
 const formatSampleLength = (pad: DrumRackPadParams) => {
   const duration = pad.sample?.source.durationSec;
+
   if (!duration) return "Empty";
+
   return `${duration.toFixed(duration < 10 ? 2 : 1)}s`;
 };
 
@@ -67,6 +69,7 @@ const CHOKE_GROUPS = Array.from({ length: 16 }, (_, index) => index + 1);
 
 const formatPan = (value: number) => {
   if (value === 0) return "C";
+
   return `${value < 0 ? "L" : "R"}${Math.round(Math.abs(value) * 100)}`;
 };
 
@@ -96,16 +99,20 @@ const SampleWaveform: Component<{
     const regionAssetKey = sampledInstrumentRegionIdentity(sample, region);
     const bufferIdentity = getDrumRackWaveformBufferIdentity(buffer);
     const nextRequestKey = `${regionAssetKey}\n${bufferIdentity}`;
+
     if (waveformRequestKey === nextRequestKey) return;
     waveformRequestKey = nextRequestKey;
     let cancelled = false;
     setData(null);
+
     if (!buffer) {
       onCleanup(() => {
         cancelled = true;
       });
+
       return;
     }
+
     void loadWaveformSourceData({
       assetKey: regionAssetKey,
       sourceIdentity: {
@@ -132,12 +139,15 @@ const SampleWaveform: Component<{
 
   createEffect(() => {
     const canvas = canvasRef;
+
     if (!canvas) return;
+
     const updateSize = () => {
       const width = Math.max(1, Math.floor(canvas.clientWidth || SAMPLE_WAVEFORM_BINS));
       const height = Math.max(1, Math.floor(canvas.clientHeight || 56));
       setCanvasSize((current) => current.width === width && current.height === height ? current : { width, height });
     };
+
     updateSize();
     const resizeObserver = new ResizeObserver(updateSize);
     resizeObserver.observe(canvas);
@@ -146,17 +156,20 @@ const SampleWaveform: Component<{
 
   createEffect(() => {
     const canvas = canvasRef;
+
     if (!canvas) return;
     const { width: cssW, height: cssH } = canvasSize();
     const dpr = props.devicePixelRatio;
     const pxW = Math.floor(cssW * dpr);
     const pxH = Math.floor(cssH * dpr);
+
     if (canvas.width !== pxW || canvas.height !== pxH) {
       canvas.width = pxW;
       canvas.height = pxH;
     }
 
     const ctx = canvas.getContext("2d");
+
     if (!ctx) return;
     const contextScaleX = pxW / cssW;
     const contextScaleY = pxH / cssH;
@@ -168,14 +181,17 @@ const SampleWaveform: Component<{
     const gridColor = themeTokens["device-graph-grid"];
     const waveformColor = themeTokens["clip-audio"];
     const nextData = data();
+
     if (!nextData) {
       ctx.strokeStyle = gridColor;
+
       for (let x = 0; x < cssW; x += 7) {
         ctx.beginPath();
         ctx.moveTo(x, cssH);
         ctx.lineTo(Math.min(cssW, x + 7), 0);
         ctx.stroke();
       }
+
       return;
     }
 
@@ -223,15 +239,20 @@ const DrumRack: Component<DrumRackProps> = (props) => {
   });
 
   const selectedPad = () => props.params.pads.find((pad) => pad.id === selectedPadId()) ?? props.params.pads[0];
+
   const readCachedPadBuffer = (pad: DrumRackPadParams) => {
     buffersVersion();
+
     if (!pad.sample) return undefined;
+
     return props.buffers?.()?.get(pad.id)?.buffer;
   };
 
   const previewPad = (pad: DrumRackPadParams) => {
     if (!pad.sample || pad.mute) return;
+
     if (!readCachedPadBuffer(pad)) return;
+
     if (props.onPreviewNote) {
       props.onPreviewNote(props.targetId, pad.note, 1, 0.35);
     } else {
@@ -246,20 +267,24 @@ const DrumRack: Component<DrumRackProps> = (props) => {
 
   const acceptsSampleDrop = (event: DragEvent) => {
     if (!props.canWrite) return false;
+
     return event.dataTransfer?.types.includes(SAMPLE_DRAG_DATA_TYPE) === true;
   };
 
   const handleSampleDragOver = (event: DragEvent) => {
     if (!acceptsSampleDrop(event)) return;
     event.preventDefault();
+
     if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
   };
 
   const handleSampleDrop = (event: DragEvent, pad: DrumRackPadParams) => {
     if (!props.canWrite) return;
     const raw = event.dataTransfer?.getData(SAMPLE_DRAG_DATA_TYPE);
+
     if (!raw) return;
     const sample = parseSampleDragData(raw);
+
     if (!sample) return;
     event.preventDefault();
     setSelectedPadId(pad.id);

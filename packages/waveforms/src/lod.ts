@@ -23,14 +23,20 @@ export const selectWaveformTier = (input: WaveformTierSelectionInput): WaveformT
     || !valid(input.backingPixelsPerCssPixel)
     || input.tiers.length === 0) return null
   const tiers = [...new Set(input.tiers.filter((tier) => Number.isSafeInteger(tier) && tier > 0))].sort((a, b) => a - b)
+
   if (tiers.length === 0) return null
+
   const sourceFramesPerBackingPixel = input.sourceFrameSpan
     / (input.cssSegmentWidth * input.backingPixelsPerCssPixel)
+
   const projected = (tier: number) => tier / sourceFramesPerBackingPixel
+
   const requestedIndex = tiers.reduce((index, tier, candidateIndex) => (
     projected(tier) <= waveformTierSelectionThreshold ? candidateIndex : index
   ), 0)
+
   const framesPerInterval = tiers[requestedIndex] ?? tiers[0]!
+
   return {
     framesPerInterval,
     sourceFramesPerBackingPixel,

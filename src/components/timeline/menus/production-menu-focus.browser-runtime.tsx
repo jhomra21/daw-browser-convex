@@ -8,6 +8,7 @@ import { useTimelineKeyboard } from "~/hooks/useTimelineKeyboard";
 
 const calls: string[] = [];
 const record = (name: string) => () => { calls.push(name); };
+
 const toolbar: TransportControlsProps = {
   isPlaying: false,
   playheadSec: 0,
@@ -92,11 +93,17 @@ const toolbar: TransportControlsProps = {
 };
 
 const arrangement = document.createElement("div");
+
 arrangement.id = "arrangement";
+
 arrangement.tabIndex = 0;
+
 arrangement.style.cssText = "position: absolute; top: 320px; left: 320px; width: 200px; height: 100px";
+
 const root = document.createElement("div");
+
 document.body.append(arrangement, root);
+
 document.addEventListener("keydown", (event) => {
   if (event.ctrlKey && event.key.toLowerCase() === "d") event.preventDefault();
 }, { capture: true });
@@ -107,8 +114,12 @@ const dispose = render(() => {
     onSpace: record("timeline:space"),
     onDelete: record("timeline:delete"),
     onDuplicate: record("timeline:duplicate"),
-    onCopy: () => { calls.push("timeline:copy"); return true; },
-    onPaste: () => { calls.push("timeline:paste"); return true; },
+    onCopy: () => { calls.push("timeline:copy");
+
+ return true; },
+    onPaste: () => { calls.push("timeline:paste");
+
+ return true; },
     onAddAudioTrack: record("timeline:add-audio-track"),
     onAddReturnTrack: record("timeline:add-return-track"),
     onAddGroupTrack: record("timeline:add-group-track"),
@@ -117,10 +128,13 @@ const dispose = render(() => {
     onAddInstrumentTrack: record("timeline:add-instrument-track"),
     onOpenExport: record("timeline:export"),
     onToggleFollow: record("timeline:follow"),
-    executeExtensionShortcut: () => { calls.push("timeline:extension"); return true; },
+    executeExtensionShortcut: () => { calls.push("timeline:extension");
+
+ return true; },
     onUndo: record("timeline:undo"),
     onRedo: record("timeline:redo"),
   });
+
   return createComponent(Menubar, {
     class: "fixture-menubar",
     get children() {
@@ -135,8 +149,10 @@ const dispose = render(() => {
 const snapshot = () => {
   const trigger = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
     .find((element) => element.textContent?.trim() === "View");
+
   const menu = [...document.querySelectorAll<HTMLElement>('[role="menu"]')]
     .find((element) => element.getClientRects().length > 0) ?? null;
+
   return {
     calls: [...calls],
     activeId: document.activeElement?.id ?? "",

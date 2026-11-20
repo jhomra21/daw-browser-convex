@@ -12,6 +12,7 @@ export type JsonValueInput = z.input<typeof jsonValueSchema>
 
 export const parseJsonValue = (value: JsonValueInput): JsonValue | undefined => {
   const result = jsonValueSchema.safeParse(value)
+
   return result.success ? result.data : undefined
 }
 

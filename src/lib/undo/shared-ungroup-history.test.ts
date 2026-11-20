@@ -17,6 +17,7 @@ describe('durable shared ungroup history', () => {
   test('builds history from the transaction-owned result after replay', () => {
     const group = track('group', { historyRef: 'group-ref', channelRole: 'group', color: '#123456' })
     const child = track('child', { historyRef: 'child-ref', groupId: 'group', outputTargetId: 'group' })
+
     const result = readSharedUngroupResult({
       status: 'applied',
       group: {
@@ -38,7 +39,9 @@ describe('durable shared ungroup history', () => {
       }],
       sidechainRoutes: [],
     })
+
     if (!result) throw new Error('Expected valid ungroup result')
+
     const entry = buildCommittedSharedUngroupHistoryEntry({
       projectId: 'project',
       tracks: [group, child],
@@ -85,6 +88,7 @@ describe('durable shared ungroup history', () => {
         effectInstanceId: 'compressor:bass',
       }],
     })
+
     expect(result?.sidechainRoutes).toEqual([{
       sourceTrackId: 'group',
       targetTrackId: 'bass',
@@ -109,6 +113,7 @@ describe('durable shared ungroup history', () => {
 
   test('preserves duplicate effect automation by exact instance identity', () => {
     const group = track('group', { channelRole: 'group' })
+
     const result = readSharedUngroupResult({
       status: 'applied',
       group: { index: 0, volume: 1, muted: false, soloed: false, sends: [] },
@@ -122,7 +127,9 @@ describe('durable shared ungroup history', () => {
         { effectInstanceId: 'delay-b', parameterId: 'delay.feedback', enabled: true, points: [], updatedAt: 2 },
       ],
     })
+
     if (!result) throw new Error('Expected valid ungroup result')
+
     const entry = buildCommittedSharedUngroupHistoryEntry({
       projectId: 'project',
       tracks: [group],
@@ -134,6 +141,7 @@ describe('durable shared ungroup history', () => {
       ],
       result,
     })
+
     expect(entry.data.automation?.map((envelope) => envelope.target.effectInstanceId)).toEqual(['delay-a', 'delay-b'])
   })
 
@@ -169,6 +177,7 @@ describe('durable shared ungroup history', () => {
     const group = track('group', { historyRef: 'group-ref', channelRole: 'group' })
     const source = track('source', { historyRef: 'source-ref' })
     const target = track('target', { historyRef: 'target-ref' })
+
     const result = readSharedUngroupResult({
       status: 'applied',
       group: { index: 0, volume: 1, muted: false, soloed: false, sends: [] },
@@ -180,6 +189,7 @@ describe('durable shared ungroup history', () => {
         { sourceTrackId: 'source', targetTrackId: 'group', effectInstanceId: 'compressor:group' },
       ],
     })
+
     if (!result) throw new Error('Expected valid ungroup result')
 
     const entry = buildCommittedSharedUngroupHistoryEntry({

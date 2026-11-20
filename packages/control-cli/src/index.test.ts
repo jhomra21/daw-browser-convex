@@ -46,6 +46,7 @@ const credentials: ControlCredentials = {
 afterEach(async () => {
   if (previousCredentialPath === undefined) delete process.env.DAW_CONTROL_AUTH_PATH
   else process.env.DAW_CONTROL_AUTH_PATH = previousCredentialPath
+
   if (previousUserDataPath === undefined) delete process.env.DAW_DESKTOP_USER_DATA
   else process.env.DAW_DESKTOP_USER_DATA = previousUserDataPath
   globalThis.fetch = previousFetch
@@ -128,11 +129,17 @@ const controlResults = {
 
 const controlResultFor = (operation: DesktopOperationV1) => {
   if (operation === "control.capabilities") return controlResults[operation]
+
   if (operation === "control.snapshot") return controlResults[operation]
+
   if (operation === "control.preview") return controlResults[operation]
+
   if (operation === "control.commit") return controlResults[operation]
+
   if (operation === "control.requestApproval") return controlResults[operation]
+
   if (operation === "control.history") return controlResults[operation]
+
   if (operation === "control.recoveries") return controlResults[operation]
   throw new Error("Unexpected host operation.")
 }
@@ -147,12 +154,15 @@ const createHost = async (
   const socketPath = join(hostDirectory, "control.sock")
   await mkdir(hostDirectory, { recursive: true, mode: 0o700 })
   await chmod(hostDirectory, 0o700)
+
   const server = createServer((socket) => {
     const decoder = createDesktopFrameDecoder((frame) => {
       if (frame.version !== "v1") {
         socket.destroy()
+
         return
       }
+
       if (frame.type === "hello") {
         socket.write(encodeDesktopFrame(desktopFrameSchemaV1.parse({
           version: desktopProtocolVersion,
@@ -164,8 +174,10 @@ const createHost = async (
         onRequest(socket, frame)
       }
     })
+
     socket.on("data", decoder)
   })
+
   servers.push(server)
   await new Promise<void>((resolve, reject) => server.once("error", reject).listen(socketPath, resolve))
   await writeFile(join(hostDirectory, "registration-v1.json"), JSON.stringify({
@@ -183,6 +195,7 @@ const createHost = async (
 const io = () => {
   const stdout: string[] = []
   const stderr: string[] = []
+
   return {
     stdout,
     stderr,
@@ -202,11 +215,13 @@ describe("control CLI output", () => {
     await createCredentialStore().write(credentials)
     const stdout: string[] = []
     const stderr: string[] = []
+
     const exitCode = await runCli(["auth", "status"], {
       stdout: (line) => stdout.push(line),
       stderr: (line) => stderr.push(line),
       readStdin: async () => "",
     })
+
     expect(exitCode).toBe(0)
     expect(stdout).toHaveLength(1)
     expect(stderr).toEqual([])
@@ -227,11 +242,13 @@ describe("control CLI output", () => {
   test("command failures only emit a structured stderr envelope", async () => {
     const stdout: string[] = []
     const stderr: string[] = []
+
     const exitCode = await runCli(["snapshot"], {
       stdout: (line) => stdout.push(line),
       stderr: (line) => stderr.push(line),
       readStdin: async () => "",
     })
+
     expect(exitCode).toBe(1)
     expect(stdout).toEqual([])
     expect(stderr).toHaveLength(1)
@@ -250,14 +267,17 @@ describe("control CLI output", () => {
       ["auth", "status", "--verbose"],
       ["auth", "logout", "extra"],
     ]
+
     for (const arguments_ of attempts) {
       const stdout: string[] = []
       const stderr: string[] = []
+
       const exitCode = await runCli(arguments_, {
         stdout: (line) => stdout.push(line),
         stderr: (line) => stderr.push(line),
         readStdin: async () => "",
       })
+
       expect(exitCode).toBe(1)
       expect(stdout).toEqual([])
       expect(stderr).toHaveLength(1)
@@ -268,11 +288,13 @@ describe("control CLI output", () => {
   test("rejects invalid host payloads before host discovery", async () => {
     const stdout: string[] = []
     const stderr: string[] = []
+
     const exitCode = await runCli(["host", "seek", "86401"], {
       stdout: (line) => stdout.push(line),
       stderr: (line) => stderr.push(line),
       readStdin: async () => "",
     })
+
     expect(exitCode).toBe(1)
     expect(stdout).toEqual([])
     expect(JSON.parse(stderr[0]).error.message).toBe("Invalid host command.")
@@ -303,6 +325,7 @@ describe("control CLI output", () => {
 
   test("dispatches host diagnostics-v2 with the strict protocol operation", async () => {
     const observed: Array<{ operation: DesktopOperationV1; input: unknown }> = []
+
     const data = desktopDiagnosticsSchemaV2.parse({
       version: "v2",
       audio: {
@@ -358,6 +381,7 @@ describe("control CLI output", () => {
       waveform: { available: false, reason: "not-exposed-at-controller-boundary" },
       native: { status: "unavailable", reason: "desktop-bridge-unavailable" },
     })
+
     await createHost((socket, frame) => {
       observed.push({ operation: frame.operation, input: frame.input })
       socket.write(encodeDesktopFrame(desktopFrameSchemaV1.parse({
@@ -428,11 +452,13 @@ describe("canonical CLI target routing", () => {
         },
       },
     ] satisfies ReadonlyArray<{ name: string; prepare: (directory: string) => Promise<void> }>
+
     for (const scenario of cases) {
       const directory = await mkdtemp("/tmp/daw-control-cli-")
       directories.push(directory)
       process.env.DAW_DESKTOP_USER_DATA = directory
       await scenario.prepare(directory)
+
       for (const command of [["project", "list", "--target", "host"], ["project", "current", "--target", "host"]]) {
         const output = io()
         expect(await runCli(command, output.value), scenario.name).toBe(1)
@@ -456,6 +482,7 @@ describe("canonical CLI target routing", () => {
       async (input: RequestInfo | URL) => {
         const url = new URL(String(input))
         cloudRequests.push(url.pathname)
+
         return Response.json({ projects: [{ projectId: "cloud-project", name: "Cloud" }] })
       },
       { preconnect: previousFetch.preconnect },
@@ -470,6 +497,7 @@ describe("canonical CLI target routing", () => {
       const result = frame.operation === "host.status"
         ? { project: { id: "host-project", kind: "local" }, ready: true, transport: "stopped", capabilities: { playback: true, diagnostics: true } }
         : controlResultFor(frame.operation)
+
       socket.write(encodeDesktopFrame(desktopFrameSchemaV1.parse({
         version: "v1",
         type: "reply",
@@ -513,6 +541,7 @@ describe("canonical CLI target routing", () => {
       })))
     })
     const directory = directories[directories.length - 1]
+
     if (!directory) throw new Error("Missing test directory.")
     process.env.DAW_CONTROL_AUTH_PATH = join(directory, "credentials.json")
     await createCredentialStore().write(credentials)
@@ -522,6 +551,7 @@ describe("canonical CLI target routing", () => {
     const commitPath = join(directory, "commit.json")
     await writeFile(commitPath, JSON.stringify({ version: "v1", projectId: "project-1", actions: [action], idempotencyKey: "request-1" }))
     const cloudRequests: Array<{ url: string; method: string; body: string | undefined }> = []
+
     const cloudFetch: typeof globalThis.fetch = Object.assign(
       async (...arguments_: Parameters<typeof globalThis.fetch>) => {
         const [input, init] = arguments_
@@ -531,6 +561,7 @@ describe("canonical CLI target routing", () => {
           method: init?.method ?? "GET",
           body: init?.body === undefined ? undefined : String(init.body),
         })
+
         const operation = url.pathname.endsWith("/capabilities") ? "control.capabilities"
           : url.pathname.endsWith("/snapshot") ? "control.snapshot"
             : url.pathname.endsWith("/preview") ? "control.preview"
@@ -538,11 +569,14 @@ describe("canonical CLI target routing", () => {
                 : url.pathname.endsWith("/commit") ? "control.commit"
                   : url.pathname.endsWith("/history") ? "control.history"
                     : "control.recoveries"
+
         return Response.json(controlResultFor(operation))
       },
       { preconnect: previousFetch.preconnect },
     )
+
     globalThis.fetch = cloudFetch
+
     const commands = [
       { command: "capabilities", arguments_: [], operation: "control.capabilities" },
       { command: "snapshot", arguments_: ["project-1"], operation: "control.snapshot" },
@@ -552,6 +586,7 @@ describe("canonical CLI target routing", () => {
       { command: "history", arguments_: ["project-1", "--cursor", "cursor-1", "--limit", "2"], operation: "control.history" },
       { command: "recoveries", arguments_: ["project-1", "--cursor", "cursor-1", "--limit", "2"], operation: "control.recoveries" },
     ] satisfies Array<{ command: string; arguments_: string[]; operation: DesktopOperationV1 }>
+
     for (const command of commands) {
       const omitted = io()
       const explicit = io()
@@ -568,6 +603,7 @@ describe("canonical CLI target routing", () => {
         data: controlResultFor(command.operation),
       })
     }
+
     expect(observed).toEqual([
       { operation: "control.capabilities", input: {} },
       { operation: "control.snapshot", input: { projectId: "project-1" } },
@@ -619,6 +655,7 @@ describe("canonical CLI target routing", () => {
     process.env.DAW_CONTROL_AUTH_PATH = join(directory, "missing.json")
     let hostRequests = 0
     await createHost(() => { hostRequests += 1 })
+
     for (const command of [["capabilities"], ["capabilities", "--target", "cloud"]]) {
       const output = io()
       expect(await runCli(command, output.value)).toBe(1)
@@ -626,6 +663,7 @@ describe("canonical CLI target routing", () => {
         error: { code: "invalid-request", message: "Run daw-control auth login first." },
       })
     }
+
     expect(hostRequests).toBe(0)
   })
 
@@ -641,6 +679,7 @@ describe("canonical CLI target routing", () => {
       })))
     })
     const directory = directories[directories.length - 1]
+
     if (!directory) throw new Error("Missing test directory.")
     const requestPath = join(directory, "invalid-request.json")
     await writeFile(requestPath, JSON.stringify({
@@ -649,6 +688,7 @@ describe("canonical CLI target routing", () => {
       actions: [{ kind: "project.rename", name: "Renamed" }],
       target: "host",
     }))
+
     for (const command of [
       ["capabilities", "--target"],
       ["capabilities", "--target", "invalid"],
@@ -659,6 +699,7 @@ describe("canonical CLI target routing", () => {
       expect(await runCli(command, output.value)).toBe(1)
       expect(JSON.parse(output.stderr[0]).error.code).toBe("invalid-request")
     }
+
     expect(requests).toBe(0)
   })
 
@@ -683,6 +724,7 @@ describe("canonical CLI target routing", () => {
       actionIndex: 3,
       details: { action: "unsupported" },
     }
+
     await createHost((socket, frame) => {
       socket.write(encodeDesktopFrame(desktopFrameSchemaV1.parse({
         version: "v1",

@@ -28,6 +28,7 @@ test('schedules expression values and restores at the clip boundary', () => {
     rangeStartSec: 0,
     rangeEndSec: 5,
   })
+
   expect(events[0]?.timeSec).toBe(1)
   expect(events[0]?.phase).toBe('set')
   expect(events[0]?.value).toBe(1)
@@ -42,6 +43,7 @@ test('seeds mapped expression on a mid-clip seek', () => {
     rangeStartSec: 2,
     rangeEndSec: 5,
   })[0]
+
   expect(event?.timeSec).toBe(2)
   expect(event?.phase).toBe('set')
   expect(event?.value).toBe(1)
@@ -60,6 +62,7 @@ test('applies a clip-start expression during a zero-length seek', () => {
     rangeStartSec: 0,
     rangeEndSec: 0,
   })
+
   expect(events).toHaveLength(1)
   expect(events[0]).toMatchObject({ timeSec: 0, phase: 'set', value: 1 })
 })

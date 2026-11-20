@@ -38,11 +38,13 @@ const createViews = (buffers: RecorderSabRingBuffers) => {
   const state = new Int32Array(buffers.state)
   const frameCounts = new Int32Array(buffers.frameCounts)
   const samples = new Float32Array(buffers.samples)
+
   if (
     state.length !== HEADER_LENGTH ||
     frameCounts.length !== RECORDER_POOL_BLOCKS ||
     samples.length !== RECORDER_POOL_BLOCKS * RECORDER_BLOCK_FRAMES * RECORDER_MAX_CHANNELS
   ) throw new Error('Recorder SAB ring buffers are invalid.')
+
   return { state, frameCounts, samples }
 }
 
@@ -53,6 +55,7 @@ export const createRecorderSabRingProducer = (
   if (!Number.isInteger(maximumOccupancy) || maximumOccupancy < 1 || maximumOccupancy > RECORDER_POOL_BLOCKS) {
     throw new Error('Recorder SAB maximum occupancy is invalid.')
   }
+
   const views = createViews(buffers)
   let peakOccupancy = 0
 
@@ -67,26 +70,33 @@ export const createRecorderSabRingProducer = (
     ) throw new Error('Recorder SAB block is invalid.')
     const writeIndex = Atomics.load(views.state, WRITE_INDEX)
     const readIndex = Atomics.load(views.state, READ_INDEX)
+
     if (writeIndex - readIndex >= maximumOccupancy) {
       Atomics.add(views.state, DROPPED_FRAMES, frameCount)
       Atomics.add(views.state, DROPPED_BLOCKS, 1)
+
       return false
     }
+
     const slot = writeIndex % RECORDER_POOL_BLOCKS
     const slotOffset = slot * RECORDER_BLOCK_FRAMES * RECORDER_MAX_CHANNELS
+
     for (let channelIndex = 0; channelIndex < channels.length; channelIndex += 1) {
       const source = channels[channelIndex]
+
       if (!source) continue
       views.samples.set(
         source.subarray(0, frameCount),
         slotOffset + channelIndex * RECORDER_BLOCK_FRAMES,
       )
     }
+
     Atomics.store(views.frameCounts, slot, frameCount)
     Atomics.store(views.state, WRITE_INDEX, writeIndex + 1)
     peakOccupancy = Math.max(peakOccupancy, writeIndex + 1 - readIndex)
     Atomics.add(views.state, NOTIFICATION, 1)
     Atomics.notify(views.state, NOTIFICATION)
+
     return true
   }
 
@@ -108,18 +118,23 @@ export const createRecorderSabRingConsumer = (
   if (!Number.isInteger(channelCount) || channelCount < 1 || channelCount > RECORDER_MAX_CHANNELS) {
     throw new Error('Recorder SAB channel count is invalid.')
   }
+
   const views = createViews(buffers)
 
   const pop = (): RecorderSabBlock | null => {
     const readIndex = Atomics.load(views.state, READ_INDEX)
+
     if (readIndex === Atomics.load(views.state, WRITE_INDEX)) return null
     const slot = readIndex % RECORDER_POOL_BLOCKS
     const frameCount = Atomics.load(views.frameCounts, slot)
+
     if (frameCount < 1 || frameCount > RECORDER_BLOCK_FRAMES) {
       throw new Error('Recorder SAB frame count is invalid.')
     }
+
     const slotOffset = slot * RECORDER_BLOCK_FRAMES * RECORDER_MAX_CHANNELS
     const channels: Float32Array[] = []
+
     for (let channelIndex = 0; channelIndex < channelCount; channelIndex += 1) {
       const channel = new Float32Array(frameCount)
       channel.set(views.samples.subarray(
@@ -128,13 +143,16 @@ export const createRecorderSabRingConsumer = (
       ))
       channels.push(channel)
     }
+
     Atomics.store(views.state, READ_INDEX, readIndex + 1)
+
     return { sequence: readIndex, frameCount, channels }
   }
 
   const waitForData = async (): Promise<void> => {
     if (Atomics.load(views.state, READ_INDEX) !== Atomics.load(views.state, WRITE_INDEX)) return
     const notification = Atomics.load(views.state, NOTIFICATION)
+
     if (Atomics.load(views.state, READ_INDEX) !== Atomics.load(views.state, WRITE_INDEX)) return
     await Atomics.waitAsync(views.state, NOTIFICATION, notification).value
   }

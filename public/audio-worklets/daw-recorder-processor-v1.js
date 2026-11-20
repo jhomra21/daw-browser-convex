@@ -30,6 +30,7 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
 
   handleMessage(message) {
     if (!isRecorderMessage(message)) return this.fail('malformed-message')
+
     if (message.type === 'initialize-sab') {
       if (
         this.session ||
@@ -41,12 +42,16 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
       const state = new Int32Array(message.state)
       const frameCounts = new Int32Array(message.frameCounts)
       const samples = new Float32Array(message.samples)
+
       if (state.length !== 5 || frameCounts.length !== POOL_BLOCKS || samples.length !== POOL_BLOCKS * BLOCK_FRAMES * 2) {
         return this.fail('invalid-sab-configuration')
       }
+
       this.sab = { state, frameCounts, samples }
+
       return
     }
+
     if (message.type === 'configure') {
       if (
         this.session ||
@@ -69,27 +74,36 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
           (!Number.isSafeInteger(message.punchEndFrame) || message.punchEndFrame < message.punchStartFrame))
       ) return this.fail('invalid-configuration')
       this.session = message
+
       if (!this.sab) {
         const bytes = BLOCK_FRAMES * message.channelCount * Float32Array.BYTES_PER_ELEMENT
         this.blocks = Array.from({ length: POOL_BLOCKS }, (_, id) => {
           const buffer = new ArrayBuffer(bytes)
+
           return { id, owner: 'available', buffer, view: new Float32Array(buffer) }
         })
       }
+
       return
     }
+
     if (!this.session || message.generation !== this.session.generation || message.sessionId !== this.session.sessionId) return
+
     if (message.type === 'return') {
       const block = this.blocks[message.blockId]
       const expectedBytes = BLOCK_FRAMES * this.session.channelCount * Float32Array.BYTES_PER_ELEMENT
+
       if (!block || block.owner !== 'transport' || !(message.buffer instanceof ArrayBuffer) || message.buffer.byteLength !== expectedBytes) {
         return this.fail('invalid-buffer-return')
       }
+
       block.buffer = message.buffer
       block.view = new Float32Array(message.buffer)
       block.owner = 'available'
+
       return
     }
+
     if (message.type === 'finalize') {
       if (this.completed || this.fatal) return
       this.completed = true
@@ -103,8 +117,10 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
         droppedFrames: this.droppedFrames,
         droppedBlocks: this.droppedBlocks,
       })
+
       return
     }
+
     this.fail('malformed-message')
   }
 
@@ -126,9 +142,11 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
     if (this.sab) {
       const reservedIndex = this.sequence + (this.pending ? 1 : 0)
       const readIndex = Atomics.load(this.sab.state, SAB_READ_INDEX)
+
       if (reservedIndex - readIndex >= POOL_BLOCKS) return null
       const slot = reservedIndex % POOL_BLOCKS
       const slotOffset = slot * BLOCK_FRAMES * 2
+
       return {
         id: slot,
         owner: 'capture',
@@ -136,16 +154,20 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
         view: this.sab.samples.subarray(slotOffset, slotOffset + BLOCK_FRAMES * 2),
       }
     }
+
     for (const block of this.blocks) {
       if (block.owner !== 'available') continue
       block.owner = 'capture'
+
       return block
     }
+
     return null
   }
 
   emitCurrent() {
     if (!this.current || this.writeOffset === 0) return
+
     if (this.pending) this.emitBlock(this.pending)
     this.pending = {
       block: this.current,
@@ -162,14 +184,17 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
       let sum = 0
       let peak = 0
       const sampleCount = frameCount * this.session.channelCount
+
       for (let channel = 0; channel < this.session.channelCount; channel += 1) {
         const offset = channel * BLOCK_FRAMES
+
         for (let frame = 0; frame < frameCount; frame += 1) {
           const value = pending.block.view[offset + frame] ?? 0
           sum += value * value
           peak = Math.max(peak, Math.abs(value))
         }
       }
+
       this.port.postMessage({
         type: 'meter',
         generation: this.session.generation,
@@ -178,9 +203,11 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
         peak,
       })
     }
+
     if (this.sab) {
       const writeIndex = Atomics.load(this.sab.state, SAB_WRITE_INDEX)
       const slot = writeIndex % POOL_BLOCKS
+
       if (pending.block.id !== slot) return this.fail('invalid-sab-write-order')
       Atomics.store(this.sab.frameCounts, slot, frameCount)
       Atomics.store(this.sab.state, SAB_WRITE_INDEX, writeIndex + 1)
@@ -192,8 +219,10 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
         sessionId: this.session.sessionId,
       })
       this.sequence += 1
+
       return
     }
+
     const message = {
       type: 'block',
       generation: this.session.generation,
@@ -204,6 +233,7 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
       channelCount: this.session.channelCount,
       buffer: pending.block.buffer,
     }
+
     pending.block.owner = 'transport'
     this.sequence += 1
     this.port.postMessage(message, [message.buffer])
@@ -211,7 +241,9 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
 
   emitThrough(stopFrame) {
     const candidates = []
+
     if (this.pending) candidates.push(this.pending)
+
     if (this.current && this.writeOffset > 0) {
       candidates.push({
         block: this.current,
@@ -219,9 +251,12 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
         startFrame: this.currentStartFrame,
       })
     }
+
     let retainedFrames = 0
+
     for (const candidate of candidates) {
       const frameCount = Math.max(0, Math.min(candidate.frameCount, stopFrame - candidate.startFrame))
+
       if (frameCount > 0) {
         this.emitBlock(candidate, frameCount)
         retainedFrames += frameCount
@@ -229,6 +264,7 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
         candidate.block.owner = 'available'
       }
     }
+
     const candidateFrames = candidates.reduce((total, candidate) => total + candidate.frameCount, 0)
     this.capturedFrames -= candidateFrames - retainedFrames
     this.pending = null
@@ -239,45 +275,62 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
 
   process(inputs, outputs = []) {
     if (!this.session) return true
+
     if (this.fatal || this.completed) return false
     const input = inputs[0] ?? []
     const output = outputs[0] ?? []
     const quantumFrames = input[0]?.length ?? 0
+
     for (let frameIndex = 0; frameIndex < quantumFrames; frameIndex += 1) {
       const absoluteFrame = currentFrame + frameIndex
       let processed0 = 0
       let processed1 = 0
+
       for (let channel = 0; channel < this.session.channelCount; channel += 1) {
         const source = input[this.session.inputChannels[channel]]
         const sample = source ? (source[frameIndex] ?? 0) * this.session.gain * this.session.polarity : 0
+
         if (channel === 0) processed0 = sample
         else processed1 = sample
+
         if (output[channel]) output[channel][frameIndex] = sample
       }
+
       if (
         absoluteFrame < this.session.punchStartFrame ||
         (this.session.punchEndFrame !== null && absoluteFrame >= this.session.punchEndFrame)
       ) continue
+
       if (!this.current) {
         this.current = this.acquire()
         this.currentStartFrame = absoluteFrame
       }
+
       if (!this.current) {
         this.droppedFrames += 1
+
         if (this.droppedFrames % BLOCK_FRAMES === 1) this.droppedBlocks += 1
+
         if (this.sab) {
           Atomics.add(this.sab.state, SAB_DROPPED_FRAMES, 1)
+
           if (this.droppedFrames % BLOCK_FRAMES === 1) Atomics.add(this.sab.state, SAB_DROPPED_BLOCKS, 1)
         }
+
         if (this.droppedFrames >= FATAL_DROPPED_FRAMES) this.fail('recorder-overrun')
+
         return false
       }
+
       this.current.view[this.writeOffset] = processed0
+
       if (this.session.channelCount === 2) this.current.view[BLOCK_FRAMES + this.writeOffset] = processed1
       this.writeOffset += 1
       this.capturedFrames += 1
+
       if (this.writeOffset === BLOCK_FRAMES) this.emitCurrent()
     }
+
     return !this.fatal
   }
 }

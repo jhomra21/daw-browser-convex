@@ -107,6 +107,7 @@ const availablePreflight = async (
 
 test("preflights a trusted effect and returns only path-free persisted manifest fields", async () => {
   const instanceId = crypto.randomUUID()
+
   const result = await preflightVst3Insertion({
     request: { instanceId, reference },
     catalog: catalog(),
@@ -146,6 +147,7 @@ test("preflights a trusted effect and returns only path-free persisted manifest 
 
 test("rejects stale catalog identity before worker preflight", async () => {
   let calls = 0
+
   const result = await preflightVst3Insertion({
     request: { instanceId: crypto.randomUUID(), reference: { ...reference, binaryFingerprint: "c".repeat(64) } },
     catalog: catalog(),
@@ -155,6 +157,7 @@ test("rejects stale catalog identity before worker preflight", async () => {
     rememberVerdict: () => undefined,
     preflight: async () => {
       calls += 1
+
       return availablePreflight(crypto.randomUUID())
     },
   })
@@ -165,6 +168,7 @@ test("rejects stale catalog identity before worker preflight", async () => {
 
 test("rejects unsupported buses without mutating any native transaction", async () => {
   const instanceId = crypto.randomUUID()
+
   const result = await preflightVst3Insertion({
     request: { instanceId, reference },
     catalog: catalog(),
@@ -180,6 +184,7 @@ test("rejects unsupported buses without mutating any native transaction", async 
 
 test("preflights a zero-input instrument with a stereo output", async () => {
   const instanceId = crypto.randomUUID()
+
   const result = await preflightVst3Insertion({
     request: { instanceId, reference },
     catalog: catalog("instrument"),

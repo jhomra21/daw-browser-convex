@@ -24,9 +24,11 @@ export const waveformSampleY = (input: {
   const maxHeight = Number.isFinite(input.maxHeightFraction)
     ? Math.max(0, Math.min(1, input.maxHeightFraction ?? DEFAULT_MAX_HEIGHT))
     : DEFAULT_MAX_HEIGHT
+
   const scale = Number.isFinite(input.amplitudeScale)
     ? Math.max(0, Math.min(1, input.amplitudeScale ?? 1))
     : 1
+
   return input.topY + input.contentH / 2
     - Math.max(-1, Math.min(1, input.sample))
       * input.contentH / 2 * maxHeight * scale
@@ -57,6 +59,7 @@ export const waveformRibbonGeometry = (input: {
   const rawCenterY = (rawUpperY + rawLowerY) / 2
   const minimumThicknessCssPx = Math.max(0, input.minimumThicknessCssPx)
   const thickness = Math.max(rawThickness, minimumThicknessCssPx)
+
   return {
     upperY: rawCenterY - thickness / 2,
     lowerY: rawCenterY + thickness / 2,
@@ -68,16 +71,21 @@ export const waveformRibbonGeometry = (input: {
 const intervalValues = (data: WaveformSourceData, channel: number, index: number) => {
   if (data.kind === 'samples') {
     const value = data.channels[channel]?.[index] ?? 0
+
     return { min: value, max: value }
   }
+
   const values = data.channels[channel]
+
   if (!values) return { min: 0, max: 0 }
+
   if (data.encoding === 'signed-u8') {
     return {
       min: decodePeakByte(values[index * 2] ?? 128),
       max: decodePeakByte(values[index * 2 + 1] ?? 128),
     }
   }
+
   return {
     min: values[index * 2] ?? 0,
     max: values[index * 2 + 1] ?? 0,
@@ -103,26 +111,33 @@ const normalizeWaveformChannel = (
   const valueCount = data.kind === 'samples'
     ? data.channels[0]?.length ?? 0
     : data.intervalCount
+
   const sourceSpan = sourceSpanFor(data)
   const firstSourceFrame = sourceFrameFor(data, 0)
+
   const firstIndex = Math.max(
     0,
     Math.floor((sourceStartFrame - firstSourceFrame) / sourceSpan),
   )
+
   const lastIndex = Math.min(
     valueCount,
     Math.ceil((sourceEndFrame - firstSourceFrame) / sourceSpan),
   )
+
   const values: CanonicalWaveformAnchor[] = []
+
   for (let index = firstIndex; index < lastIndex; index += 1) {
     const sourceFrame = sourceFrameFor(data, index)
     const sourceEnd = sourceFrame + sourceSpan
+
     if (
       data.kind === 'samples'
       && (sourceFrame < sourceStartFrame || sourceFrame >= sourceEndFrame)
     ) continue
     const clippedStart = Math.max(sourceFrame, sourceStartFrame)
     const clippedEnd = Math.min(sourceEnd, sourceEndFrame)
+
     if (clippedEnd <= clippedStart) continue
     const range = intervalValues(data, channel, index)
     values.push({
@@ -134,10 +149,13 @@ const normalizeWaveformChannel = (
       exact: data.kind === 'samples',
     })
   }
+
   if (values.length === 0) return values
   const first = values[0]
   const last = values[values.length - 1]
+
   if (!first || !last) return values
+
   // Aggregate intervals use their clipped center as the stable source anchor.
   // Boundary anchors preserve clip edges without introducing interval-width
   // geometry into the painter.
@@ -158,13 +176,17 @@ export function drawWaveformSignal(
 ) {
   const data = segment.data
   const pointRadius = segment.style?.pointRadius ?? 0
+
   const backingScaleY = Number.isFinite(segment.style?.backingScaleY)
     ? segment.style?.backingScaleY ?? 1
     : 1
+
   const minimumThicknessCssPx = Number.isFinite(segment.style?.minimumThicknessCssPx)
     ? Math.max(0, segment.style?.minimumThicknessCssPx ?? 0)
     : minimumWaveformThicknessCssPx(backingScaleY)
+
   const channelCount = Math.min(segment.channelCount, data.channels.length)
+
   if (channelCount <= 0 || segment.endPx <= segment.startPx) return
   const style = segment.style
   const maxHeightFraction = style?.maxHeightFraction ?? DEFAULT_MAX_HEIGHT
@@ -172,17 +194,24 @@ export function drawWaveformSignal(
   const sourceSpan = Math.max(1, segment.sourceEndFrame - segment.sourceStartFrame)
   const laneH = segment.contentH / channelCount
   const fadeScaleCache = new Map<number, number>()
+
   const amplitudeScaleAt = (frame: number) => {
     const cached = fadeScaleCache.get(frame)
+
     if (cached !== undefined) return cached
     const scale = segment.fadeScaleAtSourceFrame?.(frame) ?? 1
+
     const normalized = Number.isFinite(scale)
       ? Math.max(0, Math.min(1, scale))
       : 0
+
     fadeScaleCache.set(frame, normalized)
+
     return normalized
   }
+
   ctx.fillStyle = style?.fillStyle ?? DEFAULT_FILL_STYLE
+
   for (let channel = 0; channel < channelCount; channel += 1) {
     const values = normalizeWaveformChannel(
       data,
@@ -190,11 +219,14 @@ export function drawWaveformSignal(
       segment.sourceStartFrame,
       segment.sourceEndFrame,
     )
+
     const upper: Array<readonly [number, number]> = []
     const lower: Array<readonly [number, number]> = []
+
     for (const value of values) {
       const scale = amplitudeScaleAt(value.sourceFrame)
       const topY = segment.topY + laneH * channel
+
       const upperY = waveformSampleY({
         sample: value.max,
         topY,
@@ -202,6 +234,7 @@ export function drawWaveformSignal(
         maxHeightFraction,
         amplitudeScale: scale,
       })
+
       const lowerY = waveformSampleY({
         sample: value.min,
         topY,
@@ -209,37 +242,50 @@ export function drawWaveformSignal(
         maxHeightFraction,
         amplitudeScale: scale,
       })
+
       const ribbon = waveformRibbonGeometry({
         upperY,
         lowerY,
         minimumThicknessCssPx,
       })
+
       const x = segment.startPx
         + ((value.sourceFrame - segment.sourceStartFrame) / sourceSpan) * width
+
       upper.push([x, ribbon.upperY])
       lower.push([x, ribbon.lowerY])
     }
+
     if (upper.length === 0 || lower.length === 0) continue
     ctx.beginPath()
     const firstUpper = upper[0]
+
     if (!firstUpper) continue
     ctx.moveTo(firstUpper[0], firstUpper[1])
+
     for (const point of upper.slice(1)) {
       ctx.lineTo(point[0], point[1])
     }
+
     for (let index = lower.length - 1; index >= 0; index -= 1) {
       const point = lower[index]
+
       if (!point) continue
       ctx.lineTo(point[0], point[1])
     }
+
     ctx.fill()
+
     if (pointRadius <= 0) continue
     ctx.beginPath()
+
     for (const value of values) {
       if (!value.exact) continue
       const scale = amplitudeScaleAt(value.sourceFrame)
+
       const x = segment.startPx
         + ((value.sourceFrame - segment.sourceStartFrame) / sourceSpan) * width
+
       const y = waveformSampleY({
         sample: value.min,
         topY: segment.topY + laneH * channel,
@@ -247,9 +293,11 @@ export function drawWaveformSignal(
         maxHeightFraction,
         amplitudeScale: scale,
       })
+
       ctx.moveTo(x + pointRadius, y)
       ctx.arc(x, y, pointRadius, 0, Math.PI * 2)
     }
+
     ctx.fill()
   }
 }

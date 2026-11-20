@@ -36,7 +36,9 @@ export type DrumRackParams = {
 }
 
 export type DrumRackPadSampleInput = JsonValue
+
 export type DrumRackPadParamsInput = JsonValue
+
 export type DrumRackParamsInput = JsonValue
 
 export type DrumRackSampleAssignment = DrumRackPadSample
@@ -57,6 +59,7 @@ function readFiniteNumber(value: JsonValue | undefined): number | undefined {
 function normalizePadSample(input: JsonValue | undefined): DrumRackPadSample | undefined {
   const value = isJsonObject(input) ? input : undefined
   const source = value && isJsonObject(value.source) ? value.source : undefined
+
   const metadata = normalizeAudioSourceMetadataPatch({
     assetKey: value && isJsonString(value.assetKey) ? value.assetKey : undefined,
     sourceKind: value && isJsonString(value.sourceKind) ? value.sourceKind : undefined,
@@ -64,7 +67,9 @@ function normalizePadSample(input: JsonValue | undefined): DrumRackPadSample | u
     sampleRate: readFiniteNumber(source?.sampleRate),
     channelCount: readFiniteNumber(source?.channelCount),
   })
+
   const url = value && isJsonString(value.url) ? value.url : undefined
+
   if (
     metadata.assetKey === undefined
     || url === undefined
@@ -77,6 +82,7 @@ function normalizePadSample(input: JsonValue | undefined): DrumRackPadSample | u
   }
 
   const name = value && isJsonString(value.name) && value.name ? value.name : undefined
+
   return {
     assetKey: metadata.assetKey,
     url,
@@ -92,6 +98,7 @@ function normalizePadSample(input: JsonValue | undefined): DrumRackPadSample | u
 
 export function createDefaultDrumRackPad(index: number): DrumRackPadParams {
   const note = DRUM_RACK_FIRST_NOTE + index
+
   return {
     id: `pad-${note}`,
     note,
@@ -106,6 +113,7 @@ export function createDefaultDrumRackPad(index: number): DrumRackPadParams {
 
 export function createDefaultDrumRackParams(): DrumRackParams {
   const pads = Array.from({ length: DRUM_RACK_PAD_COUNT }, (_, index) => createDefaultDrumRackPad(index))
+
   return {
     pads,
     selectedPadId: pads[0]?.id,
@@ -115,6 +123,7 @@ export function createDefaultDrumRackParams(): DrumRackParams {
 export function getMidiNoteLabel(note: number): string {
   const noteName = NOTE_NAMES[((note % 12) + 12) % 12]
   const octave = Math.floor(note / 12) - 1
+
   return `${noteName}${octave}`
 }
 
@@ -158,6 +167,7 @@ export function normalizeDrumRackParams(input: DrumRackParamsInput): DrumRackPar
   const defaults = createDefaultDrumRackParams()
   const inputValue = isJsonObject(input) ? input : {}
   const inputPads = Array.isArray(inputValue.pads) ? inputValue.pads : []
+
   const pads = defaults.pads.map((defaultPad, index) => {
     const inputPad = isJsonObject(inputPads[index]) ? inputPads[index] : undefined
     const sample = normalizePadSample(inputPad?.sample)
@@ -178,6 +188,7 @@ export function normalizeDrumRackParams(input: DrumRackParamsInput): DrumRackPar
       chokeGroup: Math.round(clamp(readFiniteNumber(inputPad?.chokeGroup) ?? defaultPad.chokeGroup, 0, 16)),
     }
   })
+
   const selectedPadId = isJsonString(inputValue.selectedPadId) && pads.some((pad) => pad.id === inputValue.selectedPadId)
     ? inputValue.selectedPadId
     : pads[0]?.id

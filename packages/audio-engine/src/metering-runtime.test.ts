@@ -36,6 +36,7 @@ describe('meter worklet messages', () => {
       ],
       correlation: -1,
     }
+
     expect(readTrackMeterFrame(frame)).toEqual({
       frameCount: 2048,
       channels: [
@@ -54,6 +55,7 @@ describe('meter worklet lifecycle', () => {
       onprocessorerror: (() => void) | null = null
       disconnect = () => {}
     }
+
     Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: FakeAudioWorkletNode })
     Object.defineProperty(globalThis, 'requestAnimationFrame', { configurable: true, value: () => 1 })
     Object.defineProperty(globalThis, 'cancelAnimationFrame', { configurable: true, value: () => {} })
@@ -89,6 +91,7 @@ describe('meter worklet lifecycle', () => {
   test('clears stale levels and retries a processor fault only once per generation', async () => {
     const nodes: FakeAudioWorkletNode[] = []
     let flush = () => {}
+
     class FakeAudioWorkletNode {
       port: TestMeterPort = {
         onmessage: null,
@@ -102,18 +105,22 @@ describe('meter worklet lifecycle', () => {
         nodes.push(this)
       }
     }
+
     Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: FakeAudioWorkletNode })
     Object.defineProperty(globalThis, 'requestAnimationFrame', {
       configurable: true,
       value: (callback: () => void) => {
         flush = callback
+
         return 1
       },
     })
     Object.defineProperty(globalThis, 'cancelAnimationFrame', { configurable: true, value: () => {} })
+
     const context = Object.assign(Object.create(null), {
       audioWorklet: { addModule: () => Promise.resolve() },
     })
+
     const gain = Object.assign(Object.create(null), { connect: () => {} })
     const batches: Array<ReadonlyMap<string, { left: number; right: number }>> = []
     const runtime = createMeteringRuntime()
@@ -147,6 +154,7 @@ describe('meter worklet lifecycle', () => {
   test('publishes master levels and resets them when the runtime closes', async () => {
     let flush = () => {}
     const nodes: FakeAudioWorkletNode[] = []
+
     class FakeAudioWorkletNode {
       port: TestMeterPort = {
         onmessage: null,
@@ -160,18 +168,22 @@ describe('meter worklet lifecycle', () => {
         nodes.push(this)
       }
     }
+
     Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: FakeAudioWorkletNode })
     Object.defineProperty(globalThis, 'requestAnimationFrame', {
       configurable: true,
       value: (callback: () => void) => {
         flush = callback
+
         return 1
       },
     })
     Object.defineProperty(globalThis, 'cancelAnimationFrame', { configurable: true, value: () => {} })
+
     const context = Object.assign(Object.create(null), {
       audioWorklet: { addModule: () => Promise.resolve() },
     })
+
     const input = Object.assign(Object.create(null), { connect: () => {} })
     const levels: Array<{ left: number; right: number }> = []
     const runtime = createMeteringRuntime()
@@ -196,6 +208,7 @@ describe('meter worklet lifecycle', () => {
   test('invalidates a fault retry when the connected output is no longer current', async () => {
     const nodes: Array<{ onprocessorerror: (() => void) | null }> = []
     let current = true
+
     class FakeAudioWorkletNode {
       port = { onmessage: null, postMessage: () => {}, close: () => {} }
       onprocessorerror: (() => void) | null = null
@@ -205,12 +218,15 @@ describe('meter worklet lifecycle', () => {
         nodes.push(this)
       }
     }
+
     Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: FakeAudioWorkletNode })
     Object.defineProperty(globalThis, 'requestAnimationFrame', { configurable: true, value: () => 1 })
     Object.defineProperty(globalThis, 'cancelAnimationFrame', { configurable: true, value: () => {} })
+
     const context = Object.assign(Object.create(null), {
       audioWorklet: { addModule: () => Promise.resolve() },
     })
+
     const gain = Object.assign(Object.create(null), { connect: () => {} })
     const runtime = createMeteringRuntime()
     runtime.reconnectTrackMeters(context, 'track-1', gain, () => current)
@@ -226,17 +242,21 @@ describe('meter worklet lifecycle', () => {
   test('does not construct a node when registration resolves after track disposal or close', async () => {
     let resolveRegistration = () => {}
     let constructions = 0
+
     class FakeAudioWorkletNode {
       constructor() {
         constructions += 1
       }
     }
+
     Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: FakeAudioWorkletNode })
+
     const context = Object.assign(Object.create(null), {
       audioWorklet: {
         addModule: () => new Promise<void>((resolve) => { resolveRegistration = resolve }),
       },
     })
+
     const gain = Object.assign(Object.create(null), { connect: () => {} })
 
     const disposedRuntime = createMeteringRuntime()
@@ -247,11 +267,13 @@ describe('meter worklet lifecycle', () => {
     expect(constructions).toBe(0)
 
     let resolveCloseRegistration = () => {}
+
     const closeContext = Object.assign(Object.create(null), {
       audioWorklet: {
         addModule: () => new Promise<void>((resolve) => { resolveCloseRegistration = resolve }),
       },
     })
+
     const closedRuntime = createMeteringRuntime()
     closedRuntime.reconnectTrackMeters(closeContext, 'track-2', gain, () => true)
     closedRuntime.close()

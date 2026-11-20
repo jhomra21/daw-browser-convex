@@ -77,7 +77,9 @@ export type SynthVoiceHandle = {
 }
 
 export type SynthAutomationEnvelopes = ReadonlyMap<SynthAutomationParameterId, AutomationEnvelope>
+
 type SynthAutomationBindings = Partial<Record<SynthAutomationParameterId, AudioParam>>
+
 type ScheduledLfo = {
   node: OscillatorNode
   depths: SynthVoiceBindings['lfoDepths']
@@ -112,15 +114,18 @@ type SynthVoiceScheduleOptions = {
 const hashNoiseSeedKey = (seedKey: string | undefined) => {
   const key = seedKey ?? ''
   let value = 0
+
   for (let index = 0; index < key.length; index += 1) {
     value = Math.imul(value ^ key.charCodeAt(index), 0x01000193) >>> 0
   }
+
   return value
 }
 
 const noiseSeed = (voiceId: number, pitch: number, seedKey?: string) => {
   let value = (Math.imul(voiceId, 0x9E3779B1) ^ Math.imul(pitch, 0x85EBCA77) ^ hashNoiseSeedKey(seedKey)) >>> 0
   value ^= value >>> 16
+
   return value === 0 ? 0xA341316C : value >>> 0
 }
 
@@ -129,6 +134,7 @@ const nextNoiseSample = (state: number) => {
   value ^= value << 13
   value ^= value >>> 17
   value ^= value << 5
+
   return value >>> 0
 }
 
@@ -136,10 +142,12 @@ export const createSynthNoiseBuffer = (ctx: Pick<BaseAudioContext, 'createBuffer
   const buffer = ctx.createBuffer(1, NOISE_BUFFER_FRAMES, ctx.sampleRate)
   const samples = buffer.getChannelData(0)
   let state = noiseSeed(voiceId, pitch, seedKey)
+
   for (let index = 0; index < samples.length; index += 1) {
     state = nextNoiseSample(state)
     samples[index] = state / 0xFFFF_FFFF * 2 - 1
   }
+
   return buffer
 }
 
@@ -158,6 +166,7 @@ export const createSynthOutputChain = (
   output.gain.setValueAtTime(gain, when)
   outputPan.connect(output)
   output.connect(destination)
+
   return { output, outputPan }
 }
 
@@ -191,12 +200,15 @@ export const evaluateSynthParamsAtNote = (
   timelineStartSec: number | undefined,
 ): SynthParams => {
   if (timelineStartSec === undefined) return params
+
   const noteValue = (parameterId: SynthAutomationParameterId, fallback: number) => {
     const envelope = automationEnvelopes.get(parameterId)
+
     return envelope
       ? valueAtAutomationTime(envelope.points, timelineStartSec, fallback)
       : fallback
   }
+
   return {
     ...params,
     ampEnvelope: {
@@ -234,6 +246,7 @@ export function createSynthEnvelopePlan(
   const attackEndTime = startTime + attackSec
   const decayEndTime = attackEndTime + decaySec
   const sustain = clamp(envelope.sustain, 0, 1) * peak
+
   const levelAtNoteOff = estimateSynthEnvelopeLevel({
     startTime,
     attackEndTime,
@@ -245,6 +258,7 @@ export function createSynthEnvelopePlan(
     sustain,
     levelAtNoteOff: sustain,
   }, noteOffTime)
+
   return {
     startTime,
     attackEndTime,
@@ -260,16 +274,23 @@ export function createSynthEnvelopePlan(
 
 export function estimateSynthEnvelopeLevel(plan: SynthEnvelopePlan, time: number): number {
   if (time <= plan.startTime) return plan.startLevel
+
   if (time < plan.attackEndTime) {
     const progress = (time - plan.startTime) / Math.max(0.001, plan.attackEndTime - plan.startTime)
+
     return plan.startLevel + (plan.peak - plan.startLevel) * progress
   }
+
   if (time < plan.decayEndTime) {
     const progress = (time - plan.attackEndTime) / Math.max(0.001, plan.decayEndTime - plan.attackEndTime)
+
     return plan.peak + (plan.sustain - plan.peak) * progress
   }
+
   if (time <= plan.noteOffTime) return plan.sustain
+
   if (time >= plan.releaseEndTime) return 0
+
   return plan.levelAtNoteOff * (1 - (time - plan.noteOffTime) / Math.max(0.001, plan.releaseEndTime - plan.noteOffTime))
 }
 
@@ -294,11 +315,13 @@ const scheduleEnvelope = (
   plan: SynthEnvelopePlan,
 ) => {
   param.setValueAtTime(plan.startLevel, plan.startTime)
+
   if (plan.noteOffTime > plan.startTime) {
     if (plan.noteOffTime < plan.attackEndTime) {
       param.linearRampToValueAtTime(plan.levelAtNoteOff, plan.noteOffTime)
     } else {
       param.linearRampToValueAtTime(plan.peak, plan.attackEndTime)
+
       if (plan.noteOffTime < plan.decayEndTime) {
         param.linearRampToValueAtTime(plan.levelAtNoteOff, plan.noteOffTime)
       } else {
@@ -306,6 +329,7 @@ const scheduleEnvelope = (
       }
     }
   }
+
   param.setValueAtTime(plan.levelAtNoteOff, plan.noteOffTime)
   param.linearRampToValueAtTime(0, plan.releaseEndTime)
 }
@@ -338,9 +362,11 @@ const scheduleLfo = (
     nodes.push(depth)
     depth.gain.setValueAtTime(lfo.enabled ? lfo.pitchCents : 0, when)
     oscillator.connect(depth)
+
     for (const source of sources) depth.connect(source.detune)
     depths.pitch = depth.gain
   }
+
   {
     const depth = ctx.createGain()
     nodes.push(depth)
@@ -349,6 +375,7 @@ const scheduleLfo = (
     depth.connect(filter.detune)
     depths.filter = depth.gain
   }
+
   {
     const depth = ctx.createGain()
     nodes.push(depth)
@@ -357,6 +384,7 @@ const scheduleLfo = (
     depth.connect(amplitudeModulation.gain)
     depths.amp = depth.gain
   }
+
   {
     const depth = ctx.createGain()
     nodes.push(depth)
@@ -365,21 +393,27 @@ const scheduleLfo = (
     depth.connect(pan.pan)
     depths.pan = depth.gain
   }
+
   oscillator.start(when)
+
   return { node: oscillator, depths, nodes }
 }
 
 export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceScheduleOptions): SynthVoiceHandle {
   const { when, pitch } = options
+
   const params = evaluateSynthParamsAtNote(
     options.params,
     options.automationEnvelopes ?? new Map(),
     options.timelineStartSec,
   )
+
   const releaseTime = when + Math.max(0, options.durationSec)
+
   const clipGain = options.clipGain !== undefined && Number.isFinite(options.clipGain)
     ? clamp(options.clipGain, 0, 1.5)
     : 1
+
   let ampPlan = createSynthEnvelopePlan(
     when,
     options.durationSec,
@@ -387,12 +421,14 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
     getSynthVoiceVelocity(options.velocity) * clipGain,
     EPSILON,
   )
+
   let filterPlan = createSynthEnvelopePlan(
     when,
     options.durationSec,
     params.filter.envelope,
     (params.filter.enabled ? params.filter.envelopeAmountOctaves : 0) * 1200,
   )
+
   let ampEnvelope = params.ampEnvelope
   let filterEnvelope = params.filter.envelope
   const filter = ctx.createBiquadFilter()
@@ -428,6 +464,7 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
   const oscillatorLevels: [AudioParam | undefined, AudioParam | undefined] = [undefined, undefined]
   const oscillatorGates: [AudioParam | undefined, AudioParam | undefined] = [undefined, undefined]
   const oscillatorDetunes: [AudioParam | undefined, AudioParam | undefined] = [undefined, undefined]
+
   for (const [index, oscillator] of params.oscillators.entries()) {
     const source = ctx.createOscillator()
     const level = ctx.createGain()
@@ -451,6 +488,7 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
     oscillatorGates[index] = gate.gain
     oscillatorDetunes[index] = source.detune
   }
+
   const noise = ctx.createBufferSource()
   const noiseLevel = ctx.createGain()
   const noiseGate = ctx.createGain()
@@ -472,14 +510,18 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
   let endedSources = 0
   let stopped = false
   let finalized = false
+
   const finalize = () => {
     if (finalized) return
     finalized = true
+
     for (const node of nodes) {
       try { node.disconnect() } catch {}
     }
+
     options.onEnded?.(handle)
   }
+
   const handle: SynthVoiceHandle = {
     id: options.id,
     noteInstanceId: options.noteInstanceId,
@@ -514,22 +556,26 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
     release: (releaseWhen) => {
       if (stopped || handle.stage === 'release') return
       const start = Math.max(when, releaseWhen)
+
       const nextAmpPlan = createSynthReleasePlan(
         start,
         estimateSynthEnvelopeLevel(ampPlan, start),
         ampEnvelope.releaseSec,
       )
+
       const nextFilterPlan = createSynthReleasePlan(
         start,
         estimateSynthEnvelopeLevel(filterPlan, start),
         filterEnvelope.releaseSec,
       )
+
       amplitude.gain.cancelScheduledValues(start)
       scheduleSynthEnvelope(amplitude.gain, nextAmpPlan)
       filter.detune.cancelScheduledValues(start)
       scheduleFilterEnvelope(filter, nextFilterPlan)
       ampPlan = nextAmpPlan
       filterPlan = nextFilterPlan
+
       for (const source of endableSources) source.stop(nextAmpPlan.releaseEndTime)
       handle.releaseStartedAt = start
       handle.releaseTime = start
@@ -539,12 +585,14 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
     retargetEnvelopes: (retargetWhen, nextAmpEnvelope, nextFilterEnvelope, nextFilterAmount) => {
       if (stopped) return
       const start = Math.max(when, retargetWhen)
+
       const retargetPlan = (
         currentPlan: SynthEnvelopePlan,
         envelope: SynthEnvelopeParams,
         peak: number,
       ) => {
         const currentLevel = estimateSynthEnvelopeLevel(currentPlan, start)
+
         return start >= currentPlan.noteOffTime
           ? createSynthReleasePlan(start, currentLevel, envelope.releaseSec)
           : createSynthEnvelopePlan(
@@ -555,16 +603,19 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
             currentLevel,
           )
       }
+
       const nextAmpPlan = retargetPlan(
         ampPlan,
         nextAmpEnvelope,
         getSynthVoiceVelocity(options.velocity) * clipGain,
       )
+
       const nextFilterPlan = retargetPlan(
         filterPlan,
         nextFilterEnvelope,
         nextFilterAmount * 1200,
       )
+
       amplitude.gain.cancelScheduledValues(start)
       scheduleSynthEnvelope(amplitude.gain, nextAmpPlan)
       filter.detune.cancelScheduledValues(start)
@@ -573,17 +624,22 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
       filterPlan = nextFilterPlan
       ampEnvelope = nextAmpEnvelope
       filterEnvelope = nextFilterEnvelope
+
       for (const source of endableSources) source.stop(nextAmpPlan.releaseEndTime)
       handle.effectiveEndTime = nextAmpPlan.releaseEndTime
     },
     rescheduleLfoAutomation: (envelopes, contextTime) => {
       if (options.timelineStartSec === undefined || !options.timelineToCtxTime) return
+
       const startTimelineSec = Math.max(
         options.timelineStartSec,
         options.timelineStartSec + contextTime - when,
       )
+
       const endTimelineSec = options.timelineStartSec + Math.max(0, handle.effectiveEndTime - when)
+
       if (startTimelineSec >= endTimelineSec) return
+
       const bindings = {
         'lfo.rate': handle.bindings.lfoRate,
         'lfo.pitchDepth': handle.bindings.lfoDepths.pitch,
@@ -591,9 +647,11 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
         'lfo.ampDepth': handle.bindings.lfoDepths.amp,
         'lfo.panDepth': handle.bindings.lfoDepths.pan,
       } satisfies SynthAutomationBindings
+
       for (const [parameterId, envelope] of envelopes) {
         if (!parameterId.startsWith('lfo.') || !envelope.enabled) continue
         const param = getSynthAutomationBinding(bindings, parameterId)
+
         if (!param) continue
         scheduleAutomationEnvelope([{
           param,
@@ -611,26 +669,33 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
     stop: (stopWhen) => {
       if (stopped && stopWhen >= handle.releaseTime) return
       stopped = true
+
       if (stopWhen < when) {
         amplitude.gain.cancelScheduledValues(stopWhen)
         amplitude.gain.setValueAtTime(0, stopWhen)
+
         for (const source of endableSources) source.stop(stopWhen)
         handle.releaseStartedAt = stopWhen
         handle.releaseTime = stopWhen
         handle.effectiveEndTime = stopWhen
         handle.stage = 'release'
         finalize()
+
         return
       }
+
       const end = Math.max(when, stopWhen) + STEAL_FADE_SEC
+
       const nextAmpPlan = createSynthReleasePlan(
         stopWhen,
         estimateSynthEnvelopeLevel(ampPlan, stopWhen),
         STEAL_FADE_SEC,
       )
+
       amplitude.gain.cancelScheduledValues(stopWhen)
       scheduleSynthEnvelope(amplitude.gain, nextAmpPlan)
       ampPlan = nextAmpPlan
+
       for (const source of endableSources) source.stop(end)
       handle.releaseStartedAt = stopWhen
       handle.releaseTime = stopWhen
@@ -638,6 +703,7 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
       handle.stage = 'release'
     },
   }
+
   if (options.scheduleVoiceAutomation !== false && options.timelineStartSec !== undefined && options.timelineToCtxTime) {
     const directBindings = {
       'osc1.level': oscillatorLevels[0],
@@ -653,8 +719,10 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
       'lfo.ampDepth': lfo.depths.amp,
       'lfo.panDepth': lfo.depths.pan,
     } satisfies SynthAutomationBindings
+
     for (const [parameterId, envelope] of options.automationEnvelopes ?? []) {
       const param = getSynthAutomationBinding(directBindings, parameterId)
+
       if (!param || !envelope.enabled || (!params.lfo.enabled && parameterId.startsWith('lfo.'))) continue
       scheduleAutomationEnvelope(
         [{
@@ -677,12 +745,17 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
       )
     }
   }
+
   const onEnded = () => {
     endedSources += 1
+
     if (endedSources !== endableSources.length) return
     finalize()
   }
+
   for (const source of endableSources) source.onended = onEnded
+
   if (endableSources.length === 0) queueMicrotask(finalize)
+
   return handle
 }

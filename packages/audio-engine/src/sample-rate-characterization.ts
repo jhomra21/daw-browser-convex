@@ -61,15 +61,19 @@ const isNumber = <Value>(value: Value): value is Value & number => typeof value 
 
 export const createSrcImpulseFixture = (length: number, peakFrame: number): Float32Array => {
   const samples = new Float32Array(length)
+
   if (peakFrame >= 0 && peakFrame < length) samples[peakFrame] = 1
+
   return samples
 }
 
 export const createSrcToneFixture = (length: number, frequencyHz: number, sampleRate: number): Float32Array => {
   const samples = new Float32Array(length)
+
   for (let frame = 0; frame < length; frame += 1) {
     samples[frame] = Math.sin(2 * Math.PI * frequencyHz * frame / sampleRate)
   }
+
   return samples
 }
 
@@ -78,6 +82,7 @@ export const createSrcStereoIsolationFixture = (
   sampleRate: number,
 ): readonly [Float32Array, Float32Array] => {
   const left = createSrcToneFixture(length, 1_000, sampleRate)
+
   return [left, new Float32Array(length)]
 }
 
@@ -90,29 +95,38 @@ export const measureToneAmplitude = (
   let sine = 0
   let cosine = 0
   const length = samples.length - startFrame
+
   if (length <= 0) return 0
+
   for (let frame = startFrame; frame < samples.length; frame += 1) {
     const phase = 2 * Math.PI * frequencyHz * frame / sampleRate
     sine += samples[frame] * Math.sin(phase)
     cosine += samples[frame] * Math.cos(phase)
   }
+
   return 2 * Math.hypot(sine, cosine) / length
 }
 
 export const measureSrcImpulse = (samples: Float32Array, expectedPeakFrame: number) => {
   let peak = 0
   let peakFrame = 0
+
   for (let frame = 0; frame < samples.length; frame += 1) {
     const magnitude = Math.abs(samples[frame])
+
     if (magnitude > peak) {
       peak = magnitude
       peakFrame = frame
     }
   }
+
   let preRingingPeak = 0
   let postRingingPeak = 0
+
   for (let frame = 0; frame < peakFrame; frame += 1) preRingingPeak = Math.max(preRingingPeak, Math.abs(samples[frame]))
+
   for (let frame = peakFrame + 1; frame < samples.length; frame += 1) postRingingPeak = Math.max(postRingingPeak, Math.abs(samples[frame]))
+
   return { peak, preRingingPeak, postRingingPeak, phaseDelayFrames: peakFrame - expectedPeakFrame }
 }
 
@@ -121,25 +135,31 @@ export const measureStereoCorrelation = (left: Float32Array, right: Float32Array
   let leftEnergy = 0
   let rightEnergy = 0
   const length = Math.min(left.length, right.length)
+
   for (let frame = 0; frame < length; frame += 1) {
     dot += left[frame] * right[frame]
     leftEnergy += left[frame] * left[frame]
     rightEnergy += right[frame] * right[frame]
   }
+
   return leftEnergy > 0 && rightEnergy > 0 ? dot / Math.sqrt(leftEnergy * rightEnergy) : 0
 }
 
 export const measureIsolationDb = (source: Float32Array, isolated: Float32Array): number => {
   let sourcePeak = 0
   let isolatedPeak = 0
+
   for (const sample of source) sourcePeak = Math.max(sourcePeak, Math.abs(sample))
+
   for (const sample of isolated) isolatedPeak = Math.max(isolatedPeak, Math.abs(sample))
+
   return dbFromLinear(isolatedPeak / sourcePeak)
 }
 
 export const isSampleRateConversionResult = <Value>(value: Value): value is Value & SampleRateConversionResult => {
   if (!isConversionFields(value)) return false
   const metrics = value.metrics
+
   return isNumber(value.sourceSampleRate)
     && isNumber(value.targetSampleRate)
     && (value.status === 'pass' || value.status === 'fail' || value.status === 'unsupported')

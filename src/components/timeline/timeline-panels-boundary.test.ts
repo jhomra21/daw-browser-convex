@@ -13,6 +13,7 @@ test("keeps the complete panels model across panel replacement", async () => {
   const source = await readFile(new URL("./timeline-chrome.tsx", import.meta.url), "utf8");
   const panelSource = await readFile(new URL("./timeline-panels.tsx", import.meta.url), "utf8");
   const replacement = { effectsPanel: { projectId: "project-b" } };
+
   const transientFlattenedProps = {
     ...replacement,
     effectsPanel: undefined,

@@ -172,7 +172,9 @@ const projectControlSnapshotCore = <Snapshot>(
       createdAt: asset.createdAt,
       updatedAt: asset.updatedAt,
     }));
+
   const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
+
   const assetFolders = [...input.assetFolders]
     .sort((left, right) => compareControlSnapshotText(String(left._id), String(right._id)))
     .map((folder) => ({
@@ -181,6 +183,7 @@ const projectControlSnapshotCore = <Snapshot>(
       createdAt: folder.createdAt,
       updatedAt: folder.updatedAt,
     }));
+
   const tracks = [...input.tracks]
     .sort((left, right) => left.index - right.index || compareControlSnapshotText(String(left._id), String(right._id)))
     .map((track) => ({
@@ -204,11 +207,14 @@ const projectControlSnapshotCore = <Snapshot>(
       collapsed: track.collapsed === true,
       color: track.color,
     }));
+
   const clips = [...input.clips]
     .sort((left, right) => left.startSec - right.startSec || compareControlSnapshotText(String(left._id), String(right._id)))
     .map((clip) => {
       const asset = clip.sourceAssetKey ? assetsById.get(clip.sourceAssetKey) : undefined;
+
       if (clip.sourceAssetKey && !asset && !input.omitUnavailableClipSources) throw new Error("Audio clip references an unavailable asset.");
+
       return {
       id: String(clip._id),
       trackId: String(clip.trackId),
@@ -232,23 +238,28 @@ const projectControlSnapshotCore = <Snapshot>(
         },
     };
     });
+
   const processors = input.effects.flatMap((effect) => {
     const target = effect.targetType === "master"
       ? { master: true }
       : effect.targetType === "track" && effect.trackId
         ? { trackId: String(effect.trackId) }
         : undefined;
+
     if (!target) return [];
+
     const instrument = normalizePersistedInstrumentParams(
       effect.type,
       effect.instanceId ?? null,
       effect.params,
     );
+
     const processor = instrument
       ? { kind: "instrument", params: instrument }
       : effect.type === "arpeggiator"
         ? { kind: "arpeggiator", params: effect.params }
         : { kind: effect.type, params: effect.params };
+
     return [{ id: String(effect._id), target, instanceId: effect.instanceId, index: effect.index, processor }];
   }).sort((left, right) => (
     compareControlSnapshotText(
@@ -260,15 +271,19 @@ const projectControlSnapshotCore = <Snapshot>(
     || compareControlSnapshotText(left.instanceId ?? "", right.instanceId ?? "")
     || compareControlSnapshotText(String(left.id), String(right.id))
   ));
+
   const externalProcessors = (input.externalProcessors ?? []).map((external) => {
     const parameterIds = new Map(external.manifest.parameters.map((parameter) => [parameter.id, String(parameter.id)]));
     const parameterOverrides = new Map<string, number>();
+
     for (const [key, value] of Object.entries(external.parameterOverrides)) {
       const parameterId = Number(key);
       const canonicalKey = parameterIds.get(parameterId);
+
       if (canonicalKey === undefined || !Number.isFinite(value)) continue;
       parameterOverrides.set(canonicalKey, Math.min(1, Math.max(0, value)));
     }
+
     return {
       id: `external-plugin:${external.instanceId}`,
       target: external.targetId === "master"
@@ -303,14 +318,18 @@ const projectControlSnapshotCore = <Snapshot>(
     || compareControlSnapshotText(left.instanceId, right.instanceId)
     || compareControlSnapshotText(left.id, right.id)
   ));
+
   const automation = input.automationEnvelopes.flatMap((envelope) => {
     const descriptor = getAutomationParameterDescriptor(envelope.parameterId);
+
     const target = envelope.targetKind === "master"
       ? { master: true }
       : envelope.trackId
         ? { trackId: String(envelope.trackId) }
         : undefined;
+
     if (!target || !descriptor) return [];
+
     return [{
       id: String(envelope._id),
       target,
@@ -328,6 +347,7 @@ const projectControlSnapshotCore = <Snapshot>(
     || compareControlSnapshotText(left.effectInstanceId ?? "", right.effectInstanceId ?? "")
     || compareControlSnapshotText(left.id, right.id)
   )).map(({ id: _id, ...envelope }) => envelope);
+
   const sidechains = [...input.sidechainRoutes]
     .map((route) => ({
       sourceTrackId: String(route.sourceTrackId),

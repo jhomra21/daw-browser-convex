@@ -98,6 +98,7 @@ test('refuses a section child when a recording take starts mid-replay and compen
     refuseStep: (child) => {
       reached.push(child.type)
       checks += 1
+
       return checks === 2 ? 'Recording target locked' : undefined
     },
     actions,
@@ -109,6 +110,7 @@ test('refuses a section child when a recording take starts mid-replay and compen
 test('preserves the original section failure first when compensation fails', async () => {
   const persisted: number[] = []
   let thrown: unknown
+
   try {
     await execRedo(entry(), {
       convexClient,
@@ -119,6 +121,7 @@ test('preserves the original section failure first when compensation fails', asy
       userId: 'local',
       persistLocalMix: (_projectId, _trackId, patch) => {
         if (patch.volume === 0.5) throw new Error('compensation failure')
+
         if (patch.volume !== undefined) persisted.push(patch.volume)
       },
       grantTrackWrite: () => {},
@@ -128,7 +131,9 @@ test('preserves the original section failure first when compensation fails', asy
   } catch (error) {
     thrown = error
   }
+
   expect(thrown).toBeInstanceOf(AggregateError)
+
   if (!(thrown instanceof AggregateError)) throw new Error('Expected AggregateError')
   expect(thrown.errors[0]).toMatchObject({ message: 'Clip not found for clip-timing history entry' })
   expect(persisted).toEqual([0.9])

@@ -69,6 +69,7 @@ afterAll(async () => {
 const createTestDirectory = async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "daw-native-capability-"))
   testDirectories.push(directory)
+
   return realpath(directory)
 }
 
@@ -95,6 +96,7 @@ const expectCapabilityError = async (
     throw new Error(`Expected a ${code} file capability error.`)
   } catch (error) {
     expect(error).toBeInstanceOf(FileCapabilityError)
+
     if (error instanceof FileCapabilityError) expect(error.code).toBe(code)
   }
 }
@@ -108,6 +110,7 @@ const expectNativeError = async (
     throw new Error(`Expected a ${code} native helper error.`)
   } catch (error) {
     expect(error).toBeInstanceOf(NativeFileCapabilityError)
+
     if (error instanceof NativeFileCapabilityError) expect(error.code).toBe(code)
   }
 }
@@ -127,6 +130,7 @@ describe("native POSIX file capability boundary", () => {
 
   test("fails closed when the native helper self-test has not enabled output", async () => {
     const root = await createTestDirectory()
+
     const manager = createFileCapabilityManager({
       dialog: {
         showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
@@ -263,6 +267,7 @@ describe("native POSIX file capability boundary", () => {
     const outputPath = path.join(root, "picked.wav")
     const manager = createManager(privateTemp, outputPath)
     const selection = await manager.pickOutputFile(scope)
+
     if (selection.canceled) throw new Error("Expected an output selection.")
     const writer = await manager.beginWrite(scope, selection.file.token)
     await manager.writeChunk(scope, writer.writerId, 0, new Uint8Array([4]))
@@ -286,6 +291,7 @@ describe("native POSIX file capability boundary", () => {
     await link(outputPath, retainedLink)
     const manager = createManager(privateTemp, outputPath)
     const selection = await manager.pickOutputFile(scope)
+
     if (selection.canceled) throw new Error("Expected an output selection.")
     const writer = await manager.beginWrite(scope, selection.file.token)
     await manager.writeChunk(scope, writer.writerId, 0, new Uint8Array([7]))
@@ -322,6 +328,7 @@ describe("native POSIX file capability boundary", () => {
     await writeFile(overwritePath, "old")
     const overwriteManager = createManager(privateTemp, overwritePath)
     const overwriteSelection = await overwriteManager.pickOutputFile(scope)
+
     if (overwriteSelection.canceled) throw new Error("Expected an overwrite selection.")
     const overwriteWriter = await overwriteManager.beginWrite(scope, overwriteSelection.file.token)
     await overwriteManager.writeChunk(scope, overwriteWriter.writerId, 0, new Uint8Array([3]))
@@ -341,6 +348,7 @@ describe("native POSIX file capability boundary", () => {
     await writeFile(outputPath, "old")
     const manager = createManager(privateTemp, outputPath)
     const selection = await manager.pickOutputFile(scope)
+
     if (selection.canceled) throw new Error("Expected an overwrite selection.")
     const writer = await manager.beginWrite(scope, selection.file.token)
     await manager.writeChunk(scope, writer.writerId, 0, new Uint8Array([3]))
@@ -427,8 +435,10 @@ describe("native POSIX file capability boundary", () => {
     await writeFile(retainedPath, "old")
     await writeFile(sourcePath, "new")
     const grant = await nativeHelper.statFile(retainedPath)
+
     if (!grant.file) throw new Error("Expected an existing retained target.")
     const readOnlyHandle = await open(retainedPath, "r")
+
     try {
       await expectNativeError(
         nativeHelper.commitRetainedFile({
@@ -440,6 +450,7 @@ describe("native POSIX file capability boundary", () => {
     } finally {
       await readOnlyHandle.close()
     }
+
     expect(await readFile(retainedPath, "utf8")).toBe("old")
   })
 

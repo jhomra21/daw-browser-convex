@@ -37,10 +37,12 @@ export type FadeOverlayInput = {
 
 export const createFadeOverlayInput = (clip: ClipFadeOverlayClip): FadeOverlayInput => {
   const duration = clip.duration
+
   const sliceStartSec = Math.max(0, Math.min(
     duration,
     clip.sliceStartSec ?? 0,
   ))
+
   return {
     duration,
     fades: clip.fades,
@@ -79,30 +81,40 @@ export const createFadeOverlayPaths = (input: {
   const pointInSlice = (time: number) => (
     ((time - input.sliceStartSec) / input.sliceDurationSec) * 100
   )
+
   const path = (side: 'fadeIn' | 'fadeOut') => {
     const logicalStart = side === 'fadeIn'
       ? input.fades.fadeInStartSec
       : input.duration - input.fades.fadeOutSec
+
     const logicalEnd = side === 'fadeIn'
       ? input.fades.fadeInSec
       : input.duration - input.fades.fadeOutEndSec
+
     const start = Math.max(input.sliceStartSec, logicalStart)
+
     const end = Math.min(
       input.sliceStartSec + input.sliceDurationSec,
       logicalEnd,
     )
+
     if (end <= start) return ''
+
     const isolated = side === 'fadeIn'
       ? { ...input.fades, fadeOutSec: 0, fadeOutEndSec: 0 }
       : { ...input.fades, fadeInStartSec: 0, fadeInSec: 0 }
+
     const parts: string[] = []
+
     for (let index = 0; index <= 16; index += 1) {
       const time = start + ((end - start) * index) / 16
       const gain = normalizedFadeGainAtClipTime(isolated, input.duration, time)
       parts.push(`${index === 0 ? 'M' : 'L'} ${pointInSlice(time)} ${100 - gain * 100}`)
     }
+
     return parts.join(' ')
   }
+
   return {
     fadeIn: path('fadeIn'),
     fadeOut: path('fadeOut'),
@@ -113,10 +125,12 @@ export const createFadeOverlayPathMemo = () => {
   let previousInput: FadeOverlayInput | undefined
   let previousFades: NormalizedClipFades | undefined
   let previousPaths: ReturnType<typeof createFadeOverlayPaths> | undefined
+
   return (input: FadeOverlayInput, fades: NormalizedClipFades) => {
     if (previousInput === input && previousFades === fades && previousPaths) {
       return previousPaths
     }
+
     previousInput = input
     previousFades = fades
     previousPaths = createFadeOverlayPaths({
@@ -125,6 +139,7 @@ export const createFadeOverlayPathMemo = () => {
       sliceStartSec: input.sliceStartSec,
       sliceDurationSec: input.sliceDurationSec,
     })
+
     return previousPaths
   }
 }
@@ -135,9 +150,11 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
   const [hoveredSide, setHoveredSide] = createSignal<'fadeIn' | 'fadeOut'>()
   const [focusedCurveSide, setFocusedCurveSide] = createSignal<'fadeIn' | 'fadeOut'>()
   let overlay: HTMLDivElement | undefined
+
   let active:
     | { pointerId: number; captureTarget: Element; side: 'fadeIn' | 'fadeOut'; mode: FadeInteractionMode; left: number; top: number; width: number; height: number; baseline: NormalizedClipFades }
     | undefined
+
   let keyboard:
     | { side: 'fadeIn' | 'fadeOut'; mode: FadeInteractionMode; baseline: NormalizedClipFades }
     | undefined
@@ -145,8 +162,10 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
   const currentFades = createMemo(() => (
     draftFades() ?? normalizeClipFades(props.clip.fades, props.clip.duration)
   ))
+
   const clear = (commit: boolean) => {
     const interaction = active
+
     if (!interaction) return
     const finalFades = draftFades() ?? interaction.baseline
     active = undefined
@@ -156,15 +175,18 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
     window.removeEventListener('pointerup', up, true)
     window.removeEventListener('pointercancel', cancelPointer, true)
     window.removeEventListener('blur', cancel)
+
     try {
       if (interaction.captureTarget.hasPointerCapture(interaction.pointerId)) {
         interaction.captureTarget.releasePointerCapture(interaction.pointerId)
       }
     } catch {}
+
     if (commit && !clipFadesEqual(finalFades, interaction.baseline, props.clip.duration)) {
       props.onCommit(finalFades, interaction.baseline)
     }
   }
+
   const move = (event: PointerEvent) => {
     if (!active || event.pointerId !== active.pointerId) return
     event.preventDefault()
@@ -182,16 +204,19 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
       overlayDurationSec: props.clip.sliceDurationSec,
     }))
   }
+
   const up = (event: PointerEvent) => {
     if (!active || event.pointerId !== active.pointerId) return
     event.preventDefault()
     event.stopPropagation()
     clear(true)
   }
+
   const cancelPointer = (event: PointerEvent) => {
     if (!active || event.pointerId !== active.pointerId) return
     clear(false)
   }
+
   const cancel = () => clear(false)
   onCleanup(() => clear(false))
 
@@ -199,6 +224,7 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
     const bounds = overlay?.getBoundingClientRect()
     const width = bounds?.width ?? 0
     const height = bounds?.height ?? 0
+
     if (!canStartFadeInteraction({
       canEdit: props.canEdit(),
       isMidi: props.clip.isMidi,
@@ -207,6 +233,7 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
       overlayHeight: height,
     })) return
     const target = event.currentTarget
+
     if (!(target instanceof Element)) return
     event.preventDefault()
     event.stopPropagation()
@@ -222,9 +249,11 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
       height,
       baseline,
     }
+
     try {
       target.setPointerCapture(event.pointerId)
     } catch {}
+
     setDragging(true)
     setDraftFades(baseline)
     window.addEventListener('pointermove', move)
@@ -235,45 +264,61 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
 
   const fadePathMemo = createFadeOverlayPathMemo()
   const fadePaths = () => fadePathMemo(props.clip, currentFades())
+
   const endpointPosition = (mode: Exclude<FadeInteractionMode, 'curve'>) => {
     const fades = currentFades()
+
     const pointInSlice = (time: number) => (
       ((time - props.clip.sliceStartSec) / props.clip.sliceDurationSec) * 100
     )
+
     if (mode === 'fadeInStart') return pointInSlice(fades.fadeInStartSec)
+
     if (mode === 'fadeInEnd') return pointInSlice(fades.fadeInSec)
+
     if (mode === 'fadeOutStart') return pointInSlice(props.clip.duration - fades.fadeOutSec)
+
     return pointInSlice(props.clip.duration - fades.fadeOutEndSec)
   }
+
   const curvePosition = (side: 'fadeIn' | 'fadeOut') => {
     const control = getNormalizedClipFadeBezierControlPoint(currentFades(), props.clip.duration, side)
+
     return {
       left: `${((control.x - props.clip.sliceStartSec) / props.clip.sliceDurationSec) * 100}%`,
       top: `${100 - control.y * 100}%`,
     }
   }
+
   const commitKeyboard = (side: 'fadeIn' | 'fadeOut', mode: FadeInteractionMode, event: KeyboardEvent) => {
     const interaction = keyboard?.side === side && keyboard.mode === mode
       ? keyboard
       : { side, mode, baseline: currentFades() }
+
     const next = updateFadeDraftForKeyboard(currentFades(), side, mode, props.clip.duration, event.key)
+
     if (!next) return
     event.preventDefault()
     keyboard = interaction
     setDraftFades(next)
   }
+
   const finishKeyboard = (side: 'fadeIn' | 'fadeOut', mode: FadeInteractionMode) => {
     const interaction = keyboard
+
     if (!interaction || interaction.side !== side || interaction.mode !== mode) return
     const finalFades = draftFades() ?? interaction.baseline
     keyboard = undefined
     setDraftFades()
+
     if (!clipFadesEqual(finalFades, interaction.baseline, props.clip.duration)) {
       props.onCommit(finalFades, interaction.baseline)
     }
   }
+
   const endpointValue = (mode: Exclude<FadeInteractionMode, 'curve'>) => {
     const fades = currentFades()
+
     return mode === 'fadeInStart'
       ? fades.fadeInStartSec
       : mode === 'fadeInEnd'
@@ -282,18 +327,22 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
           ? fades.fadeOutSec
           : fades.fadeOutEndSec
   }
+
   const curveValue = (side: 'fadeIn' | 'fadeOut') => {
     const fades = currentFades()
+
     return {
       x: side === 'fadeIn' ? fades.fadeInCurvePosition : fades.fadeOutCurvePosition,
       y: getNormalizedClipFadeBezierControlPoint(fades, props.clip.duration, side).y,
     }
   }
+
   const showCurveHandle = (side: 'fadeIn' | 'fadeOut') => {
     return hoveredSide() === side
       || focusedCurveSide() === side
       || (active?.side === side && active.mode === 'curve')
   }
+
   const clearHoverOnExit = (side: 'fadeIn' | 'fadeOut', event: PointerEvent) => {
     if (!relatedTargetStaysWithinFadeHoverRegion(side, event.relatedTarget)) {
       setHoveredSide()

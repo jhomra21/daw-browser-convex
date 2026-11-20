@@ -14,11 +14,14 @@ export const captureLocalExportRenderRowsSnapshot = async (
   const db = await openLocalProjectDb(projectId)
   const tx = db.transaction("entities", "readonly")
   const index = tx.store.index("by-kind")
+
   const [effectRows, automationRows] = await Promise.all([
     index.getAll("effect"),
     index.getAll("automation-envelope"),
   ])
+
   await tx.done
+
   return {
     effects: effectRows.flatMap((row) => isLocalEffectRow(row.value) ? [row.value] : []),
     automationEnvelopes: normalizeLocalAutomationEnvelopes(automationRows.map((row) => row.value)),

@@ -40,15 +40,20 @@ const POINT_VALUE_NUDGE_RATIO = 0.01
 
 const formatValue = (value: number, unit: AutomationParameterDescriptor['unit']) => {
   if (unit === 'percent') return formatDevicePercent(value)
+
   if (unit === 'db') return formatDeviceDb(value, 1)
+
   if (unit === 'hz') return formatDeviceFrequency(value, 2)
+
   if (unit === 'seconds') return `${value.toFixed(2)}s`
+
   return value.toFixed(2)
 }
 
 const createEnvelope = (props: AutomationLaneProps, points: AutomationPoint[]): AutomationEnvelope => {
   const targetKey = automationTargetKey(props.target, props.parameterId)
   const descriptor = getAutomationParameterDescriptor(props.parameterId)
+
   return {
     id: props.envelope?.id ?? crypto.randomUUID(),
     projectId: props.projectId,
@@ -75,33 +80,44 @@ export default function AutomationLane(props: AutomationLaneProps) {
   const visibleStartSec = () => props.visibleStartSec ?? 0
   const visibleEndSec = () => visibleStartSec() + (props.viewportWidthPx ?? Number.POSITIVE_INFINITY) / props.pixelsPerSecond
   const timeToX = (timeSec: number) => (timeSec - visibleStartSec()) * props.pixelsPerSecond
+
   const valueToY = (value: number) => {
     const desc = descriptor()
+
     if (!desc) return height() / 2
     const ratio = automationValueToRatio(desc, value)
     const innerHeight = Math.max(1, height() - VERTICAL_PADDING * 2)
+
     return Math.max(VERTICAL_PADDING, Math.min(height() - VERTICAL_PADDING, (1 - ratio) * innerHeight + VERTICAL_PADDING))
   }
+
   const yToValue = (y: number) => {
     const desc = descriptor()
+
     if (!desc) return 0
     const innerHeight = Math.max(1, height() - VERTICAL_PADDING * 2)
     const ratio = 1 - ((Math.max(VERTICAL_PADDING, Math.min(height() - VERTICAL_PADDING, y)) - VERTICAL_PADDING) / innerHeight)
+
     return automationRatioToValue(desc, ratio)
   }
+
   const displayPoints = createMemo(() => {
     const desc = descriptor()
     const ordered = points()
+
     if (!desc) return []
+
     if (ordered.length === 0) {
       return [
         { id: 'automation-empty-start', timeSec: 0, value: desc.defaultValue, interpolation: 'linear' },
         { id: 'automation-empty-end', timeSec: props.durationSec, value: desc.defaultValue, interpolation: 'linear' },
       ]
     }
+
     const first = ordered[0]
     const last = ordered[ordered.length - 1]
     const next = [...ordered]
+
     if (first && first.timeSec > 0) {
       next.unshift({
         id: 'automation-start-extension',
@@ -110,6 +126,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
         interpolation: desc.interpolation ?? 'linear',
       })
     }
+
     if (last && last.timeSec < props.durationSec) {
       next.push({
         id: 'automation-end-extension',
@@ -118,48 +135,68 @@ export default function AutomationLane(props: AutomationLaneProps) {
         interpolation: desc.interpolation ?? 'linear',
       })
     }
+
     const start = visibleStartSec()
     const end = visibleEndSec()
+
     return windowAutomationPoints(next, start, end, desc.defaultValue)
   })
+
   const displayedPoint = createMemo(() => {
     const activeId = hoveredPointId() ?? selectedPointId()
+
     if (!activeId) return undefined
+
     return points().find((point) => point.id === activeId)
   })
+
   const selectedPoint = createMemo(() => {
     const selected = selectedPointId()
+
     return selected ? points().find((point) => point.id === selected) : undefined
   })
+
   const readout = createMemo(() => {
     const point = displayedPoint()
     const desc = descriptor()
+
     if (!point || !desc) return undefined
+
     return `${formatBarsBeatsSixteenths(point.timeSec, props.bpm)} · ${formatValue(point.value, desc.unit)} · ${point.interpolation}`
   })
+
   const path = createMemo(() => {
     const ordered = displayPoints()
+
     if (ordered.length === 0) return ''
     const commands: string[] = []
     ordered.forEach((point, index) => {
       const x = timeToX(point.timeSec)
       const y = valueToY(point.value)
+
       if (index === 0) {
         commands.push(`M ${x} ${y}`)
+
         return
       }
+
       const previous = ordered[index - 1]
+
       if (previous?.interpolation === 'hold') {
         commands.push(`L ${x} ${valueToY(previous.value)}`)
       }
+
       commands.push(`L ${x} ${y}`)
     })
+
     return commands.join(' ')
   })
 
   const pointFromClientPosition = (clientX: number, clientY: number): AutomationPoint | null => {
     const rect = root?.getBoundingClientRect()
+
     if (!rect) return null
+
     const timeSec = Math.max(
       0,
       Math.min(
@@ -167,6 +204,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
         visibleStartSec() + (clientX - rect.left) / props.pixelsPerSecond,
       ),
     )
+
     return {
       id: crypto.randomUUID(),
       timeSec,
@@ -181,13 +219,16 @@ export default function AutomationLane(props: AutomationLaneProps) {
   const commitPoints = (nextPoints: AutomationPoint[]) => {
     if (nextPoints.length === 0) {
       props.onCommit(undefined, targetKey())
+
       return
     }
+
     props.onCommit(createEnvelope(props, nextPoints), targetKey())
   }
 
   const startDrag = (pointId: string, event: PointerEvent) => {
     event.stopPropagation()
+
     if (event.button !== 0) return
     event.preventDefault()
     root?.focus()
@@ -196,14 +237,17 @@ export default function AutomationLane(props: AutomationLaneProps) {
     const initialPoints = points()
     setDraftPoints(initialPoints)
     setSelectedPointId(pointId)
+
     const move = (moveEvent: PointerEvent) => {
       if (moveEvent.pointerId !== pointerId) return
       const nextPoint = pointFromEvent(moveEvent)
+
       if (!nextPoint) return
       setDraftPoints((currentPoints) => (currentPoints ?? initialPoints).map((point) => point.id === pointId
         ? { ...point, timeSec: nextPoint.timeSec, value: nextPoint.value }
         : point))
     }
+
     const cleanup = () => {
       if (!dragActive) return
       dragActive = false
@@ -211,38 +255,51 @@ export default function AutomationLane(props: AutomationLaneProps) {
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', cancel)
       root?.removeEventListener('lostpointercapture', lostPointerCapture)
+
       if (root?.hasPointerCapture(pointerId)) root.releasePointerCapture(pointerId)
+
       if (cleanupDrag === cleanup) cleanupDrag = undefined
     }
+
     const up = (upEvent: PointerEvent) => {
       if (upEvent.pointerId !== pointerId) return
+
       if (!root?.hasPointerCapture(pointerId)) {
         cancel(upEvent)
+
         return
       }
+
       cleanup()
       const nextPoint = pointFromEvent(upEvent)
+
       const finalPoints = nextPoint
         ? (draftPoints() ?? initialPoints).map((point) => point.id === pointId
           ? { ...point, timeSec: nextPoint.timeSec, value: nextPoint.value }
           : point)
         : undefined
+
       setDraftPoints(undefined)
+
       if (finalPoints) commitPoints(finalPoints)
     }
+
     const cancel = (cancelEvent: PointerEvent) => {
       if (cancelEvent.pointerId !== pointerId) return
       cleanup()
       setDraftPoints(undefined)
       props.onCancelPreview(targetKey())
     }
+
     const lostPointerCapture = (lostEvent: Event) => {
       if (!dragActive) return
+
       if ('pointerId' in lostEvent && lostEvent.pointerId !== pointerId) return
       cleanup()
       setDraftPoints(undefined)
       props.onCancelPreview(targetKey())
     }
+
     cleanupDrag?.()
     cleanupDrag = cleanup
     root?.setPointerCapture(pointerId)
@@ -257,6 +314,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
     event.preventDefault()
     root?.focus()
     const point = pointFromEvent(event)
+
     if (!point) return
     setSelectedPointId(point.id)
     commitPoints([...points(), point])
@@ -265,6 +323,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
   const addPointAtPosition = (position: { clientX: number; clientY: number }) => {
     root?.focus()
     const point = pointFromClientPosition(position.clientX, position.clientY)
+
     if (!point) return
     setSelectedPointId(point.id)
     commitPoints([...points(), point])
@@ -272,6 +331,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
 
   const updateSelectedPoint = (update: (point: AutomationPoint) => AutomationPoint) => {
     const selected = selectedPointId()
+
     if (!selected) return
     const nextPoints = points().map((point) => point.id === selected ? update(point) : point)
     commitPoints(nextPoints)
@@ -286,14 +346,17 @@ export default function AutomationLane(props: AutomationLaneProps) {
 
   const deleteSelectedPoint = () => {
     const selected = selectedPointId()
+
     if (!selected) return
     commitPoints(points().filter((point) => point.id !== selected))
     setSelectedPointId(null)
   }
 
   const [contextMenuPosition, setContextMenuPosition] = createSignal<{ clientX: number; clientY: number } | null>(null)
+
   const contextMenuItems = (): TimelineContextMenuItem[] => {
     const position = contextMenuPosition()
+
     return [
       { kind: 'label', label: descriptor()?.label ?? props.parameterId },
       {
@@ -322,22 +385,30 @@ export default function AutomationLane(props: AutomationLaneProps) {
 
   const onKeyDown = (event: KeyboardEvent) => {
     const selected = selectedPointId()
+
     if (!selected) return
+
     if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault()
       deleteSelectedPoint()
+
       return
     }
+
     if (event.key === 'i' || event.key === 'I') {
       event.preventDefault()
       toggleSelectedInterpolation()
+
       return
     }
+
     const desc = descriptor()
+
     if (!desc) return
     const multiplier = event.shiftKey ? 10 : 1
     const timeDelta = POINT_TIME_NUDGE_SEC * multiplier
     const ratioDelta = POINT_VALUE_NUDGE_RATIO * multiplier
+
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
       event.preventDefault()
       const direction = event.key === 'ArrowLeft' ? -1 : 1
@@ -346,8 +417,10 @@ export default function AutomationLane(props: AutomationLaneProps) {
         ...point,
         timeSec: Math.max(0, Math.min(durationSec, point.timeSec + direction * timeDelta)),
       }))
+
       return
     }
+
     if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
       event.preventDefault()
       const direction = event.key === 'ArrowDown' ? -1 : 1

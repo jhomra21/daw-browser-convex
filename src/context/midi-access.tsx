@@ -6,7 +6,6 @@ import {
   type MidiAccessStatus,
   type MidiInputDescriptor,
 } from "~/lib/midi/midi-access"
-import type { MidiInputEvent, MidiSourceReset } from "~/lib/midi/midi-input"
 import { useAppPreferences } from "./app-preferences"
 
 const MidiAccessContext = createContext<MidiAccessContextValue | null>(null)

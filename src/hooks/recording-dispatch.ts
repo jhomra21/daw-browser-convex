@@ -1,5 +1,5 @@
 import type { useTrackRecording } from './useTrackRecording'
-import type { createMidiTrackRecordingController } from '~/lib/midi/midi-recording-controller'
+import type { createMidiTrackRecordingController } from '~/lib/midi-recording-controller'
 import { onCleanup } from 'solid-js'
 
 type RecordingStartResult = {

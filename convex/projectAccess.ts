@@ -142,16 +142,6 @@ export async function requireProjectRole(
   throw new Error("You do not have permission for this project action.");
 }
 
-export const canAccess = query({
-  args: { projectId: v.string() },
-  returns: v.boolean(),
-  handler: async (ctx, { projectId }) => {
-    const userId = await requireAuthenticatedUserId(ctx);
-
-    return hasProjectAccess(ctx, projectId, userId);
-  },
-});
-
 export const roleForUser = query({
   args: { projectId: v.string() },
   handler: async (ctx, { projectId }) => {

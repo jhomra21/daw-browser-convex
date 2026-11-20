@@ -6,9 +6,8 @@ import {
   nativeOfflinePcmSpoolRecoveryTtlMs,
   type NativeOfflinePcmSpoolDirectory,
   type NativeOfflinePcmSpoolFile,
-  type NativeOfflinePcmSpoolFilesystem,
-  type NativeOfflinePcmSpoolLockManager,
 } from '~/lib/export/native-offline-pcm-spool'
+import type { OpfsFilesystem, OpfsLockManager } from '~/lib/opfs-session-store'
 
 const originalAudioBuffer = globalThis.AudioBuffer
 
@@ -142,7 +141,7 @@ const createMemoryFilesystem = () => {
   let removeFailures = 0
   const activeLocks = new Set<string>()
 
-  const lockManager: NativeOfflinePcmSpoolLockManager = {
+  const lockManager: OpfsLockManager = {
     request: async (name, options, callback) => {
       if (options.ifAvailable && activeLocks.has(name)) return await callback(undefined)
       activeLocks.add(name)
@@ -155,7 +154,7 @@ const createMemoryFilesystem = () => {
     },
   }
 
-  const filesystem: NativeOfflinePcmSpoolFilesystem = {
+  const filesystem: OpfsFilesystem<NativeOfflinePcmSpoolFile> = {
     root: async () => wrapMemoryDirectory(root, () => {
       if (removeFailures === 0) return false
       removeFailures -= 1
@@ -577,7 +576,7 @@ describe('native offline PCM spool', () => {
   test('fails closed when the lock manager is unsupported', async () => {
     const memory = createMemoryFilesystem()
 
-    const unsupported: NativeOfflinePcmSpoolLockManager = {
+    const unsupported: OpfsLockManager = {
       request: async () => {
         throw new NativeOfflinePcmSpoolError('unsupported', 'Web Locks are unavailable.')
       },

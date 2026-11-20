@@ -5,12 +5,9 @@ import {
   isRecordingTempStorageSupported,
   RecordingTempStorageError,
   type RecordingStorageDirectory,
-  type RecordingStorageDirectoryEntry,
   type RecordingStorageFile,
-  type RecordingStorageFilesystem,
-  type RecordingStorageLockManager,
-  type RecordingStorageWritable
 } from "./recording-temp-storage"
+import type { OpfsDirectoryEntry, OpfsFilesystem, OpfsLockManager, OpfsWritable } from "~/lib/opfs-session-store"
 
 type MemoryFile = {
   kind: "file"
@@ -29,7 +26,7 @@ const createMemoryFilesystem = (failWriteAt = Number.POSITIVE_INFINITY) => {
   let writes = 0
 
   const wrapFile = (file: MemoryFile): RecordingStorageFile => ({
-    createWritable: async (): Promise<RecordingStorageWritable> => {
+    createWritable: async (): Promise<OpfsWritable> => {
       const chunks: Uint8Array[] = []
 
       return {
@@ -80,7 +77,7 @@ const createMemoryFilesystem = (failWriteAt = Number.POSITIVE_INFINITY) => {
 
       return wrapFile(child)
     },
-    entries: async function* (): AsyncIterable<RecordingStorageDirectoryEntry> {
+    entries: async function* (): AsyncIterable<OpfsDirectoryEntry> {
       for (const [name, node] of directory.children) yield { name, kind: node.kind }
     },
     remove: async (name) => {
@@ -88,7 +85,7 @@ const createMemoryFilesystem = (failWriteAt = Number.POSITIVE_INFINITY) => {
     }
   })
 
-  const filesystem: RecordingStorageFilesystem = {
+  const filesystem: OpfsFilesystem<RecordingStorageFile> = {
     root: async () => wrapDirectory(root)
   }
 
@@ -122,7 +119,7 @@ const createMemoryFilesystem = (failWriteAt = Number.POSITIVE_INFINITY) => {
 
   const activeLocks = new Set<string>()
 
-  const lockManager: RecordingStorageLockManager = {
+  const lockManager: OpfsLockManager = {
     request: async (name, options, callback) => {
       if (options.ifAvailable && activeLocks.has(name)) return callback(undefined)
       activeLocks.add(name)
@@ -143,7 +140,7 @@ describe("recording temp storage", () => {
     let clock = 0
     const memory = createMemoryFilesystem()
 
-    const filesystem: RecordingStorageFilesystem = {
+    const filesystem: OpfsFilesystem<RecordingStorageFile> = {
       root: async () => {
         const root = await memory.filesystem.root()
 

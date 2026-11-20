@@ -1,5 +1,17 @@
 import type { NativeOfflinePcmChunk } from '@daw-browser/audio-engine/native-host-wire'
 import { z } from 'zod'
+import {
+  classifyStorageFailure,
+  createBrowserLockManager,
+  createBrowserOpfsFilesystem,
+  isSafeSessionName,
+  SAFE_SESSION_NAME,
+  wrapOpfsWritable,
+  type OpfsDirectory,
+  type OpfsFilesystem,
+  type OpfsLockManager,
+  type OpfsWritable,
+} from '~/lib/opfs-session-store'
 
 const EXPORT_SPOOL_DIRECTORY = 'native-export-spools'
 const PCM_FILE = 'render.f32'
@@ -30,49 +42,16 @@ export class NativeOfflinePcmSpoolError extends Error {
   }
 }
 
-export type NativeOfflinePcmSpoolWritable = {
-  write: (data: Uint8Array<ArrayBuffer>) => Promise<void>
-  close: () => Promise<void>
-  abort: () => Promise<void>
-}
-
 export type NativeOfflinePcmSpoolFile = {
-  createWritable: () => Promise<NativeOfflinePcmSpoolWritable>
+  createWritable: () => Promise<OpfsWritable>
   read: (startByte: number, endByte: number) => Promise<ArrayBuffer>
 }
 
-export type NativeOfflinePcmSpoolDirectoryEntry = {
-  name: string
-  kind: 'file' | 'directory'
-}
-
-export type NativeOfflinePcmSpoolDirectory = {
-  getDirectory: (name: string, create: boolean) => Promise<NativeOfflinePcmSpoolDirectory>
-  getFile: (name: string, create: boolean) => Promise<NativeOfflinePcmSpoolFile>
-  remove: (name: string, recursive: boolean) => Promise<void>
-  entries: () => AsyncIterable<NativeOfflinePcmSpoolDirectoryEntry>
-}
-
-export type NativeOfflinePcmSpoolFilesystem = {
-  root: () => Promise<NativeOfflinePcmSpoolDirectory>
-}
-
-export type NativeOfflinePcmSpoolLock = {
-  name: string
-  mode: 'exclusive'
-}
-
-export type NativeOfflinePcmSpoolLockManager = {
-  request: <Value>(
-    name: string,
-    options: { mode: 'exclusive'; ifAvailable?: boolean },
-    callback: (lock: NativeOfflinePcmSpoolLock | undefined) => Promise<Value>,
-  ) => Promise<Value>
-}
+export type NativeOfflinePcmSpoolDirectory = OpfsDirectory<NativeOfflinePcmSpoolFile>
 
 type CreateNativeOfflinePcmSpoolOptions = {
-  filesystem?: NativeOfflinePcmSpoolFilesystem
-  lockManager?: NativeOfflinePcmSpoolLockManager
+  filesystem?: OpfsFilesystem<NativeOfflinePcmSpoolFile>
+  lockManager?: OpfsLockManager
   replayFrames?: number
   now?: () => number
   recoveryBatchSize?: number
@@ -109,69 +88,22 @@ export type NativeOfflinePcmSpoolSession = {
   abort: () => Promise<void>
 }
 
-const safeSessionName = (value: string) => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value)
 const validPositiveInteger = (value: number) => Number.isSafeInteger(value) && value > 0
 
-const classifyFailure = (cause: unknown): NativeOfflinePcmSpoolFailure => {
-  if (cause instanceof DOMException) {
-    if (cause.name === 'QuotaExceededError') return 'quota-exceeded'
-
-    if (cause.name === 'NotAllowedError' || cause.name === 'SecurityError') return 'permission-denied'
-  }
-
-  return 'write-failed'
-}
-
-const browserLockManager: NativeOfflinePcmSpoolLockManager = {
-  request: (name, options, callback) => {
-    const locks = globalThis.navigator?.locks
-
-    if (!locks) {
-      return Promise.reject(new NativeOfflinePcmSpoolError(
-        'unsupported',
-        'Web Locks are required for native offline PCM spools.',
-      ))
-    }
-
-    return locks.request(name, options, async (lock) => (
-      await callback(lock ? { name: lock.name, mode: 'exclusive' } : undefined)
-    ))
-  },
-}
-
-const wrapDirectory = (directory: FileSystemDirectoryHandle): NativeOfflinePcmSpoolDirectory => ({
-  getDirectory: async (name, create) => wrapDirectory(await directory.getDirectoryHandle(name, { create })),
-  getFile: async (name, create) => {
-    const handle = await directory.getFileHandle(name, { create })
-
-    return {
-      createWritable: async () => {
-        if (!handle.createWritable) {
-          throw new Error('The native offline PCM spool filesystem cannot create writable files.')
-        }
-
-        const writable = await handle.createWritable()
-
-        return {
-          write: (data) => writable.write(data),
-          close: () => writable.close(),
-          abort: () => writable.abort(),
-        }
-      },
-      read: async (startByte, endByte) => (await handle.getFile()).slice(startByte, endByte).arrayBuffer(),
-    }
-  },
-  remove: (name, recursive) => directory.removeEntry(name, { recursive }),
-  entries: async function* () {
-    for await (const [name, handle] of directory.entries()) {
-      yield { name, kind: handle.kind }
-    }
-  },
+const wrapFile = (handle: FileSystemFileHandle): NativeOfflinePcmSpoolFile => ({
+  createWritable: () => wrapOpfsWritable(
+    handle,
+    () => new Error('The native offline PCM spool filesystem cannot create writable files.'),
+  ),
+  read: async (startByte, endByte) => (await handle.getFile()).slice(startByte, endByte).arrayBuffer(),
 })
 
-const browserFilesystem: NativeOfflinePcmSpoolFilesystem = {
-  root: async () => wrapDirectory(await navigator.storage.getDirectory()),
-}
+const browserFilesystem = createBrowserOpfsFilesystem(wrapFile)
+
+const browserLockManager = createBrowserLockManager(() => new NativeOfflinePcmSpoolError(
+  'unsupported',
+  'Web Locks are required for native offline PCM spools.',
+))
 
 type NativeOfflinePcmSpoolMetadata = {
   version: 1
@@ -181,7 +113,7 @@ type NativeOfflinePcmSpoolMetadata = {
 
 const nativeOfflinePcmSpoolMetadataSchema = z.object({
   version: z.literal(1),
-  sessionId: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/),
+  sessionId: z.string().regex(SAFE_SESSION_NAME),
   createdAt: z.number().finite().nonnegative(),
 })
 
@@ -216,7 +148,7 @@ const parseMetadata = (value: string): NativeOfflinePcmSpoolMetadata | undefined
 }
 
 const createBrowserSpoolLock = async (
-  lockManager: NativeOfflinePcmSpoolLockManager,
+  lockManager: OpfsLockManager,
   sessionId: string,
 ): Promise<() => Promise<void>> => {
   let releaseHeldLock: () => void = () => undefined
@@ -259,7 +191,7 @@ const createBrowserSpoolLock = async (
 
 const recoverStaleSessions = async (
   sessions: NativeOfflinePcmSpoolDirectory,
-  lockManager: NativeOfflinePcmSpoolLockManager,
+  lockManager: OpfsLockManager,
   now: () => number,
   batchSize: number,
 ): Promise<void> => {
@@ -399,7 +331,7 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
   }
 
   const createSession = async (input: NativeOfflinePcmSpoolSessionInput): Promise<NativeOfflinePcmSpoolSession> => {
-    if (!safeSessionName(input.sessionId)
+    if (!isSafeSessionName(input.sessionId)
       || !validPositiveInteger(input.sampleRate)
       || !validPositiveInteger(input.channelCount)
       || input.channelCount > 32
@@ -412,7 +344,7 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
     const releaseLock = await createBrowserSpoolLock(lockManager, input.sessionId)
     let directory: NativeOfflinePcmSpoolDirectory | undefined
     let file: NativeOfflinePcmSpoolFile | undefined
-    let writable: NativeOfflinePcmSpoolWritable | undefined
+    let writable: OpfsWritable | undefined
     let createdDirectory = false
 
     try {
@@ -439,7 +371,7 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
       if (createdDirectory) await sessions.remove(input.sessionId, true).catch(() => undefined)
       await releaseLock().catch(() => undefined)
       throw new NativeOfflinePcmSpoolError(
-        classifyFailure(error),
+        classifyStorageFailure(error),
         'Could not create native offline PCM spool.',
         { cause: error },
       )
@@ -502,7 +434,7 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
           await writable.write(bytes)
         } catch (error) {
           throw new NativeOfflinePcmSpoolError(
-            classifyFailure(error),
+            classifyStorageFailure(error),
             'Could not write native offline PCM spool data.',
             { cause: error },
           )
@@ -543,7 +475,7 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
         await abortWritable()
         await removeDirectory()
         throw new NativeOfflinePcmSpoolError(
-          classifyFailure(error),
+          classifyStorageFailure(error),
           'Could not finalize native offline PCM spool.',
           { cause: error },
         )

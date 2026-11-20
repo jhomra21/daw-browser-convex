@@ -29,10 +29,11 @@ import {
   isAudioEffectKind,
 } from '@daw-browser/shared'
 import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
-import { sha256 } from '@noble/hashes/sha2.js'
 import { recoveryLimitsV1 } from '@daw-browser/control/recovery-limits'
-import type {
-  ControlActionV1 as CanonicalControlActionV1,
+import {
+  timelineRangeRecoveryAutomationDigestV2,
+  timelineRangeRecoveryClipDigestV2,
+  type ControlActionV1 as CanonicalControlActionV1,
   ProjectSnapshotV1 as CanonicalProjectSnapshotV1,
   ProjectSnapshotV2 as CanonicalProjectSnapshotV2,
   RecoveryPayload,
@@ -245,20 +246,6 @@ const canonical = <Value>(value: Value): string => {
 }
 
 const same = <Left, Right>(left: Left, right: Right) => canonical(left) === canonical(right)
-
-const plannerSha256 = (value: string) => (
-  Array.from(sha256(new TextEncoder().encode(value)), (byte) => byte.toString(16).padStart(2, '0')).join('')
-)
-
-const timelineRangeClipDigest = (clip: ProjectSnapshotV1['clips'][number]) => {
-  const { id: _id, ...semantic } = clip
-
-  return plannerSha256(canonical(semantic))
-}
-
-const timelineRangeAutomationDigest = (automation: ProjectSnapshotV1['automation'][number]) => (
-  plannerSha256(canonical(automation))
-)
 
 export const canonicalizePlannerSnapshotV1 = <
   Snapshot extends CanonicalProjectSnapshot,
@@ -1713,7 +1700,7 @@ export function planControlRequestV1(
           for (const update of data.updatedClips) {
             const current = clips.get(update.id)
 
-            if (!current || timelineRangeClipDigest(current) !== update.expectedAfterDigest) {
+            if (!current || timelineRangeRecoveryClipDigestV2(current) !== update.expectedAfterDigest) {
               planError(actionIndex, 'validation', 'Recovery state has drifted.')
             }
           }
@@ -1723,7 +1710,7 @@ export function planControlRequestV1(
           for (const creation of data.createdClips) {
             const current = clips.get(creation.id)
 
-            if (!current || !selectedTrackIds.has(current.trackId) || timelineRangeClipDigest(current) !== creation.expectedAfterDigest) {
+            if (!current || !selectedTrackIds.has(current.trackId) || timelineRangeRecoveryClipDigestV2(current) !== creation.expectedAfterDigest) {
               planError(actionIndex, 'validation', 'Recovery state has drifted.')
             }
 
@@ -1738,7 +1725,7 @@ export function planControlRequestV1(
               && automation.parameterId === update.before.parameterId
             ))
 
-            if (!current || timelineRangeAutomationDigest(current) !== update.expectedAfterDigest) {
+            if (!current || timelineRangeRecoveryAutomationDigestV2(current) !== update.expectedAfterDigest) {
               planError(actionIndex, 'validation', 'Recovery state has drifted.')
             }
           }

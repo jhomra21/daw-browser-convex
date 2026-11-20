@@ -1,5 +1,7 @@
+import { createKeyedLock } from '~/lib/keyed-lock'
+
 // The non-browser fallback mirrors named Web Locks within this process.
-const chains = new Map<string, Promise<void>>()
+const chains = createKeyedLock()
 
 const withAssetLock = async <Value>(
   name: string,
@@ -13,20 +15,7 @@ const withAssetLock = async <Value>(
     return navigator.locks.request(name, { mode: 'exclusive' }, callback)
   }
 
-  const previous = chains.get(name) ?? Promise.resolve()
-  let release: () => void = () => undefined
-  const current = new Promise<void>((resolve) => { release = resolve })
-  const next = previous.then(() => current, () => current)
-  chains.set(name, next)
-  await previous
-
-  try {
-    return await callback()
-  } finally {
-    release()
-
-    if (chains.get(name) === next) chains.delete(name)
-  }
+  return chains.run(name, callback)
 }
 
 export const withLocalProjectAssetLock = <Value>(

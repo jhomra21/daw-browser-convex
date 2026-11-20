@@ -17,10 +17,11 @@ import {
 } from '~/lib/external-plugin-artifacts'
 import { maxVst3WorkerStateBytes, type OpaquePluginStateMetadata } from '@daw-browser/plugin-host-protocol'
 import { z } from 'zod'
+import { createKeyedLock } from '~/lib/keyed-lock'
 
 const externalProcessorRowId = (instanceId: string) => `external-plugin:${instanceId}`
-const externalProjectWriteChains = new Map<string, Promise<void>>()
-const externalProcessorWriteChains = new Map<string, Promise<void>>()
+const externalProjectWriteLock = createKeyedLock()
+const externalProcessorWriteLock = createKeyedLock()
 
 const jsonEntityRows = (rows: readonly LocalProjectEntityRow[]) => rows.flatMap((row) => {
   const parsed = z.json().safeParse(row.value)
@@ -28,38 +29,17 @@ const jsonEntityRows = (rows: readonly LocalProjectEntityRow[]) => rows.flatMap(
   return parsed.success ? [{ ...row, value: parsed.data }] : []
 })
 
-const withWriteChain = async <Value>(
-  chains: Map<string, Promise<void>>,
-  key: string,
-  callback: () => Promise<Value>,
-): Promise<Value> => {
-  const previous = chains.get(key) ?? Promise.resolve()
-  let release: () => void = () => undefined
-  const current = new Promise<void>((resolve) => { release = resolve })
-  const next = previous.then(() => current, () => current)
-  chains.set(key, next)
-  await previous
-
-  try {
-    return await callback()
-  } finally {
-    release()
-
-    if (chains.get(key) === next) chains.delete(key)
-  }
-}
-
 export const withExternalProcessorProjectWriteLock = <Value>(
   projectId: string,
   callback: () => Promise<Value>,
-): Promise<Value> => withWriteChain(externalProjectWriteChains, projectId, callback)
+): Promise<Value> => externalProjectWriteLock.run(projectId, callback)
 
 const withExternalProcessorWriteLock = async <Value>(
   projectId: string,
   instanceId: string,
   callback: () => Promise<Value>,
 ): Promise<Value> => withExternalProcessorProjectWriteLock(projectId, () => (
-  withWriteChain(externalProcessorWriteChains, `${projectId}:${instanceId}`, callback)
+  externalProcessorWriteLock.run(`${projectId}:${instanceId}`, callback)
 ))
 
 export const pathFreeExternalProcessor = (processor: ExternalProcessor): ExternalProcessor => {

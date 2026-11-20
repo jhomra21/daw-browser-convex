@@ -18,6 +18,7 @@ import {
   flushPendingSharedOutboxHistoryUpdates,
   registerSharedOutboxHistoryHandler,
 } from './shared-outbox-history'
+import { subscribeToSharedOutboxSettlements } from './shared-outbox-settlement'
 
 const parseRequestBody = (init: RequestInit | undefined): JsonValue => (
   JSON.parse(init?.body?.toString() ?? 'null')
@@ -1391,7 +1392,7 @@ test('wakes the admitting owner when a dead letter settles behind a stalled outb
   let releaseSecondRequest: (() => void) | undefined
   const secondStarted = new Promise<void>((resolve) => { releaseSecondRequest = resolve })
   let wakes = 0
-  const unsubscribe = outbox.subscribeToSharedOutboxSettlements(projectId, userId, () => { wakes += 1 })
+  const unsubscribe = subscribeToSharedOutboxSettlements(projectId, userId, () => { wakes += 1 })
   const originalFetch = globalThis.fetch
   let requests = 0
   globalThis.fetch = Object.assign(async () => {

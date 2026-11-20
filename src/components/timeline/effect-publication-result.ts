@@ -2,9 +2,9 @@ import { z } from "zod";
 import {
   consumeSharedOutboxCompletion,
   readSharedOutboxOperation,
-  subscribeToSharedOutboxSettlements,
   type DurableEffectsPublication,
 } from "~/lib/shared-outbox";
+import { subscribeToSharedOutboxSettlements } from "~/lib/shared-outbox-settlement";
 import { decodeEffectsOperationResult } from "~/lib/shared-timeline-operations-api";
 
 export type ParameterSaveResult =

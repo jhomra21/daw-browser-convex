@@ -25,6 +25,7 @@ import { isCapabilityFile } from '~/lib/capability-file'
 import { materializeLocalRetryFile, removeLocalRetryFile } from '~/lib/local-assets'
 import { completeUngroup, attachQueuedClipDeletionRecoveries } from '~/lib/shared-outbox-history'
 import { type UploadedAudioClipPayload, uploadedAudioClipPayloadSchema, readUploadedAudioClipPayload, uploadSharedAudioClipAsset } from '~/lib/shared-outbox-uploaded-audio'
+import { wakeSettlementObservers } from '~/lib/shared-outbox-settlement'
 
 type SharedOutboxSummary = {
   pending: number
@@ -40,7 +41,6 @@ const OUTBOX_PREFIX = 'shared-outbox:'
 const OUTBOX_STATUS_KEY = 'shared-outbox-status'
 const OUTBOX_SEQUENCE_KEY = 'shared-outbox-sequence'
 const OUTBOX_COMPLETION_PREFIX = 'shared-outbox-completion:'
-const OUTBOX_SETTLEMENT_CHANNEL = 'shared-outbox-settlement:'
 const OUTBOX_LEASE_MS = 30 * 1000
 const MAX_OUTBOX_COMPLETIONS_PER_USER = 64
 const outboxFlushes = new Map<string, Promise<unknown>>()
@@ -76,60 +76,6 @@ export class SharedOutboxQueuedError extends Error {
     super(`${kind} queued for retry`)
     this.name = 'SharedOutboxQueuedError'
     this.operationId = operationId
-  }
-}
-
-const settlementWakeSchema = z.object({ projectId: z.string(), userId: z.string() })
-const settlementListeners = new Map<string, Set<() => void>>()
-const settlementChannels = new Map<string, BroadcastChannel>()
-
-const settlementScope = (projectId: string, userId: string) => `${projectId}\u0000${userId}`
-
-export const subscribeToSharedOutboxSettlements = (
-  projectId: string,
-  userId: string,
-  listener: () => void,
-) => {
-  const scope = settlementScope(projectId, userId)
-  const listeners = settlementListeners.get(scope) ?? new Set<() => void>()
-  listeners.add(listener)
-  settlementListeners.set(scope, listeners)
-  let channel = settlementChannels.get(scope)
-
-  if (!channel) {
-    channel = new BroadcastChannel(`${OUTBOX_SETTLEMENT_CHANNEL}${encodeURIComponent(projectId)}:${encodeURIComponent(userId)}`)
-    channel.addEventListener('message', (event: MessageEvent<unknown>) => {
-      const wake = settlementWakeSchema.safeParse(event.data)
-
-      if (wake.success && wake.data.projectId === projectId && wake.data.userId === userId) {
-        for (const observer of settlementListeners.get(scope) ?? []) observer()
-      }
-    })
-    settlementChannels.set(scope, channel)
-  }
-
-  return () => {
-    listeners.delete(listener)
-
-    if (listeners.size > 0) return
-    settlementListeners.delete(scope)
-    settlementChannels.get(scope)?.close()
-    settlementChannels.delete(scope)
-  }
-}
-
-const wakeSettlementObservers = (projectId: string, userId: string) => {
-  for (const listener of settlementListeners.get(settlementScope(projectId, userId)) ?? []) listener()
-  notifyLocalProjectChanged(projectId)
-  const message = { projectId, userId }
-  const channelName = `${OUTBOX_SETTLEMENT_CHANNEL}${encodeURIComponent(projectId)}:${encodeURIComponent(userId)}`
-  const channel = settlementChannels.get(settlementScope(projectId, userId))
-
-  if (channel) channel.postMessage(message)
-  else {
-    const transientChannel = new BroadcastChannel(channelName)
-    transientChannel.postMessage(message)
-    transientChannel.close()
   }
 }
 

@@ -882,7 +882,7 @@ const main = async () => {
         ...failed.map((entry) => `launch ${entry.launch} failed`),
         ...missing.map((row) => `${row.name} cannot run: ${row.needs}`),
         ...[...new Set(settledOnly.map((row) => row.name))].map((name) => `${name} has no per-window compare (settled and gated on host evidence only)`),
-        ...trials.filter((trial) => trial.verdict.outcome !== "pass").map((trial) => `${trial.row}: ${trial.verdict.outcome} at edit ${trial.verdict.editIndex}: ${trial.verdict.detail}`),
+        ...trials.flatMap((trial) => trial.verdict.outcome !== "pass" ? [`${trial.row}: ${trial.verdict.outcome} at edit ${trial.verdict.editIndex}: ${trial.verdict.detail}`] : []),
         ...(bound.boundsBelowOnePercent ? [] : [`the pooled bound over ${bound.edits} judged edits is ${(bound.upper * 100).toFixed(2)} % (needs below 1 %, no setup failure)`]),
       ]
       const verdict = `AE-08 phase 9 ${reasons.length ? "NON-CERTIFYING" : "PASS"}: ${campaign.length} launches, ${failed.length} failed, ${bound.edits} judged edits, ${bound.failures} failed`

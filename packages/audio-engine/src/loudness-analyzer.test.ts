@@ -38,8 +38,10 @@ const exactLoudnessRange = (energies: readonly number[]) => {
   const mean = absolute.reduce((sum, energy) => sum + energy, 0) / absolute.length
   const threshold = Math.max(-70, loudnessFromEnergy(mean) - 20)
   const gated = absolute
-    .map(loudnessFromEnergy)
-    .filter((loudness) => loudness >= threshold)
+    .flatMap((energy) => {
+      const loudness = loudnessFromEnergy(energy)
+      return loudness >= threshold ? [loudness] : []
+    })
     .sort((left, right) => left - right)
   return gated.length === 0 ? null : percentile(gated, 0.95) - percentile(gated, 0.1)
 }

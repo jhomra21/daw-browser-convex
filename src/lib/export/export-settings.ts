@@ -117,9 +117,10 @@ export const deriveSelectedExportTrackIds = (input: {
   if (input.rangeSelection?.trackIds.length) {
     candidateIds = input.rangeSelection.trackIds
   } else if (input.selectedClipIds.size > 0) {
-    candidateIds = [...input.selectedClipIds]
-      .map((clipId) => input.clipTrackIdById.get(clipId))
-      .filter((trackId): trackId is string => trackId !== undefined)
+    candidateIds = [...input.selectedClipIds].flatMap((clipId) => {
+      const trackId = input.clipTrackIdById.get(clipId)
+      return trackId === undefined ? [] : [trackId]
+    })
   } else {
     candidateIds = input.primaryTrackId ? [input.primaryTrackId] : []
   }

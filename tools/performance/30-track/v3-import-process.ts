@@ -172,7 +172,7 @@ export const createNativeProcessCpuSampler = async (
       workersByHost.set(worker.parentPid, children)
     }
     const activeWorkerGroup = [...workersByHost.values()].find((children) => children.length === 8)
-    const singletonWorkers = [...workersByHost.values()].filter((children) => children.length === 1).map((children) => children[0]!)
+    const singletonWorkers = [...workersByHost.values()].flatMap((children) => children.length === 1 ? [children[0]!] : [])
     const selectedWorkers = preferActiveWorkerGroup
       ? activeWorkerGroup ?? []
       : singletonWorkers.length === 8 ? singletonWorkers : activeWorkerGroup ?? []

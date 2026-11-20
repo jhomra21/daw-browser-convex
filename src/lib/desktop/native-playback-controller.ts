@@ -2451,13 +2451,11 @@ export const createNativePlaybackController = (input: {
       const attachment = preparedSnapshot.nativeExternalAttachmentPlan?.attachments
         .find((candidate) => candidate.instanceId === externalInstanceId)
       const parameters = new Map(attachment?.parameters?.map((parameter) => [parameter.id, parameter]))
-      const targets = externalParameters
-        .filter((external): external is NonNullable<typeof external> => (
+      const targets = externalParameters.flatMap((external) => (
           external?.instanceId === instanceId
           && external.instanceId === externalInstanceId
           && parameters.get(external.parameterId)?.readOnly === false
-        ))
-        .map((external) => external.parameterId)
+        ) ? [external.parameterId] : [])
       if (!attachment || targets.length !== parameterIds.length || !scheduleCoordinator) {
         return { accepted: false, reason: "unsupported" }
       }
@@ -2472,8 +2470,10 @@ export const createNativePlaybackController = (input: {
     if (!processor) {
       return { accepted: false, reason: "unsupported" }
     }
-    const targets = parameterIds.map((parameterId) => processor.parameterTargets.get(parameterId))
-      .filter((target): target is number => target !== undefined)
+    const targets = parameterIds.flatMap((parameterId) => {
+      const target = processor.parameterTargets.get(parameterId)
+      return target === undefined ? [] : [target]
+    })
     if (targets.length !== parameterIds.length) return { accepted: false, reason: "unsupported" }
     // Native resolves a lane only from the schedule it was published with, and a lane overridden by hand is left out of
     // that compile. The lane drives again once a publication from the current position carries it.

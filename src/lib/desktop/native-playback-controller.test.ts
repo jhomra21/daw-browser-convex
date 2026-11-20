@@ -15833,8 +15833,8 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
           expect(other.value).toEqual({ state: "applied" })
           const graphs = fixture.graphPayloads.at(-1)
           if (!graphs) throw new Error("Missing absolute publication")
-          const gains = [...decodeGraph(graphs).processors.values()].filter(processor => processor.kind === 1)
-            .map(processor => new DataView(processor.state.buffer, processor.state.byteOffset).getFloat32(4, true))
+          const gains = [...decodeGraph(graphs).processors.values()].flatMap(processor => processor.kind === 1
+            ? [new DataView(processor.state.buffer, processor.state.byteOffset).getFloat32(4, true)] : [])
           expect(gains).toEqual([-9, -4])
           expect(sent.slice(blockedSends).map(bytes => new DataView(bytes.buffer).getFloat32(60, true))).not.toContain(-1)
         }

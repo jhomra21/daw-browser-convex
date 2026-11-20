@@ -27,7 +27,7 @@ export default function minimizeHookWitness(seed: number, scenario: string, acti
           : scenario === "stale-compile" ? ["capture-stale-compile", "tempo"]
             : scenario === "identity-same" || scenario === "identity-changed" ? ["preview", "identity-baseline", "commit"]
               : scenario.startsWith("late-") || ["domain-timeout", "pause-latency", "prefix-10", "patch-install", "explicit-retry", "capacity-reopen", "retained-candidate", "progress-only", "explicit-context", "intent-aba", "edits-during-compile", "retained-seek", "pending-attempt", "parked-latency", "parked-page-hold", ...a2cScenarios, ...step5LiveScenarios, ...step5GuardScenarios].includes(scenario) ? [] : ["starvation-begin", "starvation-end"]
-  const checks = actions.filter((action) => action.kind === "check" && action.mode !== "terminal").map((action) => action.mode)
+  const checks = actions.flatMap((action) => action.kind === "check" && action.mode !== "terminal" ? [action.mode] : [])
   const expected = signature(failures)
   const attempts = 2
   const run = (candidate: readonly Action[]) => {

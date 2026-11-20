@@ -73,7 +73,7 @@ export const receiptFailure = (appliedGain: number | null | undefined, submitted
 // A waiter owns the batches dispatched for its record, whoever sent them: a refused batch is sent again from an adoption
 // or a frame, and a flush that joins the record sends nothing itself.
 export const recordBatches = (dispatches: readonly { editId: string; sequence: bigint }[], editId: string | undefined) =>
-  dispatches.filter((dispatch) => dispatch.editId === editId).map((dispatch) => dispatch.sequence)
+  dispatches.flatMap((dispatch) => dispatch.editId === editId ? [dispatch.sequence] : [])
 // The controller's 1 s proof deadline answered the caller before the frame naming a batch of its record as applied was
 // delivered. B3b removes that timer; every other rejection of an applied record keeps its own class.
 export const proofDeadlineError = "Native processor update was not applied before timeout."

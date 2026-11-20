@@ -292,7 +292,7 @@ const campaign = async (out: string, rowNames: readonly string[], edits: number)
       const row = rows.find((candidate) => candidate.row === burst.row)
       return row ? [{ row: burst.row, failed: judgeBurst(withoutTheEdit(burst, row), row, calibration).length > 0 }] : []
     })
-    const failures = [...controls.filter((control) => !control.failed).map((control): Failure => ({ row: control.row, check: "negative-control", owner: "oracle", detail: "a burst whose edits did not take effect passed" })),
+    const failures = [...controls.flatMap((control): Failure[] => !control.failed ? [{ row: control.row, check: "negative-control", owner: "oracle", detail: "a burst whose edits did not take effect passed" }] : []),
       ...references.flatMap(judgeReference), ...bursts.flatMap((burst) => {
       const row = rows.find((candidate) => candidate.row === burst.row)
       return row ? judgeBurst(burst, row, calibration) : []

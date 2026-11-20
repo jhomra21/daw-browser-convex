@@ -123,9 +123,9 @@ export const builtInOverriddenAutomationTargetKeys = (
   envelopes: readonly AutomationEnvelope[],
   overriddenTargetKeys: ReadonlySet<string>,
 ): Set<string> => new Set(
-  envelopes
-    .filter((envelope) => overriddenTargetKeys.has(envelope.targetKey) && !parseExternalAutomationParameterId(envelope.parameterId))
-    .map((envelope) => envelope.targetKey),
+  envelopes.flatMap((envelope) => overriddenTargetKeys.has(envelope.targetKey) && !parseExternalAutomationParameterId(envelope.parameterId)
+    ? [envelope.targetKey]
+    : []),
 )
 
 const staticDescriptors: AutomationParameterDescriptor[] = [

@@ -278,6 +278,22 @@ const localEffectKind = (kind: string, master = false): LocalEffectKind | undefi
     : undefined
 }
 
+const advancedSnapshot = (
+  current: ControlPlanV1['snapshot'],
+  next: ControlPlanV1['snapshot'],
+  localExternalProcessors: ControlPlanV1['snapshot']['processors'],
+  revision: number,
+): ControlPlanV1['snapshot'] => ({
+  ...current,
+  ...next,
+  processors: [
+    ...next.processors,
+    ...localExternalProcessors.filter((processor) => !next.processors.some((entry) => entry.id === processor.id)),
+  ],
+  version: 'v2',
+  project: { ...next.project, revision },
+})
+
 const materializedSnapshot = (
   snapshot: ControlPlanV1['snapshot'],
   ids: ReadonlyMap<string, string>,
@@ -814,16 +830,7 @@ export const executeLocalControlRequestInTransactionV1 = (
       const parsed = externalProcessorSchema.safeParse(row.value)
       return parsed.success ? [externalProcessorSnapshot(parsed.data, row.id)] : []
     })
-    current = {
-      ...current,
-      ...next,
-      processors: [
-        ...next.processors,
-        ...localExternalProcessors.filter((processor) => !next.processors.some((entry) => entry.id === processor.id)),
-      ],
-      version: 'v2',
-      project: { ...next.project, revision: context.snapshot.project.revision },
-    }
+    current = advancedSnapshot(current, next, localExternalProcessors, context.snapshot.project.revision)
     changed = changed || entry.changed
   }
   if (changed !== fullPlan.applied) throw new Error('Local control full plan disagrees with sequential execution.')

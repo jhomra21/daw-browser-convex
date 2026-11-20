@@ -270,13 +270,13 @@ const compileSinglePortableFrameSchedule = (
     timeOrigin: input.timeOrigin,
   }
   const events = pending
-    .map((pendingEvent) => ({
-      event: eventWithFrame(pendingEvent.event, pendingEvent.timelineSec, identity),
-      ordinal: pendingEvent.ordinal,
-    }))
-    .filter(({ event }) => input.eventRangeStartSec === undefined
-      || event.frame >= input.timeOrigin.frame
-      && event.frame < portableFrameAtTimelineTime(identity, input.rangeEndSec))
+    .flatMap((pendingEvent) => {
+      const event = eventWithFrame(pendingEvent.event, pendingEvent.timelineSec, identity)
+      return input.eventRangeStartSec === undefined
+        || event.frame >= input.timeOrigin.frame
+        && event.frame < portableFrameAtTimelineTime(identity, input.rangeEndSec)
+        ? [{ event, ordinal: pendingEvent.ordinal }] : []
+    })
     .sort((left, right) => left.event.frame - right.event.frame || left.ordinal - right.ordinal)
     .map(({ event }, index) => ({ ...event, sequence: index + 1 }))
   return assertPortableFrameSchedule({ ...identity, events })

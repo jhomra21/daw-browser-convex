@@ -1783,11 +1783,11 @@ export function planControlRequestV1(
     warnings: [],
     changeSummary: {
       actionCount: request.actions.length,
-      changes: planned.filter((entry) => entry.changed).map((entry) => ({
+      changes: planned.flatMap((entry) => entry.changed ? [{
         actionIndex: entry.actionIndex,
         kind: entry.action.kind,
         description: describe(entry.action),
-      })),
+      }] : []),
     },
   }
 }

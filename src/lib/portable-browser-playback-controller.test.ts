@@ -3706,7 +3706,7 @@ const c9Artifacts = (calls: readonly string[]) => c9Registered(calls).filter((ca
 // Stretch renders the clip for real, so the clip is short.
 const c9WarpFixture = (options: { refusals?: number; clip1Warp?: C9Warp } = {}) => c9Fixture({ clip1Duration: 1, ...options })
 const c9Settled = async (done: () => boolean) => { for (let turn = 0; turn < 500 && !done(); turn += 1) await Bun.sleep(0) }
-const c9Phases = (calls: readonly string[]) => calls.filter((call) => call === 'publish' || call.startsWith('register:')).map((call) => call.split(':')[0])
+const c9Phases = (calls: readonly string[]) => calls.flatMap((call) => call === 'publish' || call.startsWith('register:') ? [call.split(':')[0]] : [])
 
 test('W-C9-warp-1 a tempo edit with a Stretch clip prepares its artifact at the new tempo before the publish and releases the old leases after the seam', async () => {
   const f = await c9WarpFixture({ clip1Warp: c9Stretch })

@@ -556,9 +556,9 @@ const reconcileAtSeam = (input: {
       sounding.delete(noteKey(event))
     }
   }
-  const releases = [...sounding.values()].filter((held) => input.hasTrack(held.target.trackId)).map((held): PortableSchedule["events"][number] => ({
+  const releases = [...sounding.values()].flatMap((held): PortableSchedule["events"][number][] => input.hasTrack(held.target.trackId) ? [{
     type: "note-off", target: held.target, noteId: held.noteId, pitch: held.pitch, frame: seamFrame, sequence: 0,
-  }))
+  }] : [])
   // `next` starts at the seam, so the releases go first: a release precedes a note-on at the same frame.
   return {
     ...next,
@@ -629,11 +629,11 @@ const requiredPagedPagePlan = (
       pageFrames: portableWasmPagedPageFrames,
       descriptor: entry.descriptor,
     }] as const),
-    ...preparedStretchAssets.filter(isPagedStretchAsset).map((asset) => [asset.asset.assetId, {
+    ...preparedStretchAssets.flatMap((asset) => isPagedStretchAsset(asset) ? [[asset.asset.assetId, {
       asset: asset.asset,
       pageFrames: asset.manifest.pageFrames,
       artifactId: asset.artifactId,
-    }] as const),
+    }] as const] : []),
   ])
   const keys = new Set<string>()
   let preparationCount = 0
@@ -1287,7 +1287,7 @@ export const createPortableBrowserPlaybackController = (input: {
   const stretchRepository = input.createPreparedStretchRepository?.() ?? createPreparedStretchArtifactRepository()
   let repositoryDisposed = false
   const releasePreparedStretchAssets = async (assets: readonly PortablePreparedStretch[]) => {
-    const leases = new Set(assets.filter(isPagedStretchAsset).map((asset) => asset.lease))
+    const leases = new Set(assets.flatMap((asset) => isPagedStretchAsset(asset) ? [asset.lease] : []))
     await Promise.all([...leases].map((lease) => lease.release().catch(() => undefined)))
   }
 

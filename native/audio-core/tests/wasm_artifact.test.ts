@@ -1405,8 +1405,10 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
         const editBoundaries = [0, ...(fixture.graphEdits ?? []).map((edit) => edit.frame), fixture.frames]
         const referencePartitions = editBoundaries
           .slice(1)
-          .map((end, index) => end - (editBoundaries[index] ?? 0))
-          .filter((length) => length > 0)
+          .flatMap((end, index) => {
+            const length = end - (editBoundaries[index] ?? 0)
+            return length > 0 ? [length] : []
+          })
         const referenceBytes = encodePortableGraphParityFixture({
           ...fixture,
           maxFramesPerBlock: Math.max(...referencePartitions),

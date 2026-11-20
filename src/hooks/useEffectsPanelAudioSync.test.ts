@@ -1844,10 +1844,13 @@ for (const local of [true, false]) for (const master of [false, true]) {
       await f.settle();
       expect(g.isOpen(h)).toBe(false);
       const active = [...Array(f.runtime.audio.compressorNodeCount()).keys()]
-        .map(i => f.runtime.audio.workletNode(i)).filter(n => n && !n.closed);
+        .flatMap(i => {
+          const node = f.runtime.audio.workletNode(i);
+          return node && !node.closed ? [node] : [];
+        });
       expect(active).toHaveLength(2);
       const values = [...Array(f.runtime.audio.compressorNodeCount()).keys()]
-        .filter(i => !f.runtime.audio.workletNode(i)?.closed).map(i => f.runtime.audio.compressorThreshold(i));
+        .flatMap(i => f.runtime.audio.workletNode(i)?.closed ? [] : [f.runtime.audio.compressorThreshold(i)]);
       expect(values.sort()).toEqual([-42, -25].sort());
     } finally { f.close(); }
   });

@@ -557,8 +557,8 @@ const readEntry = (value: LocalProjectStoredValue): SharedOutboxEntry | null => 
 
 const summarizeOutboxRows = (rows: LocalProjectSyncStateRow[], userId: string) => (
   readOutboxEntries(rows, userId).reduce<SharedOutboxSummary>((acc, entry) => {
-    if (entry.status === 'pending') return { ...acc, pending: acc.pending + 1 }
-    if (entry.status === 'failed' || entry.status === 'dead-letter') return { ...acc, failed: acc.failed + 1 }
+    if (entry.status === 'pending') acc.pending += 1
+    else if (entry.status === 'failed' || entry.status === 'dead-letter') acc.failed += 1
     return acc
   }, { pending: 0, failed: 0 })
 )

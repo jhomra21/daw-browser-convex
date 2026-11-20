@@ -1094,10 +1094,10 @@ test('B6f5 the v2 host keeps a pending live acknowledgement across an adoption p
   host.handleMessage({ version: 2, type: 'processor-events', requestId: 9, revision: 1, epoch: 1, sequence: 1,
     events: [{ processorInstanceId: 31, parameterTarget: 1, frameOffset: 0, value: -6 }] })
   const adoption = adoptRevision(host, messages, graph(2), [])
-  const acknowledgedBeforeRender = messages.filter((message) => message.type === 'processor-events-applied').map((message) => message.result)
+  const acknowledgedBeforeRender = messages.flatMap((message) => message.type === 'processor-events-applied' ? [message.result] : [])
   const blocks = [renderLeft(host), renderLeft(host), renderLeft(host)]
   expect([adoption.published, acknowledgedBeforeRender,
-    messages.filter((message) => message.type === 'processor-events-applied').map((message) => message.result)])
+    messages.flatMap((message) => message.type === 'processor-events-applied' ? [message.result] : [])])
     .toEqual(['published', [], ['applied']])
   expect(blocks[2].at(-1)).toBeCloseTo(10 ** (-6 / 20), 3)
 })

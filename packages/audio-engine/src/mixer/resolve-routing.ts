@@ -58,7 +58,7 @@ function pathTouchesSolo(path: string[], soloedIds: Set<string>) {
 }
 
 function resolveSoloRoutingState(channels: ResolvedChannelRouting[]): SoloRoutingState | null {
-  const soloedIds = new Set(channels.filter(({ channel }) => channel.soloed).map(({ channel }) => channel.id))
+  const soloedIds = new Set(channels.flatMap(({ channel }) => channel.soloed ? [channel.id] : []))
   if (soloedIds.size === 0) return null
 
   const outputTargetByChannelId = new Map(

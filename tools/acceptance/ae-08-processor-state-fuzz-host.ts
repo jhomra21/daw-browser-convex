@@ -106,6 +106,12 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
   let progress: NativeScheduleProgress | undefined
   // A frame already in IPC when later ones were rendered: `deliver-held-progress` delivers it after them.
   let heldProgress: NativeScheduleProgress | undefined
+  // Progress frames are handed out and held by reference, so a new frame replaces the old one instead of mutating it.
+  const advancedProgress = (frame: NativeScheduleProgress): NativeScheduleProgress => ({
+    ...frame,
+    progressSequence: ++progressSequence,
+    admissionCapacityGeneration: capacityGeneration,
+  })
   let transport: NativeHostTransport | undefined
   let lastTransport: NativeHostTransport | undefined
   const contextHistory: NativeHostTransport[] = []
@@ -418,7 +424,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
         assets.delete(id); capacityGeneration++
         const lease = leases.get(id)
         if (lease) lease.reclaimed = true
-        if (progress) progress = { ...progress, progressSequence: ++progressSequence, admissionCapacityGeneration: capacityGeneration }
+        if (progress) progress = advancedProgress(progress)
         record({ event: "reclaimed", id, capacityGeneration })
       }
     }
@@ -877,7 +883,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
     } else if (action.kind === "grant-capacity") {
       // The only fact that legitimately reopens a capacity-blocked adoption: native reports more admission capacity.
       capacityGeneration++
-      if (progress) progress = { ...progress, progressSequence: ++progressSequence, admissionCapacityGeneration: capacityGeneration }
+      if (progress) progress = advancedProgress(progress)
       record({ event: "capacity-granted", capacityGeneration })
     } else return false
     return true

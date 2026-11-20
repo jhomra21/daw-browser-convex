@@ -1661,9 +1661,9 @@ const step3B1 = promotionCoverage.map(promotion => {
   return { ...promotion, evidence, status: "green" }
 })
 const completedPromotions = new Set(step3B1.map(row => row.name))
-const threeB1Only = requiredPromotions.filter(row => !completedPromotions.has(row.name)).map(({ name, location }) => ({
+const threeB1Only = requiredPromotions.flatMap(({ name, location }) => completedPromotions.has(name) ? [] : [{
   name, location, reason: "Full 3B-1 adapter/owner/controller witness and deliberate mutation evidence are not yet complete.",
-}))
+}])
 if (requiredPromotions.length !== 27 || new Set(requiredPromotions.map(row => row.name)).size !== 27)
   throw new Error("The 27 required promotions changed")
 

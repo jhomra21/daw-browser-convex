@@ -146,7 +146,7 @@ const requireUngroupable = (
     throw new Error('Failed to ungroup local timeline because the group track contains clips.')
   }
   const directChildIds = new Set(
-    tracks.filter((track) => track.groupId === group.id).map((track) => track.id),
+    tracks.flatMap((track) => track.groupId === group.id ? [track.id] : []),
   )
   const hasExternalReference = tracks.some((track) => (
     track.id !== group.id

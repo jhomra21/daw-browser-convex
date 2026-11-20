@@ -124,16 +124,14 @@ const snapshotForTracks = (
         masterVolume: 1,
         masterFxInstances: [],
         trackFx: Object.fromEntries(
-          tracks
-            .filter((track) => track.kind === "instrument")
-            .map((track) => [track.id, {
-              instances: [],
-              instrument: {
-                kind: "synth",
-                instanceId: `synth:${track.id}`,
-                params: synthParams,
-              },
-            }]),
+          tracks.flatMap((track) => track.kind === "instrument" ? [[track.id, {
+            instances: [],
+            instrument: {
+              kind: "synth",
+              instanceId: `synth:${track.id}`,
+              params: synthParams,
+            },
+          }]] : []),
         ),
       },
       automationEnvelopes: [],

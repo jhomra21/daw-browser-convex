@@ -219,10 +219,10 @@ const analyzeRow = (row: string, events: readonly HostEvent[], edits: z.infer<ty
 const assetEvidenceFailures = (row: string, assetFrame: number | undefined, publications: readonly Publication[]): Failure[] => [
   ...(assetFrame !== undefined && !publications.some((publication) => publication.publicationFrame === assetFrame)
     ? [inputFailure(row, `the continuity analysis places an asset at frame ${assetFrame}, but no publication has that frame`)] : []),
-  ...publications.filter((publication) => (publication.publicationFrame === assetFrame) !== publication.asset)
-    .map((publication) => inputFailure(row, publication.asset
+  ...publications.flatMap((publication) => (publication.publicationFrame === assetFrame) !== publication.asset
+    ? [inputFailure(row, publication.asset
       ? `revision ${publication.revision} carries asset-install, but the continuity analysis places no asset there`
-      : `revision ${publication.revision} delivers the asset, but carries no asset-install`)),
+      : `revision ${publication.revision} delivers the asset, but carries no asset-install`)] : []),
 ]
 
 const judgePublication = (publication: Publication): Failure[] => {

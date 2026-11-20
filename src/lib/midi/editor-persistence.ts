@@ -205,7 +205,7 @@ export const applyMidiEditorOperations = (
   midi: NormalizedLegacyMidiClip,
   operations: readonly MidiEditorOperation[],
 ): NormalizedLegacyMidiClip => {
-  let notes = [...midi.notes].map((note) => ({ ...note, channel: note.channel ?? 1 }))
+  let notes = midi.notes.map((note) => ({ ...note, channel: note.channel ?? 1 }))
   let mappings = [...midi.mappings]
   for (const operation of operations) {
     if (operation.kind === 'set-input-channel') {
@@ -214,7 +214,7 @@ export const applyMidiEditorOperations = (
     }
     if (operation.kind === 'insert-mapping') {
       const existing = mappings.find((mapping) => mapping.id === operation.mapping.id)
-      if (!existing) mappings = [...mappings, operation.mapping]
+      if (!existing) mappings.push(operation.mapping)
       else if (JSON.stringify(existing) !== JSON.stringify(operation.mapping)) {
         throw new MidiEditorConflictError(`MIDI mapping "${operation.mapping.id}" already exists with different values.`)
       }
@@ -234,7 +234,7 @@ export const applyMidiEditorOperations = (
     if (operation.kind === 'insert') {
       const index = notes.findIndex((note) => note.id === operation.note.id)
       if (index < 0) {
-        notes = [...notes, operation.note]
+        notes.push(operation.note)
       } else if (!sameNote({ ...notes[index]!, id: notes[index]!.id ?? operation.note.id }, operation.note)) {
         throw new MidiEditorConflictError(`MIDI note "${operation.note.id}" already exists with different values.`)
       }

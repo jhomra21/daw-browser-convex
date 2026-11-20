@@ -216,7 +216,7 @@ const targetSchema = z.enum(["cloud", "host"]).default("cloud")
 const projectDiscoveryInputSchema = z.object({}).strict()
 const withTarget = <Schema extends z.ZodObject>(schema: Schema) => schema.extend({ target: targetSchema })
 const targetInput = (input: McpToolInput) => {
-  if (!isRecord(input)) throw new Error("Invalid control tool input.")
+  if (input === undefined || input === null || Array.isArray(input)) throw new Error("Invalid control tool input.")
   const { target, ...canonicalInput } = input
   return { target: targetSchema.parse(target), canonicalInput }
 }

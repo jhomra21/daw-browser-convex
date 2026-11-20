@@ -30,7 +30,7 @@ if (process.argv.includes("--update-baseline")) {
 }
 
 const known = countKeys((await Bun.file(baselinePath).text()).split("\n").filter(Boolean))
-const added = [...countKeys(found)].filter(([key, count]) => count > (known.get(key) ?? 0)).map(([key]) => key)
+const added = [...countKeys(found)].flatMap(([key, count]) => count > (known.get(key) ?? 0) ? [key] : [])
 if (added.length > 0) {
   console.error(`New tools type errors (${added.length}):\n${added.join("\n")}`)
   process.exit(1)

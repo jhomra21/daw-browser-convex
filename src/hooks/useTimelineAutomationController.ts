@@ -6,6 +6,7 @@ import type { LiveProcessorControlResult } from "~/lib/live-processor-control";
 import {
   automationTargetKey,
   automationEnvelopeFromRow,
+  isJsonObject as isParsedJsonObject,
   builtInOverriddenAutomationTargetKeys,
   createAutomationTarget,
   externalAutomationParameterId,
@@ -157,12 +158,12 @@ const readNumericPath = (value: JsonValue | undefined, path: readonly string[]):
 };
 
 const readEffectParameterValue = (params: JsonValue | undefined, parameterId: string): number | undefined => {
-  const object = isJsonObject(params) ? params : undefined;
-  const state = object && isJsonObject(object.state) ? object.state : object;
+  const object = isParsedJsonObject(params) ? params : undefined;
+  const state = object && isParsedJsonObject(object.state) ? object.state : object;
   const eq = parseEqBandParameterId(parameterId);
   if (eq && state && Array.isArray(state.bands)) {
-    const band = state.bands.find((entry) => isJsonObject(entry) && entry.id === eq.bandId);
-    if (!isJsonObject(band)) return undefined;
+    const band = state.bands.find((entry) => isParsedJsonObject(entry) && entry.id === eq.bandId);
+    if (!isParsedJsonObject(band)) return undefined;
     const field = eq.property === "frequencyHz" ? "frequency" : eq.property;
     return readNumericPath(band, [field]);
   }

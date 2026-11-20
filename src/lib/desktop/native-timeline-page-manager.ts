@@ -449,8 +449,8 @@ export const createNativeTimelinePageManager = (input: {
     const removed = [...sources.values()].filter((source) => ids.has(source.sessionAssetId))
     const keys = removed.map((source) => `${source.sourceAssetKey}:`)
     await Promise.allSettled([
-      ...[...inFlight].filter(([key]) => keys.some((prefix) => key.startsWith(prefix))).map(([, work]) => work),
-      ...[...readInFlight].filter(([key]) => keys.some((prefix) => key.startsWith(`read:${prefix}`))).map(([, work]) => work),
+      ...[...inFlight].flatMap(([key, work]) => keys.some((prefix) => key.startsWith(prefix)) ? [work] : []),
+      ...[...readInFlight].flatMap(([key, work]) => keys.some((prefix) => key.startsWith(`read:${prefix}`)) ? [work] : []),
     ])
     for (const source of removed) {
       if (sources.get(source.sourceAssetKey) !== source) continue

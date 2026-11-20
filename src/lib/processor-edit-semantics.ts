@@ -58,12 +58,10 @@ export const movedSynthLiveFields = (from: SynthParams, to: SynthParams): SynthP
     const value = field.read(to);
     if (Object.is(value, field.read(from))) return moved;
     const update = field.update(value);
-    return {
-      ...moved,
-      ...update,
+    return Object.assign(moved, update, {
       filter: { ...moved.filter, ...update.filter },
       ampEnvelope: { ...moved.ampEnvelope, ...update.ampEnvelope },
-    };
+    });
   }, { filter: {}, ampEnvelope: {} });
 
 const processorKindIdsByName = new Map(processorRegistry.map((processor) => [processor.name, processor.id]));

@@ -126,10 +126,10 @@ const readContinuity = async (file: string) => {
 const assetEvidenceErrors = (row: string, assetFrame: number | undefined, publications: readonly Publication[]): string[] => [
   ...(assetFrame !== undefined && !publications.some((publication) => publication.publicationFrame === assetFrame)
     ? [`${row}: the continuity analysis places an asset at frame ${assetFrame}, but no publication has that frame`] : []),
-  ...publications.filter((publication) => (publication.publicationFrame === assetFrame) !== publication.asset)
-    .map((publication) => publication.asset
+  ...publications.flatMap((publication) => (publication.publicationFrame === assetFrame) !== publication.asset
+    ? [publication.asset
       ? `${row}: revision ${publication.revision} carries asset-install, but the continuity analysis places no asset there`
-      : `${row}: revision ${publication.revision} delivers the asset, but carries no asset-install`),
+      : `${row}: revision ${publication.revision} delivers the asset, but carries no asset-install`] : []),
 ]
 
 const judge = (publications: readonly Publication[], errors: readonly string[]): Verdict[] => {
@@ -150,8 +150,8 @@ const judge = (publications: readonly Publication[], errors: readonly string[]):
   const blockPhaseStats = plainBlockPhaseMs.length ? statsOf(plainBlockPhaseMs) : undefined
   const verdicts: Verdict[] = [
     verdict("inputs", [...errors, ...(publications.length ? [] : ["no seam publications found"])], `${publications.length} publications`),
-    verdict("bound-lead", publications.filter((publication) => publication.leadBlocks < LEAD_MIN_BLOCKS || publication.leadBlocks > LEAD_MAX_BLOCKS)
-      .map((publication) => `${name(publication)} lead ${publication.leadBlocks} blocks`),
+    verdict("bound-lead", publications.flatMap((publication) => publication.leadBlocks < LEAD_MIN_BLOCKS || publication.leadBlocks > LEAD_MAX_BLOCKS
+      ? [`${name(publication)} lead ${publication.leadBlocks} blocks`] : []),
     leads.length ? `${Math.min(...leads)}..${Math.max(...leads)} blocks, want ${LEAD_MIN_BLOCKS}..${LEAD_MAX_BLOCKS}` : "no publications"),
   ]
   verdicts.push(!plainStats ? skip("prepare-to-publish", "no non-asset publications") : verdict("prepare-to-publish",
@@ -164,15 +164,15 @@ const judge = (publications: readonly Publication[], errors: readonly string[]):
   verdicts.push(!blockPhaseStats ? skip("block-phase", "no non-asset publications") : info("block-phase",
     `not gated: n=${plainBlockPhaseMs.length} p50 ${blockPhaseStats.p50} range ${Math.min(...plainBlockPhaseMs)}..${blockPhaseStats.max} ms`))
   verdicts.push(!asset.length ? skip("prepare-to-publish-asset", "no asset-add publications") : verdict("prepare-to-publish-asset",
-    asset.filter((publication) => publication.prepareToPublishMs > ASSET_LIMIT_MS)
-      .map((publication) => `${name(publication)} ${publication.prepareToPublishMs} > ${ASSET_LIMIT_MS} ms`),
+    asset.flatMap((publication) => publication.prepareToPublishMs > ASSET_LIMIT_MS
+      ? [`${name(publication)} ${publication.prepareToPublishMs} > ${ASSET_LIMIT_MS} ms`] : []),
     `n=${asset.length} max ${Math.max(...asset.map((publication) => publication.prepareToPublishMs))} ms`))
-  verdicts.push(verdict("rebases", publications.filter((publication) => publication.rebaseRequests > 0)
-    .map((publication) => `${name(publication)} ${publication.rebaseRequests} rebase requests`),
+  verdicts.push(verdict("rebases", publications.flatMap((publication) => publication.rebaseRequests > 0
+    ? [`${name(publication)} ${publication.rebaseRequests} rebase requests`] : []),
   `${publications.reduce((sum, publication) => sum + publication.rebaseRequests, 0)} rebase requests, ${publications.reduce((sum, publication) => sum + publication.resentRequests, 0)} re-sent Publish`))
   verdicts.push(!raises.length ? skip("raise-move-complete", "no raises in this run") : verdict("raise-move-complete",
-    raises.filter((publication) => publication.completeFrames === undefined || publication.completeFrames > publication.allowedCompleteFrames)
-      .map((publication) => `${name(publication)} ${publication.completeFrames ?? "no completion"} > ${publication.allowedCompleteFrames} frames`),
+    raises.flatMap((publication) => publication.completeFrames === undefined || publication.completeFrames > publication.allowedCompleteFrames
+      ? [`${name(publication)} ${publication.completeFrames ?? "no completion"} > ${publication.allowedCompleteFrames} frames`] : []),
     `n=${raises.length} max ${Math.max(...raises.map((publication) => publication.completeFrames ?? 0))} frames`))
   return verdicts
 }

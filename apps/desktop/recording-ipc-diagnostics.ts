@@ -66,11 +66,11 @@ export const createRendererTrafficDiagnostics = (startedAt: number) => {
       const seconds = Math.max(0.001, (at - startedAt) / 1_000)
       return {
         seconds,
-        channels: Object.fromEntries([...channels].filter(([, value]) => value.count > 0).map(([channel, value]) => [channel, {
+        channels: Object.fromEntries([...channels].flatMap(([channel, value]) => value.count > 0 ? [[channel, {
           count: value.count,
           messagesPerSecond: value.count / seconds,
           estimatedBytesPerSecond: value.bytes / seconds,
-        }])),
+        }]] : [])),
       }
     },
   }

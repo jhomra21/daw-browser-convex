@@ -83,10 +83,9 @@ export const deriveTrackUngroupAfterStatesV1 = (
   tracks: readonly NormalizedTrackControlStateV1[],
   input: { groupId: string; groupIndex: number; parentGroupId?: string },
 ) => tracks
-  .filter((track) => track.id !== input.groupId)
-  .map((track) => ({
+  .flatMap((track) => track.id === input.groupId ? [] : [{
     ...track,
     index: track.index > input.groupIndex ? track.index - 1 : track.index,
     groupId: track.groupId === input.groupId ? input.parentGroupId : track.groupId,
     outputTargetId: track.outputTargetId === input.groupId ? input.parentGroupId : track.outputTargetId,
-  }))
+  }])

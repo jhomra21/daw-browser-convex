@@ -576,8 +576,8 @@ export function createParameterGestureOwner<Target, Params>(adapter: ParameterGe
     failures = failures.filter(failure => projectId && failure.projectId !== projectId);
     if (surfaced.length) throw new ParameterReleaseFailedError(surfaced);
     return {
-      unanswered: [...receipts].filter(entry => live(entry.key, entry.lifetime) && (!projectId || entry.lifetime.projectId === projectId))
-        .map(entry => ({ target: entry.target, receipt: entry.registration.receipt })),
+      unanswered: [...receipts].flatMap(entry => live(entry.key, entry.lifetime) && (!projectId || entry.lifetime.projectId === projectId)
+        ? [{ target: entry.target, receipt: entry.registration.receipt }] : []),
       admitted: [...echoes.values()].flatMap(list => list.flatMap(echo => echo.write.kind === "admitted"
         ? [{ target: echo.record.target, entryId: echo.write.entryId }] : [])),
     };
@@ -627,6 +627,6 @@ export function createParameterGestureOwner<Target, Params>(adapter: ParameterGe
     provisional: target => { const cell = readCell(adapter.key(target)); return cell?.removed ? undefined : cell?.overlay ?? cell?.draft; },
     // Observed rows are model bookkeeping, not retained delivery lanes or installed-content knowledge.
     retained: () => new Set([...lanes.keys(), ...echoes.keys(), ...gestures.keys(), ...queue.map(record => record.key),
-      ...[...receipts].filter(entry => live(entry.key, entry.lifetime)).map(entry => entry.key)]).size,
+      ...[...receipts].flatMap(entry => live(entry.key, entry.lifetime) ? [entry.key] : [])]).size,
   };
 }

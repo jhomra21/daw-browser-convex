@@ -360,7 +360,5 @@ export const trackIdsInYRange = (
   const top = Math.min(startY, endY)
   const bottom = Math.max(startY, endY)
 
-  return rows
-    .filter((row) => row.topPx < bottom && row.topPx + row.heightPx > top)
-    .map((row) => row.trackId)
+  return rows.flatMap((row) => row.topPx < bottom && row.topPx + row.heightPx > top ? [row.trackId] : [])
 }

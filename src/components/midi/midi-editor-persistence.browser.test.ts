@@ -727,7 +727,7 @@ test('MIDI editor pointer-created notes persist in local IndexedDB and survive r
   expect(duplicateCopies).toHaveLength(1)
   expect(new Set(duplicateCopies.map((note) => note.id)).size).toBe(1)
   expect(duplicateCopies.map(({ beat, length, pitch, velocity, channel }) => ({ beat, length, pitch, velocity, channel })))
-    .toEqual(duplicateSources.filter((note) => note.beat + 2 < 8).map(({ beat, length, pitch, velocity, channel }) => ({ beat: beat + 2, length, pitch, velocity, channel })))
+    .toEqual(duplicateSources.flatMap(({ beat, length, pitch, velocity, channel }) => beat + 2 < 8 ? [{ beat: beat + 2, length, pitch, velocity, channel }] : []))
   expect(duplicateUndo?.notes).toHaveLength(5)
   expect(duplicateRedo?.notes).toHaveLength(6)
   expect(selectedBeforeDelete?.selectedNoteCount).toBe(2)

@@ -174,7 +174,7 @@ export default function createControllerFixture(
   let compileUnsupported = false
   let compileCount = 0
   let productFaults = 0
-  const heldAssets = () => new Set([...h.assets].filter(([, asset]) => !asset.released).map(([id]) => id))
+  const heldAssets = () => new Set([...h.assets].flatMap(([id, asset]) => !asset.released ? [id] : []))
   // What a refusal left behind, to count the attempt a returning capacity buys from there.
   let afterRefusal = { compiles: 0, prepares: 0 }
   const nativeMaster = (context: string | undefined) => ({ native: masterGainOf(h.active), compiled: Math.fround(contextVolume(context)) })
@@ -961,7 +961,7 @@ export default function createControllerFixture(
       // A schedule publication removed a clip: the controller released its asset after the promote. Native reclaims it once
       // nothing blocks ReclaimAssets, and a published predecessor's plan blocks it until a Retire or the next Prepare.
       checked("I5")
-      const waiting = [...h.assets].filter(([, asset]) => asset.releaseRequested).map(([id]) => id)
+      const waiting = [...h.assets].flatMap(([id, asset]) => asset.releaseRequested ? [id] : [])
       record({ witness: mode, waiting, retired: h.retired?.revision, capacityGeneration: h.capacityGeneration })
       if (waiting.length)
         fail("I5", `${waiting.length} released asset(s) never reclaimed${h.retired ? ` while the predecessor plan ${h.retired.revision} stays unretired` : ""}`, "live", "retirement-starves-reclamation")

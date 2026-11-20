@@ -342,11 +342,8 @@ export const cleanupSurvivors = (
   processes: readonly ProcessIdentity[],
 ): number[] => {
   const recordedProcesses = new Map(plan.recordedProcesses.map((process) => [process.pid, process]))
-  return processes
-    .filter((process) => {
-      const recorded = recordedProcesses.get(process.pid)
-      return recorded !== undefined
-        && process.command === recorded.command
-    })
-    .map((process) => process.pid)
+  return processes.flatMap((process) => {
+    const recorded = recordedProcesses.get(process.pid)
+    return recorded !== undefined && process.command === recorded.command ? [process.pid] : []
+  })
 }

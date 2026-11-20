@@ -456,9 +456,7 @@ export async function loadInstrumentExportBuffers(
   )
   if (budget) {
     budget.ensureCapacityFor(new Map(
-      jobs
-        .filter((job) => !leasedExisting(job))
-        .map((job) => [job.key, job.bytes]),
+      jobs.flatMap((job) => leasedExisting(job) ? [] : [[job.key, job.bytes]]),
     ))
   }
   for (const job of jobs) {

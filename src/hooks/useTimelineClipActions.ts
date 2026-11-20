@@ -220,7 +220,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       const groupStart = Math.min(...sorted.map(clip => clip.startSec))
       const groupEnd = Math.max(...sorted.map(clip => clip.startSec + clip.duration))
       const baseStart = groupEnd + 0.0001
-      let simulatedClips = track.clips.map(clip => ({ ...clip }))
+      const simulatedClips = track.clips.map(clip => ({ ...clip }))
 
       for (const clip of sorted) {
         if (!isClipCompatibleWithTrack(track, clip)) continue
@@ -237,7 +237,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
             startSec: safeStart,
           },
         })
-        simulatedClips = [...simulatedClips, { ...clip, startSec: safeStart }]
+        simulatedClips.push({ ...clip, startSec: safeStart })
       }
     }
 

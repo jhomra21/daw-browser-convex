@@ -40,7 +40,9 @@ export const mergeLaunches = (rows: readonly Row[]) => rows.reduce<Row[][]>((lau
   const joins = last && tail && tail.fixture !== null && tail.fixture === row.fixture && tail.latencyClass === row.latencyClass
     && tail.repeat === row.repeat && row.repeat !== "launch" && tail.transport === undefined && row.transport === undefined && tail.periodSec === row.periodSec && tail.cycle.at(-1)?.state === row.start
     && String(tail.prepare) === String(row.prepare) && tail.device === row.device
-  return joins ? [...launches.slice(0, -1), [...last, row]] : [...launches, [row]]
+  if (joins) last.push(row)
+  else launches.push([row])
+  return launches
 }, [])
 
 // The launches of a run: a row that repeats by launch gives one launch per repetition.
@@ -113,8 +115,8 @@ const settledOn = (event: HostEvent | undefined): Settled | undefined => event &
 // The automation lane events in the schedule windows the main process sent for a publication's revision since the edit
 // (apps/desktop/audio-host.ts logs one schedule-window line per window).
 const laneEventsOf = (events: readonly HostEvent[], publish: HostEvent, sinceWallMs: number) =>
-  events.filter((window) => window.event === "schedule-window" && window.revision === publish.revision && window.wallMs >= sinceWallMs && window.wallMs <= publish.wallMs)
-    .map((window) => window.processorAutomationEvents)
+  events.flatMap((window) => window.event === "schedule-window" && window.revision === publish.revision && window.wallMs >= sinceWallMs && window.wallMs <= publish.wallMs
+    ? [window.processorAutomationEvents] : [])
 export const publicationComplete = (events: readonly HostEvent[], sinceWallMs: number, raise: boolean, settle?: Settle): Settled | undefined => {
   if (settle === "sequence") return settledOn(events.find((event) => event.event === "processor-sequence-applied" && event.frame > 0 && event.wallMs >= sinceWallMs))
   if (settle === "editor-open") return settledOn(events.find((event) => event.event === "vst-editor-state" && event.open === true && event.wallMs >= sinceWallMs))
@@ -353,8 +355,8 @@ export const editBreakdowns = (events: readonly HostEvent[], edits: readonly { i
         .map((event) => ({ name: event.event, wallMs: event.wallMs })),
       { name: "graph-prepare", wallMs: prepare.wallMs },
     ]
-    const hydrated = sent ? events.filter((event) => hydrationMarkNames.some((name) => name === event.event) && event.key === sent.key
-      && event.wallMs >= prepare.wallMs && event.wallMs <= request.wallMs).map((event) => ({ name: event.event, wallMs: event.wallMs })) : []
+    const hydrated = sent ? events.flatMap((event) => hydrationMarkNames.some((name) => name === event.event) && event.key === sent.key
+      && event.wallMs >= prepare.wallMs && event.wallMs <= request.wallMs ? [{ name: event.event, wallMs: event.wallMs }] : []) : []
     return { index: edit.index, name: edit.name, origin,
       toPrepareMs: prepare.wallMs - startMs, toRequestMs: request.wallMs - startMs, toPublishMs: publish.wallMs - startMs,
       spans: spansBetween(points),

@@ -1,4 +1,4 @@
-// oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters
+// oxlint-disable anti-slop/no-runtime-typeof
 
 export type ExtensionId = string
 export type ContributionId = string

@@ -507,8 +507,8 @@ export const createSchedulePublication = (tx: PublicationTransaction, facts: Sch
         publicationAbort.signal.throwIfAborted()
         tx.discardAddedSources = pageManager.addSources(sources)
         addedTimelineSources = sources.length > 0
-        await host.prepareMappedResources(mappedResources, pageManager, sources.filter((source) => source.immutableAfterPreparation)
-          .map((source) => ({ sourceAssetKey: source.sourceAssetKey, startFrame: 0, endFrame: source.frameCount })),
+        await host.prepareMappedResources(mappedResources, pageManager, sources.flatMap((source) => source.immutableAfterPreparation
+          ? [{ sourceAssetKey: source.sourceAssetKey, startFrame: 0, endFrame: source.frameCount }] : []),
         publicationAbort.signal, false, hydrationMark)
         host.releaseInstrumentScope(tx.stagedMemoryScope)
         hydrationMark?.("asset-sources-ready")

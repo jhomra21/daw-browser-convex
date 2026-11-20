@@ -189,15 +189,14 @@ export const normalizeDragMoveSet = (
 
   return tracks
     .filter((track) => selectedIds.has(track.id))
-    .filter((track) => {
+    .flatMap((track) => {
       let cursor = parentOf.get(track.id)
       while (cursor) {
-        if (selectedIds.has(cursor)) return false
+        if (selectedIds.has(cursor)) return []
         cursor = parentOf.get(cursor)
       }
-      return true
+      return [track.id]
     })
-    .map((track) => track.id)
 }
 
 export const planTrackReorder = (input: {

@@ -462,9 +462,7 @@ describe('unified waveform painter', () => {
         channelCount: 1,
         style: { minimumThicknessCssPx: 0.5, backingScaleY: 2 },
       })
-      return commands
-        .filter((command) => command[0] === 'moveTo' || command[0] === 'lineTo')
-        .map((command) => command[2])
+      return commands.flatMap((command) => command[0] === 'moveTo' || command[0] === 'lineTo' ? [command[2]] : [])
     }
     const intervalY = render({
       kind: 'intervals',

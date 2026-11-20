@@ -420,12 +420,12 @@ const unsupportedProcessorReasons = (
     : (kind: string) => portableWasmCapabilityMatrix.processorKinds.includes(kind)
   const targetLabel = capabilityTarget === 'native' ? 'native audio core' : 'portable core'
   return [
-    ...instances
-    .filter((instance) => !supportedProcessor(instance.kind))
-    .map((instance) => `${instance.id}: processor "${instance.kind}" is not supported by the ${targetLabel}.`),
-    ...Object.entries(fx?.trackFx ?? {})
-      .filter(([, entry]) => !allowInstruments && (entry.arp || entry.synth || entry.instrument))
-      .map(([trackId]) => `${trackId}: instrument state is not supported by the portable core.`),
+    ...instances.flatMap((instance) => supportedProcessor(instance.kind)
+      ? []
+      : [`${instance.id}: processor "${instance.kind}" is not supported by the ${targetLabel}.`]),
+    ...Object.entries(fx?.trackFx ?? {}).flatMap(([trackId, entry]) => !allowInstruments && (entry.arp || entry.synth || entry.instrument)
+      ? [`${trackId}: instrument state is not supported by the portable core.`]
+      : []),
   ]
 }
 

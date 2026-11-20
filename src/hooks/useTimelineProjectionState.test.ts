@@ -313,8 +313,8 @@ test.skipIf(isServer)('C0F a track-delete undo while native plays publishes once
     const report = publications.map((publication, index) => {
       const previous = publications[index - 1]?.view ?? baseline
       const paths = new Set([...previous.keys(), ...publication.view.keys()])
-      return { action: publication.action, changed: [...paths].filter((path) => previous.get(path) !== publication.view.get(path))
-        .map((path) => `${path}: ${previous.get(path) ?? '(absent)'} -> ${publication.view.get(path) ?? '(absent)'}`) }
+      return { action: publication.action, changed: [...paths].flatMap((path) => previous.get(path) !== publication.view.get(path)
+        ? [`${path}: ${previous.get(path) ?? '(absent)'} -> ${publication.view.get(path) ?? '(absent)'}`] : []) }
     })
     console.log('C0F-RRT', JSON.stringify({ actions, calls: f.host.calls, compiledAt: compiles.map((entry) => entry.at),
       compilations: f.compilations.map((entry) => entry.mode), report }, null, 1))
@@ -471,8 +471,8 @@ const c0gTrackDeleteUndo = async (variant: 'audio' | 'midi' | 'sampleUrl', endin
     const report = publications.map((publication, index) => {
       const previous = publications[index - 1]?.view ?? baseline
       const paths = new Set([...previous.keys(), ...publication.view.keys()])
-      return { action: publication.action, changed: [...paths].filter((path) => previous.get(path) !== publication.view.get(path))
-        .map((path) => `${path}: ${previous.get(path) ?? '(absent)'} -> ${publication.view.get(path) ?? '(absent)'}`) }
+      return { action: publication.action, changed: [...paths].flatMap((path) => previous.get(path) !== publication.view.get(path)
+        ? [`${path}: ${previous.get(path) ?? '(absent)'} -> ${publication.view.get(path) ?? '(absent)'}`] : []) }
     })
     const play = actions.find((entry) => entry.name === 'play')
     const resumed = play ? f.host.calls.slice(play.from, play.to) : []

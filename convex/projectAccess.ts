@@ -4,6 +4,7 @@ import type { UserIdentity } from "convex/server";
 import { v } from "convex/values";
 import { isProjectRole, type ProjectRole } from "@daw-browser/shared";
 import { z } from "zod";
+import { fail } from "./errors";
 import { getProjectRow } from "./projectRows";
 
 type RoomSummary = {
@@ -139,7 +140,7 @@ export async function requireProjectRole(
   const role = await getProjectRole(ctx, projectId, userId);
 
   if (role && allowed.includes(role)) return role;
-  throw new Error("You do not have permission for this project action.");
+  fail("forbidden", "You do not have permission for this project action.");
 }
 
 export const roleForUser = query({
@@ -157,7 +158,7 @@ export async function requireProjectAccess(
   userId: string,
 ) {
   if (await hasProjectAccess(ctx, projectId, userId)) return;
-  throw new Error("You do not have access to this room.");
+  fail("forbidden", "You do not have access to this room.");
 }
 
 export async function requireAuthenticatedUserId(ctx: AuthenticatedCtx) {
@@ -167,7 +168,7 @@ export async function requireAuthenticatedUserId(ctx: AuthenticatedCtx) {
 export async function requireAuthenticatedIdentity(ctx: AuthenticatedCtx) {
   const identity = await ctx.auth.getUserIdentity();
 
-  if (!identity) throw new Error("Authentication required.");
+  if (!identity) fail("authorization", "Authentication required.");
 
   const parsedIdentity = z.object({
     subject: z.string(),
@@ -178,7 +179,7 @@ export async function requireAuthenticatedIdentity(ctx: AuthenticatedCtx) {
     dawWorker: z.boolean().optional(),
   }).safeParse(identity);
 
-  if (!parsedIdentity.success) throw new Error("Authentication claims are invalid.");
+  if (!parsedIdentity.success) fail("authorization", "Authentication claims are invalid.");
 
   return {
     subject: parsedIdentity.data.subject,
@@ -193,7 +194,7 @@ export async function requireAuthenticatedIdentity(ctx: AuthenticatedCtx) {
 export async function requireWorkerIdentity(ctx: AuthenticatedCtx) {
   const identity = await requireAuthenticatedIdentity(ctx);
 
-  if (!identity.dawWorker) throw new Error("Worker access required.");
+  if (!identity.dawWorker) fail("forbidden", "Worker access required.");
 
   return identity;
 }
@@ -212,7 +213,7 @@ export async function requireProjectAdminCapability(
   userId: string,
 ) {
   if (await hasProjectAdminCapability(ctx, projectId, userId)) return;
-  throw new Error("Only project owners can update room-level settings.");
+  fail("forbidden", "Only project owners can update room-level settings.");
 }
 
 export async function requireMasterBusWriteAccess(

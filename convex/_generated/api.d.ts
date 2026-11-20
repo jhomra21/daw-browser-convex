@@ -22,6 +22,7 @@ import type * as controlProjection from "../controlProjection.js";
 import type * as controlRecovery from "../controlRecovery.js";
 import type * as controlSnapshot from "../controlSnapshot.js";
 import type * as effects from "../effects.js";
+import type * as errors from "../errors.js";
 import type * as exports from "../exports.js";
 import type * as mixerChannels from "../mixerChannels.js";
 import type * as ownerships from "../ownerships.js";
@@ -65,6 +66,7 @@ declare const fullApi: ApiFromModules<{
   controlRecovery: typeof controlRecovery;
   controlSnapshot: typeof controlSnapshot;
   effects: typeof effects;
+  errors: typeof errors;
   exports: typeof exports;
   mixerChannels: typeof mixerChannels;
   ownerships: typeof ownerships;

@@ -64,7 +64,7 @@ test('classifies locked-track clip deletion as terminal forbidden', async () => 
     convex: {
       query: async () => ({ tracks: [], clips: [] }),
       mutation: async () => {
-        throw new Error('Actor cannot delete clips on a locked track.')
+        throw { data: { version: 'v1', code: 'forbidden', message: 'Actor cannot delete clips on a locked track.' } }
       },
     },
   }, removeOperation)

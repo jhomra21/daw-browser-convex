@@ -1,8 +1,9 @@
-import { ConvexError, v } from "convex/values";
+import { v } from "convex/values";
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import {
-  canonicalJson, controlErrorSchemaV1, controlLimitsV1, resumableUploadLimitsV1,
+  canonicalJson, controlLimitsV1, resumableUploadLimitsV1,
 } from "@daw-browser/control";
+import { fail } from "./errors";
 import { requireProjectRow, withProjectEdit } from "./projectRows";
 import {
   requireAuthenticatedIdentity, requireAuthenticatedUserId, requireProjectRole,
@@ -24,13 +25,6 @@ const mimeTypes = new Set([
   "audio/mpeg", "audio/wav", "audio/x-wav", "audio/flac",
   "audio/ogg", "audio/mp4", "audio/aac", "audio/webm",
 ]);
-
-const fail = (
-  code: "invalid-request" | "validation" | "idempotency-conflict" | "forbidden" | "authorization" | "not-found" | "limit-exceeded" | "internal",
-  message: string,
-): never => {
-  throw new ConvexError(controlErrorSchemaV1.parse({ version: "v1", code, message }));
-};
 
 const validName = (value: string) => {
   const name = value.trim();

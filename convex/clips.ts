@@ -17,6 +17,7 @@ import {
   effectiveControlClipName,
   effectiveControlTimingOffset,
 } from './controlEffectiveValues'
+import { fail } from './errors'
 import { audioWarpValidator, clipFadesValidator, midiValidator } from './validators'
 import { normalizeClipFades, type ClipFades } from '@daw-browser/timeline-core/clip-fades'
 import { hashCanonicalJsonSyncV1 } from '@daw-browser/control'
@@ -646,7 +647,7 @@ const pruneClipDeletionRecoveries = async (
     activeProject.length + input.reserve > maxClipDeletionRecoveriesPerProject
     || activeActor.length + input.reserve > maxClipDeletionRecoveriesPerActorProject
   ) {
-    throw new Error('Clip deletion recovery limit exceeded.')
+    fail('limit-exceeded', 'Clip deletion recovery limit exceeded.')
   }
 }
 
@@ -1458,13 +1459,13 @@ const removeManyForUser = async (
   projectId: string,
   deleteOperationId: string,
 ) => {
-  if (clipIds.length === 0) throw new Error('Clip deletion requires at least one clip.')
+  if (clipIds.length === 0) fail('validation', 'Clip deletion requires at least one clip.')
   const clipIdTexts = new Set<string>()
 
   for (const clipId of clipIds) {
     const clipIdText = String(clipId)
 
-    if (clipIdTexts.has(clipIdText)) throw new Error('Clip deletion cannot contain duplicate clip IDs.')
+    if (clipIdTexts.has(clipIdText)) fail('validation', 'Clip deletion cannot contain duplicate clip IDs.')
     clipIdTexts.add(clipIdText)
   }
 
@@ -1478,11 +1479,11 @@ const removeManyForUser = async (
 
   for (const { clipId, ownership } of ownerships) {
     if (!ownership) {
-      throw new Error(`Clip deletion target was not found: ${String(clipId)}.`)
+      fail('not-found', `Clip deletion target was not found: ${String(clipId)}.`)
     }
 
     if (ownership.clip.projectId !== projectId) {
-      throw new Error('Clip deletion targets must belong to the requested project.')
+      fail('validation', 'Clip deletion targets must belong to the requested project.')
     }
 
     if (ownership.owner.ownerUserId !== userId) {
@@ -1494,7 +1495,7 @@ const removeManyForUser = async (
       }
 
       if (!canWrite) {
-        throw new Error('Actor cannot delete one or more clips.')
+        fail('forbidden', 'Actor cannot delete one or more clips.')
       }
     }
 
@@ -1503,7 +1504,7 @@ const removeManyForUser = async (
 
   for (const { ownership } of deletable) {
     if (await isTrackLockedByOther(ctx, ownership.clip.trackId, userId)) {
-      throw new Error('Actor cannot delete clips on a locked track.')
+      fail('forbidden', 'Actor cannot delete clips on a locked track.')
     }
   }
 
@@ -1532,7 +1533,7 @@ const removeManyForUser = async (
         recovery: { actorUserId: userId, deleteOperationId },
       })
 
-      if (!deleted.changed || !deleted.recoveryId) throw new Error('Clip deletion target changed during deletion.')
+      if (!deleted.changed || !deleted.recoveryId) fail('validation', 'Clip deletion target changed during deletion.')
       recoveries.push({ sourceClipId: clipId, recoveryId: deleted.recoveryId })
       removedClipIds.push(clipId)
     }
@@ -1576,13 +1577,13 @@ export const serverRemoveMany = mutation({
       operationId,
       isResult: (value): value is ClipDeleteResult => clipDeleteResultSchema.safeParse(value).success,
       run: async () => {
-        if (clipIds.length === 0) throw new Error('Clip deletion requires at least one clip.')
+        if (clipIds.length === 0) fail('validation', 'Clip deletion requires at least one clip.')
         const normalizedClipIds: Id<'clips'>[] = []
 
         for (const clipId of clipIds) {
           const normalized = ctx.db.normalizeId('clips', clipId)
 
-          if (!normalized) throw new Error(`Invalid clip deletion ID: ${clipId}.`)
+          if (!normalized) fail('validation', `Invalid clip deletion ID: ${clipId}.`)
           normalizedClipIds.push(normalized)
         }
 

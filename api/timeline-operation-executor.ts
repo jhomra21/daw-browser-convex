@@ -1,6 +1,6 @@
 import { api as convexApi } from '../convex/_generated/api'
 import { readSharedTimelineOperationTargets, type SharedTimelineOperation } from '@daw-browser/shared'
-import { z } from 'zod'
+import { readControlErrorV1 } from '@daw-browser/control'
 import type { createAuthenticatedConvexClient } from './convex-auth'
 
 type AuthenticatedConvexClient = Awaited<ReturnType<typeof createAuthenticatedConvexClient>>
@@ -59,70 +59,16 @@ export class TimelineOperationTargetError extends Error {
   }
 }
 
-const bulkClipDeleteErrorSchema = z.object({
-  message: z.string().optional(),
-  code: z.string().optional(),
-  cause: z.unknown().optional(),
-})
+export const classifyBulkClipDeleteError = <Failure>(error: Failure): TimelineOperationTargetError | undefined => {
+  const typed = readControlErrorV1(error)
 
-const bulkClipDeleteErrorDetails = (error: Error) => {
-  const details: Array<{ message?: string; code?: string }> = []
-  const visited = new Set<object>()
-  let currentCause: object = error
+  if (!typed) return undefined
 
-  while (true) {
-    const parsed = bulkClipDeleteErrorSchema.safeParse(currentCause)
+  if (typed.code === 'forbidden' || typed.code === 'authorization') return new TimelineOperationTargetError(typed.message, 403)
 
-    if (!parsed.success) break
-    const current = parsed.data
-
-    if (visited.has(current)) break
-    visited.add(current)
-    details.push(current)
-    const nextCause = z.object({}).passthrough().safeParse(current.cause)
-
-    if (!nextCause.success) break
-    currentCause = nextCause.data
+  if (typed.code === 'validation' || typed.code === 'not-found' || typed.code === 'limit-exceeded') {
+    return new TimelineOperationTargetError(typed.message)
   }
-
-  return details
-}
-
-export const classifyBulkClipDeleteError = (error: Error): TimelineOperationTargetError | undefined => {
-  const details = bulkClipDeleteErrorDetails(error)
-  const message = details.map((detail) => detail.message).find((value): value is string => value !== undefined)
-
-  const protectedCode = details.some((detail) => (
-    detail.code === 'forbidden'
-    || detail.code === 'access-denied'
-    || detail.code === 'track-locked'
-  ))
-
-  const protectedMessage = details
-    .map((detail) => detail.message)
-    .find((value): value is string => value !== undefined && (
-      value.includes('Actor cannot delete one or more clips.')
-      || value.includes('Actor cannot delete clips on a locked track.')
-    ))
-
-  if (protectedCode || protectedMessage) {
-    return new TimelineOperationTargetError(
-      protectedMessage ?? message ?? 'Actor cannot delete one or more clips.',
-      403,
-    )
-  }
-
-  if (!message) return undefined
-
-  if (
-    message.includes('Clip deletion requires at least one clip.')
-    || message.includes('Clip deletion cannot contain duplicate clip IDs.')
-    || message.includes('Invalid clip deletion ID:')
-    || message.includes('Clip deletion target was not found:')
-    || message.includes('Clip deletion targets must belong to the requested project.')
-    || message.includes('Clip deletion target changed during deletion.')
-    || message.includes('Clip deletion recovery limit exceeded.')
-  ) return new TimelineOperationTargetError(message)
 
   return undefined
 }
@@ -211,14 +157,7 @@ export const executeTimelineOperation = async (
           operationId: operation.payload.operationId,
         })
       } catch (error) {
-        const caughtError = z.instanceof(Error).safeParse(error)
-
-        const classified = caughtError.success
-          ? classifyBulkClipDeleteError(caughtError.data)
-          : undefined
-
-        if (classified) throw classified
-        throw error
+        throw classifyBulkClipDeleteError(error) ?? error
       }
 
     case 'clips.moveMany':

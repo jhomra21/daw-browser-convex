@@ -1,8 +1,6 @@
-import { ConvexError, v } from "convex/values";
+import { v } from "convex/values";
 import { mutation, query, type MutationCtx } from "./_generated/server";
-import {
-  controlErrorSchemaV1,
-} from "@daw-browser/control";
+import { fail } from "./errors";
 import { editProject, editProjectIf, requireProjectRow } from "./projectRows";
 import {
   requireAuthenticatedUserId, requireProjectAccess, requireProjectRole,
@@ -11,13 +9,6 @@ import { enqueueR2DeleteRows } from "./r2Deletes";
 import { findSampleRow, moveSampleFolderRow } from "./sampleRows";
 
 const maxNameLength = 120;
-
-const fail = (
-  code: "invalid-request" | "validation" | "idempotency-conflict" | "forbidden" | "authorization" | "not-found" | "limit-exceeded" | "internal",
-  message: string,
-): never => {
-  throw new ConvexError(controlErrorSchemaV1.parse({ version: "v1", code, message }));
-};
 
 const validName = (value: string) => {
   const name = value.trim();

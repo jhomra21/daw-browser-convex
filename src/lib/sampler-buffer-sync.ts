@@ -1,6 +1,6 @@
 import { createSamplerBufferCache, type AudioEngine, type EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
 import {
-  sampledInstrumentRegion,
+  resolveSampledInstrumentRegion,
   sampledInstrumentRegionBytes,
   sampledInstrumentRegionIdentity,
   sampledInstrumentRetainedBytes,
@@ -96,14 +96,10 @@ type SamplerConfig = { params: SamplerParams; instanceId?: string; projectId: st
 type GranularConfig = { params: GranularParams; instanceId?: string; projectId: string }
 
 const regionForZone = (zone: SamplerZone): RegionSpec => {
-  const region = sampledInstrumentRegion(
-    zone.sample.source,
-    zone.startSec,
-    zone.endSec ?? zone.sample.source.durationSec,
-  )
+  const { region, key } = resolveSampledInstrumentRegion(zone.sample, zone.startSec, zone.endSec)
 
   return {
-    key: sampledInstrumentRegionIdentity(zone.sample, region),
+    key,
     zone,
     ...region,
     bytes: sampledInstrumentRegionBytes(region, zone.sample.source.channelCount),

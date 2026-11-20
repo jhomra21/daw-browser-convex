@@ -1,7 +1,7 @@
 import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
 import { getExportRangeBounds, type ExportRange } from '@daw-browser/audio-engine/export-range'
 import { loadSampledInstrumentRegion } from '~/lib/sampled-instrument-region-loader'
-import { sampledInstrumentRegion, sampledInstrumentRegionBytes, sampledInstrumentRegionIdentity, validateSampledInstrumentBuffer, type SampledInstrumentBuffer } from '@daw-browser/audio-engine/sampled-instrument-region'
+import { resolveSampledInstrumentRegion, sampledInstrumentRegionBytes, sampledInstrumentRegionIdentity, validateSampledInstrumentBuffer, type SampledInstrumentBuffer } from '@daw-browser/audio-engine/sampled-instrument-region'
 import { DRUM_RACK_MAX_DECODED_BYTES } from '@daw-browser/audio-engine/drum-rack-runtime'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
@@ -156,12 +156,8 @@ export async function loadInstrumentExportBuffers(
       for (const pad of entry.instrument.params.pads) {
         const sample = pad.sample
 
-        const region = sample
-          ? sampledInstrumentRegion(sample.source, pad.startSec, pad.endSec ?? sample.source.durationSec)
-          : undefined
-
-        if (sample && region) {
-          const key = sampledInstrumentRegionIdentity(sample, region)
+        if (sample) {
+          const { region, key } = resolveSampledInstrumentRegion(sample, pad.startSec, pad.endSec)
           addConsumer(key, sampledInstrumentRegionBytes(region, sample.source.channelCount), {
             input: sample,
             bounds: region,
@@ -177,8 +173,8 @@ export async function loadInstrumentExportBuffers(
 
       for (const pad of entry.instrument.params.pads) {
         if (!pad.sample) continue
-        const region = sampledInstrumentRegion(pad.sample.source, pad.startSec, pad.endSec ?? pad.sample.source.durationSec)
-        localRegions.set(sampledInstrumentRegionIdentity(pad.sample, region), sampledInstrumentRegionBytes(region, pad.sample.source.channelCount))
+        const { region, key } = resolveSampledInstrumentRegion(pad.sample, pad.startSec, pad.endSec)
+        localRegions.set(key, sampledInstrumentRegionBytes(region, pad.sample.source.channelCount))
       }
 
       const localBytes = [...localRegions.values()].reduce((total, bytes) => total + bytes, 0)
@@ -193,8 +189,7 @@ export async function loadInstrumentExportBuffers(
       const localRegions = new Map<string, number>()
 
       for (const zone of entry.instrument.params.zones) {
-        const region = sampledInstrumentRegion(zone.sample.source, zone.startSec, zone.endSec ?? zone.sample.source.durationSec)
-        const key = sampledInstrumentRegionIdentity(zone.sample, region)
+        const { region, key } = resolveSampledInstrumentRegion(zone.sample, zone.startSec, zone.endSec)
         const bytes = sampledInstrumentRegionBytes(region, zone.sample.source.channelCount)
         localRegions.set(key, bytes)
         addConsumer(key, bytes, {
@@ -221,9 +216,8 @@ export async function loadInstrumentExportBuffers(
       if (!zone) {
         entry.granularBuffer = undefined
       } else {
-        const region = sampledInstrumentRegion(zone.sample.source, zone.startSec, zone.endSec ?? zone.sample.source.durationSec)
+        const { region, key: currentIdentity } = resolveSampledInstrumentRegion(zone.sample, zone.startSec, zone.endSec)
         const existing = entry.granularBuffer
-        const currentIdentity = sampledInstrumentRegionIdentity(zone.sample, region)
         const decodedBytes = sampledInstrumentRegionBytes(region, zone.sample.source.channelCount)
         const limit = memory.decodedLimit(entry.instrument.params.maxDecodedBytes)
         addConsumer(currentIdentity, memory.granularRetainedBytes(decodedBytes), {

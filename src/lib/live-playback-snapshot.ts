@@ -13,8 +13,7 @@ import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
 import { localizeInstrumentFx } from "@daw-browser/audio-engine/portable-export-snapshot"
 import type { AudioSourceMetadata } from "~/lib/audio-source"
 import {
-  sampledInstrumentRegion,
-  sampledInstrumentRegionIdentity,
+  resolveSampledInstrumentRegion,
   validateSampledInstrumentBuffer,
 } from "@daw-browser/audio-engine/sampled-instrument-region"
 
@@ -194,13 +193,8 @@ export const validateInstrumentBuffers = (fx: ExportFx["trackFx"]) => {
         const buffer = entry.samplerBuffers?.get(zone.id)
 
         if (!buffer) continue
-        const region = sampledInstrumentRegion(zone.sample.source, zone.startSec, zone.endSec ?? zone.sample.source.durationSec)
-        validateSampledInstrumentBuffer(
-          buffer,
-          zone.sample.source,
-          region,
-          sampledInstrumentRegionIdentity(zone.sample, region),
-        )
+        const { region, key } = resolveSampledInstrumentRegion(zone.sample, zone.startSec, zone.endSec)
+        validateSampledInstrumentBuffer(buffer, zone.sample.source, region, key)
       }
     }
 
@@ -210,30 +204,20 @@ export const validateInstrumentBuffers = (fx: ExportFx["trackFx"]) => {
         const buffer = entry.drumRackBuffers?.get(pad.id)
 
         if (!buffer) continue
-        const region = sampledInstrumentRegion(pad.sample.source, pad.startSec, pad.endSec ?? pad.sample.source.durationSec)
-        validateSampledInstrumentBuffer(
-          buffer,
-          pad.sample.source,
-          region,
-          sampledInstrumentRegionIdentity(pad.sample, region),
-        )
+        const { region, key } = resolveSampledInstrumentRegion(pad.sample, pad.startSec, pad.endSec)
+        validateSampledInstrumentBuffer(buffer, pad.sample.source, region, key)
       }
     }
 
     if (instrument?.kind === "granular" && instrument.params.zone && entry.granularBuffer) {
       const zone = instrument.params.zone
-      const region = sampledInstrumentRegion(zone.sample.source, zone.startSec, zone.endSec ?? zone.sample.source.durationSec)
+      const { region, key } = resolveSampledInstrumentRegion(zone.sample, zone.startSec, zone.endSec)
 
-      if (entry.granularBuffer.assetKey !== sampledInstrumentRegionIdentity(zone.sample, region)) {
+      if (entry.granularBuffer.assetKey !== key) {
         throw new Error(`Audio asset "${zone.sample.assetKey}" resolves inconsistently.`)
       }
 
-      validateSampledInstrumentBuffer(
-        entry.granularBuffer,
-        zone.sample.source,
-        region,
-        sampledInstrumentRegionIdentity(zone.sample, region),
-      )
+      validateSampledInstrumentBuffer(entry.granularBuffer, zone.sample.source, region, key)
     }
   }
 }

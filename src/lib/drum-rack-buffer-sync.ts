@@ -1,9 +1,8 @@
 import type { AudioEngine, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
 import { DRUM_RACK_MAX_DECODED_BYTES } from '@daw-browser/audio-engine/drum-rack-runtime'
 import {
-  sampledInstrumentRegion,
+  resolveSampledInstrumentRegion,
   sampledInstrumentRegionBytes,
-  sampledInstrumentRegionIdentity,
   validateSampledInstrumentBuffer,
   type SampledInstrumentBuffer,
 } from '@daw-browser/audio-engine/sampled-instrument-region'
@@ -52,11 +51,11 @@ type CacheEntry = {
 }
 
 const regionForSample = (sample: DrumRackPadSample, startSec: number, endSec?: number) => {
-  const region = sampledInstrumentRegion(sample.source, startSec, endSec ?? sample.source.durationSec)
+  const { region, key } = resolveSampledInstrumentRegion(sample, startSec, endSec)
 
   return {
     region,
-    key: sampledInstrumentRegionIdentity(sample, region),
+    key,
     bytes: sampledInstrumentRegionBytes(region, sample.source.channelCount),
   }
 }

@@ -60,6 +60,16 @@ export const sampledInstrumentRegion = (
   return { sourceStartFrame: startFrame, sourceEndFrame }
 }
 
+export const resolveSampledInstrumentRegion = (
+  sample: SampledInstrumentSample,
+  startSec: number,
+  endSec = sample.source.durationSec,
+) => {
+  const region = sampledInstrumentRegion(sample.source, startSec, endSec)
+
+  return { region, key: sampledInstrumentRegionIdentity(sample, region) }
+}
+
 export const sampledInstrumentRegionFrameCount = (region: SampledInstrumentRegion) => {
   const frameCount = region.sourceEndFrame - region.sourceStartFrame
 

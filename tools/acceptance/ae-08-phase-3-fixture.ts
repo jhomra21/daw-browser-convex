@@ -11,13 +11,17 @@ export const phase3Notes = { held: 69, wet: 60, deleted: 76 } as const
 
 const base = createDefaultSynthParams()
 const sine = [{ enabled: true, wave: "sine" as const, octave: 0, semitone: 0, detuneCents: 0, level: 0.7 }]
+
 // Clean sustained sines make the held and deleted contributions separable by frequency.
 const synth = compilePortableSynthState({ ...base, oscillators: sine, filter: { ...base.filter, enabled: false },
   ampEnvelope: { attackSec: 0.005, decaySec: 0.1, sustain: 1, releaseSec: 0.12 } })
+
 // The wet source ends by itself, so every run feeds the reverb identical audio.
 const pluck = compilePortableSynthState({ ...base, oscillators: sine, filter: { ...base.filter, enabled: false },
   ampEnvelope: { attackSec: 0.001, decaySec: 0.02, sustain: 0, releaseSec: 0.01 } })
+
 const reverb = normalizeReverbParams({ ...createDefaultReverbParams(), enabled: true, wet: 1, decaySec: 12 })
+
 const reverbProcessor = {
   id: "ae08-wet-reverb", kind: "reverb", kindId: 14, instanceId: 8_080, stateVersion: audioCoreContractVersion,
   state: encodeReverbProcessorState(reverb), parameterTargets: [], latencyFrames: 0, tailFrames: 48_000 * 13, bypassed: false,
@@ -26,6 +30,7 @@ const reverbProcessor = {
 const instrument = (id: string, processorOrder: AudioCoreGraphSnapshot["nodes"][number]["processorOrder"] = []) => ({
   id, kind: "instrument", inputLayout: "stereo", outputLayout: "stereo", processorOrder, latencyFrames: 0, instrument: id === "wet" ? pluck : synth,
 } satisfies AudioCoreGraphSnapshot["nodes"][number])
+
 const edge = (from: string) => ({
   version: audioCoreContractVersion, id: `edge-${from}`, fromNodeId: from, toNodeId: "master", gain: 0.3,
   kind: "output", tap: "post-fader", sidechain: false, pdcDelayFrames: 0,
@@ -44,6 +49,7 @@ const note = (nodeId: string, type: "live-note-on", sequence: number, pitch: num
 
 export const buildPhase3Fixture = () => {
   const initial = ["held", "wet", "deleted"]
+
   return {
     // Revision 1 is the baseline. 2 adds a silent connected node, 3 removes it
     // again, and 4 deletes a sounding source (the 5 ms fade).

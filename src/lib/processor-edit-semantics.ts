@@ -32,6 +32,7 @@ type SynthLiveField = {
   read: (params: SynthParams) => number;
   update: (value: number) => SynthParamsUpdate;
 };
+
 // The eight synth fields the live events carry.
 export const SYNTH_LIVE_FIELDS: readonly SynthLiveField[] = [
   { parameterId: "synth.outputGain", nativeField: "outputGain", nativeDefault: 1, nativeScale: 1,
@@ -56,19 +57,20 @@ export const SYNTH_LIVE_FIELDS: readonly SynthLiveField[] = [
 export const movedSynthLiveFields = (from: SynthParams, to: SynthParams): SynthParamsUpdate =>
   SYNTH_LIVE_FIELDS.reduce<SynthParamsUpdate>((moved, field) => {
     const value = field.read(to);
+
     if (Object.is(value, field.read(from))) return moved;
     const update = field.update(value);
-    return {
-      ...moved,
-      ...update,
+
+    return Object.assign(moved, update, {
       filter: { ...moved.filter, ...update.filter },
       ampEnvelope: { ...moved.ampEnvelope, ...update.ampEnvelope },
-    };
+    });
   }, { filter: {}, ampEnvelope: {} });
 
 const processorKindIdsByName = new Map(processorRegistry.map((processor) => [processor.name, processor.id]));
 
 export const processorEditKindId = (effect: string): number | undefined => {
   const kind = effect.replace(/^master-/, "");
+
   return kind === "instrument" ? SYNTH_KIND_ID : processorKindIdsByName.get(kind);
 };

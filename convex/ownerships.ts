@@ -14,8 +14,10 @@ const listOwnedIds = async <TableName extends "tracks" | "clips">(
     .query("ownerships")
     .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", ownerUserId))
     .collect();
+
   return rows.flatMap((row) => {
     const id = selectId(row);
+
     return id ? [id] : [];
   });
 };
@@ -26,13 +28,16 @@ export const listOwnedTrackIds = query({
   handler: async (ctx, { projectId }) => {
     const ownerUserId = await requireAuthenticatedUserId(ctx);
     const role = await getProjectRole(ctx, projectId, ownerUserId);
+
     if (canWriteProject(role)) {
       const tracks = await ctx.db
         .query("tracks")
         .withIndex("by_room_index", (q) => q.eq("projectId", projectId))
         .collect();
+
       return tracks.map((track) => track._id);
     }
+
     return await listOwnedIds(ctx, projectId, ownerUserId, (row) => row.trackId);
   },
 });
@@ -43,13 +48,16 @@ export const listOwnedClipIds = query({
   handler: async (ctx, { projectId }) => {
     const ownerUserId = await requireAuthenticatedUserId(ctx);
     const role = await getProjectRole(ctx, projectId, ownerUserId);
+
     if (canWriteProject(role)) {
       const clips = await ctx.db
         .query("clips")
         .withIndex("by_room", (q) => q.eq("projectId", projectId))
         .collect();
+
       return clips.map((clip) => clip._id);
     }
+
     return await listOwnedIds(ctx, projectId, ownerUserId, (row) => row.clipId);
   },
 });

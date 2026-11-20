@@ -41,6 +41,7 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
   const [grabOffsetSec, setGrabOffsetSec] = createSignal<number>()
   const sourceSampleRate = createMemo(() => props.clip.buffer?.sampleRate ?? props.clip.sourceSampleRate ?? 0)
   const fullViewport = createMemo(() => fitSampleDetailWaveformViewport(props.clip.duration))
+
   const overview = useSampleDetailWaveformOverview({
     clip: () => props.clip,
     cssWidthPx: widthPx,
@@ -52,15 +53,18 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
       devicePixelRatio: props.devicePixelRatio,
     }).contextScaleX,
   })
+
   const viewportRect = createMemo(() => getSampleDetailWaveformOverviewViewportRect({
     viewport: props.viewport,
     clipDurationSec: props.clip.duration,
     widthPx: widthPx(),
   }))
+
   const viewportHandle = createMemo(() => {
     const width = widthPx()
     const rect = viewportRect()
     const handleWidthPx = Math.min(width, Math.max(MINIMUM_VIEWPORT_HANDLE_PX, rect.widthPx))
+
     return {
       leftPx: Math.max(0, Math.min(width - handleWidthPx, rect.leftPx)),
       widthPx: handleWidthPx,
@@ -70,29 +74,36 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
   onMount(() => {
     const measure = () => {
       const bounds = overviewRef?.getBoundingClientRect()
+
       if (!bounds) return
       const nextWidthPx = Math.max(1, Math.floor(bounds.width))
       setWidthPx((current) => current === nextWidthPx ? current : nextWidthPx)
     }
+
     measure()
     const resizeObserver = new ResizeObserver(measure)
+
     if (overviewRef) resizeObserver.observe(overviewRef)
     onCleanup(() => resizeObserver.disconnect())
   })
 
   onCleanup(() => {
     setGrabOffsetSec(undefined)
+
     if (overviewRef && capturedPointerId !== undefined && overviewRef.hasPointerCapture(capturedPointerId)) {
       overviewRef.releasePointerCapture(capturedPointerId)
     }
+
     capturedPointerId = undefined
   })
 
   const clipTimeFromPointer = (event: Pick<PointerEvent, 'clientX'>) => {
     const element = overviewRef
+
     if (!element) return 0
     const bounds = element.getBoundingClientRect()
     const xPx = Math.max(0, Math.min(bounds.width, event.clientX - bounds.left))
+
     return sampleDetailWaveformTimeAtX({
       viewport: fullViewport(),
       xPx,
@@ -102,6 +113,7 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
 
   const moveViewportToPointer = (event: Pick<PointerEvent, 'clientX'>) => {
     const offset = grabOffsetSec()
+
     if (offset === undefined || sourceSampleRate() <= 0) return
     props.onViewportChange(moveSampleDetailWaveformOverviewViewport({
       viewport: props.viewport,
@@ -114,20 +126,26 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
 
   const draw = () => {
     const canvas = canvasRef
+
     if (!canvas) return
     const width = widthPx()
+
     const canvasSize = waveformCanvasSize({
       cssWidthPx: width,
       cssHeightPx: OVERVIEW_HEIGHT_PX,
       devicePixelRatio: props.devicePixelRatio,
     })
+
     const pxWidth = canvasSize.backingWidthPx
     const pxHeight = canvasSize.backingHeightPx
+
     if (canvas.width !== pxWidth || canvas.height !== pxHeight) {
       canvas.width = pxWidth
       canvas.height = pxHeight
     }
+
     const ctx = canvas.getContext('2d')
+
     if (!ctx) return
     ctx.setTransform(canvasSize.contextScaleX, 0, 0, canvasSize.contextScaleY, 0, 0)
     ctx.clearRect(0, 0, canvasSize.cssWidthPx, canvasSize.cssHeightPx)
@@ -141,8 +159,10 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
 
     const segments = overview.renderSegments()
     const firstSegment = segments.find((segment) => segment.data.channels.length > 0)
+
     const channelCount = firstSegment?.data.channels.length
       ?? Math.max(1, props.clip.buffer?.numberOfChannels ?? props.clip.sourceChannelCount ?? 1)
+
     const contentTop = 3
     const contentHeight = OVERVIEW_HEIGHT_PX - 6
     const channelHeight = contentHeight / channelCount
@@ -167,6 +187,7 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
 
     ctx.strokeStyle = timelineGridMajor
     ctx.lineWidth = 1
+
     for (let channel = 0; channel < channelCount; channel += 1) {
       const centerY = contentTop + channel * channelHeight + channelHeight / 2
       ctx.beginPath()
@@ -210,6 +231,7 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
         moveViewportToPointer(event)
         setGrabOffsetSec(undefined)
         capturedPointerId = undefined
+
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
           event.currentTarget.releasePointerCapture(event.pointerId)
         }
@@ -217,6 +239,7 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
       onPointerCancel={(event) => {
         setGrabOffsetSec(undefined)
         capturedPointerId = undefined
+
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
           event.currentTarget.releasePointerCapture(event.pointerId)
         }
@@ -227,11 +250,14 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
       }}
       onKeyDown={(event) => {
         if (sourceSampleRate() <= 0) return
+
         if (event.key === 'Home') {
           event.preventDefault()
           props.onViewportChange(fullViewport())
+
           return
         }
+
         if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
         event.preventDefault()
         const durationSec = props.viewport.endSec - props.viewport.startSec

@@ -17,6 +17,7 @@ function DspCharacterization() {
   const run = async () => {
     setRunning(true)
     setError()
+
     try {
       setReport(await runBrowserCharacterization())
     } catch (nextError) {
@@ -29,6 +30,7 @@ function DspCharacterization() {
   onMount(() => {
     if (diagnosticEnabled && searchParams.get('autorun') === '1') void run()
   })
+
   return (
     <Show
       when={diagnosticEnabled}

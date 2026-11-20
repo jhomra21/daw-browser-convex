@@ -23,9 +23,11 @@ export const canonicalTrackCreation = <Row extends TrackOrderRow>(
   const createsReturn = channelRole === 'return'
   const minimum = createsReturn ? nonReturns.length : 0
   const maximum = createsReturn ? ordered.length : nonReturns.length
+
   const creationIndex = requestedIndex === undefined
     ? maximum
     : Math.max(minimum, Math.min(requestedIndex, maximum))
+
   const canonicalOrder = [...nonReturns, ...returns]
 
   return {
@@ -53,13 +55,16 @@ export const hasValidReturnTrackPartition = (
   tracks: readonly TrackOrderRow[],
 ) => {
   let sawReturn = false
+
   for (const track of orderedTracks(tracks)) {
     if (isReturnTrack(track)) {
       sawReturn = true
+
       if (track.groupId !== undefined && track.groupId !== null) return false
     } else if (sawReturn) {
       return false
     }
   }
+
   return true
 }

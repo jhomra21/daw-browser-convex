@@ -22,9 +22,13 @@ const LEGACY_BRANCH_TRACK_ROW_COLOR = "#64748b"
 const LEGACY_BRANCH_GROUP_ROW_COLOR = "#475569"
 
 export type AppTheme = ConfigColorMode
+
 export type ResolvedAppTheme = "light" | "dark"
+
 export type AudioSampleRatePreference = "default" | 44100 | 48000 | 96000
+
 export type AudioLatencyMode = "interactive" | "balanced" | "playback"
+
 export type AudioPreferences = {
   inputDeviceId: string
   outputDeviceId: string
@@ -38,6 +42,7 @@ export type AudioPreferences = {
   autoGainControl: boolean
   nativePlaybackEnabled: boolean
 }
+
 export type RecordingPreferences = RecordingInputPreferences & {
   portableEnabled: boolean
   manualOffsetFrames: number
@@ -115,19 +120,25 @@ export const parseAppTheme = (value: JsonValue): AppTheme =>
 
 const parseBoolean = (value: JsonValue, fallback: boolean): boolean =>
   isJsonBoolean(value) ? value : fallback
+
 const parseDeviceId = (value: JsonValue): string => isJsonString(value) ? value : ""
+
 const parseNativeDeviceId = (value: JsonValue): string =>
   isJsonString(value) && value.startsWith("coreaudio:") && value.length > "coreaudio:".length ? value : ""
+
 const parseFiniteInteger = (value: JsonValue, minimum: number, maximum: number, fallback: number): number =>
   isJsonNumber(value) && Number.isFinite(value)
     ? Math.min(maximum, Math.max(minimum, Math.round(value)))
     : fallback
+
 const parseFiniteNumber = (value: JsonValue, minimum: number, maximum: number, fallback: number): number =>
   isJsonNumber(value) && Number.isFinite(value)
     ? Math.min(maximum, Math.max(minimum, value))
     : fallback
+
 export const parseAudioSampleRate = (value: JsonValue): AudioSampleRatePreference =>
   value === 44100 || value === 48000 || value === 96000 ? value : "default"
+
 export const parseAudioLatencyMode = (value: JsonValue): AudioLatencyMode =>
   value === "balanced" || value === "playback" ? value : "interactive"
 
@@ -141,12 +152,14 @@ const normalizeTimelineDefaultColor = (value: JsonValue, fallback: string, legac
   if (isTimelineDefaultColorToken(value)) return value
   const color = parseHexColor(isJsonString(value) ? value : undefined, fallback)
   const normalized = color.toLowerCase()
+
   return normalized === legacyBranchDefault || normalized === LEGACY_DARK_TIMELINE_SURFACE_COLOR ? fallback : color
 }
 
 export const normalizeRecordingCalibration = (value: JsonValue): RecordingCalibration | null => {
   if (!isJsonObject(value)) return null
   const unstableDeviceIds = new Set(["default", "communications"])
+
   if (
     !isJsonString(value.inputDeviceId) || value.inputDeviceId.length === 0 ||
     !isJsonString(value.outputDeviceId) || value.outputDeviceId.length === 0 ||
@@ -181,6 +194,7 @@ export const normalizeRecordingCalibration = (value: JsonValue): RecordingCalibr
 
 export const normalizeRecordingCalibrations = (value: JsonValue): RecordingCalibration[] => {
   if (!Array.isArray(value)) return []
+
   return value
     .map(normalizeRecordingCalibration)
     .filter((calibration) => calibration !== null)
@@ -219,6 +233,7 @@ export const updateRecordingCalibrations = (
 
 export const normalizeAppPreferences = (value: JsonValue): AppPreferences => {
   if (!isJsonObject(value)) return defaultAppPreferences
+
   if (value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4 && value.version !== 5 && value.version !== 6 && value.version !== 7 && value.version !== 8 && value.version !== APP_PREFERENCES_VERSION) return defaultAppPreferences
 
   const appearance = isJsonObject(value.appearance) ? value.appearance : {}

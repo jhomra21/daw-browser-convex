@@ -45,6 +45,7 @@ describe('automation helpers', () => {
       points: [],
       updatedAt: 1,
     })
+
     const second = automationEnvelopeFromRow({
       _id: 'second',
       projectId: 'project',
@@ -56,6 +57,7 @@ describe('automation helpers', () => {
       points: [],
       updatedAt: 1,
     })
+
     expect(first?.targetKey).not.toBe(second?.targetKey)
     expect(first?.target.effectInstanceId).toBe('delay-one')
   })
@@ -75,6 +77,7 @@ describe('automation helpers', () => {
   test('normalizes point ordering, duplicate times, and values', () => {
     const descriptor = getAutomationParameterDescriptor('volume')
     expect(descriptor).toBeDefined()
+
     if (!descriptor) return
 
     expect(normalizeAutomationPoints([
@@ -92,6 +95,7 @@ describe('automation helpers', () => {
     expect(descriptor?.interpolation).toBe('hold')
     expect(descriptor?.valueKind).toBe('integer')
     expect(descriptor).toBeDefined()
+
     if (!descriptor) return
 
     expect(normalizeAutomationPoints([
@@ -142,6 +146,7 @@ describe('automation helpers', () => {
       points: [{ id: 'a', timeSec: 0, value: 0.5, interpolation: 'linear' }],
       updatedAt: 1,
     }]
+
     const values = evaluatedAutomationValuesByTargetKey(envelopes, 5)
     expect(values.get(envelopes[0].targetKey)).toBe(0.5)
     expect(values.get(envelopes[1].targetKey)).toBe(0.5)
@@ -156,6 +161,7 @@ describe('automation helpers', () => {
   test('normalizes legacy hold-only values before evaluation', () => {
     const target = { kind: 'track' as const, trackId: 'track-lofi', effectInstanceId: 'lofi:one' }
     const targetKey = automationTargetKey(target, 'lofi.bitDepth')
+
     const values = evaluatedAutomationValuesByTargetKey([{
       id: 'lofi-envelope',
       projectId: 'project-1',
@@ -169,6 +175,7 @@ describe('automation helpers', () => {
       ],
       updatedAt: 1,
     }], 5)
+
     expect(values.get(targetKey)).toBe(7)
   })
 
@@ -177,6 +184,7 @@ describe('automation helpers', () => {
     const secondTarget = { kind: 'track' as const, trackId: 'track-1', effectInstanceId: 'delay:second' }
     const firstKey = automationTargetKey(firstTarget, 'delay.feedback')
     const secondKey = automationTargetKey(secondTarget, 'delay.feedback')
+
     const values = evaluatedAutomationValuesByTargetKey([
       {
         id: 'env-1',
@@ -199,6 +207,7 @@ describe('automation helpers', () => {
         updatedAt: 1,
       },
     ], 0)
+
     expect(values.get(firstKey)).toBe(0.1)
     expect(values.get(secondKey)).toBe(0.8)
   })
@@ -206,6 +215,7 @@ describe('automation helpers', () => {
   test('maps linear automation values to ratios and back', () => {
     const descriptor = getAutomationParameterDescriptor('volume')
     expect(descriptor).toBeDefined()
+
     if (!descriptor) return
 
     expect(automationValueToRatio(descriptor, descriptor.min)).toBe(0)
@@ -216,6 +226,7 @@ describe('automation helpers', () => {
   test('maps log automation values to ratios and back', () => {
     const descriptor = getAutomationParameterDescriptor('delay.lowCutHz')
     expect(descriptor).toBeDefined()
+
     if (!descriptor) return
 
     const value = Math.sqrt(descriptor.min * descriptor.max)
@@ -235,10 +246,13 @@ describe('automation helpers', () => {
       { id: 'delay-second', kind: 'delay' },
       { id: 'compressor-only', kind: 'compressor' },
     ]
+
     const options = getAutomationParameterOptionsForTarget(effects)
+
     const firstDelay = options.find((option) => (
       option.effectInstanceId === 'delay:first:colon' && option.parameterId === 'delay.feedback'
     ))
+
     const secondDelay = options.find((option) => (
       option.effectInstanceId === 'delay-second' && option.parameterId === 'delay.feedback'
     ))
@@ -264,6 +278,7 @@ describe('automation helpers', () => {
       { id: 'sampler:one', kind: 'sampler' },
       { id: 'granular:one', kind: 'granular' },
     ], 'track-1')
+
     expect(options.some((option) => option.parameterId === 'instrument:track-1:sampler:one:filter.frequency')).toBe(true)
     expect(options.some((option) => option.parameterId === 'instrument:track-1:granular:one:grainSize')).toBe(true)
     expect(options.find((option) => option.parameterId === 'instrument:track-1:granular:one:grainSize')?.effectInstanceId).toBeUndefined()
@@ -271,12 +286,14 @@ describe('automation helpers', () => {
 
   test('publishes normalized VST3 parameters with stable instance identities', () => {
     const parameterId = externalAutomationParameterId('vst-instance', 42)
+
     const options = getAutomationParameterOptionsForTarget([{
       id: 'vst-instance',
       kind: 'external',
       name: 'Example VST',
       parameters: [{ id: 42, title: 'Mix', unit: '%', readOnly: false, hidden: false }],
     }], 'track-1')
+
     expect(options).toContainEqual({
       id: parameterId,
       parameterId,
@@ -298,11 +315,13 @@ describe('automation helpers', () => {
       const encoded = externalAutomationParameterId('vst-instance', parameterId)
       expect(parseExternalAutomationParameterId(encoded)).toEqual({ instanceId: 'vst-instance', parameterId })
     }
+
     expect(parseExternalAutomationParameterId('vst3:vst-instance:4294967296')).toBeNull()
   })
 
   test('exposes only effect parameters with supported automation bindings and UI controls', () => {
     const options = getAutomationParameterOptions()
+
     for (const parameterId of [
       'saturator.driveDb',
       'saturator.outputDb',
@@ -320,6 +339,7 @@ describe('automation helpers', () => {
       expect(options.some((option) => option.id === parameterId)).toBe(true)
       expect(getAutomationParameterDescriptor(parameterId)?.targetKinds).toEqual(['track', 'master'])
     }
+
     expect(getAutomationParameterDescriptor('compressor.thresholdDb')).toBeUndefined()
     expect(getAutomationParameterDescriptor('reverb.decaySec')).toBeUndefined()
   })
@@ -352,10 +372,12 @@ describe('automation helpers', () => {
       unit: 'hz',
       targetKinds: ['track'],
     })
+
     const options = getAutomationParameterOptionsForTarget(
       [{ id: 'instrument:synth:one', kind: 'synth' }],
       'track-1',
     )
+
     expect(options.some((option) => option.parameterId === parameterId)).toBe(true)
   })
 
@@ -373,6 +395,7 @@ describe('automation helpers', () => {
       ],
       updatedAt: 1,
     }
+
     expect(automationEnvelopeValueRange(envelope, { min: 0, max: 1 })).toEqual({ min: 0, max: 1 })
   })
 })
@@ -388,6 +411,7 @@ describe('manual automation override helpers', () => {
     points: [],
     updatedAt: 1,
   }
+
   const eqEnvelope: AutomationEnvelope = {
     ...volumeEnvelope,
     id: 'env-2',
@@ -424,6 +448,7 @@ describe('manual automation override helpers', () => {
       targetKey: 'track:track-1:vst3:plugin:7',
       parameterId: externalAutomationParameterId('plugin', 7),
     }
+
     const overridden = new Set([volumeEnvelope.targetKey, vstEnvelope.targetKey])
 
     expect(builtInOverriddenAutomationTargetKeys([volumeEnvelope, eqEnvelope, vstEnvelope], overridden))

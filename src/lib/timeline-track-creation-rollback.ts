@@ -14,11 +14,13 @@ export async function applyCreatedTrackInsertion(
   input: CreatedTrackInsertionInput,
 ): Promise<boolean> {
   let applied = false
+
   try {
     applied = await input.apply()
   } catch {
     applied = false
   }
+
   if (applied) return true
 
   if (isLocalId('project', input.projectId)) {
@@ -27,5 +29,6 @@ export async function applyCreatedTrackInsertion(
   } else {
     await input.removeCloudTrack(input.track)
   }
+
   return false
 }

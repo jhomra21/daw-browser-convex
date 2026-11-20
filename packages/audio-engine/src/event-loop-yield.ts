@@ -5,5 +5,6 @@ export const yieldToEventLoop = () => new Promise<void>((resolve) => {
     channel.port2.close()
     resolve()
   }
+
   channel.port2.postMessage(null)
 })

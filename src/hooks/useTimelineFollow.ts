@@ -25,13 +25,17 @@ export const useTimelineFollow = (input: {
   });
   createEffect(() => {
     const playhead = input.playback.playheadSec();
+
     if (!input.preferences.follow() || input.followPaused() || !input.playback.isPlaying()) return;
     const scroll = input.scrollElement();
+
     if (!scroll) return;
     const visibleStart = input.viewport.visibleRange().startSec;
     const visibleDuration = scroll.clientWidth / Math.max(1e-9, input.pixelsPerSecond());
+
     if (!(visibleDuration > 0)) return;
     const visibleEnd = visibleStart + visibleDuration;
+
     if (playhead < visibleStart || playhead >= visibleEnd) {
       input.viewport.setVisibleStart(Math.max(0, playhead - visibleDuration * 0.1));
     }

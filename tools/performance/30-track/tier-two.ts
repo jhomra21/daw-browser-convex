@@ -44,6 +44,7 @@ export const createTierTwoControlClient = (projectId: string) => {
   const local = createLocalControlService({
     actor: { subject: "local:00000000-0000-4000-8000-000000000000" },
   })
+
   return {
     snapshotV2: async () => projectSnapshotSchemaV2.parse(await localResult(() => local.snapshotV2({ projectId }))),
     previewV1: async (request: Parameters<typeof parseControlPreviewRequestV1>[0]) => controlPreviewResultSchemaV1.parse(
@@ -138,6 +139,7 @@ export const assertThirtyTrackSnapshot = (snapshot: ProjectSnapshotV2): void => 
   const tracks = [...snapshot.tracks].sort((left, right) => left.index - right.index)
   const audioTracks = tracks.filter((track) => track.kind === "audio" && track.channelRole === "track")
   const trackIndexById = new Map(tracks.map((track) => [track.id, track.index]))
+
   const audioClips = snapshot.clips
     .filter((clip) => clip.midi === undefined)
     .sort((left, right) => left.bufferOffsetSec - right.bufferOffsetSec)
@@ -168,6 +170,7 @@ export const assertThirtyTrackSnapshot = (snapshot: ProjectSnapshotV2): void => 
   })), expected.timeline.clips)
 
   const tierTwoTrack = tracks.find((track) => track.name === expected.tier2.track.name)
+
   if (!tierTwoTrack) throw new Error("Tier 2 instrument track is missing.")
   assertCanonical("Tier 2 track", {
     id: trackClientRef,
@@ -178,6 +181,7 @@ export const assertThirtyTrackSnapshot = (snapshot: ProjectSnapshotV2): void => 
   }, expected.tier2.track)
 
   const midiClip = snapshot.clips.find((clip) => clip.trackId === tierTwoTrack.id && clip.midi !== undefined)
+
   if (!midiClip?.midi) throw new Error("Tier 2 MIDI clip is missing.")
   assertCanonical("Tier 2 MIDI clip", {
     id: clipClientRef,
@@ -197,13 +201,17 @@ export const assertThirtyTrackSnapshot = (snapshot: ProjectSnapshotV2): void => 
   const processors = snapshot.processors
     .filter((processor) => "trackId" in processor.target && processor.target.trackId === tierTwoTrack.id)
     .sort((left, right) => left.index - right.index)
+
   const instrument = processors.find((processor) => processor.processor.kind === "instrument")
   const saturator = processors.find((processor) => processor.processor.kind === "saturator")
   const utility = processors.find((processor) => processor.processor.kind === "utility")
+
   if (instrument?.processor.kind !== "instrument" || instrument.processor.params.kind !== "synth") {
     throw new Error("Tier 2 synth processor is missing.")
   }
+
   if (saturator?.processor.kind !== "saturator") throw new Error("Tier 2 saturator is missing.")
+
   if (utility?.processor.kind !== "utility") throw new Error("Tier 2 utility is missing.")
   assertCanonical("Tier 2 instrument", {
     id: expected.tier2.instrument.id,
@@ -221,6 +229,7 @@ export const assertThirtyTrackSnapshot = (snapshot: ProjectSnapshotV2): void => 
     && entry.effectInstanceId === saturator.instanceId
     && entry.parameterId === expected.tier2.automation.parameterId
   ))
+
   if (!automation) throw new Error("Tier 2 saturator automation is missing.")
   assertCanonical("Tier 2 automation", {
     effectKind: "saturator",

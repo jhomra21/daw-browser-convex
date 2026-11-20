@@ -35,6 +35,7 @@ class CapturedPointerWindow {
 
   dispatch(type: string, event: Event) {
     if (!(event instanceof PointerEvent)) return
+
     for (const entry of this.listeners.get(type) ?? []) {
       entry.listener(event)
     }
@@ -119,6 +120,7 @@ describe('useSteppedValueControl pointer lifecycle', () => {
         const starts: number[] = []
         const moves: number[] = []
         const ends: number[] = []
+
         const drag = useDrag({
           onDragStart: (_pos, event) => { starts.push(event.pointerId) },
           onDragMove: (_pos, event) => { moves.push(event.pointerId) },
@@ -207,10 +209,12 @@ describe('useSteppedValueControl pointer lifecycle', () => {
       createRoot((dispose) => {
         let cancellations = 0
         let ends = 0
+
         const drag = useDrag({
           onDragCancel: () => { cancellations += 1 },
           onDragEnd: () => { ends += 1 },
         })
+
         const down = new PointerEvent('pointerdown', pointerEvent(10))
         drag.onPointerDown(down)
         const captureTarget = down.currentTarget
@@ -254,6 +258,7 @@ describe('useSteppedValueControl pointer lifecycle', () => {
           onValueChange: () => undefined,
           valueFromDrag: ({ startValue }) => startValue,
         })
+
         control.onPointerDown(new PointerEvent('pointerdown', pointerEvent(240)))
 
         expect(capturedWindow.listenerCount('pointermove')).toBe(0)
@@ -290,6 +295,7 @@ describe('useSteppedValueControl pointer lifecycle', () => {
       createRoot((disposeParent) => {
         const values: number[] = []
         let bitDepth = 12
+
         const control: ReturnType<typeof useSteppedValueControl> | undefined = useSteppedValueControl({
           value: () => bitDepth,
               min: () => 2,
@@ -311,6 +317,7 @@ describe('useSteppedValueControl pointer lifecycle', () => {
         })
 
         const initialControl = control
+
         if (!initialControl) throw new Error('Expected the initial control owner.')
 
         initialControl.onPointerDown(new PointerEvent('pointerdown', pointerEvent(240)))
@@ -366,6 +373,7 @@ describe('useSteppedValueControl pointer lifecycle', () => {
       createRoot((disposeParent) => {
         const values: number[] = []
         let bitDepth = 12
+
         const control: ReturnType<typeof useSteppedValueControl> | undefined = useSteppedValueControl({
           value: () => bitDepth,
               min: () => 2,
@@ -387,6 +395,7 @@ describe('useSteppedValueControl pointer lifecycle', () => {
         })
 
         const initialControl = control
+
         if (!initialControl) throw new Error('Expected the initial control owner.')
 
         initialControl.onPointerDown(new PointerEvent('pointerdown', pointerEvent(240)))

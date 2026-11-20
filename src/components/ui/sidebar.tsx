@@ -49,6 +49,7 @@ const SidebarContext = createContext<SidebarContext | null>(null)
 function useSidebar() {
   const context = useContext(SidebarContext)
   assertDefined(context, "useSidebar must be used within a Sidebar.")
+
   return assertDefined(context, "useSidebar must be used within a Sidebar.")
 }
 
@@ -57,9 +58,11 @@ export function useIsMobile(fallback = false) {
 
   createEffect(() => {
     const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
+
     const onChange = (e: MediaQueryListEvent | MediaQueryList) => {
       setIsMobile(e.matches)
     }
+
     mql.addEventListener("change", onChange)
     onChange(mql)
     onCleanup(() => mql.removeEventListener("change", onChange))
@@ -77,6 +80,7 @@ type SidebarProviderProps = Omit<ComponentProps<"div">, "style"> & {
 
 const SidebarProvider: Component<SidebarProviderProps> = (rawProps) => {
   const appPreferences = useAppPreferences()
+
   const [local, others] = splitProps(rawProps, [
     "defaultOpen",
     "open",
@@ -98,11 +102,14 @@ const SidebarProvider: Component<SidebarProviderProps> = (rawProps) => {
   // This is the internal state of the sidebar.
   // We use open and onOpenChange for control from outside the component.
   const open = () => local.open ?? _open()
+
   const setOpen = (value: boolean | ((value: boolean) => boolean)) => {
     const nextOpen = value instanceof Function ? value(open()) : value
+
     if (local.onOpenChange) {
       return local.onOpenChange(nextOpen)
     }
+
     _setOpen(nextOpen)
     appPreferences.sidebar.setOpen(nextOpen)
   }
@@ -178,6 +185,7 @@ const Sidebar: Component<SidebarProps> = (rawProps) => {
     },
     rawProps
   )
+
   const [local, others] = splitProps(props, ["side", "variant", "collapsible", "class", "children"])
 
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
@@ -327,6 +335,7 @@ const SidebarRail: Component<ComponentProps<"button">> = (props) => {
 
 const SidebarInset: Component<ComponentProps<"main">> = (props) => {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <main
       class={cn(
@@ -343,6 +352,7 @@ type SidebarInputProps = ComponentProps<typeof TextFieldInput>
 
 const SidebarInput: Component<SidebarInputProps> = (props) => {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <TextField>
       <TextFieldInput
@@ -359,6 +369,7 @@ const SidebarInput: Component<SidebarInputProps> = (props) => {
 
 const SidebarHeader: Component<ComponentProps<"div">> = (props) => {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <div data-sidebar="header" class={cn("flex flex-col gap-2 p-2", local.class)} {...others} />
   )
@@ -366,6 +377,7 @@ const SidebarHeader: Component<ComponentProps<"div">> = (props) => {
 
 const SidebarFooter: Component<ComponentProps<"div">> = (props) => {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <div data-sidebar="footer" class={cn("flex flex-col gap-2 p-2 !bg-transparent", local.class)} {...others} />
   )
@@ -375,6 +387,7 @@ type SidebarSeparatorProps = ComponentProps<typeof Separator>
 
 const SidebarSeparator: Component<SidebarSeparatorProps> = (props) => {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <Separator
       data-sidebar="separator"
@@ -386,6 +399,7 @@ const SidebarSeparator: Component<SidebarSeparatorProps> = (props) => {
 
 const SidebarContent: Component<ComponentProps<"div">> = (props) => {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <div
       data-sidebar="content"
@@ -400,6 +414,7 @@ const SidebarContent: Component<ComponentProps<"div">> = (props) => {
 
 const SidebarGroup: Component<ComponentProps<"div">> = (props) => {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <div
       data-sidebar="group"
@@ -431,6 +446,7 @@ type SidebarGroupActionProps = ComponentProps<"button">
 
 const SidebarGroupAction: Component<SidebarGroupActionProps> = (props) => {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <button
       data-sidebar="group-action"
@@ -448,11 +464,13 @@ const SidebarGroupAction: Component<SidebarGroupActionProps> = (props) => {
 
 const SidebarGroupContent: Component<ComponentProps<"div">> = (props) => {
   const [local, others] = splitProps(props, ["class"])
+
   return <div data-sidebar="group-content" class={cn("w-full text-sm", local.class)} {...others} />
 }
 
 const SidebarMenu: Component<ComponentProps<"ul">> = (props) => {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <ul
       data-sidebar="menu"
@@ -464,6 +482,7 @@ const SidebarMenu: Component<ComponentProps<"ul">> = (props) => {
 
 const SidebarMenuItem: Component<ComponentProps<"li">> = (props) => {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <li data-sidebar="menu-item" class={cn("group/menu-item relative", local.class)} {...others} />
   )
@@ -505,6 +524,7 @@ const SidebarMenuButton: Component<SidebarMenuButtonProps> = (rawProps) => {
     "size",
     "class"
   ])
+
   const { isMobile, state } = useSidebar()
 
   const button = (
@@ -564,6 +584,7 @@ const SidebarMenuAction: Component<SidebarMenuActionProps> = (rawProps) => {
 
 const SidebarMenuBadge: Component<ComponentProps<"div">> = (props) => {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <div
       data-sidebar="menu-badge"
@@ -612,6 +633,7 @@ const SidebarMenuSkeleton: Component<SidebarMenuSkeletonProps> = (rawProps) => {
 
 const SidebarMenuSub: Component<ComponentProps<"ul">> = (props) => {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <ul
       data-sidebar="menu-sub"

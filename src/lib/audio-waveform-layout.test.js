@@ -92,6 +92,7 @@ describe('canonical clip timing integration', () => {
       leftPadSec: 0.5,
       bufferOffsetSec: 1.25,
     })
+
     const map = getAudioClipTimeMap({
       clip,
       bufferDurationSec: 8,
@@ -99,8 +100,10 @@ describe('canonical clip timing integration', () => {
       rangeStartSec: clip.startSec,
       rangeEndSec: clip.startSec + clip.duration,
     })
+
     expect(map).not.toBeNull()
     const layout = getAudioWaveformLayout(clip, 300, 8, 120)
+
     const playback = getAudioBufferPlaybackParams({
       sourceBuffer: 'buffer',
       map,
@@ -220,6 +223,7 @@ describe('getAudioWaveformLayout', () => {
       duration: 4,
       sourceDurationSec: 10,
     })
+
     const layout = getAudioWaveformLayout(clip, 400, 3)
 
     expect(layout.sourceDurationSec).toBe(3)

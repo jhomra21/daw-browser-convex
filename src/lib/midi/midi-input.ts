@@ -52,11 +52,14 @@ export const normalizeMidiSelectedInputIds = (
 ): string[] => {
   if (!Array.isArray(value)) return []
   const ids = new Set<string>()
+
   for (const item of value) {
     if (!isJsonString(item) || item.length === 0 || item.length > 256) continue
     ids.add(item)
+
     if (ids.size === MAX_SELECTED_MIDI_INPUTS) break
   }
+
   return [...ids]
 }
 
@@ -74,6 +77,7 @@ export const parseMidiInputMessage = (
   timeStamp: number,
 ): MidiInputEvent | null => {
   const status = data[0]
+
   if (!isStatusByte(status) || !Number.isFinite(timeStamp)) return null
 
   const command = status & 0xf0
@@ -83,6 +87,7 @@ export const parseMidiInputMessage = (
 
   if (command === 0xd0) {
     if (data.length !== 2 || !isMidiDataByte(data1)) return null
+
     return { sourceId, timeStamp, channel, kind: "channel-pressure", pressure: normalizeMidiValue(data1) }
   }
 
@@ -95,17 +100,21 @@ export const parseMidiInputMessage = (
   if (command === 0x80) {
     return { sourceId, timeStamp, channel, kind: "note-off", note: data1, velocity: normalizeMidiValue(data2) }
   }
+
   if (command === 0x90) {
     return data2 === 0
       ? { sourceId, timeStamp, channel, kind: "note-off", note: data1, velocity: 0 }
       : { sourceId, timeStamp, channel, kind: "note-on", note: data1, velocity: normalizeMidiValue(data2) }
   }
+
   if (command === 0xa0) {
     return { sourceId, timeStamp, channel, kind: "poly-pressure", note: data1, pressure: normalizeMidiValue(data2) }
   }
+
   if (command === 0xb0) {
     return { sourceId, timeStamp, channel, kind: "control-change", controller: data1, value: normalizeMidiValue(data2) }
   }
+
   if (command === 0xe0) {
     return {
       sourceId,
@@ -115,5 +124,6 @@ export const parseMidiInputMessage = (
       value: ((data2 << 7) | data1) / 8192 - 1
     }
   }
+
   return null
 }

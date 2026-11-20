@@ -101,6 +101,7 @@ export const normalizeAutomationValue = (
   descriptor: AutomationParameterDescriptor,
 ) => {
   const clamped = clamp(value, descriptor.min, descriptor.max)
+
   return descriptor.valueKind === 'integer' ? Math.round(clamped) : clamped
 }
 
@@ -110,8 +111,10 @@ export const externalAutomationParameterId = (instanceId: string, parameterId: n
 
 export const parseExternalAutomationParameterId = (parameterId: string) => {
   const match = /^vst3:([^:]+):([0-9]+)$/.exec(parameterId)
+
   if (!match || !match[1] || !match[2]) return null
   const id = Number(match[2])
+
   return Number.isSafeInteger(id) && id >= 0 && id <= 0xffff_ffff
     ? { instanceId: match[1], parameterId: id }
     : null
@@ -123,9 +126,9 @@ export const builtInOverriddenAutomationTargetKeys = (
   envelopes: readonly AutomationEnvelope[],
   overriddenTargetKeys: ReadonlySet<string>,
 ): Set<string> => new Set(
-  envelopes
-    .filter((envelope) => overriddenTargetKeys.has(envelope.targetKey) && !parseExternalAutomationParameterId(envelope.parameterId))
-    .map((envelope) => envelope.targetKey),
+  envelopes.flatMap((envelope) => overriddenTargetKeys.has(envelope.targetKey) && !parseExternalAutomationParameterId(envelope.parameterId)
+    ? [envelope.targetKey]
+    : []),
 )
 
 const staticDescriptors: AutomationParameterDescriptor[] = [
@@ -247,6 +250,7 @@ export const getAutomationParameterOptions = (): AutomationParameterOption[] => 
   ...effectDescriptors.map(({ id, label, group, device }) => ({ id, label, group, device })),
   ...createDefaultEqParams().bands.flatMap((band, index) => {
     const label = `EQ ${index + 1}`
+
     return [
       { id: createEqBandParameterId(band.id, 'frequencyHz'), label: `${label} Frequency`, group: 'Audio Effects', device: 'EQ Eight' },
       { id: createEqBandParameterId(band.id, 'gainDb'), label: `${label} Gain`, group: 'Audio Effects', device: 'EQ Eight' },
@@ -258,6 +262,7 @@ export const getAutomationParameterOptions = (): AutomationParameterOption[] => 
 const eqParameterOptions = (): AutomationParameterOption[] => (
   createDefaultEqParams().bands.flatMap((band, index) => {
     const label = `EQ ${index + 1}`
+
     return [
       { id: createEqBandParameterId(band.id, 'frequencyHz'), label: `${label} Frequency`, group: 'Audio Effects', device: 'EQ Eight' },
       { id: createEqBandParameterId(band.id, 'gainDb'), label: `${label} Gain`, group: 'Audio Effects', device: 'EQ Eight' },
@@ -271,11 +276,13 @@ export const getAutomationParameterOptionsForTarget = (
   trackId?: string,
 ): AutomationTargetParameterOption[] => {
   const kindCounts = new Map<AudioEffectKind, number>()
+
   return [
     { id: 'volume', parameterId: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer' },
     ...effects.flatMap((effect): AutomationTargetParameterOption[] => {
       if (effect.kind === 'sampler' || effect.kind === 'granular' || effect.kind === 'synth') {
         if (!trackId) return []
+
         if (effect.kind === 'sampler') {
           return SAMPLER_AUTOMATION_PARAMETER_IDS.map((parameterId) => ({
             id: instrumentAutomationKey(trackId, effect.id, parameterId),
@@ -285,6 +292,7 @@ export const getAutomationParameterOptionsForTarget = (
             device: 'Sampler',
           }))
         }
+
         if (effect.kind === 'granular') return GRANULAR_AUTOMATION_PARAMETER_IDS.map((parameterId) => ({
           id: granularAutomationKey(trackId, effect.id, parameterId),
           parameterId: granularAutomationKey(trackId, effect.id, parameterId),
@@ -292,6 +300,7 @@ export const getAutomationParameterOptionsForTarget = (
           group: 'Instrument',
           device: 'Granular',
         }))
+
         return SYNTH_AUTOMATION_PARAMETER_IDS.map((parameterId) => ({
           id: synthAutomationKey(trackId, effect.id, parameterId),
           parameterId: synthAutomationKey(trackId, effect.id, parameterId),
@@ -300,11 +309,13 @@ export const getAutomationParameterOptionsForTarget = (
           device: 'Synth',
         }))
       }
+
       if (effect.kind === 'external') {
         return effect.parameters
           .filter((parameter) => !parameter.hidden)
           .map((parameter) => {
             const parameterId = externalAutomationParameterId(effect.id, parameter.id)
+
             return {
               id: parameterId,
               parameterId,
@@ -315,11 +326,14 @@ export const getAutomationParameterOptionsForTarget = (
             }
           })
       }
+
       const ordinal = (kindCounts.get(effect.kind) ?? 0) + 1
       kindCounts.set(effect.kind, ordinal)
+
       const options = effect.kind === 'eq'
         ? eqParameterOptions()
         : descriptorsByEffectKind[effect.kind].map(({ id, label, group, device }) => ({ id, label, group, device }))
+
       return options.map((option) => ({
         ...option,
         parameterId: option.id,
@@ -337,9 +351,12 @@ export const createEqBandParameterId = (
 
 export const parseEqBandParameterId = (parameterId: string) => {
   const parts = parameterId.split('.')
+
   if (parts.length !== 3 || parts[0] !== 'eq' || !parts[1]) return null
   const property = parts[2]
+
   if (property !== 'frequencyHz' && property !== 'gainDb' && property !== 'q') return null
+
   return { bandId: parts[1], property }
 }
 
@@ -347,12 +364,16 @@ export const getAutomationParameterDescriptor = (
   parameterId: string,
 ): AutomationParameterDescriptor | undefined => {
   const staticDescriptor = staticDescriptors.find((descriptor) => descriptor.id === parameterId)
+
   if (staticDescriptor) return staticDescriptor
   const effectDescriptor = effectDescriptors.find((descriptor) => descriptor.id === parameterId)
+
   if (effectDescriptor) return effectDescriptor
   const sampler = parseInstrumentAutomationKey(parameterId)
+
   if (sampler) {
     const descriptor = SAMPLER_AUTOMATION_DESCRIPTORS[sampler.parameterId]
+
     return {
       id: parameterId,
       label: sampler.parameterId,
@@ -367,9 +388,12 @@ export const getAutomationParameterDescriptor = (
       unit: descriptor.unit === 'ratio' ? 'percent' : descriptor.unit,
     }
   }
+
   const granular = parseGranularAutomationKey(parameterId)
+
   if (granular) {
     const descriptor = GRANULAR_AUTOMATION_DESCRIPTORS[granular.parameterId]
+
     return {
       id: parameterId,
       label: granular.parameterId,
@@ -384,9 +408,12 @@ export const getAutomationParameterDescriptor = (
       unit: descriptor.unit === 'ratio' ? 'percent' : descriptor.unit,
     }
   }
+
   const synth = parseSynthAutomationKey(parameterId)
+
   if (synth) {
     const descriptor = SYNTH_AUTOMATION_DESCRIPTORS[synth.parameterId]
+
     return {
       id: parameterId,
       label: synth.parameterId,
@@ -401,8 +428,10 @@ export const getAutomationParameterDescriptor = (
       unit: descriptor.unit === 'ratio' ? 'percent' : descriptor.unit,
     }
   }
+
   const eq = parseEqBandParameterId(parameterId)
   const external = parseExternalAutomationParameterId(parameterId)
+
   if (!eq && external) {
     return {
       id: parameterId,
@@ -417,13 +446,17 @@ export const getAutomationParameterDescriptor = (
       scale: 'linear',
     }
   }
+
   if (!eq) return undefined
+
   if (eq.property === 'frequencyHz') {
     return { id: parameterId, label: 'EQ Frequency', group: 'Audio Effects', device: 'EQ Eight', owner: 'eq', targetKinds: ['track', 'master'], min: 20, max: 20000, defaultValue: 1000, scale: 'log', unit: 'hz' }
   }
+
   if (eq.property === 'gainDb') {
     return { id: parameterId, label: 'EQ Gain', group: 'Audio Effects', device: 'EQ Eight', owner: 'eq', targetKinds: ['track', 'master'], min: -24, max: 24, defaultValue: 0, scale: 'linear', unit: 'db' }
   }
+
   return { id: parameterId, label: 'EQ Q', group: 'Audio Effects', device: 'EQ Eight', owner: 'eq', targetKinds: ['track', 'master'], min: 0.2, max: 18, defaultValue: 1, scale: 'linear' }
 }
 
@@ -437,7 +470,9 @@ export const isAutomationParameterOwnedByTarget = (
   target: AutomationTarget,
 ): boolean => {
   const descriptor = getAutomationParameterDescriptor(parameterId)
+
   if (!descriptor || !descriptor.targetKinds.includes(target.kind)) return false
+
   return descriptor.owner === 'mixer'
     ? target.effectInstanceId === undefined
     : descriptor.owner === 'sampler' || descriptor.owner === 'granular' || descriptor.owner === 'synth'
@@ -450,11 +485,14 @@ export const automationValueToRatio = (
   value: number,
 ): number => {
   const clamped = clamp(value, descriptor.min, descriptor.max)
+
   if (descriptor.scale === 'log') {
     const min = Math.max(Number.MIN_VALUE, descriptor.min)
     const max = Math.max(min, descriptor.max)
+
     return clamp(Math.log(clamped / min) / Math.log(max / min), 0, 1)
   }
+
   return clamp((clamped - descriptor.min) / (descriptor.max - descriptor.min), 0, 1)
 }
 
@@ -463,11 +501,14 @@ export const automationRatioToValue = (
   ratio: number,
 ): number => {
   const clamped = clamp(ratio, 0, 1)
+
   if (descriptor.scale === 'log') {
     const min = Math.max(Number.MIN_VALUE, descriptor.min)
     const max = Math.max(min, descriptor.max)
+
     return min * ((max / min) ** clamped)
   }
+
   return descriptor.min + clamped * (descriptor.max - descriptor.min)
 }
 
@@ -476,6 +517,7 @@ export const normalizeAutomationPoints = (
   descriptor: AutomationParameterDescriptor,
 ): AutomationPoint[] => {
   const byTime = new Map<number, AutomationPoint>()
+
   for (const point of points) {
     if (!Number.isFinite(point.timeSec) || !Number.isFinite(point.value) || !point.id) continue
     const timeSec = Math.max(0, point.timeSec)
@@ -488,6 +530,7 @@ export const normalizeAutomationPoints = (
         : isAutomationInterpolation(point.interpolation) ? point.interpolation : 'linear',
     })
   }
+
   return [...byTime.values()].sort((a, b) => a.timeSec - b.timeSec || a.id.localeCompare(b.id))
 }
 
@@ -501,17 +544,21 @@ export const valueAtAutomationTime = (
   // Keep evaluation allocation-free because this runs for every active envelope
   // on each bounded playhead publication.
   const first = points[0]
+
   if (!first || timeSec <= first.timeSec) return first?.value ?? fallbackValue
   let low = 1
   let high = points.length - 1
   let nextIndex = points.length
+
   while (low <= high) {
     const middle = Math.floor((low + high) / 2)
     const point = points[middle]
+
     if (!point) {
       high = middle - 1
       continue
     }
+
     if (timeSec <= point.timeSec) {
       nextIndex = middle
       high = middle - 1
@@ -519,15 +566,21 @@ export const valueAtAutomationTime = (
       low = middle + 1
     }
   }
+
   if (nextIndex >= points.length) return points[points.length - 1]?.value ?? fallbackValue
   const previous = points[nextIndex - 1]
   const next = points[nextIndex]
+
   if (!previous || !next) return fallbackValue
+
   if (timeSec === next.timeSec) return next.value
+
   if (previous.interpolation === 'hold') return previous.value
   const span = next.timeSec - previous.timeSec
+
   if (span <= 0) return next.value
   const progress = (timeSec - previous.timeSec) / span
+
   return previous.value + ((next.value - previous.value) * progress)
 }
 
@@ -537,6 +590,7 @@ export const evaluatedAutomationValuesByTargetKey = (
   overriddenTargetKeys: ReadonlySet<string> = new Set(),
 ): Map<string, number> => {
   const values = new Map<string, number>()
+
   for (const envelope of envelopes) {
     if (!envelope.enabled || overriddenTargetKeys.has(envelope.targetKey)) continue
     const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
@@ -546,5 +600,6 @@ export const evaluatedAutomationValuesByTargetKey = (
       valueAtAutomationTime(points, timeSec, descriptor?.defaultValue ?? 0),
     )
   }
+
   return values
 }

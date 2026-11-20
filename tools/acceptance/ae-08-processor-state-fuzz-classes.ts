@@ -3,6 +3,7 @@ import type { Failure } from "./ae-08-processor-state-fuzz-oracle"
 // A1..B6 are the phase 5 steps. P8-11a is phase 8 step 11a, after B6: a Play resuming a paused session adopts a structural edit in place.
 export const gateSteps = ["A1", "B1", "B2a", "B2b", "B3a-i", "B3a-ii", "B3b", "B4a", "B4b", "B5a", "B5b", "B6", "P8-11a"]
 const owned = (signature: string, greenAfter: string) => ({ signature, owner: greenAfter, greenAfter })
+
 export const classes = [
   owned("stale-stamp-at-dispatch/host-refused/resend", "B3a-ii"),
   // The host admitted the batch and then cancelled it at a publication where its target lost its slot. The
@@ -136,6 +137,7 @@ export const classes = [
   // domain that will never report: it stays pending. A preview answered accepted. Both are unavailable/unprepared.
   owned("session-unavailable-pending", "B3b"),
 ]
+
 export const controllerClassTable = {
   classes,
   prefixes: [
@@ -285,11 +287,15 @@ export const classifyFailure = (failure: Failure): Failure => ({
           : failure.invariant === "I8" && failure.detail === "Running active coverage is below renderedThroughFrame plus one block" ? "refill-coverage"
             : failure.invariant === "I1" && failure.detail.startsWith("Native differs from desired:") ? "retained-override" : undefined),
 })
+
 export const gateViolations = (failures: readonly Failure[], gate: string) => {
   const step = gateSteps.indexOf(gate)
+
   if (step < 0) throw new Error(`Unknown gate ${gate}`)
+
   return failures.filter((failure) => {
     const entry = classes.find((entry) => entry.signature === failure.class)
+
     return !entry || gateSteps.indexOf(entry.greenAfter) <= step
   })
 }

@@ -70,6 +70,7 @@ const createMutableParam = (initial = 0): TestParam => {
       param.value = value
     },
   }
+
   return param
 }
 
@@ -77,6 +78,7 @@ const createTestAudio = () => {
   const sources: TestSource[] = []
   const gains: TestGain[] = []
   const pans: TestPan[] = []
+
   const ctx = Object.assign(Object.create(null), {
     currentTime: 0,
     sampleRate: 48_000,
@@ -95,11 +97,14 @@ const createTestAudio = () => {
         starts: [],
         stops: [],
       }
+
       sources.push(source)
+
       return source
     },
     createBuffer: (channels: number, length: number) => {
       const data = Array.from({ length: channels }, () => new Float32Array(length))
+
       return Object.assign(Object.create(null), {
         getChannelData: (channel: number) => data[channel] ?? new Float32Array(),
       })
@@ -109,7 +114,9 @@ const createTestAudio = () => {
         gain: createMutableParam(1),
         connect: () => {},
       }
+
       gains.push(gain)
+
       return gain
     },
     createStereoPanner: () => {
@@ -117,7 +124,9 @@ const createTestAudio = () => {
         pan: createMutableParam(0),
         connect: () => {},
       }
+
       pans.push(pan)
+
       return pan
     },
     createOscillator: () => ({
@@ -136,6 +145,7 @@ const createTestAudio = () => {
       connect: () => {},
     }),
   })
+
   return { ctx, sources, gains, pans }
 }
 
@@ -146,6 +156,7 @@ const createBuffer = (duration: number): AudioBuffer => Object.assign(Object.cre
   sampleRate: 48_000,
   getChannelData: () => new Float32Array(duration * 48_000),
 })
+
 const createSampledBuffer = (duration: number, sourceStartFrame = 0): SampledInstrumentBuffer => ({
   buffer: createBuffer(duration),
   sourceStartFrame,
@@ -187,16 +198,21 @@ describe('Instrument runtime', () => {
           disconnected: 0,
           port: { onmessage: null, postMessage: () => {}, close: () => {} },
         }
+
         nodes.push(node)
+
         return node
       },
     })
+
     try {
       const context = Object.assign(Object.create(null), {
         currentTime: 0,
         audioWorklet: { addModule: () => moduleLoad.promise },
       })
+
       const audio = createTestAudio()
+
       const runtime = createInstrumentRuntime({
         ensureAudio: () => {},
         getAudioContext: () => context,
@@ -205,6 +221,7 @@ describe('Instrument runtime', () => {
         ensureTrackInput: () => audio.ctx.createGain(),
         sources: { add: () => {}, remove: () => {}, snapshot: () => [], clear: () => {}, stopClip: () => {} },
       })
+
       const params = createDefaultGranularParams()
       const stale = runtime.setTrackGranular('track-1', params)
       const current = runtime.setTrackGranular('track-1', params)
@@ -217,10 +234,12 @@ describe('Instrument runtime', () => {
       expect(nodes[1]?.disconnected).toBe(0)
 
       const installBuffer = createSampledBuffer(1)
+
       const installing = runtime.setTrackGranular('track-install', params, {
         assetKey: 'asset-install',
         ...installBuffer,
       })
+
       await Promise.resolve()
       await Promise.resolve()
       const replacement = runtime.setTrackGranular('track-install', params)
@@ -239,6 +258,7 @@ describe('Instrument runtime', () => {
     const audio = createTestAudio()
     const params = createDefaultDrumRackParams()
     const buffers = new Map([[params.pads[0]?.id ?? '', createSampledBuffer(1)]])
+
     const runtime = createInstrumentRuntime({
       ensureAudio: () => {},
       getAudioContext: () => audio.ctx,
@@ -296,6 +316,7 @@ describe('Drum Rack runtime', () => {
   test('reports applied configuration and equal skip', () => {
     const audio = createTestAudio()
     const params = createDefaultDrumRackParams()
+
     const runtime = createDrumRackRuntime({
       ensureAudio: () => {},
       getAudioContext: () => audio.ctx,
@@ -316,6 +337,7 @@ describe('Drum Rack runtime', () => {
     const params = createDefaultDrumRackParams()
     const buffers = new Map([[params.pads[2]?.id ?? '', createSampledBuffer(1)]])
     const registryAdds: string[] = []
+
     const runtime = createDrumRackRuntime({
       ensureAudio: () => {},
       getAudioContext: () => audio.ctx,
@@ -348,6 +370,7 @@ describe('Drum Rack runtime', () => {
     const audio = createTestAudio()
     const params = createDefaultDrumRackParams()
     const buffers = new Map([[params.pads[0]?.id ?? '', createSampledBuffer(1)]])
+
     const runtime = createDrumRackRuntime({
       ensureAudio: () => {},
       getAudioContext: () => audio.ctx,
@@ -375,14 +398,18 @@ describe('Drum Rack runtime', () => {
     const audio = createTestAudio()
     const defaults = createDefaultDrumRackParams()
     const pad = defaults.pads[0]
+
     if (!pad) throw new Error('Missing default drum rack pad')
+
     const sample: DrumRackPadSample = {
       assetKey: 'regional-drum',
       url: '/regional-drum.wav',
       sourceKind: 'upload',
       source: { durationSec: 2, sampleRate: 48_000, channelCount: 2 },
     }
+
     const regionalPad = { ...pad, sample, startSec: 1, endSec: 2 }
+
     const runtime = createDrumRackRuntime({
       ensureAudio: () => {},
       getAudioContext: () => audio.ctx,
@@ -398,6 +425,7 @@ describe('Drum Rack runtime', () => {
       },
       getArpeggiator: () => undefined,
     })
+
     runtime.setTrackDrumRack('track-1', { ...defaults, pads: [regionalPad, ...defaults.pads.slice(1)] }, new Map([[pad.id, createSampledBuffer(1, 48_000)]]))
 
     runtime.startLiveNote('track-1', pad.note, 1)
@@ -408,7 +436,9 @@ describe('Drum Rack runtime', () => {
   test('live scheduling helper applies pad trim, transpose, gain, pan, and mute', () => {
     const audio = createTestAudio()
     const defaultPad = createDefaultDrumRackParams().pads[0]
+
     if (!defaultPad) throw new Error('Missing default pad')
+
     const pad = {
       ...defaultPad,
       gain: 0.5,
@@ -417,6 +447,7 @@ describe('Drum Rack runtime', () => {
       startSec: 0.25,
       endSec: 0.75,
     }
+
     const scheduled = scheduleDrumRackHit({
       ctx: audio.ctx,
       destination: audio.ctx.createGain(),
@@ -447,7 +478,9 @@ describe('Drum Rack runtime', () => {
     const defaults = createDefaultDrumRackParams()
     const first = defaults.pads[0]
     const second = defaults.pads[1]
+
     if (!first || !second) throw new Error('Missing default drum rack pads')
+
     const params = {
       ...defaults,
       pads: [
@@ -456,6 +489,7 @@ describe('Drum Rack runtime', () => {
         ...defaults.pads.slice(2),
       ],
     }
+
     const runtime = createDrumRackRuntime({
       ensureAudio: () => {},
       getAudioContext: () => audio.ctx,
@@ -471,6 +505,7 @@ describe('Drum Rack runtime', () => {
       },
       getArpeggiator: () => undefined,
     })
+
     runtime.setTrackDrumRack('track-1', params, new Map([
       [first.id, createSampledBuffer(1)],
       [second.id, createSampledBuffer(1)],
@@ -487,7 +522,9 @@ describe('Drum Rack runtime', () => {
     const audio = createTestAudio()
     const params = createDefaultDrumRackParams()
     const pad = params.pads[0]
+
     if (!pad) throw new Error('Missing default drum rack pad')
+
     const runtime = createDrumRackRuntime({
       ensureAudio: () => {},
       getAudioContext: () => audio.ctx,
@@ -503,7 +540,9 @@ describe('Drum Rack runtime', () => {
       },
       getArpeggiator: () => undefined,
     })
+
     runtime.setTrackDrumRack('track-1', params, new Map([[pad.id, createSampledBuffer(10)]]))
+
     for (let index = 0; index < 33; index += 1) runtime.startLiveNote('track-1', pad.note, 1)
     expect(audio.sources).toHaveLength(33)
     expect(audio.sources[0]?.stops).toEqual([0])
@@ -514,8 +553,10 @@ describe('Drum Rack runtime', () => {
     const audio = createTestAudio()
     const params = createDefaultDrumRackParams()
     const pad = params.pads[0]
+
     if (!pad) throw new Error('Missing default drum rack pad')
     const uses: boolean[] = []
+
     const runtime = createDrumRackRuntime({
       ensureAudio: () => {},
       getAudioContext: () => audio.ctx,
@@ -526,9 +567,11 @@ describe('Drum Rack runtime', () => {
       getArpeggiator: () => undefined,
       onAssetUse: (use) => uses.push(use.active),
     })
+
     runtime.setTrackDrumRack('track-1', params, new Map([[pad.id, createSampledBuffer(1)]]))
     const stop = runtime.startLiveNote('track-1', pad.note, 1)
     const source = audio.sources[0]
+
     if (!stop || !source) throw new Error('Expected a live Drum Rack hit')
     stop(0)
     expect(uses).toEqual([true])
@@ -540,8 +583,10 @@ describe('Drum Rack runtime', () => {
   test('retains a scheduled stop hit until its source ends and stops only once', () => {
     const audio = createTestAudio()
     const pad = createDefaultDrumRackParams().pads[0]
+
     if (!pad) throw new Error('Missing default drum rack pad')
     const uses: boolean[] = []
+
     const runtime = createDrumRackRuntime({
       ensureAudio: () => {},
       getAudioContext: () => audio.ctx,
@@ -552,9 +597,11 @@ describe('Drum Rack runtime', () => {
       getArpeggiator: () => undefined,
       onAssetUse: (use) => uses.push(use.active),
     })
+
     runtime.setTrackDrumRack('track-1', createDefaultDrumRackParams(), new Map([[pad.id, createSampledBuffer(1)]]))
     const stop = runtime.startLiveNote('track-1', pad.note, 1)
     const source = audio.sources[0]
+
     if (!stop || !source) throw new Error('Expected a live Drum Rack hit')
 
     stop(5)
@@ -568,8 +615,10 @@ describe('Drum Rack runtime', () => {
   test('removes a hit immediately when a scheduled stop throws', () => {
     const audio = createTestAudio()
     const pad = createDefaultDrumRackParams().pads[0]
+
     if (!pad) throw new Error('Missing default drum rack pad')
     const uses: boolean[] = []
+
     const runtime = createDrumRackRuntime({
       ensureAudio: () => {},
       getAudioContext: () => audio.ctx,
@@ -580,9 +629,11 @@ describe('Drum Rack runtime', () => {
       getArpeggiator: () => undefined,
       onAssetUse: (use) => uses.push(use.active),
     })
+
     runtime.setTrackDrumRack('track-1', createDefaultDrumRackParams(), new Map([[pad.id, createSampledBuffer(1)]]))
     const stop = runtime.startLiveNote('track-1', pad.note, 1)
     const source = audio.sources[0]
+
     if (!stop || !source) throw new Error('Expected a live Drum Rack hit')
     source.stop = () => { throw new Error('stop failed') }
 
@@ -593,8 +644,10 @@ describe('Drum Rack runtime', () => {
   test('disposes active hits immediately without waiting for onended', () => {
     const audio = createTestAudio()
     const pad = createDefaultDrumRackParams().pads[0]
+
     if (!pad) throw new Error('Missing default drum rack pad')
     const uses: boolean[] = []
+
     const runtime = createDrumRackRuntime({
       ensureAudio: () => {},
       getAudioContext: () => audio.ctx,
@@ -605,8 +658,10 @@ describe('Drum Rack runtime', () => {
       getArpeggiator: () => undefined,
       onAssetUse: (use) => uses.push(use.active),
     })
+
     runtime.setTrackDrumRack('track-1', createDefaultDrumRackParams(), new Map([[pad.id, createSampledBuffer(1)]]))
     const stop = runtime.startLiveNote('track-1', pad.note, 1)
+
     if (!stop) throw new Error('Expected a live Drum Rack hit')
 
     runtime.disposeTrack('track-1')
@@ -618,12 +673,14 @@ describe('Drum Rack runtime', () => {
 describe('Sampler runtime', () => {
   test('reports regional active use for each concurrent voice', () => {
     const audio = createTestAudio()
+
     const sample: DrumRackPadSample = {
       assetKey: 'regional-sampler',
       url: '/regional-sampler.wav',
       sourceKind: 'upload',
       source: { durationSec: 1, sampleRate: 48_000, channelCount: 2 },
     }
+
     const zone: SamplerZone = {
       id: 'zone-1',
       sample,
@@ -645,7 +702,9 @@ describe('Sampler runtime', () => {
       crossfadeSec: 0,
       chokeGroup: 0,
     }
+
     const uses: Array<{ regionKey: string; active: boolean }> = []
+
     const runtime = createSamplerRuntime({
       ensureAudio: () => {},
       getAudioContext: () => audio.ctx,
@@ -664,6 +723,7 @@ describe('Sampler runtime', () => {
       onAssetUse: ({ regionKey, active }) => uses.push({ regionKey, active }),
       getAutomationEnvelopes: () => [],
     })
+
     runtime.setTrackSampler('track-1', 'sampler-1', {
       ...createDefaultSamplerParams(),
       polyphony: 2,

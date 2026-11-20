@@ -7,10 +7,12 @@ import { createLocalAsset } from './local-assets'
 const createRoot = () => {
   const files = new Map<string, File>()
   const writes: number[] = []
+
   const assets = {
     getFileHandle: async (name: string) => ({
       createWritable: async () => {
         const chunks: Uint8Array[] = []
+
         return {
           write: async (chunk: Uint8Array) => {
             writes.push(chunk.byteLength)
@@ -19,10 +21,12 @@ const createRoot = () => {
           close: async () => {
             const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
             let offset = 0
+
             for (const chunk of chunks) {
               bytes.set(chunk, offset)
               offset += chunk.byteLength
             }
+
             files.set(name, new File([bytes], name))
           },
           abort: async () => undefined,
@@ -33,10 +37,12 @@ const createRoot = () => {
       files.delete(name)
     },
   }
+
   const root = {
     getDirectoryHandle: async (name: string) => name === 'assets' ? assets : root,
     removeEntry: async () => undefined,
   }
+
   return { files, root, writes }
 }
 
@@ -47,17 +53,20 @@ test('hashes streamed local asset bytes and ignores caller hash metadata', async
     configurable: true,
     value: { getDirectory: async () => root },
   })
+
   try {
     const project = await createLocalProject(`Assets ${crypto.randomUUID()}`)
     const file = new File(['abc'], 'kick.wav', { type: 'audio/wav' })
     Object.defineProperty(file, 'arrayBuffer', {
       value: () => Promise.reject(new Error('whole-file read is not allowed')),
     })
+
     const created = await createLocalAsset({
       projectId: project.id,
       file,
       metadata: { sourceKind: 'upload', channelCount: 2 },
     })
+
     expect(created.contentHash).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
     expect(created.sourceKind).toBe('upload')
     expect(created.channelCount).toBe(2)
@@ -67,6 +76,7 @@ test('hashes streamed local asset bytes and ignores caller hash metadata', async
       file,
       metadata: { contentHash: 'a'.repeat(64), sourceKind: 'recording', channelCount: 1 },
     })
+
     expect(ignored.contentHash).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
     expect(files.size).toBe(2)
   } finally {
@@ -82,6 +92,7 @@ test('hashes large chunked streams without reading a whole-file buffer', async (
     configurable: true,
     value: { getDirectory: async () => root },
   })
+
   try {
     const project = await createLocalProject(`Assets ${crypto.randomUUID()}`)
     const chunks = [new Uint8Array(1024 * 1024), new Uint8Array(1024 * 1024)]
@@ -112,6 +123,7 @@ test('persists large local assets as bounded writable chunks', async () => {
     configurable: true,
     value: { getDirectory: async () => root },
   })
+
   try {
     const project = await createLocalProject(`Assets ${crypto.randomUUID()}`)
     const chunk = new Uint8Array(2 * 1024 * 1024 + 1)
@@ -139,6 +151,7 @@ test('does not write a file when digesting its stream fails', async () => {
     configurable: true,
     value: { getDirectory: async () => root },
   })
+
   try {
     const project = await createLocalProject(`Assets ${crypto.randomUUID()}`)
     const file = new File(['abc'], 'kick.wav', { type: 'audio/wav' })
@@ -164,6 +177,7 @@ test('removes a newly written file when persistence fails', async () => {
     configurable: true,
     value: { getDirectory: async () => root },
   })
+
   try {
     const project = await createLocalProject(`Assets ${crypto.randomUUID()}`)
     const db = await openLocalProjectDb(project.id)
@@ -171,6 +185,7 @@ test('removes a newly written file when persistence fails', async () => {
     db.put = async () => {
       throw new Error('DB put failed')
     }
+
     await expect(createLocalAsset({
       projectId: project.id,
       file: new File(['abc'], 'kick.wav', { type: 'audio/wav' }),
@@ -191,12 +206,14 @@ test('removes a newly written file when opening persistence fails', async () => 
     value: { getDirectory: async () => root },
   })
   const open = indexedDB.open
+
   try {
     const project = await createLocalProject(`Assets ${crypto.randomUUID()}`)
     await purgeLocalProjectCache(project.id)
     indexedDB.open = () => {
       throw new Error('DB open failed')
     }
+
     await expect(createLocalAsset({
       projectId: project.id,
       file: new File(['abc'], 'kick.wav', { type: 'audio/wav' }),
@@ -204,6 +221,7 @@ test('removes a newly written file when opening persistence fails', async () => 
     expect(files.size).toBe(0)
   } finally {
     indexedDB.open = open
+
     if (storage) Object.defineProperty(navigator, 'storage', storage)
     else Reflect.deleteProperty(navigator, 'storage')
   }

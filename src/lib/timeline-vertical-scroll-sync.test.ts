@@ -35,6 +35,7 @@ describe("createTimelineVerticalScrollSync", () => {
       const sync = createTimelineVerticalScrollSync({
         onCanonicalScrollTop: (value) => canonicalValues.push(value),
       });
+
       sync.bindTimeline(timeline);
       sync.bindSidebar(sidebar);
 

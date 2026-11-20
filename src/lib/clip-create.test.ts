@@ -112,6 +112,7 @@ test('returns the committed clip when cancellation follows the server commit', a
     createServerClip: async () => {
       createCalls += 1
       controller.abort()
+
       return 'clip-1'
     },
     insertLocalClip: (_trackId, clip_) => insertedClipIds.push(clip_.id),
@@ -145,6 +146,7 @@ test('does not queue a canceled cloud upload', async () => {
     uploadToR2: async (_projectId, _assetKey, _file, _duration, signal) => {
       controller.abort()
       signal?.throwIfAborted()
+
       return null
     },
     audioBufferCache: clipBufferWriter,
@@ -179,14 +181,17 @@ test('carries the persisted operation receipt when an uploaded clip is queued', 
   }
 
   expect(error).toBeInstanceOf(SharedOutboxQueuedError)
+
   if (!(error instanceof SharedOutboxQueuedError)) throw error
   expect(error.operationId).toMatch(/^[0-9a-f-]{36}$/)
 
   const rows = await (await openLocalProjectDb('project-queued-receipt')).getAll('syncState')
   const queued = rows.find((row) => row.key.startsWith('shared-outbox:'))
+
   if (!queued || !isStoredObject(queued.value) || !isStoredObject(queued.value.payload) || !isStoredObject(queued.value.payload.clipPayload)) {
     throw new Error('Queued clip receipt was not persisted.')
   }
+
   expect(queued.value.payload.clipPayload.operationId).toBe(error.operationId)
 })
 
@@ -238,6 +243,7 @@ test('rolls back and does not queue uploaded clip creates with null server resul
           kind: 'clips.create',
           payload,
         })
+
         return isJsonString(result) ? result : null
       },
       insertLocalClip: () => undefined,

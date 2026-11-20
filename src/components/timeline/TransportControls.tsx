@@ -57,6 +57,7 @@ export const TransportBar: Component<{ transport: TransportBarController }> = (
   props,
 ) => {
   const transport = () => props.transport;
+
   const centerIconButtonClass =
     "h-7 w-7 text-muted-foreground hover:bg-timeline-surface-muted hover:text-foreground";
 
@@ -89,8 +90,10 @@ export const TransportBar: Component<{ transport: TransportBarController }> = (
         onClick={() => {
           if (transport().isPlaying) {
             transport().onPause();
+
             return;
           }
+
           if (transport().isPlayPending) return;
           transport().onPlay();
         }}
@@ -128,6 +131,7 @@ export const TransportBar: Component<{ transport: TransportBarController }> = (
               if (transport().tempoEditing()) {
                 transport().commitTempo();
               }
+
               transport().setTempoEditing(false);
             }}
             onInput={(event) =>
@@ -241,10 +245,12 @@ export const TransportBar: Component<{ transport: TransportBarController }> = (
 const SaveStatus: Component<{ projectMenu: TransportControlsProps["projectMenu"] }> = (props) => {
   const currentProject = () =>
     props.projectMenu.projects.find((project) => project.projectId === props.projectMenu.currentProjectId);
+
   const sharedOutboxFailure = useSharedOutboxFailure(() => ({
     projectId: props.projectMenu.currentProjectId,
     userId: props.projectMenu.currentUserId,
   }));
+
   const status = useProjectSaveStatus(() => ({
     projectId: props.projectMenu.currentProjectId,
     userId: props.projectMenu.currentUserId,
@@ -254,6 +260,7 @@ const SaveStatus: Component<{ projectMenu: TransportControlsProps["projectMenu"]
     saveFailed: props.projectMenu.saveFailed,
     sharedOutboxFailure: sharedOutboxFailure(),
   }));
+
   const isLocal = () => status().compactLabel === "Local";
 
   return (
@@ -329,10 +336,14 @@ const AutomationReEnableIcon: Component = () => (
 const MidiKeyboardToggle: Component<{ midiKeyboard: TransportControlsProps["midiKeyboard"] }> = (props) => {
   const midiKeyboard = () => props.midiKeyboard;
   const baseNoteLabel = () => `C${midiKeyboard().octave() + 4}`;
+
   const title = () => {
     const targetLabel = midiKeyboard().targetLabel();
+
     if (!midiKeyboard().enabled()) return "Turn on computer MIDI keyboard input";
+
     if (!targetLabel) return "Computer MIDI keyboard is on. Select an instrument track to play.";
+
     return `Computer MIDI keyboard is on: ${targetLabel}, ${baseNoteLabel()}`;
   };
 
@@ -356,6 +367,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
     bpm: () => props.bpm,
     onChangeBpm: (bpm) => props.onChangeBpm(bpm),
   });
+
   return (
     <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-border bg-timeline-background p-2">
       <div class="justify-self-start flex items-center gap-1">

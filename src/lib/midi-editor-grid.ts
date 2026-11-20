@@ -66,6 +66,7 @@ const createMidiEditorRowIndexes = () => (
 
 const createMidiEditorGridCells = (columns: number, stepsPerBeat: number) => {
   const majorStep = stepsPerBeat * 4
+
   return Array.from({ length: getMidiEditorRowCount() * columns }, (_, index) => (
     index % columns % majorStep === 0
   ))
@@ -109,12 +110,14 @@ export const createMidiEditorGrid = (
     }),
     findNoteAtCell: (notes: MidiEditorNote[], cell: MidiGridCell) => {
       const beat = cell.col / stepsPerBeat
+
       return notes.find(note => Math.abs(note.beat - beat) < 1e-6 && note.pitch === getMidiPitchForRow(cell.row))
     },
     findNoteById: (notes: MidiEditorNote[], id: string) => notes.find((note) => note.id === id),
     noteDurationSeconds: (lengthBeats: number, maxSeconds: number) => Math.min(maxSeconds, lengthBeats * secondsPerBeat),
     pointerStep: (container: HTMLElement, event: PointerEvent) => {
       const rect = container.getBoundingClientRect()
+
       return (event.clientX - rect.left) / Math.max(1e-6, rect.width / columns)
     },
     hasStartedNoteDrag: hasStartedMidiNoteDrag,
@@ -133,6 +136,7 @@ export const createMidiEditorGrid = (
     noteFromDrag: (drag: MidiNoteDrag, cell: MidiGridCell, pointerStep: number) => {
       if (drag.mode === 'resize') {
         const startStep = Math.round(drag.note.beat * stepsPerBeat)
+
         return {
           ...drag.note,
           length: Math.max(1 / stepsPerBeat, (cell.col - startStep + 1) / stepsPerBeat),
@@ -140,6 +144,7 @@ export const createMidiEditorGrid = (
       }
 
       const step = clamp(Math.round(pointerStep - drag.grabOffsetSteps), 0, columns - 1)
+
       return {
         ...drag.note,
         beat: step / stepsPerBeat,
@@ -218,5 +223,6 @@ export const midiVelocityFromDrag = (input: {
   laneHeight: number
 }) => {
   const raw = input.startVelocity + (input.startY - input.y) / Math.max(1, input.laneHeight)
+
   return midiVelocityValue(clamp(raw, 0, 1)) / MIDI_VELOCITY_VALUE_MAX
 }

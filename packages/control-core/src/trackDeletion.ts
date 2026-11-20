@@ -40,6 +40,7 @@ export const collectTrackDeletionAffectedIdsV1 = (
 ) => {
   const deletedTrackIds = collectDeletedTrackIdsV1(tracks, rootTrackId)
   const affectedTrackIds = new Set(deletedTrackIds)
+
   const survivors = tracks
     .filter((track) => !deletedTrackIds.has(track.id))
     .sort((left, right) => left.index - right.index || left.id.localeCompare(right.id))
@@ -54,14 +55,17 @@ export const collectTrackDeletionAffectedIdsV1 = (
       affectedTrackIds.add(track.id)
     }
   }
+
   for (const sidechain of sidechains) {
     if (!deletedTrackIds.has(sidechain.sourceTrackId) && deletedTrackIds.has(sidechain.targetTrackId)) {
       affectedTrackIds.add(sidechain.sourceTrackId)
     }
+
     if (!deletedTrackIds.has(sidechain.targetTrackId) && deletedTrackIds.has(sidechain.sourceTrackId)) {
       affectedTrackIds.add(sidechain.targetTrackId)
     }
   }
+
   return affectedTrackIds
 }
 
@@ -83,10 +87,9 @@ export const deriveTrackUngroupAfterStatesV1 = (
   tracks: readonly NormalizedTrackControlStateV1[],
   input: { groupId: string; groupIndex: number; parentGroupId?: string },
 ) => tracks
-  .filter((track) => track.id !== input.groupId)
-  .map((track) => ({
+  .flatMap((track) => track.id === input.groupId ? [] : [{
     ...track,
     index: track.index > input.groupIndex ? track.index - 1 : track.index,
     groupId: track.groupId === input.groupId ? input.parentGroupId : track.groupId,
     outputTargetId: track.outputTargetId === input.groupId ? input.parentGroupId : track.outputTargetId,
-  }))
+  }])

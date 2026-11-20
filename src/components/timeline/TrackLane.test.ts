@@ -11,6 +11,7 @@ describe('TrackLane automation interaction path', () => {
       heightsByLaneOwnerKey: { 'track-2': 48 },
       visibleParameterIdsByTrackId: { 'track-2': ['automation:v2:["track","track-2",null,"volume"]'] },
     })
+
     const row = rows[0]
     expect(row).toMatchObject({
       topPx: 0,
@@ -18,6 +19,7 @@ describe('TrackLane automation interaction path', () => {
       automationHeightPx: 48,
       heightPx: LANE_HEIGHT + 48,
     })
+
     if (!row) throw new Error('Expected a rendered track row.')
     expect(timelineTrackLaneHitRegion(row, row.clipLaneHeightPx + 10)).toBe('automation')
     expect(timelineTrackLaneHitRegion(row, row.clipLaneHeightPx - 1)).toBe('clip')

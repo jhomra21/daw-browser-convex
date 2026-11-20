@@ -11,6 +11,7 @@ test('maps Web MIDI timestamps from the output timestamp timeline', () => {
     performanceNow: () => 0,
     contextTimeToTimeline: (time) => time + 10,
   })
+
   expect(convert(1_250)).toEqual({
     contextTime: 4.25,
     timelineTime: 14.25,
@@ -24,6 +25,7 @@ test('falls back to the captured performance and context pair', () => {
     performanceNow: () => 1_000,
     contextTimeToTimeline: (time) => time,
   })
+
   expect(convert(1_500)).toEqual({
     contextTime: 3.5,
     timelineTime: 3.5,
@@ -37,6 +39,7 @@ test('uses the frozen audio clock when audio is closed', () => {
     performanceNow: () => 1_000,
     contextTimeToTimeline: (time) => time,
   })
+
   expect(convert(1_000)).toEqual({
     contextTime: 3,
     timelineTime: 3,
@@ -48,11 +51,13 @@ test('does not extrapolate timestamps while audio is suspended', () => {
   let state: AudioContextState = 'running'
   let currentTime = 1
   let performanceNow = 1_000
+
   const convert = createMidiTimestampConverter({
     context: () => ({ currentTime, state }),
     performanceNow: () => performanceNow,
     contextTimeToTimeline: (time) => time,
   })
+
   expect(convert(1_500)?.contextTime).toBe(1.5)
   state = 'suspended'
   currentTime = 3
@@ -69,11 +74,13 @@ test('does not extrapolate timestamps while audio is suspended', () => {
 test('resets fallback anchors before converting events for a replacement context', () => {
   let currentTime = 3
   let performanceNow = 1_000
+
   const convert = createMidiTimestampConverter({
     context: () => ({ currentTime, state: 'running' }),
     performanceNow: () => performanceNow,
     contextTimeToTimeline: (time) => time,
   })
+
   expect(convert(1_500)?.contextTime).toBe(3.5)
 
   currentTime = 40

@@ -18,19 +18,23 @@ const envelope = (interpolation: 'hold' | 'linear'): AutomationEnvelope => ({
 
 const createParam = () => {
   const calls: Array<{ kind: 'cancel' | 'ramp' | 'set'; value?: number; time: number }> = []
+
   return {
     calls,
     param: {
       cancelScheduledValues: (time: number) => {
         calls.push({ kind: 'cancel', time })
+
         return undefined
       },
       linearRampToValueAtTime: (value: number, time: number) => {
         calls.push({ kind: 'ramp', value, time })
+
         return undefined
       },
       setValueAtTime: (value: number, time: number) => {
         calls.push({ kind: 'set', value, time })
+
         return undefined
       },
     },

@@ -60,20 +60,28 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
   onMessage(message) {
     if (!message || message.version !== 1) {
       this.port.postMessage({ type: 'fault', version: 1, code: 'unsupported-protocol' })
+
       return
     }
+
     if (message.type === 'release' || message.type === 'dispose') {
       this.released = true
+
       return
     }
+
     if (message.type === 'reconfigure') {
       this.reconfigure(message.fftSize, message.overlap)
+
       return
     }
+
     if (message.type === 'reset') {
       this.reset()
+
       return
     }
+
     if (message.type === 'configure' && message.state) {
       // Disabling only bypasses (the 10 ms ramp in process()); the rings, noise
       // profile and a frozen capture are kept so enabling again resumes them, as the
@@ -87,6 +95,7 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
     this.writeIndex = 0
     this.samplesUntilFrame = this.fftSize
     this.bypass = this.enabled ? 0 : 1
+
     for (let channel = 0; channel < 2; channel += 1) {
       this.inputRing[channel].fill(0)
       this.sideRing[channel].fill(0)
@@ -102,36 +111,47 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
 
   reconfigure(fftSize, overlap) {
     if (fftSize !== 512 && fftSize !== 1024 && fftSize !== 2048 && fftSize !== 4096) fftSize = 2048
+
     if (overlap !== 2 && overlap !== 4) overlap = 4
+
     if (this.fftSize === fftSize && this.overlap === overlap && this.window[1] !== 0) return
     this.fftSize = fftSize
     this.overlap = overlap
     this.hopSize = fftSize / overlap
     this.latency = fftSize
+
     for (let index = 0; index < fftSize; index += 1) {
       this.window[index] = Math.sqrt(0.5 - 0.5 * Math.cos(2 * Math.PI * index / fftSize))
     }
+
     this.reset()
   }
 
   fft(real, imaginary, inverse) {
     const size = this.fftSize
+
     for (let index = 1, reversed = 0; index < size; index += 1) {
       let bit = size >> 1
+
       while (reversed & bit) { reversed ^= bit; bit >>= 1 }
+
       reversed ^= bit
+
       if (index < reversed) {
         let value = real[index]; real[index] = real[reversed]; real[reversed] = value
         value = imaginary[index]; imaginary[index] = imaginary[reversed]; imaginary[reversed] = value
       }
     }
+
     for (let length = 2; length <= size; length <<= 1) {
       const angle = (inverse ? 2 : -2) * Math.PI / length
       const stepReal = Math.cos(angle)
       const stepImaginary = Math.sin(angle)
+
       for (let start = 0; start < size; start += length) {
         let twiddleReal = 1
         let twiddleImaginary = 0
+
         for (let offset = 0; offset < length / 2; offset += 1) {
           const even = start + offset
           const odd = even + length / 2
@@ -147,6 +167,7 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
         }
       }
     }
+
     if (inverse) for (let index = 0; index < size; index += 1) { real[index] /= size; imaginary[index] /= size }
   }
 
@@ -154,13 +175,17 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
     const target = count >> 1
     let left = 0
     let right = count - 1
+
     while (left < right) {
       const pivot = values[(left + right) >> 1]
       let low = left
       let high = right
+
       while (low <= high) {
         while (values[low] < pivot) low += 1
+
         while (values[high] > pivot) high -= 1
+
         if (low <= high) {
           const value = values[low]
           values[low] = values[high]
@@ -169,10 +194,12 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
           high -= 1
         }
       }
+
       if (target <= high) right = high
       else if (target >= low) left = low
       else return values[target]
     }
+
     return values[target]
   }
 
@@ -183,15 +210,19 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
     const sideImaginary = this.sideImaginary[channel]
     const bins = this.fftSize / 2 + 1
     const value = (name) => parameters[name][parameters[name].length - 1]
+
     if (this.mode === 'freeze') {
       const freeze = value('spectral.freeze')
+
       if (freeze > 0 && !this.freezeCaptured[channel]) {
         for (let bin = 0; bin < bins; bin += 1) {
           this.frozenMagnitude[channel][bin] = Math.hypot(real[bin], imaginary[bin])
           this.frozenPhase[channel][bin] = Math.atan2(imaginary[bin], real[bin])
         }
+
         this.freezeCaptured[channel] = true
       } else if (freeze === 0) this.freezeCaptured[channel] = false
+
       if (this.freezeCaptured[channel]) for (let bin = 0; bin < bins; bin += 1) {
         const magnitude = this.frozenMagnitude[channel][bin]
         const phase = this.frozenPhase[channel][bin]
@@ -201,6 +232,7 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
       const threshold = 10 ** (value('spectral.gateThresholdDb') / 20)
       const attack = Math.exp(-this.hopSize / Math.max(1, value('spectral.gateAttackMs') * sampleRate / 1000))
       const release = Math.exp(-this.hopSize / Math.max(1, value('spectral.gateReleaseMs') * sampleRate / 1000))
+
       for (let bin = 0; bin < bins; bin += 1) {
         const target = Math.hypot(real[bin], imaginary[bin]) >= threshold ? 1 : 0
         const coefficient = target > this.gateGain[channel][bin] ? attack : release
@@ -209,6 +241,7 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
       }
     } else if (this.mode === 'morph') {
       const morph = value('spectral.morph')
+
       for (let bin = 0; bin < bins; bin += 1) {
         const phase = Math.atan2(imaginary[bin], real[bin])
         const magnitude = Math.hypot(real[bin], imaginary[bin]) * (1 - morph) + Math.hypot(sideReal[bin], sideImaginary[bin]) * morph
@@ -218,15 +251,21 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
       const shift = value('spectral.binShift')
       const blur = value('spectral.blur')
       const scratch = this.scratch[channel]
+
       for (let bin = 0; bin < bins; bin += 1) scratch[bin] = Math.hypot(real[bin], imaginary[bin])
       const radius = Math.min(15, Math.ceil(blur * 15))
+
       for (let bin = 0; bin < bins; bin += 1) {
         const source = bin - shift
         const lower = Math.floor(source)
         const fraction = source - lower
         const shifted = lower >= 0 && lower + 1 < bins ? scratch[lower] * (1 - fraction) + scratch[lower + 1] * fraction : 0
         let sum = 0; let count = 0
-        for (let offset = -radius; offset <= radius; offset += 1) { const at = lower + offset; if (at >= 0 && at < bins) { sum += scratch[at]; count += 1 } }
+
+        for (let offset = -radius; offset <= radius; offset += 1) { const at = lower + offset;
+
+ if (at >= 0 && at < bins) { sum += scratch[at]; count += 1 } }
+
         const magnitude = shifted * (1 - blur) + (count ? sum / count : 0) * blur
         const phase = Math.atan2(imaginary[bin], real[bin])
         real[bin] = magnitude * Math.cos(phase); imaginary[bin] = magnitude * Math.sin(phase)
@@ -234,17 +273,23 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
     } else if (this.mode === 'hpss') {
       const history = this.hpssHistory[channel]
       const historyOffset = this.hpssIndex[channel] * MAX_BINS
+
       for (let bin = 0; bin < bins; bin += 1) history[historyOffset + bin] = Math.hypot(real[bin], imaginary[bin])
       this.hpssIndex[channel] = (this.hpssIndex[channel] + 1) % HPSS_FRAMES
       const percussive = this.hpssMedian[channel]
+
       for (let bin = 0; bin < bins; bin += 1) {
         let count = 0
+
         for (let offset = -15; offset <= 15; offset += 1) {
           const candidate = bin + offset
+
           if (candidate >= 0 && candidate < bins) this.scratch[channel][count++] = history[historyOffset + candidate]
         }
+
         percussive[bin] = this.median(this.scratch[channel], count)
       }
+
       for (let bin = 0; bin < bins; bin += 1) {
         for (let frame = 0; frame < HPSS_FRAMES; frame += 1) this.scratch[channel][frame] = history[frame * MAX_BINS + bin]
         const harmonic = this.median(this.scratch[channel], HPSS_FRAMES)
@@ -256,6 +301,7 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
     } else if (this.mode === 'noise-reduce') {
       const reduction = value('spectral.noiseReduction')
       const learn = value('spectral.profileLearn')
+
       for (let bin = 0; bin < bins; bin += 1) {
         const magnitude = Math.hypot(real[bin], imaginary[bin])
         const detector = Math.hypot(sideReal[bin], sideImaginary[bin]) || magnitude
@@ -264,6 +310,7 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
         real[bin] *= gain; imaginary[bin] *= gain
       }
     }
+
     for (let bin = 1; bin < this.fftSize / 2; bin += 1) {
       real[this.fftSize - bin] = real[bin]
       imaginary[this.fftSize - bin] = -imaginary[bin]
@@ -274,18 +321,23 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
     const inputMask = MAX_FFT_SIZE - 1
     const outputMask = this.outputRing[0].length - 1
     const frameStart = (this.writeIndex - this.fftSize + MAX_FFT_SIZE) & inputMask
+
     for (let channel = 0; channel < 2; channel += 1) {
       const real = this.real[channel]; const imaginary = this.imaginary[channel]
       const sideReal = this.sideReal[channel]; const sideImaginary = this.sideImaginary[channel]
+
       for (let index = 0; index < this.fftSize; index += 1) {
         const source = (frameStart + index) & (MAX_FFT_SIZE - 1)
         real[index] = this.inputRing[channel][source] * this.window[index]; imaginary[index] = 0
         sideReal[index] = this.sideRing[channel][source] * this.window[index]; sideImaginary[index] = 0
       }
+
       this.fft(real, imaginary, false)
+
       if (this.mode === 'morph' || this.mode === 'noise-reduce') this.fft(sideReal, sideImaginary, false)
       this.transform(channel, parameters)
       this.fft(real, imaginary, true)
+
       for (let index = 0; index < this.fftSize; index += 1) {
         const target = (this.writeIndex + index) & outputMask
         this.outputRing[channel][target] += real[index] * this.window[index] * (2 / this.overlap)
@@ -303,8 +355,10 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
     const outputMask = this.outputRing[0].length - 1
     const bypassStep = 1 / Math.max(1, Math.round(0.01 * sampleRate))
     const targetBypass = this.enabled ? 0 : 1
+
     for (let frame = 0; frame < frames; frame += 1) {
       this.bypass += Math.max(-bypassStep, Math.min(bypassStep, targetBypass - this.bypass))
+
       for (let channel = 0; channel < 2; channel += 1) {
         const sourceChannel = input[channel] || input[0]
         const sideChannel = sidechain[channel] || sidechain[0]
@@ -323,12 +377,16 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
         const mixValues = parameters['spectral.mix']
         const mix = mixValues.length === 1 ? mixValues[0] : mixValues[frame]
         const processed = dry * (1 - mix) + wet * mix
+
         if (output[channel]) output[channel][frame] = processed + (dry - processed) * this.bypass
       }
+
       this.writeIndex = (this.writeIndex + 1) & outputMask
       this.samplesUntilFrame -= 1
+
       if (this.samplesUntilFrame === 0) { this.processFrame(parameters); this.samplesUntilFrame = this.hopSize }
     }
+
     return true
   }
 }

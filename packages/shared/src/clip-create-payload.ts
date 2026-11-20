@@ -65,6 +65,7 @@ const buildAudioClipMetadataPayloadFields = <TTrackId extends string>(
   input: BuildClipCreatePayloadInput<TTrackId>,
 ): Omit<SharedTimelineClipCreatePayload, 'trackId'> & { trackId: TTrackId } => {
   const { trackId, clip } = input
+
   if (!hasCompleteAudioClipMetadata(clip)) {
     throw new Error('Audio clips require complete source metadata')
   }
@@ -104,6 +105,7 @@ const buildAudioClipCreatePayloadFields = (
   input: BuildClipCreatePayloadInput,
 ): SharedTimelineClipCreatePayload => {
   const payload = buildAudioClipMetadataPayloadFields(input)
+
   if (!payload.sampleUrl) {
     throw new Error('Audio clips require complete source metadata')
   }
@@ -115,6 +117,7 @@ export function buildClipCreatePayload<TTrackId extends string>(
   input: BuildClipCreatePayloadInput<TTrackId>,
 ): ClipCreatePayload<TTrackId> {
   const { projectId, trackId, clip } = input
+
   if (!clip.midi) {
     return {
       projectId,

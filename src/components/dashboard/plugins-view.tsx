@@ -21,6 +21,7 @@ export function DashboardPluginsView() {
   const [catalog, setCatalog] = createSignal(initialCatalog)
   const [busy, setBusy] = createSignal(false)
   const [message, setMessage] = createSignal("")
+
   const localStorage = (() => {
     try {
       return window.localStorage
@@ -28,9 +29,11 @@ export function DashboardPluginsView() {
       return undefined
     }
   })()
+
   const [trustAcknowledged, setTrustAcknowledged] = createSignal(
     hasVst3TrustAcknowledgement(localStorage),
   )
+
   const bridge = window.dawDesktop?.pluginCatalog
   let activeUpdate: Promise<void> | undefined
   let activeScan: Promise<void> | undefined
@@ -40,16 +43,21 @@ export function DashboardPluginsView() {
     autoHeal = false,
   ) => {
     const pluginCatalogBridge = bridge
+
     if (!pluginCatalogBridge || busy()) return Promise.resolve()
     const shouldAutoHeal = autoHeal && trustAcknowledged()
+
     const run = async () => {
       setBusy(true)
+
       try {
         const result = await action()
+
         if ("catalog" in result) {
           setCatalog(result.catalog)
           setMessage("")
           window.dispatchEvent(new Event("daw-plugin-catalog-changed"))
+
           if (shouldAutoHeal) {
             const healed = await autoHealStaleVst3Catalog({
               catalog: result.catalog,
@@ -57,6 +65,7 @@ export function DashboardPluginsView() {
               trustAcknowledged: true,
               onCatalog: setCatalog,
             })
+
             if (healed && !healed.ok) setMessage(healed.error)
           }
         } else if (!result.ok) {
@@ -68,11 +77,13 @@ export function DashboardPluginsView() {
         setBusy(false)
       }
     }
+
     const promise = run()
     activeUpdate = promise
     void promise.finally(() => {
       if (activeUpdate === promise) activeUpdate = undefined
     })
+
     return promise
   }
 
@@ -90,13 +101,17 @@ export function DashboardPluginsView() {
 
   const rescan = async () => {
     if (!canUseVst3CatalogAction("scan", trustAcknowledged())) return
+
     if (activeScan) return activeScan
+
     const run = async () => {
       await activeUpdate
       await update(() => bridge?.scan() ?? Promise.resolve({ ok: false, error: "The desktop plug-in catalog is unavailable." }))
     }
+
     const promise = run()
     activeScan = promise
+
     try {
       await promise
     } finally {

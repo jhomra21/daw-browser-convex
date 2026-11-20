@@ -23,23 +23,30 @@ class FakeAudioBuffer {
 describe('granular runtime transfer contract', () => {
   test('3B1 r3 processorerror rejects an install before reporting its fault', async () => {
     const faults: string[] = [];
+
     const node: ReturnType<NonNullable<Parameters<typeof createGranularRuntime>[0]['createNode']>> = {
       parameters: new Map(), connect: () => {}, disconnect: () => {}, onprocessorerror: null,
       port: { onmessage: null, postMessage: () => {}, close: () => {} },
     };
+
     const runtime = await createGranularRuntime({
       context: { currentTime: 0 }, params: createDefaultGranularParams(),
       createNode: () => node, onFault: code => { faults.push(code); },
     });
+
     const buffer: AudioBuffer = {
       duration: 1, length: 4, numberOfChannels: 1, sampleRate: 4,
       copyFromChannel: () => {}, copyToChannel: () => {}, getChannelData: () => new Float32Array(4),
     };
+
     let failure: unknown;
+
     const install = runtime.installSample({ assetKey: 'asset', buffer, sourceStartFrame: 0 })
       .catch(cause => { failure = cause; });
+
     try {
       node.onprocessorerror?.(Object.assign(new Event('processorerror'), { message: 'processor failed', filename: '', lineno: 0, colno: 0, error: null }));
+
       for (let turn = 0; turn < 10; turn++) await Promise.resolve();
       expect(failure instanceof Error ? failure.message : failure).toBe('Granular sample installation failed: processor-error');
       expect(faults).toEqual(['processor-error']);
@@ -48,6 +55,7 @@ describe('granular runtime transfer contract', () => {
 
   test('configures stereo node params and schedules deterministic MIDI gates', async () => {
     const scheduled: Record<string, Array<[number, number]>> = {}
+
     const parameter = (name: string): AudioParam => ({
       automationRate: 'a-rate',
       defaultValue: 0,
@@ -61,10 +69,12 @@ describe('granular runtime transfer contract', () => {
       setTargetAtTime: () => parameter(name),
       setValueAtTime: (value: number, time: number) => {
         ;(scheduled[name] ??= []).push([value, time])
+
         return parameter(name)
       },
       setValueCurveAtTime: () => parameter(name),
     })
+
     const parameters = new Map([
       ['grainSizeMs', parameter('grainSizeMs')],
       ['densityHz', parameter('densityHz')],
@@ -75,7 +85,9 @@ describe('granular runtime transfer contract', () => {
       ['stereoSpread', parameter('stereoSpread')],
       ['gate', parameter('gate')],
     ])
+
     const messages: GranularWorkletControlMessage[] = []
+
     const node = {
       parameters,
       connect: () => {},
@@ -87,11 +99,13 @@ describe('granular runtime transfer contract', () => {
         close: () => {},
       },
     }
+
     const runtime = await createGranularRuntime({
       context: { currentTime: 2 },
       params: { ...createDefaultGranularParams(), seed: 77 },
       createNode: () => node,
     })
+
     runtime.resetSeed()
     runtime.scheduleNote({
       when: 4,
@@ -122,6 +136,7 @@ describe('granular runtime transfer contract', () => {
     let onmessage: ((event: MessageEvent<GranularWorkletStatusMessage>) => void) | null = null
     let disconnected = 0
     let released = 0
+
     const node = {
       parameters: new Map(),
       connect: () => {},
@@ -132,17 +147,20 @@ describe('granular runtime transfer contract', () => {
         set onmessage(value) { onmessage = value },
         postMessage: (message: GranularWorkletControlMessage, options?: StructuredSerializeOptions | Transferable[]) => {
           messages.push(message)
+
           if (Array.isArray(options)) transfers.push(options)
         },
         close: () => {},
       },
     }
+
     const runtime = await createGranularRuntime({
       context: { currentTime: 0 },
       params: createDefaultGranularParams(),
       createNode: () => node,
       resourceObserver: { acquire: () => () => { released += 1 } },
     })
+
     const buffer = new AudioBuffer({ length: 4, numberOfChannels: 2, sampleRate: 48_000 })
     const install = runtime.installSample({ assetKey: 'asset', buffer, sourceStartFrame: 0 })
     expect(messages[0]).toMatchObject({ type: 'install' })
@@ -172,6 +190,7 @@ describe('granular runtime transfer contract', () => {
 
   test('force-stops only the matching live gate while preserving other live and clip intervals', async () => {
     const scheduled: Array<[number, number]> = []
+
     const gate: AudioParam = {
       automationRate: 'a-rate',
       defaultValue: 0,
@@ -185,10 +204,12 @@ describe('granular runtime transfer contract', () => {
       setTargetAtTime: () => gate,
       setValueAtTime: (value, time) => {
         scheduled.push([value, time])
+
         return gate
       },
       setValueCurveAtTime: () => gate,
     }
+
     const runtime = await createGranularRuntime({
       context: { currentTime: 2 },
       params: createDefaultGranularParams(),
@@ -214,6 +235,7 @@ describe('granular runtime transfer contract', () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: FakeAudioBuffer })
     let onmessage: ((event: MessageEvent<GranularWorkletStatusMessage>) => void) | null = null
     const faults: string[] = []
+
     const node = {
       parameters: new Map(),
       connect: () => {},
@@ -226,12 +248,14 @@ describe('granular runtime transfer contract', () => {
         close: () => {},
       },
     }
+
     const runtime = await createGranularRuntime({
       context: { currentTime: 0 },
       params: { ...createDefaultGranularParams(), maxDecodedBytes: 1024 * 1024 },
       createNode: () => node,
       onFault: (code) => faults.push(code),
     })
+
     const oversized = new AudioBuffer({ length: 200_000, numberOfChannels: 2, sampleRate: 48_000 })
     await expect(runtime.installSample({ assetKey: 'large', buffer: oversized, sourceStartFrame: 0 })).rejects.toThrow('byte limit')
     const buffer = new AudioBuffer({ length: 4, numberOfChannels: 2, sampleRate: 48_000 })

@@ -69,41 +69,51 @@ const bulkClipDeleteErrorDetails = (error: Error) => {
   const details: Array<{ message?: string; code?: string }> = []
   const visited = new Set<object>()
   let currentCause: object = error
+
   while (true) {
     const parsed = bulkClipDeleteErrorSchema.safeParse(currentCause)
+
     if (!parsed.success) break
     const current = parsed.data
+
     if (visited.has(current)) break
     visited.add(current)
     details.push(current)
     const nextCause = z.object({}).passthrough().safeParse(current.cause)
+
     if (!nextCause.success) break
     currentCause = nextCause.data
   }
+
   return details
 }
 
 export const classifyBulkClipDeleteError = (error: Error): TimelineOperationTargetError | undefined => {
   const details = bulkClipDeleteErrorDetails(error)
   const message = details.map((detail) => detail.message).find((value): value is string => value !== undefined)
+
   const protectedCode = details.some((detail) => (
     detail.code === 'forbidden'
     || detail.code === 'access-denied'
     || detail.code === 'track-locked'
   ))
+
   const protectedMessage = details
     .map((detail) => detail.message)
     .find((value): value is string => value !== undefined && (
       value.includes('Actor cannot delete one or more clips.')
       || value.includes('Actor cannot delete clips on a locked track.')
     ))
+
   if (protectedCode || protectedMessage) {
     return new TimelineOperationTargetError(
       protectedMessage ?? message ?? 'Actor cannot delete one or more clips.',
       403,
     )
   }
+
   if (!message) return undefined
+
   if (
     message.includes('Clip deletion requires at least one clip.')
     || message.includes('Clip deletion cannot contain duplicate clip IDs.')
@@ -113,6 +123,7 @@ export const classifyBulkClipDeleteError = (error: Error): TimelineOperationTarg
     || message.includes('Clip deletion target changed during deletion.')
     || message.includes('Clip deletion recovery limit exceeded.')
   ) return new TimelineOperationTargetError(message)
+
   return undefined
 }
 
@@ -128,6 +139,7 @@ const verifyTimelineOperationTargets = async (
   const timeline = await context.convex.query(convexApi.timeline.fullViewAuthed, {
     projectId: context.projectId,
   })
+
   const projectTrackIds = new Set(timeline.tracks.map((track) => String(track._id)))
   const projectClipIds = new Set(timeline.clips.map((clip) => String(clip._id)))
 
@@ -136,6 +148,7 @@ const verifyTimelineOperationTargets = async (
       throw new TimelineOperationTargetError('Timeline operation references a track outside this project.')
     }
   }
+
   for (const clipId of clipIds) {
     if (!projectClipIds.has(clipId)) {
       throw new TimelineOperationTargetError('Timeline operation references a clip outside this project.')
@@ -187,12 +200,15 @@ export const executeTimelineOperation = async (
         })
       } catch (error) {
         const caughtError = z.instanceof(Error).safeParse(error)
+
         const classified = caughtError.success
           ? classifyBulkClipDeleteError(caughtError.data)
           : undefined
+
         if (classified) throw classified
         throw error
       }
+
     case 'clips.moveMany':
       return await context.convex.mutation(convexApi.clips.serverMoveMany, {
         moves: operation.payload.moves.map((move) => ({
@@ -237,18 +253,22 @@ export const executeTimelineOperation = async (
         outputTargetId: operation.payload.routing.outputTargetId ?? null,
         sends: operation.payload.routing.sends,
       })
+
       return { status: 'applied' }
     case 'sidechains.setRoute':
       await context.convex.mutation(convexApi.tracks.serverSetSidechainRoute, operation.payload)
+
       return { status: 'applied' }
     case 'sidechains.removeRoute':
       await context.convex.mutation(convexApi.tracks.serverRemoveSidechainRoute, operation.payload)
+
       return { status: 'applied' }
     case 'tracks.setGroup':
       await context.convex.mutation(convexApi.tracks.serverSetGroup, {
         trackId: operation.payload.trackId,
         groupId: operation.payload.groupId ?? null,
       })
+
       return { status: 'applied' }
     case 'tracks.reorderAndGroup':
       return await context.convex.mutation(convexApi.tracks.serverReorderAndGroup, operation.payload)
@@ -264,12 +284,14 @@ export const executeTimelineOperation = async (
       })
     case 'tracks.setCollapsed':
       await context.convex.mutation(convexApi.tracks.serverSetCollapsed, operation.payload)
+
       return { status: 'applied' }
     case 'tracks.setColor':
       await context.convex.mutation(convexApi.tracks.serverSetColor, {
         trackId: operation.payload.trackId,
         color: operation.payload.color ?? null,
       })
+
       return { status: 'applied' }
     case 'tracks.setColorCascade':
       return await context.convex.mutation(convexApi.tracks.serverSetColorCascade, operation.payload)
@@ -280,6 +302,7 @@ export const executeTimelineOperation = async (
         trackId: operation.payload.trackId,
         volume: operation.payload.volume,
       })
+
       return { status: 'applied' }
     case 'tracks.setMix':
       return await context.convex.mutation(convexApi.tracks.serverSetMix, {

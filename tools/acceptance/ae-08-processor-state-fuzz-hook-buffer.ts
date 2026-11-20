@@ -6,7 +6,9 @@ export default class FixtureBuffer implements AudioBuffer {
   private readonly planes = [new Float32Array(this.length), new Float32Array(this.length)]
   getChannelData(channel: number) {
     const plane = this.planes[channel]
+
     if (!plane) throw new Error("Invalid channel")
+
     return plane
   }
   copyFromChannel(destination: Float32Array<ArrayBuffer>, channel: number, start = 0) {

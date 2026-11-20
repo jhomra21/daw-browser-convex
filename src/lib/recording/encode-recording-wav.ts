@@ -26,6 +26,7 @@ export const readPlanarFloat32Channels = (
   channelCount: number,
 ): Float32Array[] => {
   const channelBytes = frameCount * Float32Array.BYTES_PER_ELEMENT
+
   return Array.from(
     { length: channelCount },
     (_, channel) => new Float32Array(payload.buffer, payload.byteOffset + channel * channelBytes, frameCount),
@@ -35,6 +36,7 @@ export const readPlanarFloat32Channels = (
 const getSessionDirectory = async (sessionId: string) => {
   const root = await navigator.storage.getDirectory()
   const recordings = await root.getDirectoryHandle(RECORDING_DIRECTORY)
+
   return recordings.getDirectoryHandle(sessionId)
 }
 
@@ -58,6 +60,7 @@ export const encodeRecordingWav = async (
     || !Number.isSafeInteger(descriptor.byteLength)
     || descriptor.byteLength < 0
   ) throw new Error('Recording PCM descriptor is invalid.')
+
   if (descriptor.capturedFrames === 0) {
     await removeRecordingTempSession(descriptor.sessionId).catch(() => undefined)
     throw new Error('Recording contained no audio frames.')
@@ -67,28 +70,36 @@ export const encodeRecordingWav = async (
   const pcmFile = await (await directory.getFileHandle(PCM_FILE)).getFile()
   const wavHandle = await directory.getFileHandle(WAV_FILE, { create: true })
   const createWritable = wavHandle.createWritable
+
   if (!createWritable) throw new Error('Origin-private file writes are unavailable.')
   const writable = await createWritable.call(wavHandle)
+
   async function* readBlocks() {
     let offset = 0
+
     while (offset < pcmFile.size) {
       const header = new Uint8Array(await pcmFile.slice(offset, offset + BLOCK_HEADER_BYTES).arrayBuffer())
+
       if (header.byteLength !== BLOCK_HEADER_BYTES) throw new Error('Recording PCM block header is truncated.')
       const frameCount = new DataView(header.buffer).getUint32(0, true)
       const payloadBytes = frameCount * descriptor.channelCount * Float32Array.BYTES_PER_ELEMENT
+
       if (frameCount === 0 || frameCount > 2048 || !Number.isSafeInteger(payloadBytes)) {
         throw new Error('Recording PCM block is invalid.')
       }
+
       const payload = new Uint8Array(await pcmFile.slice(
         offset + BLOCK_HEADER_BYTES,
         offset + BLOCK_HEADER_BYTES + payloadBytes,
       ).arrayBuffer())
+
       if (payload.byteLength !== payloadBytes) throw new Error('Recording PCM block payload is truncated.')
       const channels = readPlanarFloat32Channels(payload, frameCount, descriptor.channelCount)
       yield { frameCount, channels }
       offset += BLOCK_HEADER_BYTES + payloadBytes
     }
   }
+
   try {
     await encodePlanarFloat32Wav({
       sampleRate: descriptor.sampleRate,
@@ -103,6 +114,7 @@ export const encodeRecordingWav = async (
     })
     const file = await wavHandle.getFile()
     const fileName = `recording-${now()}.wav`
+
     return {
       file: new File([file], fileName, { type: 'audio/wav' }),
       fileName,

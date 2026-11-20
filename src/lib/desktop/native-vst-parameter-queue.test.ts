@@ -7,6 +7,7 @@ const decodePayload = (payload: Uint8Array) => {
   const instanceId = new TextDecoder().decode(payload.subarray(4, 4 + instanceLength))
   const countOffset = 4 + instanceLength
   const count = view.getUint32(countOffset, true)
+
   return {
     instanceId,
     events: Array.from({ length: count }, (_, index) => ({
@@ -21,12 +22,15 @@ describe("native VST parameter queue", () => {
     const payloads: Uint8Array[] = []
     let release: (() => void) | undefined
     let sends = 0
+
     const queue = createNativeVstParameterQueue(async (payload) => {
       payloads.push(payload)
       sends += 1
+
       if (sends === 1) {
         await new Promise<void>((resolve) => { release = resolve })
       }
+
       return { ok: true as const }
     })
 
@@ -44,8 +48,10 @@ describe("native VST parameter queue", () => {
 
   test("groups multiple parameters for one instance into one payload", async () => {
     const payloads: Uint8Array[] = []
+
     const queue = createNativeVstParameterQueue(async (payload) => {
       payloads.push(payload)
+
       return { ok: true as const }
     })
 
@@ -66,8 +72,10 @@ describe("native VST parameter queue", () => {
 
   test("serializes different instances into separate payloads", async () => {
     const payloads: Uint8Array[] = []
+
     const queue = createNativeVstParameterQueue(async (payload) => {
       payloads.push(payload)
+
       return { ok: true as const }
     })
 
@@ -82,8 +90,10 @@ describe("native VST parameter queue", () => {
   test("does not self-sustain rejected payloads and recovers after fresh input", async () => {
     let attempts = 0
     let accept = false
+
     const queue = createNativeVstParameterQueue(async () => {
       attempts += 1
+
       return accept ? { ok: true } : { ok: false, error: "unavailable" }
     })
 
@@ -99,9 +109,12 @@ describe("native VST parameter queue", () => {
   test("does not self-sustain thrown rejections and recovers after fresh input", async () => {
     let attempts = 0
     let accept = false
+
     const queue = createNativeVstParameterQueue(async () => {
       attempts += 1
+
       if (!accept) throw new Error("native host rejected")
+
       return { ok: true }
     })
 
@@ -115,9 +128,11 @@ describe("native VST parameter queue", () => {
   test("disposal prevents sends and resolves active and pending waiters", async () => {
     let release: (() => void) | undefined
     let sends = 0
+
     const queue = createNativeVstParameterQueue(async () => {
       sends += 1
       await new Promise<void>((resolve) => { release = resolve })
+
       return { ok: true as const }
     })
 
@@ -138,11 +153,13 @@ describe("native VST parameter queue", () => {
     let active = 0
     let maximumActive = 0
     let release: (() => void) | undefined
+
     const queue = createNativeVstParameterQueue(async () => {
       active += 1
       maximumActive = Math.max(maximumActive, active)
       await new Promise<void>((resolve) => { release = resolve })
       active -= 1
+
       return { ok: true as const }
     })
 

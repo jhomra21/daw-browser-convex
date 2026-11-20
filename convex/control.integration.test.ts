@@ -44,24 +44,29 @@ const approvedRequest = async (
   const approval = await t.withIdentity({ subject: owner }).mutation(api.control.requestApprovalV1, {
     request: { version: "v1", projectId, actions },
   });
+
   return { ...request(actions, idempotencyKey), approvalToken: approval.approvalToken };
 };
 
 const setup = async () => {
   const t = convexTest(schema, modules);
   await t.withIdentity({ subject: owner }).mutation(api.projects.createOwnedRoom, { projectId });
+
   return t;
 };
 
 const completeR2Deletes = async (t: Awaited<ReturnType<typeof setup>>) => {
   const rows = await t.run(async (ctx) => await ctx.db.query("r2DeleteQueue").collect());
+
   if (rows.length === 0) return;
   const worker = { subject: "worker", tokenIdentifier: "worker-token", dawWorker: true };
+
   const claimed = await t.withIdentity(worker).mutation(api.r2Deletes.claimRows, {
     projectId,
     ids: rows.map((row) => row._id),
     now: Date.now(),
   });
+
   await t.withIdentity(worker).mutation(api.r2Deletes.markDeleted, {
     projectId,
     claims: claimed.flatMap((row) => row.claimToken === undefined ? [] : [{ id: row._id, claimToken: row.claimToken }]),
@@ -79,6 +84,7 @@ const addTrack = async (
     kind: input.kind,
     groupId: input.groupId,
   });
+
   await ctx.db.insert("mixerChannels", {
     projectId,
     trackId,
@@ -89,11 +95,13 @@ const addTrack = async (
     lockedAt: input.lockedBy ? Date.now() : undefined,
   });
   await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, trackId });
+
   return trackId;
 });
 
 test("preview is write-free and commit replays persisted client refs", async () => {
   const t = await setup();
+
   const preview = await t.withIdentity({ subject: owner }).query(api.control.previewV1, {
     request: {
       version: "v1",
@@ -101,24 +109,29 @@ test("preview is write-free and commit replays persisted client refs", async () 
       actions: [{ kind: "track.create", clientRef: "new-track", trackKind: "audio", name: "Created" }],
     },
   });
+
   expect(preview.applied).toBe(true);
   expect(await t.run((ctx) => ctx.db.query("tracks").collect())).toHaveLength(0);
 
   const first = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "track.create", clientRef: "new-track", trackKind: "audio", name: "Created" }]),
   });
+
   const track = first.resolvedRefs[0];
   expect(track?.persisted).toBe(true);
   expect(track?.id).toBeTruthy();
+
   const replay = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "track.create", clientRef: "new-track", trackKind: "audio", name: "Created" }]),
   });
+
   expect(replay).toEqual({ ...first, idempotencyReplay: true });
 });
 
 test("plans and executes a legacy MIDI no-op against the expanded cloud snapshot", async () => {
   const t = await setup();
   const track = await addTrack(t, { name: "Instrument", index: 0, kind: "instrument" });
+
   const clip = await t.run(async (ctx) => {
     const clipId = await ctx.db.insert("clips", {
       projectId,
@@ -138,9 +151,12 @@ test("plans and executes a legacy MIDI no-op against the expanded cloud snapshot
         mappings: [{ id: "mapping-1", source: { kind: "cc", controller: 1, channel: 2 }, target: { parameterId: "gain" }, outputMin: 0, outputMax: 1 }],
       },
     });
+
     await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId });
+
     return clipId;
   });
+
   const action = {
     kind: "clip.midi.set",
     clip: { source: "persisted" as const, id: String(clip) },
@@ -148,13 +164,17 @@ test("plans and executes a legacy MIDI no-op against the expanded cloud snapshot
     gain: 0.5,
     notes: [{ beat: 0, length: 1, pitch: 60, velocity: 0.5 }],
   };
+
   const preview = await t.withIdentity({ subject: owner }).query(api.control.previewV1, {
     request: { version: "v1", projectId, actions: [action] },
   });
+
   expect(preview.applied).toBe(false);
+
   const committed = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([action], "expanded-midi-noop"),
   });
+
   expect(committed.applied).toBe(false);
   const v2 = await t.withIdentity({ subject: owner }).query(api.control.snapshotV2, { projectId });
   expect(v2.clips[0]?.midi).toMatchObject({
@@ -169,10 +189,13 @@ test("plans and executes a legacy MIDI no-op against the expanded cloud snapshot
 test("edits one legacy cloud MIDI note without dropping historical fields", async () => {
   const t = await setup();
   const track = await addTrack(t, { name: "Legacy instrument", index: 0, kind: "instrument" });
+
   const notes = Array.from({ length: 501 }, (_, index) => ({
     id: `note-${index}`, beat: index, length: 1, pitch: 60, velocity: 0.5, channel: 1,
   }));
+
   notes[0] = { id: "invalid-note", beat: -2, length: -1, pitch: 200, velocity: 2, channel: 1 };
+
   const legacy = {
     wave: "custom-legacy",
     gain: 7,
@@ -180,13 +203,17 @@ test("edits one legacy cloud MIDI note without dropping historical fields", asyn
     cc: [{ id: "cc-1", beat: 0, controller: 1, value: 0.5, channel: 1 }],
     mappings: [{ id: "mapping-1", source: { kind: "cc" as const, controller: 1, channel: 1 }, target: { parameterId: "gain" }, outputMin: 0, outputMax: 1 }],
   };
+
   const clip = await t.run(async (ctx) => {
     const clipId = await ctx.db.insert("clips", {
       projectId, trackId: track, startSec: 0, duration: 1, name: "Legacy MIDI", midi: legacy,
     });
+
     await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId });
+
     return clipId;
   });
+
   await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{
       kind: "clip.midi.set",
@@ -198,8 +225,10 @@ test("edits one legacy cloud MIDI note without dropping historical fields", asyn
         : note),
     }], "legacy-midi-edit"),
   });
+
   const midi = (await t.withIdentity({ subject: owner }).query(api.control.snapshotV2, { projectId }))
     .clips.find((entry) => entry.id === String(clip))?.midi;
+
   expect(midi).toMatchObject({ wave: "custom-legacy", gain: 7, cc: legacy.cc, mappings: legacy.mappings });
   expect(midi?.notes).toHaveLength(501);
   expect(midi?.notes.find((note) => note.id === "invalid-note")).toMatchObject({
@@ -218,6 +247,7 @@ test("projects historical finite MIDI values through both cloud snapshot version
         notes: [{ beat: -2, length: -1, pitch: 200, velocity: 2 }],
       },
     });
+
     await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId });
   });
   const v1 = await t.withIdentity({ subject: owner }).query(api.control.snapshotV1, { projectId });
@@ -230,20 +260,26 @@ test("projects historical finite MIDI values through both cloud snapshot version
 test("restores a deleted clip through an opaque single-use recovery descriptor", async () => {
   const t = await setup();
   const track = await addTrack(t, { name: "Audio", index: 0 });
+
   const clip = await t.run(async (ctx) => {
     const clipId = await ctx.db.insert("clips", { projectId, trackId: track, startSec: 1, duration: 2, name: "Recover" });
     await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId });
+
     return clipId;
   });
+
   const deletion = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [{ kind: "clip.delete", clip: { source: "persisted", id: String(clip) } }], "recovery-delete"),
   });
+
   const descriptor = deletion.recoveries[0];
   expect(descriptor?.id).toBeTruthy();
   expect(JSON.stringify(deletion)).not.toContain("r2Key");
+
   const restored = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "recovery.restore", recovery: { id: descriptor!.id } }], "recovery-restore"),
   });
+
   expect(restored.restored[0]?.entities[0]?.sourceId).toBe(String(clip));
   expect(restored.restored[0]?.entities[0]?.restoredId).not.toBe(String(clip));
   await expect(t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
@@ -254,18 +290,22 @@ test("restores a deleted clip through an opaque single-use recovery descriptor",
 test("restores range-deleted clips and automation after verifying semantic drift digests", async () => {
   const t = await setup();
   const track = await addTrack(t, { name: "Range recovery", index: 0, kind: "audio" });
+
   const originalPoints = [
     { id: "range-a", timeSec: 0, value: 0, interpolation: "linear" as const },
     { id: "range-b", timeSec: 2, value: 1, interpolation: "linear" as const },
     { id: "range-c", timeSec: 4, value: 0, interpolation: "linear" as const },
   ];
+
   const clips = await t.run(async (ctx) => {
     const split = await ctx.db.insert("clips", {
       projectId, trackId: track, historyRef: "split-history", startSec: 0, duration: 4, name: "Split", bufferOffsetSec: 0, midiOffsetBeats: 0,
     });
+
     const deleted = await ctx.db.insert("clips", {
       projectId, trackId: track, historyRef: "deleted-history", startSec: 1.25, duration: 0.5, name: "Deleted", bufferOffsetSec: 0, midiOffsetBeats: 0,
     });
+
     await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId: split });
     await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId: deleted });
     await ctx.db.insert("automationEnvelopes", {
@@ -278,25 +318,32 @@ test("restores range-deleted clips and automation after verifying semantic drift
       points: originalPoints,
       updatedAt: 1,
     });
+
     return { split: String(split), deleted: String(deleted) };
   });
+
   const action = {
     kind: "timeline.range.delete" as const,
     tracks: [{ source: "persisted" as const, id: String(track) }],
     startSec: 1,
     endSec: 3,
   };
+
   const deletion = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [action], "range-recovery-delete"),
   });
+
   const descriptor = deletion.recoveries[0];
+
   if (!descriptor) throw new Error("Expected range recovery.");
   expect(descriptor.kind).toBe("timeline.range.delete");
   await t.run(async (ctx) => {
     const recoveryId = ctx.db.normalizeId("controlRecoveries", descriptor.id);
     const row = recoveryId ? await ctx.db.get(recoveryId) : null;
+
     if (!row) throw new Error("Expected stored range recovery.");
     const payload = parseCapturedRecoveryPayload(row.payload);
+
     if (payload.kind !== "timeline.range.delete") throw new Error("Expected range recovery payload.");
     expect(Object.keys(payload.data).sort()).toEqual([
       "automation", "createdClips", "deletedClips", "range", "updatedClips",
@@ -311,9 +358,11 @@ test("restores range-deleted clips and automation after verifying semantic drift
     expect(payload.data.automation[0]?.id).toMatch(/.+/);
   });
   expect(await t.run((ctx) => ctx.db.query("clips").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect())).toHaveLength(2);
+
   const restored = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], "range-recovery-restore"),
   });
+
   expect(restored.restored[0]?.entities).toEqual([
     expect.objectContaining({ entity: "clip", sourceId: clips.deleted }),
   ]);
@@ -335,6 +384,7 @@ test("restores range-deleted clips and automation after verifying semantic drift
 test("resolves created clip placeholders for a later range split and recovery", async () => {
   const t = await setup();
   const track = await addTrack(t, { name: "Instrument", index: 0, kind: "instrument" });
+
   const actions = [
     {
       kind: "clip.midi.create",
@@ -352,10 +402,13 @@ test("resolves created clip placeholders for a later range split and recovery", 
       endSec: 3,
     },
   ];
+
   const committed = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request(actions, "create-then-range-delete"),
   });
+
   const recovery = committed.recoveries[0];
+
   if (!recovery) throw new Error("Expected range recovery.");
   expect(await t.run(async (ctx) => (
     await ctx.db.query("clips").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
@@ -378,9 +431,12 @@ test("keeps recovery restore and range deletion planner and executor references 
     const clipId = await ctx.db.insert("clips", {
       projectId, trackId: track, startSec: 1, duration: 1, name: "Recovered then deleted",
     });
+
     await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId });
+
     return clipId;
   });
+
   const deleted = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [
       {
@@ -391,8 +447,11 @@ test("keeps recovery restore and range deletion planner and executor references 
       },
     ], "restore-range-initial-delete"),
   });
+
   const recovery = deleted.recoveries[0];
+
   if (!recovery) throw new Error("Expected clip recovery.");
+
   const actions = [
     { kind: "recovery.restore" as const, recovery: { id: recovery.id } },
     {
@@ -402,14 +461,19 @@ test("keeps recovery restore and range deletion planner and executor references 
       endSec: 2.5,
     },
   ];
+
   const preview = await t.withIdentity({ subject: owner }).query(api.control.previewV1, {
     request: { version: "v1", projectId, actions },
   });
+
   expect(preview.applied).toBe(true);
+
   const committed = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request(actions, "restore-range-commit"),
   });
+
   const recaptured = committed.recoveries.find((entry) => entry.kind === "timeline.range.delete");
+
   if (!recaptured) throw new Error("Expected range recovery.");
   expect(await t.run((ctx) => ctx.db.query("clips")
     .withIndex("by_room", (query) => query.eq("projectId", projectId)).collect())).toEqual([]);
@@ -425,6 +489,7 @@ test("keeps recovery restore and range deletion planner and executor references 
 test("lists and restores an unexpired stored V1 clip recovery", async () => {
   const t = await setup();
   const track = await addTrack(t, { name: "V1 recovery track", index: 0 });
+
   const recoveryId = await t.run(async (ctx) => {
     const payload = canonicalRecoveryPayloadV1({
       version: 1,
@@ -441,6 +506,7 @@ test("lists and restores an unexpired stored V1 clip recovery", async () => {
         },
       },
     });
+
     return await ctx.db.insert("controlRecoveries", {
       projectId,
       actorSubject: owner,
@@ -453,12 +519,15 @@ test("lists and restores an unexpired stored V1 clip recovery", async () => {
       expiresAt: Date.now() + 60_000,
     });
   });
+
   const recoveryIdText = String(recoveryId);
   expect((await t.withIdentity({ subject: owner }).query(api.control.recoveriesV1, { projectId })).entries)
     .toEqual([expect.objectContaining({ id: recoveryIdText, kind: "clip.delete" })]);
+
   const restored = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "recovery.restore", recovery: { id: recoveryIdText } }], "stored-v1-recovery-restore"),
   });
+
   expect(restored.restored[0]?.entities).toEqual([
     expect.objectContaining({ entity: "clip", sourceId: "legacy-clip" }),
   ]);
@@ -475,37 +544,52 @@ test("captures and restores oversized legacy MIDI for clip and track deletion", 
     notes: Array.from({ length: 500 }, (_, beat) => ({ beat, length: 1, pitch: 60 })),
     cc: [{ beat: 0, controller: 1, value: 0 }],
   };
+
   for (const deletionKind of ["clip", "track"] as const) {
     const t = await setup();
     const track = await addTrack(t, { name: `Instrument ${deletionKind}`, index: 0, kind: "instrument" });
+
     const clip = await t.run(async (ctx) => {
       const clipId = await ctx.db.insert("clips", {
         projectId, trackId: track, startSec: 0, duration: 1, midi: oversizedMidi,
       });
+
       await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId });
+
       return clipId;
     });
+
     const action = deletionKind === "clip"
       ? { kind: "clip.delete" as const, clip: { source: "persisted" as const, id: String(clip) } }
       : { kind: "track.delete" as const, track: { source: "persisted" as const, id: String(track) } };
+
     const deleted = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
       request: await approvedRequest(t, [action], `oversized-${deletionKind}-delete`),
     });
+
     const descriptor = deleted.recoveries[0];
+
     if (!descriptor) throw new Error("Expected recovery descriptor.");
+
     const recovery = await t.run(async (ctx) => {
       const id = ctx.db.normalizeId("controlRecoveries", descriptor.id);
+
       return id ? await ctx.db.get(id) : null;
     });
+
     if (!recovery) throw new Error("Recovery row is unavailable.");
     expect(parseCapturedRecoveryPayload(recovery.payload).kind).toBe(`${deletionKind}.delete`);
+
     const restored = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
       request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], `oversized-${deletionKind}-restore`),
     });
+
     expect(restored.restored).toHaveLength(1);
+
     const restoredClip = await t.run(async (ctx) => (await ctx.db.query("clips")
       .withIndex("by_room", (q) => q.eq("projectId", projectId))
       .collect())[0]);
+
     expect(restoredClip?.midi?.notes).toHaveLength(500);
     expect(restoredClip?.midi?.cc).toHaveLength(1);
     expect(restoredClip?.midi).toMatchObject({ wave: "custom-legacy", gain: 7 });
@@ -521,26 +605,33 @@ test("restores a deleted nested track subtree and survivor routing through recov
     const childRow = await ctx.db.get(child);
     const childChannel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", child)).unique();
     const survivorChannel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", survivor)).unique();
+
     if (!childRow || !childChannel || !survivorChannel) throw new Error("Track fixtures are unavailable.");
     await ctx.db.patch(childRow._id, { groupId: group });
     await ctx.db.patch(childChannel._id, { outputTargetId: group });
     await ctx.db.patch(survivorChannel._id, { outputTargetId: group, sends: [{ targetId: child, amount: 0.4 }] });
   });
+
   const deleted = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [{ kind: "track.delete", track: { source: "persisted", id: String(group) } }], "track-recovery-delete"),
   });
+
   expect(deleted.recoveries[0]?.kind).toBe("track.delete");
   const descriptor = deleted.recoveries[0];
+
   if (!descriptor) throw new Error("Expected track recovery.");
+
   const restored = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], "track-recovery-restore"),
   });
+
   expect(restored.restored[0]?.entities.filter((entity) => entity.entity === "track")).toHaveLength(2);
   await t.run(async (ctx) => {
     const tracks = await ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect();
     const restoredGroup = tracks.find((track) => track.name === "Group");
     const restoredChild = tracks.find((track) => track.name === "Child");
     const restoredSurvivor = tracks.find((track) => track.name === "Survivor");
+
     if (!restoredGroup || !restoredChild || !restoredSurvivor) throw new Error("Restored tracks are unavailable.");
     const childChannel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", restoredChild._id)).unique();
     const survivorChannel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", restoredSurvivor._id)).unique();
@@ -557,23 +648,30 @@ test("restores an ungrouped group and its direct child transitions through recov
   const child = await addTrack(t, { name: "Child", index: 1, groupId: group });
   await t.run(async (ctx) => {
     const channel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", child)).unique();
+
     if (!channel) throw new Error("Child mixer channel is unavailable.");
     await ctx.db.patch(channel._id, { outputTargetId: group });
   });
+
   const ungrouped = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [{ kind: "track.ungroup", group: { source: "persisted", id: String(group) } }], "ungroup-recovery-delete"),
   });
+
   expect(ungrouped.recoveries[0]?.kind).toBe("track.ungroup");
   const descriptor = ungrouped.recoveries[0];
+
   if (!descriptor) throw new Error("Expected ungroup recovery.");
+
   const restored = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], "ungroup-recovery-restore"),
   });
+
   expect(restored.restored[0]?.entities.some((entity) => entity.entity === "track")).toBe(true);
   await t.run(async (ctx) => {
     const tracks = await ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect();
     const restoredGroup = tracks.find((track) => track.name === "Group");
     const restoredChild = tracks.find((track) => track.name === "Child");
+
     if (!restoredGroup || !restoredChild) throw new Error("Restored group fixtures are unavailable.");
     const childChannel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", restoredChild._id)).unique();
     expect(String(restoredChild.groupId)).toBe(String(restoredGroup._id));
@@ -590,34 +688,45 @@ test("captures canonical delete after-state for unrelated survivor routing and r
   await t.run(async (ctx) => {
     const track = await ctx.db.get(survivor);
     const channel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", survivor)).unique();
+
     if (!track || !channel) throw new Error("Delete recovery fixture is unavailable.");
     await ctx.db.patch(channel._id, {
       outputTargetId: keptGroup,
       sends: [{ targetId: keptGroup, amount: 0.25, tap: "pre-fader" }],
     });
   });
+
   const before = await t.run(async (ctx) => {
     const track = await ctx.db.get(survivor);
     const channel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", survivor)).unique();
+
     if (!track || !channel) throw new Error("Delete recovery fixture is unavailable.");
+
     return { index: track.index, groupId: track.groupId, outputTargetId: channel.outputTargetId, sends: channel.sends };
   });
+
   const deleted = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [{
       kind: "track.delete",
       track: { source: "persisted", id: String(deletedGroup) },
     }], "delete-unrelated-routing"),
   });
+
   const descriptor = deleted.recoveries[0];
+
   if (!descriptor) throw new Error("Expected delete recovery.");
+
   const immediate = await t.run(async (ctx) => {
     const track = await ctx.db.get(survivor);
     const channel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", survivor)).unique();
     const recoveryId = ctx.db.normalizeId("controlRecoveries", descriptor.id);
     const recovery = recoveryId ? await ctx.db.get(recoveryId) : null;
+
     if (!track || !channel || !recovery) throw new Error("Delete recovery state is unavailable.");
+
     return { track, channel, payload: parseCapturedRecoveryPayload(recovery.payload) };
   });
+
   if (immediate.payload.kind !== "track.delete") throw new Error("Expected track delete payload.");
   const survivorEntry = immediate.payload.data.survivors.find((entry) => entry.id === String(survivor));
   expect(survivorEntry?.after).toMatchObject({
@@ -631,14 +740,18 @@ test("captures canonical delete after-state for unrelated survivor routing and r
   await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], "delete-unrelated-routing-restore"),
   });
+
   const restored = await t.run(async (ctx) => {
     const tracks = await ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect();
     const track = tracks.find((entry) => entry.name === "Survivor");
+
     const channel = track
       ? await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", track._id)).unique()
       : null;
+
     return { track, channel };
   });
+
   expect(restored.track?.index).toBe(before.index);
   expect(String(restored.track?.groupId)).toBe(String(before.groupId));
   expect(String(restored.channel?.outputTargetId)).toBe(String(before.outputTargetId));
@@ -655,13 +768,16 @@ test("captures canonical ungroup after-state for unrelated and rebound child rou
   await t.run(async (ctx) => {
     const unrelatedChannel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", unrelatedChild)).unique();
     const reboundChannel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", reboundChild)).unique();
+
     if (!unrelatedChannel || !reboundChannel) throw new Error("Ungroup recovery fixture is unavailable.");
     await ctx.db.patch(unrelatedChannel._id, { outputTargetId: unrelatedOutput });
     await ctx.db.patch(reboundChannel._id, { outputTargetId: group });
   });
+
   const before = await t.run(async (ctx) => {
     const tracks = await ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect();
     const channels = await ctx.db.query("mixerChannels").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect();
+
     return {
       tracks: tracks.filter((track) => track.name.endsWith("child")).map((track) => ({
         name: track.name, index: track.index, groupId: track.groupId,
@@ -669,23 +785,31 @@ test("captures canonical ungroup after-state for unrelated and rebound child rou
       channels: channels.filter((channel) => [unrelatedChild, reboundChild].some((id) => String(id) === String(channel.trackId))),
     };
   });
+
   const ungrouped = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [{
       kind: "track.ungroup",
       group: { source: "persisted", id: String(group) },
     }], "ungroup-routing-regression"),
   });
+
   const descriptor = ungrouped.recoveries[0];
+
   if (!descriptor) throw new Error("Expected ungroup recovery.");
+
   const immediate = await t.run(async (ctx) => {
     const tracks = await ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect();
     const channels = await ctx.db.query("mixerChannels").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect();
     const recoveryId = ctx.db.normalizeId("controlRecoveries", descriptor.id);
     const recovery = recoveryId ? await ctx.db.get(recoveryId) : null;
+
     if (!recovery) throw new Error("Ungroup recovery is unavailable.");
+
     return { tracks, channels, payload: parseCapturedRecoveryPayload(recovery.payload) };
   });
+
   if (immediate.payload.kind !== "track.ungroup") throw new Error("Expected track ungroup payload.");
+
   for (const child of [unrelatedChild, reboundChild]) {
     const track = immediate.tracks.find((entry) => String(entry._id) === String(child));
     const channel = immediate.channels.find((entry) => String(entry.trackId) === String(child));
@@ -696,19 +820,24 @@ test("captures canonical ungroup after-state for unrelated and rebound child rou
       mixer: { outputTargetId: channel?.outputTargetId === undefined ? undefined : String(channel.outputTargetId) },
     });
   }
+
   await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], "ungroup-routing-regression-restore"),
   });
+
   const restored = await t.run(async (ctx) => ({
     tracks: await ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect(),
     channels: await ctx.db.query("mixerChannels").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect(),
   }));
+
   const restoredGroup = restored.tracks.find((track) => track.name === "Group");
+
   for (const expected of before.tracks) {
     const actual = restored.tracks.find((track) => track.name === expected.name);
     expect(actual?.index).toBe(expected.index);
     expect(String(actual?.groupId)).toBe(String(restoredGroup?._id));
   }
+
   expect(String(restored.channels.find((channel) => String(channel.trackId) === String(unrelatedChild))?.outputTargetId))
     .toBe(String(unrelatedOutput));
   expect(String(restored.channels.find((channel) => String(channel.trackId) === String(reboundChild))?.outputTargetId))
@@ -718,18 +847,23 @@ test("captures canonical ungroup after-state for unrelated and rebound child rou
 test("lists only active recovery descriptors without private payload data", async () => {
   const t = await setup();
   const track = await addTrack(t, { name: "Recovery list", index: 0 });
+
   const clip = await t.run(async (ctx) => {
     const clipId = await ctx.db.insert("clips", { projectId, trackId: track, startSec: 0, duration: 1 });
     await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId });
+
     return clipId;
   });
+
   const deleted = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [{ kind: "clip.delete", clip: { source: "persisted", id: String(clip) } }], "recovery-list-delete"),
   });
+
   const listed = await t.withIdentity({ subject: owner }).query(api.control.recoveriesV1, { projectId });
   expect(listed.entries).toEqual([deleted.recoveries[0]]);
   expect(JSON.stringify(listed)).not.toContain("payload");
   const descriptor = deleted.recoveries[0];
+
   if (!descriptor) throw new Error("Expected recovery.");
   await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], "recovery-list-restore"),
@@ -740,15 +874,20 @@ test("lists only active recovery descriptors without private payload data", asyn
 test("project deletion removes recoveries before a project ID is recreated", async () => {
   const t = await setup();
   const track = await addTrack(t, { name: "Delete project", index: 0 });
+
   const clip = await t.run(async (ctx) => {
     const clipId = await ctx.db.insert("clips", { projectId, trackId: track, startSec: 0, duration: 1 });
     await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId });
+
     return clipId;
   });
+
   const deleted = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [{ kind: "clip.delete", clip: { source: "persisted", id: String(clip) } }], "project-delete-recovery"),
   });
+
   const descriptor = deleted.recoveries[0];
+
   if (!descriptor) throw new Error("Expected recovery.");
   await t.run(async (ctx) => {
     await ctx.db.insert("sharedOperationResults", {
@@ -774,8 +913,10 @@ test("project deletion removes recoveries before a project ID is recreated", asy
 
 test("project deletion preserves R2 jobs for prior storage lifecycles", async () => {
   const t = await setup();
+
   const first = await t.run(async (ctx) => await ctx.db.query("projects")
     .withIndex("by_room", (query) => query.eq("projectId", projectId)).unique());
+
   if (!first) throw new Error("Expected first project lifecycle.");
   const firstExactKey = `asset-namespaces/${first.storageNamespace}/samples/first`;
   await t.run(async (ctx) => {
@@ -792,8 +933,10 @@ test("project deletion preserves R2 jobs for prior storage lifecycles", async ()
     .rejects.toThrow("cleanup");
   await completeR2Deletes(t);
   await t.withIdentity({ subject: owner }).mutation(api.projects.createOwnedRoom, { projectId });
+
   const second = await t.run(async (ctx) => await ctx.db.query("projects")
     .withIndex("by_room", (query) => query.eq("projectId", projectId)).unique());
+
   if (!second) throw new Error("Expected second project lifecycle.");
   expect(second.storageNamespace).not.toBe(first.storageNamespace);
   const secondExactKey = `asset-namespaces/${second.storageNamespace}/samples/second`;
@@ -826,11 +969,13 @@ test("project deletion preserves R2 jobs for prior storage lifecycles", async ()
   expect(oldRows.every((row) => !row.r2Key.startsWith(secondPrefixKey))).toBe(true);
 
   const worker = { subject: "worker", tokenIdentifier: "worker-token", dawWorker: true };
+
   const claimed = await t.withIdentity(worker).mutation(api.r2Deletes.claimRows, {
     projectId,
     ids: oldRows.map((row) => row._id),
     now: Date.now(),
   });
+
   await t.withIdentity(worker).mutation(api.r2Deletes.markDeleted, {
     projectId,
     claims: claimed.flatMap((row) => row.claimToken === undefined ? [] : [{ id: row._id, claimToken: row.claimToken }]),
@@ -847,15 +992,20 @@ test("recovery descriptors are single-use per request and available to project w
     await ctx.db.insert("ownerships", { projectId, ownerUserId: editor, role: "editor" });
   });
   const track = await addTrack(t, { name: "Recovery", index: 0 });
+
   const clip = await t.run(async (ctx) => {
     const clipId = await ctx.db.insert("clips", { projectId, trackId: track, startSec: 0, duration: 1, name: "Cross writer" });
     await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId });
+
     return clipId;
   });
+
   const deleted = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [{ kind: "clip.delete", clip: { source: "persisted", id: String(clip) } }], "cross-writer-delete"),
   });
+
   const descriptor = deleted.recoveries[0];
+
   if (!descriptor) throw new Error("Expected a recovery descriptor.");
   await expect(t.withIdentity({ subject: editor }).query(api.control.previewV1, {
     request: {
@@ -867,9 +1017,11 @@ test("recovery descriptors are single-use per request and available to project w
       ],
     },
   })).rejects.toThrow('"code":"validation"');
+
   const restored = await t.withIdentity({ subject: editor }).mutation(api.control.commitV1, {
     request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], "cross-writer-restore"),
   });
+
   expect(restored.restored[0]?.recoveryId).toBe(descriptor.id);
   const history = await t.withIdentity({ subject: editor }).query(api.control.historyV1, { projectId, limit: 10 });
   expect(history.entries.some((entry) => entry.recoveries.some((recovery) => recovery.id === descriptor.id))).toBe(true);
@@ -884,23 +1036,28 @@ test("restores effect, instrument, arpeggiator, automation, and sidechain payloa
   const t = await setup();
   const source = await addTrack(t, { name: "Source", index: 0 });
   const target = await addTrack(t, { name: "Target", index: 1, kind: "instrument" });
+
   const ids = await t.run(async (ctx) => {
     const utility = await ctx.db.insert("effects", {
       projectId, targetType: "track", trackId: target, index: 0, type: "utility",
       instanceId: "recover-utility", params: normalizeOwnedProcessorParams("utility", {}), createdAt: 1,
     });
+
     const compressor = await ctx.db.insert("effects", {
       projectId, targetType: "track", trackId: target, index: 1, type: "compressor",
       instanceId: "recover-compressor", params: normalizeAudioEffectParamsForUpdate("compressor", {}), createdAt: 2,
     });
+
     const instrument = await ctx.db.insert("effects", {
       projectId, targetType: "track", trackId: target, index: 2, type: "instrument",
       instanceId: "recover-instrument", params: { kind: "synth", instanceId: "recover-instrument", params: createDefaultSynthParams() }, createdAt: 3,
     });
+
     const arpeggiator = await ctx.db.insert("effects", {
       projectId, targetType: "track", trackId: target, index: 3, type: "arpeggiator",
       params: { enabled: true, pattern: "up", rate: "1/8", octaves: 1, gate: 0.8, hold: false }, createdAt: 4,
     });
+
     await ctx.db.insert("automationEnvelopes", {
       projectId, targetKind: "master", targetKey: 'automation:v2:["master",null,null,"volume"]', parameterId: "volume", enabled: true,
       points: [{ id: "recover-point", timeSec: 0, value: 0.5, interpolation: "linear" }], updatedAt: 5,
@@ -908,9 +1065,12 @@ test("restores effect, instrument, arpeggiator, automation, and sidechain payloa
     await ctx.db.insert("sidechainRoutes", {
       projectId, sourceTrackId: source, targetTrackId: target, effectInstanceId: "recover-compressor",
     });
+
     return { utility, compressor, instrument, arpeggiator };
   });
+
   const ref = (id: Id<"tracks"> | Id<"effects">) => ({ source: "persisted" satisfies "persisted", id: String(id) });
+
   const destructive = [
     { kind: "effect.remove", target: { kind: "track", track: ref(target) }, effect: ref(ids.utility), effectKind: "utility" },
     { kind: "instrument.remove", target: { kind: "track", track: ref(target) } },
@@ -918,21 +1078,27 @@ test("restores effect, instrument, arpeggiator, automation, and sidechain payloa
     { kind: "automation.delete", target: { kind: "master" }, parameterId: "volume" },
     { kind: "sidechain.remove", target: ref(target), effect: ref(ids.compressor) },
   ];
+
   const deleted = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, destructive, "bundle-recovery-delete"),
   });
+
   expect(deleted.recoveries.map((recovery) => recovery.kind).sort()).toEqual([
     "arpeggiator.remove", "automation.delete", "effect.remove", "instrument.remove", "sidechain.remove",
   ]);
+
   for (const [index, descriptor] of deleted.recoveries.entries()) {
     const recovery = await t.run(async (ctx) => {
       const recoveryId = ctx.db.normalizeId("controlRecoveries", descriptor.id);
+
       return recoveryId === null ? null : await ctx.db.get(recoveryId);
     });
+
     if (!recovery) throw new Error("Recovery record missing.");
     expect(JSON.parse(recovery.payload).version).toBe(2);
     parseRecoveryPayload(recovery.payload);
     let preview;
+
     try {
       preview = await t.withIdentity({ subject: owner }).query(api.control.previewV1, {
         request: { version: "v1", projectId, actions: [{ kind: "recovery.restore", recovery: { id: descriptor.id } }] },
@@ -940,13 +1106,17 @@ test("restores effect, instrument, arpeggiator, automation, and sidechain payloa
     } catch {
       throw new Error(`Recovery preview failed for ${descriptor.kind}.`);
     }
+
     expect(preview.applied).toBe(true);
+
     const restored = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
       request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], `bundle-recovery-${index}`),
     });
+
     const replay = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
       request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], `bundle-recovery-${index}`),
     });
+
     expect(restored.restored[0]?.entities.length).toBeGreaterThan(0);
     expect(replay.idempotencyReplay).toBe(true);
   }
@@ -958,6 +1128,7 @@ test("restores legacy synth instruments and their automation with canonical para
   const instanceId = "legacy-synth";
   const parameterId = synthAutomationKey(String(track), instanceId, "filter.frequency");
   const targetKey = automationTargetKey({ kind: "track", trackId: String(track) }, parameterId);
+
   const legacySynth = await t.run(async (ctx) => {
     const effectId = await ctx.db.insert("effects", {
       projectId,
@@ -969,6 +1140,7 @@ test("restores legacy synth instruments and their automation with canonical para
       params: createDefaultSynthParams(),
       createdAt: 1,
     });
+
     await ctx.db.insert("automationEnvelopes", {
       projectId,
       targetKind: "track",
@@ -979,16 +1151,21 @@ test("restores legacy synth instruments and their automation with canonical para
       points: [{ id: "legacy-point", timeSec: 0, value: 440, interpolation: "linear" }],
       updatedAt: 1,
     });
+
     return effectId;
   });
+
   const deleted = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [{
       kind: "instrument.remove",
       target: { kind: "track", track: { source: "persisted", id: String(track) } },
     }], "legacy-synth-delete"),
   });
+
   const descriptor = deleted.recoveries[0];
+
   if (!descriptor) throw new Error("Expected legacy synth recovery.");
+
   const preview = await t.withIdentity({ subject: owner }).query(api.control.previewV1, {
     request: {
       version: "v1",
@@ -996,17 +1173,22 @@ test("restores legacy synth instruments and their automation with canonical para
       actions: [{ kind: "recovery.restore", recovery: { id: descriptor.id } }],
     },
   });
+
   expect(preview.applied).toBe(true);
   await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], "legacy-synth-restore"),
   });
+
   const restored = await t.run(async (ctx) => {
     const effect = await ctx.db.query("effects").withIndex("by_track", (query) => query.eq("trackId", track)).unique();
+
     const automation = await ctx.db.query("automationEnvelopes")
       .withIndex("by_project_target_key", (query) => query.eq("projectId", projectId).eq("targetKey", targetKey))
       .unique();
+
     return { effect, automation };
   });
+
   expect(restored.effect?._id).not.toBe(legacySynth);
   expect(restored.effect).toMatchObject({
     type: "instrument",
@@ -1021,8 +1203,10 @@ test("restores legacy synth instruments and their automation with canonical para
 
 test("restores an asset before its pending deletion claim and replays the restore", async () => {
   const t = await setup();
+
   const project = await t.run(async (ctx) => await ctx.db.query("projects")
     .withIndex("by_room", (query) => query.eq("projectId", projectId)).unique());
+
   if (!project) throw new Error("Project missing.");
   await t.run(async (ctx) => {
     await ctx.db.insert("samples", {
@@ -1039,27 +1223,35 @@ test("restores an asset before its pending deletion claim and replays the restor
       updatedAt: 1,
     });
   });
+
   const deleted = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [
       { kind: "asset.delete", asset: { source: "persisted", id: "recover-asset" } },
     ], "asset-recovery-delete"),
   });
+
   const descriptor = deleted.recoveries[0];
+
   if (!descriptor) throw new Error("Expected an asset recovery descriptor.");
+
   const restored = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], "asset-recovery-restore"),
   });
+
   const replay = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], "asset-recovery-restore"),
   });
+
   expect(restored.restored[0]?.entities[0]?.entity).toBe("asset");
   expect(replay.idempotencyReplay).toBe(true);
 });
 
 test("previews, approves, and commits restore-then-delete asset recovery with a canonical recapture", async () => {
   const t = await setup();
+
   const project = await t.run(async (ctx) => await ctx.db.query("projects")
     .withIndex("by_room", (query) => query.eq("projectId", projectId)).unique());
+
   if (!project) throw new Error("Project missing.");
   await t.run(async (ctx) => {
     await ctx.db.insert("samples", {
@@ -1079,31 +1271,42 @@ test("previews, approves, and commits restore-then-delete asset recovery with a 
       updatedAt: 1,
     });
   });
+
   const initial = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [
       { kind: "asset.delete", asset: { source: "persisted", id: "restore-then-delete" } },
     ], "restore-then-delete-initial"),
   });
+
   const recovery = initial.recoveries[0];
+
   if (!recovery) throw new Error("Expected asset recovery.");
 
   const actions = [
     { kind: "recovery.restore" as const, recovery: { id: recovery.id } },
     { kind: "asset.delete" as const, asset: { source: "persisted" as const, id: "restore-then-delete" } },
   ];
+
   const preview = await t.withIdentity({ subject: owner }).query(api.control.previewV1, {
     request: { version: "v1", projectId, actions },
   });
+
   expect(preview.applied).toBe(true);
+
   const committed = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, actions, "restore-then-delete-commit"),
   });
+
   const recaptured = committed.recoveries[0];
+
   if (!recaptured) throw new Error("Expected recaptured asset recovery.");
+
   const row = await t.run(async (ctx) => {
     const id = ctx.db.normalizeId("controlRecoveries", recaptured.id);
+
     return id ? await ctx.db.get(id) : null;
   });
+
   if (!row) throw new Error("Expected recaptured recovery row.");
   expect(hashRecoveryPayloadSyncV1(row.payload)).toBe(row.payloadHash);
   expect(parseCapturedRecoveryPayload(row.payload)).toMatchObject({
@@ -1168,9 +1371,11 @@ test("destructive commits require an actor-bound one-time approval", async () =>
   await expect(t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request(actions, "approval-required"),
   })).rejects.toThrow("approval-required");
+
   const approval = await t.withIdentity({ subject: owner }).mutation(api.control.requestApprovalV1, {
     request: { version: "v1", projectId, actions },
   });
+
   expect((await t.run((ctx) => ctx.db.query("controlApprovals").unique()))?.tokenHash).not.toBe(approval.approvalToken);
   await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: { ...request(actions, "approval-once"), approvalToken: approval.approvalToken },
@@ -1211,6 +1416,7 @@ test("project approval capacity rejects the sixty-fifth active approval", async 
 test("existing effect omitted params and unchanged instrument do not advance revision", async () => {
   const t = await setup();
   const trackId = await addTrack(t, { name: "Instrument", index: 0, kind: "instrument" });
+
   const effectId = await t.run(async (ctx) => await ctx.db.insert("effects", {
     projectId,
     targetType: "track",
@@ -1221,7 +1427,9 @@ test("existing effect omitted params and unchanged instrument do not advance rev
     params: normalizeOwnedProcessorParams("utility", {}),
     createdAt: Date.now(),
   }));
+
   const before = await t.run(async (ctx) => (await ctx.db.query("projects").withIndex("by_room", (q) => q.eq("projectId", projectId)).unique())?.revision);
+
   const result = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{
       kind: "effect.upsert",
@@ -1230,6 +1438,7 @@ test("existing effect omitted params and unchanged instrument do not advance rev
       effectKind: "utility",
     }]),
   });
+
   expect(result.applied).toBe(false);
   expect(await t.run(async (ctx) => (await ctx.db.query("projects").withIndex("by_room", (q) => q.eq("projectId", projectId)).unique())?.revision)).toBe(before);
 });
@@ -1267,12 +1476,14 @@ test("commit retention keeps at most one thousand ledger rows", async () => {
 
 test("created refs removed in the same commit are not reported as persisted", async () => {
   const t = await setup();
+
   const result = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([
       { kind: "track.create", clientRef: "temporary-track", trackKind: "audio" },
       { kind: "track.delete", track: { source: "client", clientRef: "temporary-track" } },
     ], "created-then-deleted"),
   });
+
   expect(result.resolvedRefs).toEqual([]);
   expect(await t.run((ctx) => ctx.db.query("tracks").collect())).toEqual([]);
 });
@@ -1296,9 +1507,11 @@ test("expired idempotency records execute as a new request", async () => {
       status: "completed",
     });
   });
+
   const result = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "project.rename", name: "Fresh" }], "expired-key"),
   });
+
   expect(result.idempotencyReplay).toBe(false);
   expect(result.applied).toBe(true);
 });
@@ -1309,6 +1522,7 @@ test("track reorder preserves existing output routing", async () => {
   const second = await addTrack(t, { name: "Second", index: 1, channelRole: "group" });
   await t.run(async (ctx) => {
     const channel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", first)).unique();
+
     if (!channel) throw new Error("Missing mixer channel.");
     await ctx.db.patch(channel._id, { outputTargetId: second });
   });
@@ -1331,6 +1545,7 @@ test("deletion rejects a locked surviving routing dependent", async () => {
   const dependent = await addTrack(t, { name: "Dependent", index: 1, lockedBy: "other-user" });
   await t.run(async (ctx) => {
     const channel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", dependent)).unique();
+
     if (!channel) throw new Error("Missing mixer channel.");
     await ctx.db.patch(channel._id, { outputTargetId: deleted });
   });
@@ -1345,11 +1560,13 @@ test("deletion rejects a locked index-only survivor without writes", async () =>
   const deleted = await addTrack(t, { name: "Deleted", index: 0 });
   const survivor = await addTrack(t, { name: "Locked survivor", index: 1, lockedBy: "other-user" });
   const action = { kind: "track.delete", track: { source: "persisted", id: String(deleted) } };
+
   const before = await t.run(async (ctx) => ({
     tracks: await ctx.db.query("tracks").collect(),
     revision: (await ctx.db.query("projects").withIndex("by_room", (q) => q.eq("projectId", projectId)).unique())?.revision,
     commits: await ctx.db.query("controlCommits").collect(),
   }));
+
   for (const invoke of [
     () => t.withIdentity({ subject: owner }).query(api.control.previewV1, {
       request: { version: "v1", projectId, actions: [action] },
@@ -1360,6 +1577,7 @@ test("deletion rejects a locked index-only survivor without writes", async () =>
   ]) {
     await expect(invoke()).rejects.toThrow("Affected track is locked");
   }
+
   expect(await t.run(async (ctx) => ({
     tracks: await ctx.db.query("tracks").collect(),
     revision: (await ctx.db.query("projects").withIndex("by_room", (q) => q.eq("projectId", projectId)).unique())?.revision,
@@ -1391,12 +1609,14 @@ test("deletion rejects a locked surviving sidechain dependent without writes", a
     });
   });
   const action = { kind: "track.delete", track: { source: "persisted", id: String(deleted) } };
+
   const before = await t.run(async (ctx) => ({
     tracks: await ctx.db.query("tracks").collect(),
     sidechains: await ctx.db.query("sidechainRoutes").collect(),
     revision: (await ctx.db.query("projects").withIndex("by_room", (q) => q.eq("projectId", projectId)).unique())?.revision,
     commits: await ctx.db.query("controlCommits").collect(),
   }));
+
   for (const invoke of [
     () => t.withIdentity({ subject: owner }).query(api.control.previewV1, {
       request: { version: "v1", projectId, actions: [action] },
@@ -1407,6 +1627,7 @@ test("deletion rejects a locked surviving sidechain dependent without writes", a
   ]) {
     await expect(invoke()).rejects.toThrow("Affected track is locked");
   }
+
   expect(await t.run(async (ctx) => ({
     tracks: await ctx.db.query("tracks").collect(),
     sidechains: await ctx.db.query("sidechainRoutes").collect(),
@@ -1418,9 +1639,11 @@ test("deletion rejects a locked surviving sidechain dependent without writes", a
 test("track recovery transition limits accept sixty-four survivors and reject sixty-five before approval creation", async () => {
   const allowed = await setup();
   const root = await addTrack(allowed, { name: "Deleted", index: 0 });
+
   for (let index = 0; index < 64; index += 1) {
     await addTrack(allowed, { name: `Survivor ${index}`, index: index + 1 });
   }
+
   const allowedAction = { kind: "track.delete", track: { source: "persisted" as const, id: String(root) } };
   expect((await allowed.withIdentity({ subject: owner }).query(api.control.previewV1, {
     request: { version: "v1", projectId, actions: [allowedAction] },
@@ -1431,9 +1654,11 @@ test("track recovery transition limits accept sixty-four survivors and reject si
 
   const rejected = await setup();
   const rejectedRoot = await addTrack(rejected, { name: "Deleted", index: 0 });
+
   for (let index = 0; index < 65; index += 1) {
     await addTrack(rejected, { name: `Survivor ${index}`, index: index + 1 });
   }
+
   const rejectedAction = { kind: "track.delete", track: { source: "persisted" as const, id: String(rejectedRoot) } };
   await expect(rejected.withIdentity({ subject: owner }).query(api.control.previewV1, {
     request: { version: "v1", projectId, actions: [rejectedAction] },
@@ -1448,21 +1673,27 @@ test("recovery locks appended tracks whose indices would shift before writes", a
   const t = await setup();
   const deleted = await addTrack(t, { name: "Deleted", index: 0 });
   const survivor = await addTrack(t, { name: "Survivor", index: 1 });
+
   const deletion = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [{ kind: "track.delete", track: { source: "persisted", id: String(deleted) } }], "recovery-lock-delete"),
   });
+
   const descriptor = deletion.recoveries[0];
+
   if (!descriptor) throw new Error("Expected recovery descriptor.");
   const appended = await addTrack(t, { name: "Appended", index: 1, lockedBy: "other-user" });
+
   const action = {
     kind: "recovery.restore",
     recovery: { id: descriptor.id },
   } satisfies ControlActionV1;
+
   const before = await t.run(async (ctx) => ({
     tracks: await ctx.db.query("tracks").collect(),
     approvals: await ctx.db.query("controlApprovals").collect(),
     commits: await ctx.db.query("controlCommits").collect(),
   }));
+
   for (const invoke of [
     () => t.withIdentity({ subject: owner }).query(api.control.previewV1, {
       request: { version: "v1", projectId, actions: [action] },
@@ -1473,6 +1704,7 @@ test("recovery locks appended tracks whose indices would shift before writes", a
   ]) {
     await expect(invoke()).rejects.toThrow("Affected track is locked");
   }
+
   expect(await t.run(async (ctx) => ({
     tracks: await ctx.db.query("tracks").collect(),
     approvals: await ctx.db.query("controlApprovals").collect(),
@@ -1489,41 +1721,52 @@ test("track recovery restores canonical contiguous order matching its preview", 
   const child = await addTrack(t, { name: "Child", index: 2, groupId: group });
   const grandchild = await addTrack(t, { name: "Grandchild", index: 3, groupId: child });
   const trailing = await addTrack(t, { name: "Trailing", index: 4 });
+
   const deletion = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [{
       kind: "track.delete",
       track: { source: "persisted", id: String(group) },
     }], "canonical-order-delete"),
   });
+
   const descriptor = deletion.recoveries[0];
+
   if (!descriptor) throw new Error("Expected recovery descriptor.");
   await addTrack(t, { name: "Appended one", index: 2 });
   await addTrack(t, { name: "Appended two", index: 3 });
+
   const action = {
     kind: "recovery.restore",
     recovery: { id: descriptor.id },
   } satisfies ControlActionV1;
+
   await t.withIdentity({ subject: owner }).query(api.control.previewV1, {
     request: { version: "v1", projectId, actions: [action] },
   });
+
   const expected = await t.run(async (ctx) => {
     const recoveryId = ctx.db.normalizeId("controlRecoveries", descriptor.id);
     const recovery = recoveryId ? await ctx.db.get(recoveryId) : null;
+
     if (!recovery) throw new Error("Recovery record is unavailable.");
+
     return planControlRequestV1(
       await readProjectControlSnapshotV1(ctx, projectId),
       { projectId, actions: [action] },
       new Map([[descriptor.id, { payload: parseRecoveryPayload(recovery.payload) }]]),
     ).snapshot.tracks.map((track) => ({ name: track.name, index: track.index }));
   });
+
   await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([action], "canonical-order-restore"),
   });
+
   const actual = await t.run(async (ctx) => (await ctx.db.query("tracks")
     .withIndex("by_room", (q) => q.eq("projectId", projectId))
     .collect())
     .sort((left, right) => left.index - right.index || String(left._id).localeCompare(String(right._id)))
     .map((track) => ({ name: track.name, index: track.index })));
+
   expect(actual.map((track) => track.index)).toEqual(Array.from({ length: actual.length }, (_, index) => index));
   expect(actual).toEqual(expected);
   expect(String(leading)).toBeTruthy();
@@ -1538,16 +1781,20 @@ test("replay requires current write access without rerunning control preflight",
   await t.run(async (ctx) => {
     await ctx.db.insert("ownerships", { projectId, ownerUserId: editor, role: "editor" });
   });
+
   const commitRequest = request([
     { kind: "track.create", clientRef: "editor-track", trackKind: "audio", name: "Editor track" },
   ], "editor-replay-key");
+
   const first = await t.withIdentity({ subject: editor }).mutation(api.control.commitV1, { request: commitRequest });
   await t.run(async (ctx) => {
     const memberships = await ctx.db
       .query("ownerships")
       .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", editor))
       .collect();
+
     const membership = memberships.find((entry) => !entry.trackId && !entry.clipId);
+
     if (!membership) throw new Error("Editor membership was not found.");
     await ctx.db.delete(membership._id);
   });
@@ -1580,12 +1827,15 @@ test("endpoint enforces roles, revision conflicts, and idempotency key scopes", 
   const ownerCommit = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([action], "shared-key"),
   });
+
   await expect(t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "track.create", clientRef: "different-track", trackKind: "audio", name: "Different" }], "shared-key"),
   })).rejects.toThrow("Idempotency key");
+
   const editorCommit = await t.withIdentity({ subject: editor }).mutation(api.control.commitV1, {
     request: request([{ kind: "track.create", clientRef: "editor-track", trackKind: "audio", name: "Editor" }], "shared-key"),
   });
+
   expect(ownerCommit.idempotencyReplay).toBe(false);
   expect(editorCommit.idempotencyReplay).toBe(false);
 });
@@ -1593,6 +1843,7 @@ test("endpoint enforces roles, revision conflicts, and idempotency key scopes", 
 test("late execution failures roll back earlier actions, revisions, and idempotency rows", async () => {
   const t = await setup();
   const track = await addTrack(t, { name: "Before", index: 0 });
+
   const clip = await t.run(async (ctx) => await ctx.db.insert("clips", {
     projectId,
     trackId: track,
@@ -1600,11 +1851,13 @@ test("late execution failures roll back earlier actions, revisions, and idempote
     duration: 1,
     name: "Unowned",
   }));
+
   const before = await t.run(async (ctx) => ({
     project: await ctx.db.query("projects").withIndex("by_room", (q) => q.eq("projectId", projectId)).unique(),
     track: await ctx.db.get(track),
     commits: await ctx.db.query("controlCommits").collect(),
   }));
+
   await expect(t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [
       { kind: "track.rename", track: { source: "persisted", id: String(track) }, name: "Changed" },
@@ -1641,6 +1894,7 @@ test("every advertised action has an authenticated preview and commit endpoint f
     createdAt: 0,
     updatedAt: 0,
   }));
+
   const removable = await t.run(async (ctx) => await ctx.db.insert("effects", {
     projectId,
     targetType: "track",
@@ -1651,8 +1905,10 @@ test("every advertised action has an authenticated preview and commit endpoint f
     params: normalizeOwnedProcessorParams("utility", {}),
     createdAt: Date.now(),
   }));
+
   const ref = (id: Id<"tracks">) => ({ source: "persisted" as const, id: String(id) });
   const temp = { source: "client" as const, clientRef: "temporary" };
+
   const actions = [
     { kind: "project.rename", name: "Endpoint Matrix" },
     { kind: "project.settings.set", tempoBpm: 128, loopEnabled: true, loopStartSec: 1, loopEndSec: 9 },
@@ -1762,6 +2018,7 @@ test("every advertised action has an authenticated preview and commit endpoint f
     { kind: "track.delete", track: temp },
     { kind: "asset.delete", asset: { source: "persisted" as const, id: "missing-asset" } },
   ];
+
   expect(actions).toHaveLength(38);
   expect(actions.map((action) => action.kind).sort()).toEqual(
     controlCapabilitiesV1.actionKinds.filter((kind) => kind !== "recovery.restore").sort(),
@@ -1770,9 +2027,11 @@ test("every advertised action has an authenticated preview and commit endpoint f
   expect(() => parseControlPreviewRequestV1(previewRequest)).not.toThrow();
   const preview = await t.withIdentity({ subject: owner }).query(api.control.previewV1, { request: previewRequest });
   expect(preview.applied).toBe(true);
+
   const result = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, actions, "endpoint-action-matrix"),
   });
+
   expect(result.applied).toBe(true);
   expect(result.revision).toBe(result.priorRevision + 1);
 
@@ -1805,6 +2064,7 @@ test("a finalized uploaded asset supplies trusted metadata to canonical clip cre
   const t = await setup();
   const audio = await addTrack(t, { name: "Uploaded audio", index: 0 });
   const contentSha256 = "c".repeat(64);
+
   const begun = await t.withIdentity({ subject: owner }).mutation(api.resumableAssetUploads.beginUpload, {
     projectId,
     idempotencyKey: "uploaded-asset-1",
@@ -1816,12 +2076,15 @@ test("a finalized uploaded asset supplies trusted metadata to canonical clip cre
     sampleRate: 44_100,
     channelCount: 2,
   });
+
   const finalized = await t.withIdentity({ subject: owner }).mutation(api.resumableAssetUploads.finalizeUpload, {
     projectId,
     idempotencyKey: "uploaded-asset-1",
     contentSha256,
   });
+
   expect(finalized.asset.id).toBe(begun.assetKey);
+
   const committed = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{
       kind: "clip.audio.create",
@@ -1829,9 +2092,12 @@ test("a finalized uploaded asset supplies trusted metadata to canonical clip cre
       asset: { source: "persisted", id: finalized.asset.id },
     }], "uploaded-asset-clip"),
   });
+
   expect(committed.applied).toBe(true);
+
   const clip = await t.run(async (ctx) => await ctx.db.query("clips")
     .withIndex("by_room", (query) => query.eq("projectId", projectId)).unique());
+
   expect(clip).toMatchObject({
     sourceAssetKey: finalized.asset.id,
     sourceDurationSec: 1.25,
@@ -1843,6 +2109,7 @@ test("a finalized uploaded asset supplies trusted metadata to canonical clip cre
 const projectRevisionOf = async (t: Awaited<ReturnType<typeof setup>>) => await t.run(async (ctx) => (
   await ctx.db.query("projects").withIndex("by_room", (q) => q.eq("projectId", projectId)).unique()
 )?.revision);
+
 const effectStamps = async (t: Awaited<ReturnType<typeof setup>>, trackId: Id<"tracks">) => await t.run(async (ctx) => (
   (await ctx.db.query("effects").withIndex("by_track", (q) => q.eq("trackId", trackId)).collect())
     .map((row) => [row.instanceId ?? row.type, row.revision] as const)
@@ -1853,6 +2120,7 @@ test("a multi-effect control commit stamps every written row with its one projec
   const t = await setup();
   const trackId = await addTrack(t, { name: "Instrument", index: 0, kind: "instrument" });
   const target = { kind: "track" as const, track: { source: "persisted" as const, id: String(trackId) } };
+
   const result = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([
       { kind: "effect.upsert", target, clientRef: "compressor", effectKind: "compressor" },
@@ -1861,6 +2129,7 @@ test("a multi-effect control commit stamps every written row with its one projec
       { kind: "arpeggiator.set", target, params: { enabled: true, pattern: "up", rate: "1/8", octaves: 1, gate: 0.8, hold: false } },
     ], "multi-effect-stamps"),
   });
+
   expect(result.applied).toBe(true);
   expect(await projectRevisionOf(t)).toBe(1);
   const stamps = await effectStamps(t, trackId);
@@ -1871,15 +2140,19 @@ test("a multi-effect control commit stamps every written row with its one projec
 test("recovery restore, undo and redo stamp the rows they write with their own revision", async () => {
   const t = await setup();
   const trackId = await addTrack(t, { name: "Target", index: 0 });
+
   const effectId = await t.run(async (ctx) => await ctx.db.insert("effects", {
     projectId, targetType: "track", trackId, index: 0, type: "utility",
     instanceId: "recover-utility", params: normalizeOwnedProcessorParams("utility", {}), createdAt: 1,
   }));
+
   const ref = { source: "persisted" as const, id: String(effectId) };
+
   const removal = (key: string, id: string) => approvedRequest(t, [{
     kind: "effect.remove", target: { kind: "track", track: { source: "persisted", id: String(trackId) } },
     effect: { source: "persisted", id }, effectKind: "utility",
   }], key);
+
   const user = t.withIdentity({ subject: owner });
 
   const deleted = await user.mutation(api.control.commitV1, { request: await removal("stamp-delete", ref.id) });
@@ -1895,6 +2168,7 @@ test("recovery restore, undo and redo stamp the rows they write with their own r
   const restoredId = (await t.run(async (ctx) => (
     await ctx.db.query("effects").withIndex("by_track", (q) => q.eq("trackId", trackId)).collect()
   )))[0]?._id;
+
   if (!restoredId) throw new Error("Expected the restored row.");
   const redone = await user.mutation(api.control.commitV1, { request: await removal("stamp-redo", String(restoredId)) });
   expect(await projectRevisionOf(t)).toBe(3);

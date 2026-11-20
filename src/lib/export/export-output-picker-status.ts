@@ -16,6 +16,7 @@ export const exportOutputPickerStatus = {
   },
   subscribe(listener: ExportOutputPickerListener) {
     listeners.add(listener)
+
     return () => listeners.delete(listener)
   },
 }

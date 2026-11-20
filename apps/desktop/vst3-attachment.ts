@@ -50,16 +50,20 @@ export const resolveVst3Attachment = (
   reference: VstLaunchReference,
 ): ResolvedVst3Eligibility | undefined => {
   if (reference.version !== 1 || reference.architecture !== "arm64") return undefined
+
   const entry = catalog.entries.find((candidate) => (
     candidate.scanHealth === "scanned"
     && candidate.binaryFingerprint === reference.binaryFingerprint
     && candidate.launchEligibility?.bundleFingerprint === reference.bundleFingerprint
     && candidate.launchEligibility.scannerProtocolVersion === reference.scannerCatalogVersion
   ))
+
   const pluginClass = entry?.classes.find((candidate) => (
     candidate.classId === reference.classId && candidate.vendor === reference.vendorId
   ))
+
   const eligibility = entry?.launchEligibility
+
   if (
     !eligibility
     || !pluginClass
@@ -69,6 +73,7 @@ export const resolveVst3Attachment = (
     || eligibility.bundleFingerprint !== reference.bundleFingerprint
     || eligibility.scannerProtocolVersion !== reference.scannerCatalogVersion
   ) return undefined
+
   return {
     classId: reference.classId,
     vendorId: reference.vendorId,

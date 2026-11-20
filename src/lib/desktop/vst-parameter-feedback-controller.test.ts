@@ -11,6 +11,7 @@ import {
 import { createVstParameterFeedbackController } from './vst-parameter-feedback-controller'
 
 const instanceId = '11111111-1111-4111-8111-111111111111'
+
 const targetKey = automationTargetKey(
   { kind: 'track', trackId: 'track-1', effectInstanceId: instanceId },
   externalAutomationParameterId(instanceId, 1),
@@ -83,20 +84,25 @@ const flushAsyncWork = async () => {
 const installSubscription = () => {
   const previousWindow = globalThis.window
   let listener: ((payload: DesktopVstParameterEditPayload) => void) | undefined
+
   const subscription = (next: (payload: DesktopVstParameterEditPayload) => void) => {
     listener = next
+
     return () => {
       if (listener === next) listener = undefined
     }
   }
+
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: { dawDesktop: { audioHost: { session: { onVstParameterEdit: subscription } } } },
   })
+
   return {
     emit(payload: DesktopVstParameterEditPayload) {
       if (!listener) return false
       listener(payload)
+
       return true
     },
     restore() {
@@ -124,13 +130,17 @@ test.serial('persists active playback feedback without suppressing automation or
   const bridge = installSubscription()
   const targets: string[] = []
   const queued: unknown[] = []
+
   try {
     const controller = createVstParameterFeedbackController({
       projectId: () => project.id,
       mountedProjectGeneration: () => 0,
       overrideTarget: (target) => targets.push(target),
-      nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event); return "delivered" } },
+      nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event);
+
+ return "delivered" } },
     })
+
     expect(controller).toBeDefined()
     expect(bridge.emit(payload(project.id, 'active-playback', 1, 0.75))).toBeTrue()
     await flushAsyncWork()
@@ -150,6 +160,7 @@ test.serial('persists idle editor-session feedback without enqueueing or faultin
   const queued: unknown[] = []
   const targets: string[] = []
   const faults: string[] = []
+
   try {
     const controller = createVstParameterFeedbackController({
       projectId: () => project.id,
@@ -158,12 +169,14 @@ test.serial('persists idle editor-session feedback without enqueueing or faultin
       nativeVstParameterQueue: {
         enqueue: async (event) => {
           queued.push(event)
+
           return "rejected"
         },
       },
       isNativePlaybackPrepared: () => false,
       reportFault: (message) => faults.push(message),
     })
+
     bridge.emit(payload(project.id, 'editor-session', 1, 0.875))
     await flushAsyncWork()
 
@@ -185,6 +198,7 @@ test.serial('persists prepared editor-session feedback and enqueues exactly once
   const bridge = installSubscription()
   const targets: string[] = []
   const queued: unknown[] = []
+
   try {
     const controller = createVstParameterFeedbackController({
       projectId: () => project.id,
@@ -193,11 +207,13 @@ test.serial('persists prepared editor-session feedback and enqueues exactly once
       nativeVstParameterQueue: {
         enqueue: async (event) => {
           queued.push(event)
+
           return "delivered"
         },
       },
       isNativePlaybackPrepared: () => true,
     })
+
     bridge.emit(payload(project.id, 'editor-session', 1, 0.875))
     await flushAsyncWork()
 
@@ -215,6 +231,7 @@ test.serial('coalesces a burst to the latest value before one editor enqueue', a
   const bridge = installSubscription()
   const targets: string[] = []
   const queued: unknown[] = []
+
   try {
     const controller = createVstParameterFeedbackController({
       projectId: () => project.id,
@@ -223,11 +240,13 @@ test.serial('coalesces a burst to the latest value before one editor enqueue', a
       nativeVstParameterQueue: {
         enqueue: async (event) => {
           queued.push(event)
+
           return "delivered"
         },
       },
       isNativePlaybackPrepared: () => true,
     })
+
     bridge.emit(payload(project.id, 'editor-session', 1, 0.25))
     bridge.emit(payload(project.id, 'editor-session', 1, 0.5))
     bridge.emit(payload(project.id, 'editor-session', 1, 0.875))
@@ -247,14 +266,18 @@ test.serial('ignores project-mismatched and disposed feedback', async () => {
   const bridge = installSubscription()
   const targets: string[] = []
   const queued: unknown[] = []
+
   try {
     const controller = createVstParameterFeedbackController({
       projectId: () => project.id,
       mountedProjectGeneration: () => 0,
       overrideTarget: (target) => targets.push(target),
-      nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event); return "delivered" } },
+      nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event);
+
+ return "delivered" } },
       isNativePlaybackPrepared: () => true,
     })
+
     bridge.emit(payload(otherProject.id, 'editor-session'))
     controller?.dispose()
     bridge.emit(payload(project.id, 'editor-session'))
@@ -274,13 +297,17 @@ test.serial('suppresses override and enqueue when the mounted generation changes
   const targets: string[] = []
   const queued: unknown[] = []
   let generation = 0
+
   try {
     const controller = createVstParameterFeedbackController({
       projectId: () => project.id,
       mountedProjectGeneration: () => generation,
       overrideTarget: (target) => targets.push(target),
-      nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event); return "delivered" } },
+      nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event);
+
+ return "delivered" } },
     })
+
     bridge.emit(payload(project.id, 'editor-session', 1, 0.625))
     generation = 1
     await flushAsyncWork()
@@ -302,14 +329,18 @@ test.serial('does not override or enqueue unknown or read-only descriptors', asy
   const bridge = installSubscription()
   const targets: string[] = []
   const queued: unknown[] = []
+
   try {
     const controller = createVstParameterFeedbackController({
       projectId: () => project.id,
       mountedProjectGeneration: () => 0,
       overrideTarget: (target) => targets.push(target),
-      nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event); return "delivered" } },
+      nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event);
+
+ return "delivered" } },
       isNativePlaybackPrepared: () => true,
     })
+
     bridge.emit(payload(project.id, 'editor-session', 99, 0.4))
     bridge.emit(payload(project.id, 'editor-session', 2, 0.4))
     await flushAsyncWork()
@@ -327,6 +358,7 @@ test.serial('keeps persistence when native queue delivery fails', async () => {
   await setLocalExternalProcessor(project.id, createProcessor())
   const bridge = installSubscription()
   const targets: string[] = []
+
   try {
     const controller = createVstParameterFeedbackController({
       projectId: () => project.id,
@@ -339,6 +371,7 @@ test.serial('keeps persistence when native queue delivery fails', async () => {
       },
       isNativePlaybackPrepared: () => true,
     })
+
     bridge.emit(payload(project.id, 'editor-session', 1, 0.5))
     await flushAsyncWork()
 
@@ -357,6 +390,7 @@ test.serial('keeps persistence when native queue rejects delivery', async () => 
   const bridge = installSubscription()
   const targets: string[] = []
   const faults: string[] = []
+
   try {
     const controller = createVstParameterFeedbackController({
       projectId: () => project.id,
@@ -366,6 +400,7 @@ test.serial('keeps persistence when native queue rejects delivery', async () => 
       isNativePlaybackPrepared: () => true,
       reportFault: (message) => faults.push(message),
     })
+
     bridge.emit(payload(project.id, 'editor-session', 1, 0.375))
     await flushAsyncWork()
 
@@ -385,6 +420,7 @@ test.serial('does not report expected native queue coalescing as a fault', async
   await setLocalExternalProcessor(project.id, createProcessor())
   const bridge = installSubscription()
   const faults: string[] = []
+
   try {
     const controller = createVstParameterFeedbackController({
       projectId: () => project.id,
@@ -394,6 +430,7 @@ test.serial('does not report expected native queue coalescing as a fault', async
       isNativePlaybackPrepared: () => true,
       reportFault: (message) => faults.push(message),
     })
+
     bridge.emit(payload(project.id, 'editor-session', 1, 0.5))
     await flushAsyncWork()
 
@@ -409,6 +446,7 @@ test.serial('does not report an automation suppression failure for persisted fee
   await setLocalExternalProcessor(project.id, createProcessor())
   const bridge = installSubscription()
   const faults: string[] = []
+
   try {
     const controller = createVstParameterFeedbackController({
       projectId: () => project.id,
@@ -416,6 +454,7 @@ test.serial('does not report an automation suppression failure for persisted fee
       overrideTarget: () => { throw new Error('override unavailable') },
       reportFault: (message) => faults.push(message),
     })
+
     bridge.emit(payload(project.id, 'active-playback', 1, 0.5))
     await flushAsyncWork()
     expect(faults).toEqual([])

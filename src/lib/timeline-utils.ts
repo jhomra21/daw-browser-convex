@@ -12,10 +12,12 @@ export const GROUP_RAIL_WIDTH = 4
 export const DEFAULT_AUTOMATION_LANE_HEIGHT = 48
 const MIN_AUTOMATION_LANE_HEIGHT = 32
 const MAX_AUTOMATION_LANE_HEIGHT = 160
+
 type TimelineTrackScrollElement = {
   scrollTop: number
   getBoundingClientRect: () => Pick<DOMRect, 'top'>
 }
+
 // Shared Effects panel layout constants
 export const FX_PANEL_HEIGHT_PX = 360
 
@@ -25,9 +27,11 @@ export const clampAutomationLaneHeight = (height: number) => (
 
 export function timelineDurationSec(tracks: Track[]) {
   let maxEnd = 0
+
   for (const t of tracks) {
     for (const c of t.clips) maxEnd = Math.max(maxEnd, c.startSec + c.duration)
   }
+
   return Math.max(30, maxEnd + 5)
 }
 
@@ -36,6 +40,7 @@ export function clientYToTimelineTrackY(
   scrollRef: TimelineTrackScrollElement,
 ) {
   const rect = scrollRef.getBoundingClientRect()
+
   return clientY - rect.top + (scrollRef.scrollTop || 0) - TIMELINE_HEADER_HEIGHT
 }
 
@@ -56,12 +61,15 @@ export function quantizeSecToGrid(
 ): number {
   const safeBpm = Math.max(1e-6, bpm || 0)
   const step = (60 / safeBpm) * (4 / Math.max(1, denom || 4))
+
   if (!Number.isFinite(step) || step <= 0) return Math.max(0, sec)
   const idx = sec / step
   let snappedIdx = idx
+
   if (mode === 'floor') snappedIdx = Math.floor(idx)
   else if (mode === 'ceil') snappedIdx = Math.ceil(idx)
   else snappedIdx = Math.round(idx)
+
   return Math.max(0, snappedIdx * step)
 }
 
@@ -76,10 +84,13 @@ export function calcNonOverlapStartGridAligned(
 ): number {
   const safeBpm = Math.max(1e-6, bpm || 0)
   const step = (60 / safeBpm) * (4 / Math.max(1, denom || 4))
+
   if (!Number.isFinite(step) || step <= 0) {
     return calcNonOverlapStart(clips, excludeId, desiredStart, duration)
   }
+
   let start = quantizeSecToGrid(Math.max(0, desiredStart), bpm, denom, mode)
+
   const sorted = clips
     .filter(c => !excludeId || c.id !== excludeId)
     .slice()
@@ -90,19 +101,25 @@ export function calcNonOverlapStartGridAligned(
   if (sorted.length > 0) {
     let prevEnd = -Infinity
     let nextStart = Infinity
+
     for (let i = 0; i < sorted.length; i++) {
       const c = sorted[i]
       const cEnd = c.startSec + c.duration
+
       if (cEnd <= start) prevEnd = Math.max(prevEnd, cEnd)
+
       if (c.startSec >= start) { nextStart = Math.min(nextStart, c.startSec); break }
     }
+
     // Inside a valid gap: only magnet to an edge when close to it; otherwise respect snapped grid position.
     const leftEdge = Number.isFinite(prevEnd) ? prevEnd : -Infinity
     const rightEdge = Number.isFinite(nextStart) ? nextStart - duration : Infinity
+
     if (start > leftEdge && start < rightEdge) {
       const threshold = step * 0.5
       const nearLeft = Number.isFinite(leftEdge) && Math.abs(start - leftEdge) <= threshold + 1e-7
       const nearRight = Number.isFinite(rightEdge) && Math.abs(rightEdge - start) <= threshold + 1e-7
+
       if (nearLeft) start = leftEdge
       else if (nearRight) start = rightEdge
     } else {
@@ -116,9 +133,11 @@ export function calcNonOverlapStartGridAligned(
     }
 
   }
+
   // Pass 2: if overlap remains, move forward by the smaller of (a) flush to edge, (b) next grid
   for (let i = 0; i < sorted.length; i++) {
     const c = sorted[i]
+
     if (start < c.startSec + c.duration && start + duration > c.startSec) {
       const edge = c.startSec + c.duration
       const snappedNext = quantizeSecToGrid(edge, bpm, denom, 'ceil')
@@ -130,5 +149,6 @@ export function calcNonOverlapStartGridAligned(
       i = -1
     }
   }
+
   return start
 }

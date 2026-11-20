@@ -121,13 +121,18 @@ export type TrackSidebarModel = TrackSidebarProps["sidebar"];
 
 const clampUnit = (value: number) => Math.max(0, Math.min(1, value));
 const METER_SILENCE_FLOOR = 0.005;
+
 const displayMeterLevel = (value: number | undefined) => {
   const clamped = clampUnit(value ?? 0);
+
   return clamped > METER_SILENCE_FLOOR ? clamped : 0;
 };
+
 const quantizeVolume = normalizeMixerVolume;
+
 const isBulkCollapseModifier = (event: MouseEvent | PointerEvent) =>
   event.metaKey || event.altKey;
+
 const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const sidebar = () => props.sidebar;
   const appPreferences = useAppPreferences();
@@ -135,16 +140,20 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const [meters, setMeters] = createStore<Record<string, TrackStereoLevels>>(
     {},
   );
+
   const [masterLevels, setMasterLevels] = createSignal<TrackStereoLevels>({
     left: 0,
     right: 0,
   });
+
   const [selectedOutputTargets, setSelectedOutputTargets] = createSignal<
     Map<Track["id"], string>
   >(new Map());
+
   const [selectedSendTargets, setSelectedSendTargets] = createSignal<
     Map<Track["id"], string>
   >(new Map());
+
   const [trackDrag, setTrackDrag] = createSignal<{
     pointerId: number;
     startX: number;
@@ -154,8 +163,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     dragging: boolean;
     target?: TrackDropTarget;
   }>();
+
   const [suppressTrackClickId, setSuppressTrackClickId] =
     createSignal<Track["id"]>();
+
   let returnSectionElement: HTMLDivElement | undefined;
 
   createEffect(() => {
@@ -166,12 +177,14 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const left = clampUnit(levels.left);
             const right = clampUnit(levels.right);
             const previous = current[trackId];
+
             if (previous?.left === left && previous.right === right) continue;
             current[trackId] = { left, right };
           }
         }),
       );
     });
+
     onCleanup(unsubscribe);
   });
 
@@ -182,6 +195,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         right: clampUnit(levels.right),
       });
     });
+
     onCleanup(unsubscribe);
   });
 
@@ -189,6 +203,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     const trackIds = new Set<string>(
       sidebar().allTracks.map((track) => track.id),
     );
+
     setMeters(
       produce((current) => {
         for (const trackId of Object.keys(current)) {
@@ -203,6 +218,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       (track) => getTrackChannelRole(track) === "group",
     ),
   );
+
   const groupTrackNames = createMemo(
     () =>
       new Map<string, string>(
@@ -212,56 +228,73 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         ]),
       ),
   );
+
   const allTrackLayout = createMemo(() => [
     ...sidebar().trackLayout.scrollingRows,
     ...sidebar().trackLayout.returnRows,
   ]);
+
   const trackNumbersById = createMemo(() =>
     trackNumberById(sidebar().allTracks),
   );
+
   const depthByTrackId = createMemo(
     () => new Map(allTrackLayout().map((row) => [row.trackId, row.depth])),
   );
+
   const layoutByTrackId = createMemo(
     () => new Map(allTrackLayout().map((row) => [row.trackId, row])),
   );
+
   const visibleTrackIds = createMemo(
     () => new Set(allTrackLayout().map((row) => row.trackId)),
   );
+
   const scrollingTracks = createMemo(() =>
     sidebar().tracks.filter((track) => getTrackChannelRole(track) !== "return"),
   );
+
   const visibleReturnTracks = createMemo(() =>
     sidebar().trackLayout.returnRows.flatMap((row) => {
       const track = sidebar().trackById.get(row.trackId);
+
       return track ? [track] : [];
     }),
   );
+
   const defaultGroupColor = () => appPreferences.timeline.defaultGroupColor();
+
   const resolveGroupColor = (color: string | undefined) => {
     if (
       color === TIMELINE_DEFAULT_GROUP_COLOR ||
       color === TIMELINE_DEFAULT_TRACK_COLOR
     )
       return defaultGroupColor();
+
     return color ?? defaultGroupColor();
   };
+
   const ancestorGroupColorBandsByTrackId = createMemo(() => {
     const bandsByTrackId = new Map<
       Track["id"],
       Array<{ trackId: Track["id"]; leftPx: number; color: string }>
     >();
+
     const trackById = sidebar().trackById;
     const depths = depthByTrackId();
+
     for (const track of sidebar().tracks) {
       const bands: Array<{
         trackId: Track["id"];
         leftPx: number;
         color: string;
       }> = [];
+
       let groupId = track.groupId;
+
       while (groupId) {
         const group = trackById.get(groupId);
+
         if (!group) break;
         bands.push({
           trackId: group.id,
@@ -270,13 +303,17 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         });
         groupId = group.groupId;
       }
+
       bandsByTrackId.set(track.id, bands);
     }
+
     return bandsByTrackId;
   });
+
   const returnTracks = createMemo(() =>
     getReturnSendTargets(sidebar().allTracks),
   );
+
   const returnTrackNames = createMemo(
     () =>
       new Map<string, string>(
@@ -286,10 +323,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         ]),
       ),
   );
+
   const displayTrackName = (track: Track) =>
     groupTrackNames().get(track.id) ??
     returnTrackNames().get(track.id) ??
     track.name;
+
   const automationMetaByTrackId = createMemo(() => {
     const byTrackId = new Map<
       string,
@@ -299,6 +338,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         volumeEnvelope?: AutomationEnvelope;
       }
     >();
+
     const mutable = new Map<
       string,
       {
@@ -307,12 +347,16 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         volumeEnvelope?: AutomationEnvelope;
       }
     >();
+
     for (const envelope of props.automation.envelopes.byTargetKey.values()) {
       if (envelope.target.kind !== "track") continue;
+
       const existing = mutable.get(envelope.target.trackId) ?? {
         automatedTargetKeys: new Set<string>(),
       };
+
       existing.automatedTargetKeys.add(envelope.targetKey);
+
       if (
         envelope.parameterId === "volume" &&
         envelope.target.effectInstanceId === undefined
@@ -323,84 +367,114 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
           max: 2,
         });
       }
+
       mutable.set(envelope.target.trackId, existing);
     }
+
     for (const [trackId, meta] of mutable) {
       byTrackId.set(trackId, meta);
     }
+
     return byTrackId;
   });
+
   type MasterAutomationMeta = {
     automatedTargetKeys: Set<string>;
     selectedEnvelope: AutomationEnvelope | undefined;
   };
+
   const masterAutomationMeta = createMemo<MasterAutomationMeta>(() => {
     const meta: MasterAutomationMeta = {
       automatedTargetKeys: new Set<string>(),
       selectedEnvelope: undefined,
     };
+
     const selected = props.automation.lanes.selectedTargetsByOwnerKey
       .master ?? { parameterId: "volume" };
+
     const selectedTargetKey = automationTargetKey(
       createAutomationTarget({ kind: "master" }, selected.effectInstanceId),
       selected.parameterId,
     );
+
     for (const envelope of props.automation.envelopes.byTargetKey.values()) {
       if (envelope.target.kind !== "master") continue;
       meta.automatedTargetKeys.add(envelope.targetKey);
+
       if (envelope.targetKey === selectedTargetKey)
         meta.selectedEnvelope = envelope;
     }
+
     return meta;
   });
+
   const returnAreaHeight = () => {
     return sidebar().trackLayout.returnHeightPx;
   };
+
   const scrollingDragTarget = () => {
     const drag = trackDrag();
+
     if (!drag?.dragging || !drag.target) return undefined;
     const targetTrack = sidebar().trackById.get(drag.target.trackId);
+
     if (!targetTrack) return undefined;
+
     return getTrackChannelRole(targetTrack) === "return"
       ? undefined
       : drag.target;
   };
+
   const returnDragTarget = () => {
     const drag = trackDrag();
+
     if (!drag?.dragging || !drag.target) return undefined;
     const targetTrack = sidebar().trackById.get(drag.target.trackId);
+
     if (!targetTrack) return undefined;
+
     return getTrackChannelRole(targetTrack) === "return"
       ? drag.target
       : undefined;
   };
+
   const actualOutputTargetId = (track: Track) => track.outputTargetId ?? "";
+
   const selectedOutputTargetId = (track: Track) =>
     selectedOutputTargets().get(track.id) ?? actualOutputTargetId(track);
+
   const outputTargetName = (track: Track) =>
     groupTrackNames().get(selectedOutputTargetId(track)) ?? "Master";
+
   const actualSendTargetId = (track: Track) => {
     const targetId =
       track.sends?.find((send) => send.amount > 0.0001)?.targetId ?? "";
+
     return resolveSendTargetId(targetId, undefined, returnTracks());
   };
+
   const selectedSendTargetId = (track: Track) =>
     resolveSendTargetId(
       actualSendTargetId(track),
       selectedSendTargets().get(track.id),
       returnTracks(),
     );
+
   const sendTargetName = (track: Track) => {
     const targetId = selectedSendTargetId(track);
+
     if (!targetId) return "None";
+
     return returnTrackNames().get(targetId) ?? "None";
   };
 
   createEffect(() => {
     setSelectedOutputTargets((current) => {
       let next: Map<Track["id"], string> | null = null;
+
       for (const [trackId, targetId] of current) {
         const track = sidebar().trackById.get(trackId);
+
         if (
           !track ||
           actualOutputTargetId(track) === targetId ||
@@ -410,12 +484,15 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
           next.delete(trackId);
         }
       }
+
       return next ?? current;
     });
     setSelectedSendTargets((current) => {
       let next: Map<Track["id"], string> | null = null;
+
       for (const [trackId, targetId] of current) {
         const track = sidebar().trackById.get(trackId);
+
         if (
           !track ||
           actualSendTargetId(track) === targetId ||
@@ -425,18 +502,23 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
           next.delete(trackId);
         }
       }
+
       return next ?? current;
     });
   });
 
   const canWriteTrackRouting = (track: Track) =>
     sidebar().canWriteTrackRouting(track.id);
+
   const handleTrackCollapseClick = (track: Track, event: MouseEvent) => {
     const collapsed = track.collapsed !== true;
+
     if (!isBulkCollapseModifier(event)) {
       sidebar().onToggleTrackCollapsed(track.id);
+
       return;
     }
+
     sidebar().onSetTracksCollapsed(
       sidebar()
         .allTracks.filter((candidate) => candidate.collapsed !== collapsed)
@@ -449,15 +531,20 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     movingReturns: boolean,
   ): TrackDropTarget | undefined => {
     const returnSection = returnSectionElement;
+
     if (returnSection) {
       const rect = returnSection.getBoundingClientRect();
+
       if (clientY >= rect.top && clientY < rect.bottom) {
         if (!movingReturns) return undefined;
+
         const row = trackLayoutRowAtY(
           sidebar().trackLayout.returnRows,
           clientY - rect.top,
         );
+
         if (!row) return undefined;
+
         return {
           trackId: row.trackId,
           zone: resolveTrackDropZone({
@@ -468,16 +555,21 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         };
       }
     }
+
     if (movingReturns) return undefined;
     const scrollElement = sidebar().scrollElement();
+
     if (!scrollElement) return undefined;
     const localY = clientYToTimelineTrackY(clientY, scrollElement);
     const row = trackLayoutRowAtY(sidebar().trackLayout.scrollingRows, localY);
+
     if (!row) return undefined;
+
     const track = assertDefined(
       sidebar().trackById.get(row.trackId),
       `Timeline layout row references missing track ${row.trackId}`,
     );
+
     return {
       trackId: row.trackId,
       zone: resolveTrackDropZone({
@@ -500,8 +592,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     if (event.button !== 0) return;
     const selectedTrackIds = sidebar().selectedTrackIds;
     const trackAlreadySelected = selectedTrackIds.includes(trackId);
+
     const movingReturns =
       sidebar().trackById.get(trackId)?.channelRole === "return";
+
     const activeSelection = trackAlreadySelected
       ? selectedTrackIds.filter(
           (selectedTrackId) =>
@@ -511,12 +605,15 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               movingReturns,
         )
       : [trackId];
+
     if (!trackAlreadySelected) {
       sidebar().onTrackClick(trackId);
     }
+
     if (event.currentTarget instanceof HTMLElement) {
       event.currentTarget.setPointerCapture(event.pointerId);
     }
+
     setTrackDrag({
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -532,11 +629,15 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   const updateTrackDrag = (event: PointerEvent) => {
     const drag = trackDrag();
+
     if (!drag || drag.pointerId !== event.pointerId) return;
+
     const dragging =
       drag.dragging ||
       Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4;
+
     const movingTrack = sidebar().trackById.get(drag.trackId);
+
     const target =
       dragging && movingTrack
         ? dropTargetAt(
@@ -544,6 +645,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             getTrackChannelRole(movingTrack) === "return",
           )
         : undefined;
+
     if (
       drag.dragging === dragging &&
       drag.target?.trackId === target?.trackId &&
@@ -555,14 +657,17 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   const finishTrackDrag = (event: PointerEvent) => {
     const drag = trackDrag();
+
     if (!drag || drag.pointerId !== event.pointerId) return;
     setTrackDrag(undefined);
+
     if (
       event.currentTarget instanceof HTMLElement &&
       event.currentTarget.hasPointerCapture(event.pointerId)
     ) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+
     if (!drag.dragging || !drag.target) return;
     setSuppressTrackClickId(drag.trackId);
     sidebar().onReorderTracks(drag.moveTrackIds, drag.target);
@@ -570,6 +675,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   const cancelTrackDrag = (event: PointerEvent) => {
     const drag = trackDrag();
+
     if (drag?.pointerId === event.pointerId) setTrackDrag(undefined);
   };
 
@@ -580,26 +686,33 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         ? current
         : new Map(current).set(track.id, value),
     );
+
     const outputTargetId = value
       ? groupTracks().find((groupTrack) => groupTrack.id === value)?.id
       : undefined;
+
     sidebar().onTrackOutputTargetChange(track.id, outputTargetId);
   };
 
   const handleSendTargetChange = (track: Track, targetId: string) => {
     if (!canWriteTrackRouting(track)) return;
+
     const returnTrack = returnTracks().find(
       (candidate) => candidate.id === targetId,
     );
+
     if (targetId && !returnTrack) {
       setSelectedSendTargets((current) => {
         if (!current.has(track.id)) return current;
         const next = new Map(current);
         next.delete(track.id);
+
         return next;
       });
+
       return;
     }
+
     const nextTargetId = returnTrack?.id ?? "";
     setSelectedSendTargets((current) =>
       current.get(track.id) === nextTargetId
@@ -607,18 +720,24 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         : new Map(current).set(track.id, nextTargetId),
     );
     const existingSends = track.sends ?? [];
+
     if (!returnTrack) {
       sidebar().onTrackSendsChange(track.id, []);
+
       return;
     }
+
     const currentTargetId = actualSendTargetId(track);
+
     const existingAmount = existingSends.find(
       (send) => send.targetId === returnTrack.id,
     )?.amount;
+
     const amount =
       existingAmount !== undefined && existingAmount > 0.0001
         ? existingAmount
         : 1;
+
     sidebar().onTrackSendsChange(track.id, [
       ...existingSends.filter(
         (send) =>
@@ -639,6 +758,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       0.8
     );
   };
+
   const trackVolumeAutomationTargetKey = (trackId: Track["id"]) =>
     automationTargetKey({ kind: "track", trackId }, "volume");
 
@@ -659,6 +779,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   let automationResize:
     | { trackId: Track["id"]; startY: number; startHeight: number }
     | undefined;
+
   const automationResizeDrag = useDrag({
     onDragMove: (pos) => {
       if (!automationResize) return;
@@ -670,12 +791,14 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       );
     },
   });
+
   const startAutomationResize = (
     trackId: Track["id"],
     startHeight: number,
     event: PointerEvent,
   ) => {
     event.stopPropagation();
+
     if (automationResizeDrag.isDragging()) return;
     automationResize = { trackId, startY: event.clientY, startHeight };
     automationResizeDrag.onPointerDown(event);
@@ -716,13 +839,18 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       <Show when={scrollingDragTarget()}>
           {(target) => {
             const row = () => layoutByTrackId().get(target().trackId);
+
             const top = () => {
               const current = row();
+
               if (!current) return TIMELINE_HEADER_HEIGHT;
+
               if (target().zone === "below")
                 return TIMELINE_HEADER_HEIGHT + current.topPx + current.heightPx;
+
               return TIMELINE_HEADER_HEIGHT + current.topPx;
             };
+
             return (
               <div
                 class={cn(
@@ -787,6 +915,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               }}
             />
           );
+
           return (
             <>
               <For each={scrollingTracks()}>{renderTrackRow}</For>
@@ -811,13 +940,17 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   <Show when={returnDragTarget()}>
                     {(target) => {
                       const row = () => layoutByTrackId().get(target().trackId);
+
                       const top = () => {
                         const current = row();
+
                         if (!current) return 0;
+
                         return target().zone === "below"
                           ? current.topPx + current.heightPx
                           : current.topPx;
                       };
+
                       return (
                         <div
                           class={cn(

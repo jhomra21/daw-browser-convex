@@ -83,16 +83,20 @@ const isPortableWasmManifest = (
 test.skipIf(process.env.DAW_ELECTRON_AUDIO_WORKLET_TEST !== "1")("runs the portable Wasm AudioWorklet against static assets in Electron", async () => {
   const artifactPath = path.join(artifactDirectory, artifactName)
   const manifestPath = path.join(artifactDirectory, manifestName)
+
   if (!existsSync(artifactPath) || !existsSync(manifestPath)) {
     throw new Error("Build the portable Wasm production assets with sh native/audio-core/scripts/build-wasm.sh before running this integration test.")
   }
+
   const manifest: DesktopJsonValue = JSON.parse(await readFile(manifestPath, "utf8"))
   const sourceHash = isPortableWasmManifest(manifest) ? manifest.sourceHash : undefined
+
   if (sourceHash !== await computePortableWasmSourceHash(repositoryRoot)) {
     throw new Error("Portable Wasm manifest is stale for the current audio-core build inputs.")
   }
 
   const fixtureRoot = await mkdtemp(path.join(tmpdir(), "daw-portable-wasm-worklet-"))
+
   try {
     await mkdir(path.join(fixtureRoot, "audio-worklets"), { recursive: true })
     await mkdir(path.join(fixtureRoot, "audio-core"), { recursive: true })
@@ -120,6 +124,7 @@ test.skipIf(process.env.DAW_ELECTRON_AUDIO_WORKLET_TEST !== "1")("runs the porta
     )
 
     const diagnosticsByRate = new Map<number, WorkletDiagnostics>()
+
     for (const sampleRate of [44_100, 48_000, 96_000]) {
       const result = Bun.spawnSync({
         cmd: [electronPath, path.join(desktopDirectory, "portable-wasm-worklet-electron.cjs"), fixtureRoot, String(sampleRate)],
@@ -127,10 +132,13 @@ test.skipIf(process.env.DAW_ELECTRON_AUDIO_WORKLET_TEST !== "1")("runs the porta
         stdout: "pipe",
         stderr: "pipe",
       })
+
       const stderr = new TextDecoder().decode(result.stderr)
+
       if (result.exitCode !== 0) throw new Error(stderr)
       expect(stderr).toBe("")
       const output: DesktopJsonValue = JSON.parse(new TextDecoder().decode(result.stdout))
+
       if (!isWorkletDiagnostics(output)) throw new Error(`Electron did not return diagnostics for ${sampleRate} Hz.`)
       expect(output.requestedSampleRate).toBe(sampleRate)
       expect(output.actualSampleRate).toBe(sampleRate)
@@ -149,7 +157,9 @@ test.skipIf(process.env.DAW_ELECTRON_AUDIO_WORKLET_TEST !== "1")("runs the porta
       expect(output.memoryBytes).toBe(268_435_456)
       diagnosticsByRate.set(sampleRate, output)
     }
+
     const exact48 = diagnosticsByRate.get(48_000)
+
     if (!exact48) throw new Error("Missing 48 kHz diagnostics.")
     expect(exact48.graphPrepare).toEqual({
       byteLength: 336,
@@ -161,6 +171,7 @@ test.skipIf(process.env.DAW_ELECTRON_AUDIO_WORKLET_TEST !== "1")("runs the porta
       firstEdgeTargetProcessorIdPresent: false,
       result: 0,
     })
+
     for (const sampleRate of [44_100, 96_000]) {
       expect(diagnosticsByRate.get(sampleRate)?.graphPrepare).toMatchObject({
         byteLength: 336,

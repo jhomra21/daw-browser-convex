@@ -8,9 +8,11 @@ test('isolates project-state persistence notifications while retaining final dur
   const projectId = `project:state-notification-${crypto.randomUUID()}`
   let projectChanges = 0
   let projectStateChanges = 0
+
   const unsubscribeProjectChanges = subscribeToLocalProjectChanges(projectId, () => {
     projectChanges += 1
   })
+
   const unsubscribeProjectStateChanges = subscribeToLocalProjectStateChanges(projectId, () => {
     projectStateChanges += 1
   })
@@ -27,11 +29,13 @@ test('isolates project-state persistence notifications while retaining final dur
     unsubscribeProjectStateChanges()
   }
 })
+
 test('coalesces concurrent project-state reads and refreshes after the burst', async () => {
   const projectId = `project:state-burst-${crypto.randomUUID()}`
   await saveLocalProjectState(projectId, 'timelineScale', 128)
 
   const getAllSpy = spyOn(IDBObjectStore.prototype, 'getAll')
+
   try {
     const loaded = await Promise.all([
       loadLocalProjectState<number>(projectId, 'timelineScale'),
@@ -60,6 +64,7 @@ test('keeps concurrent project-state loads isolated by project', async () => {
   await saveLocalProjectState(secondProjectId, 'timelineScale', 256)
 
   const getAllSpy = spyOn(IDBObjectStore.prototype, 'getAll')
+
   try {
     await expect(Promise.all([
       loadLocalProjectState<number>(firstProjectId, 'timelineScale'),

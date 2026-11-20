@@ -1,5 +1,6 @@
 import type { RecordingTerminationCause } from "./recording-delivery-trace"
 import type { WriterTiming } from "../../../packages/audio-engine/src/recording/recording-protocol"
+
 export type { RecordingTerminationCause } from "./recording-delivery-trace"
 
 type RecordingDiagnostics = {
@@ -137,16 +138,19 @@ export const updateRecordingDiagnostics = (update: Partial<RecordingDiagnostics>
       ? update.writerReturnDeliveryWorst ?? null : snapshot.writerReturnDeliveryWorst,
     writerOldestOutstandingMs: Math.max(snapshot.writerOldestOutstandingMs, update.writerOldestOutstandingMs ?? 0),
   }
+
   for (const listener of listeners) listener()
 }
 
 export const resetRecordingDiagnostics = () => {
   snapshot = initialDiagnostics()
   lastNativeBlockAt = null
+
   for (const listener of listeners) listener()
 }
 
 export const subscribeRecordingDiagnostics = (listener: () => void) => {
   listeners.add(listener)
+
   return () => listeners.delete(listener)
 }

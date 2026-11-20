@@ -13,8 +13,10 @@ type PhaserProps = {
   onAutomationParameterTouch?: (parameterId: string) => void
   onManualAutomationOverride?: (parameterId: string) => void
 }
+
 const defaults = createDefaultPhaserParams()
 const percent = formatDevicePercent
+
 export default function Phaser(props: PhaserProps) {
   return <EffectShell title="Phaser" typeLabel="Modulation" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="device-phaser"><div class="device-phaser-grid grid min-h-0 flex-1 gap-3 px-3 py-3">
     <div class="grid grid-cols-2 grid-rows-3 items-center gap-x-5 border-r border-border pr-3">

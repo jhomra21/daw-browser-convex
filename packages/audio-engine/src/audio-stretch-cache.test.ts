@@ -82,6 +82,7 @@ describe('audio stretch cache eviction helpers', () => {
 describe('audio stretch cache key identity', () => {
   test('uses stable source asset metadata and fingerprint instead of clip id for persisted keys', () => {
     const buffer = createTestBuffer([0, 0.5, 1])
+
     const left = audioStretchCacheTestInternals.createCacheKey({
       id: 'clip-a',
       sourceAssetKey: 'asset-key',
@@ -92,6 +93,7 @@ describe('audio stretch cache key identity', () => {
       duration: 4,
       audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
     }, buffer, 120)
+
     const right = audioStretchCacheTestInternals.createCacheKey({
       id: 'clip-b',
       sourceAssetKey: 'asset-key',
@@ -179,14 +181,17 @@ describe('audio stretch source resolution cancellation', () => {
     let resolveSource: ((source: AudioPcmSourceDescriptor) => void) | undefined
     let resolverCalls = 0
     let resolverSignal: AbortSignal | undefined
+
     const cache = createAudioStretchCache({
       createBuffer: createRenderBuffer,
       resolveSource: async (_clip, signal) => {
         resolverCalls += 1
         resolverSignal = signal
+
         return new Promise((resolve) => { resolveSource = resolve })
       },
     })
+
     const firstController = new AbortController()
     const first = cache.renderNow(clip, 120, firstController.signal)
     const second = cache.renderNow(clip, 120)
@@ -202,13 +207,16 @@ describe('audio stretch source resolution cancellation', () => {
   test('keeps the shared render alive when the second waiter aborts', async () => {
     let resolveSource: ((source: AudioPcmSourceDescriptor) => void) | undefined
     let resolverSignal: AbortSignal | undefined
+
     const cache = createAudioStretchCache({
       createBuffer: createRenderBuffer,
       resolveSource: async (_clip, signal) => {
         resolverSignal = signal
+
         return new Promise((resolve) => { resolveSource = resolve })
       },
     })
+
     const firstController = new AbortController()
     const secondController = new AbortController()
     const first = cache.renderNow(clip, 120, firstController.signal)
@@ -225,6 +233,7 @@ describe('audio stretch source resolution cancellation', () => {
     const cache = createAudioStretchCache({
       createBuffer: createRenderBuffer,
     })
+
     const firstController = new AbortController()
     const secondController = new AbortController()
     const first = cache.renderNow(clip, 120, firstController.signal, source)
@@ -237,13 +246,16 @@ describe('audio stretch source resolution cancellation', () => {
 
   test('aborts a shared resolver and rejects all waiters when disposed', async () => {
     let resolverSignal: AbortSignal | undefined
+
     const cache = createAudioStretchCache({
       createBuffer: createRenderBuffer,
       resolveSource: async (_clip, signal) => {
         resolverSignal = signal
+
         return new Promise(() => {})
       },
     })
+
     const first = cache.renderNow(clip, 120)
     const second = cache.renderNow(clip, 120)
     const firstResult = first.then(() => false, (error) => error instanceof DOMException && error.name === 'AbortError')
@@ -257,18 +269,22 @@ describe('audio stretch source resolution cancellation', () => {
 
   test('keeps an ensure render alive without an external waiter', async () => {
     let resolverSignal: AbortSignal | undefined
+
     const cache = createAudioStretchCache({
       createBuffer: createRenderBuffer,
       resolveSource: async (_clip, signal) => {
         resolverSignal = signal
+
         return source
       },
     })
+
     const ready = new Promise<void>((resolve) => {
       cache.subscribe(() => {
         if (cache.getReady(clip, 120)) resolve()
       })
     })
+
     cache.ensure(clip, 120)
     await ready
     expect(resolverSignal?.aborted).toBe(false)
@@ -278,16 +294,20 @@ describe('audio stretch source resolution cancellation', () => {
 
 test('shares artifact preparation data but creates a binding for each requesting clip', async () => {
   let beginCalls = 0
+
   const createRepository = () => {
     const baseRepository = createPreparedStretchArtifactSessionRepository({ lockManager: preparedStretchTestLockManager })
+
     return {
       ...baseRepository,
       begin: async (descriptor: Parameters<typeof baseRepository.begin>[0]) => {
         beginCalls += 1
+
         return baseRepository.begin(descriptor)
       },
     }
   }
+
   const source: AudioPcmSourceDescriptor = {
     identity: 'verified-source',
     contentHash: 'a'.repeat(64),
@@ -307,11 +327,13 @@ test('shares artifact preparation data but creates a binding for each requesting
       }
     },
   }
+
   const cache = createAudioStretchCache({
     createBuffer: createRenderBuffer,
     artifactRepository: createRepository(),
     resolveSource: async () => source,
   })
+
   const baseClip: AudioStretchRuntimeClip = {
     id: 'base',
     startSec: 0,
@@ -322,11 +344,13 @@ test('shares artifact preparation data but creates a binding for each requesting
     sourceChannelCount: 1,
     audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
   }
+
   const left = {
     ...baseClip,
     id: 'left',
     startSec: 0,
   }
+
   const right = {
     ...baseClip,
     id: 'right',
@@ -350,6 +374,7 @@ test('shares artifact preparation data but creates a binding for each requesting
     artifactRepository: createRepository(),
     resolveSource: async () => source,
   })
+
   const otherResult = await otherCache.renderArtifactNow(left, 120)
   expect(otherResult.binding.artifactId).toBe(leftResult.binding.artifactId)
   expect(beginCalls).toBe(2)

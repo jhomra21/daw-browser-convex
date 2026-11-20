@@ -13,21 +13,25 @@ const removeOperation = {
 test('delete retries reach the receipt-aware mutation before target validation', async () => {
   let queries = 0
   let mutations = 0
+
   const receipt = {
     removedClipIds: ['deleted-clip-1'],
     recoveries: [{ sourceClipId: 'deleted-clip-1', recoveryId: 'recovery-1' }],
     skippedClipIds: [],
     skipped: [],
   }
+
   const result = await executeTimelineOperation({
     projectId: 'project-1',
     convex: {
       query: async () => {
         queries += 1
+
         return { tracks: [], clips: [] }
       },
       mutation: async () => {
         mutations += 1
+
         return receipt
       },
     },
@@ -40,6 +44,7 @@ test('delete retries reach the receipt-aware mutation before target validation',
 
 test('a new delete propagates the strict mutation rejection without a post-validation query', async () => {
   const rejection = new Error('Clip deletion target was not found.')
+
   const promise = executeTimelineOperation({
     projectId: 'project-1',
     convex: {

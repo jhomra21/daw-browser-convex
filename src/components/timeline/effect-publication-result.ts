@@ -12,6 +12,7 @@ export type ParameterSaveResult =
   | { kind: "committed-unordered" }
   | { kind: "admitted"; entryId: string }
   | { kind: "rejected"; reason: string };
+
 type SettledParameterSaveResult = Exclude<ParameterSaveResult, { kind: "admitted" }>;
 
 const decodedEffectsResult = z.object({
@@ -25,10 +26,13 @@ const decodedEffectsResult = z.object({
 
 export const parameterSaveResult = (result: DurableEffectsPublication | { row: object; sequence: number }): ParameterSaveResult => {
   if ("sequence" in result) return { kind: "committed", through: result.sequence };
+
   if (result.kind !== "applied") return result;
   const alreadyDecoded = decodedEffectsResult.safeParse(result.result);
   const decoded = alreadyDecoded.success ? alreadyDecoded.data : decodeEffectsOperationResult(result.result);
+
   if (decoded.status === "invalid") return { kind: "rejected", reason: "The effect target no longer exists." };
+
   return decoded.revision.kind === "ordered"
     ? { kind: "committed", through: decoded.revision.revision }
     : { kind: "committed-unordered" };
@@ -38,14 +42,20 @@ export const parameterSaveResult = (result: DurableEffectsPublication | { row: o
 export const effectAdmission = {
   read: async (projectId: string, userId: string, entryId: string): Promise<SettledParameterSaveResult | undefined> => {
     const result = await readSharedOutboxOperation(projectId, userId, entryId);
+
     if (result.status === "pending") return undefined;
+
     if (result.status === "rejected") return { kind: "rejected", reason: result.lastError ?? "The effect could not be saved." };
+
     if (result.status === "missing") return { kind: "committed-unordered" };
+
     if (result.status !== "applied") return undefined;
     const settled = parameterSaveResult({ kind: "applied", entryId, result: result.result });
+
     return settled.kind === "admitted" ? undefined : settled;
   },
   subscribe: subscribeToSharedOutboxSettlements,
   consume: consumeSharedOutboxCompletion,
 };
+
 export type EffectAdmission = typeof effectAdmission;

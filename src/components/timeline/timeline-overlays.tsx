@@ -52,9 +52,12 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
     const start = props.recording.previewStartSec
     const points = props.recording.previewPoints
     const trackId = props.recording.recordingTrackId
+
     if (!props.recording.isRecording || start == null || points.length === 0 || !trackId) return null
     const row = layoutByTrackId().get(trackId)
+
     if (!row) return null
+
     const clipped = clipRecordingPreviewToViewport({
       startSec: start,
       points,
@@ -63,7 +66,9 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
         + props.timeline.viewportWidthPx / props.timeline.pixelsPerSecond,
       pixelsPerSecond: props.timeline.pixelsPerSecond,
     })
+
     if (!clipped) return null
+
     return {
       ...clipped,
       topPx: row.topPx,
@@ -73,12 +78,16 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
 
   const rangeOverlayRows = createMemo(() => {
     const range = props.timeline.range
+
     if (!range) return []
     const selectedTrackIds = new Set(range.trackIds)
+
     return props.timeline.rowLayouts.filter((row) => selectedTrackIds.has(row.trackId))
   })
+
   const rangeProjection = createMemo(() => {
     const range = props.timeline.range
+
     return range
       ? intersectTimelineRangeWithViewport({
         range,
@@ -88,8 +97,10 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
       })
       : null
   })
+
   const loopProjection = createMemo(() => {
     if (!props.timeline.loopEnabled) return null
+
     return intersectTimelineRangeWithViewport({
       range: {
         startSec: props.timeline.loopStartSec,
@@ -100,6 +111,7 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
       pixelsPerSecond: props.timeline.pixelsPerSecond,
     })
   })
+
   const playheadProjection = createMemo(() => projectTimelineTimeToViewport({
     visibleStartSec: props.timeline.visibleStartSec,
     viewportWidthPx: props.timeline.viewportWidthPx,

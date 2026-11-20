@@ -49,27 +49,37 @@ export const createNativeLiveMidi = (host: NativeLiveMidiHost) => {
 
   const queueLiveInstrumentEvent = (event: NativeInstrumentEvent) => {
     const bridge = host.bridge
+
     const live = () => {
       const now = host.state()
+
       return !now.hostLost && now.livePreviewActive && now.sampleRate !== 0
     }
+
     if (!bridge || !live()) return Promise.resolve(false)
     const generation = liveInstrumentQueueGeneration
     const bytes = serializeNativeInstrumentEvents(host.state().transportEpoch, [event])
+
     const queued = liveInstrumentEventTail.then(async () => {
       if (generation !== liveInstrumentQueueGeneration || !live()) return false
+
       try {
         const reply = await host.observeControl(bridge.session.queueInstrumentEvents(bytes))
+
         if (!reply.ok && generation === liveInstrumentQueueGeneration) host.reportStopped(reply.error)
+
         return reply.ok
       } catch (error: unknown) {
         if (generation === liveInstrumentQueueGeneration && host.state().livePreviewActive) {
           host.reportStopped(error instanceof Error ? error.message : "Native live MIDI event failed.")
         }
+
         return false
       }
     }).catch(() => undefined)
+
     liveInstrumentEventTail = queued.then(() => undefined)
+
     return queued
   }
 
@@ -93,6 +103,7 @@ export const createNativeLiveMidi = (host: NativeLiveMidiHost) => {
     hasTails: () => liveMidiTailOwned,
     subscribeReset: (listener: () => void) => {
       resetListeners.add(listener)
+
       return () => resetListeners.delete(listener)
     },
     startNote: (note: {
@@ -104,16 +115,20 @@ export const createNativeLiveMidi = (host: NativeLiveMidiHost) => {
       if (!host.bridge || host.state().hostLost || !Number.isInteger(note.pitch) || note.pitch < 0 || note.pitch > 127
         || !Number.isFinite(note.velocity) || note.velocity < 0 || note.velocity > 1) return undefined
       const { preparedTracks, preparedNodes } = host.state()
+
       if (preparedTracks && !preparedTracks.some((track) => track.id === note.trackId)) {
         return undefined
       }
+
       if (preparedNodes && !preparedNodes.some((node) => (
         node.id === note.trackId && node.kind === "instrument"
       ))) {
         return undefined
       }
+
       const noteId = nextLiveNoteId++
       const wasReady = host.state().livePreviewActive
+
       const queueNoteOn = () => queueLiveInstrumentEvent({
           nodeId: note.trackId,
           noteId,
@@ -124,6 +139,7 @@ export const createNativeLiveMidi = (host: NativeLiveMidiHost) => {
           note: note.pitch,
           value: note.velocity,
         })
+
       const readiness: LiveNoteReadiness = {
         promise: Promise.resolve(),
         released: false,
@@ -131,6 +147,7 @@ export const createNativeLiveMidi = (host: NativeLiveMidiHost) => {
         noteOnQueued: false,
         releaseQueued: false,
       }
+
       const queueRelease = () => {
         if (!readiness.noteOnQueued || readiness.releaseQueued) return
         readiness.releaseQueued = true
@@ -147,9 +164,11 @@ export const createNativeLiveMidi = (host: NativeLiveMidiHost) => {
           liveNoteReadiness.delete(noteId)
         })
       }
+
       const queueAfterPreparation = async (result: string) => {
         const { preparedTracks: tracks, preparedNodes: nodes } = host.state()
         const instrument = nodes?.find((node) => node.id === note.trackId)?.instrument
+
         if (
           result !== "started"
           || readiness.force
@@ -160,13 +179,18 @@ export const createNativeLiveMidi = (host: NativeLiveMidiHost) => {
           ))
         ) {
           liveNoteReadiness.delete(noteId)
+
           return
         }
+
         readiness.noteOnQueued = (await queueNoteOn()) === true
+
         if (readiness.noteOnQueued) liveMidiTailOwned = true
+
         if (readiness.released && readiness.noteOnQueued) queueRelease()
         else liveNoteReadiness.delete(noteId)
       }
+
       readiness.promise = (host.state().livePreviewActive
         ? queueAfterPreparation("started")
         : host.ensureLivePreview(note.playheadSec ?? 0).then(queueAfterPreparation)
@@ -174,19 +198,24 @@ export const createNativeLiveMidi = (host: NativeLiveMidiHost) => {
         liveNoteReadiness.delete(noteId)
       })
       liveNoteReadiness.set(noteId, readiness)
+
       return { backend: "native", trackId: note.trackId, pitch: note.pitch, noteId }
     },
     releaseNote: (handle: NativeLiveMidiNoteHandle, force = false) => {
       if (handle.backend !== "native" || !host.bridge) return
+
       if (releasedLiveNoteHandles.has(handle)) return
       releasedLiveNoteHandles.add(handle)
       const readiness = liveNoteReadiness.get(handle.noteId)
+
       if (readiness) {
         readiness.released = true
         readiness.force = force
         void readiness.promise
+
         return
       }
+
       if (!host.state().livePreviewActive) return
       void queueLiveInstrumentEvent({
         nodeId: handle.trackId,

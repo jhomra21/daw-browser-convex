@@ -103,9 +103,11 @@ test('leases pin live physical buffers without double counting aliases', () => {
   const live = new TestAudioBuffer()
   budget.set('live', 4, () => undefined, live)
   const scope = budget.createScope('export')
+
   const lease = scope.lease([
     { key: 'same-region', buffer: live, bytes: 4 },
   ])
+
   expect(budget.totalBytes()).toBe(4)
   expect(() => budget.set('other', 4, () => undefined, new TestAudioBuffer())).toThrow('aggregate limit')
   lease.release()
@@ -118,10 +120,12 @@ test('leases account distinct physical allocations separately', () => {
   const first = new TestAudioBuffer()
   const second = new TestAudioBuffer()
   const scope = budget.createScope('export')
+
   const lease = scope.lease([
     { key: 'same-descriptor', buffer: first, bytes: 4 },
     { key: 'same-descriptor', buffer: second, bytes: 4 },
   ])
+
   expect(budget.totalBytes()).toBe(8)
   lease.release()
   expect(budget.totalBytes()).toBe(0)

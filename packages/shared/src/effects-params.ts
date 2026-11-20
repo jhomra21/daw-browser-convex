@@ -27,7 +27,9 @@ export type EqParams = {
 }
 
 export type EqParamsLite = EqParams
+
 export type EqBandParamsInput = Partial<Omit<EqBandParams, 'type'>> & { type?: JsonValue }
+
 export type EqParamsInput = {
   enabled?: boolean
   bands?: EqBandParamsInput[]
@@ -48,7 +50,9 @@ function readFiniteNumber(value: JsonValue | undefined): number | undefined {
 
 function getDefaultEqBandType(index: number): EqBandType {
   if (index === 0) return 'lowshelf'
+
   if (index === DEFAULT_EQ_FREQUENCIES.length - 1) return 'highshelf'
+
   return 'peaking'
 }
 
@@ -93,8 +97,10 @@ export function normalizeEqParams(input: EqParamsInput): EqParams {
   // The EQ has exactly eight bands, which the engine contract requires: slots the input leaves out keep their flat default band.
   const given = Array.isArray(input.bands) ? input.bands.slice(0, defaults.bands.length) : []
   const givenIds = new Set(given.flatMap((band) => isJsonString(band.id) ? [band.id] : []))
+
   const bandsInput = defaults.bands.map((defaultBand, index) => given[index]
     ?? (givenIds.has(defaultBand.id) ? { ...defaultBand, id: `${defaultBand.id}-default` } : defaultBand))
+
   return {
     enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
     channelMode: normalizeEqChannelMode(input.channelMode),
@@ -103,6 +109,7 @@ export function normalizeEqParams(input: EqParamsInput): EqParams {
       const frequency = readFiniteNumber(band.frequency)
       const gainDb = readFiniteNumber(band.gainDb)
       const q = readFiniteNumber(band.q)
+
       return {
         id: isJsonString(band.id) && band.id.length > 0 ? band.id : defaultBand.id,
         frequency: frequency === undefined ? defaultBand.frequency : clamp(frequency, EQ_FREQUENCY_MIN, EQ_FREQUENCY_MAX),
@@ -117,14 +124,17 @@ export function normalizeEqParams(input: EqParamsInput): EqParams {
 
 export function normalizeEqParamsForUpdate(input: EqParamsInput, existing?: EqParamsInput): EqParams {
   const base = existing === undefined ? {} : normalizeEqParams(existing)
+
   return normalizeEqParams({ ...base, ...input })
 }
 
 export function serializeNormalizedEqParams(params: EqParams): string {
   let signature = `${params.enabled ? '1' : '0'}|${params.channelMode}`
+
   for (const band of params.bands) {
     signature += `|${band.id}:${band.enabled ? 1 : 0}:${band.type}:${band.frequency}:${band.gainDb}:${band.q}`
   }
+
   return signature
 }
 
@@ -154,6 +164,7 @@ export type ReverbParams = {
 }
 
 export type ReverbParamsLite = ReverbParams
+
 export type ReverbParamsInput = Partial<ReverbParams>
 
 export const REVERB_WET_MIN = 0
@@ -224,6 +235,7 @@ export function normalizeReverbParams(input: ReverbParamsInput): ReverbParams {
   const highCutHz = highCutInput === undefined ? defaults.highCutHz : clamp(highCutInput, REVERB_HIGH_CUT_HZ_MIN, REVERB_HIGH_CUT_HZ_MAX)
   const diffusionLowCutHz = diffusionLowCutInput === undefined ? defaults.diffusionLowCutHz : clamp(diffusionLowCutInput, REVERB_DIFFUSION_LOW_CUT_HZ_MIN, REVERB_DIFFUSION_LOW_CUT_HZ_MAX)
   const diffusionHighCutHz = diffusionHighCutInput === undefined ? defaults.diffusionHighCutHz : clamp(diffusionHighCutInput, REVERB_DIFFUSION_HIGH_CUT_HZ_MIN, REVERB_DIFFUSION_HIGH_CUT_HZ_MAX)
+
   return {
     enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
     wet: wet === undefined ? defaults.wet : clamp(wet, REVERB_WET_MIN, REVERB_WET_MAX),
@@ -248,11 +260,13 @@ export function normalizeReverbParams(input: ReverbParamsInput): ReverbParams {
 
 export function normalizeReverbParamsForUpdate(input: ReverbParamsInput, existing?: ReverbParamsInput): ReverbParams {
   const base = existing === undefined ? {} : normalizeReverbParams(existing)
+
   return normalizeReverbParams({ ...base, ...input })
 }
 
 export function serializeReverbParams(params: ReverbParams): string {
   const normalized = normalizeReverbParams(params)
+
   return `${normalized.enabled ? 1 : 0}|${normalized.wet}|${normalized.decaySec}|${normalized.preDelayMs}|${normalized.reflections}|${normalized.reflectionSpin ? 1 : 0}|${normalized.reflectionModAmountMs}|${normalized.reflectionModRateHz}|${normalized['reflectionShape']}|${normalized.diffuse}|${normalized.size}|${normalized.diffusion}|${normalized.density}|${normalized.lowCutHz}|${normalized.highCutHz}|${normalized.diffusionLowCutHz}|${normalized.diffusionHighCutHz}|${normalized.stereoWidth}`
 }
 
@@ -270,6 +284,7 @@ export type SaturatorParams = {
 }
 
 export type SaturatorParamsLite = SaturatorParams
+
 export type SaturatorParamsInput = Partial<Omit<SaturatorParams, 'curve'>> & { curve?: JsonValue }
 
 export const SATURATOR_DRIVE_DB_MIN = 0
@@ -302,8 +317,11 @@ export function isSaturatorCurve(value: JsonValue | undefined): value is Saturat
 
 export function evaluateSaturatorCurvePoint(curve: SaturatorCurve, input: number): number {
   if (curve === 'soft') return Math.tanh(1.8 * input)
+
   if (curve === 'medium') return input < -0.666 ? -1 : input > 0.666 ? 1 : 1.5 * input - 0.5 * input * input * input
+
   if (curve === 'hard') return Math.atan(4 * input) / Math.atan(4)
+
   return clamp(input, -0.82, 0.82) / 0.82
 }
 
@@ -314,6 +332,7 @@ export function normalizeSaturatorParams(input: SaturatorParamsInput = {}): Satu
   const colorAmount = readFiniteNumber(input.colorAmount)
   const outputDb = readFiniteNumber(input.outputDb)
   const dryWet = readFiniteNumber(input.dryWet)
+
   return {
     enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
     driveDb: driveDb === undefined ? defaults.driveDb : clamp(driveDb, SATURATOR_DRIVE_DB_MIN, SATURATOR_DRIVE_DB_MAX),
@@ -328,15 +347,18 @@ export function normalizeSaturatorParams(input: SaturatorParamsInput = {}): Satu
 
 export function normalizeSaturatorParamsForUpdate(input: SaturatorParamsInput, existing?: SaturatorParamsInput): SaturatorParams {
   const base = existing === undefined ? {} : normalizeSaturatorParams(existing)
+
   return normalizeSaturatorParams({ ...base, ...input })
 }
 
 export function serializeSaturatorParams(params: SaturatorParams): string {
   const normalized = normalizeSaturatorParams(params)
+
   return `${normalized.enabled ? 1 : 0}|${normalized.driveDb}|${normalized.curve}|${normalized.color ? 1 : 0}|${normalized.colorFrequencyHz}|${normalized.colorAmount}|${normalized.outputDb}|${normalized.dryWet}`
 }
 
 export type DelayMode = 'sync' | 'time'
+
 export type DelaySyncDivision = '1/16' | '1/8' | '1/4' | '1/2' | '1/1'
 
 export type DelayParams = {
@@ -353,6 +375,7 @@ export type DelayParams = {
 }
 
 export type DelayParamsLite = DelayParams
+
 export type DelayParamsInput = Partial<Omit<DelayParams, 'mode' | 'syncDivision'>> & { mode?: JsonValue; syncDivision?: JsonValue }
 
 export const DELAY_TIME_MS_MIN = 1
@@ -399,6 +422,7 @@ export function normalizeDelayParams(input: DelayParamsInput = {}): DelayParams 
   const highCutInput = readFiniteNumber(input.highCutHz)
   const lowCutHz = lowCutInput === undefined ? defaults.lowCutHz : clamp(lowCutInput, DELAY_LOW_CUT_HZ_MIN, DELAY_LOW_CUT_HZ_MAX)
   const highCutHz = highCutInput === undefined ? defaults.highCutHz : clamp(highCutInput, Math.max(DELAY_HIGH_CUT_HZ_MIN, lowCutHz + 1), DELAY_HIGH_CUT_HZ_MAX)
+
   return {
     enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
     mode: isDelayMode(input.mode) ? input.mode : defaults.mode,
@@ -415,18 +439,23 @@ export function normalizeDelayParams(input: DelayParamsInput = {}): DelayParams 
 
 export function normalizeDelayParamsForUpdate(input: DelayParamsInput, existing?: DelayParamsInput): DelayParams {
   const base = existing === undefined ? {} : normalizeDelayParams(existing)
+
   return normalizeDelayParams({ ...base, ...input })
 }
 
 export function serializeDelayParams(params: DelayParams): string {
   const normalized = normalizeDelayParams(params)
+
   return `${normalized.enabled ? 1 : 0}|${normalized.mode}|${normalized.timeMs}|${normalized.syncDivision}|${normalized.feedback}|${normalized.dryWet}|${normalized.pingPong ? 1 : 0}|${normalized.filterEnabled ? 1 : 0}|${normalized.lowCutHz}|${normalized.highCutHz}`
 }
 
 
 export type CompressorDetectorMode = 'peak' | 'rms'
+
 export type CompressorDynamicsMode = 'compress' | 'expand'
+
 export type CompressorEnvelopeCurve = 'log' | 'linear'
+
 export type CompressorSidechainFilterType = 'lowpass' | 'highpass' | 'bandpass'
 
 export type CompressorSidechainParams = {
@@ -455,7 +484,9 @@ export type CompressorParams = {
 }
 
 export type CompressorParamsLite = CompressorParams
+
 export type CompressorSidechainParamsInput = Partial<Omit<CompressorSidechainParams, 'filterType'>> & { filterType?: JsonValue }
+
 export type CompressorParamsInput = Partial<Omit<CompressorParams, 'detectorMode' | 'dynamicsMode' | 'envelopeCurve' | 'sidechain'>> & {
   detectorMode?: JsonValue
   dynamicsMode?: JsonValue
@@ -536,6 +567,7 @@ function normalizeCompressorSidechainParams(input: CompressorSidechainParamsInpu
   const defaults = DEFAULT_COMPRESSOR_SIDECHAIN_PARAMS
   const frequencyHz = readFiniteNumber(input?.frequencyHz)
   const q = readFiniteNumber(input?.q)
+
   return {
     enabled: isJsonBoolean(input?.enabled) ? input.enabled : defaults.enabled,
     filterType: isCompressorSidechainFilterType(input?.filterType) ? input.filterType : defaults.filterType,
@@ -555,6 +587,7 @@ export function normalizeCompressorParams(input: CompressorParamsInput = {}): Co
   const dryWet = readFiniteNumber(input.dryWet)
   const kneeDb = readFiniteNumber(input.kneeDb)
   const lookaheadMs = readFiniteNumber(input.lookaheadMs)
+
   return {
     enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
     thresholdDb: thresholdDb === undefined ? defaults.thresholdDb : clamp(thresholdDb, COMPRESSOR_THRESHOLD_DB_MIN, COMPRESSOR_THRESHOLD_DB_MAX),
@@ -576,12 +609,14 @@ export function normalizeCompressorParams(input: CompressorParamsInput = {}): Co
 
 export function normalizeCompressorParamsForUpdate(input: CompressorParamsInput, existing?: CompressorParamsInput): CompressorParams {
   const base = existing === undefined ? {} : normalizeCompressorParams(existing)
+
   return normalizeCompressorParams({ ...base, ...input, sidechain: { ...existing?.sidechain, ...input.sidechain } })
 }
 
 export function serializeCompressorParams(params: CompressorParams): string {
   const normalized = normalizeCompressorParams(params)
   const sidechain = normalized.sidechain
+
   return `${normalized.enabled ? 1 : 0}|${normalized.thresholdDb}|${normalized.ratio}|${normalized.attackMs}|${normalized.releaseMs}|${normalized.autoRelease ? 1 : 0}|${normalized.makeupDb}|${normalized.outputDb}|${normalized.dryWet}|${normalized.kneeDb}|${normalized.lookaheadMs}|${normalized.detectorMode}|${normalized.dynamicsMode}|${normalized.envelopeCurve}|${sidechain.enabled ? 1 : 0}|${sidechain.filterType}|${sidechain.frequencyHz}|${sidechain.q}`
 }
 
@@ -590,27 +625,39 @@ export function computeCompressorStaticCurveDb(inputDb: number, params: Compress
   const threshold = normalized.thresholdDb
   const ratio = normalized.ratio
   const knee = normalized.kneeDb
+
   if (normalized.dynamicsMode === 'expand') {
     if (inputDb >= threshold) return inputDb
     const expanded = threshold + (inputDb - threshold) * ratio
+
     if (knee <= 0 || inputDb <= threshold - knee / 2) return expanded
     const distance = threshold - inputDb
+
     return inputDb - (2 * (ratio - 1) * distance * distance) / knee
   }
+
   const compressed = threshold + (inputDb - threshold) / ratio
+
   if (knee <= 0) return inputDb <= threshold ? inputDb : compressed
   const lower = threshold - knee / 2
   const upper = threshold + knee / 2
+
   if (inputDb <= lower) return inputDb
+
   if (inputDb >= upper) return compressed
   const x = inputDb - lower
+
   return inputDb + ((1 / ratio - 1) * x * x) / (2 * knee)
 }
 
 export type ProcessorStateEnvelope<TState> = { version: 1; state: TState }
+
 export type UtilityPolarity = 'normal' | 'invert'
+
 export type UtilityInputMode = 'stereo' | 'mono-sum'
+
 export type UtilityMatrix = 'stereo' | 'mid-side-encode' | 'mid-side-decode'
+
 export type UtilityParams = {
   enabled: boolean
   gainDb: number
@@ -623,11 +670,13 @@ export type UtilityParams = {
   swap: boolean
   dcBlock: boolean
 }
+
 export type UtilityParamsInput = Partial<Omit<UtilityParams, 'polarity' | 'inputMode' | 'matrix'>> & {
   polarity?: JsonValue
   inputMode?: JsonValue
   matrix?: JsonValue
 }
+
 export type UtilityParamsEnvelope = ProcessorStateEnvelope<UtilityParams>
 
 const readObject = (value: JsonValue): JsonObject => isJsonObject(value) ? value : {}
@@ -642,6 +691,7 @@ export function normalizeUtilityParams(input: UtilityParamsInput = {}): UtilityP
   const pan = readFiniteNumber(input.pan)
   const balance = readFiniteNumber(input.balance)
   const width = readFiniteNumber(input.width)
+
   return {
     enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
     gainDb: gainDb === undefined ? defaults.gainDb : clamp(gainDb, -60, 24),
@@ -658,12 +708,16 @@ export function normalizeUtilityParams(input: UtilityParamsInput = {}): UtilityP
 
 export const normalizeUtilityParamsForUpdate = (input: UtilityParamsInput, existing?: UtilityParamsInput) => {
   const base = existing === undefined ? {} : normalizeUtilityParams(existing)
+
   return normalizeUtilityParams({ ...base, ...input })
 }
+
 export const serializeUtilityParams = (params: UtilityParams) => JSON.stringify({ version: 1, state: normalizeUtilityParams(params) })
+
 export const normalizeUtilityParamsEnvelope = (value: JsonValue): UtilityParamsEnvelope => {
   const envelope = readObject(value)
   const state = readObject(envelope.version === 1 ? envelope.state : value)
+
   return {
     version: 1,
     state: normalizeUtilityParams({
@@ -682,7 +736,9 @@ export const normalizeUtilityParamsEnvelope = (value: JsonValue): UtilityParamsE
 }
 
 export type GateMode = 'gate' | 'expander'
+
 export type GateDetector = 'peak' | 'rms'
+
 export type GateParams = {
   enabled: boolean
   mode: GateMode
@@ -698,11 +754,13 @@ export type GateParams = {
   link: number
   sidechain: { enabled: boolean; filterType: 'highpass'; frequencyHz: number; q: number }
 }
+
 export type GateParamsInput = Partial<Omit<GateParams, 'mode' | 'detector' | 'sidechain'>> & {
   mode?: JsonValue
   detector?: JsonValue
   sidechain?: Partial<GateParams['sidechain']>
 }
+
 export type GateParamsEnvelope = ProcessorStateEnvelope<GateParams>
 
 export function createDefaultGateParams(): GateParams {
@@ -711,10 +769,13 @@ export function createDefaultGateParams(): GateParams {
 
 export function normalizeGateParams(input: GateParamsInput = {}): GateParams {
   const defaults = createDefaultGateParams()
+
   const number = (value: JsonValue | undefined, fallback: number, min: number, max: number) => {
     const finite = readFiniteNumber(value)
+
     return finite === undefined ? fallback : clamp(finite, min, max)
   }
+
   return {
     enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
     mode: input.mode === 'expander' ? 'expander' : 'gate',
@@ -739,13 +800,17 @@ export function normalizeGateParams(input: GateParamsInput = {}): GateParams {
 
 export const normalizeGateParamsForUpdate = (input: GateParamsInput, existing?: GateParamsInput) => {
   const base = existing === undefined ? {} : normalizeGateParams(existing)
+
   return normalizeGateParams({ ...base, ...input, sidechain: { ...existing?.sidechain, ...input.sidechain } })
 }
+
 export const serializeGateParams = (params: GateParams) => JSON.stringify({ version: 1, state: normalizeGateParams(params) })
+
 export const normalizeGateParamsEnvelope = (value: JsonValue): GateParamsEnvelope => {
   const envelope = readObject(value)
   const state = readObject(envelope.version === 1 ? envelope.state : value)
   const sidechain = readObject(state.sidechain)
+
   return {
     version: 1,
     state: normalizeGateParams({
@@ -778,9 +843,11 @@ export type LimiterParams = {
   link: number
   detectorOversampling: 4
 }
+
 export type LimiterParamsInput = Partial<Omit<LimiterParams, 'detectorOversampling'>> & {
   detectorOversampling?: JsonValue
 }
+
 export type LimiterParamsEnvelope = ProcessorStateEnvelope<LimiterParams>
 
 export function createDefaultLimiterParams(): LimiterParams {
@@ -793,6 +860,7 @@ export function normalizeLimiterParams(input: LimiterParamsInput = {}): LimiterP
   const releaseMs = readFiniteNumber(input.releaseMs)
   const lookaheadMs = readFiniteNumber(input.lookaheadMs)
   const link = readFiniteNumber(input.link)
+
   return {
     enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
     ceilingDbtp: ceilingDbtp === undefined ? defaults.ceilingDbtp : clamp(ceilingDbtp, -12, 0),
@@ -804,9 +872,11 @@ export function normalizeLimiterParams(input: LimiterParamsInput = {}): LimiterP
 }
 
 export const serializeLimiterParams = (params: LimiterParams) => JSON.stringify({ version: 1, state: normalizeLimiterParams(params) })
+
 export const normalizeLimiterParamsEnvelope = (value: JsonValue): LimiterParamsEnvelope => {
   const envelope = readObject(value)
   const state = readObject(envelope.version === 1 ? envelope.state : value)
+
   return {
     version: 1,
     state: normalizeLimiterParams({
@@ -821,7 +891,9 @@ export const normalizeLimiterParamsEnvelope = (value: JsonValue): LimiterParamsE
 }
 
 export type AutoFilterMode = 'lowpass' | 'highpass' | 'bandpass' | 'notch' | 'peak'
+
 export type AutoFilterWaveform = 'sine' | 'triangle'
+
 export type AutoFilterParams = {
   enabled: boolean
   mode: AutoFilterMode
@@ -833,12 +905,14 @@ export type AutoFilterParams = {
   lfo: { waveform: AutoFilterWaveform; rateHz: number; depthOctaves: number; phaseOffset: number; stereoPhase: number }
   quality: '2x'
 }
+
 export type AutoFilterParamsInput = Partial<Omit<AutoFilterParams, 'mode' | 'envelope' | 'lfo' | 'quality'>> & {
   mode?: JsonValue
   envelope?: Partial<AutoFilterParams['envelope']>
   lfo?: Partial<Omit<AutoFilterParams['lfo'], 'waveform'>> & { waveform?: JsonValue }
   quality?: JsonValue
 }
+
 export type AutoFilterParamsEnvelope = ProcessorStateEnvelope<AutoFilterParams>
 
 export function createDefaultAutoFilterParams(): AutoFilterParams {
@@ -857,11 +931,15 @@ export function createDefaultAutoFilterParams(): AutoFilterParams {
 
 export function normalizeAutoFilterParams(input: AutoFilterParamsInput = {}): AutoFilterParams {
   const defaults = createDefaultAutoFilterParams()
+
   const number = (value: JsonValue | undefined, fallback: number, min: number, max: number) => {
     const finite = readFiniteNumber(value)
+
     return finite === undefined ? fallback : clamp(finite, min, max)
   }
+
   const mode = input.mode
+
   return {
     enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
     mode: mode === 'highpass' || mode === 'bandpass' || mode === 'notch' || mode === 'peak' ? mode : 'lowpass',
@@ -886,11 +964,13 @@ export function normalizeAutoFilterParams(input: AutoFilterParamsInput = {}): Au
 }
 
 export const serializeAutoFilterParams = (params: AutoFilterParams) => JSON.stringify({ version: 1, state: normalizeAutoFilterParams(params) })
+
 export const normalizeAutoFilterParamsEnvelope = (value: JsonValue): AutoFilterParamsEnvelope => {
   const envelope = readObject(value)
   const state = readObject(envelope.version === 1 ? envelope.state : value)
   const env = readObject(state.envelope)
   const lfo = readObject(state.lfo)
+
   return {
     version: 1,
     state: normalizeAutoFilterParams({
@@ -918,53 +998,80 @@ export const normalizeAutoFilterParamsEnvelope = (value: JsonValue): AutoFilterP
 }
 
 export type ModulationWaveform = 'sine' | 'triangle'
+
 export type PhaserStages = 4 | 6 | 8 | 12
+
 export type ChorusParams = { enabled: boolean; delayMs: number; depthMs: number; rateHz: number; feedback: number; stereoPhase: number; mix: number }
+
 export type FlangerParams = ChorusParams
+
 export type PhaserParams = { enabled: boolean; stages: PhaserStages; centerHz: number; depthOctaves: number; rateHz: number; feedback: number; stereoPhase: number; mix: number }
+
 export type TremoloParams = { enabled: boolean; waveform: ModulationWaveform; rateHz: number; depth: number; 'shape': number; phase: number }
+
 export type AutoPanParams = TremoloParams
+
 export type EnsembleParams = { enabled: boolean; voices: 3; delayMs: number; depthMs: number; rateHz: number; spread: number; mix: number }
+
 export type ChorusParamsEnvelope = ProcessorStateEnvelope<ChorusParams>
+
 export type FlangerParamsEnvelope = ProcessorStateEnvelope<FlangerParams>
+
 export type PhaserParamsEnvelope = ProcessorStateEnvelope<PhaserParams>
+
 export type TremoloParamsEnvelope = ProcessorStateEnvelope<TremoloParams>
+
 export type AutoPanParamsEnvelope = ProcessorStateEnvelope<AutoPanParams>
+
 export type EnsembleParamsEnvelope = ProcessorStateEnvelope<EnsembleParams>
 
 const normalizeNumber = (value: JsonValue, fallback: number, min: number, max: number) => isJsonNumber(value) && Number.isFinite(value) ? clamp(value, min, max) : fallback
+
 const normalizeModulationEnvelope = <T>(value: JsonValue, normalize: (state: JsonObject) => T): ProcessorStateEnvelope<T> => {
   const envelope = readObject(value)
+
   return { version: 1, state: normalize(readObject(envelope.version === 1 ? envelope.state : value)) }
 }
+
 export const createDefaultChorusParams = (): ChorusParams => ({ enabled: true, delayMs: 12, depthMs: 4, rateHz: 0.8, feedback: 0, stereoPhase: 0.25, mix: 0.35 })
 export const createDefaultFlangerParams = (): FlangerParams => ({ enabled: true, delayMs: 1.5, depthMs: 1, rateHz: 0.2, feedback: 0.35, stereoPhase: 0.5, mix: 0.5 })
 export const createDefaultPhaserParams = (): PhaserParams => ({ enabled: true, stages: 6, centerHz: 1000, depthOctaves: 3, rateHz: 0.3, feedback: 0.3, stereoPhase: 0.5, mix: 0.5 })
 export const createDefaultTremoloParams = (): TremoloParams => ({ enabled: true, waveform: 'sine', rateHz: 4, depth: 0.5, 'shape': 0.5, phase: 0 })
 export const createDefaultAutoPanParams = (): AutoPanParams => ({ enabled: true, waveform: 'sine', rateHz: 1, depth: 1, 'shape': 0.5, phase: 0 })
 export const createDefaultEnsembleParams = (): EnsembleParams => ({ enabled: true, voices: 3, delayMs: 18, depthMs: 6, rateHz: 0.6, spread: 1, mix: 0.5 })
+
 export const normalizeChorusParamsEnvelope = (value: JsonValue): ChorusParamsEnvelope => normalizeModulationEnvelope(value, (state) => {
   const defaults = createDefaultChorusParams()
+
   return { enabled: isJsonBoolean(state.enabled) ? state.enabled : true, delayMs: normalizeNumber(state.delayMs, defaults.delayMs, 5, 30), depthMs: normalizeNumber(state.depthMs, defaults.depthMs, 0, 10), rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.01, 20), feedback: normalizeNumber(state.feedback, defaults.feedback, 0, 0.5), stereoPhase: normalizeNumber(state.stereoPhase, defaults.stereoPhase, -0.5, 0.5), mix: normalizeNumber(state.mix, defaults.mix, 0, 1) }
 })
+
 export const normalizeFlangerParamsEnvelope = (value: JsonValue): FlangerParamsEnvelope => normalizeModulationEnvelope(value, (state) => {
   const defaults = createDefaultFlangerParams()
+
   return { enabled: isJsonBoolean(state.enabled) ? state.enabled : true, delayMs: normalizeNumber(state.delayMs, defaults.delayMs, 0.1, 10), depthMs: normalizeNumber(state.depthMs, defaults.depthMs, 0, 5), rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.01, 20), feedback: normalizeNumber(state.feedback, defaults.feedback, -0.95, 0.95), stereoPhase: normalizeNumber(state.stereoPhase, defaults.stereoPhase, -0.5, 0.5), mix: normalizeNumber(state.mix, defaults.mix, 0, 1) }
 })
+
 export const normalizePhaserParamsEnvelope = (value: JsonValue): PhaserParamsEnvelope => normalizeModulationEnvelope(value, (state) => {
   const defaults = createDefaultPhaserParams()
+
   return { enabled: isJsonBoolean(state.enabled) ? state.enabled : true, stages: state.stages === 4 || state.stages === 6 || state.stages === 8 || state.stages === 12 ? state.stages : defaults.stages, centerHz: normalizeNumber(state.centerHz, defaults.centerHz, 100, 8000), depthOctaves: normalizeNumber(state.depthOctaves, defaults.depthOctaves, 0, 5), rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.01, 20), feedback: normalizeNumber(state.feedback, defaults.feedback, -0.95, 0.95), stereoPhase: normalizeNumber(state.stereoPhase, defaults.stereoPhase, -0.5, 0.5), mix: normalizeNumber(state.mix, defaults.mix, 0, 1) }
 })
+
 const normalizeAmplitudeModulation = (value: JsonValue, defaults: TremoloParams): TremoloParamsEnvelope => normalizeModulationEnvelope(value, (state) => ({ enabled: isJsonBoolean(state.enabled) ? state.enabled : true, waveform: state.waveform === 'triangle' ? 'triangle' : 'sine', rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.01, 20), depth: normalizeNumber(state.depth, defaults.depth, 0, 1), 'shape': normalizeNumber(state['shape'], defaults['shape'], 0, 1), phase: normalizeNumber(state.phase, defaults.phase, 0, 1) }))
 export const normalizeTremoloParamsEnvelope = (value: JsonValue): TremoloParamsEnvelope => normalizeAmplitudeModulation(value, createDefaultTremoloParams())
 export const normalizeAutoPanParamsEnvelope = (value: JsonValue): AutoPanParamsEnvelope => normalizeAmplitudeModulation(value, createDefaultAutoPanParams())
+
 export const normalizeEnsembleParamsEnvelope = (value: JsonValue): EnsembleParamsEnvelope => normalizeModulationEnvelope(value, (state) => {
   const defaults = createDefaultEnsembleParams()
+
   return { enabled: isJsonBoolean(state.enabled) ? state.enabled : true, voices: 3, delayMs: normalizeNumber(state.delayMs, defaults.delayMs, 10, 30), depthMs: normalizeNumber(state.depthMs, defaults.depthMs, 1, 12), rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.05, 5), spread: normalizeNumber(state.spread, defaults.spread, 0, 1), mix: normalizeNumber(state.mix, defaults.mix, 0, 1) }
 })
 
 export type LoFiQuantization = 'round' | 'floor' | 'truncate'
+
 export type LoFiDither = 'off' | 'rectangular' | 'triangular'
+
 export type LoFiParams = {
   enabled: boolean
   bitDepth: number
@@ -976,6 +1083,7 @@ export type LoFiParams = {
   mix: number
   seed: number
 }
+
 export type LoFiParamsEnvelope = ProcessorStateEnvelope<LoFiParams>
 
 export const createDefaultLoFiParams = (): LoFiParams => ({
@@ -995,6 +1103,7 @@ export const normalizeLoFiParamsEnvelope = (value: JsonValue): LoFiParamsEnvelop
   const state = readObject(envelope.version === 1 ? envelope.state : value)
   const defaults = createDefaultLoFiParams()
   const seed = normalizeNumber(state.seed, defaults.seed, 1, 0xffffffff)
+
   return {
     version: 1,
     state: {
@@ -1012,14 +1121,19 @@ export const normalizeLoFiParamsEnvelope = (value: JsonValue): LoFiParamsEnvelop
 }
 
 export type AudioEffectKind = 'utility' | 'eq' | 'autofilter' | 'gate' | 'compressor' | 'saturator' | 'lofi' | 'limiter' | 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' | 'delay' | 'reverb' | 'spectral' | 'spectrum'
+
 export type PlannedAudioEffectKind = AudioEffectKind
+
 // The Spectrum device only observes: it has no processor in any audio graph.
 export type DspAudioEffectKind = Exclude<AudioEffectKind, 'spectrum'>
+
 export type MasterAudioEffectKind = `master-${AudioEffectKind}`
+
 export type AudioEffectInstance = {
   id: string
   kind: AudioEffectKind
 }
+
 export type AudioEffectOrderItem = AudioEffectKind | AudioEffectInstance
 
 type EqAudioEffectContract = {
@@ -1077,6 +1191,7 @@ type UtilityAudioEffectContract = {
   normalizeParams: (params: JsonValue) => UtilityParamsEnvelope
   serializeParams: (params: UtilityParamsEnvelope) => string
 }
+
 type AutoFilterAudioEffectContract = {
   kind: 'autofilter'
   masterKind: 'master-autofilter'
@@ -1100,6 +1215,7 @@ type LimiterAudioEffectContract = {
   normalizeParams: (params: JsonValue) => LimiterParamsEnvelope
   serializeParams: (params: LimiterParamsEnvelope) => string
 }
+
 type LoFiAudioEffectContract = {
   kind: 'lofi'
   masterKind: 'master-lofi'
@@ -1107,6 +1223,7 @@ type LoFiAudioEffectContract = {
   normalizeParams: (params: JsonValue) => LoFiParamsEnvelope
   serializeParams: (params: LoFiParamsEnvelope) => string
 }
+
 type ChorusAudioEffectContract = {
   kind: 'chorus'
   masterKind: 'master-chorus'
@@ -1114,6 +1231,7 @@ type ChorusAudioEffectContract = {
   normalizeParams: (params: JsonValue) => ChorusParamsEnvelope
   serializeParams: (params: ChorusParamsEnvelope) => string
 }
+
 type FlangerAudioEffectContract = {
   kind: 'flanger'
   masterKind: 'master-flanger'
@@ -1121,6 +1239,7 @@ type FlangerAudioEffectContract = {
   normalizeParams: (params: JsonValue) => FlangerParamsEnvelope
   serializeParams: (params: FlangerParamsEnvelope) => string
 }
+
 type PhaserAudioEffectContract = {
   kind: 'phaser'
   masterKind: 'master-phaser'
@@ -1128,6 +1247,7 @@ type PhaserAudioEffectContract = {
   normalizeParams: (params: JsonValue) => PhaserParamsEnvelope
   serializeParams: (params: PhaserParamsEnvelope) => string
 }
+
 type TremoloAudioEffectContract = {
   kind: 'tremolo'
   masterKind: 'master-tremolo'
@@ -1135,6 +1255,7 @@ type TremoloAudioEffectContract = {
   normalizeParams: (params: JsonValue) => TremoloParamsEnvelope
   serializeParams: (params: TremoloParamsEnvelope) => string
 }
+
 type AutoPanAudioEffectContract = {
   kind: 'autopan'
   masterKind: 'master-autopan'
@@ -1142,6 +1263,7 @@ type AutoPanAudioEffectContract = {
   normalizeParams: (params: JsonValue) => AutoPanParamsEnvelope
   serializeParams: (params: AutoPanParamsEnvelope) => string
 }
+
 type EnsembleAudioEffectContract = {
   kind: 'ensemble'
   masterKind: 'master-ensemble'
@@ -1149,18 +1271,25 @@ type EnsembleAudioEffectContract = {
   normalizeParams: (params: JsonValue) => EnsembleParamsEnvelope
   serializeParams: (params: EnsembleParamsEnvelope) => string
 }
+
 export type SpectrumView = 'spectrum' | 'spectrogram' | 'both'
+
 export type SpectrumParams = { enabled: boolean; view: SpectrumView }
+
 export type SpectrumParamsEnvelope = ProcessorStateEnvelope<SpectrumParams>
+
 export const createDefaultSpectrumParams = (): SpectrumParams => ({ enabled: true, view: 'both' })
+
 export const normalizeSpectrumParamsEnvelope = (value: JsonValue): SpectrumParamsEnvelope => normalizeModulationEnvelope(value, (state) => ({
   enabled: isJsonBoolean(state.enabled) ? state.enabled : true,
   view: state.view === 'spectrum' || state.view === 'spectrogram' ? state.view : 'both',
 }))
+
 export const mergeSpectrumParamsEnvelope = (update: JsonValue, existing?: JsonValue): SpectrumParamsEnvelope => normalizeSpectrumParamsEnvelope({
   version: 1,
   state: { ...normalizeSpectrumParamsEnvelope(existing ?? null).state, ...readObject(readObject(update).state) },
 })
+
 type SpectrumAudioEffectContract = {
   kind: 'spectrum'
   masterKind: 'master-spectrum'
@@ -1168,6 +1297,7 @@ type SpectrumAudioEffectContract = {
   normalizeParams: (params: JsonValue) => SpectrumParamsEnvelope
   serializeParams: (params: SpectrumParamsEnvelope) => string
 }
+
 type AudioEffectContractByKind = {
   utility: UtilityAudioEffectContract
   eq: EqAudioEffectContract
@@ -1309,16 +1439,19 @@ export function normalizeAudioEffectOrder(order: readonly JsonValue[], enabled: 
   const enabledSet = new Set(enabled)
   const seen = new Set<AudioEffectKind>()
   const normalized: AudioEffectKind[] = []
+
   for (const value of order) {
     if (!isAudioEffectKind(value) || !enabledSet.has(value) || seen.has(value)) continue
     seen.add(value)
     normalized.push(value)
   }
+
   for (const kind of AUDIO_EFFECT_ORDER) {
     if (!enabledSet.has(kind) || seen.has(kind)) continue
     seen.add(kind)
     normalized.push(kind)
   }
+
   return normalized
 }
 
@@ -1352,26 +1485,33 @@ export function normalizeAudioEffectInstanceOrder(
 ): AudioEffectInstance[] {
   const enabledById = new Map(enabled.map((entry) => [entry.id, entry]))
   const legacyQueues = new Map<AudioEffectKind, AudioEffectInstance[]>()
+
   for (const entry of enabled) {
     const queue = legacyQueues.get(entry.kind)
+
     if (queue) queue.push(entry)
     else legacyQueues.set(entry.kind, [entry])
   }
+
   const seen = new Set<string>()
   const normalized: AudioEffectInstance[] = []
+
   for (const item of order) {
     const entry = isJsonString(item)
       ? legacyQueues.get(item)?.find((candidate) => !seen.has(candidate.id))
       : enabledById.get(item.id)
+
     if (!entry || seen.has(entry.id)) continue
     seen.add(entry.id)
     normalized.push(entry)
   }
+
   for (const entry of enabled) {
     if (seen.has(entry.id)) continue
     seen.add(entry.id)
     normalized.push(entry)
   }
+
   return normalized
 }
 
@@ -1385,6 +1525,7 @@ export function areAudioEffectInstanceOrdersEqual(
 }
 
 export type ArpeggiatorPattern = 'up' | 'down' | 'updown' | 'random'
+
 export type ArpeggiatorRate = '1/4' | '1/8' | '1/16' | '1/32'
 
 export type ArpeggiatorParams = {

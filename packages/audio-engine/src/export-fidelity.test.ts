@@ -12,6 +12,7 @@ import { scanTruePeak } from './true-peak-scanner'
 
 const buffer = (samples: number[], sampleRate = 10) => {
   const data = Float32Array.from(samples)
+
   return {
     numberOfChannels: 1,
     length: data.length,
@@ -63,6 +64,7 @@ describe('export fidelity contracts', () => {
     quantizeWavInPlace(first, { codec: 'pcm-s16', dither: 'tpdf' }, 42)
     quantizeWavInPlace(second, { codec: 'pcm-s16', dither: 'tpdf' }, 42)
     expect([...first.getChannelData(0)]).toEqual([...second.getChannelData(0)])
+
     for (const sample of first.getChannelData(0)) expect(sample * 32768).toBeCloseTo(Math.round(sample * 32768), 5)
   })
 })
@@ -70,13 +72,16 @@ describe('export fidelity contracts', () => {
 describe('offline true-peak limiter', () => {
   const audioBuffer = (channels: number[][], sampleRate = 48_000) => {
     const data = channels.map((values) => Float32Array.from(values))
+
     return {
       numberOfChannels: data.length,
       length: data[0]?.length ?? 0,
       sampleRate,
       getChannelData(channel: number) {
         const samples = data[channel]
+
         if (!samples) throw new Error('Missing channel')
+
         return samples
       },
     }
@@ -107,12 +112,14 @@ describe('offline true-peak limiter', () => {
     const samples = Array.from<number>({ length: 48_000 * 4 }).fill(0.001)
     samples[48_000 * 2] = 1
     const audio = audioBuffer([samples])
+
     const report = applyExportNormalization(audio, {
       mode: 'loudness',
       targetLufs: -5,
       truePeakCeilingDbtp: -6,
       limiting: 'true-peak',
     })
+
     expect(report.ceilingConstrained).toBe(true)
     expect(report.integratedLufs).not.toBeNull()
     expect(report.truePeakDbtp ?? 0).toBeLessThanOrEqual(-5.9)

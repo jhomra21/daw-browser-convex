@@ -23,7 +23,9 @@ type TimelineRulerProps = {
 
 const formatTimeInterval = (seconds: number) => {
   if (seconds < 0.001) return `${Math.round(seconds * 1_000_000)}µs`
+
   if (seconds < 1) return `${Math.round(seconds * 1_000)}ms`
+
   return `${seconds}s`
 }
 
@@ -38,12 +40,15 @@ export const collectTimelineMarkerIndices = (
   if (!(Number.isFinite(stepSec) && stepSec > 0) || last < first) return []
 
   const indices: number[] = []
+
   for (let index = first; index <= last; index += 1) {
     const positionPx = timeToX(index * stepSec)
+
     if (positionPx <= rulerWidthPx && !isExcluded?.(positionPx, index)) {
       indices.push(index)
     }
   }
+
   return indices
 }
 
@@ -90,13 +95,16 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
   }
 
   const onPointerCancel = () => cancelGesture()
+
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== 'Escape') return
+
     if (isKeyboardEventOwnedByOverlay(event)) return
     event.preventDefault()
     event.stopPropagation()
     cancelGesture()
   }
+
   const onBlur = () => cancelGesture()
 
   const attachPointerListeners = () => {
@@ -111,42 +119,57 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
 
   const clientXToSecLocal = (clientX: number) => {
     const rect = rootEl?.getBoundingClientRect()
+
     if (!rect) return 0
     const x = clientX - rect.left
+
     return props.xToTime(x)
   }
 
   const onPointerMove = (e: PointerEvent) => {
     if (!dragging || dragMode === 'none') return
+
     if (!props.loopEnabled) {
       cancelGesture()
+
       return
     }
+
     const sec = clientXToSecLocal(e.clientX)
+
     if (!props.onSetLoopRegion) return
+
     if (dragMode === 'create') {
       let s = Math.min(dragStartSec, sec)
       let ed = Math.max(dragStartSec, sec)
+
       if (props.gridEnabled) {
         s = quantizeSecToGrid(s, props.bpm, props.denom, 'round')
         ed = quantizeSecToGrid(ed, props.bpm, props.denom, 'round')
       }
+
       setLoopPreview({ startSec: s, endSec: Math.max(s + 0.05, ed) })
+
       return
     }
+
     const curStart = props.loopStartSec ?? 0
     const curEnd = props.loopEndSec ?? 0
+
     if (dragMode === 'resize-start') {
       let nextStart = Math.min(sec, curEnd - 0.05)
+
       if (props.gridEnabled) nextStart = quantizeSecToGrid(nextStart, props.bpm, props.denom, 'round')
       setLoopPreview({ startSec: nextStart, endSec: curEnd })
     } else if (dragMode === 'resize-end') {
       let nextEnd = Math.max(sec, curStart + 0.05)
+
       if (props.gridEnabled) nextEnd = quantizeSecToGrid(nextEnd, props.bpm, props.denom, 'round')
       setLoopPreview({ startSec: curStart, endSec: nextEnd })
     } else if (dragMode === 'move') {
       const length = dragLoopLen > 0 ? dragLoopLen : Math.max(0.05, (props.loopEndSec ?? 0) - (props.loopStartSec ?? 0))
       let nextStart = sec - dragOffsetFromStart
+
       if (props.gridEnabled) nextStart = quantizeSecToGrid(nextStart, props.bpm, props.denom, 'round')
       nextStart = Math.max(0, Math.min(nextStart, (props.durationSec || 0) - length))
       const nextEnd = nextStart + length
@@ -157,6 +180,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
   const onPointerUp = () => {
     if (!dragging) return
     const committed = loopPreview()
+
     // Only the released brace reaches persistence and the playback observer.
     if (committed) props.onSetLoopRegion?.(committed.startSec, committed.endSec)
     finishGesture()
@@ -166,8 +190,14 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     // Defer to scrub handler if we lack a loop setter or click is in lower half
     const rect = rootEl?.getBoundingClientRect()
     const inTopHalf = rect ? (e.clientY - rect.top) <= (RULER_HEIGHT / 2) : true
-    if (!props.onSetLoopRegion || !inTopHalf || !props.loopEnabled) { props.onPointerDown?.(e); return }
-    if (e.button !== 0) { props.onPointerDown?.(e); return }
+
+    if (!props.onSetLoopRegion || !inTopHalf || !props.loopEnabled) { props.onPointerDown?.(e);
+
+ return }
+
+    if (e.button !== 0) { props.onPointerDown?.(e);
+
+ return }
 
     const sec = clientXToSecLocal(e.clientX)
     const startPx = loopStartPx()
@@ -175,6 +205,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     const xPx = props.timeToX(sec)
     const near = 6 // px threshold for grabbing edges
     const hasLoop = props.loopEnabled && (props.loopEndSec ?? 0) - (props.loopStartSec ?? 0) > 0.05
+
     if (hasLoop && Math.abs(xPx - startPx) <= near) {
       dragging = true; dragMode = 'resize-start'; e.preventDefault(); e.stopPropagation()
     } else if (hasLoop && Math.abs(xPx - endPx) <= near) {
@@ -188,6 +219,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
       // Initialize a minimal loop so feedback is visible immediately
       setLoopPreview({ startSec: sec, endSec: sec + 0.1 })
     }
+
     attachPointerListeners()
   }
 
@@ -196,13 +228,18 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     if (!rootEl) return
     const rect = rootEl.getBoundingClientRect()
     const inTopHalf = (e.clientY - rect.top) <= (RULER_HEIGHT / 2)
-    if (!inTopHalf || !props.loopEnabled) { rootEl.style.cursor = '' ; return }
+
+    if (!inTopHalf || !props.loopEnabled) { rootEl.style.cursor = '' ;
+
+ return }
+
     const sec = clientXToSecLocal(e.clientX)
     const xPx = props.timeToX(sec)
     const startPx = loopStartPx()
     const endPx = loopEndPx()
     const near = 6
     const hasLoop = props.loopEnabled && (props.loopEndSec ?? 0) - (props.loopStartSec ?? 0) > 0.05
+
     if (hasLoop && (Math.abs(xPx - startPx) <= near || Math.abs(xPx - endPx) <= near)) {
       rootEl.style.cursor = 'ew-resize'
     } else if (hasLoop && xPx > startPx && xPx < endPx) {
@@ -223,6 +260,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
   const backgroundStyle = () => {
     if (props.gridEnabled) {
       const major = barStepPx()
+
       return {
         background: `
           /* Major bar lines */
@@ -254,15 +292,18 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
   const majorMarkerIndices = createMemo<number[]>(() => {
     if (props.gridEnabled) {
       const step = intervals().majorSec
+
       if (!(Number.isFinite(step) && step > 0)) return []
       const first = Math.max(0, Math.floor(props.visibleRange.startSec / step) - 1)
       const last = Math.min(Math.ceil(props.durationSec / step), Math.ceil(props.visibleRange.endSec / step) + 1)
+
       return collectTimelineMarkerIndices(first, last, step, rulerWidthPx(), props.timeToX)
     }
 
     const step = intervals().majorSec
     const first = Math.max(0, Math.floor(props.visibleRange.startSec / step) - 1)
     const last = Math.min(Math.ceil(props.durationSec / step), Math.ceil(props.visibleRange.endSec / step) + 1)
+
     return collectTimelineMarkerIndices(first, last, step, rulerWidthPx(), props.timeToX)
   })
 
@@ -276,6 +317,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
       if (!(Number.isFinite(step) && step > 0)) return []
       const first = Math.max(0, Math.floor(props.visibleRange.startSec / step) - 1)
       const last = Math.min(Math.ceil(props.durationSec / step), Math.ceil(props.visibleRange.endSec / step) + 1)
+
       return collectTimelineMarkerIndices(
         first,
         last,
@@ -288,6 +330,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
 
     const first = Math.max(0, Math.floor(props.visibleRange.startSec / step) - 1)
     const last = Math.min(Math.ceil(props.durationSec / step), Math.ceil(props.visibleRange.endSec / step) + 1)
+
     return collectTimelineMarkerIndices(
       first,
       last,
@@ -327,6 +370,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
       <Index each={minorMarkerIndices()}>
         {(markerIndex) => {
           const positionPx = () => props.timeToX(markerIndex() * intervals().minorSec)
+
           return (
             <div
               class="absolute top-0 w-px bg-timeline-grid-minor"
@@ -338,9 +382,11 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
       <Index each={majorMarkerIndices()}>
         {(markerIndex) => {
           const positionPx = () => props.timeToX(markerIndex() * intervals().majorSec)
+
           const label = () => props.gridEnabled
             ? `${musicalBarLabelAtTime(markerIndex() * intervals().majorSec, props.bpm)}`
             : formatTimeInterval(markerIndex() * intervals().majorSec)
+
           return (
             <div class="absolute bottom-0" style={{ left: `${positionPx()}px` }}>
               <div class="w-0.5 bg-timeline-grid-major" style={{ height: `${RULER_HEIGHT}px` }} />

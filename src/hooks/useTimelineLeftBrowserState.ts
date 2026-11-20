@@ -28,6 +28,7 @@ export const useTimelineLeftBrowserState = (
 
   const clampWidth = (value: number) =>
     clampTimelineLeftBrowserWidth(value, containerWidthPx(), options.rightSidebarWidthPx());
+
   const readSnapshot = () => ({
     open: open(),
     widthPx: widthPx(),
@@ -36,17 +37,22 @@ export const useTimelineLeftBrowserState = (
     scrollTopByTab: scrollTopByTab(),
     treeExpansionByTab: treeExpansionByTab(),
   });
+
   const saveSnapshot = () => saveTimelineLeftBrowserState(scopeId(), untrack(readSnapshot));
 
   onMount(() => {
     const element = options.getContainerElement();
+
     if (!element) return;
     setContainerWidthPx(element.clientWidth);
+
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
+
       if (!entry) return;
       setContainerWidthPx(entry.contentRect.width);
     });
+
     observer.observe(element);
     onCleanup(() => observer.disconnect());
   });
@@ -57,6 +63,7 @@ export const useTimelineLeftBrowserState = (
       untrack(containerWidthPx),
       untrack(options.rightSidebarWidthPx),
     );
+
     setOpenSignal(loaded.open);
     setWidthPx(loaded.widthPx);
     setActiveTabSignal(loaded.activeTab);
@@ -69,6 +76,7 @@ export const useTimelineLeftBrowserState = (
     const nextWidth = clampWidth(widthPx());
     setWidthPx((current) => {
       if (current === nextWidth) return current;
+
       return nextWidth;
     });
   });
@@ -85,29 +93,36 @@ export const useTimelineLeftBrowserState = (
     setOpenSignal(nextOpen);
     saveSnapshot();
   };
+
   const toggleOpen = () => {
     setOpenSignal((value) => !value);
     saveSnapshot();
   };
+
   const setActiveTab = (tab: TimelineBrowserTab) => {
     setActiveTabSignal(tab);
     setOpenSignal(true);
     saveSnapshot();
   };
+
   const setSearchQuery = (tab: TimelineBrowserTab, query: string) => {
     setSearchQueryByTab((current) => {
       if (current[tab] === query) return current;
+
       return { ...current, [tab]: query };
     });
     saveSnapshot();
   };
+
   const setScrollTop = (tab: TimelineBrowserTab, scrollTop: number) => {
     const nextScrollTop = Math.max(0, scrollTop);
     setScrollTopByTab((current) => {
       if (current[tab] === nextScrollTop) return current;
+
       return { ...current, [tab]: nextScrollTop };
     });
   };
+
   const setTreeRowExpanded = (tab: TimelineBrowserTab, rowId: string, expanded: boolean) => {
     setTreeExpansionByTab((current) => ({
       ...current,
@@ -118,11 +133,14 @@ export const useTimelineLeftBrowserState = (
     }));
     saveSnapshot();
   };
+
   const previewWidthPx = (value: number) => setWidthPx(clampWidth(value));
+
   const commitWidthPx = (value: number) => {
     setWidthPx(clampWidth(value));
     saveSnapshot();
   };
+
   const clampWidthToLayout = () => setWidthPx((value) => clampWidth(value));
 
   return {

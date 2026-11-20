@@ -33,6 +33,7 @@ type TooltipContentProps = KobalteTooltipContentProps<"div"> & ComponentProps<"d
 
 const TooltipContent = (props: TooltipContentProps) => {
   const [local, rest] = splitProps(props, ["class", "children"]);
+
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content

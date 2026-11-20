@@ -6,14 +6,17 @@ import { readInstrumentParamsFromEffectRow } from './effect-row-instrument-param
 describe('effect row instrument params', () => {
   test('reads normalized sampled instruments with absent optional fields after structured-clone persistence', () => {
     const sample = { assetKey: 'sample', url: 'local-asset:sample', sourceKind: 'upload', source: { durationSec: 8, sampleRate: 48000, channelCount: 2 } }
+
     const sampler = normalizeTrackInstrumentParams({
       kind: 'sampler', instanceId: 'instrument:sampler:1',
       params: { ...createDefaultSamplerParams(), zones: [{ id: 'zone', sample }] },
     })
+
     const rack = normalizeTrackInstrumentParams({
       kind: 'drum-rack', instanceId: 'instrument:rack:1',
       params: { ...createDefaultDrumRackParams(), pads: [{ sample }] },
     })
+
     for (const instrument of [sampler, rack]) {
       expect(instrument).toBeDefined()
       expect(readInstrumentParamsFromEffectRow({
@@ -40,11 +43,14 @@ describe('effect row instrument params', () => {
       effect: 'instrument',
       params: { kind: 'sampler', instanceId: 'instrument:sparse-zones', params: { ...samplerParams, zones: sparseZones } },
     })).toMatchObject({ kind: 'sampler', params: { zones: [{ id: 'valid-zone', sample: { assetKey: '' } }] } })
+
     const drumRack = readInstrumentParamsFromEffectRow({
       effect: 'instrument',
       params: { kind: 'drum-rack', instanceId: 'instrument:sparse-pads', params: { ...drumRackParams, pads: sparsePads } },
     })
+
     expect(drumRack?.kind).toBe('drum-rack')
+
     if (drumRack?.kind === 'drum-rack') {
       expect(drumRack.params.pads[1]?.sample?.assetKey).toBe('sample:valid-pad')
     }

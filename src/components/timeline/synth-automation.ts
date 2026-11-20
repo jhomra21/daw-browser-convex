@@ -17,20 +17,25 @@ export function createSynthAutomationState(
 ) {
   const ranges = new Map<string, { min: number; max: number }>();
   const parameterIds = new Map<string, string>();
+
   if (!targetId || !instanceId) return { ranges, parameterIds };
 
   for (const parameterId of SYNTH_AUTOMATION_PARAMETER_IDS) {
     parameterIds.set(parameterId, synthAutomationKey(targetId, instanceId, parameterId));
   }
+
   for (const envelope of automationEnvelopes) {
     if (!envelope.enabled || envelope.target.kind !== "track" || envelope.target.trackId !== targetId) continue;
     const key = parseSynthAutomationKey(envelope.parameterId);
+
     if (!key || key.instanceId !== instanceId || envelope.points.length === 0) continue;
     const range = automationEnvelopeValueRange(envelope);
+
     if (!range) continue;
     ranges.set(key.parameterId, range);
     parameterIds.set(key.parameterId, envelope.parameterId);
   }
+
   return { ranges, parameterIds };
 }
 
@@ -40,17 +45,21 @@ export function overlaySynthAutomationValues(
   evaluatedValuesByTargetKey: ReadonlyMap<string, number> | undefined,
 ): SynthParams {
   const normalized = normalizeSynthParams(params);
+
   const valueFor = (parameterId: SynthAutomationParameterId, fallback: number) => {
     const encodedParameterId = parameterIds.get(parameterId);
     const key = encodedParameterId && parseSynthAutomationKey(encodedParameterId);
+
     const targetKey = key
       ? automationTargetKey(
           { kind: "track", trackId: key.trackId },
           encodedParameterId,
         )
       : undefined;
+
     return targetKey ? evaluatedValuesByTargetKey?.get(targetKey) ?? fallback : fallback;
   };
+
   return {
     ...normalized,
     gain: valueFor("output.gain", normalized.gain),

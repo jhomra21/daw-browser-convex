@@ -12,9 +12,12 @@ export const registerPendingLocalProjectWriteFlusher = (
   projectFlushers.add(flush)
   kindFlushers.set(projectId, projectFlushers)
   pendingFlushers.set(kind, kindFlushers)
+
   return () => {
     projectFlushers.delete(flush)
+
     if (projectFlushers.size === 0) kindFlushers.delete(projectId)
+
     if (kindFlushers.size === 0) pendingFlushers.delete(kind)
   }
 }

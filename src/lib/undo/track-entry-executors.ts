@@ -27,6 +27,7 @@ import {
 } from './history-persistence'
 
 type HistoryDirection = 'undo' | 'redo'
+
 type HistoryContext = {
   refIndex: ReturnType<typeof buildHistoryRefIndex>
   deletedTrackIds?: Set<Track['id']>
@@ -45,8 +46,11 @@ function readCurrentTrackRouting(track: Pick<Track, 'sends' | 'outputTargetId'> 
 
 function mergeTrackRouting(base: TrackRouting, next: TrackRouting): TrackRouting {
   const sendsByTargetId = new Map<string, NonNullable<TrackRouting['sends']>[number]>()
+
   for (const send of base.sends ?? []) sendsByTargetId.set(send.targetId, send)
+
   for (const send of next.sends ?? []) sendsByTargetId.set(send.targetId, send)
+
   return {
     sends: Array.from(sendsByTargetId.values()).sort((left, right) => left.targetId.localeCompare(right.targetId)),
     outputTargetId: next.outputTargetId ?? base.outputTargetId,
@@ -64,20 +68,24 @@ export async function applyTrackClipCreateEntry(
 
   if (direction === 'undo') {
     const [removal] = structuralOpsOfKind(planStructuralOps(entry, direction), 'remove-track')
+
     const trackId = requireResolved(
       removal && resolveRemovedTrackId(historyContext.refIndex, deps.getTracks(), removal),
       'Track not found for track-clip-create undo',
     )
+
     await removeHistoryTrackOrThrow(deps, trackId, 'Failed to remove track during track-clip-create undo')
     deps.actions.removeLocalTrack(trackId)
     entry.data.track.currentTrackId = undefined
     entry.data.clip.currentId = undefined
+
     return
   }
 
   let trackId = resolveStoredTrackId(deps.getTracks(), entry.data.track.currentTrackId)
   let createdTrack = false
   let trackIndex = entry.data.track.index
+
   if (!trackId) {
     const createdTrackResult = await createHistoryTrack(deps, {
       trackRef: entry.data.track.trackRef,
@@ -86,10 +94,12 @@ export async function applyTrackClipCreateEntry(
       kind: entry.data.track.kind,
       channelRole: entry.data.track.channelRole,
     })
+
     trackId = createdTrackResult.trackId
     trackIndex = createdTrackResult.index
     createdTrack = true
   }
+
   trackId = assertDefined(trackId, 'Failed to recreate track')
   entry.data.track.currentTrackId = trackId
   deps.grantTrackWrite(trackId, grantScope)
@@ -104,15 +114,19 @@ export async function applyTrackClipCreateEntry(
 
   try {
     const clipSnapshot = entry.data.clip
+
     const clipId = assertDefined(
       entry.data.clip.currentId || await createHistoryClip(deps, trackId, clipSnapshot),
       'Failed to recreate clip',
     )
+
     entry.data.clip.currentId = clipId
     deps.grantClipWrite(clipId, grantScope)
+
     if (clipSnapshot.sampleUrl) {
       await deps.ensureClipBuffer?.(clipId, clipSnapshot.sampleUrl)
     }
+
     deps.actions.insertLocalClip(trackId, buildLocalClip({ id: clipId, clip: clipSnapshot }))
     deps.actions.rescheduleChangedClips([clipId])
   } catch (error) {
@@ -121,6 +135,7 @@ export async function applyTrackClipCreateEntry(
       deps.actions.removeLocalTrack(trackId)
       entry.data.track.currentTrackId = undefined
     }
+
     throw error
   }
 }
@@ -137,31 +152,39 @@ export async function applyTrackDeleteEntry(
   if (direction === 'redo') {
     const [removal] = structuralOpsOfKind(planStructuralOps(entry, direction), 'remove-track')
     const trackId = removal && resolveRemovedTrackId(historyContext.refIndex, deps.getTracks(), removal)
+
     if (!trackId) return
     const alreadyDeleted = historyContext.deletedTrackIds?.has(trackId)
     const currentTracks = deps.getTracks()
+
     if (!alreadyDeleted) {
       await removeHistoryTrackOrThrow(deps, trackId, 'Failed to remove track during track-delete redo')
+
       if (!isLocalHistoryProject(deps)) {
         historyContext.deletedTrackIds?.add(trackId)
+
         for (const descendantId of collectTrackDescendantIds(currentTracks, trackId)) {
           historyContext.deletedTrackIds?.add(descendantId)
         }
       }
     }
+
     for (const envelope of entry.data.automation ?? []) {
       const rebased = rebaseTrackAutomationEnvelope(envelope, trackId)
       deps.actions.applyAutomationEnvelope(undefined, rebased.targetKey)
     }
+
     deps.actions.removeLocalTrack(trackId)
     entry.data.recreatedTrackId = undefined
     entry.data.recreatedClips = []
+
     return
   }
 
   let newTrackId = resolveStoredTrackId(deps.getTracks(), entry.data.recreatedTrackId)
   let createdTrack = false
   let trackIndex = entry.data.track.index
+
   if (!newTrackId) {
     const createdTrackResult = await createHistoryTrack(deps, {
       trackRef: entry.data.track.trackRef,
@@ -177,10 +200,12 @@ export async function applyTrackDeleteEntry(
       color: entry.data.track.color,
       sends: [],
     })
+
     newTrackId = createdTrackResult.trackId
     trackIndex = createdTrackResult.index
     createdTrack = true
   }
+
   newTrackId = assertDefined(newTrackId, 'Failed to recreate deleted track')
   entry.data.recreatedTrackId = newTrackId
   deps.grantTrackWrite(newTrackId, grantScope)
@@ -189,12 +214,16 @@ export async function applyTrackDeleteEntry(
   if (entry.data.track.volume !== undefined) {
     await persistHistoryTrackVolume(deps, newTrackId, entry.data.track.volume)
   }
+
   if (!isLocalHistoryProject(deps)) {
     await persistHistoryTrackMixState(deps, newTrackId, { muted: entry.data.track.muted, soloed: entry.data.track.soloed })
+
     if (entry.data.track.color !== undefined) {
       await persistHistoryTrackColor(deps, newTrackId, entry.data.track.color)
     }
+
     const restoredGroupId = resolveTrackId(historyContext.refIndex, entry.data.track.groupRef)
+
     if (restoredGroupId) {
       await persistHistoryTrackGroup(deps, newTrackId, restoredGroupId, undefined)
     }
@@ -221,6 +250,7 @@ export async function applyTrackDeleteEntry(
   try {
     await persistHistoryTrackEffects(deps, newTrackId, entry.data.effects)
     await persistHistoryTrackAutomation(deps, entry.data.automation, newTrackId)
+
     for (const envelope of entry.data.automation ?? []) {
       const rebased = rebaseTrackAutomationEnvelope(envelope, newTrackId)
       deps.actions.applyAutomationEnvelope({
@@ -230,29 +260,37 @@ export async function applyTrackDeleteEntry(
 
     const recreatedClipIdsByRef = new Map((entry.data.recreatedClips ?? []).map((item) => [item.clipRef, item.clipId]))
     const restoredClipIds: string[] = []
+
     for (const clip of entry.data.clips) {
       const clipRef = requireResolved(clip.clipRef, 'Missing clip reference for track-delete history entry')
       const clipSnapshot = clip
+
       const resolvedNewId = assertDefined(
         recreatedClipIdsByRef.get(clipRef) || await createHistoryClip(deps, newTrackId, clipSnapshot),
         'Failed to recreate deleted track clip',
       )
+
       recreatedClipIdsByRef.set(clipRef, resolvedNewId)
       deps.grantClipWrite(resolvedNewId, grantScope)
+
       if (clipSnapshot.sampleUrl) {
         await deps.ensureClipBuffer?.(resolvedNewId, clipSnapshot.sampleUrl)
       }
+
       deps.actions.insertLocalClip(newTrackId, buildLocalClip({ id: resolvedNewId, clip: clipSnapshot }))
       restoredClipIds.push(resolvedNewId)
     }
+
     if (restoredClipIds.length > 0) {
       deps.actions.rescheduleChangedClips(restoredClipIds)
     }
+
     entry.data.recreatedClips = Array.from(recreatedClipIdsByRef.entries()).map(([clipRef, clipId]) => ({ clipRef, clipId }))
     syncHistoryClipCreateEntryIds(deps.getHistoryEntries(), recreatedClipIdsByRef)
 
     const refreshedIndex = buildHistoryRefIndex(deps.getHistoryEntries(), deps.getTracks())
     const restoredTrack = deps.getTracks().find((track) => track.id === newTrackId)
+
     if (restoredTrack) {
       const ownRouting = normalizeTrackRouting(restoredTrack, resolveTrackRoutingSnapshot(refreshedIndex, entry.data.track.routing), deps.getTracks())
       await persistHistoryTrackRouting(deps, newTrackId, ownRouting)
@@ -261,17 +299,22 @@ export async function applyTrackDeleteEntry(
 
     for (const inbound of structuralOpsOfKind(planStructuralOps(entry, direction), 'merge-routing')) {
       const sourceTrackId = resolveTrackId(refreshedIndex, inbound.trackRef)
+
       if (!sourceTrackId) continue
       const sourceTrack = deps.getTracks().find((track) => track.id === sourceTrackId)
+
       if (!sourceTrack) continue
+
       const merged = mergeTrackRouting(
         readCurrentTrackRouting(sourceTrack),
         resolveTrackRoutingSnapshot(refreshedIndex, inbound.routing),
       )
+
       const normalized = normalizeTrackRouting(sourceTrack, merged, deps.getTracks())
       await persistHistoryTrackRouting(deps, sourceTrackId, normalized)
       deps.actions.applyTrackRouting(sourceTrackId, normalized)
     }
+
     await persistHistorySidechainRoutes(deps, entry.data.sidechainRoutes)
   } catch (error) {
     if (createdTrack) {
@@ -280,6 +323,7 @@ export async function applyTrackDeleteEntry(
       entry.data.recreatedTrackId = undefined
       entry.data.recreatedClips = []
     }
+
     throw error
   }
 }

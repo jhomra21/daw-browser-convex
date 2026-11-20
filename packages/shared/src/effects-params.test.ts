@@ -40,6 +40,7 @@ import { parseSharedTimelineOperation } from './shared-timeline-operations'
 describe('EQ params', () => {
   test('normalizes band values and falls back for invalid values', () => {
     const defaults = createDefaultEqParams()
+
     const normalized = normalizeEqParams({
       enabled: false,
       bands: [
@@ -179,6 +180,7 @@ describe('Synth params', () => {
 describe('Compressor params', () => {
   test('normalizes defaults, clamps ratio, and falls back for invalid enums', () => {
     const defaults = createDefaultCompressorParams()
+
     const normalized = normalizeCompressorParams({
       ratio: 999,
       thresholdDb: -999,
@@ -434,6 +436,7 @@ describe('Saturator shared operations', () => {
 describe('Reverb params', () => {
   test('normalizes booleans safely and clamps numeric values', () => {
     const defaults = createDefaultReverbParams()
+
     const normalized = normalizeReverbParams({
       ...JSON.parse('{"enabled":"no","reflectionSpin":"yes"}'),
       wet: 999,

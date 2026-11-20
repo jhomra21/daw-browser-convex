@@ -23,8 +23,10 @@ export const createCloudControlHandlers = (input: {
 }) => {
   const invoke = (_context: ControlRequestContext) => {
     if (!input.gateway) throw new Error('Cloud control gateway is unavailable.')
+
     return input.gateway
   }
+
   return {
     'project.list': async (_request, context) => (
       projectListResultSchema.parse({

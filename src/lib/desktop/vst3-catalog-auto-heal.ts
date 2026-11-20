@@ -62,10 +62,12 @@ const dispatchCatalogChanged = () => {
 
 const getActiveScan = (bridge: Pick<PluginCatalogBridge, "scan">): ActiveScan => {
   if (activeScan) return activeScan
+
   const state: ActiveScan = {
     promise: bridge.scan(),
     eventDispatched: false,
   }
+
   activeScan = state
   void state.promise.then(
     () => {
@@ -75,6 +77,7 @@ const getActiveScan = (bridge: Pick<PluginCatalogBridge, "scan">): ActiveScan =>
       if (activeScan === state) activeScan = undefined
     },
   )
+
   return state
 }
 
@@ -83,22 +86,29 @@ export const autoHealStaleVst3Catalog = async (
 ): Promise<DesktopPluginCatalogReply | undefined> => {
   if (!input.trustAcknowledged || !hasStaleVst3CatalogEntries(input.catalog)) return undefined
   const identity = catalogIdentity(input.catalog)
+
   if (attemptedStaleCatalogIdentities.has(identity)) {
     if (!activeScan) return undefined
     const result = await activeScan.promise
+
     if ("catalog" in result) input.onCatalog?.(result.catalog)
+
     return result
   }
+
   attemptedStaleCatalogIdentities.add(identity)
 
   const scan = getActiveScan(input.bridge)
   const result = await scan.promise
+
   if ("catalog" in result) {
     input.onCatalog?.(result.catalog)
+
     if (!scan.eventDispatched) {
       scan.eventDispatched = true
       dispatchCatalogChanged()
     }
   }
+
   return result
 }

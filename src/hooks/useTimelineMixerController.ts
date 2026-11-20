@@ -16,8 +16,11 @@ import { RECORDING_TARGET_LOCKED_BADGE, type RecordingTargetLock } from '~/lib/t
 import type { Track, TrackRouting, TrackSend } from '@daw-browser/timeline-core/types'
 
 type LocalTrackRouting = TrackRouting & { sends: TrackSend[] }
+
 type PendingTrackMixField = keyof PendingTrackMixState
+
 type PendingTrackMixWriteAt = Partial<Record<PendingTrackMixField, number>>
+
 type PendingLocalTrackMixHistory = {
   previous: { muted: boolean; soloed: boolean }
   patch: Partial<Pick<PendingTrackMixState, 'muted' | 'soloed'>>
@@ -92,24 +95,33 @@ export function useTimelineMixerController(
   const pendingLocalVolumeHistoryVersion = new Map<Track['id'], number>()
   const pendingLocalMixHistory = new Map<Track['id'], PendingLocalTrackMixHistory>()
   const trackIndex = createMemo(() => createTimelineTrackIndex(options.tracks()))
+
   const retainedTrackIds = createMemo(() => {
     const next = new Set(options.tracks().map((track) => track.id))
+
     for (const trackId of options.optimisticTrackIds()) {
       next.add(trackId)
     }
+
     const serverState = options.serverTrackState()
+
     if (serverState) {
       for (const trackId of serverState.serverVolumes.keys()) {
         next.add(trackId)
       }
     }
+
     return next
   })
+
   const getTrack = (trackId: Track['id']) => trackIndex().trackById.get(trackId)
+
   const getLocalRouting = (trackId: Track['id']): LocalTrackRouting | undefined => {
     const localMix = options.localMix.byTrackId()[trackId]
+
     if (localMix?.sends === undefined && localMix?.outputTargetId === undefined) return undefined
     const track = getTrack(trackId)
+
     return {
       sends: localMix.sends ?? track?.sends ?? [],
       outputTargetId: localMix.outputTargetId ?? undefined,
@@ -118,10 +130,13 @@ export function useTimelineMixerController(
 
   const getTrackRoutingSnapshot = (trackId: Track['id']): LocalTrackRouting => {
     const pendingRouting = rawPendingSharedTrackRouting().get(trackId)
+
     if (pendingRouting) return pendingRouting
     const localRouting = getLocalRouting(trackId)
+
     if (localRouting) return localRouting
     const track = getTrack(trackId)
+
     return {
       sends: track?.sends ?? [],
       outputTargetId: track?.outputTargetId,
@@ -133,6 +148,7 @@ export function useTimelineMixerController(
     const localMix = options.localMix.byTrackId()[trackId]
     const pendingMix = rawPendingSharedTrackMix().get(trackId)
     const serverState = options.serverTrackState()
+
     return resolveTrackMixView({
       canWriteSharedMix: options.canWriteTrack(trackId),
       syncMix: options.syncMix(),
@@ -161,6 +177,7 @@ export function useTimelineMixerController(
 
   const getTrackMixSnapshot = (trackId: Track['id']) => {
     const resolvedMix = resolveTrackMixSnapshot(trackId)
+
     return {
       muted: resolvedMix.muted,
       soloed: resolvedMix.soloed,
@@ -174,6 +191,7 @@ export function useTimelineMixerController(
     await writeQueue.flushTimers(routingTimers)
     await writeQueue.flushTimers(mixTimers)
   }
+
   const localWrites = createTimelineMixerLocalWrites(flushAllTimers)
 
   // Writes can settle after the project switches, so the issuing project is captured here.
@@ -184,11 +202,13 @@ export function useTimelineMixerController(
     afterWrite?: () => void,
   ) => {
     const projectId = options.projectId()
+
     const trackWrites = createTimelineTrackWriteAdapter({
       projectId,
       userId: options.userId(),
       writeLocalTrack: (input) => localWrites.queueLocalTrackUpdate(projectId, input),
     })
+
     writeQueue.scheduleTrackWrite(timers, trackId, () => write(trackWrites).then(() => undefined, (cause) => {
       options.onLocalSaveFailed?.(projectId, cause instanceof Error ? cause.message : 'Local mix could not be saved.')
       throw cause
@@ -207,18 +227,24 @@ export function useTimelineMixerController(
   ) => {
     setRawPendingSharedTrackMix((current) => {
       const nextValue = update(current.get(trackId))
+
       if (nextValue) {
         const previous = current.get(trackId)
+
         if (previous?.muted === nextValue.muted && previous?.soloed === nextValue.soloed) {
           return current
         }
+
         const next = new Map(current)
         next.set(trackId, nextValue)
+
         return next
       }
+
       if (!current.has(trackId)) return current
       const next = new Map(current)
       next.delete(trackId)
+
       return next
     })
   }
@@ -231,8 +257,11 @@ export function useTimelineMixerController(
     updatePendingTrackMix(trackId, (current) => {
       if (!current || current[field] !== expectedValue) return current ?? null
       const next: PendingTrackMixState = {}
+
       if (field !== 'muted' && current.muted !== undefined) next.muted = current.muted
+
       if (field !== 'soloed' && current.soloed !== undefined) next.soloed = current.soloed
+
       return next.muted !== undefined || next.soloed !== undefined ? next : null
     })
   }
@@ -245,15 +274,19 @@ export function useTimelineMixerController(
     if (patch.muted === undefined && patch.soloed === undefined) return
     setRawTrackMixWriteAtById((current) => {
       const previous = current.get(trackId)
+
       const nextValue = {
         muted: patch.muted !== undefined ? issuedAt : previous?.muted,
         soloed: patch.soloed !== undefined ? issuedAt : previous?.soloed,
       } satisfies PendingTrackMixWriteAt
+
       if (previous?.muted === nextValue.muted && previous?.soloed === nextValue.soloed) {
         return current
       }
+
       const next = new Map(current)
       next.set(trackId, nextValue)
+
       return next
     })
   }
@@ -265,20 +298,26 @@ export function useTimelineMixerController(
     if (fields.muted === undefined && fields.soloed === undefined) return
     setRawTrackMixWriteAtById((current) => {
       const previous = current.get(trackId)
+
       if (!previous) return current
+
       const nextValue = {
         muted: fields.muted === undefined && previous.muted !== undefined ? previous.muted : undefined,
         soloed: fields.soloed === undefined && previous.soloed !== undefined ? previous.soloed : undefined,
       } satisfies PendingTrackMixWriteAt
+
       if (previous.muted === nextValue.muted && previous.soloed === nextValue.soloed) {
         return current
       }
+
       const next = new Map(current)
+
       if (nextValue.muted === undefined && nextValue.soloed === undefined) {
         next.delete(trackId)
       } else {
         next.set(trackId, nextValue)
       }
+
       return next
     })
   }
@@ -288,24 +327,30 @@ export function useTimelineMixerController(
       sends: routing.sends,
       outputTargetId: routing.outputTargetId ?? null,
     }
+
     options.localMix.persist(trackId, localRoutingPatch)
   }
 
   const applyTrackRouting = (trackId: Track['id'], next: LocalTrackRouting, persistLocal = true) => {
     writeQueue.clearScheduledWrite(routingTimers, trackId)
     const track = getTrack(trackId)
+
     if (!track) return
     const normalized = normalizeTrackRouting(track, next, options.tracks())
+
     if (persistLocal && !options.canWriteTrack(trackId)) persistLocalTrackRouting(trackId, normalized)
     const previous = rawPendingSharedTrackRouting().get(trackId)
+
     if (previous && isTrackRoutingEqual(previous, normalized)) return
 
     setRawPendingSharedTrackRouting((current) => {
       if (isTrackRoutingEqual(current.get(trackId) ?? { sends: [], outputTargetId: undefined }, normalized)) {
         return current
       }
+
       const nextRouting = new Map(current)
       nextRouting.set(trackId, normalized)
+
       return nextRouting
     })
   }
@@ -315,9 +360,11 @@ export function useTimelineMixerController(
       trackWrites.setRouting(trackId, routing).catch((error) => {
         setRawPendingSharedTrackRouting((current) => {
           const pending = current.get(trackId)
+
           if (!pending || !isTrackRoutingEqual(pending, routing)) return current
           const nextRouting = new Map(current)
           nextRouting.delete(trackId)
+
           return nextRouting
         })
         throw error
@@ -329,16 +376,21 @@ export function useTimelineMixerController(
   const setTrackRouting = (trackId: Track['id'], next: LocalTrackRouting) => {
     const projectId = options.projectId()
     const track = getTrack(trackId)
+
     if (!track || !options.canWriteTrack(trackId)) return
 
     const previous = getTrackRoutingSnapshot(trackId)
     const normalized = normalizeTrackRouting(track, next, options.tracks())
+
     if (isTrackRoutingEqual(previous, normalized)) return
+
     const refusal = options.recordingTargetLock?.refuseChange([{
       trackId, outputTargetId: normalized.outputTargetId, sends: normalized.sends,
     }])
+
     if (refusal) {
       options.notify?.(RECORDING_TARGET_LOCKED_BADGE, refusal)
+
       return
     }
 
@@ -346,17 +398,21 @@ export function useTimelineMixerController(
     const localProject = isLocalId('project', projectId)
     const from = localProject ? (pendingLocalRoutingHistoryFrom.get(trackId) ?? previous) : previous
     let historyVersion = 0
+
     if (localProject && !pendingLocalRoutingHistoryFrom.has(trackId)) {
       pendingLocalRoutingHistoryFrom.set(trackId, previous)
     }
+
     if (localProject) {
       historyVersion = (pendingLocalRoutingHistoryVersion.get(trackId) ?? 0) + 1
       pendingLocalRoutingHistoryVersion.set(trackId, historyVersion)
     }
+
     const pushHistory = () => {
       if (localProject && pendingLocalRoutingHistoryVersion.get(trackId) !== historyVersion) return
       pendingLocalRoutingHistoryFrom.delete(trackId)
       pendingLocalRoutingHistoryVersion.delete(trackId)
+
       if (!projectId || isTrackRoutingEqual(from, normalized)) return
       options.pushHistory(
         buildTrackRoutingHistoryEntry({
@@ -370,7 +426,9 @@ export function useTimelineMixerController(
         400,
       )
     }
+
     persistTrackRouting(trackId, normalized, localProject ? pushHistory : undefined)
+
     if (!localProject) pushHistory()
   }
 
@@ -390,8 +448,10 @@ export function useTimelineMixerController(
     scope: 'local' | 'shared' = options.canWriteTrack(trackId) ? 'shared' : 'local',
   ) => {
     writeQueue.clearScheduledWrite(volumeTimers, trackId)
+
     if (scope === 'local') {
       options.localMix.apply(trackId, { volume })
+
       return
     }
 
@@ -399,6 +459,7 @@ export function useTimelineMixerController(
       if (current.get(trackId) === volume) return current
       const next = new Map(current)
       next.set(trackId, volume)
+
       return next
     })
   }
@@ -410,6 +471,7 @@ export function useTimelineMixerController(
           if (current.get(trackId) !== volume) return current
           const next = new Map(current)
           next.delete(trackId)
+
           return next
         })
         throw error
@@ -426,17 +488,21 @@ export function useTimelineMixerController(
     const localProject = isLocalId('project', projectId)
     const from = localProject ? (pendingLocalVolumeHistoryFrom.get(trackId) ?? previousVolume) : previousVolume
     let historyVersion = 0
+
     if (localProject && !pendingLocalVolumeHistoryFrom.has(trackId)) {
       pendingLocalVolumeHistoryFrom.set(trackId, previousVolume)
     }
+
     if (localProject) {
       historyVersion = (pendingLocalVolumeHistoryVersion.get(trackId) ?? 0) + 1
       pendingLocalVolumeHistoryVersion.set(trackId, historyVersion)
     }
+
     const pushHistory = () => {
       if (localProject && pendingLocalVolumeHistoryVersion.get(trackId) !== historyVersion) return
       pendingLocalVolumeHistoryFrom.delete(trackId)
       pendingLocalVolumeHistoryVersion.delete(trackId)
+
       if (!projectId || !track || from === volume) return
       options.pushHistory(
         buildTrackVolumeHistoryEntry({
@@ -452,12 +518,16 @@ export function useTimelineMixerController(
     }
 
     applyTrackVolume(trackId, volume, canWriteSharedMix ? 'shared' : 'local')
+
     if (!canWriteSharedMix) {
       options.localMix.persist(trackId, { volume })
       pushHistory()
+
       return
     }
+
     persistTrackVolume(trackId, volume, localProject ? pushHistory : undefined)
+
     if (!localProject) pushHistory()
   }
 
@@ -470,13 +540,16 @@ export function useTimelineMixerController(
     const currentMix = getTrackMixSnapshot(trackId)
     const nextMuted = patch.muted ?? currentMix.muted
     const nextSoloed = patch.soloed ?? currentMix.soloed
+
     if (scope === 'local') {
       options.localMix.apply(trackId, {
         muted: patch.muted !== undefined ? nextMuted : undefined,
         soloed: patch.soloed !== undefined ? nextSoloed : undefined,
       })
+
       return
     }
+
     markTrackMixWriteAt(trackId, {
       muted: patch.muted !== undefined ? true : undefined,
       soloed: patch.soloed !== undefined ? true : undefined,
@@ -495,11 +568,14 @@ export function useTimelineMixerController(
       trackWrites.setMix(trackId, { muted, soloed })
         .then((result) => {
           if (result?.status === 'applied' || result?.status === 'noop') return
+
           if (muted !== undefined) clearPendingTrackMixField(trackId, 'muted', muted)
+
           if (soloed !== undefined) clearPendingTrackMixField(trackId, 'soloed', soloed)
           throw new Error('Track mix write was not applied.')
         }).catch((error) => {
           if (muted !== undefined) clearPendingTrackMixField(trackId, 'muted', muted)
+
           if (soloed !== undefined) clearPendingTrackMixField(trackId, 'soloed', soloed)
           throw error
         }),
@@ -515,7 +591,9 @@ export function useTimelineMixerController(
     scope: 'local' | 'shared',
   ) => {
     const projectId = options.projectId()
+
     if (!projectId || !track) return
+
     if (patch.muted !== undefined && currentMix.muted !== nextMix.muted) {
       options.pushHistory(buildTrackBooleanHistoryEntry({
         type: 'track-mute',
@@ -526,6 +604,7 @@ export function useTimelineMixerController(
         to: nextMix.muted,
       }))
     }
+
     if (patch.soloed !== undefined && currentMix.soloed !== nextMix.soloed) {
       options.pushHistory(buildTrackBooleanHistoryEntry({
         type: 'track-solo',
@@ -549,14 +628,17 @@ export function useTimelineMixerController(
     const canWriteSharedMix = options.canWriteTrack(trackId)
     const changedMuted = patch.muted !== undefined && currentMix.muted !== nextMuted
     const changedSoloed = patch.soloed !== undefined && currentMix.soloed !== nextSoloed
+
     if (!changedMuted && !changedSoloed) return
 
     const localProject = isLocalId('project', options.projectId())
     let historyPrevious = currentMix
     let historyPatch = patch
     let historyVersion = 0
+
     if (localProject) {
       const pendingHistory = pendingLocalMixHistory.get(trackId)
+
       if (pendingHistory) {
         historyPrevious = pendingHistory.previous
         historyPatch = { ...pendingHistory.patch, ...patch }
@@ -567,6 +649,7 @@ export function useTimelineMixerController(
         pendingLocalMixHistory.set(trackId, { previous: currentMix, patch, version: historyVersion })
       }
     }
+
     const pushHistory = () => {
       if (localProject && pendingLocalMixHistory.get(trackId)?.version !== historyVersion) return
       pendingLocalMixHistory.delete(trackId)
@@ -580,15 +663,19 @@ export function useTimelineMixerController(
     }
 
     applyTrackMixState(trackId, patch, canWriteSharedMix ? 'shared' : 'local')
+
     if (!canWriteSharedMix) {
       options.localMix.persist(trackId, {
         muted: patch.muted !== undefined ? nextMuted : undefined,
         soloed: patch.soloed !== undefined ? nextSoloed : undefined,
       })
       pushHistory()
+
       return
     }
+
     persistTrackMixState(trackId, localProject ? pushHistory : undefined)
+
     if (!localProject) pushHistory()
   }
 
@@ -639,22 +726,28 @@ export function useTimelineMixerController(
     const currentMix = getTrackMixSnapshot(trackId)
     const nextMuted = patch.muted ?? currentMix.muted
     const nextSoloed = patch.soloed ?? currentMix.soloed
+
     if (patch.muted === undefined && patch.soloed === undefined) return
+
     if (
       (patch.muted === undefined || currentMix.muted === nextMuted)
       && (patch.soloed === undefined || currentMix.soloed === nextSoloed)
     ) {
       return
     }
+
     if (!options.canWriteTrack(trackId)) {
       const localPatch: LocalMixPatch = {
         muted: patch.muted !== undefined ? nextMuted : undefined,
         soloed: patch.soloed !== undefined ? nextSoloed : undefined,
       }
+
       options.localMix.apply(trackId, localPatch)
       options.localMix.persist(trackId, localPatch)
+
       return
     }
+
     mirrorConfirmedTrackMixState(trackId, patch, issuedAt)
   }
 
@@ -670,6 +763,7 @@ export function useTimelineMixerController(
 
   createEffect(() => {
     const projectId = options.projectId()
+
     if (isLocalId('project', projectId)) localWrites.ensureLocalTimelineFlusher(projectId)
     void flushAllTimers()
       .catch(() => undefined)
@@ -703,42 +797,54 @@ export function useTimelineMixerController(
     const pendingMixByTrackId = rawPendingSharedTrackMix()
     setRawTrackMixWriteAtById((current) => {
       let next: Map<Track['id'], PendingTrackMixWriteAt> | null = null
+
       for (const [trackId, writeAts] of current) {
         const pending = pendingMixByTrackId.get(trackId)
+
         if (!pending) {
           if (!next) next = new Map(current)
           next.delete(trackId)
           continue
         }
+
         const nextWriteAts = {
           muted: pending.muted !== undefined && writeAts.muted !== undefined ? writeAts.muted : undefined,
           soloed: pending.soloed !== undefined && writeAts.soloed !== undefined ? writeAts.soloed : undefined,
         } satisfies PendingTrackMixWriteAt
+
         if (writeAts.muted === nextWriteAts.muted && writeAts.soloed === nextWriteAts.soloed) {
           continue
         }
+
         if (!next) next = new Map(current)
+
         if (nextWriteAts.muted === undefined && nextWriteAts.soloed === undefined) {
           next.delete(trackId)
         } else {
           next.set(trackId, nextWriteAts)
         }
       }
+
       return next ?? current
     })
   })
 
   createEffect(() => {
     const serverState = options.serverTrackState()
+
     if (!serverState) return
     setRawPendingSharedTrackVolumes((current) => {
       let next: Map<Track['id'], number> | null = null
+
       for (const [trackId, volume] of current) {
         const serverVolume = serverState.serverVolumes.get(trackId)
+
         if (serverVolume === undefined || Math.abs(serverVolume - volume) >= 1e-6) continue
+
         if (!next) next = new Map(current)
         next.delete(trackId)
       }
+
       return next ?? current
     })
   })
@@ -746,43 +852,58 @@ export function useTimelineMixerController(
   createEffect(() => {
     const serverState = options.serverTrackState()
     const routingTracks = options.tracks()
+
     if (!serverState) return
     setRawPendingSharedTrackRouting((current) => {
       let next: Map<Track['id'], LocalTrackRouting> | null = null
+
       for (const [trackId, routing] of current) {
         const normalized = normalizeTrackRouting(trackIndex().trackById.get(trackId), routing, routingTracks)
         const serverValue = serverState.serverRouting.get(trackId)
+
         if (!serverValue || !isTrackRoutingEqual(serverValue, normalized)) continue
+
         if (!next) next = new Map(current)
         next.delete(trackId)
       }
+
       return next ?? current
     })
   })
 
   createEffect(() => {
     const serverState = options.serverTrackState()
+
     if (!serverState) return
     setRawPendingSharedTrackMix((current) => {
       let next: Map<Track['id'], PendingTrackMixState> | null = null
+
       for (const [trackId, mix] of current) {
         const nextMix: PendingTrackMixState = {}
+
         if (mix.muted !== undefined && mix.muted !== serverState.serverMuted.get(trackId)) {
           nextMix.muted = mix.muted
         }
+
         if (mix.soloed !== undefined && mix.soloed !== serverState.serverSoloed.get(trackId)) {
           nextMix.soloed = mix.soloed
         }
+
         const hasMuted = nextMix.muted !== undefined
         const hasSoloed = nextMix.soloed !== undefined
+
         if (hasMuted === (mix.muted !== undefined) && hasSoloed === (mix.soloed !== undefined)) continue
+
         if (!next) next = new Map(current)
+
         if (!hasMuted && !hasSoloed) {
           next.delete(trackId)
           continue
         }
+
         next.set(trackId, nextMix)
       }
+
       return next ?? current
     })
   })
@@ -790,13 +911,17 @@ export function useTimelineMixerController(
   const pendingSharedTrackVolumes = createMemo((previous: Map<Track['id'], number>) => {
     const serverState = options.serverTrackState()
     const next = new Map<Track['id'], number>()
+
     for (const [trackId, volume] of rawPendingSharedTrackVolumes()) {
       const serverVolume = serverState?.serverVolumes.get(trackId)
+
       if (serverVolume !== undefined && Math.abs(serverVolume - volume) < 1e-6) {
         continue
       }
+
       next.set(trackId, volume)
     }
+
     return reuseMapIfEqual(
       previous,
       next,
@@ -808,38 +933,48 @@ export function useTimelineMixerController(
     const serverState = options.serverTrackState()
     const routingTracks = options.tracks()
     const next = new Map<Track['id'], LocalTrackRouting>()
+
     for (const [trackId, routing] of rawPendingSharedTrackRouting()) {
       if (!serverState) {
         next.set(trackId, routing)
         continue
       }
+
       const normalized = normalizeTrackRouting(trackIndex().trackById.get(trackId), routing, routingTracks)
       const serverValue = serverState.serverRouting.get(trackId)
+
       if (serverValue && isTrackRoutingEqual(serverValue, normalized)) {
         continue
       }
+
       next.set(trackId, normalized)
     }
+
     return reuseMapIfEqual(previous, next, (left, right) => !!right && isTrackRoutingEqual(left, right))
   }, new Map())
 
   const pendingSharedTrackMix = createMemo((previous: Map<Track['id'], PendingTrackMixState>) => {
     const serverState = options.serverTrackState()
     const next = new Map<Track['id'], PendingTrackMixState>()
+
     for (const [trackId, mix] of rawPendingSharedTrackMix()) {
       const nextMix: PendingTrackMixState = {}
       const serverMuted = serverState?.serverMuted.get(trackId)
       const serverSoloed = serverState?.serverSoloed.get(trackId)
+
       if (mix.muted !== undefined && mix.muted !== serverMuted) {
         nextMix.muted = mix.muted
       }
+
       if (mix.soloed !== undefined && mix.soloed !== serverSoloed) {
         nextMix.soloed = mix.soloed
       }
+
       if (nextMix.muted !== undefined || nextMix.soloed !== undefined) {
         next.set(trackId, nextMix)
       }
     }
+
     return reuseMapIfEqual(previous, next, (left, right) => !!right && isPendingTrackMixStateEqual(left, right))
   }, new Map())
 

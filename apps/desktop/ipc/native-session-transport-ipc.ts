@@ -9,6 +9,7 @@ import type { NativeSessionEvent, NativeSessionIpcHandler } from "./native-sessi
 import type { nativeSessionFailure } from "../audio-host"
 
 const spectrumEnvelope = nativeSessionEnvelopeSchema(z.bigint().positive().nullable())
+
 const transportSchema = z.object({
   epoch: unsigned32Schema,
   running: z.boolean(),
@@ -35,6 +36,7 @@ const transportSchema = z.object({
   && (!Object.hasOwn(value, "cycleStartSec") || value.cycleStartSec !== undefined)
   && (!Object.hasOwn(value, "cycleEndSec") || value.cycleEndSec !== undefined)
 ))
+
 const transportEnvelope = nativeSessionEnvelopeSchema(transportSchema)
 
 export const registerNativeSessionTransportIpc = (dependencies: {
@@ -50,9 +52,12 @@ export const registerNativeSessionTransportIpc = (dependencies: {
   dependencies.ipcMain.handle(sessionSetSpectrumNodeChannel, async (event, value) => {
     const supervisor = dependencies.allowed(event) ? dependencies.supervisor() : undefined
     const envelope = spectrumEnvelope.safeParse(value)
+
     if (!supervisor || !envelope.success || envelope.data.transactionToken !== undefined) return dependencies.fail()
+
     try {
       await supervisor.setSpectrumNode(envelope.data.value)
+
       return { ok: true as const }
     } catch (error) {
       return dependencies.fail(error)
@@ -61,8 +66,10 @@ export const registerNativeSessionTransportIpc = (dependencies: {
   dependencies.ipcMain.handle(sessionSetTransportChannel, async (event, value) => {
     const supervisor = dependencies.allowed(event) ? dependencies.supervisor() : undefined
     const envelope = transportEnvelope.safeParse(value)
+
     if (!supervisor || !envelope.success) return dependencies.fail()
     const value_ = envelope.data.value
+
     const transport: NativeHostTransport = {
       epoch: value_.epoch,
       running: value_.running,
@@ -75,8 +82,10 @@ export const registerNativeSessionTransportIpc = (dependencies: {
       cycleEndSec: value_.cycleEndSec,
       transitionId: value_.transitionId,
     }
+
     try {
       await supervisor.setTransport(transport, envelope.data.transactionToken)
+
       return { ok: true as const }
     } catch (error) {
       return dependencies.fail(error)

@@ -1,13 +1,16 @@
 const PROTOCOL_VERSION = 2
+
 import { graphEnvelope, stableId, writeId } from './daw-portable-graph-envelope-v3.js'
 
 const ABI_VERSION = 4
 const GRAPH_ENVELOPE_VERSION = 3
 const GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY = 4
+
 const SUPPORTED_GRAPH_ENVELOPE_VERSIONS = new Set([
   GRAPH_ENVELOPE_VERSION,
   GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY,
 ])
+
 const MAX_FAULTS = 4
 const MAX_INPUT_BUSES = 64
 const CHANNEL_COUNT = 2
@@ -33,9 +36,11 @@ const isSafeInteger = (value) => Number.isSafeInteger(value)
 const unsignedI64 = (value) => isSafeInteger(value) && value >= 0 ? BigInt(value) : null
 const signedI64 = (value) => isSafeInteger(value) ? BigInt(value) : null
 const safeNumberFromUint64 = (value) => value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : null
+
 const handleFromValue = (value) => {
   const slot = Number(value & 0xffffffffn) - 1
   const generation = Number(value >> 32n)
+
   return isSafeInteger(slot) && slot >= 0 && isSafeInteger(generation) && generation > 0
     ? { slot, generation, value }
     : null
@@ -49,37 +54,45 @@ const rampValue = (ramp, frame) => ramp.startValue + (frame - ramp.startFrame) *
 const rampEventCount = (ramp, startFrame, endFrame, stride) => {
   if (ramp.endFrame <= startFrame) return 1
   const span = Math.min(endFrame, ramp.endFrame) - Math.max(startFrame, ramp.startFrame)
+
   return Math.ceil(span / stride) + (ramp.endFrame < endFrame ? 1 : 0)
 }
 
 const byteHash = (bytes) => {
   let hash = 0x811c9dc5
+
   for (const byte of bytes) {
     hash ^= byte
     hash = Math.imul(hash, 0x01000193)
   }
+
   return hash >>> 0
 }
 
 const parameterEnvelope = (blocks) => {
   let bytes = 4
+
   for (const block of blocks) bytes += 16 + block.parameterTargets.length * 4 + block.values.byteLength
   const output = new Uint8Array(bytes)
   const view = new DataView(output.buffer)
   view.setUint32(0, blocks.length, true)
   let offset = 4
+
   for (const block of blocks) {
     writeProcessorId(view, offset, block.processorInstanceId)
     view.setUint32(offset + 8, block.frameCount, true)
     view.setUint32(offset + 12, block.parameterTargets.length, true)
     offset += 16
+
     for (const target of block.parameterTargets) {
       view.setUint32(offset, target, true)
       offset += 4
     }
+
     output.set(new Uint8Array(block.values.buffer, block.values.byteOffset, block.values.byteLength), offset)
     offset += block.values.byteLength
   }
+
   return output
 }
 
@@ -88,6 +101,7 @@ const eventEnvelope = (events) => {
   const view = new DataView(output.buffer)
   view.setUint32(0, events.length, true)
   let offset = 4
+
   for (const event of events) {
     writeProcessorId(view, offset, event.processorInstanceId)
     view.setUint32(offset + 8, event.parameterTarget, true)
@@ -95,6 +109,7 @@ const eventEnvelope = (events) => {
     view.setFloat32(offset + 16, event.value, true)
     offset += 20
   }
+
   return output
 }
 
@@ -103,6 +118,7 @@ const instrumentEventEnvelope = (events) => {
   const view = new DataView(output.buffer)
   view.setUint32(0, events.length, true)
   let offset = 4
+
   for (const event of events) {
     writeId(view, offset, event.nodeId)
     view.setBigUint64(offset + 8, BigInt(event.noteId), true)
@@ -115,6 +131,7 @@ const instrumentEventEnvelope = (events) => {
     view.setFloat32(offset + 44, event.value, true)
     offset += 48
   }
+
   return output
 }
 
@@ -250,14 +267,17 @@ export class DawPortableAudioCoreHost {
 
   handleMessage(message) {
     if (!isRecord(message) || message.version !== PROTOCOL_VERSION) return this.fault('malformed-message')
+
     if (message.type === 'dispose') {
       this.rejectPendingPublication()
       this.flushInstrumentAcks('rejected')
       this.releaseAllAssets()
       this.disposed = true
       this.close()
+
       return
     }
+
     if (message.type === 'diagnostics') {
       this.postMessage({
         version: PROTOCOL_VERSION,
@@ -270,13 +290,17 @@ export class DawPortableAudioCoreHost {
         memoryBytes: this.memory ? this.memory.buffer.byteLength : 0,
         graphPrepare: this.graphPrepareDiagnostics(),
       })
+
       return
     }
+
     if (message.type === 'recording-capture-configure') return this.configureRecordingCapture(message)
+
     if (message.type === 'recording-capture-finalize') {
       const stopFrame = message.stopFrame === null
         ? this.transportFrame + this.framesProcessed - this.transportProcessOrigin
         : message.stopFrame
+
       if (!this.recordingCaptureActive || !Number.isSafeInteger(stopFrame) || stopFrame < 0
         || !this.recordingCaptureFinalize || this.recordingCaptureFinalize(BigInt(stopFrame)) !== 0) return this.fault('core-error')
       this.recordingCaptureActive = false
@@ -284,8 +308,10 @@ export class DawPortableAudioCoreHost {
       this.recordingCaptureFinalizePending = true
       this.recordingCaptureStopFrame = stopFrame
       this.drainRecordingCapture()
+
       return
     }
+
     if (message.type === 'recording-capture-cancel') {
       if (this.recordingCaptureActive && this.recordingCaptureCancel) this.recordingCaptureCancel()
       this.recordingCaptureActive = false
@@ -301,15 +327,21 @@ export class DawPortableAudioCoreHost {
         action: 'cancelled',
         frame: this.transportFrame + this.framesProcessed - this.transportProcessOrigin,
       })
+
       return
     }
+
     if (message.type === 'recording-capture-drain') return this.drainRecordingCapture()
+
     if (message.type === 'cancel-publication') return this.rejectPendingPublication(message.revision)
+
     if (message.type === 'publish-graph' && Number.isInteger(message.requestId) && Number.isInteger(message.revision) && message.revision > this.revision) {
       if (this.pendingPublication) {
         this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'rejected' })
+
         return
       }
+
       const staged = this.stagedSchedule
       this.stagedSchedule = null
       const stagedForRevision = staged !== null && staged.schedule.revision === message.revision
@@ -320,28 +352,38 @@ export class DawPortableAudioCoreHost {
       const refused = message.requireContinuity === true && continuityResult === 'fallback'
       const publicationFrame = message.publicationFrame
       const framed = publicationFrame !== undefined
+
       // The sources of the revision are checked against its prepared graph now and held with the publication.
       const sources = prepared && message.sources !== undefined && message.requireContinuity === true
         ? this.encodeSources(message.sources, new Set(this.preparedSnapshot.nodes.filter((node) => node.kind === 'source').map((node) => node.id)))
         : undefined
+
       if (!prepared || refused || sources === null || (message.sources !== undefined && message.requireContinuity !== true) || (framed && (message.requireContinuity !== true || !stagedForRevision || !Number.isSafeInteger(publicationFrame) || publicationFrame < 0))) {
         if (this.graphCancel) this.graphCancel(message.revision)
         this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'rejected' })
         this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-continuity', revision: message.revision, result: refused ? 'fallback' : 'rejected' })
+
         return
       }
+
       if (framed) {
         if (!this.transportRunning || publicationFrame < this.currentTransportFrame()) {
           if (this.graphCancel) this.graphCancel(message.revision)
           this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'late' })
+
           return
         }
+
         this.pendingPublication = { requestId: message.requestId, revision: message.revision, continuous: true, staged, continuityResult, seam: publicationFrame, sources }
+
         return
       }
+
       this.publishPrepared({ requestId: message.requestId, revision: message.revision, continuous: message.requireContinuity === true, staged, continuityResult, sources })
+
       return
     }
+
     // Prepare runs here, on the AudioWorklet rendering thread between render quanta (the processor's port.onmessage),
     // where the native host prepares on its control thread. The core's prepare is bounded and allocates nothing after the
     // first publish; at the core's maximum graph (64 nodes, 483 processors, 243 edges) it measured 0.4 ms p50 and
@@ -349,27 +391,38 @@ export class DawPortableAudioCoreHost {
     // encodes the envelope on the main thread and posts its bytes, and diagnostics are derived only when asked for.
     if (message.type === 'prepare-graph') {
       const snapshot = message.snapshot
+
       if (!Number.isInteger(message.requestId) || !snapshot || snapshot.version !== 1 || !Number.isInteger(snapshot.revision) || snapshot.revision < 1 || !Array.isArray(snapshot.nodes) || !Array.isArray(snapshot.edges)) return this.fault('malformed-message')
+
       if (!this.graphPrepare || !this.malloc || !this.free || !this.memory) return this.fault('initialization-failed')
       let envelope = message.envelope
+
       if (!(envelope instanceof Uint8Array)) {
         try {
           envelope = graphEnvelope(snapshot)
         } catch {
           this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-prepared', requestId: message.requestId, revision: snapshot.revision, result: 'rejected' })
+
           return
         }
       }
+
       const envelopeView = new DataView(envelope.buffer, envelope.byteOffset, envelope.byteLength)
+
       if (!SUPPORTED_GRAPH_ENVELOPE_VERSIONS.has(envelopeView.getUint32(0, true))) {
         this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-prepared', requestId: message.requestId, revision: snapshot.revision, result: 'rejected' })
+
         return
       }
+
       const allocation = this.malloc(envelope.byteLength)
+
       if (!allocation) {
         this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-prepared', requestId: message.requestId, revision: snapshot.revision, result: 'rejected' })
+
         return
       }
+
       new Uint8Array(this.memory.buffer, allocation, envelope.byteLength).set(envelope)
       const result = this.graphPrepare(allocation, envelope.byteLength)
       this.graphPrepareEnvelope = envelope
@@ -377,6 +430,7 @@ export class DawPortableAudioCoreHost {
       this.graphPrepareAllocation = allocation
       this.graphPrepareResult = result
       this.free(allocation)
+
       if (result !== 0) {
         if (this.graphCancel) this.graphCancel(snapshot.revision)
         this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-prepared', requestId: message.requestId, revision: snapshot.revision, result: 'rejected' })
@@ -386,18 +440,24 @@ export class DawPortableAudioCoreHost {
           revision: snapshot.revision,
           result: continuityResultForCoreResult(result),
         })
+
         return
       }
+
       this.preparedSnapshot = snapshot
       this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-prepared', requestId: message.requestId, revision: snapshot.revision, result: 'prepared' })
+
       return
     }
+
     if (message.type === 'utility-state' && Number.isInteger(message.revision) && message.revision >= this.revision) {
       this.revision = message.revision
       this.state = message.state
       this.writeState()
+
       return
     }
+
     if (message.type === 'parameter-blocks') {
       if (!this.ready || !Number.isInteger(message.revision) || message.revision !== this.revision
         || !Array.isArray(message.blocks) || message.blocks.length > 512
@@ -406,8 +466,10 @@ export class DawPortableAudioCoreHost {
           && Array.isArray(block.parameterTargets) && block.parameterTargets.length > 0 && block.parameterTargets.length <= MAX_PROCESSOR_PARAMETERS
           && block.parameterTargets.every((target) => Number.isInteger(target) && target > 0)
           && block.values instanceof Float32Array && block.values.length === block.parameterTargets.length * block.frameCount)) return this.fault('malformed-message')
+
       return this.replaceRenderEnvelope('parameter', parameterEnvelope(message.blocks))
     }
+
     if (message.type === 'processor-events') {
       if (!this.ready || !Number.isInteger(message.revision) || message.revision !== this.revision
         || !Array.isArray(message.events) || message.events.length > 256
@@ -417,40 +479,56 @@ export class DawPortableAudioCoreHost {
           && Number.isFinite(event.value))
         || message.epoch !== undefined && (!Number.isInteger(message.epoch) || message.epoch < 1)
         || message.sequence !== undefined && (!Number.isSafeInteger(message.sequence) || message.sequence < 1)) return this.fault('malformed-message')
+
       if (message.epoch !== undefined && message.epoch !== this.transportEpoch) {
         if (message.requestId !== undefined) this.postProcessorEventResult(message, 'rejected')
+
         return
       }
+
       const sequence = message.sequence === undefined
         ? this.liveProcessorSequence + 1
         : message.sequence
+
       if (sequence <= this.liveProcessorSequence) {
         if (message.requestId !== undefined) this.postProcessorEventResult(message, 'rejected')
+
         return
       }
+
       this.liveProcessorSequence = sequence
       const incoming = eventEnvelope(message.events)
       const incomingView = new DataView(incoming.buffer, incoming.byteOffset, incoming.byteLength)
+
       if (message.requestId !== undefined && this.processorEventAckCount >= MAX_PROCESSOR_EVENT_ACKS) {
         this.postProcessorEventResult(message, 'rejected')
+
         return
       }
+
       const newKeys = new Set()
       let activeOverrideCount = 0
+
       for (let index = 0; index < this.processorOverrideCount; index += 1) {
         if (this.processorOverrideActive[index]) activeOverrideCount += 1
       }
+
       const availableSlots = MAX_PROCESSOR_OVERRIDE_TARGETS - activeOverrideCount
+
       for (let index = 0; index < message.events.length; index += 1) {
         const offset = 4 + index * PROCESSOR_EVENT_BYTES
         const processorId = incomingView.getBigUint64(offset, true)
         const target = incomingView.getUint32(offset + 8, true)
+
         if (this.findProcessorOverride(processorId, target) < 0) newKeys.add(`${processorId}:${target}`)
       }
+
       if (newKeys.size > availableSlots) {
         if (message.requestId !== undefined) this.postProcessorEventResult(message, 'rejected')
+
         return
       }
+
       for (let index = 0; index < message.events.length; index += 1) {
         const offset = 4 + index * PROCESSOR_EVENT_BYTES
         this.upsertProcessorOverride(
@@ -460,12 +538,16 @@ export class DawPortableAudioCoreHost {
           sequence,
         )
       }
+
       if (message.requestId !== undefined && !this.queueProcessorEventAck(message.requestId, sequence)) {
         return this.fault('capacity-exceeded')
       }
+
       this.replaceRenderEnvelope('event', incoming)
+
       return
     }
+
     if (message.type === 'reenable-processor-automation') {
       if (!this.ready || message.revision !== this.revision || message.epoch !== this.transportEpoch
         || !Number.isSafeInteger(message.requestId) || message.requestId < 1
@@ -475,7 +557,9 @@ export class DawPortableAudioCoreHost {
         || !message.parameterTargets.every((target) => Number.isInteger(target) && target > 0)) {
         return this.fault('malformed-message')
       }
+
       for (const target of message.parameterTargets) this.clearProcessorOverride(BigInt(message.processorInstanceId), target)
+
       if (!this.materializeCurrentAutomationValue(BigInt(message.processorInstanceId), message.parameterTargets)) {
         this.postMessage({
           version: PROTOCOL_VERSION,
@@ -485,8 +569,10 @@ export class DawPortableAudioCoreHost {
           epoch: message.epoch,
           result: 'rejected',
         })
+
         return
       }
+
       if (this.processorAutomationAckCount >= MAX_PROCESSOR_EVENT_ACKS) {
         this.postMessage({
           version: PROTOCOL_VERSION,
@@ -496,45 +582,62 @@ export class DawPortableAudioCoreHost {
           epoch: message.epoch,
           result: 'rejected',
         })
+
         return this.fault('capacity-exceeded')
       }
+
       this.processorAutomationAckRequestIds[this.processorAutomationAckCount] = message.requestId
       this.processorAutomationAckCount += 1
+
       return
     }
+
     if (message.type === 'transport') {
       if (!Number.isInteger(message.requestId) || !Number.isInteger(message.epoch) || message.epoch < 1 || !isBoolean(message.running) || !Number.isSafeInteger(message.frame) || message.frame < 0) return this.fault('malformed-message')
       this.rejectPendingPublication()
       const resetSchedule = message.epoch !== this.transportEpoch || message.frame !== this.currentTransportFrame()
+
       if (message.epoch < this.transportEpoch || !this.graphSetTransport || this.graphSetTransport(message.epoch, message.running ? 1 : 0, BigInt(message.frame)) !== 0) {
         this.postMessage({ version: PROTOCOL_VERSION, type: 'transport-applied', requestId: message.requestId, epoch: message.epoch, result: 'rejected' })
+
         return
       }
+
       this.flushPendingTransport('rejected')
       const epochChanged = this.transportEpoch !== message.epoch
       this.transportEpoch = message.epoch
+
       if (epochChanged) this.resetInstrumentEvents(true)
       this.transportRunning = message.running
       this.transportFrame = message.frame
       this.transportProcessOrigin = this.framesProcessed
       this.lastTransportPositionFrame = message.frame
+
       if (resetSchedule) this.resetScheduleCursors(message.frame)
       this.pendingTransportRequestId = message.requestId
       this.pendingTransportEpoch = message.epoch
       this.pendingTransportRendered = false
+
       return
     }
+
     if (message.type === 'instrument-state') {
       const state = message.state
+
       if (!Number.isInteger(message.revision) || !isString(message.nodeId) || message.nodeId.length === 0
         || !state || state.version !== 1 || !['synth', 'sampler', 'drum-rack', 'granular'].includes(state.kind)) return this.fault('malformed-message')
+
       if (!this.ready || message.revision !== this.revision) return this.fault('core-error')
+
       if (!this.configureInstrument(message.nodeId, state)) return this.fault('core-error')
+
       return
     }
+
     if (message.type === 'instrument-parameters') {
       const ack = { version: PROTOCOL_VERSION, type: 'instrument-events-applied', requestId: message.requestId,
         revision: message.revision, epoch: message.epoch, sequence: message.sequence, result: 'rejected' }
+
       if (!Number.isSafeInteger(message.requestId) || !Number.isSafeInteger(message.sequence)
         || message.requestId < 1 || message.sequence < 1
         || message.revision !== this.revision || message.epoch !== this.transportEpoch
@@ -542,53 +645,81 @@ export class DawPortableAudioCoreHost {
         || message.events.some(event => event.type !== 'parameter' || event.frameOffset !== 0)
         || !this.queueInstrumentEvents(message)) {
         this.postMessage(ack)
+
         return
       }
+
       ack.result = 'applied'
       this.instrumentAcks.push(ack)
+
       return
     }
+
     if (message.type === 'instrument-events') {
       if (!this.queueInstrumentEvents(message)) this.fault('event-overflow')
+
       return
     }
+
     if (message.type === 'install-schedule') {
       return this.installSchedule(message)
     }
+
     if (message.type === 'schedule-sources') {
       this.scheduleSources(message)
+
       return
     }
+
     if (message.type === 'replace-sources') {
       this.replaceSources(message)
+
       return
     }
+
     if (message.type === 'reset-sources') {
       this.resetSources(message)
+
       return
     }
+
     if (message.type === 'register-asset') {
       this.registerAsset(message)
+
       return
     }
+
     if (message.type === 'release-asset') {
       this.releaseAsset(message)
+
       return
     }
+
     if (message.type === 'register-paged-asset') return this.registerPagedAsset(message)
+
     if (message.type === 'write-asset-page') return this.writeAssetPage(message)
+
     if (message.type === 'prepare-asset-range') return this.prepareAssetRange(message)
+
     if (message.type === 'schedule-prepared-sources') return this.schedulePreparedSources(message)
+
     if (message.type === 'release-asset-preparation') return this.releaseAssetPreparation(message)
+
     if (message.type === 'trim-asset-pages') return this.trimAssetPages(message)
+
     if (message.type === 'retire-assets' && Number.isInteger(message.generation) && message.generation >= this.assetGeneration) {
       this.releaseAllAssets()
       this.assetGeneration = message.generation + 1
+
       return
     }
+
     if (message.type !== 'initialize') return this.fault('malformed-message')
+
     if (message.abiVersion !== ABI_VERSION) return this.fault('abi-mismatch')
+
     if (!Number.isInteger(message.maxFramesPerBlock) || message.maxFramesPerBlock < 1 || message.maxFramesPerBlock > 8192 || !(message.wasmModule instanceof WebAssembly.Module)) return this.fault('capacity-exceeded')
+
     return this.initializeWasm(message)
   }
 
@@ -596,6 +727,7 @@ export class DawPortableAudioCoreHost {
     const compiled = wasmModule instanceof WebAssembly.Module
       ? Promise.resolve(wasmModule)
       : WebAssembly.compile(wasmBytes)
+
     return compiled.then((module) => this.handleMessage({
       version: PROTOCOL_VERSION,
       type: 'initialize',
@@ -605,6 +737,7 @@ export class DawPortableAudioCoreHost {
       maxFramesPerBlock,
     }), () => {
       this.fault('initialization-failed')
+
       return false
     })
   }
@@ -613,6 +746,7 @@ export class DawPortableAudioCoreHost {
     if (!this.ready || message.epoch !== this.transportEpoch || !Array.isArray(message.events) || message.events.length > 256) return false
     let previousOffset = -1
     let previousSequence = 0
+
     for (const event of message.events) {
       if (!event || !isString(event.nodeId) || !Number.isSafeInteger(event.sequence) || event.sequence < 1
         || !Number.isSafeInteger(event.noteId) || event.noteId < 1
@@ -625,14 +759,18 @@ export class DawPortableAudioCoreHost {
       previousOffset = event.frameOffset
       previousSequence = event.sequence
     }
+
     if (this.liveInstrumentEvents.length + message.events.length > 256) return false
     const values = new Map(this.instrumentParameterValues)
+
     for (const event of message.events) if (event.type === 'parameter') values.set(`${event.nodeId}:${event.note}`, event)
+
     if (values.size > 256) return false
     this.instrumentParameterValues = values
     this.liveInstrumentEvents.push(...message.events.map(event => ({ ...event, epoch: message.epoch })))
     this.liveInstrumentEvents.sort((a, b) => a.frameOffset - b.frameOffset || a.sequence - b.sequence)
     this.replaceRenderEnvelope('instrumentEvent', instrumentEventEnvelope(this.liveInstrumentEvents))
+
     return true
   }
 
@@ -643,6 +781,7 @@ export class DawPortableAudioCoreHost {
       ack.result = result
       this.postMessage(ack)
     }
+
     this.instrumentAcks.length = 0
   }
 
@@ -653,6 +792,7 @@ export class DawPortableAudioCoreHost {
       : []
     this.liveInstrumentEvents.sort((a, b) => a.frameOffset - b.frameOffset || a.sequence - b.sequence)
     this.instrumentLiveDeferred = false
+
     if (!replay) this.instrumentParameterValues.clear()
     this.replaceRenderEnvelope('instrumentEvent', instrumentEventEnvelope(this.liveInstrumentEvents))
   }
@@ -660,6 +800,7 @@ export class DawPortableAudioCoreHost {
   initializeWasm(message) {
     this.initialization = WebAssembly.instantiate(message.wasmModule).then((instance) => {
       const exports = instance.exports
+
       const requiredFunctions = [
         exports.daw_audio_core_get_abi_version,
         exports.daw_audio_core_wasm_graph_initialize_planar,
@@ -692,17 +833,23 @@ export class DawPortableAudioCoreHost {
         exports.malloc,
         exports.free,
       ]
+
       if (!requiredFunctions.every(isCallable) || exports.daw_audio_core_get_abi_version() !== ABI_VERSION || !(exports.memory instanceof WebAssembly.Memory)) {
         this.fault('initialization-failed')
+
         return false
       }
+
       const planeBytes = message.maxFramesPerBlock * Float32Array.BYTES_PER_ELEMENT
       const planeCount = MAX_INPUT_BUSES * CHANNEL_COUNT + CHANNEL_COUNT
       const scratch = exports.malloc(planeCount * planeBytes + planeCount * Uint32Array.BYTES_PER_ELEMENT)
+
       if (!scratch || exports.daw_audio_core_wasm_graph_initialize_planar(this.sampleRate, message.maxFramesPerBlock, MAX_INPUT_BUSES, CHANNEL_COUNT, 64) !== 0) {
         this.fault('initialization-failed')
+
         return false
       }
+
       this.coreProcess = exports.daw_audio_core_wasm_graph_process_planar
       this.graphPrepare = exports.daw_audio_core_wasm_graph_prepare
       this.graphContinuity = isCallable(exports.daw_audio_core_wasm_graph_prepared_continuity)
@@ -727,11 +874,14 @@ export class DawPortableAudioCoreHost {
       this.pagedSubAbiVersion = exports.daw_audio_core_wasm_graph_paged_sub_abi_version()
       this.pagedPageFrames = exports.daw_audio_core_wasm_graph_paged_page_frames()
       this.pagedSlotCount = exports.daw_audio_core_wasm_graph_paged_slot_count()
+
       if (this.pagedSubAbiVersion !== 1 || this.pagedPageFrames < 1
         || this.pagedSlotCount < 1) {
         this.fault('initialization-failed')
+
         return false
       }
+
       this.synthConfigure = exports.daw_audio_core_wasm_graph_configure_synth
       this.samplerConfigure = exports.daw_audio_core_wasm_graph_configure_sampler
       this.granularConfigure = exports.daw_audio_core_wasm_graph_configure_granular
@@ -750,20 +900,25 @@ export class DawPortableAudioCoreHost {
         PAGED_MAX_CHANNELS * Uint32Array.BYTES_PER_ELEMENT + PAGED_MAX_CHANNELS * pagedPlaneBytes,
       )
       this.pagedHandleOffset = this.malloc(16)
+
       if (!this.pagedStageAllocation || !this.pagedHandleOffset) {
         this.fault('initialization-failed')
+
         return false
       }
+
       this.pagedMissingPageOffset = this.pagedHandleOffset + 8
       this.pagedStagePointers = new Uint32Array(this.memory.buffer, this.pagedStageAllocation, PAGED_MAX_CHANNELS)
       const pagedPlaneStart = this.pagedStageAllocation + PAGED_MAX_CHANNELS * Uint32Array.BYTES_PER_ELEMENT
       this.pagedStagePlanes = Array.from({ length: PAGED_MAX_CHANNELS }, (_, channel) => {
         const plane = new Float32Array(this.memory.buffer, pagedPlaneStart + channel * pagedPlaneBytes, this.pagedPageFrames)
         this.pagedStagePointers[channel] = plane.byteOffset
+
         return plane
       })
       this.eventCapacityBytes = 4 + MAX_PROCESSOR_EVENTS * PROCESSOR_EVENT_BYTES
       this.eventOffset = this.malloc(this.eventCapacityBytes)
+
       if (!this.eventOffset) return this.fault('capacity-exceeded')
       this.eventBufferView = new DataView(exports.memory.buffer, this.eventOffset, this.eventCapacityBytes)
       this.contractHash = message.contractHash
@@ -775,12 +930,14 @@ export class DawPortableAudioCoreHost {
       this.inputPlanes = Array.from({ length: MAX_INPUT_BUSES * CHANNEL_COUNT }, (_, index) => {
         const offset = planes + index * planeBytes
         this.inputPointers[index] = offset
+
         return new Float32Array(exports.memory.buffer, offset, message.maxFramesPerBlock)
       })
       this.leftOutput = new Float32Array(exports.memory.buffer, planes + (planeCount - CHANNEL_COUNT) * planeBytes, message.maxFramesPerBlock)
       this.rightOutput = new Float32Array(exports.memory.buffer, planes + (planeCount - 1) * planeBytes, message.maxFramesPerBlock)
       this.outputPointers[0] = this.leftOutput.byteOffset
       this.outputPointers[1] = this.rightOutput.byteOffset
+
       const captureScratch = exports.malloc(
         56 + 64 + 64
         + CHANNEL_COUNT * Uint32Array.BYTES_PER_ELEMENT
@@ -788,10 +945,13 @@ export class DawPortableAudioCoreHost {
         + CHANNEL_COUNT * Uint32Array.BYTES_PER_ELEMENT
         + CHANNEL_COUNT * message.maxFramesPerBlock * Float32Array.BYTES_PER_ELEMENT,
       )
+
       if (!captureScratch) {
         this.fault('initialization-failed')
+
         return false
       }
+
       this.recordingCaptureConfigOffset = captureScratch
       this.recordingCaptureBlockOffset = captureScratch + 56
       this.recordingCaptureDiagnosticsOffset = this.recordingCaptureBlockOffset + 64
@@ -802,6 +962,7 @@ export class DawPortableAudioCoreHost {
       this.recordingCaptureOutputPlanes = Array.from({ length: CHANNEL_COUNT }, (_, channel) => {
         const offset = capturePlanes + channel * 2048 * Float32Array.BYTES_PER_ELEMENT
         capturePointers[channel] = offset
+
         return new Float32Array(exports.memory.buffer, offset, 2048)
       })
       this.recordingMonitorPointerOffset = capturePlanes + CHANNEL_COUNT * 2048 * Float32Array.BYTES_PER_ELEMENT
@@ -810,15 +971,19 @@ export class DawPortableAudioCoreHost {
       this.recordingMonitorPlanes = Array.from({ length: CHANNEL_COUNT }, (_, channel) => {
         const offset = monitorPlanes + channel * message.maxFramesPerBlock * Float32Array.BYTES_PER_ELEMENT
         monitorPointers[channel] = offset
+
         return new Float32Array(exports.memory.buffer, offset, message.maxFramesPerBlock)
       })
       this.maxFramesPerBlock = message.maxFramesPerBlock
       this.scheduleEventOffset = exports.malloc(4 + 256 * 20)
       this.scheduleInstrumentEventOffset = exports.malloc(4 + 256 * 48)
+
       if (!this.scheduleEventOffset || !this.scheduleInstrumentEventOffset) {
         this.fault('initialization-failed')
+
         return false
       }
+
       this.scheduleEventView = new DataView(exports.memory.buffer, this.scheduleEventOffset, 4 + 256 * 20)
       this.scheduleInstrumentEventView = new DataView(exports.memory.buffer, this.scheduleInstrumentEventOffset, 4 + 256 * 48)
       this.writeState()
@@ -832,11 +997,14 @@ export class DawPortableAudioCoreHost {
         pagedSlotCount: this.pagedSlotCount,
         pagedMaxChannels: PAGED_MAX_CHANNELS,
       })
+
       return true
     }, () => {
       this.fault('initialization-failed')
+
       return false
     })
+
     return this.initialization
   }
 
@@ -876,6 +1044,7 @@ export class DawPortableAudioCoreHost {
     this.processorEventAckRequestIds[this.processorEventAckCount] = requestId
     this.processorEventAckSequences[this.processorEventAckCount] = sequence
     this.processorEventAckCount += 1
+
     return true
   }
 
@@ -885,11 +1054,13 @@ export class DawPortableAudioCoreHost {
         && this.processorOverrideInstances[index] === processorId
         && this.processorOverrideTargets[index] === target) return index
     }
+
     return -1
   }
 
   upsertProcessorOverride(processorId, target, value, sequence) {
     let index = this.findProcessorOverride(processorId, target)
+
     if (index < 0) {
       for (let candidate = 0; candidate < this.processorOverrideCount; candidate += 1) {
         if (!this.processorOverrideActive[candidate]) {
@@ -897,32 +1068,40 @@ export class DawPortableAudioCoreHost {
           break
         }
       }
+
       if (index < 0) {
         if (this.processorOverrideCount >= MAX_PROCESSOR_OVERRIDE_TARGETS) return false
         index = this.processorOverrideCount
         this.processorOverrideCount += 1
       }
+
       this.processorOverrideInstances[index] = processorId
       this.processorOverrideTargets[index] = target
       this.processorOverrideActive[index] = 1
     }
+
     if (sequence < this.processorOverrideSequences[index]) return true
     this.processorOverrideValues[index] = value
     this.processorOverrideSequences[index] = sequence
+
     return true
   }
 
   clearProcessorOverride(processorId, target) {
     const index = this.findProcessorOverride(processorId, target)
+
     if (index >= 0) this.processorOverrideActive[index] = 0
   }
 
   appendProcessorOverrideEvents(view) {
     let count = view.getUint32(0, true)
     this.indexLiveProcessorKeys(view)
+
     for (let index = 0; index < this.processorOverrideCount; index += 1) {
       if (!this.processorOverrideActive[index]) continue
+
       if (this.hasLiveProcessorKey(this.processorOverrideInstances[index], this.processorOverrideTargets[index])) continue
+
       if (count >= MAX_PROCESSOR_EVENTS) break
       const offset = 4 + count * PROCESSOR_EVENT_BYTES
       view.setBigUint64(offset, this.processorOverrideInstances[index], true)
@@ -931,7 +1110,9 @@ export class DawPortableAudioCoreHost {
       view.setFloat32(offset + 16, this.processorOverrideValues[index], true)
       count += 1
     }
+
     view.setUint32(0, count, true)
+
     return true
   }
 
@@ -940,10 +1121,13 @@ export class DawPortableAudioCoreHost {
     const rightOffset = 4 + right * PROCESSOR_EVENT_BYTES
     const leftProcessor = view.getBigUint64(leftOffset, true)
     const rightProcessor = view.getBigUint64(rightOffset, true)
+
     if (leftProcessor !== rightProcessor) return leftProcessor < rightProcessor ? -1 : 1
     const leftFrame = view.getUint32(leftOffset + 12, true)
     const rightFrame = view.getUint32(rightOffset + 12, true)
+
     if (leftFrame !== rightFrame) return leftFrame - rightFrame
+
     return view.getUint32(leftOffset + 8, true) - view.getUint32(rightOffset + 8, true)
   }
 
@@ -951,13 +1135,16 @@ export class DawPortableAudioCoreHost {
     const count = view.getUint32(0, true)
     let sourceOrder = this.eventSortOrder
     let targetOrder = this.eventSortScratchOrder
+
     for (let index = 0; index < count; index += 1) sourceOrder[index] = index
+
     for (let width = 1; width < count; width *= 2) {
       for (let start = 0; start < count; start += width * 2) {
         const middle = Math.min(start + width, count)
         const end = Math.min(start + width * 2, count)
         let left = start
         let right = middle
+
         for (let destination = start; destination < end; destination += 1) {
           targetOrder[destination] = left < middle
             && (right >= end || this.compareProcessorEventIndexes(view, sourceOrder[left], sourceOrder[right]) <= 0)
@@ -965,20 +1152,26 @@ export class DawPortableAudioCoreHost {
             : sourceOrder[right++]
         }
       }
+
       const previousSource = sourceOrder
       sourceOrder = targetOrder
       targetOrder = previousSource
     }
+
     this.eventSortOrder = sourceOrder
     this.eventSortScratchOrder = targetOrder
+
     for (let index = 0; index < count; index += 1) {
       const sourceOffset = 4 + sourceOrder[index] * PROCESSOR_EVENT_BYTES
+
       for (let byte = 0; byte < PROCESSOR_EVENT_BYTES; byte += 1) {
         this.eventSortScratchView.setUint8(4 + index * PROCESSOR_EVENT_BYTES + byte, view.getUint8(sourceOffset + byte))
       }
     }
+
     for (let index = 0; index < count; index += 1) {
       const destinationOffset = 4 + index * PROCESSOR_EVENT_BYTES
+
       for (let byte = 0; byte < PROCESSOR_EVENT_BYTES; byte += 1) {
         view.setUint8(destinationOffset + byte, this.eventSortScratchView.getUint8(4 + index * PROCESSOR_EVENT_BYTES + byte))
       }
@@ -989,58 +1182,74 @@ export class DawPortableAudioCoreHost {
     if (!this.eventOffset || !this.eventByteCount) return true
     const live = this.eventBufferView
     const schedule = this.scheduleEventView
+
     if (!schedule) return false
     const liveCount = live.getUint32(0, true)
     const scheduledCount = schedule.getUint32(0, true)
     this.indexLiveProcessorKeys(live)
     let outputCount = 0
+
     for (let index = 0; index < liveCount && outputCount < MAX_PROCESSOR_EVENTS; index += 1) {
       const sourceOffset = 4 + index * PROCESSOR_EVENT_BYTES
       const destinationOffset = 4 + outputCount * PROCESSOR_EVENT_BYTES
+
       for (let byte = 0; byte < PROCESSOR_EVENT_BYTES; byte += 1) {
         schedule.setUint8(destinationOffset + byte, live.getUint8(sourceOffset + byte))
       }
+
       outputCount += 1
     }
+
     for (let index = 0; index < scheduledCount; index += 1) {
       const sourceOffset = 4 + index * PROCESSOR_EVENT_BYTES
       const processorId = schedule.getBigUint64(sourceOffset, true)
       const target = schedule.getUint32(sourceOffset + 8, true)
+
       if (this.hasLiveProcessorKey(processorId, target)) continue
+
       if (outputCount >= MAX_PROCESSOR_EVENTS) break
       const destinationOffset = 4 + outputCount * PROCESSOR_EVENT_BYTES
+
       for (let byte = 0; byte < PROCESSOR_EVENT_BYTES; byte += 1) {
         schedule.setUint8(destinationOffset + byte, schedule.getUint8(sourceOffset + byte))
       }
+
       outputCount += 1
     }
+
     schedule.setUint32(0, outputCount, true)
     this.scheduleEventCount = outputCount
     this.sortProcessorEvents(schedule)
+
     return true
   }
 
   hasLiveProcessorKey(processorId, target) {
     let slot = Number(processorId % 509n)
+
     while (this.liveProcessorKeyUsed[slot]) {
       if (this.liveProcessorKeyInstances[slot] === processorId && this.liveProcessorKeyTargets[slot] === target) return true
       slot = (slot + 1) % this.liveProcessorKeyUsed.length
     }
+
     return false
   }
 
   indexLiveProcessorKeys(view) {
     this.liveProcessorKeyUsed.fill(0)
     const count = view.getUint32(0, true)
+
     for (let index = 0; index < count; index += 1) {
       const offset = 4 + index * PROCESSOR_EVENT_BYTES
       const processorId = view.getBigUint64(offset, true)
       const target = view.getUint32(offset + 8, true)
       let slot = Number(processorId % 509n)
+
       while (this.liveProcessorKeyUsed[slot]
         && (this.liveProcessorKeyInstances[slot] !== processorId || this.liveProcessorKeyTargets[slot] !== target)) {
         slot = (slot + 1) % this.liveProcessorKeyUsed.length
       }
+
       this.liveProcessorKeyUsed[slot] = 1
       this.liveProcessorKeyInstances[slot] = processorId
       this.liveProcessorKeyTargets[slot] = target
@@ -1049,39 +1258,50 @@ export class DawPortableAudioCoreHost {
 
   prepareLiveProcessorEvents() {
     if (!this.eventOffset) return false
+
     if (this.eventByteCount === 0) {
       this.eventByteCount = 4
       this.eventBufferView.setUint32(0, 0, true)
     }
+
     return this.appendProcessorOverrideEvents(this.eventBufferView)
   }
 
   // The value an installed stream gives one target at a frame: its last set, or where its last ramp stands.
   automationValueAt(stream, target, frame) {
     let value
+
     for (const event of stream.events) {
       if (event.target !== target || event.frame > frame) continue
       value = event.ramp ? event.startValue + (Math.min(frame, event.endFrame) - event.startFrame) * event.valueStep : event.value
     }
+
     return value
   }
 
   materializeCurrentAutomationValue(processorId, targets) {
     if (!this.eventOffset) return false
     const view = this.eventBufferView
+
     if (this.eventByteCount === 0) {
       this.eventByteCount = 4
       view.setUint32(0, 0, true)
     }
+
     let count = view.getUint32(0, true)
+
     for (const target of targets) {
       let value
+
       for (const stream of this.scheduleParameterStreams || []) {
         if (stream.instanceIdValue !== processorId) continue
         const streamValue = this.automationValueAt(stream, target, this.currentTransportFrame())
+
         if (streamValue !== undefined) value = streamValue
       }
+
       if (value === undefined) continue
+
       if (count >= MAX_PROCESSOR_EVENTS) continue
       const offset = 4 + count * PROCESSOR_EVENT_BYTES
       view.setBigUint64(offset, processorId, true)
@@ -1090,7 +1310,9 @@ export class DawPortableAudioCoreHost {
       view.setFloat32(offset + 16, value, true)
       count += 1
     }
+
     view.setUint32(0, count, true)
+
     return true
   }
 
@@ -1106,6 +1328,7 @@ export class DawPortableAudioCoreHost {
         result,
       })
     }
+
     this.processorEventAckCount = 0
   }
 
@@ -1120,33 +1343,42 @@ export class DawPortableAudioCoreHost {
         result,
       })
     }
+
     this.processorAutomationAckCount = 0
   }
 
   replaceRenderEnvelope(kind, envelope) {
     if (!this.malloc || !this.free || !this.memory) return this.fault('initialization-failed')
+
     if (kind === 'event' && this.eventOffset && envelope.byteLength <= this.eventCapacityBytes) {
       new Uint8Array(this.memory.buffer, this.eventOffset, envelope.byteLength).set(envelope)
       this.eventByteCount = envelope.byteLength
+
       return
     }
+
     const allocation = this.malloc(envelope.byteLength)
+
     if (!allocation) return this.fault('capacity-exceeded')
     new Uint8Array(this.memory.buffer, allocation, envelope.byteLength).set(envelope)
     const offset = `${kind}Offset`
     const byteCount = `${kind}ByteCount`
+
     if (this[offset]) this.free(this[offset])
     this[offset] = allocation
     this[byteCount] = envelope.byteLength
+
     if (kind === 'instrumentEvent') this.instrumentEventView = new DataView(this.memory.buffer, allocation, envelope.byteLength)
   }
 
   graphPrepareDiagnostics() {
     const envelope = this.graphPrepareEnvelope
     const snapshot = this.graphPrepareSnapshot
+
     if (!envelope || !snapshot) return null
     const envelopeView = new DataView(envelope.buffer, envelope.byteOffset, envelope.byteLength)
     const edgeOffset = 24 + snapshot.nodes.length * (envelopeView.getUint32(0, true) === GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY ? 136 : 132)
+
     return {
       byteLength: envelope.byteLength,
       byteHash: byteHash(envelope),
@@ -1172,21 +1404,28 @@ export class DawPortableAudioCoreHost {
     // A prepare-graph for another revision while the publish waited replaced the prepared graph.
     if (this.preparedSnapshot === null || this.preparedSnapshot.revision !== revision) {
       this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId, revision, result: 'rejected' })
+
       return false
     }
+
     if (!this.configureInstruments(this.preparedSnapshot)) {
       if (this.graphCancel) this.graphCancel(revision)
       this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId, revision, result: 'rejected' })
       this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-continuity', revision, result: 'rejected' })
+
       return false
     }
+
     const publishResult = this.graphPublish ? this.graphPublish(revision) : -1
+
     if (publishResult !== 0) {
       if (this.graphCancel) this.graphCancel(revision)
       this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId, revision, result: 'rejected' })
       this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-continuity', revision, result: continuityResultForCoreResult(publishResult) })
+
       return false
     }
+
     // An adoption keeps every target of the playing graph, so live edits in flight render on the next block and are
     // acknowledged then. Any other publish starts a graph that owns no live state.
     if (!continuous) {
@@ -1197,14 +1436,18 @@ export class DawPortableAudioCoreHost {
       this.eventByteCount = 0
       this.resetInstrumentEvents(false)
     }
+
     this.revision = revision
     this.publishedSnapshot = this.preparedSnapshot
+
     // The core takes a source table only for the graph it has published, so it follows the publish. The graph cannot be
     // taken back by now, so a table the core refuses leaves the session inconsistent and is a fault.
     if (sources && !this.applySources(sources, revision, this.transportEpoch)) this.fault('core-error')
+
     if (staged && staged.schedule.revision === revision) this.commitSchedule(staged, true, seam)
     this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-continuity', revision, result: continuityResult })
     this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId, revision, result: 'published' })
+
     return true
   }
 
@@ -1212,8 +1455,10 @@ export class DawPortableAudioCoreHost {
   // revision narrows it to that publication, which the controller abandoned.
   rejectPendingPublication(revision) {
     const pending = this.pendingPublication
+
     if (!pending || (revision !== undefined && pending.revision !== revision)) return
     this.pendingPublication = null
+
     if (this.graphCancel) this.graphCancel(pending.revision)
     this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: pending.requestId, revision: pending.revision, result: 'rejected' })
   }
@@ -1227,22 +1472,30 @@ export class DawPortableAudioCoreHost {
   resetScheduleCursors(frame, instrumentFrame = frame) {
     this.scheduleCursor = 0
     this.scheduleInstrumentCursor = 0
+
     if (this.scheduleInstrumentEvents) {
       while (this.scheduleInstrumentCursor < this.scheduleInstrumentEvents.length
         && this.scheduleInstrumentEvents[this.scheduleInstrumentCursor].frame < instrumentFrame) {
         this.scheduleInstrumentCursor += 1
       }
+
       this.scheduleCursor = this.scheduleInstrumentCursor
     }
+
     if (!this.scheduleParameterStreams) return
+
     for (const stream of this.scheduleParameterStreams) {
       stream.cursor = 0
+
       for (const ramp of stream.activeRamps) ramp.event = null
+
       while (stream.cursor < stream.events.length && stream.events[stream.cursor].frame < frame) {
         const event = stream.events[stream.cursor]
+
         if (event.ramp && event.endFrame > frame) {
           stream.activeRamps[event.rampIndex].event = event
         }
+
         stream.cursor += 1
         this.scheduleCursor += 1
       }
@@ -1255,6 +1508,7 @@ export class DawPortableAudioCoreHost {
     // new graph with the old schedule.
     const staged = schedule && this.preparedSnapshot && schedule.revision === this.preparedSnapshot.revision && schedule.revision > this.revision
     const snapshot = staged ? this.preparedSnapshot : this.publishedSnapshot
+
     if (!this.ready || !snapshot || !Number.isInteger(message.requestId)
       || !schedule || !Number.isInteger(schedule.revision) || (!staged && schedule.revision !== this.revision)
       || !Number.isInteger(schedule.transportEpoch) || schedule.transportEpoch !== this.transportEpoch
@@ -1262,6 +1516,7 @@ export class DawPortableAudioCoreHost {
     const targets = new Map()
     const parameterStreams = new Map()
     const instrumentEvents = []
+
     for (const node of snapshot.nodes) {
       if (node.mixer) {
         for (const target of node.mixer.parameterTargets) {
@@ -1273,6 +1528,7 @@ export class DawPortableAudioCoreHost {
           })
         }
       }
+
       for (const processor of node.processorOrder) {
         for (const target of processor.parameterTargets) {
           targets.set(`parameter:${node.id}:${processor.id}:${target.id}`, {
@@ -1283,31 +1539,39 @@ export class DawPortableAudioCoreHost {
           })
         }
       }
+
       if (node.kind === 'instrument') targets.set(`instrument:${node.id}`, {
         kind: 'instrument',
         nodeId: stableId(node.id),
       })
     }
+
     let previousFrame = -1
     let previousSequence = 0
+
     for (const event of schedule.events) {
       if (!isRecord(event)) return this.scheduleResult(message, 'rejected')
       const isNote = event.type === 'note-on' || event.type === 'note-off'
       const targetsInstrument = event.target && event.target.kind === 'instrument'
+
       const key = targetsInstrument
         ? `instrument:${event.target.trackId}`
         : event.target && event.target.scope === 'master'
           ? `parameter:${snapshot.masterNodeId}:${event.target.effectInstanceId || ''}:${event.target.parameterId}`
           : event.target ? `parameter:${event.target.trackId}:${event.target.effectInstanceId || ''}:${event.target.parameterId}` : ''
+
       const malformedRamp = event.type === 'parameter-ramp'
         && (!Number.isSafeInteger(event.startFrame) || !Number.isSafeInteger(event.endFrame)
           || event.startFrame !== event.frame || event.endFrame <= event.startFrame || event.interpolation !== 'linear'
           || !Number.isFinite(event.startValue) || !Number.isFinite(event.endValue))
+
       const malformedParameter = event.type !== 'parameter-ramp' && !isNote && !Number.isFinite(event.value)
+
       const malformedNote = isNote
         && (!Number.isInteger(event.noteId) || event.noteId < 1
           || !Number.isInteger(event.pitch) || event.pitch < 0 || event.pitch > 127
           || (event.type === 'note-on' && (!Number.isFinite(event.velocity) || event.velocity < 0 || event.velocity > 1)))
+
       if (!Number.isSafeInteger(event.frame) || event.frame < 0 || !Number.isInteger(event.sequence)
         || event.sequence <= previousSequence || event.frame < previousFrame || !targets.has(key)
         || isNote !== targetsInstrument
@@ -1315,9 +1579,11 @@ export class DawPortableAudioCoreHost {
         || malformedRamp || malformedParameter || malformedNote) {
         return this.scheduleResult(message, 'rejected')
       }
+
       const target = targets.get(key)
       previousFrame = event.frame
       previousSequence = event.sequence
+
       if (target.kind === 'instrument') {
         instrumentEvents.push({
           frame: event.frame,
@@ -1330,7 +1596,9 @@ export class DawPortableAudioCoreHost {
         })
         continue
       }
+
       let stream = parameterStreams.get(target.instanceId)
+
       if (!stream) {
         stream = {
           instanceId: target.instanceId,
@@ -1342,13 +1610,16 @@ export class DawPortableAudioCoreHost {
         }
         parameterStreams.set(target.instanceId, stream)
       }
+
       if (event.type === 'parameter-ramp') {
         let rampIndex = stream.rampTargets.get(target.target)
+
         if (rampIndex === undefined) {
           rampIndex = stream.activeRamps.length
           stream.rampTargets.set(target.target, rampIndex)
           stream.activeRamps.push({ event: null })
         }
+
         stream.events.push({
           frame: event.frame,
           ramp: true,
@@ -1368,11 +1639,13 @@ export class DawPortableAudioCoreHost {
         })
       }
     }
+
     const built = {
       schedule,
       parameterStreams: Array.from(parameterStreams.values()).sort((left, right) => left.instanceId - right.instanceId),
       instrumentEvents,
     }
+
     if (staged) this.stagedSchedule = built
     else this.commitSchedule(built, false)
     this.scheduleResult(message, 'installed')
@@ -1387,6 +1660,7 @@ export class DawPortableAudioCoreHost {
     this.scheduleInstrumentEvents = instrumentEvents
     const frame = this.currentTransportFrame()
     this.resetScheduleCursors(frame, instrumentFrame)
+
     if (seed) this.seedScheduleValues(frame)
   }
 
@@ -1403,11 +1677,14 @@ export class DawPortableAudioCoreHost {
   seedScheduleValues(frame) {
     for (const stream of this.scheduleParameterStreams) {
       const seeds = []
+
       for (const target of new Set(stream.events.slice(0, stream.cursor).map((event) => event.target))) {
         const ramp = stream.rampTargets.get(target)
+
         if (ramp !== undefined && stream.activeRamps[ramp].event) continue
         seeds.push({ frame, ramp: false, target, value: this.automationValueAt(stream, target, frame) })
       }
+
       stream.events.splice(stream.cursor, 0, ...seeds)
     }
   }
@@ -1422,17 +1699,21 @@ export class DawPortableAudioCoreHost {
   configureInstrument(nodeId, state) {
     if (!this.memory || !this.malloc || !this.free || !state) return false
     const node = stableId(nodeId)
+
     if (state.kind === 'synth') {
       if (!this.synthConfigure) return false
       const allocation = this.malloc(156)
+
       if (!allocation) return false
       const view = new DataView(this.memory.buffer, allocation, 156)
       view.setUint32(0, 1, true)
       view.setUint32(4, 0xA341316C, true)
+
       const oscillators = state.oscillators || [
         { enabled: true, waveform: 0, level: 0.5, octave: 0, semitone: 0, detuneCents: 0 },
         { enabled: true, waveform: 0, level: 0.5, octave: 0, semitone: 0, detuneCents: 0 },
       ]
+
       oscillators.forEach((oscillator, index) => {
         const offset = 8 + index * 24
         view.setUint32(offset, oscillator.enabled ? 1 : 0, true)
@@ -1469,14 +1750,18 @@ export class DawPortableAudioCoreHost {
       view.setFloat32(152, state.outputPan, true)
       const result = this.synthConfigure(node, allocation) === 0
       this.free(allocation)
+
       return result
     }
+
     if (state.kind === 'granular') {
       const asset = state.assetId === '' ? undefined : this.assets.get(state.assetId)
+
       if ((state.assetId !== '' && !asset) || !this.granularConfigure) return false
       // daw_audio_granular_state as wasm32 lays it out: the 64-bit asset handle sits on an 8-byte boundary (offset 8), which
       // pads the struct to 64 bytes. The padding is zeroed: the core compares by value, but a heap's leftovers should not reach it.
       const allocation = this.malloc(64)
+
       if (!allocation) return false
       new Uint8Array(this.memory.buffer, allocation, 64).fill(0)
       const view = new DataView(this.memory.buffer, allocation, 64)
@@ -1491,10 +1776,13 @@ export class DawPortableAudioCoreHost {
         .forEach((value, index) => view.setFloat32(32 + index * 4, value, true))
       const result = this.granularConfigure(node, allocation) === 0
       this.free(allocation)
+
       return result
     }
+
     if (!this.samplerConfigure || !Array.isArray(state.zones) || state.zones.length > 32) return false
     const allocation = this.malloc(88 + state.zones.length * 80)
+
     if (!allocation) return false
     // Each 80-byte zone ends in 4 bytes of padding after its 8-byte-aligned handle.
     new Uint8Array(this.memory.buffer, allocation, 88 + state.zones.length * 80).fill(0)
@@ -1518,13 +1806,17 @@ export class DawPortableAudioCoreHost {
     view.setFloat32(76, state.lfoAmplitude, true)
     view.setFloat32(80, state.lfoPan, true)
     view.setUint32(84, state.retrigger ? 1 : 0, true)
+
     for (let index = 0; index < state.zones.length; index += 1) {
       const zone = state.zones[index]
       const asset = this.assets.get(zone.assetId)
+
       if (!asset) {
         this.free(allocation)
+
         return false
       }
+
       const offset = allocation + 88 + index * 80
       view.setBigUint64(offset - allocation, asset.handle.value, true)
       ;[zone.keyLow, zone.keyHigh, zone.velocityLow, zone.velocityHigh, zone.rootNote].forEach((value, integerIndex) => view.setUint32(offset - allocation + 8 + integerIndex * 4, value, true))
@@ -1534,8 +1826,10 @@ export class DawPortableAudioCoreHost {
       ;[zone.roundRobinGroup, zone.roundRobinIndex, zone.playbackMode === 'one-shot' ? 0 : zone.playbackMode === 'forward-loop' ? 1 : 2, zone.startFrame, zone.endFrame, zone.loopStartFrame, zone.loopEndFrame, zone.crossfadeFrameCount, zone.chokeGroup]
         .forEach((value, integerIndex) => view.setUint32(offset - allocation + 40 + integerIndex * 4, value, true))
     }
+
     const result = this.samplerConfigure(node, allocation, allocation + 88) === 0
     this.free(allocation)
+
     return result
   }
 
@@ -1555,31 +1849,43 @@ export class DawPortableAudioCoreHost {
     if (!this.ready || !this.pagedAssetCreate || !this.memory
       || !Number.isInteger(message.requestId) || !Number.isInteger(message.generation)
       || !message.asset) return this.pagedAssetRegistrationResult(message, 'invalid-asset')
+
     if (message.generation < this.assetGeneration) return this.pagedAssetRegistrationResult(message, 'stale-generation')
+
     if (message.generation > this.assetGeneration) {
       this.releaseAllAssets()
       this.assetGeneration = message.generation
     }
+
     const asset = message.asset
+
     if (!Number.isInteger(asset.frameCount) || asset.frameCount < 1
       || !Number.isInteger(asset.sampleRateHz) || asset.sampleRateHz < 1
       || !Number.isInteger(asset.channelCount) || asset.channelCount < 1
       || asset.channelCount > PAGED_MAX_CHANNELS || !isString(asset.assetId) || asset.assetId.length === 0) {
       return this.pagedAssetRegistrationResult(message, 'invalid-asset')
     }
+
     const existing = this.pagedAssets.get(asset.assetId)
+
     if (existing) {
       existing.retainCount += 1
+
       return this.pagedAssetRegistrationResult(message, 'registered', existing.handle)
     }
+
     const frameCount = unsignedI64(asset.frameCount)
+
     if (frameCount === null) return this.pagedAssetRegistrationResult(message, 'invalid-asset')
     const result = this.pagedAssetCreate(frameCount, asset.sampleRateHz, asset.channelCount, this.pagedHandleOffset)
+
     if (result !== CORE_OK) return this.pagedAssetRegistrationResult(message, result === CORE_CAPACITY ? 'capacity-exceeded' : 'invalid-asset')
     const handleValue = new DataView(this.memory.buffer, this.pagedHandleOffset, 8).getBigUint64(0, true)
     const handle = handleFromValue(handleValue)
+
     if (handle === null) return this.pagedAssetRegistrationResult(message, 'invalid-asset')
     this.pagedAssets.set(asset.assetId, { asset, handle, retainCount: 1 })
+
     return this.pagedAssetRegistrationResult(message, 'registered', handle)
   }
 
@@ -1597,6 +1903,7 @@ export class DawPortableAudioCoreHost {
 
   writeAssetPage(message) {
     const asset = this.pagedAssets.get(message.assetId)
+
     if (!this.ready || !asset || message.generation !== this.assetGeneration
       || !Number.isSafeInteger(message.pageIndex) || message.pageIndex < 0
       || !Number.isSafeInteger(message.validFrames) || message.validFrames < 1
@@ -1605,15 +1912,21 @@ export class DawPortableAudioCoreHost {
       || !message.planes.every((plane) => plane instanceof Float32Array && plane.length === message.validFrames)) {
       return this.pageWriteResult(message, message.generation !== this.assetGeneration ? 'stale-generation' : 'invalid-page')
     }
+
     const pageIndex = unsignedI64(message.pageIndex)
+
     if (pageIndex === null) return this.pageWriteResult(message, 'invalid-page')
     const pageOffset = message.pageIndex * this.pagedPageFrames
+
     if (!isSafeInteger(pageOffset)) return this.pageWriteResult(message, 'invalid-page')
     const expectedFrames = Math.min(this.pagedPageFrames, asset.asset.frameCount - pageOffset)
+
     if (message.validFrames !== expectedFrames) return this.pageWriteResult(message, 'invalid-page')
+
     for (let channel = 0; channel < asset.asset.channelCount; channel += 1) {
       this.pagedStagePlanes[channel].set(message.planes[channel])
     }
+
     const result = this.pagedAssetWrite(
       asset.handle.value,
       pageIndex,
@@ -1621,6 +1934,7 @@ export class DawPortableAudioCoreHost {
       asset.asset.channelCount,
       this.pagedStageAllocation,
     )
+
     return this.pageWriteResult(message,
       result === CORE_OK ? 'written' : result === CORE_CAPACITY ? 'capacity-exceeded' : result === CORE_ASSET_IN_USE ? 'asset-in-use' : 'invalid-page')
   }
@@ -1640,16 +1954,21 @@ export class DawPortableAudioCoreHost {
 
   prepareAssetRange(message) {
     const asset = this.pagedAssets.get(message.assetId)
+
     if (!this.ready || !asset || message.generation !== this.assetGeneration) {
       return this.rangePreparationResult(message, message.generation !== this.assetGeneration ? 'stale-generation' : 'invalid-range')
     }
+
     const sourceOffsetFrame = unsignedI64(message.sourceOffsetFrame)
     const sourceFrameCount = unsignedI64(message.sourceFrameCount)
+
     if (sourceOffsetFrame === null || sourceFrameCount === null) {
       return this.rangePreparationResult(message, 'invalid-range')
     }
+
     const preparationId = this.nextPreparationId
     this.nextPreparationId += 1
+
     const result = this.pagedAssetPrepare(
       asset.handle.value,
       sourceOffsetFrame,
@@ -1658,18 +1977,25 @@ export class DawPortableAudioCoreHost {
       this.pagedHandleOffset,
       this.pagedMissingPageOffset,
     )
+
     if (result === CORE_OK) {
       const handleValue = new DataView(this.memory.buffer, this.pagedHandleOffset, 8).getBigUint64(0, true)
+
       if (handleFromValue(handleValue) === null) return this.rangePreparationResult(message, 'invalid-range')
       this.pagedPreparations.set(preparationId, { handle: handleValue, assetId: message.assetId })
+
       return this.rangePreparationResult(message, 'prepared', preparationId)
     }
+
     if (result === CORE_NO_DATA) {
       const firstMissingPageValue = new DataView(this.memory.buffer, this.pagedMissingPageOffset, 8).getBigUint64(0, true)
       const firstMissingPage = Number(firstMissingPageValue)
+
       if (!isSafeInteger(firstMissingPage)) return this.rangePreparationResult(message, 'invalid-range')
+
       return this.rangePreparationResult(message, 'missing-page', undefined, firstMissingPage)
     }
+
     return this.rangePreparationResult(message, result === CORE_CAPACITY ? 'capacity-exceeded' : 'invalid-range')
   }
 
@@ -1689,12 +2015,16 @@ export class DawPortableAudioCoreHost {
       || message.epoch !== this.transportEpoch || !Array.isArray(message.events) || message.events.length > 256) {
       return this.preparedSourcesResult(message, 'rejected')
     }
+
     let previousSequence = 0
+
     for (const event of message.events) {
       const preparation = this.pagedPreparations.get(event.preparationId)
+
       if (!preparation || event.epoch !== message.epoch || event.sequence <= previousSequence) {
         return this.preparedSourcesResult(message, 'rejected')
       }
+
       const sequence = unsignedI64(event.sequence)
       const startFrame = signedI64(event.startFrame)
       const stopFrame = signedI64(event.stopFrame)
@@ -1704,11 +2034,13 @@ export class DawPortableAudioCoreHost {
       const fadeInEndFrame = signedI64(event.fadeInEndFrame)
       const fadeOutStartFrame = signedI64(event.fadeOutStartFrame)
       const fadeOutEndFrame = signedI64(event.fadeOutEndFrame)
+
       if ([sequence, startFrame, stopFrame, sourceOffsetFrame, sourceFrameCount,
         fadeInStartFrame, fadeInEndFrame, fadeOutStartFrame, fadeOutEndFrame]
         .some((value) => value === null)) {
         return this.preparedSourcesResult(message, 'rejected')
       }
+
       const result = this.pagedSourceSchedule(
         event.epoch,
         sequence,
@@ -1729,9 +2061,11 @@ export class DawPortableAudioCoreHost {
         event.fadeOutCurve || 0,
         event.fadeOutCurvePosition ?? 0.5,
       )
+
       if (result !== CORE_OK) return this.preparedSourcesResult(message, 'rejected')
       previousSequence = event.sequence
     }
+
     return this.preparedSourcesResult(message, 'scheduled')
   }
 
@@ -1760,12 +2094,15 @@ export class DawPortableAudioCoreHost {
       ...(Array.isArray(message.ordinary) ? message.ordinary.map((event) => ({ kind: 0, event })) : []),
       ...(Array.isArray(message.prepared) ? message.prepared.map((event) => ({ kind: 1, event })) : []),
     ].sort((left, right) => left.event.sequence - right.event.sequence)
+
     if (!this.sourceReplace || message.epoch !== this.transportEpoch || all.length > 256) return null
     const handles = []
     let previousSequence = 0
+
     for (const entry of all) {
       const event = entry.event
       const preparation = entry.kind === 1 ? this.pagedPreparations.get(event.preparationId) : null
+
       if (!event || event.version !== 1 || event.epoch !== message.epoch
         || !Number.isSafeInteger(event.sequence) || event.sequence <= previousSequence
         || !isString(event.sourceNodeId) || event.sourceNodeId.length === 0 || nodeIds && !nodeIds.has(event.sourceNodeId)
@@ -1783,14 +2120,17 @@ export class DawPortableAudioCoreHost {
         || event.fadeOutCurvePosition !== undefined && (!Number.isFinite(event.fadeOutCurvePosition) || event.fadeOutCurvePosition < 0 || event.fadeOutCurvePosition > 1)) {
         return null
       }
+
       const asset = entry.kind === 0 ? this.assets.get(event.assetId) : null
       handles.push({ entry, handle: entry.kind === 0 ? asset.handle.value : preparation.handle })
       previousSequence = event.sequence
     }
+
     const bytes = new ArrayBuffer(4 + all.length * 120)
     const view = new DataView(bytes)
     view.setUint32(0, all.length, true)
     let offset = 4
+
     for (const { entry, handle } of handles) {
       const event = entry.event
       view.setUint32(offset, entry.kind, true)
@@ -1814,25 +2154,31 @@ export class DawPortableAudioCoreHost {
       view.setFloat32(offset + 116, event.fadeOutCurvePosition ?? 0.5, true)
       offset += 120
     }
+
     return new Uint8Array(bytes)
   }
 
   // Swaps the core's source table for an encoded one. The core validates it against the graph published now.
   applySources(bytes, revision, epoch) {
     const allocation = this.malloc(bytes.byteLength)
+
     if (!allocation) return false
     new Uint8Array(this.memory.buffer, allocation, bytes.byteLength).set(bytes)
     const result = this.sourceReplace(revision, epoch, allocation, bytes.byteLength)
     this.free(allocation)
+
     return result === CORE_OK
   }
 
   releaseAssetPreparation(message) {
     const preparation = this.pagedPreparations.get(message.preparationId)
+
     const result = preparation && message.generation === this.assetGeneration
       ? this.pagedPreparationRelease(preparation.handle)
       : -1
+
     const mapped = result === CORE_OK ? 'released' : result === CORE_ASSET_IN_USE ? 'asset-in-use' : 'stale-preparation'
+
     if (result === CORE_OK) this.pagedPreparations.delete(message.preparationId)
     this.postMessage({
       version: PROTOCOL_VERSION,
@@ -1846,14 +2192,17 @@ export class DawPortableAudioCoreHost {
 
   trimAssetPages(message) {
     const asset = this.pagedAssets.get(message.assetId)
+
     const result = asset && message.generation === this.assetGeneration
       ? (() => {
         const firstPage = unsignedI64(message.firstPage)
+
         return firstPage === null
           ? -1
           : this.pagedAssetTrim(asset.handle.value, firstPage, message.pageCount)
       })()
       : -1
+
     this.postMessage({
       version: PROTOCOL_VERSION,
       type: 'asset-pages-trimmed',
@@ -1868,41 +2217,57 @@ export class DawPortableAudioCoreHost {
 
   registerAsset(message) {
     if (!this.ready || !this.memory || !this.assetRegister || !this.free || !Number.isInteger(message.requestId) || !Number.isInteger(message.generation) || !message.asset || !Array.isArray(message.planes)) return this.assetRegistrationResult(message, 'invalid-pcm')
+
     if (message.generation < this.assetGeneration) return this.assetRegistrationResult(message, 'stale-generation')
+
     if (message.generation > this.assetGeneration) {
       this.releaseAllAssets()
       this.assetGeneration = message.generation
     }
+
     const asset = message.asset
+
     if (!Number.isInteger(asset.frameCount) || asset.frameCount < 1 || !Number.isInteger(asset.sampleRateHz) || asset.sampleRateHz < 1 || !Number.isInteger(asset.channelCount) || asset.channelCount < 1 || asset.channelCount > 64 || !isString(asset.assetId) || asset.assetId.length === 0 || message.planes.length !== asset.channelCount || !message.planes.every((plane) => plane instanceof Float32Array && plane.length === asset.frameCount)) return this.assetRegistrationResult(message, 'invalid-pcm')
     const existing = this.assets.get(asset.assetId)
+
     if (existing) {
       existing.retainCount += 1
+
       return this.assetRegistrationResult(message, 'registered', existing.handle)
     }
+
     const planeBytes = asset.frameCount * Float32Array.BYTES_PER_ELEMENT
     const pointersBytes = asset.channelCount * Uint32Array.BYTES_PER_ELEMENT
     const allocation = this.assetRegisterAllocation(planeBytes * asset.channelCount + pointersBytes + 8)
+
     if (!allocation) return this.assetRegistrationResult(message, 'capacity-exceeded')
     const pointers = new Uint32Array(this.memory.buffer, allocation, asset.channelCount)
     const planeStart = allocation + pointersBytes
+
     for (let channel = 0; channel < asset.channelCount; channel += 1) {
       const pointer = planeStart + planeBytes * channel
       pointers[channel] = pointer
       new Float32Array(this.memory.buffer, pointer, asset.frameCount).set(message.planes[channel])
     }
+
     const outHandle = planeStart + planeBytes * asset.channelCount
     const result = this.assetRegister(asset.frameCount, asset.sampleRateHz, asset.channelCount, allocation, outHandle)
+
     if (result !== 0) {
       this.free(allocation)
+
       return this.assetRegistrationResult(message, result === 3 ? 'capacity-exceeded' : 'invalid-pcm')
     }
+
     const handleValue = new DataView(this.memory.buffer, outHandle, 8).getBigUint64(0, true)
     const handle = handleFromValue(handleValue)
+
     if (handle === null) {
       this.free(allocation)
+
       return this.assetRegistrationResult(message, 'invalid-pcm')
     }
+
     this.assets.set(asset.assetId, {
       handle,
       allocation,
@@ -1917,46 +2282,62 @@ export class DawPortableAudioCoreHost {
 
   releaseAsset(message) {
     if (!Number.isInteger(message.requestId) || !Number.isInteger(message.generation) || !isString(message.assetId)) return this.assetReleaseResult(message, 'stale-generation')
+
     if (message.generation !== this.assetGeneration) return this.assetReleaseResult(message, 'stale-generation')
     const paged = this.pagedAssets.get(message.assetId)
+
     if (paged) {
       paged.retainCount -= 1
+
       if (paged.retainCount > 0) return this.assetReleaseResult(message, 'released')
       const result = this.pagedAssetRelease(paged.handle.value)
+
       if (result === CORE_ASSET_IN_USE) {
         paged.retainCount = 1
+
         return this.assetReleaseResult(message, 'asset-in-use')
       }
+
       this.pagedAssets.delete(message.assetId)
+
       return this.assetReleaseResult(message, result === CORE_OK ? 'released' : 'stale-generation')
     }
+
     const existing = this.assets.get(message.assetId)
+
     if (!existing) return this.assetReleaseResult(message, 'stale-generation')
     existing.retainCount -= 1
+
     // The core reads a registered asset until its last source, voice or instrument zone has let go (a source fades out
     // over its termination ramp), so the storage stays while the core says it is in use.
     if (existing.retainCount === 0 && !this.releaseStoredAsset(message.assetId, existing)) {
       existing.retainCount = 1
+
       return this.assetReleaseResult(message, 'asset-in-use')
     }
+
     this.assetReleaseResult(message, 'released')
   }
 
   releaseAllAssets() {
     for (const preparation of this.pagedPreparations.values()) this.pagedPreparationRelease(preparation.handle)
     this.pagedPreparations.clear()
+
     for (const [assetId, asset] of this.pagedAssets) {
       this.pagedAssetRelease(asset.handle.value)
       this.pagedAssets.delete(assetId)
     }
+
     for (const [assetId, asset] of this.assets) this.releaseStoredAsset(assetId, asset)
   }
 
   // Whether the storage went: the core refuses to release an asset something still reads.
   releaseStoredAsset(assetId, asset) {
     if (this.assetRelease && this.assetRelease(asset.handle.value) === CORE_ASSET_IN_USE) return false
+
     if (this.free) this.free(asset.allocation)
     this.assets.delete(assetId)
+
     return true
   }
 
@@ -1982,7 +2363,9 @@ export class DawPortableAudioCoreHost {
       || !Array.isArray(message.events) || message.events.length > 256) {
       return this.sourceScheduleResult(message, 'rejected')
     }
+
     let previousSequence = 0
+
     for (const event of message.events) {
       if (!event || event.version !== 1 || event.epoch !== message.epoch || !Number.isInteger(event.sequence)
         || event.sequence <= previousSequence || !isString(event.sourceNodeId) || event.sourceNodeId.length === 0
@@ -2002,6 +2385,7 @@ export class DawPortableAudioCoreHost {
         || event.fadeOutCurvePosition !== undefined && (!Number.isFinite(event.fadeOutCurvePosition) || event.fadeOutCurvePosition < 0 || event.fadeOutCurvePosition > 1)) {
         return this.sourceScheduleResult(message, 'rejected')
       }
+
       const handle = this.assets.get(event.assetId).handle.value
       const sequence = unsignedI64(event.sequence)
       const startFrame = signedI64(event.startFrame)
@@ -2012,17 +2396,21 @@ export class DawPortableAudioCoreHost {
       const fadeInEndFrame = signedI64(event.fadeInEndFrame)
       const fadeOutStartFrame = signedI64(event.fadeOutStartFrame)
       const fadeOutEndFrame = signedI64(event.fadeOutEndFrame)
+
       if ([sequence, startFrame, stopFrame, sourceOffsetFrame, sourceFrameCount,
         fadeInStartFrame, fadeInEndFrame, fadeOutStartFrame, fadeOutEndFrame]
         .some((value) => value === null)) return this.sourceScheduleResult(message, 'rejected')
+
       const result = this.sourceSchedule(message.epoch, sequence, stableId(event.sourceNodeId), handle,
         startFrame, stopFrame, sourceOffsetFrame, sourceFrameCount, event.gain,
         fadeInStartFrame, fadeInEndFrame, fadeOutStartFrame, fadeOutEndFrame,
         event.sourceOffsetFraction || 0, event.fadeInCurve || 0, event.fadeInCurvePosition ?? 0.5,
         event.fadeOutCurve || 0, event.fadeOutCurvePosition ?? 0.5)
+
       if (result !== 0) return this.sourceScheduleResult(message, 'rejected')
       previousSequence = event.sequence
     }
+
     this.sourceScheduleResult(message, 'scheduled')
   }
 
@@ -2035,6 +2423,7 @@ export class DawPortableAudioCoreHost {
       && message.epoch === this.transportEpoch
       ? this.sourceReset(message.revision, message.epoch)
       : 1
+
     this.postMessage({
       version: PROTOCOL_VERSION,
       type: 'sources-reset',
@@ -2068,6 +2457,7 @@ export class DawPortableAudioCoreHost {
       || (message.punchEndFrame !== null && (!Number.isSafeInteger(message.punchEndFrame) || message.punchEndFrame < message.punchStartFrame))) {
       return this.fault('malformed-message')
     }
+
     const view = new DataView(this.memory.buffer, this.recordingCaptureConfigOffset, 56)
     view.setUint32(0, ABI_VERSION, true)
     view.setUint32(4, message.generation, true)
@@ -2079,6 +2469,7 @@ export class DawPortableAudioCoreHost {
     view.setInt32(32, message.polarity, true)
     view.setBigInt64(40, BigInt(message.punchStartFrame), true)
     view.setBigInt64(48, BigInt(message.punchEndFrame === null ? -1 : message.punchEndFrame), true)
+
     if (this.recordingCaptureInitialize(this.recordingCaptureConfigOffset) !== 0) return this.fault('core-error')
     this.recordingMonitoring = message.monitoring
     this.recordingCaptureActive = true
@@ -2107,16 +2498,20 @@ export class DawPortableAudioCoreHost {
     if (!this.ready || !this.memory || !this.recordingCaptureDequeue || !this.recordingCaptureDiagnostics
       || !this.recordingCaptureOutputPlanes) return this.fault('initialization-failed')
     const metadata = new DataView(this.memory.buffer, this.recordingCaptureBlockOffset, 64)
+
     if (this.recordingCaptureDequeue(this.recordingCaptureOutputPointerOffset, this.recordingCaptureBlockOffset) === 0) {
       const channelCount = metadata.getUint32(32, true)
       const frameCount = metadata.getUint32(28, true)
       const sessionId = safeNumberFromUint64(metadata.getBigUint64(8, true))
       const sequence = safeNumberFromUint64(metadata.getBigUint64(16, true))
+
       if (sessionId === null || sequence === null) return this.fault('core-error')
       const planes = []
+
       for (let channel = 0; channel < channelCount; channel += 1) {
         planes.push(this.recordingCaptureOutputPlanes[channel].slice(0, frameCount))
       }
+
       this.postMessage({
         version: PROTOCOL_VERSION,
         type: 'recording-capture-block',
@@ -2130,8 +2525,10 @@ export class DawPortableAudioCoreHost {
         peak: metadata.getFloat32(48, true),
       })
     }
+
     this.recordingCaptureNotificationPending = false
     const diagnostics = this.postRecordingCaptureDiagnostics()
+
     if (this.recordingCaptureFinalizePending && diagnostics && diagnostics.getUint32(40, true) === 0) {
       this.recordingCaptureFinalizePending = false
       this.postMessage({
@@ -2149,10 +2546,12 @@ export class DawPortableAudioCoreHost {
     if (!this.ready || !this.memory || !this.recordingCaptureDiagnostics
       || this.recordingCaptureDiagnostics(this.recordingCaptureDiagnosticsOffset) !== 0) return this.fault('core-error')
     const diagnostics = this.recordingCaptureDiagnosticsView
+
     if (!diagnostics) return this.fault('initialization-failed')
     const sessionId = safeNumberFromUint64(diagnostics.getBigUint64(8, true))
     const capturedFrames = safeNumberFromUint64(diagnostics.getBigUint64(16, true))
     const droppedFrames = safeNumberFromUint64(diagnostics.getBigUint64(24, true))
+
     if (sessionId === null || capturedFrames === null || droppedFrames === null) return this.fault('core-error')
     this.postMessage({
       version: PROTOCOL_VERSION,
@@ -2169,6 +2568,7 @@ export class DawPortableAudioCoreHost {
       fatal: diagnostics.getUint32(52, true) !== 0,
       active: diagnostics.getUint32(56, true) !== 0,
     })
+
     return diagnostics
   }
 
@@ -2178,29 +2578,39 @@ export class DawPortableAudioCoreHost {
   // lost. Each such event is counted in `droppedProcessorEvents`.
   writeProcessorEvent(count, first, instanceIdValue, frameOffset, target, value) {
     const view = this.scheduleEventView
+
     if (count >= MAX_PROCESSOR_EVENTS) {
       this.droppedProcessorEvents += 1
+
       for (let index = count - 1; index >= 0; index -= 1) {
         const offset = 4 + index * PROCESSOR_EVENT_BYTES
+
         if (view.getBigUint64(offset, true) === instanceIdValue && view.getUint32(offset + 8, true) === target) {
           view.setFloat32(offset + 16, value, true)
+
           return count
         }
       }
+
       return count
     }
+
     let index = count
+
     while (index > first && view.getUint32(4 + (index - 1) * PROCESSOR_EVENT_BYTES + 12, true) > frameOffset) {
       for (let word = 0; word < PROCESSOR_EVENT_BYTES; word += 4) {
         view.setUint32(4 + index * PROCESSOR_EVENT_BYTES + word, view.getUint32(4 + (index - 1) * PROCESSOR_EVENT_BYTES + word, true), true)
       }
+
       index -= 1
     }
+
     const offset = 4 + index * PROCESSOR_EVENT_BYTES
     view.setBigUint64(offset, instanceIdValue, true)
     view.setUint32(offset + 8, target, true)
     view.setUint32(offset + 12, frameOffset, true)
     view.setFloat32(offset + 16, value, true)
+
     return count + 1
   }
 
@@ -2212,20 +2622,25 @@ export class DawPortableAudioCoreHost {
     const liveCount = this.eventOffset && this.eventByteCount ? this.eventBufferView.getUint32(0, true) : 0
     const budget = MAX_PROCESSOR_EVENTS - liveCount
     let stride = 1
+
     while (stride < endFrame - startFrame) {
       let count = 0
+
       for (const stream of this.scheduleParameterStreams) {
         for (const active of stream.activeRamps) {
           if (active.event) count += rampEventCount(active.event, startFrame, endFrame, stride)
         }
+
         for (let index = stream.cursor; index < stream.events.length && stream.events[index].frame < endFrame; index += 1) {
           const event = stream.events[index]
           count += event.ramp ? rampEventCount(event, startFrame, endFrame, stride) : 1
         }
       }
+
       if (count <= budget) break
       stride *= 2
     }
+
     return stride
   }
 
@@ -2233,11 +2648,14 @@ export class DawPortableAudioCoreHost {
     if (ramp.endFrame <= startFrame) {
       return this.writeProcessorEvent(count, first, instanceIdValue, 0, ramp.target, rampValue(ramp, ramp.endFrame))
     }
+
     const to = Math.min(endFrame, ramp.endFrame)
     let written = count
+
     for (let frame = Math.max(startFrame, ramp.startFrame); frame < to; frame += stride) {
       written = this.writeProcessorEvent(written, first, instanceIdValue, frame - startFrame, ramp.target, rampValue(ramp, frame))
     }
+
     return ramp.endFrame < endFrame
       ? this.writeProcessorEvent(written, first, instanceIdValue, ramp.endFrame - startFrame, ramp.target, rampValue(ramp, ramp.endFrame))
       : written
@@ -2251,52 +2669,68 @@ export class DawPortableAudioCoreHost {
     let instrumentCount = 0
     // A pending framed publish takes over at its seam: this schedule plays every event before it and none from it on.
     const endFrame = Math.min(startFrame + frameCount, this.pendingPublication ? this.pendingPublication.seam : Infinity)
+
     for (const stream of this.scheduleParameterStreams) {
       while (stream.cursor < stream.events.length && stream.events[stream.cursor].frame < startFrame) {
         const expired = stream.events[stream.cursor]
+
         if (expired.ramp && expired.endFrame > startFrame) {
           stream.activeRamps[expired.rampIndex].event = expired
         }
+
         stream.cursor += 1
         this.scheduleCursor += 1
       }
     }
+
     const stride = this.processorRampStride(startFrame, endFrame)
+
     for (const stream of this.scheduleParameterStreams) {
       const first = processorCount
+
       for (const active of stream.activeRamps) {
         const ramp = active.event
+
         if (!ramp) continue
         processorCount = this.writeRamp(processorCount, first, stream.instanceIdValue, ramp, startFrame, endFrame, stride)
+
         if (ramp.endFrame < endFrame) active.event = null
       }
+
       while (stream.cursor < stream.events.length && stream.events[stream.cursor].frame < endFrame) {
         const event = stream.events[stream.cursor]
         stream.cursor += 1
         this.scheduleCursor += 1
+
         if (!event.ramp) {
           processorCount = this.writeProcessorEvent(processorCount, first, stream.instanceIdValue, event.frame - startFrame, event.target, event.value)
           continue
         }
+
         processorCount = this.writeRamp(processorCount, first, stream.instanceIdValue, event, startFrame, endFrame, stride)
+
         if (event.endFrame >= endFrame) stream.activeRamps[event.rampIndex].event = event
       }
     }
+
     const liveView = this.instrumentEventByteCount > 0 ? this.instrumentEventView : null
     const liveCount = liveView ? liveView.getUint32(0, true) : 0
     // A full scheduled quantum owns all 256 slots. Defer the entire live
     // envelope without moving its cursor or acknowledging it.
     let scheduledEnd = this.scheduleInstrumentCursor
+
     while (scheduledEnd < this.scheduleInstrumentEvents.length
       && scheduledEnd - this.scheduleInstrumentCursor <= 256
       && this.scheduleInstrumentEvents[scheduledEnd].frame < endFrame) scheduledEnd += 1
     const liveLimit = this.instrumentLiveDeferred || scheduledEnd - this.scheduleInstrumentCursor + liveCount <= 256 ? liveCount : 0
     this.materializedLiveInstrumentCount = liveLimit
     let liveCursor = 0
+
     while (this.scheduleInstrumentCursor < this.scheduleInstrumentEvents.length || liveCursor < liveLimit) {
       if (instrumentCount >= 256) break
       const event = this.scheduleInstrumentEvents[this.scheduleInstrumentCursor]
       const liveFrame = liveCursor < liveLimit ? liveView.getUint32(4 + liveCursor * 48 + 28, true) : Infinity
+
       // Merge immediate instrument controls with the schedule, rather than
       // discarding them whenever a timeline schedule is materialized.
       if (liveCursor < liveLimit && (!event || event.frame >= endFrame || liveFrame < Math.max(0, event.frame - startFrame)
@@ -2304,10 +2738,12 @@ export class DawPortableAudioCoreHost {
         for (let word = 0; word < 48; word += 4) {
           this.scheduleInstrumentEventView.setUint32(4 + instrumentCount * 48 + word, liveView.getUint32(4 + liveCursor * 48 + word, true), true)
         }
+
         liveCursor += 1
         instrumentCount += 1
         continue
       }
+
       if (!event || event.frame >= endFrame) break
       const offset = 4 + instrumentCount * 48
       this.scheduleInstrumentEventView.setBigUint64(offset, event.nodeId, true)
@@ -2323,16 +2759,20 @@ export class DawPortableAudioCoreHost {
       this.scheduleCursor += 1
       instrumentCount += 1
     }
+
     this.scheduleEventView.setUint32(0, processorCount, true)
+
     // Live and timeline events have independent sequence domains. The core
     // requires one increasing sequence for the merged render block.
     for (let index = 0; index < instrumentCount; index += 1) {
       this.scheduleInstrumentEventView.setUint32(4 + index * 48 + 16, index + 1, true)
       this.scheduleInstrumentEventView.setUint32(4 + index * 48 + 20, 0, true)
     }
+
     this.scheduleInstrumentEventView.setUint32(0, instrumentCount, true)
     this.scheduleEventCount = processorCount
     this.scheduleInstrumentEventCount = instrumentCount
+
     return true
   }
 
@@ -2352,32 +2792,46 @@ export class DawPortableAudioCoreHost {
 
   process(inputs, outputs) {
     const output = outputs[0]
+
     if (this.disposed) return false
+
     if (!output || output.length === 0 || !this.ready || !this.coreProcess) return true
+
     if (this.pendingTransportRendered) this.flushPendingTransport('applied')
     const frames = output[0] ? output[0].length : 0
+
     if (frames > this.maxFramesPerBlock) {
       this.flushInstrumentAcks('rejected')
       this.flushPendingTransport('rejected')
+
       for (let channel = 0; channel < output.length; channel += 1) output[channel].fill(0)
+
       return true
     }
+
     const inputBusCount = Math.min(inputs.length, MAX_INPUT_BUSES)
+
     const stagedInputBusCount = Math.min(
       Math.max(inputBusCount, this.recordingCaptureActive ? this.recordingInputBusCount : 0),
       MAX_INPUT_BUSES,
     )
+
     const busesToWrite = Math.max(stagedInputBusCount, this.stagedInputBusCount)
+
     for (let bus = 0; bus < busesToWrite; bus += 1) {
       const input = bus < inputBusCount ? inputs[bus] : null
+
       for (let channel = 0; channel < CHANNEL_COUNT; channel += 1) {
         const target = this.inputPlanes[bus * CHANNEL_COUNT + channel]
         const source = input && (input[channel] || input[0])
+
         for (let frame = 0; frame < frames; frame += 1) target[frame] = source ? source[frame] : 0
       }
     }
+
     this.stagedInputBusCount = stagedInputBusCount
     const startFrame = this.currentTransportFrame()
+
     if (this.recordingCaptureActive && this.recordingCaptureProcessMonitor && this.recordingMonitorPlanes) {
       const captureResult = this.recordingCaptureProcessMonitor(
         this.inputPointerOffset,
@@ -2387,28 +2841,37 @@ export class DawPortableAudioCoreHost {
         frames,
         BigInt(startFrame),
       )
+
       if (captureResult !== 0) {
         this.recordingCaptureActive = false
         this.recordingInputBusCount = 0
+
         if (!this.recordingCaptureNotificationPending && this.recordingCaptureAvailableMessage) {
           this.recordingCaptureNotificationPending = true
           this.postMessage(this.recordingCaptureAvailableMessage)
         }
       }
     }
+
     if (this.pendingPublication && startFrame >= this.pendingPublication.seam) {
       const pending = this.pendingPublication
       this.pendingPublication = null
+
       if (!this.publishPrepared(pending)) this.keepScheduleAt(startFrame, pending.seam)
     }
+
     if (!this.prepareLiveProcessorEvents()) {
       this.flushInstrumentAcks('rejected')
       this.flushPendingTransport('rejected')
       this.fault('event-overflow')
+
       for (let channel = 0; channel < output.length; channel += 1) output[channel].fill(0)
+
       return true
     }
+
     const materialized = this.materializeSchedule(startFrame, frames)
+
     if (materialized && !this.mergeLiveProcessorEvents()) {
       this.flushInstrumentAcks('rejected')
       this.flushPendingTransport('rejected')
@@ -2416,9 +2879,12 @@ export class DawPortableAudioCoreHost {
       this.flushProcessorEventAcks('rejected')
       this.flushProcessorAutomationAcks('rejected')
       this.fault('event-overflow')
+
       for (let channel = 0; channel < output.length; channel += 1) output[channel].fill(0)
+
       return true
     }
+
     if (!materialized) this.sortProcessorEvents(this.eventBufferView)
     // The core rejects a buffer pointer that comes with no bytes.
     const eventOffset = materialized ? this.scheduleEventOffset : this.eventByteCount ? this.eventOffset : 0
@@ -2426,6 +2892,7 @@ export class DawPortableAudioCoreHost {
     const instrumentEventOffset = materialized ? this.scheduleInstrumentEventOffset : this.instrumentEventByteCount ? this.instrumentEventOffset : 0
     const instrumentEventByteCount = materialized ? 4 + this.scheduleInstrumentEventCount * 48 : this.instrumentEventByteCount
     const result = this.coreProcess(frames, stagedInputBusCount, CHANNEL_COUNT, this.inputPointerOffset, this.outputPointerOffset, this.revision, this.parameterOffset, this.parameterByteCount, eventOffset, eventByteCount, instrumentEventOffset, instrumentEventByteCount)
+
     if (result !== 0) {
       this.flushInstrumentAcks('rejected')
       this.instrumentEventByteCount = 0
@@ -2433,35 +2900,46 @@ export class DawPortableAudioCoreHost {
       this.flushPendingTransport('rejected')
       this.flushProcessorEventAcks('rejected')
       this.flushProcessorAutomationAcks('rejected')
+
       for (let channel = 0; channel < output.length; channel += 1) output[channel].fill(0)
+
       return true
     }
+
     this.eventByteCount = 0
     // At most one full scheduled block may defer controls. On the next block,
     // reserve their slots and retain excess scheduled notes at their cursor.
     this.instrumentLiveDeferred = materialized && this.liveInstrumentEvents.length > 0 && this.materializedLiveInstrumentCount === 0
+
     if (!materialized || this.materializedLiveInstrumentCount > 0 || this.liveInstrumentEvents.length === 0) {
       this.instrumentEventByteCount = 0
       this.liveInstrumentEvents.length = 0
       this.flushInstrumentAcks('applied')
     }
+
     this.flushProcessorEventAcks('applied')
     this.flushProcessorAutomationAcks('applied')
+
     for (let frame = 0; frame < frames; frame += 1) {
       output[0][frame] = this.leftOutput[frame] + (
         this.recordingCaptureActive && this.recordingMonitoring ? this.recordingMonitorPlanes[0][frame] : 0
       )
+
       if (output[1]) output[1][frame] = this.rightOutput[frame] + (
         this.recordingCaptureActive && this.recordingMonitoring ? this.recordingMonitorPlanes[1][frame] : 0
       )
     }
+
     if (this.pendingTransportRequestId !== 0) this.pendingTransportRendered = true
     this.framesProcessed += frames
+
     if (this.transportRunning) {
       const frame = this.currentTransportFrame()
       const cadenceFrames = Math.max(frames, Math.floor(this.sampleRate / 20))
+
       const publishPosition = this.transportPositionSequence === 0
         || frame >= this.lastTransportPositionFrame + cadenceFrames
+
       if (publishPosition) {
         this.lastTransportPositionFrame = frame
       this.postMessage({
@@ -2475,20 +2953,25 @@ export class DawPortableAudioCoreHost {
       })
       }
     }
+
     if (this.recordingCaptureActive && !this.recordingCaptureNotificationPending && this.recordingCaptureDiagnostics
       && this.recordingCaptureDiagnostics(this.recordingCaptureDiagnosticsOffset) === 0) {
       const diagnostics = this.recordingCaptureDiagnosticsView
+
       if (!diagnostics) return true
+
       if (diagnostics.getUint32(40, true) > 0) {
         this.recordingCaptureNotificationPending = true
         this.postMessage(this.recordingCaptureAvailableMessage)
       }
+
       if (diagnostics.getUint32(52, true) !== 0
         && !this.recordingCaptureNotificationPending && this.recordingCaptureAvailableMessage) {
         this.recordingCaptureNotificationPending = true
         this.postMessage(this.recordingCaptureAvailableMessage)
       }
     }
+
     return true
   }
 }

@@ -18,6 +18,7 @@ const failTransactions = (db: Awaited<ReturnType<typeof openLocalProjectDb>>) =>
     configurable: true,
     value: () => { throw new Error('IndexedDB write failed.') },
   })
+
   return () => Object.defineProperty(db, 'transaction', { configurable: true, value: original })
 }
 

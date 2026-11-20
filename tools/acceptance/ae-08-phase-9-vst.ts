@@ -5,6 +5,7 @@ import { waitForUi } from "./ae-08-phase-5-fixture"
 // VST flow of `run()` in ae-08-live-graph.ts for phases 1-4 (plug-ins dashboard, trust acknowledgement, catalog scan, effects tab,
 // plug-in button), with the test plug-in in place of ValhallaSupermassive.
 type Ui = Pick<Phase5Context, "evaluate" | "interact" | "reload">
+
 const browser = `[data-timeline-left-browser="1"]`
 const testPluginButton = `[...document.querySelectorAll('${browser} button')].find(b=>/ae08.?test.?effect/i.test(b.textContent??''))`
 const externalDevice = `document.querySelector('[data-external-effect-id]')`
@@ -76,6 +77,7 @@ export const closeTestPluginEditor = async (context: Ui) => {
   const clickedWallMs = Date.now()
   await context.evaluate(`(()=>{const button=${cardButton("Close UI")};if(!button)throw new Error('Test plug-in Close UI button missing');button.click();return true})()`)
   await waitForUi(context, "The test plug-in editor did not close", `Boolean(${cardButton("Open UI")})`)
+
   return clickedWallMs
 }
 

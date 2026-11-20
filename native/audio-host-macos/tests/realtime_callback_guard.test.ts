@@ -34,10 +34,13 @@ const forbidden = [
 const markedRegions = (source: string) => {
   const regions: string[] = []
   const pattern = /DAW_REALTIME_CALLBACK_(?:REGION|HELPER)_BEGIN[^\n]*\n([\s\S]*?)\/\/ DAW_REALTIME_CALLBACK_(?:REGION|HELPER)_END/g
+
   for (const match of source.matchAll(pattern)) {
     const region = match[1]
+
     if (region) regions.push(region)
   }
+
   return regions
 }
 
@@ -46,14 +49,19 @@ test('CoreAudio callback paths contain no scheduler wake, wait, or lock operatio
     const source = await Bun.file(sourceUrl).text()
     const regions = markedRegions(source)
     expect(regions.length).toBeGreaterThan(0)
+
     for (const region of regions) {
       for (const token of forbidden) expect(region).not.toContain(token)
     }
   }
+
   const host = await Bun.file(new URL('../src/audio-host.cpp', import.meta.url)).text()
+
   const callback = host.slice(host.indexOf('bool AudioHost::ProcessPlanar('),
     host.indexOf('bool AudioHost::ProcessRecordingPlanar('))
+
   expect(callback.length).toBeGreaterThan(0)
+
   for (const token of ['native_vst_attachments', 'PublishAutomationCredits(']) {
     expect(callback).not.toContain(token)
   }

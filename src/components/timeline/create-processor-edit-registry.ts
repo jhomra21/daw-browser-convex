@@ -25,7 +25,9 @@ const targetOf = (payload: NativeBuiltInParameterPayload) => {
   if (payload.effect === "instrument") {
     return payload.to.kind === "synth" ? { instanceId: payload.to.instanceId, kindId: SYNTH_KIND_ID } : undefined;
   }
+
   const kindId = processorEditKindId(payload.effect);
+
   return payload.instanceId && kindId !== undefined ? { instanceId: payload.instanceId, kindId } : undefined;
 };
 
@@ -40,23 +42,30 @@ export const createProcessorEditRegistry = (readBpm: () => number) => {
   let signature: string | undefined;
   let observing = false;
   let changed = false;
+
   const advanceStructure = () => {
     if (observing) changed = true;
     else setStructure(value => value + 1);
   };
+
   const isLiveChange = (previous: Member["latest"], payload: NativeBuiltInParameterPayload) => {
     if (!previous) return false;
     const from = parseJsonValue(previous.edit.content.params);
+
     if (payload.effect === "instrument") {
       const instrument = normalizeTrackInstrumentParams(from ?? null);
+
       // A change the live events do not carry is structure: it advances the playback inputs so the session adopts it.
       return instrument !== undefined && isLiveEventOnlyInstrumentChange(instrument, payload.to);
     }
+
     const timing = nativeBuiltInPatchTiming(payload);
+
     return timing !== undefined && isLiveParameterChange(createAudioEffectParameterPayload({
       targetId: payload.targetId, instanceId: payload.instanceId ?? "", kind: timing.input.kind,
     }, from, parseJsonValue(payload.to)), readBpm());
   };
+
   let order = 0;
   let creations = 0;
   const keyOf = (nodeId: string, instanceId: string) => `${nodeId}:${instanceId}`;
@@ -64,13 +73,16 @@ export const createProcessorEditRegistry = (readBpm: () => number) => {
   const issue = (payload: NativeBuiltInParameterPayload, target: { instanceId: string; kindId: number }, rollback = false) => {
     const key = keyOf(payload.targetId, target.instanceId);
     let member = members.get(key);
+
     if (member?.kindId !== target.kindId) {
       member = { kindId: target.kindId, incarnation: ++creations };
       members.set(key, member);
     }
+
     const bpm = readBpm();
     const state = encodeNativeBuiltInStateCommit(payload, bpm)?.state;
     const values = captureNativeBuiltInParameterValues(payload, bpm);
+
     const edit: LiveProcessorEditIdentity = {
       id: crypto.randomUUID(),
       order: ++order,
@@ -78,8 +90,10 @@ export const createProcessorEditRegistry = (readBpm: () => number) => {
       target: { nodeId: payload.targetId, instanceId: target.instanceId, kindId: target.kindId, incarnation: member.incarnation },
       content: { params: payload.to, timing: nativeBuiltInPatchTiming(payload), ...(state && { state }), ...(values && { values }) },
     };
+
     return { member, edit };
   };
+
   // A newer allocation supersedes any reservation made before it. A history
   // replay that completes after it is a later arrival and takes a new order;
   // keeping the reserved, older order would let native drop the replay.
@@ -88,16 +102,21 @@ export const createProcessorEditRegistry = (readBpm: () => number) => {
     const structural = !isLiveChange(member.latest, payload);
     member.pending = undefined;
     member.latest = { signature: JSON.stringify(payload.to), edit };
+
     if (structural) advanceStructure();
+
     return edit;
   };
+
   // Equal content on a member is the same write: its identity is reused, so a
   // write, its history replay and its projection echo share one edit.
   const allocate = (payload: NativeBuiltInParameterPayload) => {
     const target = targetOf(payload);
+
     if (!target) return undefined;
     const signature = JSON.stringify(payload.to);
     const current = members.get(keyOf(payload.targetId, target.instanceId));
+
     if (current?.kindId === target.kindId) {
       // The reservation is matched first and consumed, so an equal current
       // value cannot leave it behind to identify a later, distinct write.
@@ -105,16 +124,21 @@ export const createProcessorEditRegistry = (readBpm: () => number) => {
         const structural = !isLiveChange(current.latest, payload);
         current.latest = current.pending;
         current.pending = undefined;
+
         if (structural) advanceStructure();
+
         return current.latest.edit;
       }
+
       if (current.latest?.signature === signature) return current.latest.edit;
     }
+
     return supersede(payload, target);
   };
 
   const observeInstance = (payload: NativeBuiltInParameterPayload, live: Set<string>) => {
     const target = targetOf(payload);
+
     if (!target) return;
     live.add(keyOf(payload.targetId, target.instanceId));
     allocate(payload);
@@ -128,14 +152,17 @@ export const createProcessorEditRegistry = (readBpm: () => number) => {
     // adopts it when that write happens. One reservation per member.
     reserve: (payload: NativeBuiltInParameterPayload) => {
       const target = targetOf(payload);
+
       if (!target) return undefined;
       const { member, edit } = issue(payload, target);
       member.pending = { signature: JSON.stringify(payload.to), edit };
+
       return edit;
     },
     // A reservation whose write will not happen (failed persistence) is retired.
     release: (edit: LiveProcessorEditIdentity) => {
       const member = members.get(keyOf(edit.target.nodeId, edit.target.instanceId));
+
       if (member?.pending?.edit === edit) member.pending = undefined;
     },
     // Conditional rollback (save failure or explicit gesture cancel of `failed`):
@@ -145,7 +172,9 @@ export const createProcessorEditRegistry = (readBpm: () => number) => {
     replace: (failed: LiveProcessorEditIdentity, payload: NativeBuiltInParameterPayload) => {
       const target = targetOf(payload);
       const member = target && members.get(keyOf(payload.targetId, target.instanceId));
+
       if (!target || member?.incarnation !== failed.target.incarnation || member.latest?.edit.id !== failed.id) return undefined;
+
       return supersede(payload, target, true);
     },
     // A new mounted project or generation starts with no membership. Creation
@@ -154,10 +183,12 @@ export const createProcessorEditRegistry = (readBpm: () => number) => {
       const populated = members.size > 0 || signature !== undefined;
       members.clear();
       signature = undefined;
+
       if (populated) advanceStructure();
     },
     target: (nodeId: string, instanceId: string) => {
       const member = members.get(keyOf(nodeId, instanceId));
+
       return member && { kindId: member.kindId, incarnation: member.incarnation, latest: member.latest?.edit };
     },
     // Ingests the effective projection (own writes echoed back, collaborators,
@@ -170,16 +201,20 @@ export const createProcessorEditRegistry = (readBpm: () => number) => {
       // Only resolved scheduling structure belongs here. Member parameters use
       // the mapper above; decoded buffers and mapper-live values never do.
       const instances = (entries: ExportFx["masterFxInstances"]) => entries.map(entry => [entry.id, entry.kind]);
+
       const nextSignature = JSON.stringify([instances(fx.masterFxInstances),
         Object.entries(fx.trackFx ?? {}).sort(([left], [right]) => left.localeCompare(right)).map(([id, entry]) => [
           id, instances(entry.instances), entry.instrument?.kind === "synth"
             ? [entry.instrument.kind, entry.instrument.instanceId] : entry.instrument, entry.arp, entry.synth,
         ])]);
+
       if (signature !== nextSignature) {
         signature = nextSignature;
         changed = true;
       }
+
       const live = new Set<string>();
+
       const effectsOf = (nodeId: string, instances: ExportFx["masterFxInstances"]) => {
         for (const instance of instances) {
           observeInstance(
@@ -188,16 +223,21 @@ export const createProcessorEditRegistry = (readBpm: () => number) => {
           );
         }
       };
+
       effectsOf("master", fx.masterFxInstances);
+
       for (const [trackId, entry] of Object.entries(fx.trackFx ?? {})) {
         effectsOf(trackId, entry.instances);
         const instrument = entry.instrument;
+
         if (instrument?.kind === "synth") {
           observeInstance({ targetId: trackId, effect: "instrument", from: instrument, to: instrument }, live);
         }
       }
+
       for (const key of members.keys()) if (!live.has(key)) members.delete(key);
       observing = false;
+
       if (changed) advanceStructure();
     },
   };

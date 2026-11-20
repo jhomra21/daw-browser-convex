@@ -29,6 +29,7 @@ const sourceFromPages = (input: {
   channelCount: input.channelCount,
   readPages: async function* (options = {}) {
     options.signal?.throwIfAborted()
+
     for (const page of input.pages) {
       yield page
     }
@@ -41,10 +42,12 @@ const collectChunks = async (
   signal?: AbortSignal,
 ) => {
   const chunks: ExtractedPeakChunk[] = []
+
   const record = await extractPeakAsset(source, assetKey, {
     signal,
     onChunk: async (chunk) => { chunks.push(chunk) },
   })
+
   return { record, chunks }
 }
 
@@ -119,28 +122,35 @@ describe('waveform hierarchy and quantization', () => {
         ],
       }],
     })
+
     const { record, chunks } = await collectChunks(source, 'tails')
     expect(record.levels[0]?.framesPerInterval).toBe(1)
     expect(chunks).toHaveLength(record.levels.reduce((sum, level) => sum + level.chunkCount, 0))
     expect(chunks.every((chunk) => chunk.data.length === 2)).toBe(true)
+
     const firstLevelChunks = chunks.filter((chunk) => (
       chunk.meta.generationId === record.generationId
       && chunk.meta.intervalCount === 5
     ))
+
     expect(firstLevelChunks[0]?.meta.intervalCount).toBe(5)
     expect(firstLevelChunks[0]?.data[0]?.length).toBe(10)
+
     const levelTwo = chunks.find((chunk) => (
       chunk.meta.generationId === record.generationId
       && chunk.meta.framesPerInterval === 2
     ))
+
     expect(decodePeakByte(levelTwo?.data[0]?.[0] ?? 128)).toBeCloseTo(0.5, 2)
     expect(decodePeakByte(levelTwo?.data[0]?.[1] ?? 128)).toBeCloseTo(1, 2)
     expect(decodePeakByte(levelTwo?.data[0]?.[4] ?? 128)).toBeCloseTo(0.25, 2)
     expect(decodePeakByte(levelTwo?.data[0]?.[5] ?? 128)).toBeCloseTo(0.25, 2)
+
     const levelThree = chunks.find((chunk) => (
       chunk.meta.generationId === record.generationId
       && chunk.meta.framesPerInterval === 4
     ))
+
     expect(decodePeakByte(levelThree?.data[0]?.[0] ?? 128)).toBeCloseTo(-0.5, 2)
     expect(decodePeakByte(levelThree?.data[0]?.[1] ?? 128)).toBeCloseTo(1, 2)
     expect(decodePeakByte(levelThree?.data[0]?.[2] ?? 128)).toBeCloseTo(0.25, 2)
@@ -169,12 +179,14 @@ describe('waveform hierarchy and quantization', () => {
         },
       ],
     }))
+
     const first = chunks.find((chunk) => (
       chunk.meta.generationId === record.generationId
       && chunk.meta.framesPerInterval === 1
       && chunk.meta.chunkIndex === 0
       && chunk.meta.intervalStart === 0
     ))
+
     expect(first?.data[0]?.slice(0, 8)).toEqual(new Uint8Array([
       encodePeakByte(1), encodePeakByte(1),
       128, 128,
@@ -202,11 +214,13 @@ describe('waveform hierarchy and quantization', () => {
         planes: [new Float32Array([0, 0])],
       }],
     })
+
     await expect(collectChunks(source)).rejects.toThrow('unordered or malformed')
   })
 
   test('honors cancellation between pages', async () => {
     const controller = new AbortController()
+
     const source: AudioPcmSourceDescriptor = {
       ...sourceFromPages({
         frameCount: 2,
@@ -232,6 +246,7 @@ describe('waveform hierarchy and quantization', () => {
         }
       },
     }
+
     await expect(collectChunks(source, 'cancelled', controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
   })
 })
@@ -254,13 +269,17 @@ describe('waveform LOD and source scheduler', () => {
 
   test('deduplicates tiles, clones cached data, and retries null results', async () => {
     let calls = 0
+
     const scheduler = createArrangementWaveformScheduler({
       decode: async () => {
         calls += 1
+
         if (calls === 1) return null
+
         return intervalData(0, 1, 128)
       },
     })
+
     expect(await scheduler.request(request('retry'))).toBeNull()
     const first = scheduler.request(request('retry'))
     const second = scheduler.request(request('retry'))
@@ -268,6 +287,7 @@ describe('waveform LOD and source scheduler', () => {
     expect(calls).toBe(2)
     expect(one).not.toBeNull()
     expect(two).not.toBeNull()
+
     if (!one || !two || one.kind !== 'intervals' || two.kind !== 'intervals') throw new Error('Expected intervals')
     one.channels[0]![0] = 255
     expect(two.channels[0]![0]).toBe(0)
@@ -277,14 +297,17 @@ describe('waveform LOD and source scheduler', () => {
   test('limits active work and honors priority before FIFO order', async () => {
     const gates: Array<{ resolve: (value: WaveformSourceData | null) => void }> = []
     const starts: string[] = []
+
     const scheduler = createArrangementWaveformScheduler({
       maxConcurrent: 1,
       decode: async (input) => {
         starts.push(input.assetKey)
         const gate = new Promise<WaveformSourceData | null>((resolve) => { gates.push({ resolve }) })
+
         return await gate
       },
     })
+
     const first = scheduler.request(request('first'))
     const second = scheduler.request(request('second'))
     const urgent = scheduler.request(request('urgent', { priority: -1 }))
@@ -304,12 +327,15 @@ describe('waveform LOD and source scheduler', () => {
   test('isolates subscriber cancellation and aborts only the final subscriber', async () => {
     let decodeSignal: AbortSignal | undefined
     let resolveDecode: (value: WaveformSourceData | null) => void = () => {}
+
     const scheduler = createArrangementWaveformScheduler({
       decode: async (_input, signal) => {
         decodeSignal = signal
+
         return await new Promise<WaveformSourceData | null>((resolve) => { resolveDecode = resolve })
       },
     })
+
     const firstController = new AbortController()
     const secondController = new AbortController()
     const first = scheduler.request(request('shared', { signal: firstController.signal }))
@@ -325,9 +351,11 @@ describe('waveform LOD and source scheduler', () => {
 
   test('assembles exact samples spanning multiple bounded tiles', async () => {
     let calls = 0
+
     const scheduler = createArrangementWaveformScheduler({
       decode: async (input) => {
         calls += 1
+
         return {
           kind: 'samples',
           channels: [new Float32Array(input.tileEndFrame - input.tileStartFrame)],
@@ -337,11 +365,13 @@ describe('waveform LOD and source scheduler', () => {
         }
       },
     })
+
     const result = await scheduler.request(request('samples', {
       sourceStartFrame: 0,
       sourceEndFrame: ARRANGEMENT_PCM_TILE_FRAMES * 3,
       framesPerInterval: 1,
     }))
+
     expect(result?.kind).toBe('samples')
     expect(result?.kind === 'samples' ? result.channels[0]?.length : 0)
       .toBe(ARRANGEMENT_PCM_TILE_FRAMES * 3)
@@ -352,6 +382,7 @@ describe('waveform LOD and source scheduler', () => {
 describe('unified waveform painter', () => {
   const recordingContext = () => {
     const commands: Array<readonly [string, ...number[]]> = []
+
     const ctx = {
       fillStyle: '',
       beginPath() { commands.push(['beginPath']) },
@@ -360,6 +391,7 @@ describe('unified waveform painter', () => {
       fill() { commands.push(['fill']) },
       arc(x: number, y: number, radius: number) { commands.push(['arc', x, y, radius]) },
     }
+
     return { ctx, commands }
   }
 
@@ -367,11 +399,13 @@ describe('unified waveform painter', () => {
     for (const backingScaleY of [1, 1.5, 2, 3]) {
       for (const deviceCenter of [10, 10.25, 10.5, 10.75]) {
         const centerY = deviceCenter / backingScaleY
+
         const ribbon = waveformRibbonGeometry({
           upperY: centerY,
           lowerY: centerY,
         minimumThicknessCssPx: 1 / backingScaleY,
         })
+
         const upperBackingY = ribbon.upperY * backingScaleY
         const lowerBackingY = ribbon.lowerY * backingScaleY
         expect(ribbon.thickness * backingScaleY).toBeGreaterThanOrEqual(1)
@@ -391,11 +425,13 @@ describe('unified waveform painter', () => {
         for (const deviceCenter of [10, 10.25, 10.5, 10.75, 10.999, 11]) {
           const centerY = deviceCenter / backingScaleY
           const thickness = deviceThickness / backingScaleY
+
           const ribbon = waveformRibbonGeometry({
             upperY: centerY - thickness / 2,
             lowerY: centerY + thickness / 2,
             minimumThicknessCssPx: 1 / backingScaleY,
           })
+
           const upperBackingY = ribbon.upperY * backingScaleY
           const lowerBackingY = ribbon.lowerY * backingScaleY
           expect(ribbon.thickness * backingScaleY).toBeGreaterThanOrEqual(1)
@@ -412,6 +448,7 @@ describe('unified waveform painter', () => {
     for (const backingScaleY of [1, 1.5, 2, 3]) {
       for (const deviceCenter of [10, 10.25, 10.5, 10.75]) {
         const centers: number[] = []
+
         for (const deviceThickness of [2, 2.0001, 2.001, 2.01, 2.1, 2.5, 3, 3.5, 3.999, 4]) {
           const centerY = deviceCenter / backingScaleY
           const thickness = deviceThickness / backingScaleY
@@ -421,6 +458,7 @@ describe('unified waveform painter', () => {
             minimumThicknessCssPx: 1 / backingScaleY,
           }).centerY * backingScaleY)
         }
+
         const jumps = centers.slice(1).map((value, index) => Math.abs(value - (centers[index] ?? value)))
         expect(Math.max(...jumps)).toBeLessThan(1e-12)
         expect(centers.every((value) => Math.abs(value - deviceCenter) < 1e-12)).toBe(true)
@@ -434,6 +472,7 @@ describe('unified waveform painter', () => {
       lowerY: 12,
       minimumThicknessCssPx: 1,
     })
+
     expect(thick).toEqual({
       upperY: 4,
       lowerY: 12,
@@ -443,6 +482,7 @@ describe('unified waveform painter', () => {
 
     const render = (data: Parameters<typeof drawWaveformSignal>[1]['data']) => {
       const commands: Array<readonly [string, ...number[]]> = []
+
       const ctx = {
         fillStyle: '',
         beginPath() { commands.push(['beginPath']) },
@@ -451,6 +491,7 @@ describe('unified waveform painter', () => {
         fill() { commands.push(['fill']) },
         arc() {},
       }
+
       drawWaveformSignal(ctx, {
         data,
         sourceStartFrame: 0,
@@ -462,10 +503,10 @@ describe('unified waveform painter', () => {
         channelCount: 1,
         style: { minimumThicknessCssPx: 0.5, backingScaleY: 2 },
       })
-      return commands
-        .filter((command) => command[0] === 'moveTo' || command[0] === 'lineTo')
-        .map((command) => command[2])
+
+      return commands.flatMap((command) => command[0] === 'moveTo' || command[0] === 'lineTo' ? [command[2]] : [])
     }
+
     const intervalY = render({
       kind: 'intervals',
       encoding: 'float32',
@@ -476,6 +517,7 @@ describe('unified waveform painter', () => {
       framesPerInterval: 1,
       intervalCount: 1,
     })
+
     const sampleY = render({
       kind: 'samples',
       channels: [new Float32Array([0])],
@@ -483,6 +525,7 @@ describe('unified waveform painter', () => {
       sampleRate: 1,
       sourceFrameCount: 1,
     })
+
     expect([Math.min(...intervalY), Math.max(...intervalY)]).toEqual([
       Math.min(...sampleY),
       Math.max(...sampleY),
@@ -492,6 +535,7 @@ describe('unified waveform painter', () => {
 
   test('renders valid zero data but no data remains empty', () => {
     const fills: string[] = []
+
     const ctx = {
       fillStyle: '',
       beginPath() {},
@@ -500,6 +544,7 @@ describe('unified waveform painter', () => {
       fill() { fills.push('fill') },
       arc() {},
     }
+
     drawWaveformSignal(ctx, {
       data: {
         kind: 'intervals',
@@ -545,6 +590,7 @@ describe('unified waveform painter', () => {
   test('uses the same fill-only style contract for persisted and exact data', () => {
     const persisted = recordingContext()
     const exact = recordingContext()
+
     const common = {
       sourceStartFrame: 0,
       sourceEndFrame: 2,
@@ -555,6 +601,7 @@ describe('unified waveform painter', () => {
       channelCount: 1,
       style: { fillStyle: '#4ade80', minimumThicknessCssPx: 0.5, backingScaleY: 2 },
     }
+
     drawWaveformSignal(persisted.ctx, {
       ...common,
       data: {
@@ -603,15 +650,18 @@ describe('unified waveform painter', () => {
       channelCount: 1,
       style: { fillStyle: '#4ade80', minimumThicknessCssPx: 0.5, backingScaleY: 2 },
     })
+
     const yValues = recorded.commands
       .filter((command) => command[0] === 'moveTo' || command[0] === 'lineTo')
       .map((command) => command[2])
       .filter((value): value is number => typeof value === 'number')
+
     expect(Math.max(...yValues) - Math.min(...yValues)).toBe(0.5)
   })
 
   test('renders signed interval geometry through one painter', () => {
     let fillCount = 0
+
     const ctx = {
       fillStyle: '',
       beginPath() {},
@@ -620,6 +670,7 @@ describe('unified waveform painter', () => {
       fill() { fillCount += 1 },
       arc() {},
     }
+
     drawWaveformSignal(ctx, {
       data: {
         kind: 'intervals',
@@ -644,6 +695,7 @@ describe('unified waveform painter', () => {
 
   test('draws exact points with the shared fill style', () => {
     let arcCount = 0
+
     const ctx = {
       fillStyle: '',
       beginPath() {},
@@ -652,6 +704,7 @@ describe('unified waveform painter', () => {
       fill() {},
       arc() { arcCount += 1 },
     }
+
     drawWaveformSignal(ctx, {
       data: {
         kind: 'samples',
@@ -693,17 +746,20 @@ describe('unified waveform painter', () => {
         style: { fillStyle: '#4ade80', pointRadius },
       })
       const firstFill = recorded.commands.findIndex(([kind]) => kind === 'fill')
+
       return {
         line: recorded.commands.slice(0, firstFill),
         fillStyle: recorded.ctx.fillStyle,
       }
     }
+
     expect(render(0)).toEqual(render(1))
   })
 
   test('uses exact sample-frame x coordinates for line and point vertices', () => {
     const moves: number[] = []
     const arcs: number[] = []
+
     const ctx = {
       fillStyle: '',
       beginPath() {},
@@ -712,6 +768,7 @@ describe('unified waveform painter', () => {
       fill() {},
       arc(x: number) { arcs.push(x) },
     }
+
     drawWaveformSignal(ctx, {
       data: {
         kind: 'samples',
@@ -754,24 +811,35 @@ describe('unified waveform painter', () => {
       channelCount: 1,
       style: { minimumThicknessCssPx: 1 },
     })
+
     const path = recorded.commands.slice(0, recorded.commands.findIndex(([kind]) => kind === 'fill'))
       .filter((command) => command[0] === 'moveTo' || command[0] === 'lineTo')
+
     const vertices = path.map((command) => [command[1] ?? 0, command[2] ?? 0])
+
     const area = vertices.reduce((total, [x, y], index) => {
       const next = vertices[(index + 1) % vertices.length]
+
       if (!next) return total
+
       return total + x * next[1] - next[0] * y
     }, 0) / 2
+
     const pixelX = 15.1
     const pixelY = 8
+
     const filledPixel = vertices.reduce((inside, [x0, y0], index) => {
       const next = vertices[(index + 1) % vertices.length]
+
       if (!next) return inside
       const [x1, y1] = next
+
       const crosses = (y0 > pixelY) !== (y1 > pixelY)
         && pixelX < (x1 - x0) * (pixelY - y0) / (y1 - y0) + x0
+
       return crosses ? !inside : inside
     }, false)
+
     expect(path.some(([, x, y]) => x === 10 && y < 15.5)).toBe(true)
     expect(path.some(([, x, y]) => x === 10 && y >= 15.5)).toBe(true)
     expect(path.filter(([, x]) => x === 10)).toHaveLength(2)
@@ -795,9 +863,11 @@ describe('unified waveform painter', () => {
         style: { minimumThicknessCssPx: 1 },
       })
       const fillIndex = recorded.commands.findIndex(([kind]) => kind === 'fill')
+
       return recorded.commands.slice(0, fillIndex)
         .filter((command) => command[0] === 'moveTo' || command[0] === 'lineTo')
     }
+
     const samples = bodyCommands({
       kind: 'samples',
       channels: [new Float32Array([-.5, .25, -.25, .5])],
@@ -805,6 +875,7 @@ describe('unified waveform painter', () => {
       sampleRate: 1,
       sourceFrameCount: 4,
     })
+
     const intervals = bodyCommands({
       kind: 'intervals',
       encoding: 'float32',
@@ -815,6 +886,7 @@ describe('unified waveform painter', () => {
       framesPerInterval: 2,
       intervalCount: 2,
     })
+
     const assertSourceAnchors = (commands: readonly (readonly [string, ...number[]])[]) => {
       const xValues = commands.map((command) => command[1] ?? 0)
       const repeatedXTransitions = xValues.slice(1).filter((x, index) => x === xValues[index]).length
@@ -822,6 +894,7 @@ describe('unified waveform painter', () => {
       expect(commands.filter(([kind]) => kind === 'moveTo')).toHaveLength(1)
       expect(commands.filter(([kind]) => kind === 'lineTo').length).toBeGreaterThan(1)
     }
+
     assertSourceAnchors(samples)
     assertSourceAnchors(intervals)
     expect(samples[0]?.[0]).toBe('moveTo')
@@ -833,6 +906,7 @@ describe('unified waveform painter', () => {
     let moves = 0
     let lines = 0
     const fadeFrames: number[] = []
+
     const ctx = {
       fillStyle: '',
       beginPath() {},
@@ -841,6 +915,7 @@ describe('unified waveform painter', () => {
       fill() { fills += 1 },
       arc() {},
     }
+
     drawWaveformSignal(ctx, {
       data: {
         kind: 'intervals',
@@ -864,6 +939,7 @@ describe('unified waveform painter', () => {
       channelCount: 2,
       fadeScaleAtSourceFrame: (frame) => {
         fadeFrames.push(frame)
+
         return 0.5
       },
     })

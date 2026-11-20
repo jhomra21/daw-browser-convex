@@ -33,41 +33,53 @@ export const createSpectrumFrameDelivery = ({
 
   function sampleBrowser() {
     browserFrame = null;
+
     if (released || isNativePrepared()) return;
+
     try {
       deliver(readBrowserFrame());
     } catch {
       deliver(null);
     }
+
     scheduleBrowserSample();
   }
 
   function deliverNativeFrame() {
     nativeDeliveryFrame = null;
+
     if (released || !nativeFramePending) return;
+
     if (!isNativePrepared()) {
       nativeFramePending = false;
       scheduleBrowserSample();
+
       return;
     }
+
     nativeFramePending = false;
     deliver(nativeFrame);
   }
 
   const unsubscribeNative = subscribeNative((frame) => {
     if (released) return;
+
     if (isNativePrepared()) {
       if (browserFrame !== null) {
         scheduler.cancel(browserFrame);
         browserFrame = null;
       }
+
       nativeFrame = frame;
       nativeFramePending = true;
+
       if (nativeDeliveryFrame === null) {
         nativeDeliveryFrame = scheduler.request(deliverNativeFrame);
       }
+
       return;
     }
+
     scheduleBrowserSample();
   });
 
@@ -77,7 +89,9 @@ export const createSpectrumFrameDelivery = ({
     if (released) return;
     released = true;
     unsubscribeNative();
+
     if (browserFrame !== null) scheduler.cancel(browserFrame);
+
     if (nativeDeliveryFrame !== null) scheduler.cancel(nativeDeliveryFrame);
     browserFrame = null;
     nativeDeliveryFrame = null;

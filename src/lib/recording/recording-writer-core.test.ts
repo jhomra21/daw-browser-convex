@@ -22,6 +22,7 @@ describe('recording writer handler', () => {
     let clock = 0
     let release: () => void = () => undefined
     const pending = new Promise<void>((resolve) => { release = resolve })
+
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: async () => { await pending; clock += 4 },
@@ -29,6 +30,7 @@ describe('recording writer handler', () => {
         abort: async () => undefined,
       }),
     }, () => undefined, () => clock)
+
     handler.handle({ type: 'start', generation: 1, sessionId: 'take', sampleRate: 48000, channelCount: 1 })
     await handler.testing.settled()
     handler.handle(block(0))
@@ -44,6 +46,7 @@ describe('recording writer handler', () => {
   })
   test('sends bounded append and storage aggregates only at finalization', async () => {
     const output: WriterOutboundMessage[] = []
+
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: async () => undefined,
@@ -55,6 +58,7 @@ describe('recording writer handler', () => {
         }),
       }),
     }, (message) => output.push(message), () => 1)
+
     handler.handle({ type: 'start', generation: 1, sessionId: 'take', sampleRate: 48000, channelCount: 1 })
     await handler.testing.settled()
     handler.handle(block(0))
@@ -73,6 +77,7 @@ describe('recording writer handler', () => {
     const producer = createRecorderSabRingProducer(buffers)
     const writes: number[][][] = []
     const output: WriterOutboundMessage[] = []
+
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: async (channels) => {
@@ -84,6 +89,7 @@ describe('recording writer handler', () => {
         abort: async () => undefined,
       }),
     }, (message) => output.push(message))
+
     handler.handle({
       type: 'start-sab',
       generation: 1,
@@ -113,6 +119,7 @@ describe('recording writer handler', () => {
   test('writes in order, returns buffers after writes, and finalizes after queued work', async () => {
     const events: string[] = []
     let frames = 0
+
     const storage: RecordingWriterStorage = {
       createSession: async () => ({
         append: async (channels) => {
@@ -121,16 +128,21 @@ describe('recording writer handler', () => {
         },
         finalize: async () => {
           events.push('finalize')
+
           return { capturedFrames: frames }
         },
         abort: async () => undefined,
       }),
     }
+
     const output: WriterOutboundMessage[] = []
+
     const handler = createRecordingWriterHandler(storage, (message) => {
       output.push(message)
+
       if (message.type === 'return') events.push(`return:${message.blockId}`)
     })
+
     handler.handle({ type: 'start', generation: 1, sessionId: 'take', sampleRate: 48000, channelCount: 1 })
     await handler.testing.settled()
     const first = block(0)
@@ -148,6 +160,7 @@ describe('recording writer handler', () => {
   test('passes contiguous transferable PCM directly to storage', async () => {
     const planarBlocks: ArrayBuffer[] = []
     const output: WriterOutboundMessage[] = []
+
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         appendPlanar: async (buffer) => {
@@ -160,6 +173,7 @@ describe('recording writer handler', () => {
         abort: async () => undefined,
       }),
     }, (message) => output.push(message))
+
     handler.handle({ type: 'start', generation: 1, sessionId: 'take', sampleRate: 48000, channelCount: 1 })
     await handler.testing.settled()
     const input = block(0)
@@ -172,6 +186,7 @@ describe('recording writer handler', () => {
 
   test('ignores stale sessions and rejects malformed messages', async () => {
     const output: WriterOutboundMessage[] = []
+
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: async () => undefined,
@@ -179,6 +194,7 @@ describe('recording writer handler', () => {
         abort: async () => undefined,
       }),
     }, (message) => output.push(message))
+
     handler.handle({ type: 'start', generation: 1, sessionId: 'take', sampleRate: 48000, channelCount: 1 })
     await handler.testing.settled()
     handler.handle({ type: 'finalize', generation: 0, sessionId: 'old' })
@@ -190,10 +206,13 @@ describe('recording writer handler', () => {
 
   test('enforces the eight-block queue during a stalled write', async () => {
     let release = () => {}
+
     const stalled = new Promise<void>((resolve) => {
       release = resolve
     })
+
     const output: WriterOutboundMessage[] = []
+
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: () => stalled,
@@ -201,8 +220,10 @@ describe('recording writer handler', () => {
         abort: async () => undefined,
       }),
     }, (message) => output.push(message))
+
     handler.handle({ type: 'start', generation: 1, sessionId: 'take', sampleRate: 48000, channelCount: 1 })
     await handler.testing.settled()
+
     for (let sequence = 0; sequence < 9; sequence += 1) handler.handle(block(sequence))
     expect(handler.testing.snapshot().queuedBlocks).toBe(8)
     expect(output.at(-1)).toMatchObject({ type: 'ready' })
@@ -214,10 +235,13 @@ describe('recording writer handler', () => {
 
   test('settles storage cleanup before reporting writer failure', async () => {
     let releaseAbort = () => {}
+
     const aborting = new Promise<void>((resolve) => {
       releaseAbort = resolve
     })
+
     const output: WriterOutboundMessage[] = []
+
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: async () => {
@@ -227,6 +251,7 @@ describe('recording writer handler', () => {
         abort: () => aborting,
       }),
     }, (message) => output.push(message))
+
     handler.handle({ type: 'start', generation: 1, sessionId: 'take', sampleRate: 48000, channelCount: 1 })
     await handler.testing.settled()
     handler.handle(block(0))
@@ -241,6 +266,7 @@ describe('recording writer handler', () => {
   test('aborts only after queued writes and surfaces worker storage failure', async () => {
     const events: string[] = []
     const output: WriterOutboundMessage[] = []
+
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: async () => {
@@ -252,6 +278,7 @@ describe('recording writer handler', () => {
         },
       }),
     }, (message) => output.push(message))
+
     handler.handle({ type: 'start', generation: 1, sessionId: 'take', sampleRate: 48000, channelCount: 1 })
     await handler.testing.settled()
     handler.handle(block(0))
@@ -261,11 +288,13 @@ describe('recording writer handler', () => {
     expect(output.at(-1)).toMatchObject({ type: 'aborted', timing: { append: { count: 1 } } })
 
     const failedOutput: WriterOutboundMessage[] = []
+
     const failed = createRecordingWriterHandler({
       createSession: async () => {
         throw new Error('storage-unavailable')
       },
     }, (message) => failedOutput.push(message))
+
     failed.handle({ type: 'start', generation: 1, sessionId: 'take', sampleRate: 48000, channelCount: 1 })
     await failed.testing.settled()
     expect(failedOutput.at(-1)).toMatchObject({ type: 'failure', reason: 'storage-unavailable' })
@@ -275,6 +304,7 @@ describe('recording writer handler', () => {
     let appends = 0
     let aborts = 0
     const output: WriterOutboundMessage[] = []
+
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: async () => {
@@ -286,6 +316,7 @@ describe('recording writer handler', () => {
         },
       }),
     }, (message) => output.push(message))
+
     handler.handle({ type: 'start', generation: 1, sessionId: 'take', sampleRate: 48000, channelCount: 1 })
     await handler.testing.settled()
     handler.handle({
@@ -301,15 +332,19 @@ describe('recording writer handler', () => {
 
   test('serializes abort after the active write and cancels queued appends on failure', async () => {
     let release = () => {}
+
     const active = new Promise<void>((resolve) => {
       release = resolve
     })
+
     const events: string[] = []
     const output: WriterOutboundMessage[] = []
+
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: async (channels) => {
           events.push(`append:${channels[0]?.[0]}`)
+
           if (channels[0]?.[0] === 1) await active
         },
         finalize: async () => ({ capturedFrames: 0 }),
@@ -318,6 +353,7 @@ describe('recording writer handler', () => {
         },
       }),
     }, (message) => output.push(message))
+
     handler.handle({ type: 'start', generation: 1, sessionId: 'take', sampleRate: 48000, channelCount: 1 })
     await handler.testing.settled()
     const first = block(0)
@@ -339,6 +375,7 @@ describe('recording writer handler', () => {
   test('keeps createSession failure terminal when startup completion is already queued', async () => {
     let resolveSession = () => {}
     let aborts = 0
+
     const pendingSession = new Promise<Awaited<ReturnType<RecordingWriterStorage['createSession']>>>((resolve) => {
       resolveSession = () => resolve({
         append: async () => undefined,
@@ -348,7 +385,9 @@ describe('recording writer handler', () => {
         },
       })
     })
+
     const output: WriterOutboundMessage[] = []
+
     const handler = createRecordingWriterHandler({
       createSession: () => pendingSession,
     }, (message) => output.push(message))
@@ -370,17 +409,21 @@ describe('recording writer handler', () => {
 
   test('keeps queued finalize completion from overwriting a terminal failure', async () => {
     let releaseAppend = () => {}
+
     const pendingAppend = new Promise<void>((resolve) => {
       releaseAppend = resolve
     })
+
     let finalizes = 0
     let aborts = 0
     const output: WriterOutboundMessage[] = []
+
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: () => pendingAppend,
         finalize: async () => {
           finalizes += 1
+
           return { capturedFrames: 2 }
         },
         abort: async () => {

@@ -14,6 +14,7 @@ describe('granular params', () => {
       maxGrains: 999,
       maxDecodedBytes: Number.POSITIVE_INFINITY,
     })
+
     expect(params.grainSizeMs).toBe(5)
     expect(params.densityHz).toBe(200)
     expect(params.position).toBe(1)

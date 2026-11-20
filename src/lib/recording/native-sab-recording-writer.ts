@@ -21,6 +21,7 @@ const deferred = <T>() => {
   let resolve = (_value: T) => {}
   let reject = (_error: Error) => {}
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+
   return { promise, resolve, reject }
 }
 
@@ -46,6 +47,7 @@ export const createNativeSabRecordingWriter = (input: NativeSabRecordingWriterIn
   let expectedSequence = 0
   let deadline: ReturnType<typeof setTimeout> | undefined
   const clearDeadline = () => { if (deadline !== undefined) clearTimeout(deadline); deadline = undefined }
+
   const fail = (message: string) => {
     if (state === 'closed') return
     state = 'closed'
@@ -57,25 +59,35 @@ export const createNativeSabRecordingWriter = (input: NativeSabRecordingWriterIn
     worker.terminate()
     input.onFailure?.(error)
   }
+
   const armDeadline = (phase: string) => {
     // The atomic read index bounds queued blocks, but append or finalization can stall after pop.
     deadline = setTimeout(() => fail(`Native SAB writer ${phase === 'startup' && booted ? 'storage startup' : phase} timed out.`), input.timeoutMs ?? 2_000)
   }
+
   worker.setMessageHandler((value) => {
     const message = readWriterOutboundMessage(value)
+
     if (!message) return fail('Malformed native SAB writer response.')
+
     if (message.generation !== input.generation || message.sessionId !== input.sessionId || state === 'closed') return
+
     if (message.type === 'failure') return fail(message.reason)
+
     if (message.type === 'boot' && state === 'starting' && !booted) {
       booted = true
+
       return
     }
+
     if (message.type === 'ready' && state === 'starting') {
       clearDeadline()
       state = 'open'
       ready.resolve()
+
       return
     }
+
     if (state === 'closing' && pending &&
       ((terminal === 'finalize' && message.type === 'finalized') || (terminal === 'abort' && message.type === 'aborted'))) {
       clearDeadline()
@@ -84,8 +96,10 @@ export const createNativeSabRecordingWriter = (input: NativeSabRecordingWriterIn
       pending = undefined
       worker.terminate()
       completion.resolve({ capturedFrames: message.type === 'finalized' ? message.capturedFrames : 0 })
+
       return
     }
+
     fail('Unexpected native SAB writer response.')
   })
   worker.setErrorHandler?.((error) => fail(`Native SAB writer ${error.message}.`))
@@ -109,29 +123,37 @@ export const createNativeSabRecordingWriter = (input: NativeSabRecordingWriterIn
       fail('Invalid native SAB recording block.')
       throw new Error('Invalid native SAB recording block.')
     }
+
     const wasEmpty = producer.stats().occupancy === 0
+
     if (producer.stats().occupancy >= RECORDER_MAX_QUEUED_BLOCKS) {
       fail('Native SAB recording writer exceeded its hard bound.')
       throw new Error('Native SAB recording writer exceeded its hard bound.')
     }
+
     if (!producer.push(block.planes, block.frameCount)) {
       fail('Native SAB recording writer exceeded its hard bound.')
       throw new Error('Native SAB recording writer exceeded its hard bound.')
     }
+
     expectedSequence += 1
+
     // The notification wakes waitAsync consumers; this one message also wakes
     // workers without waitAsync when the ring transitions from empty.
     if (wasEmpty) worker.postMessage({
       type: 'wake', generation: input.generation, sessionId: input.sessionId,
     })
   }
+
   const finish = async (type: 'finalize' | 'abort', capturedFrames?: number) => {
     await ready.promise
+
     if (state !== 'open') throw new Error('Native SAB writer is not open.')
     state = 'closing'
     terminal = type
     pending = deferred<{ capturedFrames: number }>()
     armDeadline(type)
+
     if (type === 'finalize') {
       worker.postMessage({
         type, generation: input.generation, sessionId: input.sessionId, capturedFrames,
@@ -139,8 +161,10 @@ export const createNativeSabRecordingWriter = (input: NativeSabRecordingWriterIn
     } else {
       worker.postMessage({ type, generation: input.generation, sessionId: input.sessionId })
     }
+
     return pending.promise
   }
+
   return {
     ready: ready.promise,
     write,
@@ -153,6 +177,7 @@ export const createNativeSabRecordingWriter = (input: NativeSabRecordingWriterIn
 
 export const createBrowserWorker = (injected?: Worker, onTerminate?: () => void): WorkerEndpoint => {
   const worker = injected ?? new Worker(new URL('../../workers/recording-writer-worker.ts', import.meta.url), { type: 'module' })
+
   return {
     postMessage: (message) => worker.postMessage(message),
     setMessageHandler: (handler) => { worker.onmessage = (event: MessageEvent<unknown>) => handler(readWriterOutboundMessage(event.data)) },
@@ -162,11 +187,13 @@ export const createBrowserWorker = (injected?: Worker, onTerminate?: () => void)
         const category = /SecurityError|ReferenceError|SyntaxError|TypeError|NetworkError/.exec(event.message)?.[0]
           ?? (event.error instanceof Error && /^(SecurityError|ReferenceError|SyntaxError|TypeError|NetworkError)$/.test(event.error.name)
             ? event.error.name : 'unknown')
+
         const source = /\/(recording-writer-worker-[\w-]+\.js)$/.exec(event.filename)?.[1] ?? 'unavailable'
         const line = Number.isSafeInteger(event.lineno) ? event.lineno : 0
         const column = Number.isSafeInteger(event.colno) ? event.colno : 0
         handler(new Error(`worker-load-failed:${category}:${source}:${line}:${column}`))
       }
+
       worker.onmessageerror = () => handler(new Error('worker-message-failed'))
     },
     terminate: () => { worker.terminate(); onTerminate?.() },

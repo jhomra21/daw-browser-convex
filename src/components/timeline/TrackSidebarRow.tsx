@@ -115,6 +115,7 @@ type TrackSidebarRowProps = {
 const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
   const model = untrack(() => props.model);
   const track = untrack(() => props.track);
+
   const {
     ancestorGroupColorBandsByTrackId,
     appPreferences,
@@ -152,10 +153,12 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
     finishTrackDrag,
     cancelTrackDrag,
   } = model;
+
   const sidebar = model.sidebar;
 
   const lockedByOther =
     !!track.lockedBy && track.lockedBy !== sidebar().currentUserId;
+
   const isRecordArmed = () => sidebar().recordArmTrackId === track.id;
   const recordingLocked = () => sidebar().recordingTargetLock.holds(track.id);
   const isRecordingTarget = () => sidebar().recordingTargetLock.targetId() === track.id;
@@ -165,36 +168,48 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
   const isGroupTrack = channelRole === "group";
   const depth = () => depthByTrackId().get(track.id) ?? 0;
   const defaultTrackColor = () => appPreferences.timeline.defaultTrackColor();
+
   const defaultTrackColorInput = () =>
     appPreferences.timeline.defaultTrackColorInput();
+
   const defaultGroupColorInput = () =>
     appPreferences.timeline.defaultGroupColorInput();
+
   const configuredDefaultColor = () =>
     isGroupTrack ? defaultGroupColor() : defaultTrackColor();
+
   const customDefaultColor = () => parseHexColor(configuredDefaultColor(), "");
   const explicitTrackColor = () => parseHexColor(track.color, "");
+
   const trackColor = () =>
     explicitTrackColor() || customDefaultColor() || undefined;
+
   const isSelected = () =>
     sidebar().selectedTrackId === track.id ||
     sidebar().selectedTrackIds.includes(track.id);
+
   const ancestorGroupColorBands = () =>
     ancestorGroupColorBandsByTrackId().get(track.id) ?? [];
+
   const railHeightPx = () => Math.max(0, clipLaneHeightPx() - 1);
   const muteDisabled = lockedByOther;
   const soloDisabled = lockedByOther;
   const volumeDisabled = lockedByOther;
+
   const recordDisabled = lockedByOther || !(
     canTrackReceiveAudioClip(track) || isClipKindCompatibleWithTrack(track, "midi")
   );
+
   const volume = () => displayVolume(track);
   const muted = () => !!track.muted;
   const soloed = () => !!track.soloed;
   const currentSendTargetId = () => selectedSendTargetId(track);
+
   const selectedAutomationSelection = () =>
     automation().lanes.selectedTargetsByOwnerKey[track.id] ?? {
       parameterId: "volume",
     };
+
   const selectedAutomationTargetKey = () =>
     automationTargetKey(
       createAutomationTarget(
@@ -205,27 +220,36 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
     );
 
   const automationMeta = () => automationMetaByTrackId().get(track.id);
+
   const automationVisible = () =>
     automation().lanes.visibleByTrackId[track.id] === true;
+
   const displayedAutomationVisible = () =>
     track.collapsed !== true && automationVisible();
+
   const visibleAutomationTargetKeys = () =>
     automation().lanes.visibleTargetKeysByTrackId[track.id] ?? [];
+
   const automationHeight = () =>
     automation().lanes.heightsByLaneOwnerKey[track.id] ??
     DEFAULT_AUTOMATION_LANE_HEIGHT;
+
   const rowLayout = () => layoutByTrackId().get(track.id);
   const rowHeightPx = () => rowLayout()?.heightPx ?? LANE_HEIGHT;
   const clipLaneHeightPx = () => rowLayout()?.clipLaneHeightPx ?? LANE_HEIGHT;
+
   const automationTotalHeight = () =>
     rowLayout()?.automationHeightPx ??
     (displayedAutomationVisible()
       ? automationHeight() * Math.max(1, visibleAutomationTargetKeys().length)
       : 0);
+
   const canAddAutomationLane = () => {
     if (!automationVisible()) return false;
     const visible = new Set(visibleAutomationTargetKeys());
+
     if (!visible.has(selectedAutomationTargetKey())) return true;
+
     return getAutomationParameterOptionsForTarget(
       automation().lanes.effectInstancesByOwnerKey[track.id] ?? [],
     ).some(
@@ -238,25 +262,33 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
         ),
     );
   };
+
   const handleAutomationVisibility = () => {
     if (track.collapsed) {
       sidebar().onToggleTrackCollapsed(track.id);
+
       if (!automationVisible())
         automation().actions.toggleTrackVisibility(track.id);
+
       return;
     }
+
     automation().actions.toggleTrackVisibility(track.id);
   };
+
   const handleAddAutomationLane = () => {
     if (!canAddAutomationLane()) return;
+
     if (track.collapsed) sidebar().onToggleTrackCollapsed(track.id);
     automation().actions.addTrackLane(track.id);
   };
+
   const contextMenuColor = () =>
     parseHexColor(
       track.color,
       isGroupTrack ? defaultGroupColorInput() : defaultTrackColorInput(),
     );
+
   const trackContextMenuItems = (): TimelineContextMenuItem[] => [
     { kind: "label", label: displayTrackName(track) },
     ...(recordingLocked()
@@ -379,8 +411,10 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
       onClick={() => {
         if (suppressTrackClickId() === track.id) {
           setSuppressTrackClickId(undefined);
+
           return;
         }
+
         sidebar().onTrackClick(track.id);
       }}
       onPointerDown={(event) => {
@@ -389,8 +423,10 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
           event.target.closest("[data-track-name]")
         ) {
           startTrackDrag(track.id, event);
+
           return;
         }
+
         if (isTrackDragBlockedTarget(event.target)) return;
         startTrackDrag(track.id, event);
       }}
@@ -497,10 +533,13 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
             }}
             onClick={(event) => {
               event.stopPropagation();
+
               if (suppressTrackClickId() === track.id) {
                 setSuppressTrackClickId(undefined);
+
                 return;
               }
+
               sidebar().onTrackClick(track.id);
             }}
             aria-label={`Select track ${trackNumber()}: ${displayTrackName(track)}`}
@@ -669,6 +708,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                   }
                   onClick={(event) => {
                     event.stopPropagation();
+
                     if (!muteDisabled) sidebar().onToggleMute(track.id);
                   }}
                 >
@@ -693,6 +733,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                   disabled={soloDisabled}
                   onClick={(event) => {
                     event.stopPropagation();
+
                     if (soloDisabled) return;
                     sidebar().onToggleSolo(track.id);
                   }}
@@ -736,6 +777,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                   disabled={recordDisabled}
                   onClick={(event) => {
                     event.stopPropagation();
+
                     if (recordDisabled) return;
                     sidebar().onToggleRecordArm(track.id);
                   }}
@@ -775,6 +817,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                     automation().actions.selectParameter(track.id, {
                       parameterId: "volume",
                     });
+
                     if (!volumeDisabled) {
                       automation().actions.overrideTarget(
                         trackVolumeAutomationTargetKey(track.id),
@@ -872,8 +915,10 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 const left = displayMeterLevel(meter?.left);
                 const right = displayMeterLevel(meter?.right);
                 const leftColor = left >= 0.98 ? "bg-meter-clipping" : "bg-meter-safe";
+
                 const rightColor =
                   right >= 0.98 ? "bg-meter-clipping" : "bg-meter-safe";
+
                 return (
                   <>
                     <div class="relative h-full w-1 overflow-hidden bg-black/75">
@@ -920,13 +965,16 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
             {(targetKey) => {
               const envelope = () =>
                 automation().envelopes.byTargetKey.get(targetKey);
+
               const selection = () => {
                 const currentEnvelope = envelope();
+
                 if (currentEnvelope)
                   return {
                     parameterId: currentEnvelope.parameterId,
                     effectInstanceId: currentEnvelope.target.effectInstanceId,
                   };
+
                 return (
                   getAutomationParameterOptionsForTarget(
                     automation().lanes.effectInstancesByOwnerKey[track.id] ?? [],
@@ -939,6 +987,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                   ) ?? { parameterId: "volume" }
                 );
               };
+
               return (
                 <div
                   class="track-expanded-row-grid grid items-center gap-x-4 border-b border-red-500/20 px-2"
@@ -991,6 +1040,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
       ) : null}
     </div>
   );
+
   return (
     <TimelineContextMenu items={trackContextMenuItems}>
       {row}

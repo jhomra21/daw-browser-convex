@@ -14,7 +14,9 @@ export const listLatest = query({
       .withIndex("by_room_createdAt", (q) => q.eq("projectId", projectId))
       .order("desc")
       .take(Math.floor(Math.max(1, Math.min(500, limit ?? 200))));
+
     const recent = rows.reverse();
+
     return recent;
   },
 });
@@ -29,6 +31,7 @@ export const send = mutation({
   handler: async (ctx, { projectId, content, senderName }) => {
     const senderUserId = await requireAuthenticatedUserId(ctx);
     const text = content.trim();
+
     if (!text) return null;
 
     await requireProjectAccess(ctx, projectId, senderUserId);

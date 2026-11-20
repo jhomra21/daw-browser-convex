@@ -59,12 +59,14 @@ const createManagedWritable = (
 ): WritableStream<StreamTargetChunk> => {
   if (!target.close && !target.abort) return target.writable
   let writer: WritableStreamDefaultWriter<StreamTargetChunk> | undefined
+
   return new WritableStream<StreamTargetChunk>({
     start() {
       writer = target.writable.getWriter()
     },
     write(chunk) {
       if (!writer) throw new Error('Export stream writer was not initialized.')
+
       return writer.write(chunk)
     },
     close() {
@@ -72,6 +74,7 @@ const createManagedWritable = (
     },
     abort(reason) {
       writer?.releaseLock()
+
       return abortTarget(reason)
     },
   })
@@ -85,12 +88,15 @@ const createEncodeTarget = (target: EncodeAudioBufferTarget | undefined): Encode
       abort: async () => {},
     }
   }
+
   let aborted = false
+
   const abortTarget = async (reason?: ExportAbortReason) => {
     if (aborted) return
     aborted = true
     await target.abort?.(reason)
   }
+
   return {
     target: new StreamTarget(createManagedWritable(target, abortTarget), { chunked: true }),
     close: target.close ?? (async () => {}),
@@ -100,6 +106,7 @@ const createEncodeTarget = (target: EncodeAudioBufferTarget | undefined): Encode
 
 const getBufferTargetBlob = (target: Target, mimeType: string): Blob | undefined => {
   if (!(target instanceof BufferTarget) || !target.buffer) return
+
   return new Blob([target.buffer], { type: mimeType })
 }
 
@@ -113,15 +120,19 @@ const validateAudioChunk = (
     || !Number.isSafeInteger(chunk.length) || chunk.length <= 0) {
     throw new Error('Export audio chunk metadata is invalid.')
   }
+
   for (let channel = 0; channel < chunk.numberOfChannels; channel += 1) {
     const channelData = chunk.getChannelData(channel)
+
     if (channelData.length !== chunk.length) {
       throw new Error('Export audio chunk channel data is invalid.')
     }
   }
+
   if (sampleRate !== undefined && chunk.sampleRate !== sampleRate) {
     throw new Error('Export audio chunk sample rate changed during encoding.')
   }
+
   if (channelCount !== undefined && chunk.numberOfChannels !== channelCount) {
     throw new Error('Export audio chunk channel count changed during encoding.')
   }
@@ -136,27 +147,34 @@ const quantizeAudioChunk = (
     length: chunk.length,
     sampleRate: chunk.sampleRate,
   })
+
   for (let channel = 0; channel < chunk.numberOfChannels; channel += 1) {
     const source = chunk.getChannelData(channel)
     const destination = output.getChannelData(channel)
     const quantize = quantizers[channel]
+
     if (!quantize) throw new Error('Export WAV quantizer channel is missing.')
+
     for (let frame = 0; frame < chunk.length; frame += 1) destination[frame] = quantize(source[frame] ?? 0)
   }
+
   return output
 }
 
 function* splitAudioBuffer(buffer: AudioBuffer, maximumFrames: number): Generator<AudioBuffer> {
   for (let startFrame = 0; startFrame < buffer.length; startFrame += maximumFrames) {
     const frameCount = Math.min(maximumFrames, buffer.length - startFrame)
+
     const chunk = new AudioBuffer({
       numberOfChannels: buffer.numberOfChannels,
       length: frameCount,
       sampleRate: buffer.sampleRate,
     })
+
     for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
       chunk.getChannelData(channel).set(buffer.getChannelData(channel).subarray(startFrame, startFrame + frameCount))
     }
+
     yield chunk
   }
 }
@@ -176,27 +194,34 @@ export async function encodeAudioChunks(
     options.onWrite?.(sizeBytes)
   })
   const wav = options.wav ?? { codec: 'pcm-s16', dither: 'none' }
+
   const src = new AudioBufferSource({
     codec: format === 'wav' ? wav.codec : getExportAudioCodec(format),
     quality: getExportAudioQuality(format, options.bitrate),
   })
+
   let sampleRate: number | undefined
   let channelCount: number | undefined
   let totalFrames = 0
   let quantizers: WavQuantizer[] | undefined
+
   try {
     throwIfAborted(options.signal)
     output.addAudioTrack(src)
     await output.start()
+
     for await (const chunk of chunks) {
       throwIfAborted(options.signal)
       validateAudioChunk(chunk, sampleRate, channelCount)
       sampleRate ??= chunk.sampleRate
       channelCount ??= chunk.numberOfChannels
+
       if (totalFrames > Number.MAX_SAFE_INTEGER - chunk.length) {
         throw new Error('Export audio frame count exceeds exact JavaScript integer range.')
       }
+
       totalFrames += chunk.length
+
       if (format === 'wav' && wav.codec !== 'pcm-f32') {
         quantizers ??= Array.from(
           { length: chunk.numberOfChannels },
@@ -207,9 +232,11 @@ export async function encodeAudioChunks(
         await src.add(chunk)
       }
     }
+
     if (sampleRate === undefined || channelCount === undefined || totalFrames === 0) {
       throw new Error('Export audio chunk stream produced no audio frames.')
     }
+
     src.close()
     await output.finalize()
     throwIfAborted(options.signal)
@@ -218,11 +245,16 @@ export async function encodeAudioChunks(
     if (output.state !== 'canceled' && output.state !== 'finalized') {
       try { await output.cancel() } catch {}
     }
+
     const abortReason = error instanceof Error ? error : String(error)
+
     try { await encodeTarget.abort(abortReason) } catch {}
+
     throw error
   }
+
   const blob = getBufferTargetBlob(encodeTarget.target, metadata.mimeType)
+
   return {
     blob,
     format,
@@ -235,9 +267,12 @@ export async function encodeAudioChunks(
 export async function encodeAudioBuffer(buffer: AudioBuffer, options: EncodeAudioBufferOptions = {}): Promise<ExportResult> {
   const format = options.format ?? 'wav'
   const wav = options.wav ?? { codec: 'pcm-s16', dither: 'none' }
+
   if (format === 'wav' && wav.codec !== 'pcm-f32') {
     const chunkFrames = Math.max(1, Math.round(buffer.sampleRate))
+
     return encodeAudioChunks(splitAudioBuffer(buffer, chunkFrames), options)
   }
+
   return encodeAudioChunks([buffer], options)
 }

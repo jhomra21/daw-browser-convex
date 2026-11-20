@@ -34,6 +34,7 @@ const validateLogicalPcmSize = (input: {
     || !Number.isSafeInteger(input.capturedFrames)
     || input.capturedFrames < 1
   ) throw new Error('Recording PCM size arithmetic is invalid.')
+
   return BigInt(input.capturedFrames) * BigInt(input.channelCount) * BigInt(PCM_BYTES_PER_SAMPLE)
 }
 
@@ -65,17 +66,22 @@ export const encodePlanarFloat32Wav = async (input: {
 }): Promise<{ capturedFrames: number }> => {
   if (input.capturedFrames === 0) throw new Error('Recording contained no audio frames.')
   const format = createWavOutputFormat(input)
+
   const output = new Output({
     format,
     target: new StreamTarget(new WritableStream<StreamTargetChunk>(input.sink)),
   })
+
   const source = new AudioSampleSource({
     codec: 'pcm-f32',
   })
+
   output.addAudioTrack(source)
   let encodedFrames = 0
+
   try {
     await output.start()
+
     for await (const block of input.blocks) {
       if (
         block.frameCount < 1
@@ -83,17 +89,22 @@ export const encodePlanarFloat32Wav = async (input: {
         || block.channels.some((channel) => channel.length !== block.frameCount)
       ) throw new Error('Recording PCM block is invalid.')
       const sampleBytes = block.frameCount * input.channelCount * PCM_BYTES_PER_SAMPLE
+
       if (!Number.isSafeInteger(sampleBytes)) throw new Error('Recording PCM block size arithmetic is invalid.')
       const nextEncodedFrames = encodedFrames + block.frameCount
+
       if (!Number.isSafeInteger(nextEncodedFrames) || nextEncodedFrames > input.capturedFrames) {
         throw new Error('Recording PCM frame count changed.')
       }
+
       const data = new Uint8Array(sampleBytes)
       let offset = 0
+
       for (const channel of block.channels) {
         data.set(new Uint8Array(channel.buffer, channel.byteOffset, channel.byteLength), offset)
         offset += channel.byteLength
       }
+
       const sample = new AudioSample({
         format: 'f32-planar',
         sampleRate: input.sampleRate,
@@ -101,15 +112,19 @@ export const encodePlanarFloat32Wav = async (input: {
         timestamp: encodedFrames / input.sampleRate,
         data,
       })
+
       try {
         await source.add(sample)
       } finally {
         sample.close()
       }
+
       encodedFrames = nextEncodedFrames
     }
+
     if (encodedFrames !== input.capturedFrames) throw new Error('Recording PCM frame count changed.')
     await output.finalize()
+
     return { capturedFrames: encodedFrames }
   } catch (error) {
     await output.cancel().catch(() => undefined)

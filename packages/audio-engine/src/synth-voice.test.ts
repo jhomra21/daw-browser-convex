@@ -16,8 +16,10 @@ describe('synth envelope planning', () => {
   test('creates deterministic bounded white-noise buffers per voice identity and seed key', () => {
     const createBuffer = () => {
       const samples = new Float32Array(16_384)
+
       return Object.assign(Object.create(null), { getChannelData: () => samples })
     }
+
     const context = { createBuffer, sampleRate: 48_000 }
     const first = createSynthNoiseBuffer(context, 1, 60, 'track-a')
     const repeat = createSynthNoiseBuffer(context, 1, 60, 'track-a')
@@ -54,6 +56,7 @@ describe('synth envelope planning', () => {
     const plan = createSynthEnvelopePlan(1, 0.05, {
       attackSec: 0.1, decaySec: 0.2, sustain: 0.4, releaseSec: 0.3,
     })
+
     const events: Array<{ kind: 'set' | 'ramp'; time: number; value: number }> = []
     scheduleSynthEnvelope({
       setValueAtTime: (value, time) => events.push({ kind: 'set', value, time }),
@@ -69,6 +72,7 @@ describe('synth envelope planning', () => {
     const plan = createSynthEnvelopePlan(1, 0.2, {
       attackSec: 0.1, decaySec: 0.2, sustain: 0.4, releaseSec: 0.3,
     })
+
     const events: Array<{ kind: 'set' | 'ramp'; time: number; value: number }> = []
     scheduleSynthEnvelope({
       setValueAtTime: (value, time) => events.push({ kind: 'set', value, time }),
@@ -95,6 +99,7 @@ describe('synth envelope planning', () => {
 
   test('evaluates ADSR and filter envelope automation at note-on only', () => {
     const params = createDefaultSynthParams()
+
     const evaluated = evaluateSynthParamsAtNote(params, [
       {
         id: 'amp-attack',
@@ -123,7 +128,9 @@ describe('synth envelope planning', () => {
       const parameterId = envelope.parameterId.endsWith('amp.attack')
         ? 'amp.attack'
         : 'filter.release'
+
       envelopes.set(parameterId, envelope)
+
       return envelopes
     }, new Map()), 0.5)
 

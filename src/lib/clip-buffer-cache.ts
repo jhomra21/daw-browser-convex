@@ -1,6 +1,7 @@
 import type { Clip } from '@daw-browser/timeline-core/types'
 
 type ClipMediaStatus = NonNullable<Clip['mediaStatus']>
+
 export type EnsureClipBuffer = (
   clipId: string,
   sampleUrl?: string,
@@ -54,10 +55,12 @@ export function createClipBufferCache(input: {
 
   const setEntries = (entries: Iterable<readonly [string, AudioBuffer]>) => {
     let didChange = false
+
     for (const [clipId, buffer] of entries) {
       didChange = clearMediaStatus(clipId) || buffers.get(clipId) !== buffer || didChange
       buffers.set(clipId, buffer)
     }
+
     notifyIfChanged(didChange)
   }
 
@@ -83,6 +86,7 @@ export function createClipBufferCache(input: {
     clear: () => {
       const hadBuffers = buffers.size > 0
       const hadMediaStatus = input.mediaStatus.size > 0
+
       if (!hadBuffers && !hadMediaStatus) return
       buffers.clear()
       input.mediaStatus.clear()

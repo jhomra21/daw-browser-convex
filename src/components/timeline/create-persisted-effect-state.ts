@@ -78,13 +78,16 @@ export function createPersistedEffectState<TRow, TParams>(
 
   const keyForTarget = (targetId: string) => {
     const scopeId = options.scopeId?.()
+
     return scopeId ? `${scopeId}:${targetId}` : targetId
   }
+
   const persistContext = (lifetime: GestureLifetime): PersistedEffectContext => ({
     projectId: lifetime.projectId,
     userId: lifetime.userId,
     projectGeneration: lifetime.generation,
   })
+
   const currentContext = (): PersistedEffectContext => options.createPersistContext?.() ?? {}
 
   // Every release allocates its edit synchronously, so a project's flusher exists before any of its work awaits.
@@ -104,11 +107,13 @@ export function createPersistedEffectState<TRow, TParams>(
   }
 
   const committed = (targetId: string) => remoteByTarget()[keyForTarget(targetId)] ?? options.readVisibleParams?.(targetId)
+
   const owner = createParameterGestureOwner<string, TParams>({
     acceptance: options.acceptance,
     key: keyForTarget,
     scope: () => {
       const context = currentContext()
+
       return { projectId: context.projectId, userId: context.userId, generation: context.projectGeneration ?? 0 }
     },
     exists: (targetId) => committed(targetId) !== undefined,
@@ -128,10 +133,12 @@ export function createPersistedEffectState<TRow, TParams>(
     announce: (record) => options.announce?.(record.target, record.latest, record.edit),
     allocateEdit: (targetId, from, to) => {
       ensureProjectFlusher(currentContext().projectId)
+
       return options.allocateEdit?.(targetId, from, to)
     },
     onError: (stage, cause, record) => {
       const context = record ? persistContext(record.lifetime) : currentContext()
+
       if (stage === 'persist') options.onPersistError?.(cause instanceof Error ? cause : new Error('The effect could not be saved.'), context)
       else if (record) options.onReleaseFailed?.(cause instanceof Error ? cause : new Error("The effect could not be applied to playback."), context)
       else options.onEngineApplyError?.(cause, context)
@@ -142,10 +149,12 @@ export function createPersistedEffectState<TRow, TParams>(
     const key = keyForTarget(targetId)
     setRemoteByTarget((prev) => {
       const current = prev[key]
+
       if (
         current === nextParams
         || (current !== undefined && nextParams !== undefined && options.serializeParams(current) === options.serializeParams(nextParams))
       ) return prev
+
       return { ...prev, [key]: nextParams }
     })
     owner.external(targetId, nextParams, through)
@@ -168,12 +177,16 @@ export function createPersistedEffectState<TRow, TParams>(
 
   createEffect(() => {
     const targetId = options.targetId()
+
     if (!targetId) return
     const row = options.row()
+
     if (row === undefined) {
       if (options.isMissingRowLoaded?.()) untrack(() => syncRemote(targetId, undefined))
+
       return
     }
+
     const params = options.readQueryParams(row)
     const through = options.readQueryThrough?.(row) ?? 0
     untrack(() => syncRemote(targetId, params, through))
@@ -186,16 +199,20 @@ export function createPersistedEffectState<TRow, TParams>(
 
   const params = createMemo(() => {
     const targetId = options.targetId()
+
     return targetId ? owner.effective(targetId) : undefined
   })
+
   const addForTarget = (targetId: string) => {
     const initial = options.createInitialParams(targetId)
+
     if (initial) owner.set(targetId, initial)
   }
 
   return {
     add: () => {
       const targetId = options.targetId()
+
       if (targetId) addForTarget(targetId)
     },
     addForTarget,
@@ -206,14 +223,17 @@ export function createPersistedEffectState<TRow, TParams>(
     readProvisionalForTarget: owner.provisional,
     reset: () => {
       const targetId = options.targetId()
+
       if (!targetId) return
       const initial = options.createInitialParams(targetId)
+
       if (initial) owner.set(targetId, initial)
     },
     setForTarget: owner.set,
     syncRemoteForTarget: syncRemote,
     update: (updater) => {
       const targetId = options.targetId()
+
       if (targetId) owner.write(targetId, updater)
     },
     updateForTarget: owner.write,

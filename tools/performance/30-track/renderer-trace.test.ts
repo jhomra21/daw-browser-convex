@@ -28,6 +28,7 @@ test("trace output retains only allowlisted names and numeric timings", () => {
     { cat: "v8", name: "V8.Execute", ts: 150, dur: 20, args: { token: "secret" } },
     { cat: "devtools.timeline", name: "secret", ts: 170, args: { data: "secret" } },
   ] }))
+
   expect(output).toEqual({ events: [{ name: "RunTask", ts: 100, dur: 40 }, { name: "V8.Execute", ts: 150, dur: 20 }], counts: { RunTask: 1, "V8.Execute": 1 } })
   expect(JSON.stringify(output)).not.toContain("secret")
 })

@@ -39,9 +39,11 @@ const isToggleBrowserShortcut = (
   context: ShortcutResolutionContext,
 ): boolean => {
   if (context.editableTarget) return false;
+
   try {
     const normalized = normalizeShortcutChord(chord);
     const declared = normalizeShortcutChord(builtinViewToggleBrowserShortcut.chord);
+
     return normalized.mod === declared.mod
       && normalized.alt === declared.alt
       && normalized.shift === declared.shift
@@ -59,13 +61,16 @@ export const createTimelineExtensionHost = (
   const definition = createBuiltinViewToggleBrowser(views);
   const manager = createBuiltinExtensionManager([definition], kernel);
   let state: "activating" | "active" | "failed" | "disposed" = "activating";
+
   const activation = manager.enable(definition.id).then(
     () => {
       if (state === "activating") state = "active";
+
       return true;
     },
     () => {
       if (state === "activating") state = "failed";
+
       return false;
     },
   );
@@ -75,14 +80,19 @@ export const createTimelineExtensionHost = (
     context: ShortcutResolutionContext,
   ): boolean => {
     if (state === "disposed") return false;
+
     if (state !== "active") {
       if (!isToggleBrowserShortcut(chord, context)) return false;
       views.browser.toggle();
+
       return true;
     }
+
     const match = kernel.resolveShortcuts(chord, context)[0];
+
     if (!match) return false;
     void kernel.executeCommand(match.commandId).catch(() => {});
+
     return true;
   };
 
@@ -102,8 +112,10 @@ export const createTimelineExtensionHost = (
 
   const executeMenuCommand = async (commandId: string): Promise<boolean> => {
     const contribution = contributions().find((entry) => entry.commandId === commandId);
+
     if (!contribution) return false;
     await kernel.executeCommand(commandId);
+
     return true;
   };
 

@@ -10,6 +10,7 @@ const createInput = (
 ) => {
   const listeners = new Set<(event: FakeMessage) => void>()
   let closeCount = 0
+
   return {
     id,
     name: `Name ${id}`,
@@ -19,6 +20,7 @@ const createInput = (
     removeEventListener: (_type: "midimessage", listener: (event: FakeMessage) => void) => listeners.delete(listener),
     close: () => {
       closeCount += 1
+
       return close()
     },
     emit: (data: number[]) => {
@@ -31,6 +33,7 @@ const createInput = (
 
 const createAccess = (inputs: ReturnType<typeof createInput>[]) => {
   const listeners = new Set<() => void>()
+
   return {
     inputs: new Map(inputs.map((input) => [input.id, input])),
     addEventListener: (_type: "statechange", listener: () => void) => listeners.add(listener),
@@ -48,6 +51,7 @@ const createController = (
   const statuses: MidiAccessStatus[] = []
   const inputs: MidiInputDescriptor[][] = []
   const persistedIds: string[][] = []
+
   const controller = createMidiAccessController({
     isSupported: () => true,
     requestAccess: async () => access,
@@ -56,6 +60,7 @@ const createController = (
     onStatusChange: (status) => statuses.push(status),
     onInputsChange: (nextInputs) => inputs.push(nextInputs),
   })
+
   return { controller, statuses, inputs, persistedIds }
 }
 
@@ -76,6 +81,7 @@ describe("createMidiAccessController", () => {
 
   test("reports unsupported and denied access without attaching inputs", async () => {
     const statuses: MidiAccessStatus[] = []
+
     const unsupported = createMidiAccessController({
       isSupported: () => false,
       requestAccess: async () => createAccess([]),
@@ -84,10 +90,12 @@ describe("createMidiAccessController", () => {
       onStatusChange: (status) => statuses.push(status),
       onInputsChange: () => {},
     })
+
     await unsupported.requestAccess()
     expect(statuses).toEqual(["unsupported"])
 
     const deniedStatuses: MidiAccessStatus[] = []
+
     const denied = createMidiAccessController({
       isSupported: () => true,
       requestAccess: async () => Promise.reject(new DOMException("", "NotAllowedError")),
@@ -96,6 +104,7 @@ describe("createMidiAccessController", () => {
       onStatusChange: (status) => deniedStatuses.push(status),
       onInputsChange: () => {},
     })
+
     await denied.requestAccess()
     expect(deniedStatuses).toEqual(["idle", "requesting", "denied"])
   })
@@ -166,6 +175,7 @@ describe("createMidiAccessController", () => {
     const input = createInput("input-a", "connected", async () => {
       throw new Error("close failed")
     })
+
     const { controller } = createController(createAccess([input]), ["input-a"])
 
     await controller.requestAccess()

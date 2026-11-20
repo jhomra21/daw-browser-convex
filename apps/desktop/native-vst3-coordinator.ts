@@ -21,7 +21,9 @@ import { preflightNativeVst3Worker } from "./vst3-preflight"
 import type { HostEvidence } from "./ae08-evidence"
 
 type Attachment = NativeExternalAttachmentPlan["attachments"][number]
+
 type PreflightAttachment = ResolvedVst3Attachment & { stateRevision: number }
+
 type CapturedVst3State = { bytes: Uint8Array; sha256: string }
 
 type NativeVst3CoordinatorFailureCode =
@@ -55,6 +57,7 @@ const decodeCapturedVst3State = (value: CapturedVst3State): CapturedVst3State | 
   if (value.bytes.byteLength > maxVst3WorkerStateBytes
     || !sha256Pattern.test(value.sha256)
     || createHash("sha256").update(value.bytes).digest("hex") !== value.sha256) return undefined
+
   return value
 }
 
@@ -62,6 +65,7 @@ const sameBuses = (left: Attachment["inputBuses"], right: Attachment["inputBuses
   left.length === right.length
   && left.every((bus, index) => {
     const candidate = right[index]
+
     return candidate !== undefined
       && bus.name === candidate.name
       && bus.channels === candidate.channels
@@ -76,6 +80,7 @@ const sameParameters = (
   left.length === right.length
   && left.every((parameter, index) => {
     const candidate = right[index]
+
     return candidate !== undefined
       && parameter.id === candidate.id
       && parameter.title === candidate.title
@@ -91,12 +96,15 @@ const sameParameters = (
 
 const layoutFor = (buses: readonly { enabled: boolean; channels: number }[]): "mono" | "stereo" | undefined => {
   const enabled = buses.filter((bus) => bus.enabled)
+
   if (enabled.length !== 1) return undefined
+
   return enabled[0].channels === 1 ? "mono" : enabled[0].channels === 2 ? "stereo" : undefined
 }
 
 const matchesManifest = (attachment: Attachment, result: Extract<NativeVst3PreflightResult, { status: "available" }>) => {
   const manifest = result.hello.manifest
+
   return result.hello.instanceId === attachment.instanceId
     && manifest.role === attachment.role
     && sameBuses(manifest.inputBuses, attachment.inputBuses)
@@ -125,18 +133,24 @@ const resolveAttachment = (
     binaryFingerprint: attachment.binaryFingerprint,
     scannerCatalogVersion: attachment.catalogIdentity.scannerCatalogVersion,
   })
+
   const inputLayout = attachment.role === "instrument"
     ? attachment.inputBuses.some((bus) => bus.enabled) ? undefined : "none"
     : layoutFor(attachment.inputBuses)
+
   const outputLayout = layoutFor(attachment.outputBuses)
+
   const expectedInputChannels = inputLayout === "none"
     ? 0
     : inputLayout === "mono" ? 1 : inputLayout === "stereo" ? 2 : undefined
+
   const expectedOutputChannels = outputLayout === "mono" ? 1 : outputLayout === "stereo" ? 2 : undefined
+
   if (!eligibility || eligibility.role !== attachment.role
     || !inputLayout || !outputLayout
     || expectedInputChannels !== attachment.workerTransport.inputChannels
     || expectedOutputChannels !== attachment.workerTransport.outputChannels) return undefined
+
   return {
     graphNodeId: BigInt(attachment.nativeGraphNodeId),
     stageIndex: attachment.role === "instrument" ? 0 : attachment.stageIndex,
@@ -203,16 +217,20 @@ export const nativeVst3InstanceEvent = (
   reportDefect: (defect: NativeVst3Defect) => void = reportDefectToConsole,
 ): DesktopVstInstanceEvent | undefined => {
   const { instanceId } = notification
+
   switch (notification.kind) {
     case "latency":
       return { kind: "latency", instanceId, latencyFrames: notification.value }
     case "fault":
       if (nativeVst3PluginFaultOrigins.has(notification.value & 0xff)) return { kind: "failed", instanceId }
+
       if ((notification.value & 0xff) === nativeVst3LaunchNotTrustedFaultOrigin) return { kind: "launch-not-trusted", instanceId }
       reportDefect({ source: "worker-fault", instanceId, detail: `origin ${notification.value & 0xff}` })
+
       return undefined
     case "miss":
       reportDefect({ source: "worker-miss", instanceId, detail: "deadline miss" })
+
       return undefined
     default:
       return undefined
@@ -220,6 +238,7 @@ export const nativeVst3InstanceEvent = (
 }
 
 type AvailablePreflight = Extract<NativeVst3PreflightResult, { status: "available" }>
+
 type LedgerEntry = {
   plugin: string
   binding: string
@@ -255,20 +274,25 @@ export const createNativeVst3AttachmentLedger = (
   const staged = new Map<string, LedgerEntry>()
   const parked = new Map<string, { plugin: string; at: number }>()
   const liveCaptures = new Map<string, string>()
+
   const isParked = (instanceId: string, plugin: string) => {
     const entry = parked.get(instanceId)
+
     return entry !== undefined
       && entry.plugin === plugin
       && now() - entry.at < parkingLimits.parkedAgeMs
   }
+
   return {
     // Splits a plan into new instances, changed instances (detached first), staged ones it dropped and active ones it removed.
     reconcile(entries: ReadonlyMap<string, LedgerEntry>) {
       const attach: string[] = []
       const replace: string[] = []
+
       for (const [instanceId, entry] of entries) {
         const holder = staged.has(instanceId) ? staged : active
         const current = holder.get(instanceId)
+
         if (current === undefined) attach.push(instanceId)
         else if (current.plugin !== entry.plugin || current.binding !== entry.binding) replace.push(instanceId)
         else if (current.stateSha256 !== entry.stateSha256) {
@@ -277,8 +301,10 @@ export const createNativeVst3AttachmentLedger = (
           else replace.push(instanceId)
         }
       }
+
       const removed = [...active.keys()].filter((instanceId) => !entries.has(instanceId))
       const dropped = [...staged.keys()].filter((instanceId) => !entries.has(instanceId))
+
       return { attach, replace, removed, dropped: dropped.filter((instanceId) => !active.has(instanceId)) }
     },
     isParked,
@@ -301,14 +327,17 @@ export const createNativeVst3AttachmentLedger = (
     // restoring plan loads it anew.
     release: async (instanceId: string, transactionToken?: string) => {
       const plugin = active.get(instanceId)?.plugin
+
       if (plugin === undefined) return
       const { status } = await host.detachVst(instanceId, transactionToken)
       active.delete(instanceId)
       liveCaptures.delete(instanceId)
+
       if (status === "refused") return
       // Deleted first so the Map's insertion order stays the parking order the eviction below relies on.
       parked.delete(instanceId)
       parked.set(instanceId, { plugin, at: now() })
+
       for (const oldest of [...parked.keys()].slice(0, Math.max(0, parked.size - parkingLimits.maximumParkedInstances))) parked.delete(oldest)
     },
     // The revision is live: staged instances are active.
@@ -331,6 +360,7 @@ export const createNativeVst3SessionLedger = () => {
   let ledger: NativeVst3AttachmentLedger | undefined
   // Held beside the ledger because an insertion's preflight arrives before the session has coordinated any plug-in.
   let verdicts = new Map<string, AvailablePreflight>()
+
   return {
     begin: () => {
       ledger = undefined
@@ -372,35 +402,44 @@ export const coordinateNativeVst3Attachments = async (
 ): Promise<NativeVst3CoordinatorResult> => {
   const reportDefect = input.reportDefect ?? reportDefectToConsole
   let result: NativeVst3CoordinatorResult
+
   try {
     result = await coordinateDelta(input)
   } catch (error) {
     reportDefect({ source: "attachment-command", detail: error instanceof Error ? error.message : "unknown" })
     throw error
   }
+
   if (!result.ok && nativeVst3CoordinatorFailureOrigin(result.code) === "host") {
     reportDefect({ source: `attachment-${result.code}`, instanceId: result.instanceId, detail: result.message })
   }
+
   return result
 }
 
 const coordinateDelta = async (input: CoordinationInput): Promise<NativeVst3CoordinatorResult> => {
   let plan: NativeExternalAttachmentPlan
+
   try {
     plan = decodeNativeExternalAttachmentPlan(input.serializedPlan)
   } catch {
     return { ok: false, code: "invalid-plan", message: "The native external attachment plan is invalid." }
   }
+
   let catalog: PluginCatalogData
+
   try {
     catalog = await input.catalogStore.load()
   } catch {
     return { ok: false, code: "catalog-unavailable", message: "The trusted native plug-in catalog is unavailable." }
   }
+
   const resolved: Array<{ attachment: Attachment; native: PreflightAttachment }> = []
   const stateRequired = new Set<string>()
+
   for (const attachment of canonicalAttachments(plan.attachments)) {
     const native = resolveAttachment(catalog, attachment)
+
     if (!native) {
       return {
         ok: false,
@@ -409,23 +448,30 @@ const coordinateDelta = async (input: CoordinationInput): Promise<NativeVst3Coor
         instanceId: attachment.instanceId,
       }
     }
+
     resolved.push({ attachment, native })
   }
+
   const ledger = input.ledger
+
   const entries = ledger && new Map(resolved.map(({ attachment }) => [
     attachment.instanceId,
     ledgerEntry(attachment, input.capturedVstStates?.get(attachment.instanceId)?.sha256),
   ]))
+
   const delta = ledger && entries ? ledger.reconcile(entries) : undefined
   const changed = delta && new Set([...delta.attach, ...delta.replace])
   const pending = changed ? resolved.filter((candidate) => changed.has(candidate.attachment.instanceId)) : resolved
   const runPreflight = input.preflight ?? preflightNativeVst3Worker
+
   for (const candidate of pending) {
     const instanceId = candidate.attachment.instanceId
     const entry = entries?.get(instanceId)
+
     if (entry && ledger?.isParked(instanceId, entry.plugin)) continue
     const key = verdictKey(candidate.native, input.sampleRateHz)
     const cached = ledger?.verdict(key)
+
     const result = cached
       ? { ...cached, hello: { ...cached.hello, instanceId, manifest: { ...cached.hello.manifest, stateRevision: candidate.native.stateRevision } } }
       : await runPreflight({
@@ -435,6 +481,7 @@ const coordinateDelta = async (input: CoordinationInput): Promise<NativeVst3Coor
         evidence: input.evidence,
         workerEnvironment: input.workerEnvironment,
       })
+
     if (result.status === "unavailable") {
       return {
         ok: false,
@@ -443,6 +490,7 @@ const coordinateDelta = async (input: CoordinationInput): Promise<NativeVst3Coor
         instanceId,
       }
     }
+
     if (!matchesManifest(candidate.attachment, result)) {
       return {
         ok: false,
@@ -451,7 +499,9 @@ const coordinateDelta = async (input: CoordinationInput): Promise<NativeVst3Coor
         instanceId,
       }
     }
+
     if (ledger && !cached) ledger.rememberVerdict(key, result)
+
     if (
       !candidate.attachment.bypassed
       && result.hello.manifest.supportsState === true
@@ -461,9 +511,12 @@ const coordinateDelta = async (input: CoordinationInput): Promise<NativeVst3Coor
       stateRequired.add(instanceId)
     }
   }
+
   const validatedStates = new Map<string, CapturedVst3State>()
+
   for (const candidate of pending) {
     const captured = input.capturedVstStates?.get(candidate.attachment.instanceId)
+
     if (!captured) {
       if (stateRequired.has(candidate.attachment.instanceId)) {
         return {
@@ -473,8 +526,10 @@ const coordinateDelta = async (input: CoordinationInput): Promise<NativeVst3Coor
           instanceId: candidate.attachment.instanceId,
         }
       }
+
       continue
     }
+
     if (!decodeCapturedVst3State(captured)) {
       return {
         ok: false,
@@ -483,29 +538,37 @@ const coordinateDelta = async (input: CoordinationInput): Promise<NativeVst3Coor
         instanceId: candidate.attachment.instanceId,
       }
     }
+
     validatedStates.set(candidate.attachment.instanceId, captured)
   }
+
   try {
     // The playback controller owns the encompassing graph transaction. Attach
     // only after preflight so graph publication and VST attachment commit
     // atomically as one native session.
     for (const instanceId of delta?.dropped ?? []) await ledger?.detach(instanceId, input.transactionToken)
+
     for (const instanceId of delta?.removed ?? []) await ledger?.release(instanceId, input.transactionToken)
+
     for (const candidate of pending) {
       const instanceId = candidate.attachment.instanceId
       const { stateRevision: _stateRevision, ...attachment } = candidate.native
       const state = validatedStates.get(instanceId)
+
       if (delta?.replace.includes(instanceId)) await ledger?.detach(instanceId, input.transactionToken)
       await input.audioHost.attachVst(
         state ? { ...attachment, initialState: state } : attachment,
         input.transactionToken,
       )
       const entry = entries?.get(instanceId)
+
       if (entry) ledger?.stage(instanceId, entry)
     }
+
     return { ok: true, attached: pending.length }
   } catch (error) {
     if (error instanceof NativeAudioHostCommandError) throw error
+
     return { ok: false, code: "native-transaction-failed", message: "The native VST3 attachment transaction failed." }
   }
 }
@@ -524,52 +587,69 @@ export const resolveNativeVst3AttachmentPlan = async (input: {
   const catalog = await input.catalogStore.load()
   input.signal?.throwIfAborted()
   const resolved: Array<{ attachment: Attachment; native: PreflightAttachment }> = []
+
   for (const attachment of canonicalAttachments(input.plan.attachments)) {
     const native = resolveAttachment(catalog, attachment)
+
     if (!native) throw new Error(`Native VST3 attachment "${attachment.instanceId}" is stale or untrusted.`)
     resolved.push({ attachment, native })
   }
+
   const output: ResolvedVst3Attachment[] = []
+
   for (const candidate of resolved) {
     input.signal?.throwIfAborted()
+
     const result = await (input.preflight ?? preflightNativeVst3Worker)({
       workerPath: input.workerPath,
       attachment: candidate.native,
       sampleRateHz: input.sampleRateHz,
       signal: input.signal,
     })
+
     if (result.status === "unavailable" || !matchesManifest(candidate.attachment, result)) {
       throw new Error(`Native VST3 attachment "${candidate.attachment.instanceId}" failed preflight.`)
     }
+
     if (candidate.attachment.bypassed) {
       output.push(candidate.native)
       continue
     }
+
     if (result.hello.manifest.supportsState !== true) {
       // A plugin that explicitly lacks the state API is still exportable:
       // instantiate its defaults and apply the persisted initial parameters.
       output.push(candidate.native)
       continue
     }
+
     const capturedState = input.capturedVstStates?.get(candidate.attachment.instanceId)
+
     if (!capturedState && !input.stateReader) {
       throw new Error(`Native VST3 attachment "${candidate.attachment.instanceId}" cannot be exported without state capture.`)
     }
+
     let initialState = capturedState
+
     if (!initialState && input.stateReader) {
       let captured: CapturedVst3State
+
       try {
         captured = await input.stateReader(candidate.attachment.instanceId, input.signal)
       } catch (error) {
         const detail = error instanceof Error ? ` ${error.message}` : ""
         throw new Error(`Native VST3 attachment "${candidate.attachment.instanceId}" state capture failed.${detail}`)
       }
+
       initialState = decodeCapturedVst3State(captured)
     }
+
     if (!initialState) {
       throw new Error(`Native VST3 attachment "${candidate.attachment.instanceId}" state capture failed. The captured state is malformed.`)
     }
+
     output.push({ ...candidate.native, initialState })
   }
+
   return output
 }

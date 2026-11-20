@@ -14,6 +14,7 @@ test('streams stored entries in bounded chunks and reads them from slices', asyn
   })
   const archive = new Blob(chunks.map((chunk) => Uint8Array.from(chunk).buffer))
   const result = new Map<string, Blob>()
+
   for await (const entry of readStoredZipEntries(archive)) result.set(entry.name, entry.file)
   expect(await result.get('manifest.json')?.text()).toBe('{"version":2}')
   expect(new Uint8Array(await result.get('assets/audio')!.arrayBuffer())).toEqual(bytes(42, 150_000))
@@ -23,9 +24,11 @@ test('rejects truncated, corrupt, duplicate, and unsupported archives', async ()
   const chunks: Uint8Array[] = []
   await writeStoredZip([{ name: 'a', file: new Blob(['hello']) }], (chunk) => { chunks.push(chunk) })
   const original = new Uint8Array(await new Blob(chunks.map((chunk) => Uint8Array.from(chunk).buffer)).arrayBuffer())
+
   const read = async (data: Uint8Array) => {
     for await (const entry of readStoredZipEntries(new Blob([Uint8Array.from(data).buffer]))) await entry.file.arrayBuffer()
   }
+
   await expect(read(original.slice(0, -3))).rejects.toThrow()
   const corrupt = original.slice()
   corrupt[31] ^= 1

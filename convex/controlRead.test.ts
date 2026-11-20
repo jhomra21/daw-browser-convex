@@ -29,6 +29,7 @@ const setup = async () => {
     await ctx.db.insert("ownerships", { projectId, ownerUserId: editor, role: "editor" });
     await ctx.db.insert("ownerships", { projectId, ownerUserId: viewer, role: "viewer" });
   });
+
   return t;
 };
 
@@ -82,6 +83,7 @@ test("owners, editors, and viewers can read snapshots and history while anonymou
 
 test("history uses newest-first bounded Convex cursor pagination without public ledger leakage", async () => {
   const t = await setup();
+
   for (let index = 0; index < 101; index += 1) {
     await seedCommit(t, index);
   }
@@ -100,6 +102,7 @@ test("history uses newest-first bounded Convex cursor pagination without public 
     cursor: first.continueCursor,
     limit: 100,
   });
+
   expect(second.entries).toHaveLength(51);
   expect(second.isDone).toBe(true);
   const ids = [...first.entries, ...second.entries].map((entry: { id: string }) => entry.id);
@@ -111,6 +114,7 @@ test("history uses newest-first bounded Convex cursor pagination without public 
 
 test("history rejects malformed control query arguments with structured errors", async () => {
   const t = await setup();
+
   for (const args of [
     { projectId: "" },
     { projectId, cursor: "invalid\ncursor" },
@@ -152,6 +156,7 @@ test("commits retain normal and trusted bridge actor attribution without request
     .withIndex("by_project_createdAt", (query) => query.eq("projectId", projectId))
     .order("asc")
     .collect());
+
   expect(commits.map((commit) => ({
     subject: commit.actorSubject,
     issuer: commit.actorIssuer,

@@ -6,5 +6,6 @@ test('runs the timeline viewport regression with Solid browser conditions', () =
     stdout: 'pipe',
     stderr: 'pipe',
   })
+
   expect(result.exitCode).toBe(0)
 })

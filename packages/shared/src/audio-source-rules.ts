@@ -29,27 +29,33 @@ type ClipAudioSourceFields = {
 
 export function sanitizePositiveNumber(value: number | undefined) {
   if (value === undefined || !Number.isFinite(value) || value <= 0) return undefined
+
   return value
 }
 
 export function sanitizePositiveInt(value: number | undefined) {
   const normalized = sanitizePositiveNumber(value)
+
   if (normalized === undefined) return undefined
+
   return Math.max(1, Math.round(normalized))
 }
 
 export function sanitizeAudioAssetKey(value: string | undefined) {
   const trimmed = value?.trim()
+
   return trimmed && trimmed.length > 0 ? trimmed : undefined
 }
 
 export function sanitizeAudioSourceKind(value: string | undefined): AudioSourceKind | undefined {
   if (value === 'upload' || value === 'url' || value === 'recording') return value
+
   return undefined
 }
 
 function defaultSampleUrlFromAssetKey(assetKey: string | undefined) {
   const key = defaultSampleKeyFromAssetKey(assetKey)
+
   return key ? defaultSampleUrl(key) : undefined
 }
 
@@ -75,10 +81,16 @@ export function normalizeAudioSourceMetadataPatch(
 
 export function buildClipAudioSourceFields(metadata: AudioSourceMetadataPatch): ClipAudioSourceFields {
   const patch: ClipAudioSourceFields = {}
+
   if (metadata.assetKey !== undefined) patch.sourceAssetKey = metadata.assetKey
+
   if (metadata.sourceKind !== undefined) patch.sourceKind = metadata.sourceKind
+
   if (metadata.durationSec !== undefined) patch.sourceDurationSec = metadata.durationSec
+
   if (metadata.sampleRate !== undefined) patch.sourceSampleRate = metadata.sampleRate
+
   if (metadata.channelCount !== undefined) patch.sourceChannelCount = metadata.channelCount
+
   return patch
 }

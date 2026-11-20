@@ -44,6 +44,7 @@ function Button(
   props: PolymorphicProps<ValidComponent, ButtonProps<ValidComponent>>,
 ): JSX.Element {
   const [local, others] = splitProps(props, ["variant", "size", "class"])
+
   return (
     <ButtonPrimitive.Root
       class={cn(buttonVariants({ variant: local.variant, size: local.size }), local.class)}

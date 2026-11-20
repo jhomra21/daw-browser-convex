@@ -12,13 +12,17 @@ export const thirtyTrackClipGain = 0.1
 
 // Independent source plan; the committed v2 archive and generator remain unchanged.
 const mixedRateDurations = [3, 10, 30, 60, 120, 360, 600] as const
+
 export const planThirtyTrackMixedRateSources = () => Object.freeze(
   Array.from({ length: thirtyTrackCount }, (_, trackIndex) => {
     const sampleRate = [44_100, 48_000, 96_000][trackIndex % 3]
+
     if (sampleRate === undefined) throw new Error(`Missing source rate for track ${trackIndex}.`)
     const channelCount = trackIndex % 2 === 0 ? 1 : 2
     const durationSec = trackIndex === 0 ? 600 : mixedRateDurations[(trackIndex - 1) % 6]
+
     if (durationSec === undefined) throw new Error(`Missing source duration for track ${trackIndex}.`)
+
     return Object.freeze({
       trackIndex,
       sampleRate,
@@ -36,18 +40,22 @@ export const sampleThirtyTrackMixedRatePage = (
   frameCount: number,
 ): readonly Float32Array[] => {
   const totalFrames = source.sampleRate * source.durationSec
+
   if (!Number.isSafeInteger(startFrame) || !Number.isSafeInteger(frameCount)
     || startFrame < 0 || frameCount < 1 || frameCount > 16_384
     || startFrame + frameCount > totalFrames) {
     throw new RangeError("Mixed-rate page must contain 1–16384 frames within the source.")
   }
+
   if (![44_100, 48_000, 96_000].includes(source.sampleRate)
     || (source.channelCount !== 1 && source.channelCount !== 2)
     || !mixedRateDurations.includes(source.durationSec)) {
     throw new RangeError("Invalid mixed-rate source descriptor.")
   }
+
   return Array.from({ length: source.channelCount }, (_, channel) => {
     const samples = new Float32Array(frameCount)
+
     for (let frame = 0; frame < frameCount; frame += 1) {
       const absoluteFrame = startFrame + frame
       // Integer-period triangular signals remain reproducible across page boundaries.
@@ -55,12 +63,16 @@ export const sampleThirtyTrackMixedRatePage = (
         ? 0.12 * triangle(absoluteFrame, 240) + 0.06 * triangle(absoluteFrame, 60)
         : 0.12 * triangle(absoluteFrame, 160) + 0.06 * triangle(absoluteFrame, 40)
     }
+
     return samples
   })
 }
+
 export const thirtyTrackProjectName = "30 Track Performance v2"
 export const thirtyTrackArchiveName = `${thirtyTrackFixtureVersion}.dawproject`
+
 type ThirtyTrackColor = "#ff5f57" | "#febc2e" | "#28c840" | "#4da3ff" | "#a78bfa" | "#f472b6"
+
 const thirtyTrackColors: readonly ThirtyTrackColor[] = Object.freeze([
   "#ff5f57",
   "#febc2e",
@@ -73,9 +85,12 @@ const thirtyTrackColors: readonly ThirtyTrackColor[] = Object.freeze([
 const tierTwoPitches: readonly [60, 64, 67, 71] = [60, 64, 67, 71]
 
 const benchmarkName = (index: number) => `Benchmark ${String(index + 1).padStart(2, "0")}`
+
 const colorAt = (index: number): ThirtyTrackColor => {
   const color = thirtyTrackColors[index % thirtyTrackColors.length]
+
   if (color === undefined) throw new Error(`Missing 30-track color at index ${index}.`)
+
   return color
 }
 
@@ -249,7 +264,9 @@ const tuple = <Items extends readonly unknown[]>(...items: Items): Readonly<Item
 const tierTwoNotes: ThirtyTrackSemanticManifest["tier2"]["midiClip"]["notes"] = Object.freeze(
   Array.from({ length: 16 }, (_, beat) => {
     const pitch = tierTwoPitches[beat % tierTwoPitches.length]
+
     if (pitch === undefined) throw new Error(`Missing Tier 2 pitch at beat ${beat}.`)
+
     return Object.freeze({
       id: `tier2-note-${String(beat).padStart(2, "0")}`,
       beat,
@@ -264,6 +281,7 @@ const tierTwoNotes: ThirtyTrackSemanticManifest["tier2"]["midiClip"]["notes"] = 
 const tierTwoSynthParams = synthParamsSchema.parse({ ...createDefaultSynthParams(), polyphony: 1 })
 const tierTwoSaturatorParams = saturatorParamsSchema.parse(AUDIO_EFFECT_CONTRACTS.saturator.createDefaultParams())
 const utilityDefaults = AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams()
+
 const tierTwoUtilityParams = utilityParamsSchema.parse({
   ...utilityDefaults,
   state: { ...utilityDefaults.state, gainDb: -12 },
@@ -353,6 +371,7 @@ const thirtyTrackFixtureGenerationResultSchema = z.object({
   tracks: z.literal(thirtyTrackTotalTrackCount),
   clips: z.literal(thirtyTrackTotalClipCount),
 }).strict()
+
 export const thirtyTrackFixtureBrowserOutputSchema = z.union([
   thirtyTrackFixtureGenerationResultSchema,
   z.object({ error: z.string().min(1) }).strict(),
@@ -370,9 +389,11 @@ export const sampleThirtyTrackSource = (sampleIndex: number) => ({
 // oxlint-disable-next-line anti-slop/no-unknown-parameters
 const validateThirtyTrackSemanticManifest = (value: unknown): ThirtyTrackSemanticManifest => {
   const parsed = semanticManifestSchema.parse(value)
+
   if (parsed.timeline.sourceOffsetsSec.some((offset, index) => offset !== index)) {
     throw new Error("30-track fixture source offsets must be the integers 0 through 29.")
   }
+
   if (parsed.tier2.midiClip.notes.some((note, index) => (
     note.id !== `tier2-note-${String(index).padStart(2, "0")}`
     || note.beat !== index
@@ -380,6 +401,7 @@ const validateThirtyTrackSemanticManifest = (value: unknown): ThirtyTrackSemanti
   ))) {
     throw new Error("Tier 2 MIDI notes do not match the canonical sequence.")
   }
+
   return parsed
 }
 
@@ -390,12 +412,16 @@ export const assertThirtyTrackSemanticManifest = (value: unknown): void => {
 
 export const thirtyTrackTrackAt = (index: number): ThirtyTrackSemanticManifest["timeline"]["tracks"][number] => {
   const track = thirtyTrackSemanticManifest.timeline.tracks[index]
+
   if (track === undefined) throw new Error(`Missing 30-track track at index ${index}.`)
+
   return track
 }
 
 export const thirtyTrackClipAt = (index: number): ThirtyTrackSemanticManifest["timeline"]["clips"][number] => {
   const clip = thirtyTrackSemanticManifest.timeline.clips[index]
+
   if (clip === undefined) throw new Error(`Missing 30-track clip at index ${index}.`)
+
   return clip
 }

@@ -42,13 +42,17 @@ export function useProjectExports(options: UseProjectExportsArgs): UseProjectExp
     setLocalExports([])
     setLocalLoading(false)
     setLocalError(null)
+
     if (enabled && !enabled()) {
       return
     }
+
     const rid = projectId()
+
     if (!rid || !isLocalId('project', rid)) {
       return
     }
+
     let active = true
     onCleanup(() => { active = false })
     setLocalLoading(true)
@@ -80,8 +84,10 @@ export function useProjectExports(options: UseProjectExportsArgs): UseProjectExp
     () => {
       if (enabled && !enabled()) return null
       const rid = projectId()
+
       if (isLocalId('project', rid)) return null
       const uid = userId()
+
       return rid && uid ? ({ projectId: rid }) : null
     },
     () => ['exports', 'by_room', projectId(), userId()]
@@ -89,9 +95,12 @@ export function useProjectExports(options: UseProjectExportsArgs): UseProjectExp
 
   const list = createMemo<ProjectExportItem[]>(() => {
     const rid = projectId()
+
     if (isLocalId('project', rid)) return localExports()
+
     return Array.isArray(raw.data) ? raw.data : []
   })
+
   const cloudQueryEnabled = () => Boolean(
     (!enabled || enabled())
     && projectId()

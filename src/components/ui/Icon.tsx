@@ -17,12 +17,14 @@ type IconProps = BaseIconProps & {
 
 const normalizeSize = (size?: number | string) => {
   if (size === undefined) return "1em";
+
   return Number.isFinite(size) ? `${size}px` : String(size);
 };
 
 const GoogleIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
   const s = () => normalizeSize(local.size);
+
   return (
     <svg
       {...rest}
@@ -103,6 +105,7 @@ const SolidJSIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>
 const ConvexIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
   const s = () => normalizeSize(local.size);
+
   return (
     <svg
       {...rest}
@@ -316,6 +319,7 @@ const GridIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> =
 const UserIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
   const s = () => normalizeSize(local.size);
+
   return (
     <svg
       {...rest}
@@ -341,6 +345,7 @@ const UserIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> =
 const LogOutIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
   const s = () => normalizeSize(local.size);
+
   return (
     <svg
       {...rest}
@@ -367,6 +372,7 @@ const LogOutIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>>
 const LogInIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
   const s = () => normalizeSize(local.size);
+
   return (
     <svg
       {...rest}
@@ -393,6 +399,7 @@ const LogInIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> 
 const HouseIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
   const s = () => normalizeSize(local.size);
+
   return (
     <svg
       {...rest}
@@ -418,6 +425,7 @@ const HouseIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> 
 const SidebarOpenIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
   const s = () => normalizeSize(local.size);
+
   return (
     <svg
       {...rest}
@@ -446,6 +454,7 @@ const SidebarOpenIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElem
 const SidebarClosedIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
   const s = () => normalizeSize(local.size);
+
   return (
     <svg
       {...rest}
@@ -490,6 +499,7 @@ const registry = {
 
 const Icon: Component<IconProps> = (allProps) => {
   const [props, rest] = splitProps(allProps, ["name", "size", "class", "title", "ariaLabel"]);
+
   return (
     <Show when={registry[props.name]}>
       {(Svg) => (

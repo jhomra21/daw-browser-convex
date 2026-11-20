@@ -39,6 +39,7 @@ export function useProjectPersistedState<TValue>(
     pendingAsyncSavesByProject.set(projectId, pendingAsyncSaves)
     void save.finally(() => {
       pendingAsyncSaves.delete(save)
+
       if (pendingAsyncSaves.size === 0) pendingAsyncSavesByProject.delete(projectId)
     }).catch(() => undefined)
   }
@@ -52,39 +53,49 @@ export function useProjectPersistedState<TValue>(
 
   const syncHydratedValue = () => {
     const projectId = options.projectId()
+
     if (projectId === hydratedProjectId) return
     hydratedProjectId = projectId
     valueRevision += 1
+
     if (!projectId) {
       setCurrentValue(() => options.createInitial())
       setAsyncHydrated(true)
+
       return
     }
+
     setCurrentValue(() => options.load(projectId))
     setAsyncHydrated(!options.loadAsync)
   }
 
   const value: Accessor<TValue> = () => {
     syncHydratedValue()
+
     return currentValue()
   }
 
   createEffect(on(options.projectId, (projectId) => {
     syncHydratedValue()
+
     if (!projectId || !options.loadAsync) return
     const load = options.loadAsync
+
     const refresh = () => {
       const loadRevision = ++valueRevision
       void load(projectId).then((loaded) => {
         if (options.projectId() !== projectId || valueRevision !== loadRevision) return
+
         if (loaded !== undefined) setCurrentValue(() => loaded)
         setAsyncHydrated(true)
       }).catch(() => {
         if (options.projectId() === projectId && valueRevision === loadRevision) setAsyncHydrated(true)
       })
     }
+
     setAsyncHydrated(false)
     const unsubscribe = options.subscribeToChanges?.(projectId, refresh)
+
     if (unsubscribe) onCleanup(unsubscribe)
     refresh()
   }, { defer: false }))
@@ -93,11 +104,13 @@ export function useProjectPersistedState<TValue>(
     syncHydratedValue()
     valueRevision += 1
     setAsyncHydrated(true)
+
     return setCurrentValue(next)
   }
 
   const persistValue = (projectId: string, value: TValue) => {
     options.save(projectId, value)
+
     if (!options.saveAsync) return
     ensureProjectFlusher(projectId)
     const save = options.saveAsync(projectId, value)
@@ -113,16 +126,19 @@ export function useProjectPersistedState<TValue>(
     const resolved = setCurrentValue(next)
     setAsyncHydrated(true)
     const projectId = options.projectId()
+
     if (projectId && resolved !== previous) {
       valueRevision += 1
       persistValue(projectId, resolved)
     }
+
     return resolved
   }
 
   const commitValue = (value: TValue) => {
     syncHydratedValue()
     const projectId = options.projectId()
+
     if (!projectId) return
     valueRevision += 1
     setAsyncHydrated(true)

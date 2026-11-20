@@ -91,6 +91,7 @@ describe('DSP characterization fixtures and metrics', () => {
     const shifted = new Float32Array(length)
     const clipped = new Float32Array(length)
     const leaked = new Float32Array(length)
+
     for (let frame = 0; frame < length; frame += 1) {
       const angle = 2 * Math.PI * frequencyHz * frame / sampleRate
       shifted[frame] = 0.5 * Math.sin(angle + Math.PI / 4)
@@ -111,15 +112,19 @@ describe('DSP characterization fixtures and metrics', () => {
 
     const highToneHz = 10_000
     const aliased = createSineFixture(length, highToneHz, sampleRate)[0]
+
     for (let frame = 0; frame < length; frame += 1) {
       aliased[frame] += 0.1 * Math.sin(2 * Math.PI * 18_000 * frame / sampleRate)
     }
+
     expect(measureAliasingEnergyDb(aliased, highToneHz, sampleRate, 3)).toBeCloseTo(-20, 1)
 
     const cleanWithInBandHarmonic = createSineFixture(length, highToneHz, sampleRate)[0]
+
     for (let frame = 0; frame < length; frame += 1) {
       cleanWithInBandHarmonic[frame] += 0.1 * Math.sin(2 * Math.PI * 2 * highToneHz * frame / sampleRate)
     }
+
     expect(measureAliasingEnergyDb(cleanWithInBandHarmonic, highToneHz, sampleRate, 3)).toBeLessThan(-100)
 
     for (const ambiguousHz of [8_000, 3_430, 9_605]) {
@@ -145,6 +150,7 @@ describe('DSP characterization fixtures and metrics', () => {
     const bin = 32
     const fixture = createSineFixture(ANALYZER_FFT_SIZE, bin, ANALYZER_FFT_SIZE)
     const result = characterizeAnalyzerFrame(fixture)
+
     const peakBin = result.magnitude.reduce(
       (best, value, index) => value > result.magnitude[best] ? index : best,
       0,
@@ -190,11 +196,13 @@ describe('DSP characterization fixtures and metrics', () => {
     right[480] = 0.8
     left[816] = 0.25
     right[816] = -0.2
+
     for (let frame = 481; frame < 2_400; frame += 1) {
       const decay = Math.pow(0.5, (frame - 480) / 480)
       left[frame] += decay * 0.01
       right[frame] += decay * -0.008
     }
+
     const metrics = measureReverbCharacterization([left, right], { earlyWindow: [480, 960] })
 
     expect(metrics.finite).toBe(true)

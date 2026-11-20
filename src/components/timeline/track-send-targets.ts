@@ -10,8 +10,10 @@ export const resolveSendTargetId = (
   returnTargets: readonly Track[],
 ) => {
   const returnTargetIds = new Set(returnTargets.map((track) => track.id))
+
   if (selectedTargetId && returnTargetIds.has(selectedTargetId)) {
     return selectedTargetId
   }
+
   return returnTargetIds.has(actualTargetId) ? actualTargetId : ''
 }

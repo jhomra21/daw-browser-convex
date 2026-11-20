@@ -18,6 +18,7 @@ function hasAuthEnvBindings(env: Env): boolean {
 function buildAuth(env: Env) {
   const controlOrigin = getControlOAuthOrigin(env.BETTER_AUTH_URL, "http://localhost");
   const controlResource = getControlOAuthResource(env.BETTER_AUTH_URL, "http://localhost");
+
   return betterAuth({
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL || "http://localhost:3000",
@@ -93,11 +94,13 @@ let cachedAuth: AuthInstance | null = null;
 
 export function createAuth(env: Env): AuthInstance {
   const canReuseCachedAuth = hasAuthEnvBindings(env);
+
   if (canReuseCachedAuth && cachedAuth) {
     return cachedAuth;
   }
 
   const instance = buildAuth(env);
+
   if (canReuseCachedAuth) {
     cachedAuth = instance;
   }
@@ -106,4 +109,5 @@ export function createAuth(env: Env): AuthInstance {
 }
 
 export type Auth = ReturnType<typeof createAuth>;
+
 export type Session = Auth["$Infer"]["Session"];

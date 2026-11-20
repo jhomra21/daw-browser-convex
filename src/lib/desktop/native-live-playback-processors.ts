@@ -12,11 +12,14 @@ export const resolveNativeLivePlaybackProcessors = async (input: {
   readPersisted: (projectId: string, instanceId: string) => Promise<ExternalProcessor | undefined>
 }): Promise<ExternalProcessor[]> => {
   const processorsById = new Map<string, ExternalProcessor>()
+
   for (const processor of input.persisted) processorsById.set(processor.instanceId, processor)
   const seed = input.seed
+
   if (seed?.projectId !== input.projectId) return [...processorsById.values()]
 
   const persistedProcessor = await input.readPersisted(input.projectId, seed.processor.instanceId)
+
   if (persistedProcessor && !persistedProcessor.bypassed && persistedProcessor.health.state !== "degraded") {
     processorsById.set(persistedProcessor.instanceId, persistedProcessor)
   } else if (persistedProcessor) {
@@ -28,5 +31,6 @@ export const resolveNativeLivePlaybackProcessors = async (input: {
     // this bound rebuild. Rollback rebuilds omit it.
     processorsById.set(seed.processor.instanceId, seed.processor)
   }
+
   return [...processorsById.values()]
 }

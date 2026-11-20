@@ -34,6 +34,7 @@ export default function ProjectRenameDialog(props: ProjectRenameDialogProps) {
 
   const confirmRename = () => {
     const project = props.project
+
     if (!project) return
     props.onConfirm(project, name())
   }

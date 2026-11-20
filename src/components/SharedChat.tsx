@@ -52,7 +52,9 @@ const SharedChat: Component<SharedChatProps> = (props) => {
   // Auto-scroll to bottom on open and when new messages arrive
   function scrollToBottom() {
     const el = bottomAnchorRef
+
     if (!el) return
+
     try { el.scrollIntoView({ behavior: 'auto', block: 'end' }) } catch {}
   }
 
@@ -70,27 +72,36 @@ const SharedChat: Component<SharedChatProps> = (props) => {
     const now = Date.now()
     // prune old timestamps
     recentSends = recentSends.filter(t => now - t < RATE_LIMIT_WINDOW_MS)
+
     if (recentSends.length >= RATE_LIMIT_MAX) {
       const oldest = recentSends[0]
       const waitMs = RATE_LIMIT_WINDOW_MS - (now - oldest)
+
       return { ok: false, waitMs: Math.max(0, waitMs) }
     }
+
     return { ok: true }
   }
 
   async function send() {
     const rid = props.projectId
     const uid = props.userId
+
     if (!rid || !uid) return
     const content = input().trim()
+
     if (!content) return
 
     const gate = canSendNow()
+
     if (!gate.ok) {
       const secs = Math.ceil(gate.waitMs / 1000)
       setRateError(`Slow down — try again in ${secs}s`)
+
       if (rateErrorTimer) { clearTimeout(rateErrorTimer); rateErrorTimer = null }
+
       rateErrorTimer = window.setTimeout(() => setRateError(''), 1500)
+
       return
     }
 
@@ -105,7 +116,9 @@ const SharedChat: Component<SharedChatProps> = (props) => {
       // Scroll will be driven by subscription update
     } catch {
       setRateError('Failed to send')
+
       if (rateErrorTimer) { clearTimeout(rateErrorTimer); rateErrorTimer = null }
+
       rateErrorTimer = window.setTimeout(() => setRateError(''), 1500)
     }
   }

@@ -66,29 +66,39 @@ export function useTimelineMidiOverlay(
   const [midiKeyboardEnabled, setMidiKeyboardEnabled] = createSignal(false)
   const [projectionRevision, setProjectionRevision] = createSignal(0)
   const activeLiveNotes = new Map<number, LiveNote>()
+
   const activeMappingTargets = new Map<string, {
     sourceId: string
     trackId: string
     target: { parameterId: string; effectInstanceId?: string }
   }>()
+
   let scheduledMappingTargetKeys = new Set<string>()
+
   const auditionReleaseTimers = createAuditionReleaseTimerOwnership({
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     clear: (timer) => window.clearTimeout(timer),
   })
+
   let liveTargetKey: string | undefined
+
   const projectedTracks = createMemo(() => {
     projectionRevision()
+
     return projectMidiProjectTracks(options.projectId(), options.tracks())
   })
+
   const trackIndex = createMemo(() => createTimelineTrackIndex(projectedTracks()))
+
   const midiEditorClipId = createMemo(() => {
     const clipId = options.dockedMidiClipId()
+
     return clipId && trackIndex().clipEntryById.get(clipId)?.clip.midi ? clipId : null
   })
 
   const midiKeyboardStorageKey = () => {
     const projectId = options.projectId() || 'default'
+
     return `mb:midi_kb:${projectId}`
   }
 
@@ -96,22 +106,33 @@ export function useTimelineMidiOverlay(
 
   const resolveTargetTrack = () => {
     const recordingTrackId = options.activeRecordingTargetId?.()
+
     if (recordingTrackId) {
       const recordingTrack = trackIndex().trackById.get(recordingTrackId)
+
       if (isPlayableMidiTrack(recordingTrack)) return recordingTrack
     }
+
     const clipId = midiEditorClipId()
+
     if (clipId) {
       const match = trackIndex().clipEntryById.get(clipId)
+
       if (match && isPlayableMidiTrack(match.track)) return match.track
     }
+
     const fxTarget = options.selection.selectedFXTarget()
+
     if (fxTarget !== 'master') {
       const track = trackIndex().trackById.get(fxTarget)
+
       if (isPlayableMidiTrack(track)) return track
     }
+
     const selectedTrack = trackIndex().trackById.get(options.selection.selectedTrackId())
+
     if (isPlayableMidiTrack(selectedTrack)) return selectedTrack
+
     return undefined
   }
 
@@ -124,24 +145,31 @@ export function useTimelineMidiOverlay(
   const resolveTargetTrackId = () => midiKeyboardTarget()?.id
   const midiKeyboardCanPlay = createMemo(() => Boolean(midiKeyboardTarget()))
   const midiKeyboardTargetLabel = createMemo(() => midiKeyboardTarget()?.name ?? null)
+
   const activeMappingIndex = createMemo(() => {
     const clipId = midiEditorClipId()
     const clip = clipId ? trackIndex().clipEntryById.get(clipId)?.clip : undefined
+
     return clip?.midi ? compileMidiMappingSourceIndex(normalizeLegacyMidiClip(clip.midi).mappings) : undefined
   })
+
   const activeMappingFingerprint = createMemo(() => {
     const clipId = midiEditorClipId()
     const clip = clipId ? trackIndex().clipEntryById.get(clipId)?.clip : undefined
+
     return clip?.midi ? JSON.stringify(normalizeLegacyMidiClip(clip.midi).mappings) : ''
   })
+
   const activeInputChannel = createMemo(() => {
     const clipId = midiEditorClipId()
     const clip = clipId ? trackIndex().clipEntryById.get(clipId)?.clip : undefined
+
     return clip?.midi?.inputChannel
   })
 
   const restoreLiveMappings = (sourceId?: string) => {
     if (requiresNativeAudio) return
+
     for (const [key, mapping] of activeMappingTargets) {
       if (sourceId !== undefined && mapping.sourceId !== sourceId) continue
       options.audioEngine.restoreTransientMidiMapping(
@@ -157,6 +185,7 @@ export function useTimelineMidiOverlay(
   const liveArpeggiator = createLiveMidiArpeggiator<LiveBackendHandle>({
     getConfig: () => {
       const trackId = resolveTargetTrackId()
+
       return {
         trackId,
         params: trackId ? options.audioEngine.getTrackArpeggiator(trackId) : undefined,
@@ -170,25 +199,33 @@ export function useTimelineMidiOverlay(
         && (requiresNativeAudio || (nativeMidiReady && shouldUseNativeLiveMidi(options.nativeLiveMidi)))
       ) {
         const handle = options.nativeLiveMidi.start(note)
+
         if (handle) return { backend: 'native', handle }
       }
+
       if (requiresNativeAudio) {
         return undefined
       }
+
       options.audioEngine.ensureAudio()
       void options.audioEngine.resume().catch(() => undefined)
+
       const handle = options.audioEngine.startLiveMidiNote({
         ...note,
         when: note.when ?? options.audioEngine.currentTime,
       })
+
       return handle ? { backend: 'browser', handle } : undefined
     },
     stop: (handle, release: LiveMidiArpeggiatorRelease = {}) => {
       const force = release.force === true
+
       if (handle.backend === 'native') {
         options.nativeLiveMidi?.stop(handle.handle, force)
+
         return
       }
+
       if (!requiresNativeAudio) options.audioEngine.releaseLiveMidiNote(
         handle.handle,
         release.when ?? options.audioEngine.currentTime,
@@ -197,9 +234,11 @@ export function useTimelineMidiOverlay(
       )
     },
   })
+
   const stopLiveNote = (pitch: number, force = false) => {
     try {
       const entry = activeLiveNotes.get(pitch)
+
       if (!entry) return
       activeLiveNotes.delete(pitch)
       auditionReleaseTimers.cancel(pitch)
@@ -211,6 +250,7 @@ export function useTimelineMidiOverlay(
     for (const pitch of Array.from(activeLiveNotes.keys())) {
       stopLiveNote(pitch, true)
     }
+
     auditionReleaseTimers.clear()
     hardwareRouter.panic()
     liveArpeggiator.panic()
@@ -219,17 +259,23 @@ export function useTimelineMidiOverlay(
   const stopNativeLiveNotes = () => {
     forceStopAllLiveNotes()
   }
+
   const previewInstrumentNote = (trackId: string, pitch: number, velocity: number) => {
     const instrumentKind = options.audioEngine.getTrackInstrumentKind(trackId)
+
     if (instrumentKind === 'drum-rack') return options.audioEngine.previewDrumRackNote(trackId, pitch, velocity)
+
     if (instrumentKind === 'sampler') return options.audioEngine.previewSamplerNote(trackId, pitch, velocity)
+
     if (instrumentKind === 'synth') return options.audioEngine.previewSynthNote(trackId, pitch, velocity) !== undefined
+
     return false
   }
 
   const auditionNote = (trackId: string, pitch: number, velocity = DEFAULT_NOTE_VELOCITY, durSec = 0.35) => {
     try {
       if (!isPlayableMidiTrack(trackIndex().trackById.get(trackId))) return
+
       const auditionArpeggiator = createLiveMidiArpeggiator<LiveBackendHandle>({
         getConfig: () => ({
           trackId,
@@ -243,25 +289,33 @@ export function useTimelineMidiOverlay(
             && (requiresNativeAudio || (nativeMidiReady && shouldUseNativeLiveMidi(options.nativeLiveMidi)))
           ) {
             const handle = options.nativeLiveMidi.start(note)
+
             if (handle) return { backend: 'native', handle }
           }
+
           if (requiresNativeAudio) {
             return undefined
           }
+
           options.audioEngine.ensureAudio()
           void options.audioEngine.resume().catch(() => undefined)
+
           const handle = options.audioEngine.startLiveMidiNote({
             ...note,
             when: note.when ?? options.audioEngine.currentTime,
           })
+
           return handle ? { backend: 'browser', handle } : undefined
         },
         stop: (handle, release: LiveMidiArpeggiatorRelease = {}) => {
           const force = release.force === true
+
           if (handle.backend === 'native') {
             options.nativeLiveMidi?.stop(handle.handle, force)
+
             return
           }
+
           if (!requiresNativeAudio) options.audioEngine.releaseLiveMidiNote(
             handle.handle,
             release.when ?? options.audioEngine.currentTime,
@@ -270,28 +324,38 @@ export function useTimelineMidiOverlay(
           )
         },
       })
+
       stopLiveNote(pitch, true)
+
       if (requiresNativeAudio) {
         const sourceId = auditionArpeggiator.noteOn(pitch, velocity)
+
         if (sourceId === undefined) return
         activeLiveNotes.set(pitch, { handle: sourceId, arpeggiator: auditionArpeggiator })
         // UI audition notes have no sustained pointer lifecycle; this bounded
         // one-shot note-off prevents a successful native preview from hanging.
         auditionReleaseTimers.schedule(pitch, Math.max(0, durSec * 1000), () => stopLiveNote(pitch, true))
+
         return
       }
+
       options.audioEngine.ensureAudio()
       void options.audioEngine.resume().catch(() => undefined)
       const sourceId = auditionArpeggiator.noteOn(pitch, velocity)
+
       if (sourceId !== undefined) {
         activeLiveNotes.set(pitch, { handle: sourceId, arpeggiator: auditionArpeggiator })
         auditionReleaseTimers.schedule(pitch, Math.max(0, durSec * 1000), () => stopLiveNote(pitch, true))
+
         return
       }
+
       if (options.audioEngine.getTrackInstrumentKind(trackId) === 'synth') {
         options.audioEngine.previewSynthNote(trackId, pitch, velocity, durSec)
+
         return
       }
+
       previewInstrumentNote(trackId, pitch, velocity)
     } catch {}
   }
@@ -299,8 +363,10 @@ export function useTimelineMidiOverlay(
   const startLiveNote = (pitch: number, velocity = DEFAULT_NOTE_VELOCITY) => {
     try {
       if (midiSuspended) return
+
       if (activeLiveNotes.has(pitch)) return
       const sourceId = liveArpeggiator.noteOn(pitch, velocity)
+
       if (sourceId !== undefined) activeLiveNotes.set(pitch, { handle: sourceId, arpeggiator: liveArpeggiator })
     } catch {}
   }
@@ -309,15 +375,19 @@ export function useTimelineMidiOverlay(
     const unsubscribe = subscribeMidiProjectProjection(options.projectId(), () => {
       setProjectionRevision((revision) => revision + 1)
     })
+
     onCleanup(unsubscribe)
   })
 
   createEffect(() => {
     const key = midiKeyboardStorageKey()
+
     if (!canUseLocalStorage()) {
       setMidiKeyboardEnabled(false)
+
       return
     }
+
     try {
       setMidiKeyboardEnabled(window.localStorage.getItem(key) === '1')
     } catch {
@@ -327,6 +397,7 @@ export function useTimelineMidiOverlay(
 
   createEffect(() => {
     if (!canUseLocalStorage()) return
+
     try {
       window.localStorage.setItem(midiKeyboardStorageKey(), midiKeyboardEnabled() ? '1' : '0')
     } catch {}
@@ -344,17 +415,21 @@ export function useTimelineMidiOverlay(
     acceptsChannel: (channel) => {
       if (midiSuspended) return false
       const track = resolveTargetTrack()
+
       if (!track) return false
       const clipId = midiEditorClipId()
       const clip = clipId ? trackIndex().clipEntryById.get(clipId)?.clip : undefined
+
       return !clip?.midi?.inputChannel || clip.midi.inputChannel === channel
     },
     startNote: (event) => {
       try {
         const trackId = resolveTargetTrackId()
+
         if (!trackId) return undefined
         const times = options.audioEngine.midiEventTimes(event.timeStamp)
         const sourceId = liveArpeggiator.noteOn(event.note, event.velocity, times?.scheduledContextTime)
+
         return sourceId === undefined ? undefined : { id: sourceId }
       } catch {
         return undefined
@@ -367,7 +442,9 @@ export function useTimelineMidiOverlay(
     applyExpression: (event) => {
       const trackId = resolveTargetTrackId()
       const index = activeMappingIndex()
+
       if (!trackId || !index) return
+
       const sourceEvent: MidiMappingSourceEvent | undefined = event.kind === 'control-change'
         ? { kind: 'cc', controller: event.controller, channel: event.channel, value: event.value }
         : event.kind === 'pitch-bend'
@@ -377,11 +454,15 @@ export function useTimelineMidiOverlay(
             : event.kind === 'poly-pressure'
               ? { kind: 'poly-pressure', channel: event.channel, pitch: event.note, value: event.pressure }
               : undefined
+
       if (!sourceEvent) return
+
       if (requiresNativeAudio) return
       const times = options.audioEngine.midiEventTimes(event.timeStamp)
+
       for (const mapping of index.match(sourceEvent)) {
         const value = midiMappingValue(mapping, sourceEvent)
+
         if (value === undefined) continue
         options.audioEngine.writeTransientMidiMapping(
           trackId,
@@ -390,11 +471,13 @@ export function useTimelineMidiOverlay(
           times?.scheduledContextTime,
           event.sourceId,
         )
+
         const targetKey = automationTargetKey({
           kind: 'track',
           trackId,
           effectInstanceId: mapping.target.effectInstanceId,
         }, mapping.target.parameterId)
+
         activeMappingTargets.set(`${event.sourceId}\u0000${targetKey}`, {
           sourceId: event.sourceId,
           trackId,
@@ -403,6 +486,7 @@ export function useTimelineMidiOverlay(
       }
     },
   })
+
   const removeNativeLiveMidiReset = options.nativeLiveMidi?.subscribeReset?.(() => {
     forceStopAllLiveNotes()
   })
@@ -415,9 +499,11 @@ export function useTimelineMidiOverlay(
       midiEditorClipId(),
       resolveTargetTrackId(),
     ].join('\u0000')
+
     if (liveTargetKey !== undefined && liveTargetKey !== targetKey) {
       forceStopAllLiveNotes()
     }
+
     liveTargetKey = targetKey
     liveArpeggiator.configure()
     restoreLiveMappings()
@@ -437,9 +523,11 @@ export function useTimelineMidiOverlay(
     if (requiresNativeAudio) return
     activeMappingFingerprint()
     const previousTargetKeys = scheduledMappingTargetKeys
+
     if (previousTargetKeys.size > 0) {
       options.audioEngine.cancelAutomationSchedules(previousTargetKeys)
     }
+
     const trackId = resolveTargetTrackId()
     const clipId = midiEditorClipId()
     const clip = clipId ? trackIndex().clipEntryById.get(clipId)?.clip : undefined
@@ -455,6 +543,7 @@ export function useTimelineMidiOverlay(
     restoreLiveMappings()
     const affectedTargetKeys = new Set([...previousTargetKeys, ...scheduledMappingTargetKeys])
     const playheadSec = untrack(options.playheadSec)
+
     if (untrack(options.isPlaying)) {
       options.audioEngine.scheduleAutomationFromPlayhead(playheadSec, {
         targetKeys: affectedTargetKeys,
@@ -472,16 +561,19 @@ export function useTimelineMidiOverlay(
 
   createEffect(() => {
     const unsubscribe = midiAccess.subscribe(hardwareRouter.receive)
+
     const unsubscribeReset = midiAccess.subscribeSourceReset((event) => {
       hardwareRouter.resetSource(event.sourceId)
       restoreLiveMappings(event.sourceId)
     })
+
     const onVisibilityChange = () => {
       if (document.hidden) {
         forceStopAllLiveNotes()
         restoreLiveMappings()
       }
     }
+
     const removeAudioLifecycle = lifecycleBridge
       ? createDesktopAudioLifecycleReconciler(lifecycleBridge, (lifecycle) => {
         if (lifecycle.state === "suspended") {
@@ -489,14 +581,17 @@ export function useTimelineMidiOverlay(
           nativeMidiReady = false
           forceStopAllLiveNotes()
           restoreLiveMappings()
+
           if (!requiresNativeAudio) options.audioEngine.panicLiveMidi()
         } else {
           midiSuspended = false
           nativeMidiReady = lifecycle.state === "ready"
+
           if (!nativeMidiReady) stopNativeLiveNotes()
         }
         })
       : undefined
+
     document.addEventListener('visibilitychange', onVisibilityChange)
     onCleanup(() => {
       unsubscribe()
@@ -505,6 +600,7 @@ export function useTimelineMidiOverlay(
       removeAudioLifecycle?.()
       forceStopAllLiveNotes()
       restoreLiveMappings()
+
       if (!requiresNativeAudio) options.audioEngine.panicLiveMidi()
     })
   })
@@ -514,6 +610,7 @@ export function useTimelineMidiOverlay(
     forceStopAllLiveNotes()
     auditionReleaseTimers.clear()
     restoreLiveMappings()
+
     if (!requiresNativeAudio) options.audioEngine.panicLiveMidi()
   })
 

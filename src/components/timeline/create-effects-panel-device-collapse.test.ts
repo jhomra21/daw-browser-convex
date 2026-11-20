@@ -14,6 +14,7 @@ describe("device collapse preferences", () => {
       deviceCollapseIdentity.audioEffect("effect-2"),
       deviceCollapseIdentity.instrument("instrument-1"),
     ]);
+
     const serialized = serializeCollapsedDeviceIdentities(identities);
 
     expect(parseCollapsedDeviceIdentities(serialized)).toEqual(identities);

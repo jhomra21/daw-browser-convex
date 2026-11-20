@@ -24,6 +24,7 @@ const handlers: ControlOperationHandlers<"cloud"> = {
   "control.history": async () => { throw new Error("not used"); },
   "control.recoveries": async () => { throw new Error("not used"); },
 };
+
 const invoker: ControlInvoker<"cloud"> = createDirectControlInvoker({
   handlers,
   context: { target: "cloud", principal: { subject: "test" } },
@@ -34,6 +35,7 @@ const responseSchema = z.object({
   result: z.unknown().optional(),
   error: z.object({ code: z.number() }).optional(),
 }).passthrough();
+
 const responseFor = async (line: string) => responseSchema.parse(JSON.parse(
   await createJsonlRpcAdapter({ invoker }).processLine(line) ?? "",
 ));
@@ -74,10 +76,13 @@ test("decodes bounded UTF-8 JSONL lines across chunks and recovers after oversiz
     new Uint8Array(Buffer.from("y\n", "utf8")),
     new Uint8Array(Buffer.from('{"jsonrpc":"2.0","id":1,"method":"project.list","params":{}}', "utf8")),
   ];
+
   const lines = [];
+
   async function* inputChunks() {
     yield* chunks;
   }
+
   for await (const line of decodeJsonlLines(inputChunks())) lines.push(line);
   expect(lines).toEqual([
     '{"jsonrpc":"2.0","id":"é"}',
@@ -95,10 +100,12 @@ test("preserves every canonical domain error and sanitizes unknown failures", as
     { code: "validation", message: "Invalid action.", actionIndex: 2, details: { field: "name" } },
     { code: "not-found", message: "Project not found." },
   ] as const;
+
   for (const [index, error] of errors.entries()) {
     const details = "details" in error
       ? { ...error.details, safe: "value", extra: 42 }
       : { safe: "value", extra: 42 };
+
     const domainInvoker: ControlInvoker<"cloud"> = {
       target: "cloud",
       invoke: async () => {
@@ -113,9 +120,11 @@ test("preserves every canonical domain error and sanitizes unknown failures", as
         };
       },
     };
+
     const domain = JSON.parse(await createJsonlRpcAdapter({ invoker: domainInvoker }).processLine(
       `{"jsonrpc":"2.0","id":${index},"method":"project.list","params":{}}`,
     ) ?? "");
+
     expect(domain.error).toEqual({
       code: -32000,
       message: "Control operation failed.",
@@ -126,6 +135,7 @@ test("preserves every canonical domain error and sanitizes unknown failures", as
       },
     });
   }
+
   const apiErrorInvoker: ControlInvoker<"cloud"> = {
     target: "cloud",
     invoke: async () => {
@@ -138,9 +148,11 @@ test("preserves every canonical domain error and sanitizes unknown failures", as
       });
     },
   };
+
   const apiError = JSON.parse(await createJsonlRpcAdapter({ invoker: apiErrorInvoker }).processLine(
     '{"jsonrpc":"2.0","id":7,"method":"project.list","params":{}}',
   ) ?? "");
+
   expect(apiError.error.data).toEqual({
     version: "v1",
     code: "revision-conflict",
@@ -148,26 +160,33 @@ test("preserves every canonical domain error and sanitizes unknown failures", as
     actionIndex: 1,
     details: { field: "expectedRevision" },
   });
+
   const directError: ControlErrorV1 = {
     version: "v1",
     code: "forbidden",
     message: "Write forbidden.",
   };
+
   const directInvoker: ControlInvoker<"cloud"> = {
     target: "cloud",
     invoke: async () => { throw directError; },
   };
+
   const direct = JSON.parse(await createJsonlRpcAdapter({ invoker: directInvoker }).processLine(
     '{"jsonrpc":"2.0","id":8,"method":"project.list","params":{}}',
   ) ?? "");
+
   expect(direct.error.data).toEqual(directError);
+
   const unknownInvoker: ControlInvoker<"cloud"> = {
     target: "cloud",
     invoke: async () => { throw new Error("token and transport details"); },
   };
+
   const unknown = JSON.parse(await createJsonlRpcAdapter({ invoker: unknownInvoker }).processLine(
     '{"jsonrpc":"2.0","id":1,"method":"project.list","params":{}}',
   ) ?? "");
+
   expect(unknown.error).toEqual({
     code: -32603,
     message: "Internal error.",

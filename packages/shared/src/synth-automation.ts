@@ -83,13 +83,17 @@ export const synthAutomationKey = (
 
 export const parseSynthAutomationKey = (value: string): SynthAutomationKey | undefined => {
   const parts = value.split(':')
+
   if (parts.length < 4 || parts[0] !== 'synth-instrument' || !parts[1]) return undefined
   const parameterId = parts.at(-1)
+
   if (!parameterId || !isSynthAutomationParameterId(parameterId)) return undefined
+
   if (parts.length === 4) {
     try {
       const trackId = decodeURIComponent(parts[1])
       const instanceId = decodeURIComponent(parts[2])
+
       return trackId && instanceId
         ? { kind: 'synth-instrument', trackId, instanceId, parameterId }
         : undefined
@@ -97,7 +101,9 @@ export const parseSynthAutomationKey = (value: string): SynthAutomationKey | und
       return undefined
     }
   }
+
   const instanceId = parts.slice(2, -1).join(':')
+
   return instanceId
     ? { kind: 'synth-instrument', trackId: parts[1], instanceId, parameterId }
     : undefined

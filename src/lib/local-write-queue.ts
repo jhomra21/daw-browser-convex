@@ -21,12 +21,15 @@ type ScheduledIdleFlush = {
 }
 
 export type LocalEntityWriteStatus = 'saved' | 'saving' | 'failed'
+
 const queuesByProject = new Map<string, LocalEntityWriteQueue>()
 
 const INITIAL_RETRY_DELAY_MS = 250
 const MAX_RETRY_DELAY_MS = 30_000
+
 const createWriteStatus = () => {
   const [status, setStatus] = createSignal<LocalEntityWriteStatus>('saved')
+
   return { status, setStatus }
 }
 
@@ -36,13 +39,18 @@ const entityKey = (kind: string, id: string) => `${kind}:${id}`
 const scheduleIdleFlush = (callback: () => void, delayMs: number): ScheduledIdleFlush => {
   if (delayMs > 0) {
     const handle = globalThis.setTimeout(callback, delayMs)
+
     return { cancel: () => globalThis.clearTimeout(handle) }
   }
+
   if (globalThis.window !== undefined && 'requestIdleCallback' in globalThis.window) {
     const handle = globalThis.window.requestIdleCallback(callback)
+
     return { cancel: () => globalThis.window.cancelIdleCallback(handle) }
   }
+
   const handle = globalThis.setTimeout(callback, 0)
+
   return { cancel: () => globalThis.clearTimeout(handle) }
 }
 
@@ -65,6 +73,7 @@ export class LocalEntityWriteQueue {
   public hold(): () => void {
     this.holders += 1
     let held = true
+
     return () => {
       if (!held) return
       held = false
@@ -83,23 +92,29 @@ export class LocalEntityWriteQueue {
 
   public subscribe(listener: (status: LocalEntityWriteStatus) => void): () => void {
     this.listeners.add(listener)
+
     return () => this.listeners.delete(listener)
   }
 
   public getPending(kind: string, id: string): LocalProjectEntityRow | null | undefined {
     const key = entityKey(kind, id)
+
     if (this.deletes.has(key)) return null
+
     return this.puts.get(key)?.row
   }
 
   public applyPendingRows(kind: string, rows: LocalProjectEntityRow[]): LocalProjectEntityRow[] {
     const rowById = new Map<string, LocalProjectEntityRow>()
+
     for (const row of rows) {
       if (row.kind === kind && !this.deletes.has(entityKey(kind, row.id))) rowById.set(row.id, row)
     }
+
     for (const write of this.puts.values()) {
       if (write.kind === kind) rowById.set(write.id, write.row)
     }
+
     return Array.from(rowById.values())
   }
 
@@ -121,17 +136,22 @@ export class LocalEntityWriteQueue {
 
   public flush(): Promise<void> {
     this.cancelScheduledFlush()
+
     if (this.flushPromise) {
       return this.flushPromise.then(() => {
         if (this.puts.size === 0 && this.deletes.size === 0) return
+
         return this.flush()
       })
     }
+
     this.flushPromise = this.flushBatches().finally(() => {
       this.flushPromise = null
+
       if (this.puts.size > 0 || this.deletes.size > 0) this.scheduleFlush()
       else this.unregisterIfIdle()
     })
+
     return this.flushPromise
   }
 
@@ -159,6 +179,7 @@ export class LocalEntityWriteQueue {
 
   private setStatus(status: LocalEntityWriteStatus): void {
     this.statusState.setStatus(status)
+
     for (const listener of this.listeners) listener(status)
   }
 
@@ -182,12 +203,16 @@ export class LocalEntityWriteQueue {
       } catch (error) {
         for (const write of puts) {
           const key = entityKey(write.kind, write.id)
+
           if (!this.puts.has(key) && !this.deletes.has(key)) this.puts.set(key, write)
         }
+
         for (const entry of deletes) {
           const key = entityKey(entry.kind, entry.id)
+
           if (!this.puts.has(key) && !this.deletes.has(key)) this.deletes.set(key, entry)
         }
+
         this.retryDelayMs = this.retryDelayMs === 0
           ? INITIAL_RETRY_DELAY_MS
           : Math.min(this.retryDelayMs * 2, MAX_RETRY_DELAY_MS)
@@ -200,14 +225,17 @@ export class LocalEntityWriteQueue {
 
 export const getLocalEntityWriteQueue = (projectId: string) => {
   const existing = queuesByProject.get(projectId)
+
   if (existing) return existing
   const queue = new LocalEntityWriteQueue(projectId)
   queuesByProject.set(projectId, queue)
+
   return queue
 }
 
 export const acquireLocalEntityWriteQueue = (projectId: string) => {
   const queue = getLocalEntityWriteQueue(projectId)
+
   return { queue, release: queue.hold() }
 }
 
@@ -216,8 +244,11 @@ export const getLocalEntityWriteQueueIfCreated = (projectId: string) => queuesBy
 
 export const releaseLocalEntityWriteQueue = async (projectId: string): Promise<void> => {
   const queue = queuesByProject.get(projectId)
+
   if (!queue) return
   await queue.flush()
+
   if (!queue.hasPendingWrites() && queuesByProject.get(projectId) === queue) queuesByProject.delete(projectId)
 }
+
 registerLocalEntityWriteQueueRelease(releaseLocalEntityWriteQueue)

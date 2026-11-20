@@ -62,6 +62,7 @@ const clip = (source = buffer()): AudioStretchRuntimeClip => ({
 
 const preparedAsset = (): PortablePreparedStretchAsset => {
   const source = buffer()
+
   const asset: AudioAssetRef = {
     version: 1,
     assetId: 'portable-stretch:7:clip-stretch',
@@ -69,11 +70,14 @@ const preparedAsset = (): PortablePreparedStretchAsset => {
     sampleRateHz: source.sampleRate,
     channelCount: source.numberOfChannels,
   }
+
   const plane = new Float32Array(source.getChannelData(0))
+
   const pcm: PlanarPcm = {
     frameCount: source.length,
     planes: [plane],
   }
+
   return {
     clipId: 'clip-stretch',
     sourceAssetKey: 'source-a',
@@ -92,6 +96,7 @@ const preparedAsset = (): PortablePreparedStretchAsset => {
 
 test('prepares deterministic copied PCM and exact scheduling metadata', async () => {
   const rendered = buffer([[0.5, -0.25, 0.75, -1]])
+
   const result = await preparePortableStretchAsset({
     clip: clip(),
     projectBpm: 120,
@@ -133,6 +138,7 @@ test('prepares deterministic copied PCM and exact scheduling metadata', async ()
       sourceStartSec: 0,
     }),
   })
+
   if (!changed.supported) throw new Error(changed.diagnostics.map((entry) => entry.message).join('\n'))
   expect(changed.asset.portableAssetId).not.toBe(result.asset.portableAssetId)
 })
@@ -187,6 +193,7 @@ const prepareAggregateStretch = async (
 test('uses mapped source duration for exact frame-capacity preflight', async () => {
   let createBufferCalls = 0
   const source = buffer([[0, 0.25, -0.5, 1]], 4)
+
   const result = await preparePortableStretchAssets({
     tracks: [preparedStretchTrack(source, 3)],
     projectBpm: 120,
@@ -195,6 +202,7 @@ test('uses mapped source duration for exact frame-capacity preflight', async () 
     maximumFrameCount: 7,
     createBuffer: (channels, frames, sampleRate) => {
       createBufferCalls += 1
+
       return new TestAudioBuffer(
         Array.from({ length: channels }, () => new Float32Array(frames)),
         sampleRate,
@@ -222,12 +230,14 @@ test('uses mapped source duration for exact frame-capacity preflight', async () 
       sampleRate,
     ),
   })
+
   if (!withinCapacity.supported) throw new Error(withinCapacity.diagnostics.map((entry) => entry.message).join('\n'))
   expect(withinCapacity.assets[0]?.asset.frameCount).toBe(8)
 })
 
 test('plans the clipped source range instead of the nominal clip duration', () => {
   const source = buffer([Array.from({ length: 16 }, (_, index) => index)], 16)
+
   const descriptor = createAudioPcmSourceDescriptor({
     identity: 'source',
     durationSec: source.duration,
@@ -236,6 +246,7 @@ test('plans the clipped source range instead of the nominal clip duration', () =
     channelCount: source.numberOfChannels,
     source,
   })
+
   const plan = createAudioStretchReadPlan({
     clip: {
       ...clip(source),
@@ -259,6 +270,7 @@ test('plans the clipped source range instead of the nominal clip duration', () =
 
 test('plans marker warp segments from mapped source coverage', () => {
   const source = buffer([Array.from({ length: 16 }, (_, index) => index)], 16)
+
   const descriptor = createAudioPcmSourceDescriptor({
     identity: 'source',
     durationSec: source.duration,
@@ -267,6 +279,7 @@ test('plans marker warp segments from mapped source coverage', () => {
     channelCount: source.numberOfChannels,
     source,
   })
+
   const plan = createAudioStretchReadPlan({
     clip: {
       ...clip(source),
@@ -297,6 +310,7 @@ test('plans marker warp segments from mapped source coverage', () => {
 
 test('allows Stretch preparation at the estimated native frame boundary', async () => {
   const source = buffer([[0, 0.25, -0.5, 1]], 4)
+
   const result = await prepareAggregateStretch(source, 8, 24, 3, {
     maximumAssetCount: 1,
     maximumPreparationBytes: 36 * Float32Array.BYTES_PER_ELEMENT + WSOLA_MAX_PIPELINE_WORKING_MEMORY_BYTES,
@@ -307,6 +321,7 @@ test('allows Stretch preparation at the estimated native frame boundary', async 
 
 test('charges one sequential WSOLA workspace for many tiny Stretch assets', async () => {
   const source = buffer([[0.25]], 44_100)
+
   const tracks = (count: number): Track<AudioBuffer>[] => Array.from({ length: count }, (_, index) => ({
     ...preparedStretchTrack(source, source.duration, `clip-stretch-${index}`),
     id: `track-stretch-${index}`,
@@ -322,6 +337,7 @@ test('charges one sequential WSOLA workspace for many tiny Stretch assets', asyn
       sampleRate,
     ),
   })
+
   expect(eightUnder512MiB.supported).toBe(true)
 
   const fourUnder256MiB = await preparePortableStretchAssets({
@@ -334,6 +350,7 @@ test('charges one sequential WSOLA workspace for many tiny Stretch assets', asyn
       sampleRate,
     ),
   })
+
   expect(fourUnder256MiB.supported).toBe(true)
 })
 
@@ -341,11 +358,13 @@ test('rejects aggregate Stretch asset count before rendering', async () => {
   let createBufferCalls = 0
   const source = buffer()
   const track = preparedStretchTrack(source)
+
   const secondTrack = {
     ...preparedStretchTrack(source),
     id: 'track-stretch-2',
     clips: preparedStretchTrack(source, source.duration, 'clip-stretch-2').clips,
   }
+
   const result = await preparePortableStretchAssets({
     tracks: [track, secondTrack],
     projectBpm: 120,
@@ -353,6 +372,7 @@ test('rejects aggregate Stretch asset count before rendering', async () => {
     maximumAssetCount: 1,
     createBuffer: (channels, frames, sampleRate) => {
       createBufferCalls += 1
+
       return new TestAudioBuffer(
         Array.from({ length: channels }, () => new Float32Array(frames)),
         sampleRate,
@@ -360,6 +380,7 @@ test('rejects aggregate Stretch asset count before rendering', async () => {
     },
     signal: undefined,
   })
+
   expect(result).toMatchObject({
     supported: false,
     diagnostics: [{ code: 'stretch-asset-count-exceeded' }],
@@ -370,6 +391,7 @@ test('rejects aggregate Stretch asset count before rendering', async () => {
 test('rejects cumulative estimated Stretch bytes before rendering', async () => {
   let createBufferCalls = 0
   const source = buffer()
+
   const result = await preparePortableStretchAssets({
     tracks: [
       preparedStretchTrack(source),
@@ -384,12 +406,14 @@ test('rejects cumulative estimated Stretch bytes before rendering', async () => 
     maximumPreparationBytes: 2 * source.length * Float32Array.BYTES_PER_ELEMENT - 1,
     createBuffer: (channels, frames, sampleRate) => {
       createBufferCalls += 1
+
       return new TestAudioBuffer(
         Array.from({ length: channels }, () => new Float32Array(frames)),
         sampleRate,
       )
     },
   })
+
   expect(result).toMatchObject({
     supported: false,
     diagnostics: [{ code: 'stretch-preparation-bytes-exceeded' }],
@@ -400,10 +424,12 @@ test('rejects cumulative estimated Stretch bytes before rendering', async () => 
 test('rejects materialization expansion before allocating the rendered buffer', async () => {
   let createBufferCalls = 0
   const source = new TestAudioBuffer([new Float32Array(1_000)], 1_000)
+
   const result = await prepareAggregateStretch(source, 2_000, undefined, source.duration, {
     maximumPreparationBytes: 7_000,
     createBuffer: (channels, frames, sampleRate) => {
       createBufferCalls += 1
+
       return new TestAudioBuffer(
         Array.from({ length: channels }, () => new Float32Array(frames)),
         sampleRate,
@@ -420,10 +446,12 @@ test('rejects materialization expansion before allocating the rendered buffer', 
 
 test('admits a high-rate source when final normalized frames fit capacity', async () => {
   const source = new TestAudioBuffer([new Float32Array(288_000)], 96_000)
+
   const result = await prepareAggregateStretch(source, 48_000, 144_000, 3, {
     maximumAssetCount: 1,
     maximumPreparationBytes: 1_100_000 * Float32Array.BYTES_PER_ELEMENT + WSOLA_MAX_PIPELINE_WORKING_MEMORY_BYTES,
   })
+
   if (!result.supported) throw new Error(result.diagnostics.map((entry) => entry.message).join('\n'))
   expect(result.assets[0]?.asset).toMatchObject({
     frameCount: 144_000,
@@ -433,6 +461,7 @@ test('admits a high-rate source when final normalized frames fit capacity', asyn
 
 test('rechecks actual cumulative prepared PCM bytes after rendering', async () => {
   const source = buffer()
+
   const result = await prepareAggregateStretch(source, undefined, undefined, source.duration, {
     maximumAssetCount: 1,
     maximumPreparationBytes: source.length * Float32Array.BYTES_PER_ELEMENT,
@@ -444,6 +473,7 @@ test('rechecks actual cumulative prepared PCM bytes after rendering', async () =
       sampleRate,
     ),
   })
+
   expect(result).toMatchObject({
     supported: false,
     diagnostics: [{ code: 'stretch-preparation-bytes-exceeded' }],
@@ -458,6 +488,7 @@ test('normalizes prepared Stretch PCM to the required sample rate while preservi
 
   if (!normalized.supported) throw new Error(normalized.diagnostics.map((entry) => entry.message).join('\n'))
   const prepared = normalized.assets[0]
+
   if (!prepared) throw new Error('Expected a prepared Stretch asset.')
   expect(prepared).toMatchObject({
     clipId: 'clip-stretch',
@@ -482,6 +513,7 @@ test('normalizes prepared Stretch PCM to the required sample rate while preservi
   expect(prepared.asset.assetId).toBe(prepared.portableAssetId)
   expect(prepared.projectAssetId).toBe(prepared.portableAssetId)
   const sameRate = await prepareAggregateStretch(source, 44_100)
+
   if (!sameRate.supported) throw new Error(sameRate.diagnostics.map((entry) => entry.message).join('\n'))
   expect(prepared.portableAssetId).not.toBe(sameRate.assets[0]?.portableAssetId)
   expect(prepared.transferables).toHaveLength(prepared.pcm.planes.length)
@@ -494,6 +526,7 @@ test('keeps same-rate aggregate Stretch preparation identical to the existing be
   const source = new TestAudioBuffer([
     Float32Array.from({ length: 441 }, (_, index) => index / 440),
   ], 44_100)
+
   const withoutRequirement = await prepareAggregateStretch(source)
   const sameRate = await prepareAggregateStretch(source, 44_100)
 
@@ -506,6 +539,7 @@ test('resamples one-frame Stretch sources without reading outside the source pla
 
   if (!normalized.supported) throw new Error(normalized.diagnostics.map((entry) => entry.message).join('\n'))
   const prepared = normalized.assets[0]
+
   if (!prepared) throw new Error('Expected a prepared Stretch asset.')
   expect(prepared.asset.frameCount).toBe(1)
   expect(prepared.pcm.planes[0]).toEqual(new Float32Array([0.25]))
@@ -557,6 +591,7 @@ test('reports cancellation and rejects invalid rendered channel metadata', async
       throw new Error('must not render')
     },
   })
+
   expect(cancelled).toMatchObject({
     supported: false,
     diagnostics: [{ code: 'stretch-render-cancelled', clipId: 'clip-stretch' }],
@@ -573,6 +608,7 @@ test('reports cancellation and rejects invalid rendered channel metadata', async
       sourceStartSec: 0,
     }),
   })
+
   expect(invalid).toMatchObject({
     supported: false,
     diagnostics: [{ code: 'stretch-invalid-channel-count', clipId: 'clip-stretch' }],
@@ -581,16 +617,20 @@ test('reports cancellation and rejects invalid rendered channel metadata', async
 
 test('registers generation-safe assets and releases the exact registered identity', async () => {
   const calls: string[] = []
+
   const registry: PortableStretchAssetRegistry = {
     register: async (asset, _pcm, generation) => {
       calls.push(`register:${asset.assetId}:${generation}`)
+
       return { status: 'registered', handle: { slot: 3, generation: 2 } }
     },
     release: async (assetId, generation) => {
       calls.push(`release:${assetId}:${generation}`)
+
       return { status: 'released' }
     },
   }
+
   const result = await registerPortableStretchAsset({
     prepared: preparedAsset(),
     projectGeneration: 7,
@@ -615,17 +655,20 @@ test('registers generation-safe assets and releases the exact registered identit
 
 test('rejects stale registrations and releases an asset registered before cancellation', async () => {
   let registerCalls = 0
+
   const stale = await registerPortableStretchAsset({
     prepared: preparedAsset(),
     projectGeneration: 8,
     registry: {
       register: async () => {
         registerCalls += 1
+
         return { status: 'registered', handle: { slot: 0, generation: 1 } }
       },
       release: async () => ({ status: 'released' }),
     },
   })
+
   expect(stale).toMatchObject({
     supported: false,
     diagnostics: [{ code: 'stretch-asset-stale-generation' }],
@@ -634,6 +677,7 @@ test('rejects stale registrations and releases an asset registered before cancel
 
   const controller = new AbortController()
   let releases = 0
+
   const cancelled = await registerPortableStretchAsset({
     prepared: preparedAsset(),
     projectGeneration: 7,
@@ -641,14 +685,17 @@ test('rejects stale registrations and releases an asset registered before cancel
     registry: {
       register: async () => {
         controller.abort()
+
         return { status: 'registered', handle: { slot: 0, generation: 1 } }
       },
       release: async () => {
         releases += 1
+
         return { status: 'released' }
       },
     },
   })
+
   expect(cancelled).toMatchObject({
     supported: false,
     diagnostics: [{ code: 'stretch-render-cancelled' }],
@@ -665,6 +712,7 @@ test('maps core registration failures to precise typed diagnostics', async () =>
     { status: 'stale-generation', code: 'stretch-registration-stale-generation' },
     { status: 'invalid-pcm', code: 'stretch-registration-invalid-pcm' },
   ]
+
   for (const { status, code } of cases) {
     const result = await registerPortableStretchAsset({
       prepared: preparedAsset(),
@@ -674,6 +722,7 @@ test('maps core registration failures to precise typed diagnostics', async () =>
         release: async () => ({ status: 'released' }),
       },
     })
+
     expect(result).toMatchObject({
       supported: false,
       diagnostics: [{ code, clipId: 'clip-stretch' }],
@@ -690,6 +739,7 @@ test('reports stale release generations without marking the asset released', asy
       release: async () => ({ status: 'stale-generation' }),
     },
   })
+
   if (!result.supported) throw new Error(result.diagnostics.map((entry) => entry.message).join('\n'))
   expect(await result.registered.release()).toMatchObject({
     released: false,

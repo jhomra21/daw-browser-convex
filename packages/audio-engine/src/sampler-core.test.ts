@@ -60,6 +60,7 @@ describe('sampler core', () => {
       when: 1,
       durationSec: 2,
     })
+
     expect(plan.detuneCents).toBe(1200)
     expect(plan.segments.length).toBeGreaterThan(1)
     expect(plan.segments.every((segment) => segment.durationSec > 0)).toBe(true)
@@ -76,12 +77,14 @@ describe('sampler core', () => {
         when: 1,
         durationSec: 4,
       })
+
       expect((plan.segments[1]?.startTime ?? 0) - plan.startTime).toBeCloseTo(expectedAdvance, 12)
     }
   })
 
   test('keeps forward-loop sources alive through the note envelope', () => {
     const forwardLoop: SamplerZone = { ...zone('forward', 0), playbackMode: 'forward-loop' }
+
     const plan = createSamplerVoicePlan({
       zone: forwardLoop,
       params: createDefaultSamplerParams(),
@@ -90,6 +93,7 @@ describe('sampler core', () => {
       when: 1,
       durationSec: 4,
     })
+
     expect(plan.segments).toHaveLength(1)
     expect(plan.segments[0]?.durationSec).toBeCloseTo(plan.endTime - plan.startTime, 12)
   })

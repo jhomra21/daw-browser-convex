@@ -38,10 +38,14 @@ export const hydrateInstrumentBuffers = (
   snapshotInstrumentBuffers: EffectsPanelInstrumentDevice["snapshotInstrumentBuffers"],
 ): ExportRenderStateSnapshot => {
   const trackFx = renderState.fx.trackFx;
+
   if (!trackFx) return renderState;
+
   const hydratedTrackFx = Object.fromEntries(Object.entries(trackFx).map(([trackId, entry]) => {
     const activeInstrument = entry.instrument;
+
     if (!activeInstrument) return [trackId, entry];
+
     const {
       samplerBuffers: _samplerBuffers,
       drumRackBuffers: _drumRackBuffers,
@@ -49,9 +53,12 @@ export const hydrateInstrumentBuffers = (
       unavailableSampleAssetKeys: _unavailableSampleAssetKeys,
       ...entryWithoutBuffers
     } = entry;
+
     const runtimeBuffers = snapshotInstrumentBuffers(trackId, activeInstrument);
+
     return [trackId, runtimeBuffers ? { ...entryWithoutBuffers, ...runtimeBuffers } : entryWithoutBuffers];
   }));
+
   return {
     ...renderState,
     fx: {
@@ -131,11 +138,13 @@ const deviceInsertActionsEqual = (
 export function createEffectsPanelController(options: EffectsPanelControllerOptions) {
   const samplerBufferSync = options.samplerBufferSync;
   const drumRackBufferSync = options.drumRackBufferSync;
+
   const target = useEffectsPanelTarget({
     selectedFXTarget: options.selectedFXTarget,
     tracks: options.tracks,
     canWriteTrackRouting: options.canWriteTrackRouting,
   });
+
   const {
     currentTargetId,
     currentTrack,
@@ -148,16 +157,20 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     convexApi.effects.listByRoom,
     () => {
       const projectId = options.projectId();
+
       if (projectId && isLocalId("project", projectId)) return null;
+
       return projectId && options.userId() ? { projectId } : null;
     },
     () => ["effects", "room", options.projectId(), options.userId()],
   );
+
   // One local reader serves the instrument device, audio device and all-target audio sync.
   const localEffectsView = createLocalEffectsView({ projectId: options.projectId, onError: options.onEffectError });
 
   const canWriteCurrentTargetEffects = createMemo(() => currentTargetId() === "master" || canWriteCurrentTrackRouting());
   const pendingWorkOwner = createPendingWorkOwner();
+
   const instrument = createEffectsPanelInstrumentDevice(
     {
       acceptance: options.acceptance,
@@ -190,11 +203,15 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     currentTrack,
     resolveTrackByTargetId,
   );
+
   const isCurrentTargetReadOnly = createMemo(() => currentTargetId() !== "master" && !canWriteCurrentTrackRouting());
+
   const canWriteEffectsTarget = (targetId: Track["id"] | "master") => {
     if (targetId === "master") return true;
+
     return options.canWriteTrackRouting ? options.canWriteTrackRouting(targetId) : true;
   };
+
   const audioEffects = createEffectsPanelAudioDevice(
     {
       acceptance: options.acceptance,
@@ -242,6 +259,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
   let observedCloudTrackIds = new Set<string>();
   createEffect(() => {
     const effects = roomEffectsQuery.data;
+
     if (effects === undefined) return;
     const { instruments, arpeggiators } = indexInstrumentEffectRows(effects);
     const tracks = options.tracks();
@@ -253,6 +271,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       }
     });
     observedCloudTrackIds = currentTrackIds;
+
     for (const track of tracks) {
       const instrumentParams = track.kind === "instrument" ? instruments.get(track.id) : undefined;
       const arpParams = track.kind === "instrument" ? arpeggiators.get(track.id) : undefined;
@@ -271,27 +290,35 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       flushSampledInstrumentWork(),
     ]);
   };
+
   const exportSnapshot: EffectsPanelExportSnapshot = {
     flushPending,
     // Compilation cannot drain the gesture owner: its announce awaits this preparation.
     awaitInstrumentReadiness: async (override) => {
       await flushSampledInstrumentWork();
+
       const readProjection = () => {
         const projection = exportSnapshot.snapshotEffectsProjection();
+
         return override ? withInstrumentOverride(projection, override.targetId, override.instrument) : projection;
       };
+
       // Select the last row per target before comparing only loader inputs, not knob values.
       const instrumentRows = (projection: ExportEffectsProjection) => new Map(projection.upsertDeviceRows
         .filter(row => row.effect === "instrument").map(row => [row.targetId, row]));
+
       const hydrationKey = (projection: ExportEffectsProjection) => JSON.stringify(
         [...instrumentRows(projection).values()].flatMap(row => {
           const params = row.params;
+
           const inputs = params.kind === "drum-rack" ? drumRackBufferSync.hydrationInputs(params)
             : params.kind === "sampler" || params.kind === "granular" ? samplerBufferSync.hydrationInputs(params)
               : undefined;
+
           return inputs ? [[row.targetId, inputs]] : [];
         }),
       );
+
       // A queued draft can precede its FIFO apply. Load only, through the same
       // region caches and pending-work owner, and pin until the compile finishes.
       while (true) {
@@ -301,25 +328,32 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
         const buffers = new Map<string, ReturnType<EffectsPanelInstrumentDevice["snapshotInstrumentBuffers"]>>();
         const pins: { release: () => void }[] = [];
         const release = () => { for (const pin of pins.splice(0)) pin.release(); };
+
         try {
           for (const row of instrumentRows(projection).values()) {
             const params = row.params;
+
             if (params.kind !== "sampler" && params.kind !== "granular" && params.kind !== "drum-rack") continue;
+
             const work = params.kind === "drum-rack"
               ? drumRackBufferSync.loadBuffers(row.targetId, params)
               : samplerBufferSync.loadBuffers(row.targetId, params);
+
             pendingWorkOwner.track(projectId, work.then(() => undefined));
             const loaded = await work;
             pins.push(loaded);
             const { release: _release, ...runtimeBuffers } = loaded;
             buffers.set(row.targetId, runtimeBuffers);
           }
+
           await pendingWorkOwner.flushPending(projectId);
           const fresh = readProjection();
+
           if (projectId !== options.projectId() || hydrationKey(fresh) !== key) {
             release();
             continue;
           }
+
           return {
             projection: fresh,
             hydrateInstrumentBuffers: (renderState) => hydrateInstrumentBuffers(renderState, (trackId) => buffers.get(trackId)),
@@ -327,6 +361,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
           };
         } catch (cause) {
           release();
+
           if (projectId !== options.projectId() || hydrationKey(readProjection()) !== key) continue;
           throw cause;
         }
@@ -335,14 +370,18 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     snapshotEffectsProjection: () => {
       const projection = audioEffects.snapshotExportProjection();
       const clearInstrumentTargets: string[] = [];
+
       for (const track of options.tracks()) {
         if (track.kind !== "instrument") continue;
         clearInstrumentTargets.push(track.id);
         const instrumentParams = instrument.readInstrumentForTarget(track.id);
+
         if (instrumentParams) projection.upsertDeviceRows.push({ targetId: track.id, effect: "instrument", params: instrumentParams });
         const arpParams = instrument.arp.readForTarget(track.id);
+
         if (arpParams) projection.upsertDeviceRows.push({ targetId: track.id, effect: "arp", params: arpParams });
       }
+
       return { ...projection, clearInstrumentTargets };
     },
     hydrateInstrumentBuffers: (renderState) => {
@@ -358,42 +397,55 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
 
   const canAddArpeggiatorToTarget = (targetId: Track["id"]) => {
     const track = resolveTrackByTargetId(targetId);
+
     if (!track || track.kind !== "instrument") return false;
+
     if (options.canWriteTrackRouting && !options.canWriteTrackRouting(track.id)) return false;
+
     return !instrument.arp.readForTarget(track.id);
   };
 
   const addArpeggiatorToTarget = async (targetId: Track["id"]) => {
     if (!canAddArpeggiatorToTarget(targetId)) return false;
+
     return await instrument.arp.addToTarget(targetId);
   };
 
   const canAddMidiClipToTarget = (targetId: Track["id"]) => {
     const track = resolveTrackByTargetId(targetId);
+
     if (!track || track.kind !== "instrument") return false;
+
     if (options.canWriteTrackRouting && !options.canWriteTrackRouting(track.id)) return false;
+
     return true;
   };
 
   const addMidiClipToTarget = async (targetId: Track["id"], insertOptions?: AddMidiClipOptions) => {
     if (!canAddMidiClipToTarget(targetId)) return false;
+
     return await instrument.addMidiClipToTarget(targetId, insertOptions);
   };
 
   const canSetInstrumentForTarget = (targetId: Track["id"]) => {
     const track = resolveTrackByTargetId(targetId);
+
     if (!track || track.kind !== "instrument") return false;
+
     if (options.canWriteTrackRouting && !options.canWriteTrackRouting(track.id)) return false;
+
     return true;
   };
 
   const setInstrumentForTarget: TimelineDeviceInsertActions["setInstrumentForTarget"] = (targetId, nextInstrument) => {
     if (!canSetInstrumentForTarget(targetId)) return false;
+
     return instrument.setInstrumentForTarget(targetId, nextInstrument);
   };
 
   const setArpeggiatorForTarget: TimelineDeviceInsertActions["setArpeggiatorForTarget"] = (targetId, params) => {
     if (!canSetInstrumentForTarget(targetId)) return false;
+
     return instrument.arp.setForTarget(targetId, params);
   };
 
@@ -403,6 +455,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
 
   const addAudioEffectToTarget = async (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => {
     if (!canWriteEffectsTarget(targetId)) return false;
+
     return await audioEffects.addByKindToTarget(targetId, effect, index);
   };
 
@@ -414,6 +467,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
 
   const addAudioEffectChainToTarget = async (targetId: Track["id"] | "master", chain: AudioEffectChainPreset, index?: number) => {
     if (!canWriteEffectsTarget(targetId) || chain.effects.length === 0) return false;
+
     return await audioEffects.addChainToTarget(targetId, chain.effects, index);
   };
 
@@ -448,6 +502,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       canAddDelay: true,
       canAddReverb: true,
     };
+
     if (deviceInsertActionsEqual(previousDeviceInsertActions, nextActions)) return;
     previousDeviceInsertActions = nextActions;
     options.onDeviceInsertActionsChange?.(nextActions);
@@ -467,6 +522,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       instanceId: string;
       params: EffectParamsByEffect[Effect];
     }) => audioEffects.replayInstanceParams(payload);
+
     options.onEffectInstanceParamsReplayChange?.(replay);
   });
 
@@ -485,5 +541,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
 }
 
 export type EffectsPanelController = ReturnType<typeof createEffectsPanelController>;
+
 export type EffectsPanelInstrumentDevice = EffectsPanelController["devices"]["instrument"];
+
 export type EffectsPanelAudioEffects = EffectsPanelController["devices"]["audioEffects"];

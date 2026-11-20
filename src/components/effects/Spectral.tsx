@@ -29,6 +29,7 @@ type SpectralProps = {
 }
 
 const defaults = createDefaultSpectralParams()
+
 const modeLabels = {
   freeze: 'Freeze',
   gate: 'Gate',
@@ -37,6 +38,7 @@ const modeLabels = {
   hpss: 'HPSS',
   'noise-reduce': 'Noise Reduce',
 } satisfies Record<SpectralMode, string>
+
 const percent = formatDevicePercent
 const formatLatency = (frames: number) => `${formatDeviceMilliseconds(frames / 48, 1)} @ 48 kHz`
 

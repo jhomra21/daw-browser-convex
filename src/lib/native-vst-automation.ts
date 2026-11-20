@@ -22,9 +22,12 @@ export const isExternalVstAutomationEnvelope = (
   externalAttachments: NativeExternalAttachmentPlan | undefined,
 ) => {
   const parsed = parseExternalAutomationParameterId(envelope.parameterId)
+
   if (!parsed || !externalAttachments) return false
   const attachment = externalAttachments.attachments.find((entry) => entry.instanceId === parsed.instanceId)
+
   if (!attachment) return false
+
   return envelope.target.kind === 'master'
     ? attachment.graphNodeId === 'master'
     : attachment.graphNodeId === envelope.target.trackId
@@ -39,10 +42,13 @@ export const projectNativeVstAutomationSegments = (
     || !Number.isSafeInteger(input.endFrame) || input.endFrame <= input.startFrame) {
     throw new Error('Native VST automation projection bounds are invalid.')
   }
+
   const plan = input.externalAttachments
+
   if (!plan) return []
   const attachments = new Map(plan.attachments.map((attachment) => [attachment.instanceId, attachment]))
   const timelineTimeAtFrame = (frame: number) => input.timelineOriginSec + frame / input.sampleRateHz
+
   const frameAtTimelineTime = (timeSec: number) => Math.round(
     (timeSec - input.timelineOriginSec) * input.sampleRateHz,
   )
@@ -51,18 +57,22 @@ export const projectNativeVstAutomationSegments = (
     const parsed = parseExternalAutomationParameterId(envelope.parameterId)
     const attachment = parsed ? attachments.get(parsed.instanceId) : undefined
     const descriptor = attachment?.parameters?.find((parameter) => parameter.id === parsed?.parameterId)
+
     if (!parsed || !attachment || attachment.bypassed || !envelope.enabled
       || descriptor?.readOnly === true
       || envelope.points.length === 0) return []
+
     const targetMatches = envelope.target.kind === 'master'
       ? attachment.graphNodeId === 'master'
       : attachment.graphNodeId === envelope.target.trackId
+
     if (!targetMatches) return []
 
     const points = envelope.points
     const pointFrames = points.map((point) => frameAtTimelineTime(point.timeSec))
     const fallback = descriptor?.defaultValue ?? 0
     const segments: NativeVstAutomationSegment[] = []
+
     const appendSegment = (
       segmentStart: number,
       segmentEnd: number,
@@ -94,6 +104,7 @@ export const projectNativeVstAutomationSegments = (
       Math.min(input.endFrame, firstFrame),
       'hold',
     )
+
     for (let index = 0; index < points.length - 1; index += 1) {
       const point = points[index]
       const pointFrame = pointFrames[index] ?? input.endFrame
@@ -104,8 +115,10 @@ export const projectNativeVstAutomationSegments = (
         point.interpolation === 'linear' ? 'linear' : 'hold',
       )
     }
+
     const lastFrame = pointFrames[pointFrames.length - 1] ?? input.startFrame
     appendSegment(Math.max(input.startFrame, lastFrame), input.endFrame, 'hold')
+
     return segments
   }).sort((left, right) => (
     left.instanceId.localeCompare(right.instanceId)

@@ -26,37 +26,47 @@ export const createMidiTimestampConverter = (input: {
 
   const convert = (eventTimeStamp: number): AudioClockResult | undefined => {
     const context = input.context()
+
     if (!context || !Number.isFinite(eventTimeStamp)) return undefined
     const current = Number.isFinite(context.currentTime) ? context.currentTime : 0
+
     if (context.state !== 'running') {
       fallback = undefined
+
       return {
         contextTime: current,
         timelineTime: input.contextTimeToTimeline(current),
         scheduledContextTime: current,
       }
     }
+
     const outputTimestamp = context.getOutputTimestamp?.()
     const outputContextTime = outputTimestamp?.contextTime
     const outputPerformanceTime = outputTimestamp?.performanceTime
+
     const contextTime = isFiniteNumber(outputContextTime)
       && isFiniteNumber(outputPerformanceTime)
       ? outputContextTime + (eventTimeStamp - outputPerformanceTime) / 1000
       : (() => {
           const now = input.performanceNow()
+
           if (!fallback || now < fallback.performanceTime) {
             fallback = { performanceTime: now, contextTime: current }
           }
+
           return fallback.contextTime + (eventTimeStamp - fallback.performanceTime) / 1000
         })()
+
     return {
       contextTime,
       timelineTime: input.contextTimeToTimeline(contextTime),
       scheduledContextTime: Math.max(current, contextTime),
     }
   }
+
   convert.reset = () => {
     fallback = undefined
   }
+
   return convert
 }

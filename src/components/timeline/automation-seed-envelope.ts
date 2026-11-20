@@ -13,13 +13,16 @@ export const createAutomationSeedEnvelope = (input: {
   initialValue?: number
 }): AutomationEnvelope | undefined => {
   const descriptor = getAutomationParameterDescriptor(input.parameterId)
+
   if (!descriptor) return undefined
+
   const point = {
     id: crypto.randomUUID(),
     timeSec: 0,
     value: input.initialValue ?? descriptor.defaultValue,
     interpolation: descriptor.interpolation ?? 'linear',
   }
+
   return {
     id: crypto.randomUUID(),
     projectId: input.projectId,

@@ -5,6 +5,7 @@ import { createBenchmarkRecordingTelemetry } from "./benchmark-runtime"
 
 test("terminal benchmark evidence is logged once without mutating the status", () => {
   const log = spyOn(console, "error").mockImplementation(() => undefined)
+
   try {
     const telemetry = createBenchmarkRecordingTelemetry(true)
     const active = { generation: 1, sessionId: 1n, timelineFrame: 0, capturedFrames: 2048, droppedFrames: 0, droppedBlocks: 0, availableBlocks: 32, queuedBlocks: 0, rms: 0, peak: 0, fatal: false, active: true, configured: true }
@@ -23,6 +24,7 @@ test("terminal benchmark evidence is logged once without mutating the status", (
 
 test("main benchmark opt-out produces no evidence", () => {
   const log = spyOn(console, "error").mockImplementation(() => undefined)
+
   try {
     const telemetry = createBenchmarkRecordingTelemetry(false)
     telemetry.recordStatus({ generation: 1, sessionId: 1n, timelineFrame: 0, capturedFrames: 0, droppedFrames: 0,
@@ -34,6 +36,7 @@ test("main benchmark opt-out produces no evidence", () => {
 test("main benchmark waits for capture then dumps once per session with scalar metadata", () => {
   const logs: string[] = []
   const log = spyOn(console, "error").mockImplementation((message) => { logs.push(String(message)) })
+
   try {
     const telemetry = createBenchmarkRecordingTelemetry(true)
     const status = { generation: 1, sessionId: 1n, timelineFrame: 0, capturedFrames: 0, droppedFrames: 0, droppedBlocks: 0, availableBlocks: 32, queuedBlocks: 0, rms: 0, peak: 0, fatal: false, active: false, configured: true }
@@ -65,6 +68,7 @@ test("delivery tracing is a no-op when disabled", () => {
 
 test("delivery trace wraps at 512 entries in arrival order and dumps once", () => {
   const trace = createRecordingDeliveryTrace(true, 1, 1n, 0)
+
   for (let sequence = 0; sequence < 600; sequence++) trace.block(sequence, sequence === 599 ? 17 : 2048, sequence, 2)
   const dump = trace.dump(601)
   expect(dump?.events).toHaveLength(512)
@@ -81,6 +85,7 @@ test("new delivery sessions reset counts and retain first fatal through cleanup 
   const trace = createRecordingDeliveryTrace(true, 1, 1n, 0)
   trace.status(10, 11, true, true, 22528)
   trace.transition("native-fatal", 11)
+
   for (let index = 0; index < 520; index++) trace.block(index, 128, index + 12, 0)
   trace.status(533, 0, false, false, 0)
   trace.transition("controller-cleanup", 534)

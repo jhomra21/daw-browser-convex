@@ -1,0 +1,488 @@
+{
+ "name": "anti-slop-update",
+ "sequence": 88,
+ "createdAt": "2026-11-20T03:28:11.618Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "apps/desktop/audio-host.ts",
+   "from": "d2ed3b877d8a50e0edb7ca064fd8c1109483d594a3438fbd65c6c04751b2a4e4",
+   "to": "f2996f85a976e653f1282762c060ba433cae66ca1403fb4b65911c571f495486"
+  },
+  {
+   "file": "native/audio-host-macos/tests/realtime_callback_guard.test.ts",
+   "from": "f6e9fe362ce3e10d1d1b7dbf8aa7164a613ff08248ed57af98bdce824f2e0a89",
+   "to": "c8ec2a93c4eb757eada36949d6bc4b38d999d018585b53d2ed2b568bcc827e77"
+  },
+  {
+   "file": "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts",
+   "from": "a612840aafa9f76f8d560cabee5e91d86a421ffb5982810ade09a8c4733e9796",
+   "to": "85f8ee6e746c0b53df86331315ec4d96f8facd59a354b32a51c72d710928a98b"
+  },
+  {
+   "file": "packages/audio-engine/src/backends/wasm-audio-worklet-backend.ts",
+   "from": "798a1e4300df48d667795e2d4813c5f0992895ec97adb1adf90ae8b424e7ff9e",
+   "to": "7617aeacab29ee4d8dcc5dffa38e293c8fac923ff1435271b09ff11c6df48938"
+  },
+  {
+   "file": "packages/audio-engine/src/native-host-wire.test.ts",
+   "from": "66687e823918211b1551e160d0442caba5196c923ba26c1fabad209a7d6a5cbb",
+   "to": "9b6ce8571eb84fa04530229541ef4c74829378a64fdee8e772a484d22a0e466c"
+  },
+  {
+   "file": "packages/audio-engine/src/native-host-wire.ts",
+   "from": "bfcc2dd12794d91bed86ddb6edd67dffeff03df62fbd1f084384e1ea441fe1c7",
+   "to": "26da7cdf259cc811d9d524b122bf82ca2f6de45eb5a59fcc4b482850ebc8f0b5"
+  },
+  {
+   "file": "packages/audio-engine/src/portable-wasm-host.test.ts",
+   "from": "86e62c5938e17f61904ebcf738b9610426168476f734ddec64a58d3a5801c196",
+   "to": "e80d61b1e91b289547f81d16083dba98a27adfb25ce08e928f5fe1efc5cd5a14"
+  },
+  {
+   "file": "packages/audio-engine/src/portable-wasm-protocol.test.ts",
+   "from": "b94c0451d92b92c43d1bc633bdc007eb11b81ba7ff7c2a1a4e464b0e7ec0db0b",
+   "to": "9998fa922f095ea35aefc936c2f625f8415429f56b6091a39e24dfd7cd5b6183"
+  },
+  {
+   "file": "packages/audio-engine/src/portable-wasm-protocol.ts",
+   "from": "563927524f38dde3c814386befb13aacea025893737f2e51c53e0cf4107fce0b",
+   "to": "46113f63a2ebcb97bf7691695c8eef5e71393b7ad4936ee47e5037aa47ab8b63"
+  },
+  {
+   "file": "packages/audio-engine/src/portable-wasm-worklet.test.ts",
+   "from": "0651d0ed11ff3b5a57c829e5fc7c4f1e3d59e533c9cd60e95c0bc40c5e2c7989",
+   "to": "e9bdac5adebf54a2d4e501cd301b510425db02af7f2f44be3d3ecc909ededff9"
+  },
+  {
+   "file": "public/audio-worklets/daw-portable-audio-core-host-v2.js",
+   "from": "40cfc893967ce25980ba31e0a89a4023b805d506a45c7f707326998a58c5974b",
+   "to": "69cc2407f39f06d21457a3230d9890250237f30e30a816d78f92e96bb2e6faaa"
+  },
+  {
+   "file": "public/audio-worklets/daw-portable-graph-envelope-v3.js",
+   "from": "21f7a750448152905143ac481a8c6cff75fdbc43b0508c1e1cd671173927c6ef",
+   "to": "12e03002e9d602d0da33fba4489b54cfd8cb9147616e6e3722a9ae5d43812741"
+  },
+  {
+   "file": "src/components/Timeline.test.ts",
+   "from": "7ef50bea4b29759449dfe73c2b6e54c485ac280acaa79315dc96ad4410e802cb",
+   "to": "3ace76f0b468af4c65cb695530a4e79e4b192074960387ff16aaefff94f3385f"
+  },
+  {
+   "file": "src/components/Timeline.tsx",
+   "from": "a3abdf836955a83dc4b4b40ee7059e313a423c23aec8205fa9623d14d12dcac1",
+   "to": "e419ba0ae5bf34f15b8cf303d57242f4ed62521eda4d10e5b22d94910092a168"
+  },
+  {
+   "file": "src/components/effects/Granular.tsx",
+   "from": "fbe9fc7779af8359dd593e4232ba5bf8546335e15cebc602bf1da82bc6ec6982",
+   "to": "5dc9d7ba48ecc449c4f6b99ecfca288ee8693663c40098cb9f2fa4eda5cdbf6e"
+  },
+  {
+   "file": "src/components/effects/Sampler.tsx",
+   "from": "100afdc2e12c7a644e38dad806344cc7f3faad4572c619fecad541000d82d8e7",
+   "to": "2572d8391dab1389f6ea2224270c0299700ae2f7350055068dc0204cba30476f"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-audio-effects-state.test.ts",
+   "from": "7b3523f6af14e318e734bd62a10429d2f70aa1dd119ac29db2c869559480a9f6",
+   "to": "f3c83aeddff4c77f0d2414832c60871f0dfd7b4e7272bc9be76352e48b33741e"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-audio-effects-state.ts",
+   "from": "5901f7a2bedf8ffbae92e967e659bc74022a50b924d29601fcb94d25a20a8142",
+   "to": "59c6579ce275695a5bffcc1864bbdd1609ae3efef82ed80914790d2a7f1e3acc"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-controller.ts",
+   "from": "bce1fe2c11516522b05f92b968e6fc06486cb3c256946117f93ba4ec117790b8",
+   "to": "290898ea2d41a846c6ea314f8b027492c75a435f50494a0cf5fc5af0c28b364e"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-state.ts",
+   "from": "b279d747ebf6aef10f1eb77e2fce2bf8a1e17808d078c4b09d31a7aea79df200",
+   "to": "fa6d257f038e92ddb6a49b259bc4b9fa30cb0dc8ff5c09f614849653f2a1b72b"
+  },
+  {
+   "file": "src/components/timeline/create-persisted-effect-state.test.ts",
+   "from": "f9b2e8202f8969d6b76d81e4d3e9f7dc54db7e056ca96dc4893bde7798a5b81d",
+   "to": "9b8e6a26e334c0a6b67859b76630c7b3455e5f4a1a40032815617ead91f59904"
+  },
+  {
+   "file": "src/components/timeline/create-persisted-effect-state.ts",
+   "from": "8a94bf7fd598d47b33cd28c509ea1e9100d6bfe622342f791c25bc9c01a48686",
+   "to": "3331f5f47be4e672820d8a08e6d9dd71147d382b00eab3c8186b74410d945b49"
+  },
+  {
+   "file": "src/components/timeline/create-processor-edit-registry.ts",
+   "from": "5fe45c0d8f68639a7d6a7517cb11b87964531f9f08fb2c0a2bbbf98ea4e7dfb1",
+   "to": "42fae08a8e2b62759fc9a9a35fa95c352ad80f744ca9bee1bb7a8452ff16df5b"
+  },
+  {
+   "file": "src/components/timeline/create-timeline-effect-commit.ts",
+   "from": "c62ae6f5ec087a8abe5a0d1038d71b1172ae060a0c294bcef848c553b278a9c2",
+   "to": "d484104548d68392c418cb02098eebbfc0880cb18e65d3cee92fd57a557beef9"
+  },
+  {
+   "file": "src/components/timeline/parameter-gesture-owner.ts",
+   "from": "4dd194ddb7ff0a988b19c15715f55876cc2ea65a661dbdb03308100ab4e64fc9",
+   "to": "6b6ee1ed625da949a06f55df690d7a50ca3f2cb6b81b47facf230e0d0abce049"
+  },
+  {
+   "file": "src/hooks/pointer-gesture-ownership.browser.test.ts",
+   "from": "97de152a03d38f7a859db24def1097eede4735d1d606667175197a3d2163b6dc",
+   "to": "52799132d88bc0de0524a2d09f7bcf362585953d60dbc03964ca4c1fa594c1d8"
+  },
+  {
+   "file": "src/hooks/useEffectsPanelAudioSync.test.ts",
+   "from": "8e1b3461865537cc810225d15d4055fb14c3166c14e99ad1f850f5a1922aa1f1",
+   "to": "45782f2c83184b2e38cf40e396ce8b61def83bd8902afcbd3f596e8fc1ea0662"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.test.ts",
+   "from": "c98fea6db69d47ccb39a5dda08644bd4ebe02153faa15a99c67cc77615b5b82b",
+   "to": "cca39fbe9e6e5e105ee2ae6f8aa2d02548a77ecc05de6fa09465c21941d6dd13"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.ts",
+   "from": "68e5f405e511fd1f6ae4647139eacd9d0221450c67c8f13324d2f14cbbcd7bf2",
+   "to": "f529c9683eb5db1eb34d3590b63bfbcf80d7dec778ac041284aaa84b44592d1f"
+  },
+  {
+   "file": "src/hooks/useTimelineProjectionState.test.ts",
+   "from": "6e2bcef9dae22eff8ef12885c964b50d338176d0059e704ca615d05e27216ead",
+   "to": "cd0ca0446b51a8e7270527a6c42bbe4e18732bb1db464ac51d3522520b3a6648"
+  },
+  {
+   "file": "src/lib/desktop/native-built-in-parameter-mapper.ts",
+   "from": "dff45138f0e19ddbe4d77a90a06dab3343013bdda6d6d804b1c502aadd6e423b",
+   "to": "c6495060c9fb65af0da4091ffb53e395457335314622501c967e195f2868d824"
+  },
+  {
+   "file": "src/lib/desktop/native-graph-targets.ts",
+   "from": "f239fc94953b808a8b8500bb09a5f18aab48d51f5ec11ee6eef546b50fe4ca45",
+   "to": "e4dc6d99333bfa415904c68d848e9a52d58d8bdc95272b469e4489489aa3aa3a"
+  },
+  {
+   "file": "src/lib/desktop/native-host-connection-loss.ts",
+   "from": "50e0feaea25c8237c9527180fcfd1245a712d9d66ae0ec48ec7921f5145a7026",
+   "to": "b1289fc6f224cc95a80b5d97e295833b42e711a1e9c7b33e95bc6593f35b8add"
+  },
+  {
+   "file": "src/lib/desktop/native-live-midi.ts",
+   "from": "41b4119ea3cd2bbdeb4ff5f9e50e0d17985a90aeeaaf5a25a9b9ec97a7c602f2",
+   "to": "9f152404893b4f9280cc73474ff9bd8035740d8f23dd1012089a18a091984948"
+  },
+  {
+   "file": "src/lib/desktop/native-observation.ts",
+   "from": "faf78a4eb7d08eac973a4c8da0a69afa0dbc16efbb7672dfe745ec918bc8fb17",
+   "to": "00dd7b0593e8d743d7bbbb23994ba359c192cbef173a4996d74ecdf4a2274a46"
+  },
+  {
+   "file": "src/lib/desktop/native-parameter-events.ts",
+   "from": "ecda290f936f834041c565fa3ad1657395a9a0aad3d51e11ad9856c1fd4d6aac",
+   "to": "3b0e5ba2345cc66458b9e220f82fcadf13f958d941dcac63161f10e84cdb9f37"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.test.ts",
+   "from": "db9a3d447ddf55251bd99436a98377a767a967dc5d3219037e7e20cc628762c5",
+   "to": "e18888301f2647a7ee8fee717a2b1811716000eb7c9564e3a2b03cb61cf76d2d"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.ts",
+   "from": "e60cc5f1bebaa5640bb8d61392f03b576b2332e845e48cb0ad2f2c2ebda4f98b",
+   "to": "0bc77835e26b7709e12593dad6ea34bc1734e1cbd5a4f5d930dc3d3337b61fc8"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-lifecycle.browser.test.ts",
+   "from": "2a9a93779e8e5a855acc37927977e377897d8f9a027ccd3c04e9df0a3e04a0f7",
+   "to": "25ef1a31c33eac64c6c688b73937ca44e75a04d1b82c9a493750014d7792ccae"
+  },
+  {
+   "file": "src/lib/desktop/native-processor-state-owner.ts",
+   "from": "53750681a61f1fada917534a649b3bb299699c9e0c775656f421a9defaaabf48",
+   "to": "51240d9c2b7d9b2f96bb034ec1e1258406fe9981c86775b3d371a5d079934b28"
+  },
+  {
+   "file": "src/lib/desktop/native-publication-transaction.ts",
+   "from": "8a2cdf786ddf3e4afe276d39a23bf20ea87cdc020953eaf5b881780b42b1e5bf",
+   "to": "f5fb94a4b20df818500ba99bd61dca72254ecdc44fd5786ba4ec031e635637f6"
+  },
+  {
+   "file": "src/lib/desktop/native-recording-session.ts",
+   "from": "e4b827bd74b74f02a20f33ca3858f7e46b387189bd668d6574958710c6155180",
+   "to": "8405e5cb7ba8cc145a46db2f97357576282badc249f76f8b764f0992f71de7a7"
+  },
+  {
+   "file": "src/lib/desktop/native-retirement.ts",
+   "from": "cf0d6b0b4d8f72ee715475185405c6eb5e93ea65bdf5b3092c2e9c4386fef953",
+   "to": "3927ba62cd6691447c98999dca5955213b97f4395118d60f1505dbfeb2a527ae"
+  },
+  {
+   "file": "src/lib/desktop/native-schedule-coordinator.ts",
+   "from": "aa2875b872dbb75c3f0504889d8d95b582c5b5bebcd8df32655382073fbb3978",
+   "to": "53849faa087573fe924faee888d4f13e30037a4e24feae123050ec01be34d340"
+  },
+  {
+   "file": "src/lib/desktop/native-schedule-publication.ts",
+   "from": "b64c14ace9ea4f823ceec5ace6a6620d199556ad8b23b441fe7ef4d60bbae87e",
+   "to": "ecf3007be44126f403c30d6598ccf55d9b53c558d7c72736256fddc3bdf407eb"
+  },
+  {
+   "file": "src/lib/desktop/native-snapshot-support.ts",
+   "from": "3380d9389286f0e06ae58d7749e0dd7d329093a479bcbbf14054295d88a46b6a",
+   "to": "61a01346d9a89b74a5e2c4e2f642034c0e3bf84b42aea6d881b0033b143d2d4a"
+  },
+  {
+   "file": "src/lib/desktop/native-state-patches.ts",
+   "from": "22f05e3f3215f1844d3703ef869612d1e471f1b1338adf38a5696c790cdca1ba",
+   "to": "cd51b6aaefb57ef225cd2b7745d54c5da068fc37a57df1b4036f7db1255b602b"
+  },
+  {
+   "file": "src/lib/instrument-buffer-sync.test.ts",
+   "from": "8750fafbc193881b73bf8dd9fb3a6c7cc599a54bc86d04466eec4576fc36ed8c",
+   "to": "270e996541078b90fb0b4867fdbe635e28d33ac63292018671b71da5838023b1"
+  },
+  {
+   "file": "src/lib/live-playback-snapshot.ts",
+   "from": "a91045f04e9c1cf5cc2569ec9e1acef0300c86b2e8983adcbad963f95d20874d",
+   "to": "0884622a3c6eacb11ec1ac4042042d944fb6914e794e4b26843475b3515d4e56"
+  },
+  {
+   "file": "src/lib/live-processor-control.ts",
+   "from": "690e6414550836e6b20fe001095a01e4bb25f5c531e836a506e8a1c9c910bdcb",
+   "to": "3fdfa747f55ddd77895e6f26956d754d102507f24dad85055aaef93be4fa2c61"
+  },
+  {
+   "file": "src/lib/local-effects.ts",
+   "from": "93d1315b15d6529fdd7db235f78acd5052ef3d1d9c60511229cc4bb9eb437316",
+   "to": "9b067fc06d36e33460bcc6d55b649b5c17b5922cab2e110f8c434dac75eee47b"
+  },
+  {
+   "file": "src/lib/portable-browser-playback-controller.test.ts",
+   "from": "88e2c48496b243d276adfe9e01bda4e3d2b5ab5dd5c6f0fc12d1cc8c7bb8778b",
+   "to": "0b3a65f20379816f89c97e03d405103a15ff469cd8e2bae315c395a66a7cc82c"
+  },
+  {
+   "file": "src/lib/portable-browser-playback-controller.ts",
+   "from": "f02a0d0f80490c1f9883b91348c40a568b474281f349a8f1d60a0ce6bcd2a83c",
+   "to": "a8afe0b480e0c8aaa1aa33e2ac1833038d9d5ee91de9efd348f4542877e2a317"
+  },
+  {
+   "file": "src/lib/timeline-audio-import-metadata-only.test.ts",
+   "from": "90ed907b59b969d0328295eef29d0b29920a1de8bef4687fbf9a3adbff4e417c",
+   "to": "6dbde94e5ca069dd0b1c253321a4542a98af58e3df001bd0c8d214a99be6206f"
+  },
+  {
+   "file": "src/lib/timeline-audio-import.ts",
+   "from": "7f9fb7978bffee79814e7eaf99d27abb521c64e0beadfce39e078cee0136950b",
+   "to": "10b129315b075f81fcded4f92a31e4bca81810a4b508481a9b2c6583bd594823"
+  },
+  {
+   "file": "src/lib/when-number.ts",
+   "from": "150b8cec20b6dbb8758327b24c25ddad21050c2f30297d247360382d326a08f4",
+   "to": "3e57f1361e8651d60c0be138c61db9577c7179f689b0b47607770536e6eb44e5"
+  },
+  {
+   "file": "tools/acceptance/ae-08-live-graph.ts",
+   "from": "b9cf38d7d364a108ba24ebe58453d3ce32db071d77cdeeb96118de78dca50ab1",
+   "to": "28172913dc52c18bde74ee68164ab799354987738dd7a1e0f1202d698065c0c9"
+  },
+  {
+   "file": "tools/acceptance/ae-08-phase-5-fixture.ts",
+   "from": "ec1afc30ce457e8d4db4be2a5324583dd1c7db3e1349f0723359f664d8a1ec98",
+   "to": "18cee089fb283290e3d2ce4e83075e94f1859f9b1df4cdc3c2f7a15e64e59cdd"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-classes.ts",
+   "from": "9e5ad044ef9fa3326fb6ac8494285593662d2cf8c2c15f5ccab8706c342441b6",
+   "to": "0e64f95c223e3d04047a08272ab4b3a0cd26a9a13897e5e7f6dc1cd74130f5b8"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-edit.ts",
+   "from": "447452df6e1d848f00de7c9bfb1b25a5b4182607d2011fe25f6a8f80e932e7e7",
+   "to": "fc64facaeb3694c3ff38ddc810799d0611dff956daefb20bd8f0af74e96ec51a"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts",
+   "from": "88fdbcaeb4873a76e9d267bf907388fd970e1064bcd994176df6c196f1d839dd",
+   "to": "65add88798b08937e42cb48a82f1906f1c5e65fcc5c5149fc72c868e044c1a22"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook-bank-checks.ts",
+   "from": "737bc4c9789b828e56a603334fcb232d8d9ffe633b86890badce4d470da871f8",
+   "to": "7bbfbc6d91bbfe1aa122bccdb4d47be89f07111d49d88359d6724559c1e03d49"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook-bridge.ts",
+   "from": "5ee8044dc7b0ede1a2ca34b866b4f08d71ccf33d15fce5f9dc3abc087e8c2874",
+   "to": "a34423c9b2d7f0419e275630c70ee1888420b371a02d6cf20093eb1d7bb06a26"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook-buffer.ts",
+   "from": "4269810567eb6b579ef0ebdcc1295a677aea1cfbb4e30ea1fda57a8865c2dc4a",
+   "to": "2c2569432a6c1e99b02b1d47e724025134047898132c99de669d88f95b498ac5"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook-checks.ts",
+   "from": "dd36484be52905e92fdc8362299bdee308091cb89a0d4020f06028e550fc0395",
+   "to": "f7737dd5ede6e65f6477902e3b13cc7d53e6c8177c664def144cec93fb2328fb"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook-classes.ts",
+   "from": "3d46c8e6cd6ec9e7dee21ab8e47261a8e1a5b2eebe6e887a44878b2140604c48",
+   "to": "25ed91a7d31411619f743ece528f6e673b0b7cd3219fd0925378c9d34d5e2a63"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook-edits.ts",
+   "from": "55f149daade8923d30ff69ef02b8980c3299cb5d46c486e944abbce78f450f1f",
+   "to": "74b2f695feecef3699500683a7c12c819289588d778b9cc98bcd05883e38d416"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook-history.ts",
+   "from": "0b4ad5c66deafc6b84653d2d609e70a64be89ad3541cc1fb0f2ff7ac564e49a3",
+   "to": "8d262f6fb790597fae1707f72ee1d763ec14e74e0f3f2771a2acc49f2555c091"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook-minimize.ts",
+   "from": "6111a6ee3e7415fa05dab67cbcad7248e1f19490a6b5903869cf1faeb63537da",
+   "to": "cef722c70ad256e265f276bf93a9134eee2cc5e6252fcb55ff8d5cb38c095d60"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts",
+   "from": "cc425e8e63ca4a699494120e580dc059652519d97aad660215f92fdacf3b21ee",
+   "to": "b235c55943deae01731def5a9b36e02ea01d2d30b0b751ed59b1ba88ee9f7fe8"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook-scenarios-a2c.ts",
+   "from": "96219765eaf82064231fa6bc3c63b7120716577cdb2b9ef4b681cc9f81a89bc0",
+   "to": "c84c6295928a446c68595e23b2111a88ba875fb0677015fd2b721f37c97546f2"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook-scenarios.ts",
+   "from": "590afa5e2d0e2e6b28035e3312bbfac3c51574d12458dddb29ab94d8a109b975",
+   "to": "411dd4dea8ca527decfc50ac4b45cabf6a1cdd745fe6e1194b3ecffb8fa6873a"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts",
+   "from": "e0b1a2dd2a1b90280f727e4be02ce695222226001e6068254dc3999a37ecf892",
+   "to": "87fc943ad3159603cc300de5797ccebf556d45eef2489b24022e540766147c6b"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook.ts",
+   "from": "45812b888a956f3e705848a27de914bedcb956ec728e5bd2f6ec86a07cd3acd0",
+   "to": "906d40daeceb6ac1b1b5794616fc10489ee0d1ad55a26dca17a568de23b98a8a"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-host.ts",
+   "from": "6dd9c727cec1d33ae59f9ea84ee9dcb9e58b4d50a6f439e7c8a80eed854cdaf9",
+   "to": "849ccfc235ee28b37c9cf5b4604d4910f402e6df03f4c292c27eb7ddfe776bdf"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-oracle.ts",
+   "from": "6012c31220beacef2e8a2221335d9ce35af8754b98d3e5190d2e07282198addb",
+   "to": "bee93fb827ac390ce4185a1010d3771d6b6566acf306fac8ee12c8eb10229a7b"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-trace.ts",
+   "from": "3746a8cfcc27bfb2c092dcc5ff01a8e31e771c09776150490a05c9a44794916a",
+   "to": "827068b2362de25287bf6c4bf2f03b0eabf50d35e771ac202abe7876c4b043d4"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-virtual-time.ts",
+   "from": "e64ef10c2079d01c2cd83883d701d9e8e5404bff98561c30b170b4267db8da4e",
+   "to": "ae69c66aa9da0e5d3c32a6d7173caffc59344d776b64a7ee1f6ae49e6cd39bf5"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-witness.ts",
+   "from": "569424058f9ebfa0d98b7b2ec9ab1e12c533ba606dde44d170359d8a18c1658b",
+   "to": "1b37db2bacb964ce8128caa2a5abd99f55356c4a85b069d244f4ce210be8ff6f"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz.ts",
+   "from": "c524fa77cf555056ba1b4d2f935930916dea19bd2b773e8d9d3696cc702f3f65",
+   "to": "c7e891e3b5ff53005f499a06fda991e35f0b07726d66f0934d54f0b0e0df062b"
+  },
+  {
+   "file": "tools/acceptance/analyze-ae-08-continuity.ts",
+   "from": "c142ac7336932fe4833eb82bb334063587da9e8245737d72566d9f28228831b0",
+   "to": "33a61fc7dba85ab143b79e3f97b0d7403768afd7a760efc515e913d73d28c734"
+  },
+  {
+   "file": "tools/acceptance/b5c-playback-witness-support.ts",
+   "from": "150d326d412a89e9bf2ee6a61a799de287db8683507361e161022b45bf443137",
+   "to": "66ac4947e85da7189372feb3714b812ffb84a3e82ac3af30a4873e1933620f10"
+  },
+  {
+   "file": "tools/acceptance/device-control-cost.browser-runtime.tsx",
+   "from": "00b35b36c9932e396b05304ddea7c4dd8d75ec2c768088680cc34848b38983fb",
+   "to": "94458f86647d66188efa35b88abaf5e8cad9a80c0d76b17d00f7c9d71a543c06"
+  },
+  {
+   "file": "tools/acceptance/device-control-cost.browser.test.ts",
+   "from": "6a9acd3f2f391531e58e0981a6424ab67152de8aa8d8fa32da46031317919f40",
+   "to": "cd41fa32b65a2c200963937e2c48827113a03e3a82f62a578c8107a5dfd5cb12"
+  },
+  {
+   "file": "tools/acceptance/device-control-cost.ts",
+   "from": "cbfc01c361f83eba5061512fc866b6de1686b06a81f5a6ad4bf6adc1fc4ef3fe",
+   "to": "6fa0974b6afd5f8b96e3869bc9c7dc88bbc84be01d3830d2e47bd6e2dc567345"
+  },
+  {
+   "file": "tools/performance/30-track/native-spool-wav.test.ts",
+   "from": "26540502e79939621b1932de1d2469746ea8deebb749323ae78e1501b70bd602",
+   "to": "c45c841717be1dc771e1bc7327706b29357aabbc0b7c299536c24ac88becdabf"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "9a5199a6d4bf7e70518aa8412c6f2993cf4688952a90cc5f47f3e7a7be5b1ca6",
+   "new": "8bacb7a8acc39d72df2660528061d1b722c8f2cad6bd64b24cefe5d7e3af42bb"
+  },
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "aa08fdad6f5cd17e9b76972ad1268f68b85b03827b06325aa4cac4f2bc4876ea",
+   "new": "cd3188f77acec0fba3f710f060cf2a316f5c4089bbc072c53e75de11c574f1fe"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "3dfbd33a87bc59c31ba77ea843a822b4df587464",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "fe4ee90d9f3a7cd122c840ed74f810790a9ac656f0f420e76137dc97e18deba4",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "fe4ee90d9f3a7cd122c840ed74f810790a9ac656f0f420e76137dc97e18deba4",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/as-bless2/live",
+   "resultSha256": "049794130dac3468e74efb06efaffd72ff6792d98c7861605d59177327a747ba",
+   "seconds": 1193.869222833,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

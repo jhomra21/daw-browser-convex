@@ -89,9 +89,11 @@ export const createMidiAccessController = (
 
   const detachInput = (sourceId: string, reset: boolean) => {
     const attached = listeners.get(sourceId)
+
     if (!attached) return
     attached.input.removeEventListener("midimessage", attached.listener)
     listeners.delete(sourceId)
+
     if (reset) emitReset(sourceId)
     void attached.input.close().catch(() => {
       // Detachment is complete even when the browser cannot close the port.
@@ -102,6 +104,7 @@ export const createMidiAccessController = (
 
   const publishInputs = () => {
     const currentInputs = new Map(inputEntries())
+
     const descriptors = [...currentInputs.values()].map((input) => ({
       id: input.id,
       name: input.name,
@@ -109,32 +112,41 @@ export const createMidiAccessController = (
       connected: input.state === "connected",
       selected: selectedIds.has(input.id),
     }))
+
     for (const id of selectedIds) {
       if (!currentInputs.has(id)) {
         descriptors.push({ id, name: null, manufacturer: null, connected: false, selected: true })
       }
     }
+
     options.onInputsChange(descriptors)
   }
 
   const refreshInputs = () => {
     if (!access || disposed) return
     const currentInputs = new Map(inputEntries())
+
     for (const [id, attached] of listeners) {
       const input = currentInputs.get(id)
+
       if (!selectedIds.has(id) || input !== attached.input || input.state !== "connected") {
         detachInput(id, true)
       }
     }
+
     for (const [id, input] of currentInputs) {
       if (!selectedIds.has(id) || input.state !== "connected" || listeners.has(id)) continue
+
       const listener = (event: MidiMessage) => {
         const normalized = parseMidiInputMessage(id, event.data, event.timeStamp)
+
         if (normalized) isolateSubscribers(inputSubscribers, normalized)
       }
+
       input.addEventListener("midimessage", listener)
       listeners.set(id, { input, listener })
     }
+
     publishInputs()
   }
 
@@ -143,12 +155,16 @@ export const createMidiAccessController = (
   const requestAccess = async () => {
     if (disposed || status === "unsupported" || status === "requesting" || access) return
     setStatus("requesting")
+
     try {
       access = await options.requestAccess()
+
       if (disposed) {
         access.removeEventListener("statechange", handleStateChange)
+
         return
       }
+
       access.addEventListener("statechange", handleStateChange)
       setStatus("ready")
       refreshInputs()
@@ -160,8 +176,10 @@ export const createMidiAccessController = (
   const setSelectedInputIds = (ids: readonly string[]) => {
     if (disposed) return
     const normalized = normalizeMidiSelectedInputIds(ids)
+
     if (normalized.length === selectedIds.size && normalized.every((value) => selectedIds.has(value))) return
     selectedIds.clear()
+
     for (const value of normalized) selectedIds.add(value)
     options.onSelectedInputIdsChange(normalized)
     refreshInputs()
@@ -170,6 +188,7 @@ export const createMidiAccessController = (
   const setInputSelected = (id: string, selected: boolean) => {
     if (id.length === 0) return
     const nextIds = new Set(selectedIds)
+
     if (selected) nextIds.add(id)
     else nextIds.delete(id)
     setSelectedInputIds([...nextIds])
@@ -183,6 +202,7 @@ export const createMidiAccessController = (
     if (disposed) return
     disposed = true
     access?.removeEventListener("statechange", handleStateChange)
+
     for (const sourceId of listeners.keys()) detachInput(sourceId, true)
     inputSubscribers.clear()
     resetSubscribers.clear()
@@ -197,10 +217,12 @@ export const createMidiAccessController = (
     setInputSelected,
     subscribe: (subscriber) => {
       inputSubscribers.add(subscriber)
+
       return () => inputSubscribers.delete(subscriber)
     },
     subscribeSourceReset: (subscriber) => {
       resetSubscribers.add(subscriber)
+
       return () => resetSubscribers.delete(subscriber)
     },
     panic,

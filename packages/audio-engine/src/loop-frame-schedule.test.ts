@@ -37,6 +37,7 @@ test('splits loop windows into contiguous native slices', () => {
     loopStartSec: 2,
     loopEndSec: 4,
   }, 10)
+
   expect(loop).toBeDefined()
   expect(splitLoopScheduleRange(0, 80, loop)).toEqual([
     { nativeStartFrame: 0, nativeEndFrame: 20, arrangementStartFrame: 0, arrangementEndFrame: 20, iteration: 0 },

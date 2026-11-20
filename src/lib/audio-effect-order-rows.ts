@@ -29,7 +29,9 @@ export const collectAudioEffectOrders = (entries: Iterable<AudioEffectOrderEntry
       masterRows.push(entry)
       continue
     }
+
     const rows = trackRows.get(entry.targetId)
+
     if (rows) rows.push(entry)
     else trackRows.set(entry.targetId, [entry])
   }
@@ -38,6 +40,7 @@ export const collectAudioEffectOrders = (entries: Iterable<AudioEffectOrderEntry
     const order = rows
       .sort(compareAudioEffectOrderEntries)
       .flatMap((entry) => entry.kind === 'spectral' ? [] : [entry.kind])
+
     return normalizeAudioEffectOrder(order, order)
   }
 
@@ -56,7 +59,9 @@ export const collectAudioEffectInstances = (entries: Iterable<AudioEffectOrderEn
       masterRows.push(entry)
       continue
     }
+
     const rows = trackRows.get(entry.targetId)
+
     if (rows) rows.push(entry)
     else trackRows.set(entry.targetId, [entry])
   }
@@ -65,12 +70,15 @@ export const collectAudioEffectInstances = (entries: Iterable<AudioEffectOrderEn
     const instances = rows
       .sort(compareAudioEffectOrderEntries)
       .map((entry) => ({ id: entry.instanceId ?? entry.kind, kind: entry.kind }))
+
     const regular = instances.filter((instance): instance is AudioEffectInstance => instance.kind !== 'spectral')
     const normalized = normalizeAudioEffectInstanceOrder(regular, regular)
     const normalizedById = new Map(normalized.map((instance) => [instance.id, instance]))
+
     return instances.flatMap((instance) => {
       if (instance.kind === 'spectral') return [instance]
       const normalizedInstance = normalizedById.get(instance.id)
+
       return normalizedInstance ? [normalizedInstance] : []
     })
   }

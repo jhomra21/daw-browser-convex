@@ -71,7 +71,9 @@ const graph = (
     ...sourceInput,
     tracks: sourceInput.tracks.map((track, index) => index === 0 ? { ...track, kind: trackKind } : track),
   })
+
   if (!result.supported) throw new Error(result.reasons.join("\n"))
+
   return result.snapshot.mixer.graph
 }
 
@@ -134,6 +136,7 @@ const input = (
 test("accepts a stereo VST on a metadata-backed mono track", () => {
   const result = compileLivePlaybackSnapshot(metadataMonoSnapshotInput)
   expect(result.supported).toBeTrue()
+
   if (!result.supported) return
   expect(result.snapshot.assets).toEqual([expect.objectContaining({
     assetId: "asset-a",
@@ -151,7 +154,9 @@ test("accepts a stereo VST on a metadata-backed mono track", () => {
     "audio",
     metadataMonoSnapshotInput,
   ))
+
   expect(attachment.supported).toBeTrue()
+
   if (!attachment.supported) return
   expect(attachment.plan.attachments[0]?.workerTransport).toMatchObject({
     inputChannels: 2,
@@ -165,6 +170,7 @@ test("maps resolved mixer nodes and deterministically orders external chains", (
   const result = compileNativeExternalAttachmentPlan(input([third, first]))
 
   expect(result.supported).toBeTrue()
+
   if (!result.supported) return
   expect(result.plan.attachments.map(({ graphNodeId, nativeGraphNodeId: mappedNodeId, stageIndex }) => ({
     graphNodeId,
@@ -192,6 +198,7 @@ test("maps resolved mixer nodes and deterministically orders external chains", (
 test("compiles a migrated legacy processor for native playback attachment", () => {
   const current = processor()
   const { index: _index, ...legacy } = current
+
   const migrated = parseExternalProcessorValue({
     ...legacy,
     chainIndex: 0,
@@ -206,7 +213,9 @@ test("compiles a migrated legacy processor for native playback attachment", () =
       location: "plugin-state/valhalla",
     },
   })
+
   expect(migrated.success).toBeTrue()
+
   if (!migrated.success) return
   expect(migrated.data).not.toHaveProperty("chainIndex")
   expect(compileNativeExternalAttachmentPlan(input([migrated.data]))).toMatchObject({
@@ -220,11 +229,13 @@ test("keeps an empty VST target beside a built-in instrument in the native graph
     { ...snapshotInput.tracks[0]!, id: "synth", name: "Synth", kind: "instrument" as const, clips: [] },
     { ...snapshotInput.tracks[1]!, id: "vst-target", name: "VST Target", kind: "audio" as const, clips: [] },
   ]
+
   const instrument = {
     kind: "synth" as const,
     instanceId: "instrument:1",
     params: createDefaultSynthParams(),
   }
+
   const projection = compileLiveNativeProjection({
     tracks,
     bpm: 120,
@@ -237,7 +248,9 @@ test("keeps an empty VST target beside a built-in instrument in the native graph
       trackFx: { synth: { instances: [], instrument } },
     },
   })
+
   expect(projection.supported).toBeTrue()
+
   if (!projection.supported) return
   expect(projection.graph.nodes.map((node) => node.id)).toEqual(["synth", "vst-target", "$master"])
   expect(projection.events).toHaveLength(0)
@@ -253,15 +266,20 @@ test("keeps an empty VST target beside a built-in instrument in the native graph
       automationEnvelopes: [],
     },
   })
+
   expect(snapshot.supported).toBeTrue()
+
   if (!snapshot.supported) return
+
   const result = compileNativeExternalAttachmentPlan({
     target: "native",
     graph: snapshot.snapshot.mixer.graph,
     processors: [processor({ targetId: "vst-target" })],
     workerTransport: { slotCount: 2, maximumFrames: 512, maximumEventsPerBlock: 128 },
   })
+
   expect(result.supported).toBeTrue()
+
   if (!result.supported) return
   expect(result.plan.attachments[0]?.graphNodeId).toBe("vst-target")
 })
@@ -270,21 +288,27 @@ test("supports serial chains and rejects missing targets, stale identity, unsupp
   const duplicate = processor({ index: 1 })
   const missingTarget = processor({ targetId: "missing" })
   const staleReference = processor().launchReference
+
   if (!staleReference) throw new Error("Test processor requires a launch reference.")
+
   const staleIdentity = processor({
     index: 0,
     launchReference: { ...staleReference, binaryFingerprint: "c".repeat(64) },
   })
+
   const instrument = processor({
     index: 0,
     manifest: { ...processor().manifest, role: "instrument", audioInputs: [] },
   })
+
   const incompatibleLayout = processor({
     index: 0,
     manifest: { ...processor().manifest, audioInputs: [{ name: "Main Input", channels: 1, enabled: true }] },
   })
+
   const chain = compileNativeExternalAttachmentSnapshot(input([processor(), duplicate]))
   expect(chain.supported).toBeTrue()
+
   if (chain.supported) expect(chain.attachments).toHaveLength(2)
   expect(compileNativeExternalAttachmentSnapshot(input([processor({ index: 2 })]))).toMatchObject({
     supported: true,
@@ -315,6 +339,7 @@ test("preserves active stage indexes across bypass gaps", () => {
   const result = compileNativeExternalAttachmentSnapshot(input([third, bypassed, first]))
 
   expect(result.supported).toBeTrue()
+
   if (!result.supported) return
   expect(result.attachments.map(({ instanceId, stageIndex }) => ({ instanceId, stageIndex }))).toEqual([
     { instanceId: first.instanceId, stageIndex: 0 },
@@ -343,9 +368,11 @@ test("projects a zero-input instrument onto an instrument mixer node", () => {
       audioInputs: [],
     },
   })
+
   const result = compileNativeExternalAttachmentSnapshot(input([instrument], "native", "instrument"))
 
   expect(result.supported).toBeTrue()
+
   if (!result.supported) return
   expect(result.attachments[0]).toMatchObject({
     instanceId: instrument.instanceId,
@@ -373,6 +400,7 @@ test("rejects degraded processors instead of skipping their displayed chain posi
   const degraded = processor({
     health: { state: "degraded", reason: "Native playback failed.", updatedAt: 8 },
   })
+
   const ready = processor({ targetId: "track-b", index: 1 })
 
   const native = compileNativeExternalAttachmentSnapshot(input([degraded, ready]))
@@ -395,6 +423,7 @@ test("encodes equivalent native projections identically regardless of persisted 
 
   expect(first.supported).toBeTrue()
   expect(second.supported).toBeTrue()
+
   if (!first.supported || !second.supported) return
   expect(encodeNativeExternalAttachmentPlan(first.plan)).toBe(encodeNativeExternalAttachmentPlan(second.plan))
 })
@@ -406,6 +435,7 @@ test("compiles a path-free editor plan without resolving a playback graph", () =
   })
 
   expect(result.supported).toBeTrue()
+
   if (!result.supported) return
   expect(result.plan.attachments).toHaveLength(1)
   expect(result.plan.attachments[0]).toMatchObject({
@@ -431,12 +461,14 @@ test("compiles a zero-input instrument editor plan", () => {
       audioInputs: [],
     },
   })
+
   const result = compileNativeExternalEditorPlan({
     processor: instrument,
     targetId: "track-a",
   })
 
   expect(result.supported).toBeTrue()
+
   if (!result.supported) return
   expect(result.plan.attachments[0]).toMatchObject({
     role: "instrument",
@@ -448,14 +480,19 @@ test("compiles a zero-input instrument editor plan", () => {
 
 test("rejects stale editor identity and unsupported enabled bus layouts", () => {
   const reference = processor().launchReference
+
   if (!reference) throw new Error("Test processor requires a launch reference.")
+
   const stale = compileNativeExternalEditorPlan({
     processor: processor({ launchReference: { ...reference, binaryFingerprint: "c".repeat(64) } }),
     targetId: "track-a",
   })
+
   expect(stale.supported).toBeFalse()
+
   if (stale.supported) return
   expect(stale.reasons[0]).toContain("stale native catalog identity")
+
   const unsupportedBus = processor({
       manifest: {
         ...processor().manifest,
@@ -465,6 +502,7 @@ test("rejects stale editor identity and unsupported enabled bus layouts", () => 
         ],
       },
     })
+
   expect(compileNativeExternalEditorPlan({
     processor: unsupportedBus,
     targetId: "track-a",

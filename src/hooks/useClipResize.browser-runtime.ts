@@ -9,7 +9,9 @@ import type { ClipTimelinePatch, PendingTrackEntry } from '~/lib/resolve-timelin
 import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
 
 const scroll = document.createElement('div')
+
 scroll.style.cssText = 'position:fixed;left:0;top:0;width:1000px;height:400px'
+
 document.body.append(scroll)
 
 const clips = Array.from({ length: 10_001 }, (_, index) => ({
@@ -23,9 +25,11 @@ const clips = Array.from({ length: 10_001 }, (_, index) => ({
   createdAt: 0,
   updatedAt: 0,
 }))
+
 let constraintComputations = 0
 let committedDuration: number | undefined
 const commitDurations: number[] = []
+
 const snapshot: TimelineSnapshot = {
   projectId: 'local:resize',
   tracks: [{
@@ -57,7 +61,9 @@ const snapshot: TimelineSnapshot = {
   }],
   clips,
 }
+
 const committedEdits = new Map<string, ClipTimelinePatch>()
+
 const emptyMix = {
   syncMix: true,
   writableTrackIds: new Set<string>(),
@@ -66,6 +72,7 @@ const emptyMix = {
   pendingSharedTrackRouting: new Map(),
   pendingSharedMixByTrackId: new Map(),
 }
+
 const emptyTrackState = {
   pendingEntriesById: new Map<string, PendingTrackEntry>(),
   removedIds: new Set<string>(),
@@ -73,18 +80,22 @@ const emptyTrackState = {
   historyRefsById: new Map<string, string>(),
   namesByHistoryRef: new Map<string, string>(),
 }
+
 const emptyBuffers = {
   getBuffer: () => undefined,
   getMediaStatus: () => undefined,
 }
+
 const [drafts, setDrafts] = createSignal(new Map<string, { duration?: number }>())
 const [visibleStartSec, setVisibleStartSec] = createSignal(20_000)
 let dispose = () => {}
+
 createRoot((cleanup) => {
   dispose = cleanup
   const [projectId] = createSignal('cloud-project')
   const [currentSnapshot, setCurrentSnapshot] = createSignal(snapshot)
   const [gridEnabled, setGridEnabled] = createSignal(false)
+
   const resolve = (draftEditsById: Map<string, { duration?: number }>) => resolveTimelineTracks({
     projectId: currentSnapshot().projectId,
     server: { localSnapshot: currentSnapshot() },
@@ -102,6 +113,7 @@ createRoot((cleanup) => {
     },
     buffers: emptyBuffers,
   })
+
   const committedTracks = createMemo(() => {
     return resolve(committedEdits).map((track) => (
       track.id === 'track:dense'
@@ -115,9 +127,11 @@ createRoot((cleanup) => {
               yield* target
             }
           }
+
           if (key === 'find') {
             return (...args: Parameters<typeof target.find>) => target.find(...args)
           }
+
           return undefined
         },
             }),
@@ -125,18 +139,22 @@ createRoot((cleanup) => {
         : track
     ))
   })
+
   const resolvedTracks = createMemo(() => resolve(drafts()))
   createEffect(() => { resolvedTracks() })
   const selection = useTimelineSelectionState({ projectId, tracks: resolvedTracks })
   let projectionUpdates = 0
+
   const resize = useClipResize({
     tracks: committedTracks,
     draftClipTiming: (clipId) => drafts().get(clipId),
     setDraftClipTiming: (clipId, patch) => {
       setDrafts((current) => {
         const next = new Map(current)
+
         if (patch) next.set(clipId, patch)
         else next.delete(clipId)
+
         return next
       })
       projectionUpdates += 1
@@ -160,6 +178,7 @@ createRoot((cleanup) => {
     projectId: () => 'cloud-project',
     historyPush: () => {},
   })
+
   const target = document.createElement('div')
   document.body.append(target)
   target.addEventListener('pointerdown', (event) => {
@@ -170,6 +189,7 @@ createRoot((cleanup) => {
       event,
     )
   })
+
   const startResize = (edge: 'left' | 'right', pointerId: number) => {
     target.dispatchEvent(new PointerEvent('pointerdown', {
       button: 0,
@@ -179,27 +199,35 @@ createRoot((cleanup) => {
       cancelable: true,
     }))
   }
+
   const moveResize = (pointerId: number, clientX: number) => {
     window.dispatchEvent(new PointerEvent('pointermove', { pointerId, clientX }))
   }
+
   const readTiming = () => {
     const clip = untrack(resolvedTracks)
       .flatMap((track) => track.clips)
       .find((candidate) => candidate.id === 'clip:5000')
+
     return { startSec: clip?.startSec, duration: clip?.duration }
   }
+
   startResize('right', 4)
   const initialConstraintComputations = constraintComputations
+
   for (let index = 0; index < 50; index += 1) {
     moveResize(4, 150 + index)
   }
+
   const resolvedTarget = untrack(resolvedTracks)
     .flatMap((track) => track.clips)
     .find((clip) => clip.id === 'clip:5000')
+
   const projectedDuration = resolvedTarget?.duration
   window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 4 }))
   const initialCommittedDuration = committedDuration
   const noDraftConstraintComputations = constraintComputations - initialConstraintComputations
+
   const remoteNeighbor = {
     id: 'clip:remote-neighbor',
     trackId: 'track:dense',
@@ -211,6 +239,7 @@ createRoot((cleanup) => {
     createdAt: 0,
     updatedAt: 0,
   }
+
   startResize('right', 5)
   setCurrentSnapshot({
     ...snapshot,
@@ -262,15 +291,18 @@ createRoot((cleanup) => {
   const dialogButton = document.createElement('button')
   dialog.append(dialogButton)
   document.body.append(dialog)
+
   const dialogEscape = new KeyboardEvent('keydown', {
     key: 'Escape',
     bubbles: true,
     cancelable: true,
   })
+
   dialogButton.dispatchEvent(dialogEscape)
   const dialogEscapeNotConsumed = !dialogEscape.defaultPrevented && resize.isResizing()
   window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 9 }))
   dialog.remove()
+
   const dialogEscapeDoesNotCancelResize = dialogEscapeNotConsumed
     && commitDurations.length === commitCountBeforeDialogEscape + 1
 

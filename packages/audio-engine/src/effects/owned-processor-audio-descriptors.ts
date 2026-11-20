@@ -18,6 +18,7 @@ const AUDIO_PARAM_STATE_PATHS = {
 
 const defaultStatePath = (parameterId: string) => {
   const separator = parameterId.indexOf('.')
+
   return [parameterId.slice(separator + 1)]
 }
 
@@ -26,6 +27,7 @@ const statePath = (parameterId: string) =>
     ?? defaultStatePath(parameterId)
 
 type OwnedProcessorState = ReturnType<typeof normalizeOwnedProcessorParams>['state']
+
 type OwnedProcessorPathValue = OwnedProcessorState | number | string | boolean | null | undefined
 
 const isObjectValue = (value: OwnedProcessorPathValue): value is Extract<OwnedProcessorPathValue, object> =>
@@ -36,10 +38,12 @@ const isNumberValue = (value: OwnedProcessorPathValue): value is number =>
 
 const readPath = (value: OwnedProcessorState, path: readonly string[]) => {
   let current: OwnedProcessorPathValue = value
+
   for (const key of path) {
     if (!isObjectValue(current)) return undefined
     current = Object.entries(current).find(([candidate]) => candidate === key)?.[1]
   }
+
   return isNumberValue(current) ? current : undefined
 }
 
@@ -63,5 +67,6 @@ export const ownedProcessorAudioParamValues = (
   params: Parameters<typeof normalizeOwnedProcessorParams>[1],
 ) => {
   const state = normalizeOwnedProcessorAudioState(kind, params)
+
   return audioParamValuesFromState(kind, state)
 }

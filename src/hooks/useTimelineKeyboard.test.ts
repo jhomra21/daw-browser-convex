@@ -43,6 +43,7 @@ const createKeyboardEvent = (
 ): TestKeyboardEvent => {
   let defaultPrevented = false;
   let stopped = false;
+
   return {
     target,
     composedPath: () => [target],
@@ -74,6 +75,7 @@ test("routes only the exact browser chord and preserves editable-target exclusio
   Reflect.set(globalThis, "HTMLElement", TestElement);
 
   const calls: Array<{ chord: string; editableTarget: boolean }> = [];
+
   try {
     const onKeyDown = createTimelineKeyboardHandler({
       enabled: () => true,
@@ -95,6 +97,7 @@ test("routes only the exact browser chord and preserves editable-target exclusio
           chord: `${chord.mod}:${chord.alt}:${chord.shift}:${chord.key ?? chord.code}`,
           editableTarget: context.editableTarget,
         });
+
         return true;
       },
       onUndo: () => {},
@@ -106,6 +109,7 @@ test("routes only the exact browser chord and preserves editable-target exclusio
       ctrlKey: true,
       altKey: true,
     });
+
     onKeyDown(event);
     expect(calls).toEqual([{ chord: "true:true:false:B", editableTarget: false }]);
     expect(event.defaultPrevented).toBeTrue();

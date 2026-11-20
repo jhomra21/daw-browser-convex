@@ -41,17 +41,21 @@ import { nativeSessionRequestAllowed } from "./ipc/native-session-access"
 import type { NativeSessionEvent, NativeSessionIpcHandler } from "./ipc/native-session-access"
 
 type IpcEnvelope = { value?: object | bigint | number | string | null; transactionToken?: string }
+
 type Invocation = { channel: string; args: Array<string | IpcEnvelope> }
+
 const invocations: Invocation[] = []
 const exposed = new Map<string, DesktopBridge>()
 const ipcReply = { ok: true, marker: "from-main" }
 const sentToMain: Array<Parameters<IpcRenderer["send"]>> = []
 const rendererListeners = new Map<string, Parameters<IpcRenderer["on"]>[1]>()
+
 mock.module("electron", () => ({
   contextBridge: { exposeInMainWorld: (name: string, api: DesktopBridge) => exposed.set(name, api) },
   ipcRenderer: {
     invoke: (channel: string, ...args: Array<string | IpcEnvelope>) => {
       invocations.push({ channel, args })
+
       return Promise.resolve(ipcReply)
     },
     send: (...args: Parameters<IpcRenderer["send"]>) => { sentToMain.push(args) },
@@ -66,13 +70,16 @@ process.argv.push("--daw-total-memory-bytes=17179869184")
 
 // Each variant is a distinct module instance, so preload re-evaluates its platform gate.
 const bridges = new Map<string, DesktopBridge>()
+
 const loadPreload = async (platform: string, arch: string) => {
   const variant = `${platform}-${arch}`
   const cached = bridges.get(variant)
+
   if (cached) return cached
   const original = { platform: process.platform, arch: process.arch }
   Object.defineProperty(process, "platform", { value: platform, configurable: true })
   Object.defineProperty(process, "arch", { value: arch, configurable: true })
+
   try {
     const specifier = `./preload.ts?${variant}`
     await import(specifier)
@@ -80,15 +87,20 @@ const loadPreload = async (platform: string, arch: string) => {
     Object.defineProperty(process, "platform", { value: original.platform, configurable: true })
     Object.defineProperty(process, "arch", { value: original.arch, configurable: true })
   }
+
   const bridge = exposed.get("dawDesktop")
+
   if (!bridge) throw new Error("preload did not expose dawDesktop")
   bridges.set(variant, bridge)
+
   return bridge
 }
 
 const darwinAudioHost = async () => {
   const { audioHost } = await loadPreload("darwin", "arm64")
+
   if (!audioHost) throw new Error("preload did not expose audioHost on macOS arm64")
+
   return audioHost
 }
 
@@ -113,13 +125,16 @@ test("exposes only the macOS arm64 typed PCM asset session surface to renderers"
 
 test("the preload forwards only schema-valid application menu messages and state, and unsubscribes its listener", async () => {
   const { applicationMenu } = await loadPreload("darwin", "arm64")
+
   if (!applicationMenu) throw new Error("preload did not expose applicationMenu")
+
   const state: DesktopApplicationMenuState = {
     ready: true, canExportArchive: false, canUndo: false, canRedo: false, canCut: false, canCopy: false,
     canPaste: false, canSelectAll: false, canDuplicateSelection: false, canDeleteSelection: false,
     editableFocused: false, signedIn: false, metronomeEnabled: false, loopEnabled: false, gridEnabled: false,
     followEnabled: false, syncMix: false, gridDenominator: 4,
   }
+
   const event: IpcRendererEvent = Object.create(null)
 
   sentToMain.length = 0
@@ -131,6 +146,7 @@ test("the preload forwards only schema-valid application menu messages and state
   const received: DesktopApplicationMenuMessage[] = []
   const unsubscribe = applicationMenu.onCommand((command) => received.push(command))
   const deliver = rendererListeners.get(applicationMenuCommandChannel)
+
   if (!deliver) throw new Error("onCommand did not subscribe to the menu command channel")
   deliver(event, "not-a-command")
   deliver(event, "undo")
@@ -144,12 +160,14 @@ test("sends each native session call as a channel envelope with its transaction 
   const bytes = new Uint8Array([1, 2, 3])
   const token = "18446744073709551615"
   const asset: NativeHostPcmAsset = { sessionAssetId: 7, frameCount: 1, sampleRateHz: 48_000, channelCount: 1, planarPcm: new Uint8Array(4) }
+
   const calls: Array<[() => Promise<object>, string, object]> = [
     [() => session.installAsset(asset, token), sessionInstallAssetChannel, asset],
     [() => session.queueProcessorStatePatch(bytes, token), sessionQueueProcessorStatePatchChannel, bytes],
     [() => session.queueParameterEvents(bytes, token), sessionQueueParameterEventsChannel, bytes],
     [() => session.queueInstrumentEvents(bytes, token), sessionQueueInstrumentEventsChannel, bytes],
   ]
+
   for (const [call, channel, value] of calls) {
     invocations.length = 0
     expect(await call()).toBe(ipcReply)
@@ -161,6 +179,7 @@ test("sends each revision call to its own channel with the input unchanged", asy
   const { session } = await darwinAudioHost()
   const request = { projectId: "project", revision: 3, hostGeneration: 2 }
   const prepare = { projectId: "project", bytes: new Uint8Array([1]), projectRevision: 4 }
+
   const calls: Array<[() => Promise<object>, string, object]> = [
     [() => session.revisions.prepare(prepare), sessionPrepareGraphRevisionChannel, prepare],
     [() => session.revisions.publish(request), sessionPublishGraphRevisionChannel, request],
@@ -168,6 +187,7 @@ test("sends each revision call to its own channel with the input unchanged", asy
     [() => session.revisions.rollback(request), sessionRollbackGraphRevisionChannel, request],
     [() => session.revisions.retire(request), sessionRetireGraphRevisionChannel, request],
   ]
+
   for (const [call, channel, input] of calls) {
     invocations.length = 0
     expect(await call()).toBe(ipcReply)
@@ -177,6 +197,7 @@ test("sends each revision call to its own channel with the input unchanged", asy
 
 test("keeps spectrum selection on the native session envelope contract", async () => {
   const { session } = await darwinAudioHost()
+
   for (const nodeId of [5n, null]) {
     invocations.length = 0
     await session.setSpectrumNode(nodeId)
@@ -186,13 +207,16 @@ test("keeps spectrum selection on the native session envelope contract", async (
 
 test("routes recording configure and stop through native session envelopes", async () => {
   const { session } = await darwinAudioHost()
+
   const input: NativeHostRecordingConfiguration & { spoolImportVersion: NativeRecordingSpoolImportVersion } = {
     projectId: "project", deviceUid: "device", generation: 1, sessionId: 1n, channelCount: 2, inputChannels: [0, 1],
     gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false, targetNodeId: 1n, spoolImportVersion: 1,
   }
+
   invocations.length = 0
   await session.configureRecording(input)
   expect(invocations).toEqual([{ channel: sessionConfigureRecordingChannel, args: [{ value: input, transactionToken: undefined }] }])
+
   for (const stopFrame of [12, undefined]) {
     invocations.length = 0
     await session.stopRecording(stopFrame)
@@ -220,6 +244,7 @@ test("gates registered native session IPC to the macOS arm64 app origin", async 
   })
 
   const handler = handlers.get(sessionSetSpectrumNodeChannel)
+
   if (!handler) throw new Error("Spectrum handler was not registered")
   const mainFrame = { url: "daw://app/index.html" }
   const validEvent = { sender: { id: 7, mainFrame }, senderFrame: mainFrame }
@@ -278,6 +303,7 @@ test("validates spectrum selection through the registered native session handler
     fail: nativeSessionFailure,
   })
   const handler = handlers.get(sessionSetSpectrumNodeChannel)
+
   if (!handler) throw new Error("Spectrum handler was not registered")
   const mainFrame = { url: "daw://app/index.html" }
   const event = { sender: { id: 1, mainFrame }, senderFrame: mainFrame }
@@ -291,20 +317,25 @@ test("validates spectrum selection through the registered native session handler
 test("validates recording envelopes through the registered production handlers", async () => {
   const handlers = new Map<string, NativeSessionIpcHandler>()
   const calls: Array<{ kind: string; input: unknown }> = []
+
   const owner: RecordingSessionOwner = {
     configure: async (_context, _supervisor, request) => {
       calls.push({ kind: "configure", input: request })
+
       return request === undefined ? nativeSessionFailure() : { ok: true, takeId: "123e4567-e89b-12d3-a456-426614174000", sampleRateHz: 48_000, channelCount: 2 }
     },
     start: async (_context, _supervisor, request) => {
       calls.push({ kind: "start", input: request })
+
       return request === undefined ? nativeSessionFailure() : { ok: true }
     },
     stop: async (_context, _supervisor, request) => {
       calls.push({ kind: "stop", input: request })
+
       return request === undefined ? nativeSessionFailure() : { ok: true }
     },
   }
+
   registerNativeSessionRecordingIpc({
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     allowed: () => true,
@@ -323,14 +354,17 @@ test("validates recording envelopes through the registered production handlers",
   const configure = handlers.get(sessionConfigureRecordingChannel)
   const start = handlers.get(sessionStartRecordingChannel)
   const stop = handlers.get(sessionStopRecordingChannel)
+
   if (!configure || !start || !stop) throw new Error("Recording handlers were not registered")
   const mainFrame = { url: "daw://app/index.html" }
   const event: NativeSessionEvent = { sender: { id: 1, mainFrame }, senderFrame: mainFrame }
+
   const configuration: NativeHostRecordingConfiguration & { spoolImportVersion: NativeRecordingSpoolImportVersion } = {
     projectId: "project", projectGeneration: 2, deviceUid: "device", generation: 3, sessionId: 4n,
     channelCount: 2, inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0,
     punchEndFrame: null, monitoring: false, targetNodeId: 1n, spoolImportVersion: 1,
   }
+
   expect(await configure(event, { value: configuration, transactionToken: undefined })).toEqual({
     ok: true, takeId: "123e4567-e89b-12d3-a456-426614174000", sampleRateHz: 48_000, channelCount: 2,
   })
@@ -363,6 +397,7 @@ test("maps registered native transport handlers with transition IDs intact", asy
     fail: nativeSessionFailure,
   })
   const handler = handlers.get(sessionSetTransportChannel)
+
   if (!handler) throw new Error("Transport handler was not registered")
   const transitionId = 9_007_199_254_740_993n
   const transport = { epoch: 1, running: true, frame: 10, transitionId }
@@ -404,6 +439,7 @@ test("navigation commit activates the privileged native session IPC", async () =
     fail: nativeSessionFailure,
   })
   const spectrumHandler = handlers.get(sessionSetSpectrumNodeChannel)
+
   if (!spectrumHandler) throw new Error("Spectrum handler was not registered")
   const event: NativeSessionEvent = { sender: { id: 4, mainFrame }, senderFrame: mainFrame }
   const value = { value: 17n, transactionToken: undefined }
@@ -421,6 +457,7 @@ test("the plug-in card's close command parses with main's editor command schema"
     requiresState: true,
     captureState: true,
   }
+
   expect(nativeEditorCommandSchema.safeParse(nativeEditorCommand({
     ...common, command: "close", serializedPlan: undefined, initialState: undefined, anchor: undefined,
   })).success).toBe(true)

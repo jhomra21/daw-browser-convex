@@ -12,7 +12,9 @@ type RoomSummary = {
 };
 
 type RoomOwnership = Doc<"ownerships">;
+
 type ProjectAccessCtx = { db: DatabaseReader };
+
 type AuthenticatedCtx = {
   auth: {
     getUserIdentity: () => Promise<UserIdentity | null>;
@@ -28,6 +30,7 @@ export async function isProjectDeletionPending(
   projectId: string,
 ) {
   const project = await getProjectRow(ctx, projectId);
+
   return project?.deletionPendingAt !== undefined;
 }
 
@@ -36,7 +39,9 @@ async function readAccessibleProjectNameByRoom(
   projectId: string,
 ) {
   const project = await getProjectRow(ctx, projectId);
+
   if (project?.deletionPendingAt !== undefined) return null;
+
   return project?.name.trim() ? project.name : "Untitled";
 }
 
@@ -62,9 +67,11 @@ export async function listAccessibleProjects(
   for (const project of activeProjects) {
     projectIds.add(project.projectId);
   }
+
   const ownershipProjectIds = Array.from(new Set(
     ownerships.map((ownership) => ownership.projectId),
   ));
+
   if (ownershipProjectIds.length > 0) {
     const ownershipNames = await Promise.all(
       ownershipProjectIds.map(async (projectId) => [
@@ -72,6 +79,7 @@ export async function listAccessibleProjects(
         nameByProjectId.get(projectId) ?? await readAccessibleProjectNameByRoom(ctx, projectId),
       ] as const),
     );
+
     for (const [projectId, projectName] of ownershipNames) {
       if (projectName === null) continue;
       projectIds.add(projectId);
@@ -103,16 +111,22 @@ export async function getProjectRole(
   userId: string,
 ): Promise<ProjectRole | null> {
   const project = await getProjectRow(ctx, projectId);
+
   if (!project || project.deletionPendingAt !== undefined) return null;
+
   if (project.ownerUserId === userId) return "owner";
+
   const ownerships = await ctx.db
     .query("ownerships")
     .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
     .collect();
+
   if (ownerships.length === 0) return null;
   const projectOwnership = ownerships.find(isProjectOwnership);
+
   if (!projectOwnership) return null;
   const role = projectOwnership.role;
+
   return isProjectRole(role) ? role : "editor";
 }
 
@@ -123,6 +137,7 @@ export async function requireProjectRole(
   allowed: ProjectRole[],
 ) {
   const role = await getProjectRole(ctx, projectId, userId);
+
   if (role && allowed.includes(role)) return role;
   throw new Error("You do not have permission for this project action.");
 }
@@ -132,6 +147,7 @@ export const canAccess = query({
   returns: v.boolean(),
   handler: async (ctx, { projectId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
+
     return hasProjectAccess(ctx, projectId, userId);
   },
 });
@@ -140,6 +156,7 @@ export const roleForUser = query({
   args: { projectId: v.string() },
   handler: async (ctx, { projectId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
+
     return getProjectRole(ctx, projectId, userId);
   },
 });
@@ -159,7 +176,9 @@ export async function requireAuthenticatedUserId(ctx: AuthenticatedCtx) {
 
 export async function requireAuthenticatedIdentity(ctx: AuthenticatedCtx) {
   const identity = await ctx.auth.getUserIdentity();
+
   if (!identity) throw new Error("Authentication required.");
+
   const parsedIdentity = z.object({
     subject: z.string(),
     issuer: z.string(),
@@ -168,7 +187,9 @@ export async function requireAuthenticatedIdentity(ctx: AuthenticatedCtx) {
     dawControlActorTokenIdentifier: z.string().optional(),
     dawWorker: z.boolean().optional(),
   }).safeParse(identity);
+
   if (!parsedIdentity.success) throw new Error("Authentication claims are invalid.");
+
   return {
     subject: parsedIdentity.data.subject,
     issuer: parsedIdentity.data.issuer,
@@ -181,7 +202,9 @@ export async function requireAuthenticatedIdentity(ctx: AuthenticatedCtx) {
 
 export async function requireWorkerIdentity(ctx: AuthenticatedCtx) {
   const identity = await requireAuthenticatedIdentity(ctx);
+
   if (!identity.dawWorker) throw new Error("Worker access required.");
+
   return identity;
 }
 

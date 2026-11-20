@@ -37,16 +37,21 @@ import type { ExportAudioFormat } from "@daw-browser/shared"
 import type { NativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeRevisionSession } from "@daw-browser/desktop-protocol/native-revision"
 import type { NativeInstrumentBudgetPolicy } from "../lib/desktop/native-instrument-budget-policy"
+
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
+
 /** `plugin`: the plug-in's own crash or API error. `host`: ours. */
 type NativeVstCoordinationReply = { ok: true } | {
   ok: false
   error: string
   failure?: { code: string; origin: "plugin" | "host"; instanceId?: string }
 }
+
 /** `refused`: native answered no. `unavailable`: nothing was delivered. `unconfirmed`: it may have been delivered. */
 export type NativeDeliveryFailureKind = "refused" | "unconfirmed" | "unavailable"
+
 export type NativeDeliveryReply = { ok: true } | { ok: false; error: string; kind: NativeDeliveryFailureKind }
+
 /** Claim tokens are u64 decimal strings: they can exceed Number.MAX_SAFE_INTEGER. */
 export type NativeProcessorPatchReply =
   | { ok: true; outcome: "applied" }
@@ -59,7 +64,9 @@ export type NativeProcessorPatchReply =
     token?: string
   }
   | { ok: false; error: string; kind: NativeDeliveryFailureKind }
+
 export type NativeRecordingScope = { projectId: string; projectGeneration: number }
+
 export type NativeRecordingTake = {
   takeId: string
   state: "pending" | "interrupted" | "complete" | "damaged"
@@ -70,6 +77,7 @@ export type NativeRecordingTake = {
   bytes: number | null
   blocks: number | null
 }
+
 export type NativeRecordingRelease = { reason: "discard" } | {
   reason: "imported"
   sessionId: string
@@ -81,17 +89,21 @@ export type NativeRecordingRelease = { reason: "discard" } | {
   finalized: boolean
   savedClip?: { clipId: string; sourceAssetKey: string }
 }
+
 export type NativeRecordingImportedTake = {
   takeId: string
   scope: NativeRecordingScope
   acknowledgment: Extract<NativeRecordingRelease, { reason: "imported" }>
 }
+
 export type NativeRecordingFailure = { generation: number; sessionId: bigint; message: string }
+
 export type NativeRecordingSpoolBridge = {
   list(scope: NativeRecordingScope, cursor?: string): Promise<{ takes: NativeRecordingTake[]; nextCursor: string | null }>
   read(scope: NativeRecordingScope, takeId: string, offset: number, length: number): Promise<Uint8Array>
   release(scope: NativeRecordingScope, takeId: string, acknowledgment: NativeRecordingRelease): Promise<void>
 }
+
 type NativeVstEditorReply = {
   ok: true
   status: {
@@ -106,14 +118,18 @@ type NativeVstEditorReply = {
     teardownError?: string
   }
 } | { ok: false; error: string }
+
 export type DesktopVstEditorState = { projectId: string; instanceId: string; open: boolean }
+
 export type DesktopVstEditorCapturedState = {
   requestId: string
   projectId: string
   instanceId: string
   state: { bytes: Uint8Array; sha256: string }
 }
+
 type NativeVstEditorAnchor = { x: number; y: number }
+
 type NativeVstAttachmentCoordinationInput = {
   projectId: string
   serializedPlan: string
@@ -121,6 +137,7 @@ type NativeVstAttachmentCoordinationInput = {
   requiredVstStateInstanceIds?: readonly string[]
   capturedVstStates?: readonly { instanceId: string; bytes: Uint8Array; sha256: string }[]
 }
+
 export type DesktopPluginCatalogEntry = {
   displayName: string
   discoveredAtMs: number
@@ -142,6 +159,7 @@ export type DesktopPluginCatalogEntry = {
   binaryFingerprint?: string
   catalogReference?: Omit<NativeVst3InsertionPreflightRequest["reference"], "classId" | "vendorId">
 }
+
 export type DesktopPluginCatalog = {
   version: 3
   directories: string[]
@@ -149,13 +167,16 @@ export type DesktopPluginCatalog = {
   diagnostics: { directory: string; message: string }[]
   scannedAtMs: number | null
 }
+
 export type DesktopPluginCatalogReply =
   | { ok: true; catalog: DesktopPluginCatalog }
   | { ok: true; canceled: true }
   | { ok: false; error: string }
+
 type NativeReleaseArtifactVerification =
   | { status: "disabled" | "development" | "verified" }
   | { status: "failed"; reason: string }
+
 type NativeAudioHostHello = {
   capabilities: number
   abiVersion: number
@@ -165,12 +186,14 @@ type NativeAudioHostHello = {
   deviceState: "idle" | "configured" | "running" | "faulted"
   readinessReason: "ready" | "device-not-configured" | "graph-not-prepared" | "transport-not-prepared"
 }
+
 type NativeAudioHostStatus = {
   running: boolean
   hello?: NativeAudioHostHello
   pid?: number
   generation: number
 }
+
 type NativeAudioHostDiagnosticsReply = (
   | {
       ok: true
@@ -196,7 +219,9 @@ type DesktopResponse = {
 }
 
 type DesktopRequestHandler = (request: DesktopRequest) => Promise<DesktopResponse>
+
 type DesktopRequestCancellationHandler = (requestId: string) => void
+
 type DesktopPrepareToCloseHandler = () => Promise<{ flushed: boolean }>
 
 type NativeSessionBridge = {
@@ -261,8 +286,11 @@ type NativeSessionBridge = {
 }
 
 type NativeOutputDeviceReply = { ok: true; device: NativeOutputDevice | null } | { ok: false; error: string }
+
 type NativeInputDeviceReply = { ok: true; device: NativeInputDevice | null } | { ok: false; error: string }
+
 type NativeDeviceListReply = { ok: true; devices: NativeAudioDevice[] } | { ok: false; error: string }
+
 export type DesktopAudioLifecycle = {
   state: "suspended" | "recovering" | "ready" | "failed"
   powerGeneration: number

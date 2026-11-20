@@ -48,6 +48,7 @@ type HistoryPush = (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: numb
 
 export function createLocalTrack(options: CreateLocalTrackOptions): Track {
   const volume = options.volume ?? 0.8
+
   const track: Track = {
     id: options.id,
     historyRef: options.historyRef ?? options.id,
@@ -64,14 +65,17 @@ export function createLocalTrack(options: CreateLocalTrackOptions): Track {
     sends: options.sends ?? [],
     outputTargetId: options.outputTargetId,
   }
+
   if (options.lockedBy !== undefined) {
     track.lockedBy = options.lockedBy
   }
+
   return track
 }
 
 function ensureLocalTrack(options: EnsureLocalTrackOptions): Track {
   const index = options.index ?? 0
+
   const next = createLocalTrack({
     id: options.id,
     historyRef: options.historyRef,
@@ -90,7 +94,9 @@ function ensureLocalTrack(options: EnsureLocalTrackOptions): Track {
     sends: options.sends,
     outputTargetId: options.outputTargetId,
   })
+
   options.insertLocalTrack(next, index)
+
   return next
 }
 
@@ -98,6 +104,7 @@ export async function createOptimisticTrack(options: CreateOptimisticTrackOption
   const channelRole = options.channelRole ?? 'track'
   const index = options.index
   const collapsed = trackCreationCollapsed(channelRole, options.collapsed)
+
   const operation = buildSharedTrackCreateOperation({
     index,
     kind: options.kind,
@@ -105,8 +112,10 @@ export async function createOptimisticTrack(options: CreateOptimisticTrackOption
     collapsed,
     color: options.color,
   })
+
   const result = await publishSharedTimelineOperation(options.projectId, operation)
   const trackId = isJsonString(result) ? result : null
+
   if (!trackId) return null
 
   options.grantWrite?.(trackId, options.grantScope)

@@ -12,6 +12,7 @@ const identity = {
     brands: [{ brand: "Chromium", version: "140.0.0.0" }],
   },
 }
+
 const calibration: RecordingCalibration = {
   inputDeviceId: "input-1",
   outputDeviceId: "output-1",
@@ -41,6 +42,7 @@ describe("recording calibration identity", () => {
         brands: [{ brand: "Chromium", version: "140.1" }],
         getHighEntropyValues: async (hints) => {
           requestedHints = hints
+
           return { platformVersion: "15.3.0" }
         },
       },

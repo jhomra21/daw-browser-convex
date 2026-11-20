@@ -49,11 +49,13 @@ import type { NativeVstParameterQueueResult } from "~/lib/desktop/native-vst-par
 import type { ExportQueue } from "~/lib/export/export-queue"
 import { createImportJobQueue, type ImportJobQueue } from "~/lib/desktop/import-job-queue"
 import type { ImportProjectBinding, ImportSummary } from "~/hooks/useTimelineClipImport"
+
 export type {
   DesktopPluginCatalog,
   DesktopPluginCatalogEntry,
   DesktopPluginCatalogReply,
 } from "~/types/desktop-bridge"
+
 import { createDesktopCapabilityExportOutputTargetFactory, desktopExportResourceLimits } from "~/lib/desktop/capability-export-output-targets"
 import { CapabilityFile } from "~/lib/desktop/capability-file"
 import { preflightExportResources } from "~/lib/export/export-resource-preflight"
@@ -93,27 +95,35 @@ const cancelled = (id: string): HostResponse => ({
 const mountedProjectRequired = () => hostError("unavailable", "A mounted local project is required.")
 const controlUnavailable = () => hostError("cancelled", "The local control request was cancelled.")
 const controlFailure = () => hostError("internal", "The local control request could not be completed.")
+
 const committedButNotReconciled = () => hostError(
   "internal",
   "The change was saved, but the open project could not refresh. Read a fresh snapshot before making another change.",
 )
+
 const safeRuntimeFaults = (runtime: ReturnType<AudioEngine["getRuntimeSnapshot"]>["runtimeFaults"]) => ({
   ...runtime,
   last: runtime.last === null
     ? null
     : { kind: runtime.last.kind, codePresent: runtime.last.code.length > 0 },
 })
+
 const safeRecordingDiagnostics = (recording: ReturnType<typeof getRecordingDiagnostics>) => {
   const { lastFailure, termination, ...safeRecording } = recording
+
   return { ...safeRecording, termination: termination ? { cause: termination.cause } : null, lastFailurePresent: lastFailure !== null }
 }
+
 type NativeArtifactVerification =
   | { status: "disabled" | "development" | "verified" }
   | { status: "failed" }
+
 const safeNativeArtifactVerification = (
   verification: { status: "disabled" | "development" | "verified" } | { status: "failed"; reason: string },
 ): NativeArtifactVerification => verification.status === "failed" ? { status: "failed" } : verification
+
 const mountedProjectMismatch = () => hostError("invalid-request", "The requested project is not mounted.")
+
 const projectIdForControlRequest = (request: HostRequest) => {
   switch (request.operation) {
     case "control.capabilities":
@@ -145,6 +155,7 @@ const mountedProjectError = (request: HostRequest, mountedProjectId: string) => 
     ? mountedProjectRequired()
     : mountedProjectMismatch()
 )
+
 const invokeCanonicalControl = (
   invoker: ControlInvoker<"desktop">,
   operation: DesktopControlOperationV1,
@@ -169,14 +180,17 @@ const invokeCanonicalControl = (
       return invoker.invoke(operation, controlRecoveriesQuerySchemaV1.parse(input))
   }
 }
+
 const pageValues = <Value>(values: readonly Value[], cursor: string | undefined, limit: number) => {
   const start = cursor === undefined ? 0 : Number(cursor)
   const page = values.slice(start, start + limit)
+
   return {
     values: page,
     nextCursor: start + page.length < values.length ? String(start + page.length) : null,
   }
 }
+
 const clampNormalizedValue = (value: number) => Math.min(1, Math.max(0, value))
 const compareText = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0
 
@@ -185,6 +199,7 @@ class ControlRequestUnavailableError extends Error {}
 let activeController: TimelineHostController | undefined
 
 type CapabilityImport = { canceled: boolean; files?: { token: string; basename: string; byteLength: number; mime: string }[] }
+
 type CapabilityExport = {
   canceled: boolean
   preflightOnly: boolean
@@ -197,32 +212,44 @@ type CapabilityExport = {
 
 const parseCapabilityExport = (request: HostRequest): CapabilityExport | undefined => {
   const internal = desktopRendererExportInputSchemaV1.safeParse(request.input)
+
   if (!internal.success) return undefined
+
   if (internal.data.canceled) {
     const mode = internal.data.mode
+
     if (mode !== "mixdown" && mode !== "stems") return undefined
+
     return { canceled: true, preflightOnly: false, mode, output: { token: "", basename: "", directory: false }, settings: { range: { mode: "whole" }, formats: ["wav"], render: { sampleRate: 44100, numberOfChannels: 2, normalization: { mode: "none" }, tail: { mode: "none" } }, encoding: { bitrateByFormat: {}, wav: { codec: "pcm-s16", dither: "none" } } } }
   }
+
   const { destination } = internal.data
   const { canceled: _canceled, preflightOnly, ...exportRequest } = internal.data
+
   const external = desktopHostExportRunInputSchemaV1.safeParse({
     ...exportRequest,
     destination: destination.kind === "capability-file"
       ? { kind: "file", path: `/capability/${destination.basename}` }
       : { kind: "directory", path: "/capability" },
   })
+
   if (!external.success) return undefined
   const { channels, normalization, ...renderBase } = external.data.render
+
   const normalizedRender = normalization.mode === "loudness"
     ? { ...renderBase, numberOfChannels: channels, normalization: { ...normalization, truePeakCeilingDbtp: normalization.ceiling } }
     : { ...renderBase, numberOfChannels: channels, normalization }
+
   const bitrateByFormat: TimelineExportInput["encoding"]["bitrateByFormat"] = {}
+
   if (external.data.encoding.mp3Bitrate !== undefined) {
     bitrateByFormat.mp3 = external.data.encoding.mp3Bitrate
   }
+
   if (external.data.encoding.oggOpusBitrate !== undefined) {
     bitrateByFormat["ogg-opus"] = external.data.encoding.oggOpusBitrate
   }
+
   const settings: TimelineExportInput = {
     range: external.data.range,
     formats: external.data.mode === "mixdown" ? [external.data.format] : external.data.formats,
@@ -232,25 +259,33 @@ const parseCapabilityExport = (request: HostRequest): CapabilityExport | undefin
       wav: external.data.encoding.wav,
     },
   }
+
   if (external.data.mode === "mixdown") return { canceled: false, preflightOnly: preflightOnly === true, mode: "mixdown", output: { token: destination.token, basename: destination.basename, directory: false }, settings }
+
   const stems = external.data.selection.kind === "all-tracks"
     ? { stemSelection: "all-tracks" as const, stemMode: external.data.stemMode }
     : { stemSelection: "selected-tracks" as const, stemMode: external.data.stemMode, selectedTrackIds: external.data.selection.trackIds }
+
   return { canceled: false, preflightOnly: preflightOnly === true, mode: "stems", output: { token: destination.token, basename: destination.basename, directory: true }, settings, stems }
 }
 
 const safeExportStatus = (job: ReturnType<TimelineExportService["status"]>) => {
   if (!job) return { status: "idle" as const }
+
   const safeJob: NonNullable<DesktopOperationMapV1["host.export.status"]["result"]["job"]> = {
     id: job.id,
   }
+
   if (job.progress?.phase !== undefined) safeJob.phase = job.progress.phase
+
   if (job.progress?.sizeBytes !== undefined) safeJob.sizeBytes = job.progress.sizeBytes
+
   if (job.outcome !== undefined) {
     safeJob.outputs = job.outcome.outputs.map((output) => ({
       name: output.name,
       sizeBytes: output.sizeBytes,
     }))
+
     if (job.outcome.type === "error") {
       safeJob.errorOwner = job.outcome.failureOwner ?? "export"
       safeJob.error = job.outcome.message
@@ -260,9 +295,11 @@ const safeExportStatus = (job: ReturnType<TimelineExportService["status"]>) => {
         .replace(/[\r\n\t]+/gu, " ")
         .trim()
         .slice(0, 512)
+
       if (safeJob.error.length === 0) safeJob.error = "Export failed."
     }
   }
+
   return {
     status: job.status,
     job: safeJob,
@@ -271,18 +308,22 @@ const safeExportStatus = (job: ReturnType<TimelineExportService["status"]>) => {
 
 const safeImportStatus = (job: ReturnType<ImportJobQueue["status"]>) => {
   if (!job) return { status: "idle" as const }
+
   const safeJob: NonNullable<DesktopOperationMapV1["host.import.status"]["result"]["job"]> = {
     id: job.id,
     name: job.name,
   }
+
   const safeMessage = (message: string) => {
     const structuredMessage = job.summary?.outcomes
       .reduce((safe, outcome) => {
         const fileName = outcome.fileName.split(/[/\\]/u).at(-1)
+
         return fileName && outcome.fileName !== fileName
           ? safe.replaceAll(outcome.fileName, fileName)
           : safe
       }, message) ?? message
+
     return structuredMessage
       .replace(/https?:\/\/\S+/gu, "[url]")
       // Multiple paths on one line may redact intervening text too, conservatively preventing directory leaks.
@@ -291,18 +332,22 @@ const safeImportStatus = (job: ReturnType<ImportJobQueue["status"]>) => {
       .trim()
       .slice(0, 512)
   }
+
   if (job.summary) {
     safeJob.count = job.summary.outcomes.filter((outcome) => (
       outcome.status === "created" || outcome.status === "queued"
     )).length
+
     const failures = job.summary.outcomes
       .filter((outcome) => outcome.status === "failed" || outcome.status === "local-save-failed" || outcome.status === "skipped")
       .slice(0, 8)
       .flatMap((outcome) => {
         const message = safeMessage(outcome.message ?? "Audio import failed.")
         const fileName = outcome.fileName.split(/[/\\]/u).at(-1)?.slice(0, 256)
+
         return fileName && message ? [`${fileName} (${message})`] : []
       })
+
     if (failures.length > 0) {
       const failureCount = job.summary.outcomes.filter((outcome) => outcome.status === "failed" || outcome.status === "local-save-failed" || outcome.status === "skipped").length
       const remaining = failureCount - failures.length
@@ -310,7 +355,9 @@ const safeImportStatus = (job: ReturnType<ImportJobQueue["status"]>) => {
       safeJob.error = summary.slice(0, 512)
     }
   }
+
   if (job.error && safeJob.error === undefined) safeJob.error = safeMessage(job.error) || "Audio import failed."
+
   return { status: job.status, job: safeJob }
 }
 
@@ -332,17 +379,21 @@ export const registerAttachedHostController = (controller: TimelineHostControlle
   if (activeController) throw new Error("Only one timeline host controller may be attached.")
   activeController = controller
   const requestControllers = new Map<string, AbortController>()
+
   const request = async (request_: Omit<HostRequest, "signal">) => {
     const requestController = new AbortController()
     requestControllers.set(request_.id, requestController)
+
     try {
       return await controller.request({ ...request_, signal: requestController.signal })
     } finally {
       if (requestControllers.get(request_.id) === requestController) requestControllers.delete(request_.id)
     }
   }
+
   window.dawDesktop?.setRequestHandler(request, (requestId) => requestControllers.get(requestId)?.abort())
   window.dawDesktop?.onPrepareToClose(async () => ({ flushed: await controller.prepareToClose() }))
+
   return () => {
     if (activeController !== controller) return
     activeController = undefined
@@ -393,20 +444,26 @@ export const createAttachedHostController = (input: {
   const preparedExports = new Map<string, PreparedTimelineExport | PreparedStemExport>()
   const importQueue = input.importQueue ?? createImportJobQueue()
   const maxPreparedExports = 8
+
   const releasePreparedExport = (prepared: PreparedTimelineExport | PreparedStemExport) => {
     input.exportService.releasePreparedExport?.(prepared)
   }
+
   const clearPreparedExports = () => {
     for (const prepared of preparedExports.values()) releasePreparedExport(prepared)
     preparedExports.clear()
   }
+
   const findMountedLocalProject = input.getMountedLocalProject ?? getLocalProject
+
   const transport = () => ({
     state: input.isPlaying() ? "playing" as const : input.playheadSec() === 0 ? "stopped" as const : "paused" as const,
     playheadSec: Math.max(0, input.playheadSec()),
   })
+
   const status = () => {
     const projectId = input.projectId()
+
     return {
       project: projectId ? { id: projectId, kind: isLocalId("project", projectId) ? "local" as const : "cloud" as const } : null,
       ready: Boolean(activeController)
@@ -415,6 +472,7 @@ export const createAttachedHostController = (input: {
       capabilities: { playback: true, diagnostics: true },
     }
   }
+
   const isMountedLocalProject = (mountedProjectId: string, mountedGeneration: number, signal: AbortSignal) => (
     !signal.aborted
     && activeController === controller
@@ -422,9 +480,11 @@ export const createAttachedHostController = (input: {
     && input.mountedProjectGeneration() === mountedGeneration
     && isLocalId("project", mountedProjectId)
   )
+
   const ensureMountedLocalProject = async (mountedProjectId: string, mountedGeneration: number, signal: AbortSignal) => {
     if (!isMountedLocalProject(mountedProjectId, mountedGeneration, signal)) return false
     const project = await findMountedLocalProject(mountedProjectId)
+
     if (project === undefined || !input.ensureMountedLocalMedia) {
       return !signal.aborted
       && activeController === controller
@@ -432,6 +492,7 @@ export const createAttachedHostController = (input: {
       && input.mountedProjectGeneration() === mountedGeneration
       && project !== undefined
     }
+
     try {
       await input.ensureMountedLocalMedia({
         projectId: mountedProjectId,
@@ -441,34 +502,45 @@ export const createAttachedHostController = (input: {
     } catch {
       return false
     }
+
     return !signal.aborted
       && activeController === controller
       && input.projectId() === mountedProjectId
       && input.mountedProjectGeneration() === mountedGeneration
   }
+
   const control = async (request_: HostRequest & { operation: DesktopControlOperationV1 }): Promise<HostResponse> => {
     const commitKey = () => {
       const commit = request_.operation === "control.commit" ? controlCommitRequestSchemaV1.safeParse(request_.input) : undefined
+
       return commit?.success ? commit.data.idempotencyKey : undefined
     }
+
     input.acceptance?.mark("control-handler-entry", commitKey)
+
     if (!request_.trustedActorSubject) {
       return {
         id: request_.id,
         error: { version: "v1", code: "authorization", message: "A trusted local control actor is required." },
       }
     }
+
     const mountedProjectId = input.projectId()
     const mountedGeneration = input.mountedProjectGeneration()
+
     if (!mountedProjectId) {
       return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectRequired() }
     }
+
     if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
       return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectError(request_, mountedProjectId) }
     }
+
     if (!projectMatchesMount(request_, mountedProjectId)) return { id: request_.id, error: mountedProjectMismatch() }
+
     try {
       const requestInput = desktopJsonValueSchema.parse(request_.input)
+
       const handlers = createLocalControlHandlers({
         projectId: mountedProjectId,
         actor: { subject: request_.trustedActorSubject, issuer: "daw-browser-desktop-host" },
@@ -483,6 +555,7 @@ export const createAttachedHostController = (input: {
           ) throw new ControlRequestUnavailableError()
         },
       })
+
       const invoker = createDirectControlInvoker({
         handlers,
         context: {
@@ -493,6 +566,7 @@ export const createAttachedHostController = (input: {
           },
         },
       })
+
       if (request_.operation === "control.commit" && input.reconcileMountedLocalTimeline && input.hasReflectableOverlays?.()) {
         // Retire reflected UI overlays before this commit can supersede their
         // persisted values. A post-commit snapshot alone can miss that echo.
@@ -505,28 +579,37 @@ export const createAttachedHostController = (input: {
         })
         input.acceptance?.mark("control-reload-before-done", commitKey)
       }
+
       const result = await invokeCanonicalControl(invoker, request_.operation, requestInput)
       input.acceptance?.mark("control-commit-done", commitKey)
+
       if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
         return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectError(request_, mountedProjectId) }
       }
+
       if (request_.operation === "control.commit" && input.enqueueNativeVstParameter) {
         try {
           const commitRequest = controlCommitRequestSchemaV1.parse(requestInput)
           const commitResult = controlCommitResultSchemaV1.safeParse(result)
+
           if (commitResult.success && commitResult.data.applied && !commitResult.data.idempotencyReplay) {
             const changedActionIndexes = new Set(commitResult.data.changeSummary.changes
               .filter((change) => change.kind === "external-plugin.parameters.set")
               .map((change) => change.actionIndex))
+
             if (changedActionIndexes.size > 0) {
               const postCommitSnapshot = projectSnapshotSchemaV2.parse(await invoker.invoke("control.snapshot", { projectId: mountedProjectId }))
               const processorsById = new Map(postCommitSnapshot.processors.map((processor) => [processor.id, processor]))
+
               if (await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
                 const deliveries: Promise<{ instanceId: string; delivery: NativeVstParameterQueueResult }>[] = []
+
                 for (const [actionIndex, action] of commitRequest.actions.entries()) {
                   if (action.kind !== "external-plugin.parameters.set" || !changedActionIndexes.has(actionIndex)) continue
                   const processor = processorsById.get(action.processor.id)
+
                   if (processor?.processor.kind !== "external-vst3" || processor.instanceId === undefined) continue
+
                   for (const change of action.changes) {
                     try {
                       const instanceId = processor.instanceId
@@ -540,13 +623,16 @@ export const createAttachedHostController = (input: {
                     }
                   }
                 }
+
                 // Native refuses a parameter event it cannot queue (no attachment, playback off, queue full) and the
                 // commit still succeeds: the mark tells a refused delivery from one that never ran, and the refusal
                 // is reported. A superseded delivery was replaced by a newer value for the same parameter.
                 const results = await Promise.all(deliveries)
                 const refused = results.some((result) => result.delivery === "rejected")
                 input.acceptance?.mark(refused ? "control-parameters-undelivered" : "control-parameters-delivered", commitKey)
+
                 if (refused) input.reportUndeliveredNativeVstParameters?.()
+
                 // The plug-in's live state moved; persist it like any other committed edit.
                 for (const instanceId of new Set(results.filter((result) => result.delivery === "delivered").map((result) => result.instanceId))) {
                   input.requestNativeVstStateCapture?.(instanceId)
@@ -559,8 +645,10 @@ export const createAttachedHostController = (input: {
           input.reportUndeliveredNativeVstParameters?.()
         }
       }
+
       if (request_.operation === "control.commit" && input.reconcileMountedLocalTimeline) {
         const commitResult = controlCommitResultSchemaV1.safeParse(result)
+
         // The project row was just confirmed above; only the mount can have moved since, which needs no storage read.
         if (commitResult.success && commitResult.data.applied && !commitResult.data.idempotencyReplay
           && isMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
@@ -572,11 +660,14 @@ export const createAttachedHostController = (input: {
             })
           } catch {
             if (request_.signal.aborted) return { id: request_.id, error: controlUnavailable() }
+
             return { id: request_.id, error: committedButNotReconciled() }
           }
+
           input.acceptance?.mark("control-store-emitted", commitKey)
         }
       }
+
       const rendererProtocolVersion = (
         request_.operation === "control.capabilities"
         && desktopRendererControlCapabilitiesInputSchemaV1.parse(requestInput).readVersion === "v2"
@@ -584,6 +675,7 @@ export const createAttachedHostController = (input: {
         request_.operation === "control.snapshot"
         && desktopRendererControlSnapshotInputSchemaV1.parse(requestInput).readVersion === "v2"
       ) ? "v2" : "v1"
+
       return {
         id: request_.id,
         result: parseDesktopResult(
@@ -597,45 +689,61 @@ export const createAttachedHostController = (input: {
       if (error instanceof ControlRequestUnavailableError) {
         return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectRequired() }
       }
+
       if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
         return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectError(request_, mountedProjectId) }
       }
+
       if (error instanceof LocalControlServiceError) return { id: request_.id, error: error.data }
+
       return { id: request_.id, error: controlFailure() }
     }
   }
+
   const request = async (request_: HostRequest): Promise<HostResponse> => {
     if (activeController !== controller) return unavailable(request_.id)
+
     if (request_.signal.aborted) return cancelled(request_.id)
     const mountedProjectId = input.projectId()
     const mountedGeneration = input.mountedProjectGeneration()
+
     if (isLocalId("project", mountedProjectId) && input.ensureMountedLocalMedia
       && !await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
       return { id: request_.id, error: request_.signal.aborted ? cancelled(request_.id).error : mountedProjectRequired() }
     }
+
     try {
       let result: DesktopOperationMapV1[DesktopOperationV1]["result"]
+
       if (request_.operation === "host.vst.instances" || request_.operation === "host.vst.parameters") {
         const parsedInput = request_.operation === "host.vst.instances"
           ? desktopHostVstInstancesInputSchemaV1.safeParse(request_.input)
           : desktopHostVstParametersInputSchemaV1.safeParse(request_.input)
+
         if (!parsedInput.success) {
           return { id: request_.id, error: hostError("invalid-request", "Invalid VST discovery request.") }
         }
+
         const projectId = parsedInput.data.projectId
         const mountedProjectId = input.projectId()
+
         if (!mountedProjectId || !isLocalId("project", mountedProjectId)) {
           return { id: request_.id, error: request_.signal.aborted ? cancelled(request_.id).error : mountedProjectRequired() }
         }
+
         if (projectId !== mountedProjectId) return { id: request_.id, error: mountedProjectMismatch() }
         const mountedGeneration = input.mountedProjectGeneration()
+
         if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
           return { id: request_.id, error: request_.signal.aborted ? cancelled(request_.id).error : mountedProjectRequired() }
         }
+
         const processors = await listLocalExternalProcessors(mountedProjectId)
+
         if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
           return { id: request_.id, error: request_.signal.aborted ? cancelled(request_.id).error : mountedProjectRequired() }
         }
+
         if (request_.operation === "host.vst.instances") {
           const instances = [...processors]
             .sort((left, right) => (
@@ -662,12 +770,15 @@ export const createAttachedHostController = (input: {
               supportsEditor: processor.manifest.supportsEditor,
               supportsState: processor.manifest.supportsState,
             }))
+
           const page = pageValues(instances, parsedInput.data.cursor, parsedInput.data.limit)
           result = { projectId, instances: page.values, nextCursor: page.nextCursor }
         } else {
           const parameterInput = desktopHostVstParametersInputSchemaV1.parse(request_.input)
           const processor = processors.find((candidate) => candidate.instanceId === parameterInput.instanceId)
+
           if (!processor) return { id: request_.id, error: hostError("invalid-request", "The requested VST instance was not found.") }
+
           const parameters = [...processor.manifest.parameters]
             .sort((left, right) => left.id - right.id)
             .map((parameter) => ({
@@ -682,9 +793,11 @@ export const createAttachedHostController = (input: {
               hidden: parameter.hidden,
               currentValue: clampNormalizedValue(processor.parameterOverrides[String(parameter.id)] ?? parameter.defaultValue),
             }))
+
           const page = pageValues(parameters, parsedInput.data.cursor, parsedInput.data.limit)
           result = { projectId, instanceId: processor.instanceId, parameters: page.values, nextCursor: page.nextCursor }
         }
+
         return {
           id: request_.id,
           result: parseDesktopResult(
@@ -694,31 +807,41 @@ export const createAttachedHostController = (input: {
           ),
         }
       }
+
       if (isDesktopControlOperation(request_.operation)) {
         return control({ ...request_, operation: request_.operation })
       }
+
       if (request_.operation === "host.status") result = status()
       else if (request_.operation === "host.import.audio") {
         const parsedInput = desktopRendererImportInputSchemaV1.safeParse(request_.input)
+
         if (!parsedInput.success) return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Invalid audio import request." } }
         const input_: CapabilityImport = parsedInput.data
+
         if (input_.canceled) result = { status: "canceled", count: 0 }
         else {
           const files = input_.files ?? []
+
           if (request_.signal.aborted) return cancelled(request_.id)
           const submittedProjectId = input.projectId()
           const submittedProjectGeneration = input.mountedProjectGeneration()
+
           const isCurrent = () => activeController === controller
             && input.projectId() === submittedProjectId
             && input.mountedProjectGeneration() === submittedProjectGeneration
+
           const assertCurrent = (signal: AbortSignal) => {
             signal.throwIfAborted()
+
             if (!isCurrent()) throw new DOMException("The audio import was canceled.", "AbortError")
           }
+
           const submitted = importQueue.submit(
             files[0]?.basename ?? "Audio import",
             async (signal) => {
               assertCurrent(signal)
+
               const summary = await input.importFiles(
                 files.map((file) => fileFromCapability(request_.id, signal, file)),
                 signal,
@@ -727,11 +850,14 @@ export const createAttachedHostController = (input: {
                   mountedProjectGeneration: submittedProjectGeneration,
                 },
               )
+
               assertCurrent(signal)
+
               return summary
             },
             isCurrent,
           )
+
           void submitted.completion.then(() => {
             window.dawDesktop?.importTerminal?.(submitted.id)
           })
@@ -741,30 +867,40 @@ export const createAttachedHostController = (input: {
         result = safeImportStatus(importQueue.status())
       } else if (request_.operation === "host.import.cancel") {
         const parsedInput = desktopHostImportCancelInputSchemaV1.safeParse(request_.input)
+
         if (!parsedInput.success) return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Invalid import job ID." } }
         importQueue.cancel(parsedInput.data.jobId)
         result = safeImportStatus(importQueue.status(parsedInput.data.jobId))
       } else if (request_.operation === "host.export.run") {
         const exportInput = parseCapabilityExport(request_)
+
         if (!exportInput) return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Invalid export request." } }
+
         if (exportInput.canceled) {
           const prepared = preparedExports.get(request_.id)
+
           if (prepared) releasePreparedExport(prepared)
           preparedExports.delete(request_.id)
+
           return { id: request_.id, result: { status: "canceled" } }
         }
+
         if (exportInput.preflightOnly) {
           let prepared: PreparedTimelineExport | PreparedStemExport | undefined
+
           try {
             prepared = exportInput.mode === "mixdown"
               ? await input.exportService.prepareTimelineExport(exportInput.settings)
               : exportInput.stems
                 ? await input.exportService.prepareStemExport({ ...exportInput.settings, ...exportInput.stems })
                 : undefined
+
             if (!prepared) return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Invalid stem export request." } }
+
             const stemCount = prepared.kind === "timeline"
               ? 1
               : collectStemTracks({ ...prepared.input, tracks: prepared.snapshot.tracks }).length
+
             if (stemCount === 0) throw new Error("Select at least one track to export stems.")
             preflightExportResources({
               tracks: prepared.snapshot.tracks,
@@ -775,39 +911,53 @@ export const createAttachedHostController = (input: {
               stemCount,
               resourceLimits: desktopExportResourceLimits,
             })
+
             if (request_.signal.aborted) {
               releasePreparedExport(prepared)
+
               return cancelled(request_.id)
             }
+
             const previous = preparedExports.get(request_.id)
+
             if (previous) releasePreparedExport(previous)
             preparedExports.set(request_.id, prepared)
+
             while (preparedExports.size > maxPreparedExports) {
               const oldest = preparedExports.entries().next().value
+
               if (!oldest) break
               releasePreparedExport(oldest[1])
               preparedExports.delete(oldest[0])
             }
           } catch (error) {
             if (prepared) releasePreparedExport(prepared)
+
             // The export service refuses with messages written for the user, such as a format or stem mode
             // the native renderer cannot produce, so the client gets the same reason the export dialog shows.
             if (error instanceof Error) return { id: request_.id, error: hostError("invalid-request", error.message) }
             throw error
           }
+
           return { id: request_.id, result: { status: "canceled" } }
         }
+
         const prepared = preparedExports.get(request_.id)
         preparedExports.delete(request_.id)
+
         if (!prepared || (exportInput.mode === "mixdown") !== (prepared.kind === "timeline")) {
           if (prepared) releasePreparedExport(prepared)
+
           return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Export preflight is missing or stale." } }
         }
+
         try {
           const target = createDesktopCapabilityExportOutputTargetFactory(window.dawDesktop!, request_.id, exportInput.output)
+
           const submitted = prepared.kind === "timeline"
             ? input.exportService.submitPreparedTimelineExport(prepared, target)
             : input.exportService.submitPreparedStemExport(prepared, target)
+
           void submitted.completion.then((outcome) => {
             window.dawDesktop?.exportTerminal(
               submitted.id,
@@ -823,6 +973,7 @@ export const createAttachedHostController = (input: {
         result = safeExportStatus(input.exportService.status())
       } else if (request_.operation === "host.export.cancel") {
         const parsedInput = desktopHostExportCancelInputSchemaV1.safeParse(request_.input)
+
         if (!parsedInput.success) return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Invalid export job ID." } }
         input.exportService.cancel(parsedInput.data.jobId)
         result = safeExportStatus(input.exportService.status(parsedInput.data.jobId))
@@ -842,9 +993,11 @@ export const createAttachedHostController = (input: {
         result = { state: "stopped", playheadSec: 0 }
       } else if (request_.operation === "transport.seek") {
         const parsedInput = desktopSeekInputSchemaV1.safeParse(request_.input)
+
         if (!parsedInput.success) {
           return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Invalid seek position." } }
         }
+
         if (request_.signal.aborted) return cancelled(request_.id)
         input.setPlayhead(parsedInput.data.seconds)
         result = transport()
@@ -852,6 +1005,7 @@ export const createAttachedHostController = (input: {
         window.dawDesktop?.traceDiagnosticsV2(request_.id, "controller-before-native")
         const runtime = input.audioEngine.getRuntimeSnapshot()
         const recording = getRecordingDiagnostics()
+
         let native: {
           status: "unavailable"
           reason: "desktop-bridge-unavailable"
@@ -867,16 +1021,20 @@ export const createAttachedHostController = (input: {
           status: "unavailable",
           reason: "desktop-bridge-unavailable",
         }
+
         try {
           const nativeReply = await window.dawDesktop?.audioHost?.diagnostics()
+
           if (nativeReply) {
             native = nativeReply.ok
               ? { status: "available", artifactVerification: safeNativeArtifactVerification(nativeReply.artifactVerification), diagnostics: serializeNativeDiagnostics(nativeReply.diagnostics) }
               : { status: "failed", errorCode: "native-diagnostics-unavailable", artifactVerification: safeNativeArtifactVerification(nativeReply.artifactVerification) }
           }
         } catch {}
+
         window.dawDesktop?.traceDiagnosticsV2(request_.id, "controller-after-native")
         const scheduler = input.schedulerDiagnostics?.()
+
         const diagnosticSnapshot = {
           version: "v2",
           audio: { ...runtime, runtimeFaults: safeRuntimeFaults(runtime.runtimeFaults) },
@@ -891,6 +1049,7 @@ export const createAttachedHostController = (input: {
           },
           native,
         }
+
         result = desktopDiagnosticsSchemaV2.parse(scheduler === undefined
           ? diagnosticSnapshot
           : { ...diagnosticSnapshot, scheduler })
@@ -898,22 +1057,26 @@ export const createAttachedHostController = (input: {
       } else {
         const runtime = input.audioEngine.getRuntimeSnapshot()
         const recording = getRecordingDiagnostics()
+
         // V1 cannot represent native spool ownership. Preserve its existing
         // schema rather than disguising native capture as SAB or transferable.
         if (recording.transport === "native-spool") {
           return { id: request_.id, error: hostError("unavailable", "Native recording diagnostics require diagnostics.snapshot.v2.") }
         }
+
         result = {
           audio: { state: runtime.state, sampleRate: runtime.sampleRate ?? null },
           recording: { transport: recording.transport, capturedFrames: recording.capturedFrames, droppedFrames: recording.droppedFrames, deviceLost: recording.deviceLost },
           counts: { tracks: input.tracks().length, clips: input.tracks().reduce((total, track) => total + track.clips.length, 0) },
         }
       }
+
       return { id: request_.id, result }
     } catch {
       return { id: request_.id, error: { version: "v1", code: "internal", message: "The timeline operation failed." } }
     }
   }
+
   const prepareToClose = async () => {
     try {
       await input.captureNativeVstStates?.()
@@ -923,14 +1086,17 @@ export const createAttachedHostController = (input: {
       clearPreparedExports()
       await input.finishRecording()
       const projectId = input.projectId()
+
       if (isLocalId("project", projectId)) await flushLocalProjectPendingWrites(projectId)
       await Promise.resolve(input.audioEngine.close())
       resetAudioEngine()
+
       return true
     } catch {
       return false
     }
   }
+
   const controller: TimelineHostController = {
     request,
     prepareToClose,
@@ -939,5 +1105,6 @@ export const createAttachedHostController = (input: {
       importQueue.dispose()
     },
   }
+
   return controller
 }

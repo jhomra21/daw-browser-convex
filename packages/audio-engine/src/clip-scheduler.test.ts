@@ -153,6 +153,7 @@ describe('clip scheduler stretch fallback policy', () => {
 describe('clip scheduler deferred stretch windows', () => {
   test('returns deferred metadata when a future stretch render is not ready', () => {
     const scheduler = createTestScheduler()
+
     const result = scheduler.scheduleAllClipsFromPlayhead([
       createTrack([createAudioClip('clip-1', 12, 4)]),
     ], 10, { endLimitSec: 40 })
@@ -164,6 +165,7 @@ describe('clip scheduler deferred stretch windows', () => {
 
   test('returns replace metadata when repitch fallback is imminent', () => {
     const scheduler = createTestScheduler()
+
     const result = scheduler.scheduleAllClipsFromPlayhead([
       createTrack([createAudioClip('clip-1', 11, 4)]),
     ], 10, { endLimitSec: 40 })
@@ -175,9 +177,11 @@ describe('clip scheduler deferred stretch windows', () => {
 
   test('clip filter limits append retries to matching clips', () => {
     const scheduledClipIds: string[] = []
+
     const scheduler = createTestScheduler({
       scheduleMidiClip: (_track, clip) => {
         scheduledClipIds.push(clip.id)
+
         return true
       },
     })
@@ -199,6 +203,7 @@ describe('clip scheduler deferred stretch windows', () => {
 
   test('reschedule returns deferred metadata for future stretch renders', () => {
     const scheduler = createTestScheduler()
+
     const result = scheduler.rescheduleClipsAtPlayhead([
       createTrack([createAudioClip('clip-1', 12, 4)]),
     ], 10, ['clip-1'], { endLimitSec: 40 })

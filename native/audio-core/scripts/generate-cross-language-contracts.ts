@@ -20,11 +20,15 @@ import {
 const root = resolve(import.meta.dir, "../../..")
 const faultOrigins = Object.entries(nativeVst3WorkerFaultOrigins)
 const enumerator = (name: string) => `k${name.charAt(0).toUpperCase()}${name.slice(1)}`
+
 const faultOriginName = (value: number) => {
   const entry = faultOrigins.find(([, origin]) => origin === value)
+
   if (!entry) throw new Error(`No worker fault origin is defined for ${value}.`)
+
   return enumerator(entry[0])
 }
+
 const pluginHostHeader = `#pragma once
 
 #include <cstdint>
@@ -58,12 +62,14 @@ ${[...nativeVst3PluginFaultOrigins].map((value) => `    case WorkerFaultOrigin::
 
 }
 `
+
 const spoolHeader = `#pragma once
 
 #define DAW_RECORDING_SPOOL_BLOCK_HEADER_BYTES ${recordingSpoolBlockHeaderBytes}u
 #define DAW_RECORDING_SPOOL_SAMPLE_BYTES ${recordingSpoolSampleBytes}u
 #define DAW_RECORDING_SPOOL_MAX_BLOCK_FRAMES ${maximumRecordingSpoolBlockFrames}u
 `
+
 const generated = [
   {
     path: resolve(root, "native/plugin-host/src/plugin-host-contract-generated.h"),

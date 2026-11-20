@@ -36,6 +36,7 @@ type UseEffectsPanelAudioSyncOptions = {
 };
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
+
 type SyncedEffectRow = RoomEffectRow | LocalEffectRow<JsonValue>;
 
 type UseEffectsPanelAudioSyncReturn = {
@@ -64,6 +65,7 @@ export const createSpectrumSubscriptionOwner = (
     targetId: string,
   ) => {
     if (disposed) return;
+
     if (isOpen === activeOpen && provider === activeProvider && targetId === activeTargetId) return;
     generation += 1;
     unsubscribe();
@@ -71,10 +73,13 @@ export const createSpectrumSubscriptionOwner = (
     activeOpen = isOpen;
     activeProvider = provider;
     activeTargetId = targetId;
+
     if (!isOpen || !provider) {
       setFrame(null);
+
       return;
     }
+
     const subscriptionGeneration = generation;
     unsubscribe = provider(targetId, (frame) => {
       if (!disposed && subscriptionGeneration === generation) setFrame(frame);
@@ -118,13 +123,17 @@ export const createEffectsPanelReadinessOwner = (options: EffectsPanelReadinessO
 
   const stateFor = (projectId: string) => {
     const existing = states.get(projectId);
+
     if (existing) return existing;
+
     const state: ProjectState = {
       rowsProcessed: false,
       remoteStatus: "pending",
       remoteDataDefined: false,
     };
+
     states.set(projectId, state);
+
     return state;
   };
 
@@ -147,12 +156,14 @@ export const createEffectsPanelReadinessOwner = (options: EffectsPanelReadinessO
     state.remoteStatus = status;
     state.remoteDataDefined = rows !== undefined;
     state.remoteError = toError(cause);
+
     if (status !== "success" || rows === undefined) state.rowsProcessed = false;
     notify();
   };
 
   const markRowsProcessed = (projectId: string) => {
     const state = stateFor(projectId);
+
     if (state.remoteStatus !== "success" || !state.remoteDataDefined) return;
     state.rowsProcessed = true;
     notify();
@@ -160,28 +171,36 @@ export const createEffectsPanelReadinessOwner = (options: EffectsPanelReadinessO
 
   const flushPending = async (projectId: string | undefined) => {
     if (disposed || !projectId) return;
+
     const assertCurrentProject = () => {
       if (options.currentProjectId() !== projectId) {
         throw new Error(`Project changed while waiting for effects readiness for project "${projectId}".`);
       }
     };
+
     const state = stateFor(projectId);
+
     while (!disposed) {
       assertCurrentProject();
+
       if (isLocalId("project", projectId)) {
         const localReady = options.localReady().catch((cause: unknown) => {
           throw new Error(`Failed to load local effects for project "${projectId}": ${errorMessage(toError(cause))}`);
         });
+
         // A change can win the race; the read this pass waited on may still fail afterwards.
         localReady.catch(() => undefined);
         const ready = await Promise.race([localReady, waitForChange().then(() => false)]);
         assertCurrentProject();
+
         if (ready) return;
         continue;
       }
+
       if (state.remoteStatus === "error") {
         throw new Error(`Failed to load remote effects for project "${projectId}": ${errorMessage(state.remoteError)}`);
       }
+
       if (
         state.remoteStatus !== "success"
         || !state.remoteDataDefined
@@ -191,6 +210,7 @@ export const createEffectsPanelReadinessOwner = (options: EffectsPanelReadinessO
         assertCurrentProject();
         continue;
       }
+
       return;
     }
   };
@@ -222,6 +242,7 @@ export const createPendingWorkOwner = () => {
     pendingByProject.set(projectId, projectPending);
     void pending.then(() => {
       projectPending.delete(pending);
+
       if (projectPending.size === 0 && pendingByProject.get(projectId) === projectPending) {
         pendingByProject.delete(projectId);
       }
@@ -230,8 +251,10 @@ export const createPendingWorkOwner = () => {
 
   const flushPending = async (projectId: string | undefined) => {
     if (disposed || !projectId) return;
+
     while (true) {
       const projectPending = pendingByProject.get(projectId);
+
       if (!projectPending || projectPending.size === 0) return;
       await Promise.all(projectPending);
     }
@@ -249,16 +272,19 @@ export function useEffectsPanelAudioSync(
   options: UseEffectsPanelAudioSyncOptions,
 ): UseEffectsPanelAudioSyncReturn {
   const localEffectsView = options.localEffectsView;
+
   const readinessOwner = createEffectsPanelReadinessOwner({
     currentProjectId: options.projectId,
     localReady: localEffectsView.ready,
   });
+
   onCleanup(readinessOwner.dispose);
 
   createEffect(on(options.projectId, () => readinessOwner.projectChanged()));
 
   createEffect(() => {
     const projectId = options.projectId();
+
     if (!projectId || isLocalId("project", projectId)) return;
     readinessOwner.updateRemote(
       projectId,
@@ -292,8 +318,10 @@ export function useEffectsPanelAudioSync(
 
   createEffect(() => {
     const audioEngine = options.audioEngine();
+
     if (options.usesLegacyAudioEngine && !options.usesLegacyAudioEngine()) return;
     const projectId = options.projectId();
+
     if (projectId) return;
     clearSyncedTrackState(audioEngine, syncedTrackIds);
     clearSyncedMasterState(audioEngine);
@@ -305,12 +333,14 @@ export function useEffectsPanelAudioSync(
     const audioEngine = options.audioEngine();
     const usesLegacyAudioEngine = options.usesLegacyAudioEngine?.() ?? true;
     const projectId = options.projectId();
+
     const effects: SyncedEffectRow[] | undefined = projectId && isLocalId("project", projectId)
       ? localEffectsView.view()?.rows
       : options.roomEffects();
 
     const tracks = options.tracks();
     const currentTrackIds = new Set(tracks.map((track) => track.id));
+
     if (effects === undefined) {
       if (projectId && syncedProjectId !== projectId) {
         if (usesLegacyAudioEngine) {
@@ -322,9 +352,11 @@ export function useEffectsPanelAudioSync(
             samplerBufferSync.clearTrack(trackId);
           }
         }
+
         syncedTrackIds = new Set(currentTrackIds);
         syncedProjectId = projectId;
       }
+
       return;
     }
 
@@ -334,6 +366,7 @@ export function useEffectsPanelAudioSync(
       const { instruments, arpeggiators } = indexInstrumentEffectRows(effects);
       untrack(() => {
         const through = localEffectsView.view()?.through ?? 0;
+
         for (const track of tracks) {
           options.syncInstrumentForTarget?.(track.id, track.kind === "instrument" ? instruments.get(track.id)?.params : undefined, through);
           options.syncArpeggiatorForTarget?.(track.id, track.kind === "instrument" ? arpeggiators.get(track.id)?.params : undefined, through);
@@ -342,11 +375,13 @@ export function useEffectsPanelAudioSync(
     }
 
     const staleTrackIds = new Set<Track["id"]>();
+
     for (const trackId of syncedTrackIds) {
       if (!currentTrackIds.has(trackId)) {
         staleTrackIds.add(trackId);
       }
     }
+
     for (const trackId of staleTrackIds) {
       if (isLocalId("project", projectId)) untrack(() => {
         options.syncInstrumentForTarget?.(trackId, undefined);
@@ -365,6 +400,7 @@ export function useEffectsPanelAudioSync(
       syncedTrackIds = new Set(currentTrackIds);
       syncedProjectId = projectId;
       acknowledgeRows();
+
       return;
     }
 

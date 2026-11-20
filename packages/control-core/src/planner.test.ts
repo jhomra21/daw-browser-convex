@@ -70,11 +70,13 @@ const snapshot = (): any => ({
 });
 
 type PersistedRef = { source: "persisted"; id: string };
+
 type PlannerRequestFixture = { projectId: string; actions: ControlActionV1[] };
 
 const persisted = (id: string): PersistedRef => ({ source: "persisted", id });
 const ownership = { projectId: "project-1", localActorSubject: "local-user" };
 const recovery = (payload: RecoveryPayload) => ({ payload });
+
 const mappings = (count: number) => Array.from({ length: count }, (_, index) => ({
   id: `mapping-${index}`,
   source: { kind: "cc" as const, controller: index },
@@ -154,6 +156,7 @@ test("plans an atomic selected-track range split with automation boundaries", ()
       { id: "c", timeSec: 7, value: 0, interpolation: "linear" },
     ],
   }]
+
   const plan = planControlRequestV1(base, {
     projectId: "project-1",
     actions: [{
@@ -163,6 +166,7 @@ test("plans an atomic selected-track range split with automation boundaries", ()
       endSec: 6,
     }],
   })
+
   const action = plan.actions[0]
   expect(action?.changed).toBe(true)
   expect(action?.timelineRangeDelete?.clipUpdates[0]?.after.duration).toBe(2)
@@ -177,10 +181,12 @@ test("preserves the planned snapshot version and V2 MIDI envelope", () => {
     version: "v1",
     processors: [],
   })
+
   const v1Plan = planControlRequestV1(v1, {
     projectId: "project-1",
     actions: [{ kind: "project.rename", name: "V1 project" }],
   })
+
   const preservedV1: ProjectSnapshotV1 = v1Plan.snapshot
   expect(preservedV1.version).toBe("v1")
 
@@ -202,10 +208,12 @@ test("preserves the planned snapshot version and V2 MIDI envelope", () => {
       },
     }],
   })
+
   const v2Plan = planControlRequestV1(v2, {
     projectId: "project-1",
     actions: [{ kind: "project.rename", name: "V2 project" }],
   })
+
   const preservedV2: ProjectSnapshotV2 = v2Plan.snapshot
   expect(preservedV2.version).toBe("v2")
   expect(preservedV2.clips[0]?.midi?.notes[0]?.channel).toBe(2)
@@ -224,6 +232,7 @@ test("keeps expanded MIDI unchanged for a matching legacy action", () => {
     polyPressure: [],
     mappings: [{ id: "mapping-1", source: { kind: "cc", controller: 1, channel: 2 }, target: { parameterId: "gain" }, outputMin: 0, outputMax: 1 }],
   }
+
   const plan = planControlRequestV1(base, {
     projectId: "project-1",
     actions: [{
@@ -234,6 +243,7 @@ test("keeps expanded MIDI unchanged for a matching legacy action", () => {
       notes: [{ beat: 0, length: 1, pitch: 60, velocity: 0.5 }],
     }],
   })
+
   expect(plan.applied).toBe(false)
   expect(plan.snapshot.clips[0]?.midi).toEqual(base.clips[0].midi)
 })
@@ -250,6 +260,7 @@ test("preserves expanded MIDI when an action note supplies an ID or channel", ()
     polyPressure: [],
     mappings: [],
   }
+
   const plan = planControlRequestV1(base, {
     projectId: "project-1",
     actions: [{
@@ -259,6 +270,7 @@ test("preserves expanded MIDI when an action note supplies an ID or channel", ()
       notes: [{ id: "replacement-note", beat: 1, length: 1, pitch: 61, channel: 3 }],
     }],
   })
+
   expect(plan.snapshot.clips[0]?.midi).toEqual(expect.objectContaining({
     wave: "sine",
     inputChannel: 2,
@@ -282,6 +294,7 @@ test("reports MIDI resolver failures as bounded action-scoped planner errors", (
     polyPressure: [],
     mappings: [],
   }
+
   const request: PlannerRequestFixture = {
     projectId: "project-1",
     actions: [
@@ -294,6 +307,7 @@ test("reports MIDI resolver failures as bounded action-scoped planner errors", (
       },
     ],
   }
+
   expect(() => planControlRequestV1(base, request)).toThrow(expect.objectContaining({
     code: "validation",
     actionIndex: 1,
@@ -330,6 +344,7 @@ test("traces canonically ordered snapshots for every action and the final plan",
     processor: { kind: "reverb", params: {} },
   })
   const traces: any[] = []
+
   const plan = planControlRequestV1(base, {
     projectId: "project-1",
     actions: [
@@ -352,9 +367,11 @@ test("traces canonically ordered snapshots for every action and the final plan",
   }, new Map(), { trace: { onActionPlanned: (entry) => traces.push(entry) } })
 
   expect(traces).toHaveLength(plan.actions.length)
+
   for (const entry of traces) {
     expect(entry.afterSnapshot).toEqual(canonicalizePlannerSnapshotV1(entry.afterSnapshot))
   }
+
   expect(traces.at(-1)?.afterSnapshot).toEqual(plan.snapshot)
 })
 
@@ -369,6 +386,7 @@ test("derives destructive impact from the planned base-to-final diff", () => {
     enabled: true, points: [],
   });
   base.sidechains.push({ sourceTrackId: "track-2", targetTrackId: "track-1", effectInstanceId: "audio-effect:one" });
+
   const plan = planControlRequestV1(base, {
     projectId: "project-1",
     actions: [{
@@ -378,6 +396,7 @@ test("derives destructive impact from the planned base-to-final diff", () => {
       effectKind: "eq",
     }],
   });
+
   expect(controlApprovalRequirementV1(plan, "a".repeat(64))).toMatchObject({
     required: true,
     actionIndexes: [0],
@@ -394,6 +413,7 @@ test("does not require approval for create-then-delete net no-ops", () => {
       { kind: "track.delete", track: { source: "client", clientRef: "temporary" } },
     ],
   });
+
   expect(controlApprovalRequirementV1(plan, "a".repeat(64)).required).toBe(false);
 });
 
@@ -423,6 +443,7 @@ test("requires approval to delete an asset restored earlier in the request", () 
         },
       },
   })]]));
+
   expect(controlApprovalRequirementV1(plan, "a".repeat(64))).toMatchObject({
     required: true,
     actionIndexes: [1],
@@ -467,6 +488,7 @@ test("plans track deletion for a legacy MIDI clip beyond new write event limits"
 
 test("requires approval when a client-ref deletion cascades persisted descendants", () => {
   const base = snapshot();
+
   const plan = planControlRequestV1(base, {
     projectId: "project-1",
     actions: [
@@ -475,6 +497,7 @@ test("requires approval when a client-ref deletion cascades persisted descendant
       { kind: "track.delete", track: { source: "client", clientRef: "group" } },
     ],
   });
+
   expect(controlApprovalRequirementV1(plan, "a".repeat(64))).toMatchObject({
     required: true,
     actionIndexes: [2],
@@ -506,6 +529,7 @@ test("rejects incomplete authoritative audio assets and projects complete source
     sizeBytes: 1, contentSha256: "a".repeat(64), createdAt: 0, updatedAt: 0,
     }],
   };
+
   expect(() => planControlRequestV1(incomplete, {
     projectId: "project-1",
     actions: [{ kind: "clip.audio.create", track: persisted("track-1"), asset: persisted("asset-1") }],
@@ -515,6 +539,7 @@ test("rejects incomplete authoritative audio assets and projects complete source
     ...incomplete,
     assets: [{ ...incomplete.assets[0], durationSec: 2, sampleRate: 48_000, channelCount: 2 }],
   };
+
   const plan = planControlRequestV1(complete, {
     projectId: "project-1",
     actions: [
@@ -522,6 +547,7 @@ test("rejects incomplete authoritative audio assets and projects complete source
       { kind: "clip.color.set", clip: { source: "client", clientRef: "audio" }, color: "#22c55e" },
     ],
   });
+
   expect(plan.snapshot.clips.find((clip: ProjectSnapshotV2["clips"][number]) => clip.id === "control:clip:audio")?.source).toEqual({
     assetId: "asset-1", sourceKind: "upload", durationSec: 2, sampleRate: 48_000, channelCount: 2,
   });
@@ -533,16 +559,19 @@ test("validates recovered audio clip sources against the projected asset set", (
     sizeBytes: 1, contentSha256: "a".repeat(64), durationSec: 2, sampleRate: 48_000, channelCount: 2,
     createdAt: 0, updatedAt: 0,
   } satisfies ProjectSnapshotV2["assets"][number];
+
   const audioClip = {
     projectId: "project-1", trackId: "track-1", name: "Audio", startSec: 0, duration: 1,
     sourceAssetKey: "asset-1", sourceKind: "upload", sourceDurationSec: 2,
     sourceSampleRate: 48_000, sourceChannelCount: 2,
   } satisfies Extract<RecoveryPayload, { kind: "clip.delete" }>["data"]["clip"];
+
   const clipRecovery = recovery({
     version: 2,
     kind: "clip.delete",
     data: { clipId: "clip-1", clip: audioClip, ownership },
   });
+
   const base = snapshot();
   base.tracks[0].kind = "audio";
   base.clips = [];
@@ -560,9 +589,11 @@ test("validates recovered audio clip sources against the projected asset set", (
     duration: audioAsset.durationSec, sampleRate: audioAsset.sampleRate, channelCount: audioAsset.channelCount,
     createdAt: audioAsset.createdAt, updatedAt: audioAsset.updatedAt,
   } } });
+
   const recoveries = new Map<string, { payload: RecoveryPayload }>()
   recoveries.set("asset", assetRecovery)
   recoveries.set("clip", clipRecovery)
+
   const restored = planControlRequestV1(base, {
     projectId: "project-1",
     actions: [
@@ -570,6 +601,7 @@ test("validates recovered audio clip sources against the projected asset set", (
       { kind: "recovery.restore", recovery: { id: "clip" } },
     ],
   }, recoveries);
+
   expect(restored.snapshot.clips[0]?.source).toEqual({
     assetId: "asset-1", sourceKind: "upload", durationSec: 2, sampleRate: 48_000, channelCount: 2,
   });
@@ -587,6 +619,7 @@ test("validates recovered audio clip sources against the projected asset set", (
       effects: [], automation: [], sidechains: [], survivors: [],
     },
   });
+
   const trackBase = { ...base, tracks: [] };
   expect(() => planControlRequestV1(trackBase, {
     projectId: "project-1",
@@ -597,6 +630,7 @@ test("validates recovered audio clip sources against the projected asset set", (
 test("restores a historical 501-note MIDI recovery without V2 write validation", () => {
   const base = snapshot()
   base.clips = []
+
   const historicalRecovery = recovery({
       version: 2,
       kind: "clip.delete",
@@ -615,10 +649,12 @@ test("restores a historical 501-note MIDI recovery without V2 write validation",
         },
       },
   })
+
   const plan = planControlRequestV1(base, {
     projectId: "project-1",
     actions: [{ kind: "recovery.restore", recovery: { id: "recovery-1" } }],
   }, new Map([["recovery-1", historicalRecovery]]))
+
   expect(plan.snapshot.clips[0]?.midi?.notes).toHaveLength(501)
 })
 
@@ -725,6 +761,7 @@ test("compacts effect indices after an exact removal", () => {
     index: 1,
     processor: { kind: "reverb", params: {} },
   });
+
   const plan = planControlRequestV1(base, {
     projectId: "project-1",
     actions: [{
@@ -734,6 +771,7 @@ test("compacts effect indices after an exact removal", () => {
       effect: persisted("effect-1"),
     }],
   });
+
   expect(plan.snapshot.processors).toEqual([expect.objectContaining({
     id: "effect-2",
     target: { trackId: "track-1" },
@@ -753,6 +791,7 @@ test("uses compacted indices when a removal precedes a reorder", () => {
     index: 1,
     processor: { kind: "reverb", params: {} },
   });
+
   const plan = planControlRequestV1(base, {
     projectId: "project-1",
     actions: [
@@ -769,6 +808,7 @@ test("uses compacted indices when a removal precedes a reorder", () => {
       },
     ],
   });
+
   expect(plan.actions.map((entry) => entry.changed)).toEqual([true, false]);
   expect(plan.snapshot.processors[0]?.index).toBe(0);
 });
@@ -831,6 +871,7 @@ test("consolidates duplicate instrument and arpeggiator projections on set", () 
       processor: { kind: "reverb", params: {} },
     },
   ];
+
   const plan = planControlRequestV1(base, {
     projectId: "project-1",
     actions: [
@@ -846,6 +887,7 @@ test("consolidates duplicate instrument and arpeggiator projections on set", () 
       },
     ],
   });
+
   expect(plan.actions.map((entry) => entry.changed)).toEqual([true, true, false]);
   expect(plan.snapshot.processors.map((entry: ProjectSnapshotV2["processors"][number]) => ({ id: entry.id, index: entry.index }))).toEqual([
     { id: "effect-1", index: 0 },
@@ -864,6 +906,7 @@ test("treats absent optional clip fields as clearable and MIDI notes as unordere
       { beat: 0, length: 1, pitch: 60 },
     ] },
   };
+
   const plan = planControlRequestV1(base, {
     projectId: "project-1",
     actions: [{
@@ -877,6 +920,7 @@ test("treats absent optional clip fields as clearable and MIDI notes as unordere
       ],
     }],
   });
+
   expect(plan.applied).toBe(false);
 });
 
@@ -891,6 +935,7 @@ test("plans optional audio source, fades, and warp from absent values without th
     sizeBytes: 1, contentSha256: "a".repeat(64), durationSec: 2, sampleRate: 48_000, channelCount: 2,
     createdAt: 0, updatedAt: 0,
   }];
+
   const plan = planControlRequestV1(base, {
     projectId: "project-1",
     actions: [
@@ -899,6 +944,7 @@ test("plans optional audio source, fades, and warp from absent values without th
       { kind: "clip.audioWarp.set", clip: persisted("clip-1"), audioWarp: { enabled: false, mode: "repitch" } },
     ],
   });
+
   expect(plan.applied).toBe(true);
 });
 
@@ -906,6 +952,7 @@ test("treats equivalent disabled audio warp endpoints as a no-op", () => {
   const base = snapshot();
   base.tracks[0].kind = "audio";
   base.clips[0].midi = undefined;
+
   const plan = planControlRequestV1(base, {
     projectId: "project-1",
     actions: [{
@@ -914,6 +961,7 @@ test("treats equivalent disabled audio warp endpoints as a no-op", () => {
       audioWarp: { enabled: false, mode: "repitch" },
     }],
   });
+
   expect(plan.applied).toBe(false);
   expect(plan.actions[0]?.changed).toBe(false);
 });
@@ -928,6 +976,7 @@ test("normalizes track creation colors and projects an explicit instrument", () 
       color: "#AbC",
     }],
   });
+
   const track = plan.snapshot.tracks.find((entry: ProjectSnapshotV2["tracks"][number]) => entry.id === "control:track:new-instrument");
   expect(track?.color).toBe("#aabbcc");
   expect(track?.collapsed).toBe(false);
@@ -974,6 +1023,7 @@ test("compacts remaining device indices before a later reorder", () => {
       processor: { kind: "eq", params: {} },
     },
   ];
+
   const plan = planControlRequestV1(base, {
     projectId: "project-1",
     actions: [
@@ -981,6 +1031,7 @@ test("compacts remaining device indices before a later reorder", () => {
       { kind: "effect.reorder", target: { kind: "track", track: persisted("track-1") }, order: [{ effect: persisted("effect-1"), kind: "eq" }] },
     ],
   });
+
   expect(plan.snapshot.processors.find((entry: ProjectSnapshotV2["processors"][number]) => entry.id === "effect-1")?.index).toBe(0);
 });
 
@@ -1003,6 +1054,7 @@ const externalSnapshotProcessor = {
 test("matches external automation to the projected VST3 processor identity", () => {
   const base = snapshot();
   base.processors.push(externalSnapshotProcessor);
+
   const plan = planControlRequestV1(base, {
     projectId: "project-1",
     actions: [{
@@ -1014,6 +1066,7 @@ test("matches external automation to the projected VST3 processor identity", () 
       points: [],
     }],
   });
+
   expect(plan.applied).toBe(true);
   expect(plan.snapshot.automation).toContainEqual({
     target: { trackId: "track-1" },
@@ -1094,6 +1147,7 @@ test("rejects ungrouping when the group has an external VST processor", () => {
 test("merges external VST3 parameter overrides and preserves untouched values", () => {
   const base = snapshot();
   base.processors.push(externalSnapshotProcessor);
+
   const plan = planControlRequestV1(base, {
     projectId: "project-1",
     actions: [{
@@ -1103,6 +1157,7 @@ test("merges external VST3 parameter overrides and preserves untouched values", 
       changes: [{ parameterId: 1, normalizedValue: 0.75 }],
     }],
   });
+
   expect(plan.actions[0]?.changed).toBe(true);
   expect(plan.snapshot.processors.find((entry: ProjectSnapshotV2["processors"][number]) => entry.id === "external-plugin:instance-1")?.processor).toMatchObject({
     kind: "external-vst3",
@@ -1117,6 +1172,7 @@ test("validates external VST3 target, kind, and writable parameter requirements"
     processor: persisted("external-plugin:instance-1"),
     changes: [{ parameterId: 1, normalizedValue: 0.75 }],
   };
+
   const base = snapshot();
   base.processors.push(externalSnapshotProcessor);
   expect(() => planControlRequestV1(base, {

@@ -1,9 +1,13 @@
-// oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters
+// oxlint-disable anti-slop/no-runtime-typeof
 
 export type ExtensionId = string
+
 export type ContributionId = string
+
 export type CommandId = string
+
 export type ShortcutId = string
+
 export type ExtensionCommandValue =
   | string
   | number
@@ -179,9 +183,11 @@ export const normalizeShortcutChord = (
 ): ShortcutChord => {
   const key = typeof chord.key === 'string' ? chord.key.trim().toLowerCase() : undefined
   const code = typeof chord.code === 'string' ? chord.code.trim() : undefined
+
   if ((key === undefined || key.length === 0) === (code === undefined || code.length === 0)) {
     throw new ExtensionKernelError('invalid-shortcut-chord', 'A shortcut must contain exactly one key or code.')
   }
+
   return Object.freeze({
     mod: chord.mod === true,
     alt: chord.alt === true,
@@ -206,11 +212,14 @@ const normalizeConditions = (
   conditions: readonly ShortcutCondition[] | undefined,
 ): readonly ShortcutCondition[] => {
   const source = conditions ?? [{ kind: 'always' }]
+
   if (source.length === 0 || source.length > 2) {
     throw new ExtensionKernelError('invalid-shortcut-conditions', 'Shortcut conditions are empty or too broad.')
   }
+
   let hasAlways = false
   let hasEditable = false
+
   for (const condition of source) {
     if (condition.kind === 'always') {
       if (hasAlways) throw new ExtensionKernelError('invalid-shortcut-conditions', 'Duplicate shortcut condition.')
@@ -222,6 +231,7 @@ const normalizeConditions = (
       throw new ExtensionKernelError('invalid-shortcut-conditions', 'Unknown shortcut condition.')
     }
   }
+
   return Object.freeze([...source])
 }
 
@@ -309,25 +319,32 @@ const validateDefinition = (definition: AppExtensionDefinition): NormalizedDefin
   if (!isExtensionId(definition.id)) {
     throw new ExtensionKernelError('invalid-extension-id', 'Extension ID is not a bounded namespaced ID.')
   }
+
   if (!isBoundedText(definition.version, MAX_VERSION_LENGTH)) {
     throw new ExtensionKernelError('invalid-extension-version', 'Extension version is invalid.')
   }
+
   if (!Array.isArray(definition.commands) || !Array.isArray(definition.shortcuts)) {
     throw new ExtensionKernelError('invalid-extension-definition', 'Commands and shortcuts must be arrays.')
   }
+
   const commands: NormalizedCommand[] = []
   const commandIds = new Set<string>()
   const contributionIds = new Set<string>()
+
   for (const command of definition.commands) {
     if (!isCommandId(command.id) || commandIds.has(command.id)) {
       throw new ExtensionKernelError('duplicate-command-id', 'Command IDs must be unique and valid.')
     }
+
     if (!isContributionId(command.contributionId) || contributionIds.has(command.contributionId)) {
       throw new ExtensionKernelError('duplicate-contribution-id', 'Contribution IDs must be unique and valid.')
     }
+
     if (!isBoundedText(command.title, MAX_TITLE_LENGTH)) {
       throw new ExtensionKernelError('invalid-command-title', 'Command titles are bounded and non-empty.')
     }
+
     if (
       command.replacement !== undefined &&
       (command.replacement.allowed !== true ||
@@ -335,13 +352,16 @@ const validateDefinition = (definition: AppExtensionDefinition): NormalizedDefin
     ) {
       throw new ExtensionKernelError('invalid-replacement-contract', 'Replacement contracts are invalid.')
     }
+
     commandIds.add(command.id)
     contributionIds.add(command.contributionId)
+
     const normalizedCommand: NormalizedCommand = {
       id: command.id,
       contributionId: command.contributionId,
       title: command.title,
     }
+
     if (command.replacement !== undefined) {
       commands.push(Object.freeze({
         ...normalizedCommand,
@@ -354,8 +374,10 @@ const validateDefinition = (definition: AppExtensionDefinition): NormalizedDefin
       commands.push(Object.freeze(normalizedCommand))
     }
   }
+
   const replacements: AppExtensionReplacement[] = []
   const replacementTargets = new Set<string>()
+
   for (const replacement of definition.replacements ?? []) {
     if (
       !isContributionId(replacement.targetContributionId) ||
@@ -364,25 +386,32 @@ const validateDefinition = (definition: AppExtensionDefinition): NormalizedDefin
     ) {
       throw new ExtensionKernelError('invalid-replacement', 'Replacement intents must be unique and bounded.')
     }
+
     replacementTargets.add(replacement.targetContributionId)
     replacements.push(Object.freeze({
       targetContributionId: replacement.targetContributionId,
       contract: replacement.contract,
     }))
   }
+
   const shortcuts: NormalizedShortcut[] = []
   const shortcutIds = new Set<string>()
+
   for (const shortcut of definition.shortcuts) {
     if (!isShortcutId(shortcut.id) || shortcutIds.has(shortcut.id)) {
       throw new ExtensionKernelError('duplicate-shortcut-id', 'Shortcut IDs must be unique and valid.')
     }
+
     if (!isCommandId(shortcut.commandId) || !commandIds.has(shortcut.commandId)) {
       throw new ExtensionKernelError('shortcut-command-missing', 'Shortcuts must reference a declared command.')
     }
+
     const priority = shortcut.priority ?? 0
+
     if (!Number.isInteger(priority) || priority < -100 || priority > 100) {
       throw new ExtensionKernelError('invalid-shortcut-priority', 'Shortcut priority is outside the bounded range.')
     }
+
     shortcutIds.add(shortcut.id)
     shortcuts.push(Object.freeze({
       id: shortcut.id,
@@ -392,6 +421,7 @@ const validateDefinition = (definition: AppExtensionDefinition): NormalizedDefin
       priority,
     }))
   }
+
   return Object.freeze({
     id: definition.id,
     version: definition.version,
@@ -420,6 +450,7 @@ export const createExtensionKernel = (): ExtensionKernel => {
     const activeProviders = [...providers.values()]
       .filter((provider) => provider.contextState === 'active')
       .sort((left, right) => left.generation - right.generation)
+
     const result: ExtensionKernelSnapshot = Object.freeze({
       generation,
       extensions: Object.freeze(activeProviders.map((provider) => Object.freeze({
@@ -442,11 +473,13 @@ export const createExtensionKernel = (): ExtensionKernel => {
       }))),
       diagnostics: Object.freeze([...diagnostics]),
     })
+
     return result
   }
 
   const notify = (): void => {
     const current = snapshot()
+
     for (const listener of subscribers) {
       try {
         listener(current)
@@ -467,6 +500,7 @@ export const createExtensionKernel = (): ExtensionKernel => {
     details: Pick<ExtensionDiagnostic, 'extensionId' | 'contributionId' | 'commandId' | 'shortcutId'> = {},
   ): ExtensionKernelError => {
     addDiagnostic({ kind, code, message, ...details })
+
     return new ExtensionKernelError(code, message)
   }
 
@@ -494,8 +528,10 @@ export const createExtensionKernel = (): ExtensionKernel => {
   const cleanupProvider = async (provider: Provider): Promise<void> => {
     if (provider.cleanupStarted) return
     provider.cleanupStarted = true
+
     for (let index = provider.cleanups.length - 1; index >= 0; index -= 1) {
       const cleanup = provider.cleanups[index]
+
       try {
         await cleanup()
       } catch (error) {
@@ -517,18 +553,23 @@ export const createExtensionKernel = (): ExtensionKernel => {
 
   const registryWithoutProvider = (source: Registry, provider: Provider): Registry => {
     const next = copyRegistry(source)
+
     for (const [commandId, entry] of next.commands) {
       if (entry.providerId === provider.definition.id) next.commands.delete(commandId)
     }
+
     for (const [shortcutId, entry] of next.shortcuts) {
       if (entry.providerId === provider.definition.id) next.shortcuts.delete(shortcutId)
     }
+
     for (const [targetContributionId, previous] of provider.replaced) {
       const current = next.commands.get(previous.declaration.id)
+
       if (current === undefined || current.declaration.contributionId === targetContributionId) {
         next.commands.set(previous.declaration.id, previous)
       }
     }
+
     return next
   }
 
@@ -540,6 +581,7 @@ export const createExtensionKernel = (): ExtensionKernel => {
   ): Promise<Provider> => {
     ensureAvailable()
     let normalized: NormalizedDefinition
+
     try {
       normalized = validateDefinition(definition)
     } catch (error) {
@@ -552,7 +594,9 @@ export const createExtensionKernel = (): ExtensionKernel => {
       })
       throw error
     }
+
     const existing = providers.get(normalized.id)
+
     if (
       stagedProviders.has(normalized.id) ||
       (existing !== undefined && (mode !== 'reload' || existing.contextState !== 'active'))
@@ -561,21 +605,26 @@ export const createExtensionKernel = (): ExtensionKernel => {
         extensionId: normalized.id,
       })
     }
+
     if (mode === 'activate' && normalized.replacements.length > 0) {
       throw fail('conflict', 'replacement-required', 'Replacement intents require replace().', {
         extensionId: normalized.id,
       })
     }
+
     if (mode === 'reload' && existing !== undefined && hasProtectedProvider(normalized.id)) {
       throw fail('conflict', 'provider-replaced', 'A replaced provider must remain until its replacement deactivates.', {
         extensionId: normalized.id,
       })
     }
+
     const baseRegistry = existing === undefined
       ? registry
       : registryWithoutProvider(registry, existing)
+
     const baseRegistryVersion = registryVersion
     const controller = new AbortController()
+
     const provider: Provider = {
       definition: normalized,
       generation: ++generation,
@@ -587,7 +636,9 @@ export const createExtensionKernel = (): ExtensionKernel => {
       shortcuts: new Map(),
       replaced: new Map(),
     }
+
     stagedProviders.set(normalized.id, provider)
+
     const context: ExtensionActivationContext = Object.freeze({
       extensionId: normalized.id,
       signal: controller.signal,
@@ -598,25 +649,30 @@ export const createExtensionKernel = (): ExtensionKernel => {
             commandId,
           })
         }
+
         if (typeof handler !== 'function') {
           throw fail('activation', 'invalid-command-handler', 'Command handler must be a function.', {
             extensionId: normalized.id,
             commandId,
           })
         }
+
         const declaration = normalized.commands.find((command) => command.id === commandId)
+
         if (declaration === undefined) {
           throw fail('activation', 'undeclared-command-binding', 'Only statically declared commands may be bound.', {
             extensionId: normalized.id,
             commandId,
           })
         }
+
         if (provider.commands.has(commandId)) {
           throw fail('activation', 'duplicate-command-binding', 'A command may only be bound once.', {
             extensionId: normalized.id,
             commandId,
           })
         }
+
         provider.commands.set(commandId, Object.freeze({ declaration, providerId: normalized.id, handler }))
       },
       addCleanup: (cleanup) => {
@@ -625,21 +681,26 @@ export const createExtensionKernel = (): ExtensionKernel => {
             extensionId: normalized.id,
           })
         }
+
         if (typeof cleanup !== 'function') {
           throw fail('activation', 'invalid-cleanup', 'Cleanup must be a function.', {
             extensionId: normalized.id,
           })
         }
+
         provider.cleanups.push(cleanup)
       },
     })
+
     try {
       await normalized.activate(context)
+
       if (provider.contextState !== 'staged' || controller.signal.aborted) {
         throw fail('stale', 'stale-generation', 'Extension activation generation is stale.', {
           extensionId: normalized.id,
         })
       }
+
       for (const command of normalized.commands) {
         if (!provider.commands.has(command.id)) {
           throw fail('activation', 'missing-command-binding', 'Every declared command must be bound.', {
@@ -648,9 +709,12 @@ export const createExtensionKernel = (): ExtensionKernel => {
           })
         }
       }
+
       const stagedRegistry = copyRegistry(baseRegistry)
+
       for (const shortcut of normalized.shortcuts) {
         const binding = provider.commands.get(shortcut.commandId)
+
         if (binding === undefined) {
           throw fail('activation', 'missing-shortcut-command', 'Shortcut command binding is missing.', {
             extensionId: normalized.id,
@@ -658,48 +722,59 @@ export const createExtensionKernel = (): ExtensionKernel => {
             shortcutId: shortcut.id,
           })
         }
+
         if (stagedRegistry.shortcuts.has(shortcut.id)) {
           throw fail('conflict', 'duplicate-shortcut-id', 'Shortcut ID is already registered.', {
             extensionId: normalized.id,
             shortcutId: shortcut.id,
           })
         }
+
         const key = `${chordKey(shortcut.chord)}|${conditionsKey(shortcut.conditions)}`
+
         const conflict = [...stagedRegistry.shortcuts.values()].find((entry) => {
           const other = entry.declaration
+
           return `${chordKey(other.chord)}|${conditionsKey(other.conditions)}` === key &&
             other.priority === shortcut.priority
         })
+
         if (conflict !== undefined) {
           throw fail('conflict', 'shortcut-conflict', 'Shortcut chord and priority conflict.', {
             extensionId: normalized.id,
             shortcutId: shortcut.id,
           })
         }
+
         const entry = Object.freeze({ declaration: shortcut, providerId: normalized.id })
         provider.shortcuts.set(shortcut.id, entry)
         stagedRegistry.shortcuts.set(shortcut.id, entry)
       }
+
       for (const replacement of normalized.replacements) {
         const target = findCommandByContribution(stagedRegistry, replacement.targetContributionId)
+
         if (target === undefined) {
           throw fail('conflict', 'replacement-target-absent', 'Replacement target is not active.', {
             extensionId: normalized.id,
             contributionId: replacement.targetContributionId,
           })
         }
+
         if (target.declaration.replacement === undefined) {
           throw fail('conflict', 'replacement-not-allowed', 'Replacement target does not allow replacement.', {
             extensionId: normalized.id,
             contributionId: replacement.targetContributionId,
           })
         }
+
         if (target.declaration.replacement.contract !== replacement.contract) {
           throw fail('conflict', 'replacement-contract-mismatch', 'Replacement contract does not match the target.', {
             extensionId: normalized.id,
             contributionId: replacement.targetContributionId,
           })
         }
+
         if (provider.replaced.has(replacement.targetContributionId) ||
             target.declaration.contributionId === normalized.commands.find(
               (command) => command.id === target.declaration.id,
@@ -716,16 +791,20 @@ export const createExtensionKernel = (): ExtensionKernel => {
             contributionId: replacement.targetContributionId,
           })
         }
+
         const replacementBinding = provider.commands.get(target.declaration.id)
+
         if (replacementBinding === undefined) {
           throw fail('activation', 'replacement-command-missing', 'Replacement must declare the target command.', {
             extensionId: normalized.id,
             commandId: target.declaration.id,
           })
         }
+
         const replacementDeclaration = normalized.commands.find(
           (command) => command.id === target.declaration.id,
         )
+
         if (
           replacementDeclaration === undefined
           || replacementDeclaration.title !== target.declaration.title
@@ -737,12 +816,14 @@ export const createExtensionKernel = (): ExtensionKernel => {
             contributionId: replacement.targetContributionId,
           })
         }
+
         provider.replaced.set(replacement.targetContributionId, target)
         stagedRegistry.commands.set(target.declaration.id, Object.freeze({
           ...replacementBinding,
           declaration: target.declaration,
         }))
       }
+
       for (const command of normalized.commands) {
         if (hasContribution(baseRegistry, command.contributionId)) {
           throw fail('conflict', 'duplicate-contribution-id', 'Contribution ID is already registered.', {
@@ -751,19 +832,23 @@ export const createExtensionKernel = (): ExtensionKernel => {
           })
         }
       }
+
       for (const [commandId, binding] of provider.commands) {
         if ([...provider.replaced.values()].some(
           (previous) => previous.declaration.id === commandId,
         )) continue
         const existing = stagedRegistry.commands.get(commandId)
+
         if (existing !== undefined) {
           throw fail('conflict', 'duplicate-command-id', 'Command ID is already registered.', {
             extensionId: normalized.id,
             commandId,
           })
         }
+
         stagedRegistry.commands.set(commandId, binding)
       }
+
       if (
         disposed ||
         registryVersion !== baseRegistryVersion ||
@@ -773,26 +858,33 @@ export const createExtensionKernel = (): ExtensionKernel => {
           extensionId: normalized.id,
         })
       }
+
       const reloadedProvider = mode === 'reload' ? existing : undefined
       provider.contextState = 'active'
       registry = stagedRegistry
       registryVersion += 1
       stagedProviders.delete(normalized.id)
       providers.set(normalized.id, provider)
+
       if (reloadedProvider !== undefined) {
         staleProvider(reloadedProvider)
       }
+
       notify()
+
       if (reloadedProvider !== undefined) {
         await cleanupProvider(reloadedProvider)
       }
+
       notify()
+
       return provider
     } catch (error) {
       staleProvider(provider)
       await cleanupProvider(provider)
       stagedProviders.delete(normalized.id)
       notify()
+
       if (error instanceof ExtensionKernelError) throw error
       throw fail(
         'activation',
@@ -806,13 +898,17 @@ export const createExtensionKernel = (): ExtensionKernel => {
   const deactivate = async (extensionId: ExtensionId): Promise<void> => {
     ensureAvailable()
     const provider = providers.get(extensionId)
+
     if (provider === undefined) return
+
     if (provider.contextState !== 'active') return
+
     if (hasProtectedProvider(extensionId)) {
       throw fail('conflict', 'provider-replaced', 'A replaced provider must remain until its replacement deactivates.', {
         extensionId,
       })
     }
+
     registry = registryWithoutProvider(registry, provider)
     registryVersion += 1
     staleProvider(provider)
@@ -832,10 +928,13 @@ export const createExtensionKernel = (): ExtensionKernel => {
 
   const reload = async (definition: AppExtensionDefinition): Promise<void> => {
     const existing = providers.get(definition.id)
+
     if (existing === undefined) {
       await activate(definition)
+
       return
     }
+
     await stage(definition, 'reload')
   }
 
@@ -845,9 +944,11 @@ export const createExtensionKernel = (): ExtensionKernel => {
   ): Promise<ExtensionCommandValue> => {
     ensureAvailable()
     const entry = registry.commands.get(commandId)
+
     if (entry === undefined) {
       throw fail('activation', 'command-not-found', 'Command is not registered.', { commandId })
     }
+
     return entry.handler(input, providers.get(entry.providerId)?.controller.signal ?? new AbortController().signal)
   }
 
@@ -861,6 +962,7 @@ export const createExtensionKernel = (): ExtensionKernel => {
     priority: number
   }>[] => {
     const normalized = normalizeShortcutChord(chord)
+
     return Object.freeze([...registry.shortcuts.values()]
       .filter((entry) =>
         chordKey(entry.declaration.chord) === chordKey(normalized) &&
@@ -884,9 +986,12 @@ export const createExtensionKernel = (): ExtensionKernel => {
         code: 'subscriber-failed',
         message: error instanceof Error ? error.message.slice(0, MAX_TITLE_LENGTH) : 'Extension subscriber failed.',
       })
+
       return () => false
     }
+
     subscribers.add(listener)
+
     return () => subscribers.delete(listener)
   }
 
@@ -897,10 +1002,12 @@ export const createExtensionKernel = (): ExtensionKernel => {
     registry = emptyRegistry()
     registryVersion += 1
     const staged = [...stagedProviders.values()]
+
     for (const provider of [...current, ...staged]) staleProvider(provider)
     providers.clear()
     stagedProviders.clear()
     notify()
+
     for (const provider of [...current, ...staged]) await cleanupProvider(provider)
     subscribers.clear()
   }

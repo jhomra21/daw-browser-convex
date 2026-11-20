@@ -38,6 +38,7 @@ const isModulationKind = (kind: StaticWorkletKind) =>
 const manifest = (kind: StaticWorkletKind) => kind === 'utility' ? utilityWorklet : kind === 'autofilter' ? autoFilterWorklet : kind === 'gate' ? gateWorklet : kind === 'limiter' ? limiterWorklet : kind === 'lofi' ? loFiWorklet : kind === 'spectral' ? spectralWorklet : modulationWorklet
 
 type StaticWorkletParams = Parameters<typeof normalizeOwnedProcessorAudioState>[1]
+
 type NormalizedOwnedState = ReturnType<typeof normalizeOwnedProcessorAudioState>
 
 const isSpectralState = (state: NormalizedOwnedState): state is NormalizedOwnedState & SpectralParams =>
@@ -55,6 +56,7 @@ export async function createStaticWorkletNodeChain(
   const spectralState = kind === 'spectral' && isSpectralState(normalizedState) ? normalizedState : undefined
   const fftSize = spectralState?.fftSize
   const overlap = spectralState?.overlap
+
   const node = new AudioWorkletNode(ctx, asset.processorName, {
     numberOfInputs: kind === 'gate' || kind === 'spectral' ? 2 : 1,
     numberOfOutputs: 1,
@@ -71,6 +73,7 @@ export async function createStaticWorkletNodeChain(
           }
         : undefined,
   })
+
   const chain: StaticWorkletNodeChain = {
     kind,
     state: 'active',
@@ -79,8 +82,10 @@ export async function createStaticWorkletNodeChain(
     revision: 0,
     gateMeterListeners: new Set(),
   }
+
   node.port.onmessage = (event) => {
     const fault = readStaticWorkletFault(event.data)
+
     if (fault) {
       if (chain.state === 'active') {
         chain.state = 'faulted'
@@ -88,12 +93,17 @@ export async function createStaticWorkletNodeChain(
         publishGateMeterReset(chain)
         onFault?.(fault)
       }
+
       return
     }
+
     const frame = readGateMeterFrame(event.data)
+
     if (!frame) return
+
     for (const listener of chain.gateMeterListeners) listener(frame)
   }
+
   node.onprocessorerror = () => {
     if (chain.state !== 'active') return
     chain.state = 'faulted'
@@ -101,7 +111,9 @@ export async function createStaticWorkletNodeChain(
     publishGateMeterReset(chain)
     onFault?.('processor-error')
   }
+
   applyStaticWorkletNodeParams(chain, params)
+
   return chain
 }
 
@@ -111,17 +123,21 @@ export function applyStaticWorkletNodeParams(
 ) {
   const normalizedState = normalizeOwnedProcessorAudioState(chain.kind, params)
   const stateKey = JSON.stringify(normalizedState)
+
   if (chain.normalizedStateKey === stateKey) return
   chain.normalizedState = undefined
   chain.normalizedStateKey = undefined
+
   if (chain.kind === 'spectral' && isSpectralState(normalizedState)) {
     const fftSize = normalizedState.fftSize
     const overlap = normalizedState.overlap
+
     if (chain.spectralTopology?.fftSize !== fftSize || chain.spectralTopology?.overlap !== overlap) {
       chain.node.port.postMessage({ type: 'reconfigure', version: 1, fftSize, overlap })
       chain.spectralTopology = { fftSize, overlap }
     }
   }
+
   chain.revision += 1
   chain.node.port.postMessage({
     type: 'configure',
@@ -130,10 +146,13 @@ export function applyStaticWorkletNodeParams(
     processorKind: isModulationKind(chain.kind) ? chain.kind : undefined,
     state: normalizedState,
   })
+
   for (const { parameterId, value } of ownedProcessorAudioParamValuesFromState(chain.kind, normalizedState)) {
     const param = chain.node.parameters.get(parameterId)
+
     if (param && isJsonNumber(value)) param.value = value
   }
+
   chain.normalizedState = normalizedState
   chain.normalizedStateKey = stateKey
 }
@@ -143,53 +162,69 @@ export function disconnectStaticWorkletNodeChain(chain: StaticWorkletNodeChain) 
   chain.state = 'closed'
   let resetFailed = false
   let resetError: unknown
+
   try {
     publishGateMeterReset(chain)
   } catch (error) {
     resetFailed = true
     resetError = error
   }
+
   chain.gateMeterListeners.clear()
   chain.normalizedState = undefined
   chain.normalizedStateKey = undefined
   chain.spectralTopology = undefined
   chain.node.port.onmessage = null
   chain.node.onprocessorerror = null
+
   try { chain.node.port.postMessage({ type: 'release', version: 1 }) } catch {}
+
   try { chain.node.port.close() } catch {}
+
   disconnectAudioNodes([chain.node])
+
   if (resetFailed) throw resetError
 }
 
 function readGateMeterFrame(data: JsonValue): GateMeterFrame | null {
   if (!isJsonObject(data) || data.type !== 'meter') return null
+
   if (!isJsonNumber(data.gainReductionDb) || !Number.isFinite(data.gainReductionDb)) return null
+
   return { gainReductionDb: data.gainReductionDb }
 }
 
 function readStaticWorkletFault(data: JsonValue): string | null {
   if (!isJsonObject(data) || data.type !== 'fault') return null
+
   if (data.version !== 1 || !isJsonString(data.code) || data.code.length === 0) {
     return 'malformed-fault'
   }
+
   return data.code
 }
 
 const publishGateMeterReset = (chain: StaticWorkletNodeChain) => {
   if (chain.kind !== 'gate' && chain.kind !== 'limiter') return
+
   for (const listener of chain.gateMeterListeners) listener({ gainReductionDb: 0 })
 }
 
 export function subscribeStaticGateMeter(chain: StaticWorkletNodeChain, listener: GateMeterListener) {
   if ((chain.kind !== 'gate' && chain.kind !== 'limiter') || chain.state !== 'active') {
     listener({ gainReductionDb: 0 })
+
     return () => {}
   }
+
   const hadListeners = chain.gateMeterListeners.size > 0
   chain.gateMeterListeners.add(listener)
+
   if (!hadListeners) chain.node.port.postMessage({ type: 'metering', version: 1, enabled: true })
+
   return () => {
     chain.gateMeterListeners.delete(listener)
+
     if (chain.gateMeterListeners.size === 0 && chain.state === 'active') {
       chain.node.port.postMessage({ type: 'metering', version: 1, enabled: false })
       listener({ gainReductionDb: 0 })
@@ -203,5 +238,6 @@ export const resolveStaticWorkletAutomationBinding = (
 ) => {
   if (!chain || !OWNED_PROCESSOR_PARAMETER_IDS[chain.kind].some((id) => id === parameterId)) return []
   const param = chain.node.parameters.get(parameterId)
+
   return param ? [{ param, valueToAudioValue: (value: number) => value }] : []
 }

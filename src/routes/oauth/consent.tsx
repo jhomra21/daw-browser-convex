@@ -13,6 +13,7 @@ const Consent = () => {
   const submit = async (accept: boolean) => {
     setSubmitting(true);
     setError(null);
+
     try {
       const response = await fetch("/api/auth/oauth2/consent", {
         method: "POST",
@@ -23,11 +24,14 @@ const Consent = () => {
           oauth_query: (() => {
             const query = new URLSearchParams(window.location.search);
             query.delete("resource");
+
             return query.toString();
           })(),
         }),
       });
+
       const body: JsonValue = await response.json();
+
       if (
         !response.ok
         || !isJsonObject(body)
@@ -35,6 +39,7 @@ const Consent = () => {
       ) {
         throw new Error("Unable to complete consent.");
       }
+
       window.location.assign(body.redirect_uri);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to complete consent.");

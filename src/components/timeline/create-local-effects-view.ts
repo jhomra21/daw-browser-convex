@@ -42,6 +42,7 @@ export const createLocalEffectsViewOwner = (options: LocalEffectsViewOptions) =>
     settled: "pending" | "loaded" | Error;
     acknowledged: boolean;
   };
+
   const waiters = new Set<() => void>();
   let lifetime = 0;
   let projectId: string | undefined;
@@ -54,6 +55,7 @@ export const createLocalEffectsViewOwner = (options: LocalEffectsViewOptions) =>
   const wake = () => {
     const woken = [...waiters];
     waiters.clear();
+
     for (const waiter of woken) waiter();
   };
 
@@ -71,38 +73,50 @@ export const createLocalEffectsViewOwner = (options: LocalEffectsViewOptions) =>
   // A read that started at the current change sequence already sees every change, so a caller asking now joins it.
   const reload = (): Promise<LocalEffectRows> => {
     const id = projectId;
+
     if (id === undefined) return Promise.resolve([]);
     const through = localProjectChangeSequence(id);
+
     if (inflight && inflight.lifetime === lifetime && inflight.through === through) return inflight.promise;
     const startedIn = lifetime;
     const publicationId = {};
+
     const promise: Promise<LocalEffectRows> = options.list(id).then((rows) => {
       if (startedIn === lifetime && through >= publishedThrough) {
         publishedThrough = through;
         options.publish({ projectId: id, lifetime: startedIn, through, publicationId, rows });
         options.fail(undefined);
       }
+
       if (newest === started) {
         started.settled = "loaded";
         wake();
       }
+
       return rows;
     }, (cause: unknown) => {
       const error = toError(cause);
+
       if (startedIn === lifetime) options.fail(error);
+
       if (newest === started) {
         started.settled = error;
         wake();
       }
+
       throw error;
     });
+
     const started: Reload = { lifetime: startedIn, through, publicationId, promise, settled: "pending", acknowledged: false };
     inflight = started;
     newest = started;
+
     const done = () => {
       if (inflight === started) inflight = undefined;
     };
+
     promise.then(done, done);
+
     return promise;
   };
 
@@ -118,13 +132,18 @@ export const createLocalEffectsViewOwner = (options: LocalEffectsViewOptions) =>
   // on false would otherwise spin.
   const ready = () => new Promise<boolean>((resolve, reject) => {
     const startedIn = lifetime;
+
     const check = () => {
       if (disposed) return;
+
       if (lifetime !== startedIn) return resolve(false);
+
       if (newest?.settled instanceof Error) return reject(newest.settled);
+
       if (newest?.settled === "loaded" && newest.acknowledged) return resolve(true);
       waiters.add(check);
     };
+
     check();
   });
 
@@ -137,10 +156,13 @@ export const createLocalEffectsViewOwner = (options: LocalEffectsViewOptions) =>
     if (disposed) return;
     const next = options.currentProjectId();
     const local = next !== undefined && isLocalId("project", next) ? next : undefined;
+
     if (local === projectId) return;
     const hadLifetime = projectId !== undefined;
     endLifetime();
+
     if (hadLifetime) options.publish(undefined);
+
     if (local === undefined) return;
     projectId = local;
     unsubscribe = subscribeToLocalProjectChanges(local, reloadInBackground);
@@ -164,6 +186,7 @@ export const createLocalEffectsView = (input: {
   onError?: (title: string, message: string) => void;
 }) => {
   const [view, setView] = createSignal<LocalEffectsView | undefined>();
+
   const owner = createLocalEffectsViewOwner({
     currentProjectId: input.projectId,
     list: listLocalEffects,
@@ -172,11 +195,13 @@ export const createLocalEffectsView = (input: {
       if (error) input.onError?.("Local effects unavailable", error.message);
     },
   });
+
   createEffect(() => {
     input.projectId();
     untrack(owner.sync);
   });
   onCleanup(owner.dispose);
+
   return { view, reload: owner.reload, acknowledge: owner.acknowledge, ready: owner.ready };
 };
 

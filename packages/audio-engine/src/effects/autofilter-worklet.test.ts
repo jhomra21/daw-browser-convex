@@ -7,11 +7,14 @@ type Port = {
   postMessage: (message: PortMessage) => void
   close: () => void
 }
+
 type Processor = {
   port: Port
   process: (inputs: Float32Array[][], outputs: Float32Array[][], parameters: Record<string, Float32Array>) => boolean
 }
+
 type ProcessorConstructor = new () => Processor
+
 type WorkletMessage = {
   type: 'configure' | 'fault' | 'reset'
   version?: number
@@ -25,11 +28,13 @@ type WorkletMessage = {
     lfo: { waveform: string; rateHz: number; depthOctaves: number; phaseOffset: number; stereoPhase: number }
   }
 }
+
 type PortMessage = WorkletMessage
 
 const loadProcessor = async (sampleRate: number) => {
   const source = await Bun.file(new URL(`../../../../public/${autoFilterWorklet.modulePath}`, import.meta.url)).text()
   const registered = new Map<string, ProcessorConstructor>()
+
   class FakeAudioWorkletProcessor {
     port: Port = {
       onmessage: null,
@@ -38,13 +43,16 @@ const loadProcessor = async (sampleRate: number) => {
       close: () => {},
     }
   }
+
   new Function('AudioWorkletProcessor', 'registerProcessor', 'sampleRate', source)(
     FakeAudioWorkletProcessor,
     (name: string, processor: ProcessorConstructor) => registered.set(name, processor),
     sampleRate,
   )
   const Constructor = registered.get(autoFilterWorklet.processorName)
+
   if (!Constructor) throw new Error('AutoFilter processor did not register.')
+
   return new Constructor()
 }
 

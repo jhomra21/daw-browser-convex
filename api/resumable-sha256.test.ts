@@ -11,14 +11,17 @@ const hex = (bytes: Uint8Array) => Array.from(bytes, (byte) => byte.toString(16)
 
 test('serializable SHA-256 state matches noble across awkward chunk boundaries', () => {
   const input = new Uint8Array(257)
+
   for (let index = 0; index < input.length; index += 1) input[index] = (index * 31 + 7) % 256
   let state = initialSerializableSha256State()
+
   for (const [start, end] of [[0, 1], [1, 63], [63, 64], [64, 129], [129, 193], [193, 257]]) {
     state = updateSerializableSha256State(state, input.slice(start, end))
     expect(state.totalBytes).toBe(end)
     expect(state.tail.length).toBe(end % 64)
     expect(parseSerializableSha256State(state)).toEqual(state)
   }
+
   expect(finalizeSerializableSha256State(state)).toBe(hex(sha256(input)))
 })
 

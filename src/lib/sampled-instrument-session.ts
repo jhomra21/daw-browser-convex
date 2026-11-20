@@ -33,15 +33,19 @@ export const createSampledInstrumentSession = (
       ? options.nativeMemoryPolicy?.aggregateBytes ?? 0
       : DEFAULT_SAMPLED_INSTRUMENT_AGGREGATE_BYTES),
   )
+
   const samplerBufferSync = createSamplerBufferSync({
     ...options,
     aggregateBudget,
   })
+
   const drumRackBufferSync = createDrumRackBufferSync({
     ...options,
     aggregateBudget,
   })
+
   let disposed = false
+
   return {
     aggregateBudget,
     samplerBufferSync,

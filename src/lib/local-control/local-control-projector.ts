@@ -47,6 +47,7 @@ const projectMetadata = (
 ): LocalControlProjectMetadata => {
   const row = rows.find((entry) => entry.key === LOCAL_CONTROL_PROJECT_METADATA_KEY)
   const value = parseLocalProjectStoredJsonValue(row?.value)
+
   if (
     !isJsonObject(value)
     || value.version !== 1
@@ -54,6 +55,7 @@ const projectMetadata = (
     || !isJsonNumber(value.updatedAt)
     || !isCanonicalLocalControlTimeSignature(value.timeSignature)
   ) return fallback
+
   return {
     version: 1,
     name: value.name,
@@ -71,6 +73,7 @@ const valueOfKind = <Value extends JsonValue>(
   accepts: (value: JsonValue) => value is Value,
 ) => rows.flatMap((row) => {
   const value = parseLocalProjectStoredJsonValue(row.value)
+
   return row.kind === kind && value !== undefined && accepts(value) ? [value] : []
 })
 
@@ -127,6 +130,7 @@ const isEffect = (value: JsonValue): value is LocalEffectRow<JsonValue> => (
   && isJsonString(value.effect)
   && 'params' in value
 )
+
 const isExternalProcessor = (value: JsonValue): value is ExternalProcessor => (
   parseExternalProcessorValue(parseExternalPluginJsonValue(value)).success
 )
@@ -156,6 +160,7 @@ const completeAssets = (
   schema: typeof assetSnapshotSchemaV1 | typeof assetSnapshotSchemaV2,
 ) => assets.flatMap((asset) => {
   if (asset.missing || !asset.sourceKind || !asset.contentHash) return []
+
   const result = schema.safeParse({
     id: asset.id,
     name: asset.name,
@@ -170,7 +175,9 @@ const completeAssets = (
     createdAt: asset.createdAt,
     updatedAt: asset.updatedAt,
   })
+
   if (!result.success) return []
+
   return [{
     assetKey: result.data.id,
     name: result.data.name,
@@ -209,11 +216,14 @@ const projectLocalControlSnapshot = <Snapshot>(
   const parsedLoop = parseLocalProjectStoredJsonValue(loop)
   const parsedProjectMix = parseLocalProjectStoredJsonValue(projectMix)
   const effects = valueOfKind(input.entities, 'effect', isEffect)
+
   const externalProcessors = valueOfKind(input.entities, externalPluginEntityKind, isExternalProcessor)
     .flatMap((value) => {
       const parsed = parseExternalProcessorValue(parseExternalPluginJsonValue(value))
+
       return parsed.success ? [parsed.data] : []
     })
+
   return projectSnapshot({
     omitUnavailableClipSources: true,
     project: {
@@ -263,6 +273,7 @@ const projectLocalControlSnapshot = <Snapshot>(
     effects: effects.map((effect) => {
       const master = effect.effect.startsWith('master-')
       const type = master ? effect.effect.slice('master-'.length) : effect.effect === 'arp' ? 'arpeggiator' : effect.effect
+
       return {
         _id: effect.id,
         targetType: master ? 'master' : 'track',
@@ -309,6 +320,7 @@ const projectLocalControlSnapshot = <Snapshot>(
       if (!row.key.startsWith(LOCAL_ASSET_FOLDER_KEY_PREFIX)) return []
       const value = parseLocalProjectStoredJsonValue(row.value)
       const folder = value === undefined ? undefined : parseLocalAssetFolderRow(value)
+
       return folder ? [{
         _id: folder.id,
         name: folder.name,

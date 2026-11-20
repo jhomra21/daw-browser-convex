@@ -17,12 +17,15 @@ test("backpressures stdin while a JSONL invocation is pending", async () => {
   const validRequest = (id: number) => Buffer.from(
     `{"jsonrpc":"2.0","id":${id},"method":"project.list","params":{}}\n`,
   )
+
   const oversizedRequest = Buffer.from(
     `{"jsonrpc":"2.0","id":2,"method":"project.list","params":{"value":"${"x".repeat(maxJsonlLineBytes)}"}}\n`,
   )
+
   const notification = Buffer.from('{"jsonrpc":"2.0","method":"project.list","params":{}}\n')
   const splitRequest = Buffer.from('{"jsonrpc":"2.0","id":"café","method":"project.list","params":{}}\n')
   const splitOffset = splitRequest.indexOf(Buffer.from("é")) + 1
+
   const chunks = [
     Buffer.from("{\n"),
     validRequest(1),
@@ -33,17 +36,21 @@ test("backpressures stdin while a JSONL invocation is pending", async () => {
     splitRequest.subarray(splitOffset),
     validRequest(5),
   ]
+
   const stdin = Readable.from(chunks)
   const invocations: string[] = []
   let firstInvocationStarted: (() => void) | undefined
   const firstInvocationStartedPromise = new Promise<void>((resolve) => { firstInvocationStarted = resolve })
   let releaseFirst: (() => void) | undefined
   const firstInvocation = new Promise<void>((resolve) => { releaseFirst = resolve })
+
   const handlers: ControlOperationHandlers<"desktop"> = {
     "project.list": async () => {
       invocations.push("project.list")
       firstInvocationStarted?.()
+
       if (invocations.length === 1) await firstInvocation
+
       return { projects: [] }
     },
     "project.current": async () => ({ status: "absent" }),
@@ -55,11 +62,14 @@ test("backpressures stdin while a JSONL invocation is pending", async () => {
     "control.history": async () => { throw new Error("not used") },
     "control.recoveries": async () => { throw new Error("not used") },
   }
+
   const invoker = createDirectControlInvoker({
     handlers,
     context: { target: "desktop", principal: { subject: "test" } },
   })
+
   const output: string[] = []
+
   const processing = processJsonlLines(
     decodeJsonlLines(readStdinChunks(stdin)),
     createJsonlRpcAdapter({ invoker }),

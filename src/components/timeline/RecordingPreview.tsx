@@ -24,10 +24,13 @@ export const clipRecordingPreviewToViewport = (input: {
   pixelsPerSecond: number
 }) => {
   const last = input.points[input.points.length - 1]
+
   if (!last || input.visibleEndSec <= input.startSec || last.offset <= 0) return null
   const startOffset = Math.max(0, input.visibleStartSec - input.startSec)
   const endOffset = Math.min(last.offset, input.visibleEndSec - input.startSec)
+
   if (endOffset <= startOffset) return null
+
   const pointCandidates = recordingPreviewRequiresViewportClip({
     lastOffsetSec: last.offset,
     pixelsPerSecond: input.pixelsPerSecond,
@@ -35,18 +38,23 @@ export const clipRecordingPreviewToViewport = (input: {
   })
     ? input.points.filter((point) => point.offset >= startOffset && point.offset <= endOffset)
     : input.points
+
   const interpolate = (offset: number) => {
     const next = input.points.findIndex((point) => point.offset >= offset)
+
     if (next <= 0) return input.points[0] ?? { offset, amplitude: 0 }
     const right = input.points[next]
     const left = input.points[next - 1]
+
     if (!right || !left || right.offset === left.offset) return right ?? left
     const ratio = (offset - left.offset) / (right.offset - left.offset)
+
     return {
       offset,
       amplitude: left.amplitude + (right.amplitude - left.amplitude) * ratio,
     }
   }
+
   const points = [
     interpolate(startOffset),
     ...pointCandidates.filter((point) => point.offset > startOffset && point.offset < endOffset),
@@ -55,6 +63,7 @@ export const clipRecordingPreviewToViewport = (input: {
     offset: point.offset - startOffset,
     amplitude: point.amplitude,
   }))
+
   return {
     leftPx: Math.max(0, (input.startSec + startOffset - input.visibleStartSec) * input.pixelsPerSecond),
     widthPx: (endOffset - startOffset) * input.pixelsPerSecond,
@@ -75,6 +84,7 @@ const RecordingPreview: Component<RecordingPreviewProps> = (props) => {
     const widthPx = Math.max(6, Math.ceil(props.widthPx))
     const heightPx = Math.max(12, props.heightPx - 4)
     const innerHeight = Math.max(1, heightPx - INNER_PADDING_TOP - INNER_PADDING_BOTTOM)
+
     return { widthPx, heightPx, innerHeight }
   })
 
@@ -85,6 +95,7 @@ const RecordingPreview: Component<RecordingPreviewProps> = (props) => {
     const gain = innerHeight / 2
     const vertexCount = pts.length
     const combined = Array.from({length: vertexCount * 2 + 2})
+
     for (let i = 0; i < vertexCount; i++) {
       const point = pts[i]
       const x = Math.max(0, point.offset * props.pixelsPerSecond)
@@ -94,8 +105,10 @@ const RecordingPreview: Component<RecordingPreviewProps> = (props) => {
       combined[i] = `${x},${yTop}`
       combined[vertexCount + 1 + (vertexCount - 1 - i)] = `${x},${yBottom}`
     }
+
     combined[vertexCount] = `${widthPx},${midY}`
     combined[combined.length - 1] = `0,${midY}`
+
     return combined.join(' ')
   })
 

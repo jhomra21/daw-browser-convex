@@ -13,7 +13,9 @@ export const current = query({
   ),
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
+
     if (!identity) return null;
+
     return {
       userId: identity.subject,
       issuer: identity.issuer,

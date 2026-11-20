@@ -27,6 +27,7 @@ function Index() {
       setProjectId(readProjectIdFromLocation())
       setShareToken(readLocationSearchParam('shareToken'))
     }
+
     syncLocationState()
     window.addEventListener('popstate', syncLocationState)
     onCleanup(() => {
@@ -48,6 +49,7 @@ function Index() {
   const setDashboardParam = (view: Parameters<typeof writeDashboardParam>[0]) => {
     // The timeline writes a project it creates or opens (File > New Project) into the URL without a popstate.
     if (!view) setProjectId(readProjectIdFromLocation())
+
     if (!hasProjectContext() && !view) return
     writeDashboardParam(view)
   }
@@ -57,6 +59,7 @@ function Index() {
 
   const requiresCloudLogin = () => {
     const rid = projectId()
+
     return Boolean(((rid && !isLocalId('project', rid)) || shareToken()) && session.data === null)
   }
 

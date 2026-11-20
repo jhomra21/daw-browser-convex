@@ -75,6 +75,7 @@ describe('useTimelineViewport physical anchor maintenance', () => {
     Reflect.set(globalThis, 'ResizeObserver', TestResizeObserver)
     Reflect.set(globalThis, 'requestAnimationFrame', (callback: FrameRequestCallback) => {
       rafCallbacks.push(callback)
+
       return rafCallbacks.length
     })
     Reflect.set(globalThis, 'cancelAnimationFrame', () => {})
@@ -84,6 +85,7 @@ describe('useTimelineViewport physical anchor maintenance', () => {
         const [scope, setScope] = createSignal('project-1')
         const [pixelsPerSecond, setPixelsPerSecond] = createSignal(100 / 3)
         const element = new TestTimelineElement()
+
         const viewport = useTimelineViewport({
           persistenceScope: scope,
           pixelsPerSecond,
@@ -92,6 +94,7 @@ describe('useTimelineViewport physical anchor maintenance', () => {
           durationSec: () => 30,
           canZoom: () => true,
         })
+
         viewport.bind(element)
 
         void (async () => {

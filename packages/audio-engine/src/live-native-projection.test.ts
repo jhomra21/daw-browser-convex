@@ -22,6 +22,7 @@ import type { ExportFx } from './export-mixdown'
 const defaultSamples = () => {
   const samples = new Float32Array(new ArrayBuffer(4 * Float32Array.BYTES_PER_ELEMENT))
   samples.set([0, 0.25, -0.5, 1])
+
   return samples
 }
 
@@ -45,17 +46,21 @@ class TestAudioBuffer implements AudioBuffer {
 
   copyFromChannel(destination: Float32Array<ArrayBuffer>, channel: number, offset = 0) {
     const source = this.channels[channel]
+
     if (!source) throw new Error(`Missing channel ${channel}.`)
     destination.set(source.subarray(offset, offset + destination.length))
   }
   copyToChannel(source: Float32Array<ArrayBuffer>, channel: number, offset = 0) {
     const destination = this.channels[channel]
+
     if (!destination) throw new Error(`Missing channel ${channel}.`)
     destination.set(source, offset)
   }
   getChannelData(_channel: number): Float32Array<ArrayBuffer> {
     const channel = this.channels[_channel]
+
     if (!channel) throw new Error(`Missing channel ${_channel}.`)
+
     return channel
   }
 }
@@ -69,6 +74,7 @@ const clip: Clip<AudioBuffer> = {
 const preparedStretchAsset = (clipId: string): PortablePreparedStretchAsset => {
   const assetId = `portable-stretch:1:${clipId}`
   const planes = [new Float32Array([1, 0.5, 0, -0.5])]
+
   return {
     clipId,
     sourceAssetKey: 'source',
@@ -101,13 +107,17 @@ const compile = (tracks: readonly Track<AudioBuffer>[]) => compileLiveNativeProj
 
 test('r3 multi-track shared-sample projection preserves fixed pre-r2 output and native bytes', () => {
   const shared = new TestAudioBuffer([new Float32Array(4800).fill(0.2), new Float32Array(4800).fill(-0.3)])
+
   const sample: SamplerZone['sample'] = { assetKey: 'instrument-only', url: '/sample.wav', sourceKind: 'upload',
     source: { durationSec: 0.1, sampleRate: 48000, channelCount: 2 } }
+
   const zone: SamplerZone = { id: 'zone', sample, keyLow: 0, keyHigh: 127, velocityLow: 1, velocityHigh: 127,
     rootNote: 60, tuneCents: 0, gain: 1, pan: 0, roundRobinGroup: 0, roundRobinIndex: 0,
     playbackMode: 'one-shot', startSec: 0, endSec: 0.1, crossfadeSec: 0, chokeGroup: 0 }
+
   const secondZone = { ...zone, sample: { ...sample, assetKey: 'second', url: '/second.wav' } }
   const pad = { ...createDefaultDrumRackParams().pads[0]!, sample, endSec: 0.1 }
+
   const fx: ExportFx = {
     masterVolume: 1, masterFxInstances: [], trackFx: {
       s1: { instances: [], instrument: { kind: 'sampler', instanceId: 's1', params: { ...createDefaultSamplerParams(), zones: [zone] } },
@@ -121,14 +131,17 @@ test('r3 multi-track shared-sample projection preserves fixed pre-r2 output and 
       synth: { instances: [], instrument: { kind: 'synth', instanceId: 'synth', params: createDefaultSynthParams() } },
     },
   }
+
   const tracks = [track(), ...['s1', 'g1', 'd1', 's2', 'synth'].map(id => track({ id, kind: 'instrument',
     clips: [{ id: `midi-${id}`, name: 'MIDI', color: '#fff', startSec: 0, duration: 1,
       midi: { wave: 'sawtooth', notes: [{ pitch: 60, beat: 0, length: 0.5, velocity: 0.8 }] } }],
   }))]
+
   // Golden output is captured from the reviewer's exact pre-r2 compiler, not another implementation in this test.
   for (const mode of [undefined, 'metadata'] satisfies readonly (undefined | 'metadata')[]) {
     const result = compileLiveNativeProjection({ tracks, fx: localizeInstrumentFx(fx), bpm: 120, sampleRateHz: 48000,
       revision: 1, epoch: 1, firstSequence: 1, instrumentRegionMode: mode })
+
     if (!result.supported) throw new Error(result.reasons.join('\n'))
     const configurations = result.graph.nodes.flatMap(node => node.instrument ? [{ nodeId: node.id, state: node.instrument }] : [])
     const assets = mapNativeSessionAssets(result.assets.map(asset => asset.asset))
@@ -146,6 +159,7 @@ test('r3 multi-track shared-sample projection preserves fixed pre-r2 output and 
 
 test('projects source metadata without copying ordinary PCM', () => {
   const result = compile([track()])
+
   if (!result.supported) throw new Error(result.reasons.join('\n'))
   expect(result.assets).toEqual([expect.objectContaining({
     asset: expect.objectContaining({ assetId: 'portable-export:source' }),
@@ -157,6 +171,7 @@ test('projects source metadata without copying ordinary PCM', () => {
 
 test('keeps long ordinary sources as one metadata asset', () => {
   const frameCount = 12 * 48_000
+
   const longClip = {
     ...clip,
     duration: frameCount / 48_000,
@@ -165,7 +180,9 @@ test('keeps long ordinary sources as one metadata asset', () => {
       new Float32Array(frameCount),
     ]),
   }
+
   const result = compile([track({ clips: [longClip] })])
+
   if (!result.supported) throw new Error(result.reasons.join('\n'))
   expect(result.assets).toHaveLength(1)
   expect(result.assets[0]?.asset.frameCount).toBe(frameCount)
@@ -176,12 +193,15 @@ test('keeps long ordinary sources as one metadata asset', () => {
 
 test('keeps long mono source assets mono while projecting a stereo mixer bus', () => {
   const frameCount = 12 * 48_000
+
   const longClip = {
     ...clip,
     duration: frameCount / 48_000,
     buffer: new TestAudioBuffer([new Float32Array(frameCount)]),
   }
+
   const result = compile([track({ clips: [longClip] })])
+
   if (!result.supported) throw new Error(result.reasons.join('\n'))
   expect(result.assets).toEqual([expect.objectContaining({
     asset: expect.objectContaining({
@@ -244,8 +264,10 @@ test('projects prepared Stretch PCM instead of the raw source asset', () => {
     ...clip,
     audioWarp: { enabled: true, mode: 'stretch' as const, sourceBpm: 120 },
   }
+
   const prepared = preparedStretchAsset(warpedClip.id)
   const planes = prepared.pcm.planes
+
   const result = compileLiveNativeProjection({
     tracks: [track({ clips: [warpedClip] })],
     bpm: 120,
@@ -275,6 +297,7 @@ test('keeps disabled Stretch warp on the raw source path', () => {
       audioWarp: { enabled: false, mode: 'stretch', sourceBpm: 120 },
     }],
   })])
+
   if (!result.supported) throw new Error(result.reasons.join('\n'))
   expect(result.assets[0]?.asset.assetId).toBe('portable-export:source')
   expect(result.events[0]?.assetId).toBe('portable-export:source')
@@ -338,11 +361,13 @@ test('projects a synth instrument node for native MIDI playback', () => {
     buffer: undefined,
     midi: { wave: 'sawtooth' as const, notes: [{ pitch: 60, beat: 0, length: 1, velocity: 0.75 }] },
   }
+
   const instrument: TrackInstrumentParams = {
     kind: 'synth',
     instanceId: 'instrument:1',
     params: createDefaultSynthParams(),
   }
+
   const result = compileLiveNativeProjection({
     tracks: [track({ kind: 'instrument', clips: [midiClip] })],
     fx: {
@@ -355,6 +380,7 @@ test('projects a synth instrument node for native MIDI playback', () => {
     epoch: 1,
     firstSequence: 1,
   })
+
   if (!result.supported) throw new Error(result.reasons.join('\n'))
   expect(result.graph.nodes.find((node) => node.id === 'track')).toMatchObject({
     kind: 'instrument',
@@ -371,12 +397,14 @@ test('localizes bounded sampler regions for native MIDI playback', () => {
     buffer: undefined,
     midi: { wave: 'sawtooth', notes: [{ pitch: 60, beat: 0, length: 1, velocity: 0.75 }] },
   }
+
   const sample: SamplerZone['sample'] = {
     assetKey: 'source-a',
     url: 'https://samples.example/source.wav',
     sourceKind: 'url',
     source: { durationSec: 1, sampleRate: 48_000, channelCount: 1 },
   }
+
   const params: SamplerParams = {
     ...createDefaultSamplerParams(),
     zones: [{
@@ -399,6 +427,7 @@ test('localizes bounded sampler regions for native MIDI playback', () => {
       chokeGroup: 0,
     }],
   }
+
   const result = compileLiveNativeProjection({
     tracks: [track({ kind: 'instrument', clips: [midiClip] })],
     fx: localizeInstrumentFx({
@@ -440,6 +469,7 @@ test('exposes localized instrument buffers in opt-in metadata mode without timel
     sourceKind: 'url',
     source: { durationSec: 2, sampleRate: 48_000, channelCount: 1 },
   }
+
   const params: SamplerParams = {
     ...createDefaultSamplerParams(),
     zones: [{
@@ -500,12 +530,14 @@ test('exposes localized instrument buffers in opt-in metadata mode without timel
       chokeGroup: 0,
     }],
   }
+
   const firstSamples = new Float32Array(48_000).fill(0.5)
   firstSamples[0] = 0.25
   const secondSamples = new Float32Array(48_000).fill(-0.5)
   secondSamples[0] = -0.25
   const firstRegion = new TestAudioBuffer([firstSamples])
   const region = new TestAudioBuffer([secondSamples])
+
   const fx = localizeInstrumentFx({
     masterFxInstances: [],
     trackFx: {
@@ -520,6 +552,7 @@ test('exposes localized instrument buffers in opt-in metadata mode without timel
       },
     },
   })
+
   const result = compileLiveNativeProjection({
     tracks: [track({ kind: 'instrument', clips: [] })],
     fx,
@@ -560,14 +593,17 @@ test('exposes localized drum-rack and granular buffers in metadata mode', () => 
     sourceKind: 'url',
     source: { durationSec: 1, sampleRate: 48_000, channelCount: 1 },
   }
+
   const drumParams: DrumRackParams = {
     ...createDefaultDrumRackParams(),
     pads: createDefaultDrumRackParams().pads.map((pad, index) => index < 2
       ? { ...pad, sample, startSec: index * 0.5, endSec: (index + 1) * 0.5 }
       : pad),
   }
+
   const firstDrumRegion = new TestAudioBuffer([new Float32Array(24_000).fill(0.1)])
   const secondDrumRegion = new TestAudioBuffer([new Float32Array(24_000).fill(0.7)])
+
   const drumFx = localizeInstrumentFx({
     masterFxInstances: [],
     trackFx: {
@@ -581,6 +617,7 @@ test('exposes localized drum-rack and granular buffers in metadata mode', () => 
       },
     },
   })
+
   const drumResult = compileLiveNativeProjection({
     tracks: [track({ kind: 'instrument', clips: [] })],
     fx: drumFx,
@@ -591,6 +628,7 @@ test('exposes localized drum-rack and granular buffers in metadata mode', () => 
     firstSequence: 1,
     instrumentRegionMode: 'metadata',
   })
+
   if (!drumResult.supported) throw new Error(drumResult.reasons.join('\n'))
   expect(drumResult.instrumentRegionSources?.map(({ sourceAssetKey }) => sourceAssetKey)).toEqual([
     sampledInstrumentRegionIdentity(sample, { sourceStartFrame: 0, sourceEndFrame: 24_000 }),
@@ -627,7 +665,9 @@ test('exposes localized drum-rack and granular buffers in metadata mode', () => 
       chokeGroup: 0,
     },
   }
+
   const granularRegion = new TestAudioBuffer([new Float32Array(24_000).fill(0.3)])
+
   const granularFx = localizeInstrumentFx({
     masterFxInstances: [],
     trackFx: {
@@ -642,10 +682,13 @@ test('exposes localized drum-rack and granular buffers in metadata mode', () => 
       },
     },
   })
+
   const localizedGranularZone = granularFx?.trackFx?.track?.instrument?.kind === 'granular'
     ? granularFx.trackFx.track.instrument.params.zone
     : undefined
+
   if (!localizedGranularZone) throw new Error('Expected localized granular zone.')
+
   const granularResult = compileLiveNativeProjection({
     tracks: [track({ kind: 'instrument', clips: [] })],
     fx: granularFx,
@@ -656,6 +699,7 @@ test('exposes localized drum-rack and granular buffers in metadata mode', () => 
     firstSequence: 1,
     instrumentRegionMode: 'metadata',
   })
+
   if (!granularResult.supported) throw new Error(granularResult.reasons.join('\n'))
   expect(granularResult.instrumentRegionSources?.map(({ sourceAssetKey }) => sourceAssetKey)).toEqual([
     sampledInstrumentRegionIdentity(sample, { sourceStartFrame: 12_000, sourceEndFrame: 36_000 }),
@@ -674,10 +718,13 @@ test('projects the available Drum Rack pad when another sample is missing', () =
     sourceKind: 'url',
     source: { durationSec: 1, sampleRate: 48_000, channelCount: 1 },
   }
+
   const params = createDefaultDrumRackParams()
   const firstPad = params.pads[0]
   const secondPad = params.pads[1]
+
   if (!firstPad || !secondPad) throw new Error('Expected default drum pads.')
+
   const drumParams: DrumRackParams = {
     ...params,
     pads: [
@@ -685,6 +732,7 @@ test('projects the available Drum Rack pad when another sample is missing', () =
       { ...secondPad, sample },
     ],
   }
+
   const fx = localizeInstrumentFx({
     masterFxInstances: [],
     trackFx: {
@@ -698,6 +746,7 @@ test('projects the available Drum Rack pad when another sample is missing', () =
       },
     },
   })
+
   const result = compileLiveNativeProjection({
     tracks: [track({ kind: 'instrument', clips: [] })],
     fx,
@@ -722,6 +771,7 @@ test('rejects inconsistent dimensions for a shared instrument-region identity', 
     sourceKind: 'url',
     source: { durationSec: 1, sampleRate: 48_000, channelCount: 1 },
   }
+
   const params: SamplerParams = {
     ...createDefaultSamplerParams(),
     zones: ['zone-1', 'zone-2'].map((id): SamplerZone => ({
@@ -744,6 +794,7 @@ test('rejects inconsistent dimensions for a shared instrument-region identity', 
       chokeGroup: 0,
     })),
   }
+
   const result = compileLiveNativeProjection({
     tracks: [track({ kind: 'instrument', clips: [] })],
     fx: {
@@ -787,6 +838,7 @@ test('projects legacy synth state for native MIDI playback', () => {
     buffer: undefined,
     midi: { wave: 'sawtooth' as const, notes: [{ pitch: 60, beat: 0, length: 1, velocity: 0.75 }] },
   }
+
   const result = compileLiveNativeProjection({
     tracks: [track({ kind: 'instrument', clips: [midiClip] })],
     fx: {
@@ -799,6 +851,7 @@ test('projects legacy synth state for native MIDI playback', () => {
     epoch: 1,
     firstSequence: 1,
   })
+
   if (!result.supported) throw new Error(result.reasons.join('\n'))
   expect(result.graph.nodes.find((node) => node.id === 'track')).toMatchObject({
     kind: 'instrument',
@@ -814,11 +867,13 @@ test('projects empty sampled instruments for native MIDI playback', () => {
     buffer: undefined,
     midi: { wave: 'sawtooth' as const, notes: [{ pitch: 60, beat: 0, length: 1, velocity: 0.75 }] },
   }
+
   const instruments: readonly TrackInstrumentParams[] = [
     { kind: 'sampler', instanceId: 'sampler:empty', params: createDefaultSamplerParams() },
     { kind: 'drum-rack', instanceId: 'drums:empty', params: createDefaultDrumRackParams() },
     { kind: 'granular', instanceId: 'granular:empty', params: createDefaultGranularParams() },
   ]
+
   for (const instrument of instruments) {
     const result = compileLiveNativeProjection({
       tracks: [track({ kind: 'instrument', clips: [midiClip] })],
@@ -832,6 +887,7 @@ test('projects empty sampled instruments for native MIDI playback', () => {
       epoch: 1,
       firstSequence: 1,
     })
+
     if (!result.supported) throw new Error(result.reasons.join('\n'))
     expect(result.graph.nodes.find((node) => node.id === 'track')).toMatchObject({
       kind: 'instrument',
@@ -848,6 +904,7 @@ test('routes eight-second stereo sampler regions through explicit native metadat
     buffer: undefined,
     midi: { wave: 'sine' as const, notes: [] },
   }
+
   const params: SamplerParams = {
     ...createDefaultSamplerParams(),
     zones: [{
@@ -875,6 +932,7 @@ test('routes eight-second stereo sampler regions through explicit native metadat
       chokeGroup: 0,
     }],
   }
+
   const result = compileLiveNativeProjection({
     instrumentRegionMode: 'metadata',
     tracks: [track({ kind: 'instrument', clips: [midiClip] })],
@@ -900,7 +958,9 @@ test('routes eight-second stereo sampler regions through explicit native metadat
     epoch: 1,
     firstSequence: 1,
   })
+
   expect(result.supported).toBe(true)
+
   if (!result.supported) throw new Error(result.reasons.join(' '))
   expect(result.assets[0]?.asset.frameCount).toBe(8 * 48_000)
   expect(result.assets[0]?.pcm).toBeUndefined()
@@ -948,6 +1008,7 @@ test('projects a default synth for instrument tracks without instrument state', 
     buffer: undefined,
     midi: { wave: 'sine' as const, notes: [] },
   }
+
   const result = compileLiveNativeProjection({
     tracks: [track({ id: 'instrument', kind: 'instrument', clips: [midiClip] })],
     fx: {
@@ -989,6 +1050,7 @@ test('retains empty audio tracks for graph topology without emitting source even
     epoch: 1,
     firstSequence: 1,
   })
+
   if (!result.supported) throw new Error(result.reasons.join('\n'))
   expect(result.graph.nodes.map((node) => node.id)).toEqual(['empty-audio', 'instrument', '$master'])
   expect(result.events).toHaveLength(0)
@@ -1000,19 +1062,23 @@ test('allows empty instrument tracks alongside prepared Stretch audio and mixer 
     id: 'stretch-clip',
     audioWarp: { enabled: true, mode: 'stretch' as const, sourceBpm: 120 },
   }
+
   const prepared = preparedStretchAsset(stretchClip.id)
+
   const audioTracks = Array.from({ length: 6 }, (_, index) => track({
     id: `audio-${index + 1}`,
     kind: 'audio',
     clips: index === 0 ? [stretchClip] : [],
     outputTargetId: 'group',
   }))
+
   const emptyInstrumentTracks = Array.from({ length: 4 }, (_, index) => track({
     id: `instrument-${index + 1}`,
     kind: 'instrument',
     clips: [],
     outputTargetId: 'group',
   }))
+
   const result = compileLiveNativeProjection({
     tracks: [
       ...audioTracks,
@@ -1061,7 +1127,9 @@ test('an instrument for a track the snapshot does not hold leaves the compile su
       absent: { instances: [], instrument: { kind: 'synth', instanceId: 'absent', params: createDefaultSynthParams() } },
     },
   }
+
   const result = compileLiveNativeProjection({ tracks: [track()], fx, bpm: 120, sampleRateHz: 48_000, revision: 1, epoch: 1, firstSequence: 1 })
+
   if (!result.supported) throw new Error(result.reasons.join('\n'))
   expect(result.graph.nodes.map((node) => node.id)).not.toContain('absent')
 })

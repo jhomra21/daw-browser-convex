@@ -14,6 +14,7 @@ const Avatar = <T extends ValidComponent = "span">(
   props: PolymorphicProps<T, AvatarRootProps<T>>
 ) => {
   const [local, others] = splitProps<AvatarRootProps<T>, [["class"]]>(props, ["class"])
+
   return (
     <ImagePrimitive.Root
       class={cn("relative flex size-10 shrink-0 overflow-hidden rounded-full", local.class)}
@@ -30,6 +31,7 @@ const AvatarImage = <T extends ValidComponent = "img">(
   props: PolymorphicProps<T, AvatarImageProps<T>>
 ) => {
   const [local, others] = splitProps<AvatarImageProps<T>, [["class"]]>(props, ["class"])
+
   return <ImagePrimitive.Img class={cn("aspect-square size-full", local.class)} {...others} />
 }
 
@@ -40,6 +42,7 @@ const AvatarFallback = <T extends ValidComponent = "span">(
   props: PolymorphicProps<T, AvatarFallbackProps<T>>
 ) => {
   const [local, others] = splitProps<AvatarFallbackProps<T>, [["class"]]>(props, ["class"])
+
   return (
     <ImagePrimitive.Fallback
       class={cn("flex size-full items-center justify-center bg-muted", local.class)}

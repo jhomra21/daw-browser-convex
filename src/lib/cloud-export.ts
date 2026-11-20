@@ -18,8 +18,11 @@ const readCloudExportUpload = (value: JsonValue): CloudExportUpload => {
   if (!isJsonObject(value)) {
     throw new Error('Invalid upload response')
   }
+
   const url = isJsonString(value.url) ? value.url : ''
+
   if (!url) throw new Error('Invalid upload response')
+
   return { url }
 }
 
@@ -33,6 +36,8 @@ export const saveCloudExport = async (input: SaveCloudExportInput): Promise<Clou
   form.append('file', input.blob, input.name)
 
   const response = await fetch('/api/exports', { method: 'POST', body: form, signal: input.signal })
+
   if (!response.ok) throw new Error('Upload failed')
+
   return readCloudExportUpload(await response.json().catch(() => null))
 }

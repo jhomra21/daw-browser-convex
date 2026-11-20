@@ -7,6 +7,7 @@ const createNode = () => {
   const node = Object.create(null)
   node.connections = []
   node.connect = (target: TestAudioNode) => node.connections.push(target)
+
   return node
 }
 

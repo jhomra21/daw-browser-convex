@@ -55,10 +55,12 @@ import {
 
 const persisted = (id: string): ContextualRefV1 => ({ source: 'persisted', id })
 const client = (clientRef: string): ContextualRefV1 => ({ source: 'client', clientRef })
+
 const trackTarget = (track: ContextualRefV1): ProcessorTargetV1 => ({
   kind: 'track',
   track,
 })
+
 const masterTarget: ProcessorTargetV1 = { kind: 'master' }
 
 type ControlCommitFixture = {
@@ -68,6 +70,7 @@ type ControlCommitFixture = {
   idempotencyKey: string
   actions: unknown[]
 }
+
 type ControlPreviewFixture = {
   version: string
   projectId: string
@@ -226,6 +229,7 @@ test('rejects raw, malformed, ambiguous, and non-strict refs', () => {
     { source: 'client', clientRef: 'track-client', id: 'track-1' },
     { source: 'magic', id: 'track-1' },
   ]
+
   for (const track of invalidTracks) {
     expect(() => parseControlCommitRequestV1(commit([{
       kind: 'track.rename',
@@ -233,6 +237,7 @@ test('rejects raw, malformed, ambiguous, and non-strict refs', () => {
       name: 'Invalid',
     }]))).toThrow()
   }
+
   expect(() => parseControlCommitRequestV1(commit([{
     kind: 'effect.upsert',
     target: { kind: 'master', track: persisted('track-1') },
@@ -261,6 +266,7 @@ test('detects duplicate creation client refs with the exported helper and envelo
     },
     { kind: 'effect.upsert', target: masterTarget, clientRef: 'unique-ref', effectKind: 'eq' },
   ])
+
   expect(findDuplicateCreationClientRefsV1(actions)).toEqual(['shared-ref'])
   expect(() => parseControlCommitRequestV1(commit(actions))).toThrow()
   expect(() => parseControlPreviewRequestV1(preview(actions))).toThrow()
@@ -280,6 +286,7 @@ test('validates optional revisions and strict idempotency keys', () => {
       { kind: 'track.delete', track: persisted('track-1') },
     ], idempotencyKey))).toThrow()
   }
+
   expect(() => parseControlCommitRequestV1(commit([
     { kind: 'track.delete', track: persisted('track-1') },
   ], 'a'.repeat(128)))).not.toThrow()
@@ -307,6 +314,7 @@ test('validates strict preview, commit, and error result envelopes', () => {
   ]) {
     expect(() => controlErrorSchemaV1.parse({ version: 'v1', code, message: 'Error.' })).not.toThrow()
   }
+
   expect(() => controlErrorSchemaV1.parse({
     version: 'v1',
     code: 'validation',
@@ -349,6 +357,7 @@ test('validates bounded strict control history contracts', () => {
     applied: true,
     createdAt: 1,
   })
+
   expect(controlHistoryQuerySchemaV1.parse({ projectId: 'project-1' })).toEqual({
     projectId: 'project-1',
     limit: controlLimitsV1.defaultHistoryPageSize,
@@ -389,6 +398,7 @@ test('validates bounded strict control history contracts', () => {
 
 test('accepts opaque project IDs and rejects URL-interpretable project IDs everywhere', () => {
   const acceptedProjectIds = ['project-1', 'k9zzzzz', 'project:opaque_~id', 'project%20name']
+
   for (const projectId of acceptedProjectIds) {
     expect(() => parseControlCommitRequestV1({ ...commit([{ kind: 'project.rename', name: 'Project' }]), projectId })).not.toThrow()
     expect(() => parseControlPreviewRequestV1({ ...preview([{ kind: 'project.rename', name: 'Project' }]), projectId })).not.toThrow()
@@ -419,6 +429,7 @@ test('accepts opaque project IDs and rejects URL-interpretable project IDs every
     'project%3fid', 'project%23id', 'project%00id', 'project%1Fid', 'project%7fid',
     'project\nid', `project${String.fromCharCode(127)}id`,
   ]
+
   for (const projectId of forbiddenProjectIds) {
     expect(() => parseControlCommitRequestV1({ ...commit([{ kind: 'project.rename', name: 'Project' }]), projectId })).toThrow()
     expect(() => parseControlPreviewRequestV1({ ...preview([{ kind: 'project.rename', name: 'Project' }]), projectId })).toThrow()
@@ -450,6 +461,7 @@ test('semantic digest input is canonical and excludes idempotency', () => {
     track: persisted('track-1'),
     name: 'Bass',
   }], 'request-0001'))
+
   const second = parseControlCommitRequestV1({
     actions: [{ name: 'Bass', track: { id: 'track-1', source: 'persisted' }, kind: 'track.rename' }],
     idempotencyKey: 'request-0002',
@@ -457,6 +469,7 @@ test('semantic digest input is canonical and excludes idempotency', () => {
     projectId: 'project-1',
     version: 'v1',
   })
+
   const previewRequest = parseControlPreviewRequestV1(preview(first.actions))
 
   expect(controlRequestDigestInputV1(first)).toBe(controlRequestDigestInputV1(second))
@@ -476,11 +489,13 @@ test('computes stable SHA-256 semantic request digests', async () => {
     track: persisted('track-1'),
     name: 'Bass',
   }], 'request-0001'))
+
   const second = parseControlCommitRequestV1(commit([{
     kind: 'track.rename',
     track: persisted('track-1'),
     name: 'Bass',
   }], 'request-0002'))
+
   const changed = parseControlCommitRequestV1(commit([{
     kind: 'track.rename',
     track: persisted('track-1'),
@@ -498,6 +513,7 @@ test('hashes canonical Unicode and empty payloads synchronously with WebCrypto-e
     kind: 'project.rename',
     name: 'Åudio 🎛️',
   }]))
+
   const asyncDigest = await controlRequestDigestV1(request)
   expect(controlRequestDigestSyncV1(request)).toBe(asyncDigest)
   const emptyDigest = hashRecoveryPayloadSyncV1('')
@@ -520,6 +536,7 @@ test('keeps cloud recovery payload bytes canonical while accepting strict local 
       },
     },
   })
+
   const local = recoveryPayloadSchemaV1.parse({
     version: 1,
     kind: 'asset.delete',
@@ -532,6 +549,7 @@ test('keeps cloud recovery payload bytes canonical while accepting strict local 
       },
     },
   })
+
   const bytes = canonicalRecoveryPayloadV1(cloud)
   expect(bytes).toBe(canonicalJson(cloud))
   expect(await hashRecoveryPayloadV1(bytes)).toBe(hashRecoveryPayloadSyncV1(bytes))
@@ -554,8 +572,10 @@ test('verifies legacy recovery bytes before normalizing note-only MIDI', () => {
       },
     },
   }
+
   const stored = canonicalJson(legacy)
   const restored = parseRecoveryPayload(stored)
+
   if (restored.kind !== 'clip.delete') throw new Error('Expected clip recovery payload.')
   expect(restored.data.clip.midi).toMatchObject({
     notes: [{ channel: 1 }],
@@ -583,12 +603,15 @@ test('keeps exact V1 recovery bytes and rejects expanded MIDI fields', () => {
       },
     },
   }
+
   const bytes = canonicalRecoveryPayloadV1(recoveryPayloadSchemaV1.parse(legacy))
   expect(bytes).toBe(canonicalJson(legacy))
+
   const emptyWave = recoveryPayloadSchemaV1.parse({
     ...legacy,
     data: { ...legacy.data, clip: { ...legacy.data.clip, midi: { ...legacy.data.clip.midi, wave: '' } } },
   })
+
   expect(canonicalRecoveryPayloadV1(emptyWave)).toBe(canonicalJson(emptyWave))
   expect(parseRecoveryPayload(canonicalRecoveryPayloadV1(emptyWave))).toMatchObject({
     version: 2,
@@ -616,9 +639,11 @@ test('parses and hashes a 501-note canonical V1 recovery without applying V2 wri
       },
     },
   })
+
   const bytes = canonicalRecoveryPayloadV1(legacy)
   expect(await hashRecoveryPayloadV1(bytes)).toBe(hashRecoveryPayloadSyncV1(bytes))
   const restored = parseRecoveryPayload(bytes)
+
   if (restored.kind !== 'clip.delete') throw new Error('Expected clip recovery payload.')
   expect(restored.data.clip.midi?.notes).toHaveLength(501)
 })
@@ -648,6 +673,7 @@ test('round-trips canonical V2 recovery MIDI without changing fields', () => {
       },
     },
   })
+
   const bytes = canonicalRecoveryPayloadV2(payload)
   expect(parseRecoveryPayload(bytes)).toEqual(payload)
   expect(() => parseRecoveryPayload(bytes.replace('"version":2', '"version":1'))).toThrow()
@@ -665,6 +691,7 @@ test('rejects expanded V2 recovery MIDI limits and duplicate supplied IDs', () =
       clip: { projectId: 'project-1', trackId: 'track-1', startSec: 0, duration: 1, midi },
     },
   }) satisfies Extract<RecoveryPayloadV2, { kind: 'clip.delete' }>
+
   expect(() => canonicalRecoveryPayloadV2(recovery({
     wave: 'sine',
     notes: midiNotes(501).map((note, index) => ({ ...note, id: `note-${index}`, channel: 1 })),
@@ -686,6 +713,7 @@ test('captures oversized durable V2 MIDI without relaxing new recovery payload l
     notes: midiNotes(500).map((note, index) => ({ ...note, id: `note-${index}`, channel: 1 })),
     cc: [{ id: 'cc-1', beat: 0, controller: 1, value: 0, channel: 1 }],
   }
+
   const clipPayload = {
     version: 2 as const,
     kind: 'clip.delete' as const,
@@ -695,9 +723,11 @@ test('captures oversized durable V2 MIDI without relaxing new recovery payload l
       clip: { projectId: 'project-1', trackId: 'track-1', startSec: 0, duration: 1, midi: oversizedMidi },
     },
   }
+
   expect(() => recoveryPayloadSchemaV2.parse(clipPayload)).toThrow()
   const bytes = canonicalCapturedRecoveryPayloadV2(recoveryCapturedPayloadSchemaV2.parse(clipPayload))
   const parsed = parseCapturedRecoveryPayload(bytes)
+
   if (parsed.kind !== 'clip.delete') throw new Error('Expected clip recovery payload.')
   expect(parsed.data.clip.midi?.notes).toHaveLength(500)
   expect(parsed.data.clip.midi?.cc).toHaveLength(1)
@@ -731,9 +761,11 @@ test('captures oversized durable V2 MIDI without relaxing new recovery payload l
       survivors: [],
     },
   }
+
   expect(() => recoveryPayloadSchemaV2.parse(trackPayload)).toThrow()
   const trackBytes = canonicalCapturedRecoveryPayloadV2(recoveryCapturedPayloadSchemaV2.parse(trackPayload))
   const parsedTrack = parseCapturedRecoveryPayload(trackBytes)
+
   if (parsedTrack.kind !== 'track.delete') throw new Error('Expected track recovery payload.')
   expect(parsedTrack.data.clips[0]?.clip.midi?.notes).toHaveLength(500)
   expect(parsedTrack.data.clips[0]?.clip.midi?.cc).toHaveLength(1)
@@ -745,6 +777,7 @@ test('projects historical finite MIDI values through the narrow V1 snapshot sche
     gain: 7,
     notes: [{ beat: -2, length: -1, pitch: 200, velocity: 2 }],
   }
+
   const parsed = projectSnapshotSchemaV1.parse({
     ...snapshot,
     clips: [{
@@ -759,6 +792,7 @@ test('projects historical finite MIDI values through the narrow V1 snapshot sche
       midi: legacyMidi,
     }],
   })
+
   expect(parsed.clips[0]?.midi).toEqual(legacyMidi)
   expect(() => parseControlCommitRequestV1(commit([{
     kind: 'clip.midi.create',
@@ -774,6 +808,7 @@ test('rejects external snapshots with oversized parameter override records', () 
   const parameterOverrides = Object.fromEntries(
     Array.from({ length: 16_385 }, (_, index) => [String(index), 0]),
   )
+
   expect(() => projectSnapshotSchemaV1.parse({
     ...snapshot,
     processors: [{
@@ -812,6 +847,7 @@ test('enforces MIDI and automation aggregates at exact boundaries for preview an
       points: automationPoints(controlLimitsV1.maxAutomationPointsPerCommit),
     },
   ]
+
   expect(() => parseControlCommitRequestV1(commit(boundaryActions))).not.toThrow()
   expect(() => parseControlPreviewRequestV1(preview(boundaryActions))).not.toThrow()
 
@@ -819,10 +855,12 @@ test('enforces MIDI and automation aggregates at exact boundaries for preview an
     { ...boundaryActions[0], notes: midiNotes(251) },
     { ...boundaryActions[0], notes: midiNotes(250) },
   ]
+
   const automationOver = [
     { ...boundaryActions[1], points: automationPoints(501) },
     { ...boundaryActions[1], points: automationPoints(500) },
   ]
+
   expect(() => parseControlCommitRequestV1(commit(midiOver))).toThrow()
   expect(() => parseControlPreviewRequestV1(preview(midiOver))).toThrow()
   expect(() => parseControlCommitRequestV1(commit(automationOver))).toThrow()
@@ -839,6 +877,7 @@ test('reports expanded MIDI aggregate overflow through safeParse', () => {
     notes: midiNotes(500),
     cc: [{ id: 'cc-1', beat: 0, controller: 1, value: 0, channel: 1 }],
   }]))
+
   expect(result.success).toBe(false)
 })
 
@@ -856,6 +895,7 @@ test('aggregates strict MIDI set payloads while preserving oversized legacy set 
         outputMax: 1,
       })),
   })
+
   expect(() => parseControlPreviewRequestV1(preview([set(250), set(251)]))).toThrow('MIDI performance events')
   expect(() => parseControlCommitRequestV1(commit([
     {
@@ -877,6 +917,7 @@ test('enforces action count for preview and commit', () => {
     kind: 'track.delete',
     track: persisted('track-1'),
   }))
+
   expect(() => parseControlCommitRequestV1(commit(boundary))).not.toThrow()
   expect(() => parseControlPreviewRequestV1(preview(boundary))).not.toThrow()
   expect(() => parseControlCommitRequestV1(commit([...boundary, boundary[0]]))).toThrow()
@@ -889,18 +930,23 @@ const requestOfByteLength = (byteLength: number, mode: 'commit' | 'preview') => 
     track: persisted('track-1'),
     sends: Array.from({ length: 16 }, () => ({ target: persisted('x'), amount: 1 })),
   }))
+
   const request = mode === 'commit' ? commit(actions) : preview(actions)
   const baseline = new TextEncoder().encode(canonicalJson(request)).byteLength
   let remaining = byteLength - baseline
+
   for (const action of actions) {
     for (const send of action.sends) {
       const extension = Math.min(255, Math.max(0, remaining))
+
       if (send.target.source !== 'persisted') throw new Error('Expected a persisted routing target.')
       send.target.id = `x${'x'.repeat(extension)}`
       remaining -= extension
     }
   }
+
   if (remaining !== 0) throw new Error('Requested routing fixture size is unavailable.')
+
   return request
 }
 
@@ -970,6 +1016,7 @@ test('parses every Phase 5B action strictly', () => {
   const clip = persisted('clip-1')
   const asset = { source: 'persisted' as const, id: 'asset-1' }
   const target = trackTarget(track)
+
   const actions = [
     { kind: 'clip.audio.create', track, asset },
     { kind: 'clip.source.set', clip, asset },
@@ -992,6 +1039,7 @@ test('parses every Phase 5B action strictly', () => {
     { kind: 'asset.delete', asset },
     { kind: 'timeline.range.delete', tracks: [track], startSec: 0, endSec: 1 },
   ]
+
   for (const action of actions) expect(() => parseControlCommitRequestV1(commit([action]))).not.toThrow()
   expect(() => parseControlCommitRequestV1(commit([{
     kind: 'clip.audio.create', track, asset: { source: 'persisted', id: 'asset-1', key: 'raw-key' },
@@ -1011,6 +1059,7 @@ test('parses every Phase 5B action strictly', () => {
     processor: persisted('external-plugin:instance-1'),
     changes: [{ parameterId: 1, normalizedValue: Number.NaN }],
   }).success).toBe(false)
+
   for (const parameterId of [0, 0x7fff_ffff, 0x8000_0000, 0xffff_ffff]) {
     expect(controlActionSchemaV1.safeParse({
       kind: 'external-plugin.parameters.set',
@@ -1019,6 +1068,7 @@ test('parses every Phase 5B action strictly', () => {
       changes: [{ parameterId, normalizedValue: 0.5 }],
     }).success).toBe(true)
   }
+
   expect(controlActionSchemaV1.safeParse({
     kind: 'external-plugin.parameters.set',
     target,
@@ -1036,6 +1086,7 @@ test('accepts every canonical effect payload and rejects unknown nested fields',
       effectKind,
       params: contract.createDefaultParams(),
     }
+
     expect(() => parseControlCommitRequestV1(commit([action]))).not.toThrow()
     expect(() => parseControlCommitRequestV1(commit([{
       ...action,
@@ -1077,6 +1128,7 @@ test('keeps the canonical request serialization and digest fixture unchanged', (
     track: persisted('track-1'),
     name: 'Bass',
   }]))
+
   expect(controlRequestDigestInputV1(request)).toBe(
     '{"actions":[{"kind":"track.rename","name":"Bass","track":{"id":"track-1","source":"persisted"}}],"expectedRevision":0,"projectId":"project-1","version":"v1"}',
   )
@@ -1090,6 +1142,7 @@ test('rejects duplicate MIDI event and mapping IDs while permitting legacy mappi
     wave: 'sine' as const,
     notes: [{ id: 'duplicate', beat: 0, length: 1, pitch: 60 }],
   }
+
   expect(controlActionSchemaV1.safeParse({
     ...action,
     notes: [...action.notes, { id: 'duplicate', beat: 1, length: 1, pitch: 61 }],
@@ -1125,6 +1178,7 @@ test('accepts a Spectrum device insertion on a track and on the master', () => {
     effectKind: 'spectrum',
     params: { version: 1, state: { enabled: true, view: 'spectrogram' } },
   })
+
   expect(upsert(masterTarget).success).toBe(true)
   expect(upsert(trackTarget(persisted('track-1'))).success).toBe(true)
   expect(controlActionSchemaV1.safeParse({

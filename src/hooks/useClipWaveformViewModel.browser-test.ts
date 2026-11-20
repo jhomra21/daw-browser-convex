@@ -30,6 +30,7 @@ type SourceControls = {
 const deferred = <Value>(): Deferred<Value> => {
   let resolve: (value: Value) => void = () => {}
   const promise = new Promise<Value>((nextResolve) => { resolve = nextResolve })
+
   return { promise, resolve }
 }
 
@@ -82,6 +83,7 @@ const createSource = (
 ): SourceFixture => {
   let abortCount = 0
   let readCount = 0
+
   const source: AudioPcmSourceDescriptor = {
     identity,
     durationSec: 1,
@@ -91,7 +93,9 @@ const createSource = (
     readPages: async function* (options = {}) {
       readCount += 1
       const onAbort = () => { abortCount += 1 }
+
       options.signal?.addEventListener('abort', onAbort, { once: true })
+
       if (failOnRead === readCount) throw new Error('waveform read failed')
       await (readCount === 1
         ? gate.promise
@@ -110,6 +114,7 @@ const createSource = (
       }
     },
   }
+
   return {
     source,
     controls: {
@@ -155,7 +160,9 @@ const resolveWhen = (sources: ReadonlyMap<string, AudioPcmSourceDescriptor>): Au
   async (clip, signal) => {
     signal?.throwIfAborted()
     const source = sources.get(clip.sourceAssetKey ?? '')
+
     if (!source) throw new Error('missing source')
+
     return source
   }
 )
@@ -163,6 +170,7 @@ const resolveWhen = (sources: ReadonlyMap<string, AudioPcmSourceDescriptor>): Au
 const waveformCommands = (waveform: ReturnType<typeof useClipWaveformViewModel>) => (
   waveform.segments().flatMap((segment) => {
     const commands: string[] = []
+
     const ctx = {
       fillStyle: '',
       beginPath: () => commands.push('beginPath'),
@@ -171,6 +179,7 @@ const waveformCommands = (waveform: ReturnType<typeof useClipWaveformViewModel>)
       fill: () => commands.push('fill'),
       arc: (x: number, y: number, radius: number) => commands.push(`arc:${x}:${y}:${radius}`),
     }
+
     drawWaveformSignal(ctx, {
       data: segment.data,
       sourceStartFrame: segment.sourceStartFrame,
@@ -187,6 +196,7 @@ const waveformCommands = (waveform: ReturnType<typeof useClipWaveformViewModel>)
         minimumThicknessCssPx: 1,
       },
     })
+
     return commands
   })
 )
@@ -195,13 +205,16 @@ describe('useClipWaveformViewModel unified generation publication', () => {
   test('shares source, scheduler, tier, geometry, and painter commands across surfaces', async () => {
     await new Promise<void>((resolve, reject) => createRoot((dispose) => {
       const source = createSource('source-a', 0.25)
+
       const input = {
         clip: () => createClip(),
         width: () => 400,
         resolve: resolveWhen(new Map([['asset-a', source.source]])),
       }
+
       const arrangement = createWaveform(input)
       const sampleDetail = createWaveform(input)
+
       const sampleDetailOverview = useSampleDetailWaveformOverview({
         clip: input.clip,
         cssWidthPx: input.width,
@@ -209,6 +222,7 @@ describe('useClipWaveformViewModel unified generation publication', () => {
         source: arrangement.source,
         backingPixelsPerCssPixel: () => 1,
       })
+
       void (async () => {
         source.controls.gate.resolve()
         await settle(arrangement)
@@ -256,6 +270,7 @@ describe('useClipWaveformViewModel unified generation publication', () => {
     await new Promise<void>((resolve, reject) => createRoot((dispose) => {
       const [width, setWidth] = createSignal(400)
       const source = createSource('source-a', 0.25)
+
       const waveform = createWaveform({
         clip: () => createClip(),
         width,
@@ -263,6 +278,7 @@ describe('useClipWaveformViewModel unified generation publication', () => {
           ['asset-a', source.source],
         ])),
       })
+
       void (async () => {
         source.controls.gate.resolve()
         await flush()
@@ -289,11 +305,13 @@ describe('useClipWaveformViewModel unified generation publication', () => {
     await new Promise<void>((resolve, reject) => createRoot((dispose) => {
       const [width, setWidth] = createSignal(400)
       const source = createSource('source-a', 0.25)
+
       const waveform = createWaveform({
         clip: () => createClip(),
         width,
         resolve: resolveWhen(new Map([['asset-a', source.source]])),
       })
+
       void (async () => {
         source.controls.gate.resolve()
         await flush()
@@ -321,6 +339,7 @@ describe('useClipWaveformViewModel unified generation publication', () => {
       const [clip, setClip] = createSignal(createClip('asset-a'))
       const sourceA = createSource('source-a', 0.25)
       const sourceB = createSource('source-b', 0.75)
+
       const waveform = createWaveform({
         clip,
         width: () => 400,
@@ -329,6 +348,7 @@ describe('useClipWaveformViewModel unified generation publication', () => {
           ['asset-b', sourceB.source],
         ])),
       })
+
       void (async () => {
         sourceA.controls.gate.resolve()
         await flush()
@@ -352,20 +372,25 @@ describe('useClipWaveformViewModel unified generation publication', () => {
   test('reloads when a same-metadata buffer source is replaced', async () => {
     await new Promise<void>((resolve, reject) => createRoot((dispose) => {
       const initialBuffer = new TestAudioBuffer()
+
       const [clip, setClip] = createSignal({
         ...createClip(),
         buffer: initialBuffer,
       })
+
       const sourceA = createSource('source-a', 0.25)
       const sourceB = createSource('source-b', 0.75)
+
       const waveform = createWaveform({
         clip,
         width: () => 400,
         resolve: async (nextClip, signal) => {
           signal?.throwIfAborted()
+
           return nextClip.buffer === initialBuffer ? sourceA.source : sourceB.source
         },
       })
+
       void (async () => {
         sourceA.controls.gate.resolve()
         await flush()
@@ -391,11 +416,13 @@ describe('useClipWaveformViewModel unified generation publication', () => {
     await new Promise<void>((resolve, reject) => createRoot((dispose) => {
       const [width, setWidth] = createSignal(400)
       const source = createSource('source-a', 0.25)
+
       const waveform = createWaveform({
         clip: () => createClip(),
         width,
         resolve: resolveWhen(new Map([['asset-a', source.source]])),
       })
+
       void (async () => {
         source.controls.gate.resolve()
         await flush()
@@ -419,11 +446,13 @@ describe('useClipWaveformViewModel unified generation publication', () => {
     await new Promise<void>((resolve, reject) => createRoot((dispose) => {
       const [width, setWidth] = createSignal(400)
       const source = createSource('source-a', 0.25, undefined, undefined, 4)
+
       const waveform = createWaveform({
         clip: () => createClip(),
         width,
         resolve: resolveWhen(new Map([['asset-a', source.source]])),
       })
+
       void (async () => {
         source.controls.gate.resolve()
         await flush()
@@ -447,12 +476,14 @@ describe('useClipWaveformViewModel unified generation publication', () => {
     await new Promise<void>((resolve, reject) => createRoot((dispose) => {
       const [visible, setVisible] = createSignal(true)
       const source = createSource('source-a', 0.25)
+
       const waveform = createWaveform({
         clip: () => createClip(),
         width: () => 400,
         resolve: resolveWhen(new Map([['asset-a', source.source]])),
         waveformVisible: visible,
       })
+
       void (async () => {
         source.controls.gate.resolve()
         await flush()

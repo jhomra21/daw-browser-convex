@@ -45,15 +45,18 @@ test("binds only the narrow browser view facade", async () => {
 
 test("keeps browser state outside the extension definition when activation fails", async () => {
   let toggles = 0;
+
   const definition = createBuiltinViewToggleBrowser({
     browser: { toggle: () => { toggles += 1; } },
   });
+
   const failingDefinition: AppExtensionDefinition = {
     ...definition,
     activate: () => {
       throw new Error("activation failed");
     },
   };
+
   const kernel = createExtensionKernel();
 
   await expect(kernel.activate(failingDefinition)).rejects.toThrow("activation failed");

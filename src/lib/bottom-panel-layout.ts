@@ -13,5 +13,6 @@ export const getBottomPanelMountedFootprintPx = (input: BottomPanelFootprintInpu
   if (input.open) {
     return input.heightPx + BOTTOM_PANEL_FOOTER_HEIGHT_PX + BOTTOM_PANEL_EDGE_PADDING_PX;
   }
+
   return BOTTOM_PANEL_FOOTER_HEIGHT_PX + BOTTOM_PANEL_EDGE_PADDING_PX;
 };

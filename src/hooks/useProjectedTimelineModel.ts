@@ -13,6 +13,7 @@ import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
 import type { Track, TrackRouting, TrackSend } from '@daw-browser/timeline-core/types'
 
 type ProjectedTimelineRouting = TrackRouting & { sends: TrackSend[] }
+
 type OptimisticGrantState = 'pending' | 'seen'
 
 type PendingClipCreate = { trackId: Track['id']; clip: Track['clips'][number] }
@@ -47,21 +48,27 @@ type UseProjectedTimelineModelReturn = {
 
 const addIdsToMap = <TId extends string>(current: Map<TId, OptimisticGrantState>, ids: Iterable<TId>) => {
   let next: Map<TId, OptimisticGrantState> | null = null
+
   for (const id of ids) {
     if (!id) continue
     const existing = (next ?? current).get(id)
+
     if (existing) continue
+
     if (!next) next = new Map(current)
     next.set(id, 'pending')
   }
+
   return next ?? current
 }
 
 const mergeIdSets = <TId extends string>(serverIds: Set<TId>, optimisticIds: Iterable<TId>) => {
   const merged = new Set(serverIds)
+
   for (const id of optimisticIds) {
     merged.add(id)
   }
+
   return merged
 }
 
@@ -71,33 +78,41 @@ const reconcileOptimisticGrants = <TId extends string>(
   serverIds: Set<TId>,
 ) => {
   let next: Map<TId, OptimisticGrantState> | null = null
+
   for (const [id, state] of current) {
     if (serverIds.has(id)) {
       if (!next) next = new Map(current)
       next.delete(id)
       continue
     }
+
     if (state === 'pending' && existingIds.has(id)) {
       if (!next) next = new Map(current)
       next.set(id, 'seen')
       continue
     }
+
     if (state === 'seen' && !existingIds.has(id)) {
       if (!next) next = new Map(current)
       next.delete(id)
     }
   }
+
   if (!next) return current
+
   if (next.size === current.size) {
     let unchanged = true
+
     for (const [id, state] of next) {
       if (current.get(id) !== state) {
         unchanged = false
         break
       }
     }
+
     if (unchanged) return current
   }
+
   return next
 }
 
@@ -112,7 +127,9 @@ export function useProjectedTimelineModel(
     () => {
       const projectId = options.projectId()
       const userId = options.userId()
+
       if (isLocalId('project', projectId)) return null
+
       return projectId && userId ? { projectId } : null
     },
     () => ['owned-tracks', options.projectId(), options.userId()],
@@ -123,7 +140,9 @@ export function useProjectedTimelineModel(
     () => {
       const projectId = options.projectId()
       const userId = options.userId()
+
       if (isLocalId('project', projectId)) return null
+
       return projectId && userId ? { projectId } : null
     },
     () => ['owned-clips', options.projectId(), options.userId()],
@@ -132,6 +151,7 @@ export function useProjectedTimelineModel(
   const existingTrackIds = createMemo(() => {
     const trackIds = new Set<Track['id']>()
     const data = options.fullViewData()
+
     if (data) {
       for (const track of data.tracks) {
         if (!options.removedTrackIds().has(track._id)) {
@@ -139,8 +159,10 @@ export function useProjectedTimelineModel(
         }
       }
     }
+
     if (isLocalId('project', options.projectId())) {
       const localSnapshot = options.localSnapshot()
+
       if (localSnapshot) {
         for (const track of localSnapshot.tracks) {
           if (!options.removedTrackIds().has(track.id)) {
@@ -149,25 +171,31 @@ export function useProjectedTimelineModel(
         }
       }
     }
+
     for (const [trackId] of options.pendingTrackEntriesById()) {
       trackIds.add(trackId)
     }
+
     return trackIds
   })
 
   const existingClipIds = createMemo(() => {
     const clipIds = new Set<string>()
     const data = options.fullViewData()
+
     if (data) {
       for (const clip of data.clips) {
         const clipId = String(clip._id)
+
         if (!options.removedClipIds().has(clipId)) {
           clipIds.add(clipId)
         }
       }
     }
+
     if (isLocalId('project', options.projectId())) {
       const localSnapshot = options.localSnapshot()
+
       if (localSnapshot) {
         for (const clip of localSnapshot.clips) {
           if (!options.removedClipIds().has(clip.id)) {
@@ -176,31 +204,40 @@ export function useProjectedTimelineModel(
         }
       }
     }
+
     for (const [clipId] of options.pendingClipCreatesById()) {
       clipIds.add(clipId)
     }
+
     return clipIds
   })
 
   const ownedTrackIds = createMemo(() => {
     if (isLocalId('project', options.projectId())) return existingTrackIds()
+
     return new Set<Track['id']>(ownedTracksQ.data ?? [])
   })
 
   const ownedClipIds = createMemo(() => {
     if (isLocalId('project', options.projectId())) return existingClipIds()
+
     return new Set<string>((ownedClipsQ.data ?? []).map((value: string) => String(value)))
   })
 
   const writableTrackIds = createMemo(() => {
     const optimistic = optimisticTrackWriteIds()
+
     return optimistic.size === 0 ? ownedTrackIds() : mergeIdSets(ownedTrackIds(), optimistic.keys())
   })
+
   const writableClipIds = createMemo(() => {
     const optimistic = optimisticClipWriteIds()
+
     return optimistic.size === 0 ? ownedClipIds() : mergeIdSets(ownedClipIds(), optimistic.keys())
   })
+
   const optimisticTrackIds = createMemo(() => new Set<Track['id']>(optimisticTrackWriteIds().keys()))
+
   const currentGrantScopeKey = createMemo(() => buildOptimisticGrantScopeKey({
     projectId: options.projectId(),
     userId: options.userId(),
@@ -237,6 +274,7 @@ export function useProjectedTimelineModel(
 
   const serverTrackState = createMemo(() => {
     const data = options.fullViewData()
+
     if (!data) return null
     const serverVolumes = new Map<Track['id'], number>()
     const serverMuted = new Map<Track['id'], boolean>()
@@ -247,18 +285,22 @@ export function useProjectedTimelineModel(
       assert(track.volume !== undefined, `Missing mixer channel volume for track ${String(track._id)}`)
       assert(track.sends !== undefined, `Missing mixer channel sends for track ${String(track._id)}`)
       serverVolumes.set(track._id, track.volume)
+
       if (track.muted !== undefined) {
         serverMuted.set(track._id, track.muted)
       }
+
       if (track.soloed !== undefined) {
         serverSoloed.set(track._id, track.soloed)
       }
+
       serverRouting.set(track._id, {
         outputTargetId: track.outputTargetId,
         sends: track.sends.map((send) => {
           const targetId = assertDefined(send?.targetId, `Missing mixer send target for track ${String(track._id)}`)
           const amount = Number(send.amount)
           assert(Number.isFinite(amount), `Invalid mixer send amount for track ${String(track._id)}`)
+
           return { targetId, amount, tap: send.tap }
         }),
       })

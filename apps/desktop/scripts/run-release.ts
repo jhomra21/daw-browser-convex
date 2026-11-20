@@ -61,12 +61,14 @@ const main = async (): Promise<void> => {
   if (process.platform !== "darwin") {
     fail("The macOS release helper must run on macOS.")
   }
+
   const command = isReleaseCommand(commandArgument)
     ? commandArgument
     : fail("Usage: bun scripts/run-release.ts <package|make> [--dry-run|--diagnostic] [Forge arguments...]")
 
   const desktopRoot = path.resolve(import.meta.dirname, "..")
   const projectRoot = path.resolve(desktopRoot, "../..")
+
   if (!diagnostic) rebuildNativePackageArtifacts(projectRoot)
   const artifactPaths = resolveNativeArtifactPaths(projectRoot)
   const identity = discoverSigningIdentity()
@@ -92,16 +94,20 @@ const main = async (): Promise<void> => {
       artifactPaths,
       manifestPath,
     )}\n`)
+
     return
   }
 
   const forgeRunner = path.join(import.meta.dirname, "run-forge.ts")
+
   const result = spawnSync(process.execPath, [forgeRunner, preparation.command, ...forgeArguments], {
     cwd: desktopRoot,
     env: preparation.environment,
     stdio: "inherit",
   })
+
   if (result.error) throw result.error
+
   if (result.status !== 0) {
     process.exitCode = result.status ?? 1
   }

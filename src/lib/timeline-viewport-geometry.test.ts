@@ -56,6 +56,7 @@ describe('timeline viewport geometry', () => {
       durationSec: 360,
       pixelsPerSecond: 240_000,
     })
+
     expect(projected.width).toBe(1000)
   })
 

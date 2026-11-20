@@ -24,6 +24,7 @@ export const createAutomationTarget = (
       ? { kind: 'track', trackId: owner.trackId }
       : { kind: 'track', trackId: owner.trackId, effectInstanceId }
   }
+
   return effectInstanceId === undefined
     ? { kind: 'master' }
     : { kind: 'master', effectInstanceId }
@@ -68,13 +69,17 @@ export const automationEnvelopeFromRow = (
   row: AutomationEnvelopeRow,
 ): AutomationEnvelope | null => {
   const effectInstanceId = row.effectInstanceId
+
   if (effectInstanceId !== undefined && effectInstanceId.length === 0) return null
+
   const target: AutomationTarget | null = row.targetKind === 'master'
     ? createAutomationTarget({ kind: 'master' }, effectInstanceId)
     : row.trackId
       ? createAutomationTarget({ kind: 'track', trackId: row.trackId }, effectInstanceId)
       : null
+
   if (!target) return null
+
   return {
     id: row._id,
     projectId: row.projectId,
@@ -105,11 +110,14 @@ export const automationEnvelopeValueRange = (
   if (!envelope || envelope.points.length === 0) return undefined
   let min = Number.POSITIVE_INFINITY
   let max = Number.NEGATIVE_INFINITY
+
   for (const point of envelope.points) {
     min = Math.min(min, point.value)
     max = Math.max(max, point.value)
   }
+
   if (!bounds) return { min, max }
+
   return {
     min: Math.max(bounds.min, Math.min(bounds.max, min)),
     max: Math.max(bounds.min, Math.min(bounds.max, max)),
@@ -121,6 +129,7 @@ export const automationTargetKeysForManualOverride = (
   targetKey: string,
 ): Set<string> => {
   if (current.has(targetKey)) return new Set(current)
+
   return new Set([...current, targetKey])
 }
 
@@ -129,7 +138,9 @@ export const automationTargetKeysAfterReEnable = (
   targetKeys: Iterable<string>,
 ): Set<string> => {
   const next = new Set(current)
+
   for (const targetKey of targetKeys) next.delete(targetKey)
+
   return next
 }
 

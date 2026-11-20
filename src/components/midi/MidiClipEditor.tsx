@@ -55,11 +55,13 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
   const [mappings, setMappings] = createSignal<MidiMapping[]>([])
   const [lastCreatedNoteLength, setLastCreatedNoteLength] = createSignal(0)
   const warnMissingUser = () => console.warn('[MidiClipEditor] Cannot edit or persist MIDI without a writable project.')
+
   const grid = createMemo(() => createMidiEditorGrid(
     props.bpm,
     props.gridDenominator,
     props.clipDurationSec,
   ))
+
   const persistence = useMidiEditorPersistence({
     clipId: () => props.clipId,
     projectId: () => props.projectId,
@@ -68,12 +70,16 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
     onLocalMidiSaved: (clipId, midi) => props.onLocalMidiSaved?.(clipId, midi),
     onCannotPersist: warnMissingUser,
   })
+
   const projectedMidi = createMemo(() => {
     const midi = props.midi
     const normalized = midi && Array.isArray(midi.notes) ? normalizeLegacyMidiClip(midi) : undefined
+
     return normalized ? persistence.project(normalized) : undefined
   })
+
   const clipId = createMemo(() => props.clipId)
+
   const mappingTargets = createMemo(() => getAutomationParameterOptionsForTarget(
     props.effectInstances ?? [],
     props.trackId,
@@ -90,6 +96,7 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
     started: boolean
     changed: boolean
   }
+
   let dragNote: DragState | null = null
   let projectedNotes: MidiEditorNote[] = []
   let root: HTMLDivElement | undefined
@@ -106,27 +113,35 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
   createEffect(() => {
     const m = props.midi
     const normalized = m && Array.isArray(m.notes) ? normalizeLegacyMidiClip(m) : undefined
+
     if (normalized) persistence.reconcile(normalized)
     const projected = projectedMidi()
+
     const nextNotes = projected
       ? projected.notes.flatMap((note) => (
         note.id === undefined ? [] : [{ ...note, id: note.id, channel: note.channel ?? 1 }]
       ))
       : []
+
     setMappings(projected?.mappings ?? [])
     projectedNotes = nextNotes
     const drag = dragNote
+
     if (drag && !nextNotes.some((note) => note.id === drag.noteId)) {
       cleanupNoteDragListeners()
       dragNote = null
       setNotes(nextNotes)
+
       return
     }
+
     if (drag) {
       const draft = drag.draft
       setNotes(nextNotes.map((note) => note.id === draft.id ? draft : note))
+
       return
     }
+
     setNotes(nextNotes)
   })
   createEffect(on(clipId, () => setSelectedNoteIds([])))
@@ -136,6 +151,7 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
   }))
 
   let gridRef: HTMLDivElement | undefined
+
   const pointToCell = (container: HTMLElement, event: PointerEvent) => (
     grid().cellFromPointer(container, event)
   )
@@ -152,33 +168,42 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
     const selectedIds = new Set(selectedNoteIds())
     const before = notes()
     const deleted = before.filter((note) => selectedIds.has(note.id))
+
     if (deleted.length === 0) return
     const after = before.filter((note) => !selectedIds.has(note.id))
     setNotes(after)
+
     for (const note of deleted) persistence.saveSoon({ kind: 'delete', id: note.id })
     props.onNotesEdited?.(props.clipId, before, after)
   }
+
   const duplicateSelectedNotes = () => {
     const selectedIds = new Set(selectedNoteIds())
     const selected = notes().filter((note) => selectedIds.has(note.id))
+
     if (selected.length === 0 || !persistence.canPersist()) return
     const start = Math.min(...selected.map((note) => note.beat))
     const end = Math.max(...selected.map((note) => note.beat + note.length))
     const offset = end - start
+
     const copies = selected
       .map((note) => ({ ...note, id: crypto.randomUUID(), beat: note.beat + offset }))
       .filter((note) => note.beat < grid().clipBeats)
+
     if (copies.length === 0) return
     const before = notes()
     const after = [...before, ...copies]
     setNotes(after)
+
     for (const note of copies) persistence.saveSoon({ kind: 'insert', note })
     props.onNotesEdited?.(props.clipId, before, after)
     setSelectedNoteIds(copies.map((note) => note.id))
   }
+
   const onLocalDuplicateRequest = () => duplicateSelectedNotes()
   createEffect(() => {
     const currentRoot = root
+
     if (!currentRoot) return
     currentRoot.addEventListener('timeline-local-duplicate', onLocalDuplicateRequest)
     onCleanup(() => currentRoot.removeEventListener('timeline-local-duplicate', onLocalDuplicateRequest))
@@ -199,24 +224,31 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
       event.preventDefault()
       event.stopPropagation()
       duplicateSelectedNotes()
+
       return
     }
+
     if (event.key === 'Escape' && !dragNote && selectedNoteIds().length > 0) {
       event.preventDefault()
       event.stopPropagation()
       setSelectedNoteIds([])
+
       return
     }
+
     if (event.key !== 'Delete' && event.key !== 'Backspace') return
+
     if (isEditableKeyboardTarget(event.target)) return
     event.preventDefault()
     event.stopPropagation()
+
     if (persistence.canPersist()) deleteSelectedNotes()
     else if (selectedNoteIds().length > 0) warnMissingUser()
   }
 
   const selectNote = (noteId: string, event: PointerEvent) => {
     const selected = selectedNoteIds()
+
     if (event.shiftKey || event.metaKey || event.ctrlKey) {
       setSelectedNoteIds(selected.includes(noteId)
         ? selected.filter((id) => id !== noteId)
@@ -227,15 +259,26 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
   }
 
   const onGridPointerDown = (e: PointerEvent) => {
-    if (dragNote) { e.preventDefault(); return }
+    if (dragNote) { e.preventDefault();
+
+ return }
+
     if (e.button !== 0) return
     const target = e.target
+
     if (target instanceof HTMLElement && target.closest('[data-midi-note="1"]')) return
     setSelectedNoteIds([])
-    if (!persistence.canPersist()) { warnMissingUser(); return }
-    const el = gridRef; if (!el) return
+
+    if (!persistence.canPersist()) { warnMissingUser();
+
+ return }
+
+    const el = gridRef;
+
+ if (!el) return
     const cell = pointToCell(el, e)
     const existing = grid().findNoteAtCell(notes(), cell)
+
     if (existing) {
       deleteNote(existing.id)
     } else {
@@ -246,6 +289,7 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
       const before = notes()
       const after = [...before, nextNote]
       setNotes(after)
+
       if (props.trackId) props.onAuditionNote?.(props.trackId, nextNote.pitch, nextNote.velocity, grid().noteDurationSeconds(nextNote.length, 0.5))
       persistence.saveSoon({ kind: 'insert', note: nextNote })
       props.onNotesEdited?.(props.clipId, before, after)
@@ -254,6 +298,7 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
 
   // Drag to move/resize notes
   const noteDragListenerOptions: AddEventListenerOptions = { capture: true }
+
   const cleanupNoteDragListeners = () => {
     props.onNoteDragStateChange?.(false)
     window.removeEventListener('pointermove', onNotePointerMove, noteDragListenerOptions)
@@ -263,33 +308,48 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
     window.removeEventListener('blur', cancelNoteDrag)
     gridRef?.removeEventListener('lostpointercapture', onNotePointerCancel)
     const pointerId = dragNote?.pointerId
+
     if (pointerId !== undefined && gridRef?.hasPointerCapture(pointerId)) gridRef.releasePointerCapture(pointerId)
   }
+
   const cancelNoteDrag = () => {
     cleanupNoteDragListeners()
     dragNote = null
     setNotes(projectedNotes)
   }
+
   const isForeignNotePointer = (e: PointerEvent) => dragNote !== null && e.pointerId !== dragNote.pointerId
+
   const onNoteDragKeyDown = (e: KeyboardEvent) => {
     if (e.key !== 'Escape') return
     e.preventDefault(); e.stopPropagation()
     cancelNoteDrag()
   }
+
   const onNotePointerDown = (noteId: string, target: HTMLElement, e: PointerEvent) => {
     if (e.button !== 0) return
     focusEditorOnPointerDown(e)
     e.preventDefault()
     selectNote(noteId, e)
+
     if (e.shiftKey || e.metaKey || e.ctrlKey) return
-    if (!persistence.canPersist()) { warnMissingUser(); return }
+
+    if (!persistence.canPersist()) { warnMissingUser();
+
+ return }
+
     // If this is a double-click, don't start dragging; deletion is handled by onDblClick
     if (e.detail >= 2) {
       return
     }
+
     if (dragNote) return
-    const n = grid().findNoteById(notes(), noteId); if (!n) return
-    const el = gridRef; if (!el) return
+    const n = grid().findNoteById(notes(), noteId);
+
+ if (!n) return
+    const el = gridRef;
+
+ if (!el) return
     const rect = target.getBoundingClientRect()
     const nearRight = (e.clientX - rect.left) > rect.width * 0.7
     const cell = pointToCell(el, e)
@@ -312,26 +372,38 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
     window.addEventListener('pointercancel', onNotePointerCancel, noteDragListenerOptions)
     window.addEventListener('keydown', onNoteDragKeyDown, noteDragListenerOptions)
     window.addEventListener('blur', cancelNoteDrag)
+
     // The note element is re-rendered for every draft, so the stable grid owns the pointer.
     try { el.setPointerCapture(e.pointerId) } catch {}
+
     el.addEventListener('lostpointercapture', onNotePointerCancel)
     // Audition on drag start
     const dur = Math.max(0.05, grid().noteDurationSeconds(n.length, 0.6))
+
     if (props.trackId) props.onAuditionNote?.(props.trackId, n.pitch, midiNoteVelocity(n), dur)
   }
+
   const onNotePointerMove = (e: PointerEvent) => {
     const drag = dragNote
+
     if (!drag || isForeignNotePointer(e)) return
+
     if (!persistence.canPersist()) { return }
-    const el = gridRef; if (!el) return
+
+    const el = gridRef;
+
+ if (!el) return
     const cell = pointToCell(el, e)
     const note = grid().findNoteById(notes(), drag.noteId)
+
     if (!note) {
       cancelNoteDrag()
+
       return
     }
 
     const pointerStep = grid().pointerStep(el, e)
+
     if (
       !drag.started
       && !grid().hasStartedNoteDrag(
@@ -345,41 +417,53 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
     setSelectedNoteIds((selected) => selected.includes(drag.noteId) ? selected : [...selected, drag.noteId])
 
     const next = grid().noteFromDrag(drag.drag, cell, pointerStep)
+
     if (grid().notesEqual(note, next)) return
     drag.changed = true
     drag.draft = next
     setNotes(prev => grid().replaceNoteById(prev, drag.noteId, next))
+
     if (drag.drag.mode === 'move' && note.pitch !== next.pitch) {
       if (props.trackId) props.onAuditionNote?.(props.trackId, next.pitch, midiNoteVelocity(next), grid().noteDurationSeconds(next.length, 0.25))
     }
   }
+
   const onNotePointerUp = (e: PointerEvent) => {
     if (isForeignNotePointer(e)) return
     const drag = dragNote
     cleanupNoteDragListeners()
+
     if (!persistence.canPersist()) {
       cancelNoteDrag()
+
       return
     }
+
     if (drag?.changed) {
       // Read before saveSoon: it re-projects synchronously and would replace projectedNotes with the moved list.
       const before = projectedNotes
       const note = grid().findNoteById(notes(), drag.noteId)
+
       if (note) setLastCreatedNoteLength(note.length)
       const original = grid().findNoteById(before, drag.noteId)
+
       if (note && original && !grid().notesEqual(original, drag.draft)) {
         const changes = drag.drag.mode === 'resize'
           ? { length: note.length }
           : { beat: note.beat, pitch: note.pitch }
+
         persistence.saveSoon({ kind: 'update', id: drag.noteId, changes })
         props.onNotesEdited?.(props.clipId, before, grid().replaceNoteById(before, drag.noteId, drag.draft))
       }
     }
+
     dragNote = null
   }
+
   const onNotePointerCancel = (e: PointerEvent) => {
     if (!isForeignNotePointer(e)) cancelNoteDrag()
   }
+
   createEffect(() => {
     if (!persistence.canPersist() && dragNote) cancelNoteDrag()
   })
@@ -387,52 +471,67 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
 
   // Velocity drag: the live value is an overlay, so notes stay projected until pointerup commits one update.
   type VelocityDrag = { noteId: string; startY: number; startVelocity: number; velocity: number }
+
   const [velocityDrag, setVelocityDrag] = createSignal<VelocityDrag | null>(null)
+
   const displayedVelocity = (note: MidiEditorNote) => {
     const drag = velocityDrag()
+
     return drag?.noteId === note.id ? drag.velocity : midiNoteVelocity(note)
   }
+
   let velocityLaneRef: HTMLDivElement | undefined
+
   const endVelocityDrag = () => {
     setVelocityDrag(null)
     props.onNoteDragStateChange?.(false)
   }
+
   const commitVelocity = (drag: VelocityDrag) => {
     if (!persistence.canPersist()) return
     // Read before saveSoon: it re-projects synchronously and would replace projectedNotes.
     const before = projectedNotes
     const original = grid().findNoteById(before, drag.noteId)
+
     if (!original || midiVelocityValue(midiNoteVelocity(original)) === midiVelocityValue(drag.velocity)) return
     const after = grid().replaceNoteById(before, drag.noteId, { ...original, velocity: drag.velocity })
     persistence.saveSoon({ kind: 'update', id: drag.noteId, changes: { velocity: drag.velocity } })
     props.onNotesEdited?.(props.clipId, before, after)
   }
+
   const velocityPointer = useDrag({
     disabled: () => !persistence.canPersist(),
     onDragMove: (pos) => {
       const drag = velocityDrag()
       const lane = velocityLaneRef
+
       if (!drag || !lane) return
+
       const velocity = midiVelocityFromDrag({
         startVelocity: drag.startVelocity,
         startY: drag.startY,
         y: pos.y,
         laneHeight: lane.getBoundingClientRect().height,
       })
+
       if (velocity !== drag.velocity) setVelocityDrag({ ...drag, velocity })
     },
     onDragEnd: () => {
       const drag = velocityDrag()
+
       if (drag) commitVelocity(drag)
       endVelocityDrag()
     },
     onDragCancel: endVelocityDrag,
   })
+
   const onVelocityPointerDown = (noteId: string, event: PointerEvent) => {
     if (event.button !== 0) return
     focusEditorOnPointerDown(event)
+
     if (!persistence.canPersist()) return
     const note = grid().findNoteById(notes(), noteId)
+
     if (!note) return
     const velocity = midiNoteVelocity(note)
     setVelocityDrag({ noteId, startY: event.clientY, startVelocity: velocity, velocity })
@@ -489,11 +588,15 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
 
   const sourceForKind = (mapping: MidiMapping, kind: MidiMapping['source']['kind']): MidiMapping['source'] => {
     const channel = mapping.source.channel
+
     if (kind === 'cc') return { kind, controller: mapping.source.kind === 'cc' ? mapping.source.controller : 1, channel }
+
     if (kind === 'poly-pressure') {
       const pitch = mapping.source.kind === 'poly-pressure' ? mapping.source.pitch : undefined
+
       return { kind, channel, pitch }
     }
+
     return { kind, channel }
   }
 
@@ -505,6 +608,7 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
 
   const boundedMidiValue = (value: string) => {
     const parsed = Number(value)
+
     return Number.isFinite(parsed) ? Math.min(127, Math.max(0, Math.round(parsed))) : 0
   }
 
@@ -534,10 +638,12 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
         <For each={mappings()}>
         {(mapping) => {
           const selectedTargetKey = midiMappingTargetKey(mapping.target)
+
           const available = createMemo(() => mappingTargets().some((option) => midiMappingTargetKey({
             parameterId: option.parameterId,
             effectInstanceId: option.effectInstanceId,
           }) === selectedTargetKey))
+
           return (
             <div class="flex shrink-0 flex-wrap items-center gap-1 border-l border-border pl-2">
               <select
@@ -547,6 +653,7 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
                 disabled={!persistence.canPersist()}
                 onChange={(event) => {
                   const kind = mappingSourceKind(event.currentTarget.value)
+
                   if (!kind) return
                   persistence.saveSoon({
                     kind: 'update-mapping',
@@ -632,6 +739,7 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
                     parameterId: candidate.parameterId,
                     effectInstanceId: candidate.effectInstanceId,
                   }) === event.currentTarget.value)
+
                   if (!option) return
                   persistence.saveSoon({
                     kind: 'update-mapping',
@@ -702,6 +810,7 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
           {(row) => {
             const pitch = grid().pitchForRow(row)
             const isBlackKey = grid().isBlackKey(pitch)
+
             return (
               <button
                 type="button"
@@ -762,7 +871,11 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
             onClick={stopAndPreventEditorEvent}
             onDblClick={(event) => {
               stopAndPreventEditorEvent(event)
-              if (!persistence.canPersist()) { warnMissingUser(); return }
+
+              if (!persistence.canPersist()) { warnMissingUser();
+
+ return }
+
               deleteNote(note.id)
             }}
             data-midi-note="1"
@@ -788,6 +901,7 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
   // Text fields and buttons keep their own focus, which is still inside the root.
   const focusEditorOnPointerDown = (event: PointerEvent) => {
     stopEditorEvent(event)
+
     if (isEditableKeyboardTarget(event.target) || isButtonKeyboardTarget(event.target)) return
     root?.focus({ preventScroll: true })
   }

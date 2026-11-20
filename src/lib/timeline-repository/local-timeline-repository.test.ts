@@ -30,6 +30,7 @@ test('normalizes and preserves expanded local MIDI without reference equality', 
   const projectId = 'project:local-expanded-midi'
   const repository = createLocalTimelineRepository(projectId)
   const track = await repository.createTrack({ id: 'instrument-track', kind: 'instrument' })
+
   const clip = await repository.createClip({
     id: 'midi-clip',
     trackId: track.id,
@@ -48,17 +49,21 @@ test('normalizes and preserves expanded local MIDI without reference equality', 
       }],
     },
   })
+
   const snapshot = await repository.loadSnapshot()
   const stored = snapshot.clips[0]
   expect(stored?.midi).toEqual(expect.objectContaining({
     cc: [{ id: 'cc-1', beat: 0, controller: 1, value: 0.5, channel: 2 }],
     mappings: clip.midi?.mappings,
   }))
+
   if (!stored?.midi) throw new Error('Expected normalized MIDI clip.')
+
   const updated = await repository.updateClip({
     clipId: clip.id,
     midi: stored.midi,
   })
+
   expect(updated?.updatedAt).toBe(clip.updatedAt)
 })
 
@@ -92,6 +97,7 @@ test('restores historical local MIDI through the dedicated legacy path', async (
   const projectId = 'project:local-history-midi'
   const repository = createLocalTimelineRepository(projectId)
   const track = await repository.createTrack({ id: 'instrument-track', kind: 'instrument' })
+
   const restored = await repository.restoreHistoryClip({
     id: 'restored-midi',
     historyRef: 'historical-midi',
@@ -108,6 +114,7 @@ test('restores historical local MIDI through the dedicated legacy path', async (
       ],
     },
   })
+
   expect(restored.midi).toMatchObject({ wave: '', gain: 7 })
   expect(restored.midi?.notes).toHaveLength(503)
   await expect(repository.createClip({
@@ -122,6 +129,7 @@ test('creation repairs interleaved legacy Return indexes atomically', async () =
   const projectId = 'project:local-return-creation-repair'
   const db = await openLocalProjectDb(projectId)
   const timestamp = 1
+
   const legacyTracks = [
     buildTimelineTrackRow({
       id: 'normal-a',
@@ -149,6 +157,7 @@ test('creation repairs interleaved legacy Return indexes atomically', async () =
       timestamp,
     }),
   ]
+
   await Promise.all(legacyTracks.map((track) =>
     db.put(
       'entities',
@@ -158,12 +167,14 @@ test('creation repairs interleaved legacy Return indexes atomically', async () =
 
   const repository = createLocalTimelineRepository(projectId)
   const normal = await repository.createTrack({ id: 'normal-new' })
+
   const returnTrack = await repository.createTrack({
     id: 'return-new',
     channelRole: 'return',
     index: 0,
     collapsed: false,
   })
+
   const snapshot = await repository.loadSnapshot()
 
   expect(normal.index).toBe(2)
@@ -241,6 +252,7 @@ test('persists fades with clip creation and atomically clamps them on duration u
 test('allows ungrouping a legacy Return track and unrelated updates', async () => {
   const projectId = 'project:local-return-ungroup-update'
   const db = await openLocalProjectDb(projectId)
+
   const legacyReturn = buildTimelineTrackRow({
     id: 'return',
     index: 0,
@@ -248,6 +260,7 @@ test('allows ungrouping a legacy Return track and unrelated updates', async () =
     groupId: 'legacy-group',
     timestamp: 1,
   })
+
   await db.put(
     'entities',
     createLocalProjectEntityRow('track', legacyReturn.id, legacyReturn, 1),
@@ -270,6 +283,7 @@ test('restores a group immediately before the Return partition', async () => {
   const repository = createLocalTimelineRepository(projectId)
   await repository.createTrack({ id: 'normal' })
   await repository.createTrack({ id: 'return', channelRole: 'return' })
+
   const group = buildTimelineTrackRow({
     id: 'restored-group',
     index: 1,
@@ -300,6 +314,7 @@ test('rejects restoring a group with a Return child without writing any tracks',
   const repository = createLocalTimelineRepository(projectId)
   await repository.createTrack({ id: 'return', channelRole: 'return' })
   const before = await repository.loadSnapshot()
+
   const group = buildTimelineTrackRow({
     id: 'restored-group',
     index: 0,

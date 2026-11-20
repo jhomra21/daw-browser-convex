@@ -17,6 +17,7 @@ type DeviceGraphHandle = {
 }
 
 const clampGraphValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
 const graphKey = (key: string): GraphKey | undefined => {
   if (
     key === 'ArrowRight'
@@ -28,6 +29,7 @@ const graphKey = (key: string): GraphKey | undefined => {
     || key === 'Home'
     || key === 'End'
   ) return key
+
   return undefined
 }
 
@@ -37,6 +39,7 @@ export function handleGraphKeyDelta(
 ) {
   const key = graphKey(event.key)
   const apply = key === undefined ? undefined : deltas[key]
+
   if (!apply) return
   event.preventDefault()
   apply()
@@ -59,18 +62,23 @@ export function DraggableDeviceGraph(props: {
   let graphRef: HTMLDivElement | undefined
   let dragBounds: DOMRect | undefined
   const gesture = useParameterGesture({ onClosed: () => drag.cancelDrag() })
+
   const graphPoint = (position: { x: number, y: number }) => {
     const bounds = dragBounds ?? graphRef?.getBoundingClientRect()
+
     if (!bounds) return { x: 0, y: 0 }
+
     return {
       x: clampGraphValue(((position.x - bounds.left) / bounds.width) * GRAPH_WIDTH, 0, GRAPH_WIDTH),
       y: clampGraphValue(((position.y - bounds.top) / bounds.height) * GRAPH_HEIGHT, 0, GRAPH_HEIGHT),
     }
   }
+
   const finishDrag = () => {
     dragBounds = undefined
     setActiveHandle()
   }
+
   // A handle drag is one gesture. Escape, pointer cancel and lost capture are handled by useDrag.
   const drag = useDrag({
     disabled: () => props.disabled,
@@ -132,18 +140,24 @@ export function DraggableDeviceGraph(props: {
             }}
             onKeyDown={(event) => {
               if (props.disabled || event.metaKey || event.ctrlKey || event.altKey) return
+
               if (event.key === 'Escape' && gesture.isOpen()) {
                 event.preventDefault()
                 event.stopPropagation()
                 gesture.cancel()
+
                 return
               }
+
               if (graphKey(event.key) === undefined) return
+
               // Auto-repeat only continues a hold: after Escape or an owner close it must not open a new gesture.
               if (event.repeat && !gesture.isOpen()) {
                 event.preventDefault()
+
                 return
               }
+
               gesture.open()
               gesture.tick(() => handle.onKeyDown?.(event))
             }}

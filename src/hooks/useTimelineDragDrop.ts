@@ -47,21 +47,28 @@ export function useTimelineDragDrop(
 
   const updateDropTarget = (clientY: number) => {
     const scrollElement = options.scrollElement()
+
     if (!scrollElement) return
     const y = clientYToTimelineTrackY(clientY, scrollElement)
     const laneIndex = trackIndexAtY(options.trackLayout(), y)
+
     if (laneIndex >= 0) {
       setDropTargetLane(laneIndex)
       setDropAtNewTrack(false)
+
       return
     }
+
     const layout = options.trackLayout()
     const trackAreaBottom = layout.length === 0 ? 0 : layout[layout.length - 1].topPx + layout[layout.length - 1].heightPx
+
     if (y >= trackAreaBottom) {
       setDropTargetLane(null)
       setDropAtNewTrack(true)
+
       return
     }
+
     clearDropTarget()
   }
 
@@ -75,6 +82,7 @@ export function useTimelineDragDrop(
 
   const isSupportedDrag = (event: DragEvent) => {
     const transfer = event.dataTransfer
+
     return Boolean(
       transfer?.types.includes(SAMPLE_DRAG_DATA_TYPE)
       || transfer?.types.includes('Files'),
@@ -84,8 +92,10 @@ export function useTimelineDragDrop(
   const isSupportedDragInsideTimeline = (event: DragEvent) => {
     if (!isSupportedDrag(event)) return false
     const scrollElement = options.scrollElement()
+
     if (!scrollElement) return false
     const bounds = scrollElement.getBoundingClientRect()
+
     return (
       event.clientX >= bounds.left
       && event.clientX <= bounds.right
@@ -103,6 +113,7 @@ export function useTimelineDragDrop(
 
   const handleRootDrop = async (event: DragEvent) => {
     if (event.defaultPrevented) return
+
     if (!isSupportedDragInsideTimeline(event)) return
     await runDrop(event)
   }

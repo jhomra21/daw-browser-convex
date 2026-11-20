@@ -12,6 +12,7 @@ import { z } from 'zod'
 const repositoryRoot = new URL('../../', import.meta.url).pathname
 const evidenceDirectory = `/tmp/daw-pointer-gesture-ownership-${crypto.randomUUID()}`
 const fixtureId = 'virtual:pointer-gesture-fixture'
+
 // These fixtures use local projects. A durable call is a wiring error, not an invented admission or completion.
 const localOnlyOutboxStub = `
 export const publishDurableSharedTimelineOperation = async () => { throw new Error('Unexpected cloud operation in local fixture') }
@@ -23,6 +24,7 @@ export const subscribeToSharedOutboxSettlements = () => { throw new Error('Unexp
 
 const buildFixture = async (source: string, stubs: Record<string, string>) => {
   const stubFor = (id: string) => Object.keys(stubs).find((suffix) => id.endsWith(suffix))
+
   const result = await build({
     root: repositoryRoot,
     configFile: false,
@@ -33,22 +35,28 @@ const buildFixture = async (source: string, stubs: Record<string, string>) => {
       resolveId: (id) => {
         if (id.endsWith(fixtureId)) return `\0${fixtureId}.ts`
         const stub = stubFor(id)
+
         return stub ? `\0stub:${stub}.ts` : undefined
       },
       load: (id) => {
         if (id === `\0${fixtureId}.ts`) return source
+
         return id.startsWith('\0stub:') ? stubs[id.slice('\0stub:'.length, -'.ts'.length)] : undefined
       },
     }],
     resolve: { alias: { '~': `${repositoryRoot}src` } },
     build: { write: false, minify: false, lib: { entry: fixtureId, formats: ['iife'], name: 'pointerGestureFixture' } },
   })
+
   const output = Array.isArray(result) ? result[0] : result
+
   if (!output || !('output' in output)) throw new Error('Expected a single fixture bundle.')
+
   // Fixtures that import the app stylesheet get real Tailwind layout, which pointer geometry depends on.
   const styles = output.output.flatMap((chunk) => (
     chunk.type === 'asset' && chunk.fileName.endsWith('.css') ? [String(chunk.source)] : []
   ))
+
   return `<!doctype html><head><style>${styles.join('\n')}</style></head><body style="margin:0"><script>${output.output[0].code}</script>`
 }
 
@@ -57,16 +65,21 @@ const openFixture = async (name: string, source: string, stubs: Record<string, s
   await mkdir(directory, { recursive: true })
   await Bun.write(`${directory}/index.html`, await buildFixture(source, stubs))
   const session = `pointer-gesture-${name}-${crypto.randomUUID()}`
+
   const run = async (...args: string[]) => {
     const env = { ...process.env }
     delete env.AGENT_BROWSER_CDP
     delete env.AGENT_BROWSER_SESSION
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
     const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
+
     if (await child.exited !== 0) throw new Error(stderr || stdout)
+
     return stdout.trim()
   }
+
   await run('open', `file://${directory}/index.html`)
+
   return {
     directory,
     mouse: (action: 'move' | 'down' | 'up', x?: number, y?: number) => (
@@ -152,6 +165,7 @@ const resizeResultSchema = z.object({
   duration: z.number(),
   resizing: z.boolean(),
 })
+
 const resizeLiveSchema = z.object({ duration: z.number(), resizing: z.boolean() })
 
 test('clip resize commits only on owner release and reverts on every cancel path', async () => {
@@ -161,31 +175,40 @@ test('clip resize commits only on owner release and reverts on every cancel path
     })`,
     'lib/clip-mutations': `export const persistClipTimingAndAudioWarp = async () => { throw new Error('Cloud clip persistence is outside this fixture.') }`,
   })
+
   const results: Record<string, z.infer<typeof resizeResultSchema>> = {}
   let foreignPointerLive: z.infer<typeof resizeLiveSchema> | undefined
+
   try {
     for (const scenario of ['release', 'pointercancel', 'escape', 'lost-capture', 'blur', 'foreign-pointer', 'detached-handle']) {
       const start = await page.read(pointSchema, 'resizeFixture.mount()')
       await page.mouse('move', start.x, start.y)
       await page.mouse('down')
       await page.mouse('move', start.x + 100, start.y)
+
       if (scenario === 'pointercancel') await page.evaluate('resizeFixture.pointer("pointercancel", 1, 300)')
+
       if (scenario === 'escape') await page.press('Escape')
+
       if (scenario === 'blur') await page.evaluate('resizeFixture.blur()')
+
       if (scenario === 'lost-capture') {
         await page.evaluate('resizeFixture.stealCapture()')
         await page.mouse('move', start.x + 110, start.y)
       }
+
       if (scenario === 'foreign-pointer') {
         await page.evaluate('resizeFixture.pointer("pointermove", 2, 700)')
         await page.evaluate('resizeFixture.pointer("pointercancel", 2, 700)')
         await page.evaluate('resizeFixture.pointer("pointerup", 2, 700)')
         foreignPointerLive = await page.read(resizeLiveSchema, 'resizeFixture.live()')
       }
+
       if (scenario === 'detached-handle') {
         await page.evaluate('resizeFixture.detachHandle()')
         await page.mouse('move', start.x + 150, start.y)
       }
+
       await page.mouse('up')
       // A stray move after the gesture would change the clip if a listener leaked.
       await page.mouse('move', start.x + 250, start.y)
@@ -196,6 +219,7 @@ test('clip resize commits only on owner release and reverts on every cancel path
     console.log(`Clip resize evidence: ${page.directory}/results.json`)
     await page.close()
   }
+
   const committed = (duration: number) => ({ commits: [duration], history: ['clip-timing'], persisted: [duration], duration, resizing: false })
   const reverted = { commits: [], history: [], persisted: [], duration: 2, resizing: false }
   expect(results.release).toMatchObject(committed(3))
@@ -400,6 +424,7 @@ test('effect card reorder remeasures scrolled geometry on pointer release', asyn
   const page = await openFixture('reorder', reorderScrollFixture)
   const reorderResultSchema = z.object({ targetIndex: z.number().optional(), scrollLeft: z.number(), events: z.array(z.string()), header: z.boolean() })
   let result = reorderResultSchema.parse({ scrollLeft: 0, events: [], header: false })
+
   try {
     const point = await page.read(pointSchema, 'reorderScrollFixture.mount()')
     await page.mouse('move', point.x, point.y)
@@ -413,6 +438,7 @@ test('effect card reorder remeasures scrolled geometry on pointer release', asyn
     console.log(`Effect reorder evidence: ${page.directory}/results.json`)
     await page.close()
   }
+
   expect(result.scrollLeft).toBe(100)
   expect(result.targetIndex).toBe(2)
 }, 120_000)
@@ -443,6 +469,7 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
     'lib/shared-outbox': localOnlyOutboxStub,
     'context/app-preferences': `export const useAppPreferences = () => ({ appearance: { themeTokens: () => ({}) } })`,
   })
+
   const resultSchema = z.object({
     writes: z.array(z.object({ projectId: z.string(), targetId: z.string(), instanceId: z.string(), feedback: z.number() })),
     history: z.number(),
@@ -455,7 +482,9 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
     order: z.array(z.string()),
     targetFeedback: z.number().optional(),
   })
+
   const evidence = new Map<string, object>()
+
   const startGesture = async () => {
     await page.read(pointSchema, 'effectLifecycleFixture.mount()')
     const before = await page.read(resultSchema, 'effectLifecycleFixture.result()')
@@ -464,8 +493,10 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
     await page.mouse('move', point.x, point.y)
     await page.mouse('down')
     await page.mouse('move', point.x, point.y - 45)
+
     return { before, held: await result() }
   }
+
   const startQueuedGesture = async () => {
     await page.read(pointSchema, 'effectLifecycleFixture.mount()')
     const before = await page.read(resultSchema, 'effectLifecycleFixture.result()')
@@ -476,11 +507,15 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
     await page.mouse('move', point.x, point.y - 45)
     const queuedPreviewCount = await page.evaluate('effectLifecycleFixture.queuedPreviewCount()')
     expect(queuedPreviewCount).toBe('1')
+
     return { before, queuedPreviewCount }
   }
+
   const result = () => page.read(resultSchema, 'effectLifecycleFixture.result()')
+
   const delta = async (before: z.infer<typeof resultSchema>) => {
     const after = await result()
+
     return {
       writes: after.writes.slice(before.writes.length),
       history: after.history - before.history,
@@ -493,6 +528,7 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
       targetFeedback: after.targetFeedback,
     }
   }
+
   try {
     let gesture = await startGesture()
     let before = gesture.before
@@ -512,10 +548,12 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
     await page.evaluate('effectLifecycleFixture.keyboardEdit()')
     await page.evaluate('effectLifecycleFixture.flushPending()')
     const targetKeyboard = await result()
+
     const keyboardAfterTargetSwitch = {
       writes: targetKeyboard.writes.slice(before.writes.length),
       history: targetKeyboard.history - before.history,
     }
+
     evidence.set('keyboardAfterTargetSwitch', keyboardAfterTargetSwitch)
     expect(keyboardAfterTargetSwitch).toMatchObject({ writes: [{ projectId: 'project:lifecycle-one', targetId: 'track:one', instanceId: 'delay-1' }], history: 1 })
 
@@ -567,10 +605,12 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
     await page.evaluate('effectLifecycleFixture.keyboardEdit()')
     await page.evaluate('effectLifecycleFixture.flushPending()')
     const newProjectEdit = await result()
+
     const newProjectKeyboardEdit = {
       writes: newProjectEdit.writes.slice(before.writes.length),
       history: newProjectEdit.history - before.history,
     }
+
     evidence.set('newProjectKeyboardEdit', newProjectKeyboardEdit)
     expect(newProjectKeyboardEdit).toMatchObject({ writes: [{ projectId: 'project:lifecycle-two', targetId: 'track:one', instanceId: 'delay-1' }], history: 1 })
   } finally {
@@ -711,6 +751,7 @@ const utilityResultSchema = z.object({
 test('Utility Gain restores the pre-gesture value on every cancel path', async () => {
   const page = await openFixture('utility-gain', utilityFixture, utilityStubs)
   const results: Record<string, z.infer<typeof utilityResultSchema>> = {}
+
   try {
     for (const legacy of [true, false]) {
       for (const scenario of ['release', 'pointercancel', 'escape', 'lost-capture', 'blur', 'shift-cancel', 'release-at-baseline']) {
@@ -722,18 +763,24 @@ test('Utility Gain restores the pre-gesture value on every cancel path', async (
         // Read while still held: a preview is not persisted.
         const held = await page.read(utilityResultSchema, 'utilityFixture.result()')
         results[`${legacy}:${scenario}:held`] = held
+
         if (scenario === 'pointercancel') await page.evaluate('utilityFixture.pointer("pointercancel", {})')
+
         if (scenario === 'escape') await page.press('Escape')
+
         if (scenario === 'blur') await page.evaluate('utilityFixture.blur()')
+
         if (scenario === 'lost-capture') {
           await page.evaluate('utilityFixture.stealCapture()')
           await page.mouse('move', start.x, start.y - 50)
         }
+
         if (scenario === 'shift-cancel') {
           // Shift rebases the precision drag; cancel must still restore the gesture start.
           await page.evaluate(`utilityFixture.pointer("pointermove", { clientX: ${start.x}, clientY: ${start.y - 80}, shiftKey: true })`)
           await page.evaluate('utilityFixture.pointer("pointercancel", {})')
         }
+
         if (scenario === 'release-at-baseline') await page.mouse('move', start.x, start.y)
         await page.mouse('up')
         await page.mouse('move', start.x, start.y - 120)
@@ -745,6 +792,7 @@ test('Utility Gain restores the pre-gesture value on every cancel path', async (
     console.log(`Utility Gain evidence: ${page.directory}/results.json`)
     await page.close()
   }
+
   for (const legacy of [true, false]) {
     const released = results[`${legacy}:release`]
     expect(released?.changes.length).toBeGreaterThan(0)
@@ -753,6 +801,7 @@ test('Utility Gain restores the pre-gesture value on every cancel path', async (
     expect(released?.history).toEqual([{ from: 0, to: released?.gainDb }])
     expect(released?.writes).toEqual([released?.gainDb])
     expect(released?.persistedGainDb).toBe(released?.gainDb ?? Number.NaN)
+
     for (const scenario of ['pointercancel', 'escape', 'lost-capture', 'blur', 'shift-cancel', 'release-at-baseline']) {
       const held = results[`${legacy}:${scenario}:held`]
       expect(held?.history).toEqual([])
@@ -894,8 +943,10 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
     'lib/timeline-repository/local-timeline-repository': `export const createLocalTimelineRepository = () => ({}); export const flushLocalTimelineWrites = async () => {}`,
     'lib/shared-outbox': localOnlyOutboxStub,
   })
+
 const resultSchema = z.object({ writes: z.array(z.number()), history: z.number(), historyEntries: z.array(z.unknown()), historyEntry: z.unknown().optional(), calls: z.array(z.number().nullable()), value: z.number(), frames: z.number(), previews: z.number(), flushes: z.number(), nativeValues: z.array(z.number()), overrides: z.array(z.string()) })
   const evidence: Record<string, z.infer<typeof resultSchema>> = {}
+
   try {
     const start = await page.read(pointSchema, 'deviceKnobFixture.mount()')
     await page.evaluate('deviceKnobFixture.reset()')
@@ -925,6 +976,7 @@ const resultSchema = z.object({ writes: z.array(z.number()), history: z.number()
     expect(cancelled.writes).toEqual([])
     expect(cancelled.history).toBe(0)
     expect(cancelled.value).toBe(0.25)
+
     for (const legacy of [false]) {
       for (const targetId of ['track:one', 'master']) {
         const nativeStart = await page.read(pointSchema, `deviceKnobFixture.mount(${legacy}, ${JSON.stringify(targetId)})`)
@@ -953,6 +1005,7 @@ const resultSchema = z.object({ writes: z.array(z.number()), history: z.number()
           await page.mouse('move', cancelStart.x, cancelStart.y)
           await page.mouse('down')
           await page.mouse('move', cancelStart.x, cancelStart.y - 35)
+
           if (cancel === 'escape') await page.press('Escape')
           else await page.evaluate('deviceKnobFixture.cancel()')
           const rolledBack = await page.read(resultSchema, 'deviceKnobFixture.result()')
@@ -969,12 +1022,14 @@ const resultSchema = z.object({ writes: z.array(z.number()), history: z.number()
 
     const rapidStart = await page.read(pointSchema, 'deviceKnobFixture.mount(false)')
     await page.evaluate('deviceKnobFixture.reset()')
+
     for (const offset of [30, 60]) {
       await page.mouse('move', rapidStart.x, rapidStart.y)
       await page.mouse('down')
       await page.mouse('move', rapidStart.x, rapidStart.y - offset)
       await page.mouse('up')
     }
+
     const rapidReleases = await page.read(resultSchema, 'deviceKnobFixture.result()')
     evidence.rapidReleases = rapidReleases
     expect(rapidReleases.history).toBe(2)
@@ -1029,6 +1084,7 @@ const resultSchema = z.object({ writes: z.array(z.number()), history: z.number()
     const pressKey = (key: string, type: 'keydown' | 'keyup', repeat = false) => page.evaluate(`document.querySelector('[aria-label="Feedback"]').dispatchEvent(new KeyboardEvent(${JSON.stringify(type)}, { key: ${JSON.stringify(key)}, repeat: ${repeat}, bubbles: true, cancelable: true }))`)
     const shownValue = () => page.read(z.string(), `document.querySelector('[aria-label="Feedback"]').getAttribute('aria-valuenow')`)
     await pressKey('ArrowUp', 'keydown')
+
     for (let index = 0; index < 5; index++) await pressKey('ArrowUp', 'keydown', true)
     expect(Number(await shownValue())).toBeCloseTo(0.33)
     const heldKeyboard = await page.read(resultSchema, 'deviceKnobFixture.result()')
@@ -1092,6 +1148,7 @@ const resultSchema = z.object({ writes: z.array(z.number()), history: z.number()
 test('Utility reports playback and storage failures through separate surfaces', async () => {
   const page = await openFixture('utility-failures', utilityFixture, utilityStubs)
   const results: Record<string, z.infer<typeof utilityResultSchema>> = {}
+
   try {
     for (const failure of ['engine', 'persist']) {
       const start = await page.read(pointSchema, 'utilityFixture.mount()')
@@ -1107,6 +1164,7 @@ test('Utility reports playback and storage failures through separate surfaces', 
     console.log(`Utility failure evidence: ${page.directory}/results.json`)
     await page.close()
   }
+
   // A released edit whose engine apply failed is not saved: the knob returns to what the engine holds, and the failure is
   // reported as playback (the preview) and as an unsaved local edit (the release).
   expect(results.engine).toMatchObject({ errors: ['Engine is unavailable'], writes: [], history: [], gainDb: 0, persistedGainDb: 0 })
@@ -1160,6 +1218,7 @@ window.effectFailureFixture = {
   },
 }
 `
+
 const effectFailureSchema = z.object({
   engineErrors: z.array(z.object({ message: z.string(), projectId: z.string() })),
   persistenceErrors: z.array(z.object({ message: z.string(), projectId: z.string() })),
@@ -1169,6 +1228,7 @@ const effectFailureSchema = z.object({
 test('effect engine failures are not reported as persistence failures', async () => {
   const page = await openFixture('effect-failures', effectFailureFixture)
   const results: Record<string, z.infer<typeof effectFailureSchema>> = {}
+
   try {
     for (const mode of ['local-sync', 'local-async', 'remote-sync', 'remote-async', 'persist']) {
       results[mode] = await page.read(effectFailureSchema, `effectFailureFixture.run(${JSON.stringify(mode)})`)
@@ -1178,12 +1238,14 @@ test('effect engine failures are not reported as persistence failures', async ()
     console.log(`Effect failure evidence: ${page.directory}/results.json`)
     await page.close()
   }
+
   for (const mode of ['local-sync', 'local-async', 'remote-sync', 'remote-async']) {
     expect(results[mode]).toMatchObject({
       engineErrors: [{ message: mode, projectId: 'project:failure-fixture' }],
       persistenceErrors: [], escaped: null,
     })
   }
+
   expect(results.persist?.engineErrors).toEqual([])
   expect(results.persist?.persistenceErrors[0]).toEqual({ message: 'persist', projectId: 'project:failure-fixture' })
 }, 120_000)
@@ -1236,18 +1298,22 @@ window.eqFixture = {
   result: () => ({ events: state.events, gainDb: state.params().bands[0].gainDb }),
 }
 `
+
 test('EQ knob cancellation dispatches cancel rather than commit', async () => {
   const page = await openFixture('eq-gain', eqFixture, {
     'context/app-preferences': `export const useAppPreferences = () => ({ appearance: { themeTokens: () => ({}) } })`,
   })
+
   const schema = z.object({ events: z.array(z.string()), gainDb: z.number() })
   const results: Record<string, z.infer<typeof schema>> = {}
+
   try {
     for (const scenario of ['release', 'escape']) {
       const start = await page.read(pointSchema, 'eqFixture.mount()')
       await page.mouse('move', start.x, start.y)
       await page.mouse('down')
       await page.mouse('move', start.x, start.y - 30)
+
       if (scenario === 'escape') await page.press('Escape')
       await page.mouse('up')
       results[scenario] = await page.read(schema, 'eqFixture.result()')
@@ -1257,6 +1323,7 @@ test('EQ knob cancellation dispatches cancel rather than commit', async () => {
     console.log(`EQ gesture evidence: ${page.directory}/results.json`)
     await page.close()
   }
+
   expect(results.release?.events).toEqual(['begin', 'commit'])
   expect(results.release?.gainDb).not.toBe(0)
   expect(results.escape).toEqual({ events: ['begin', 'cancel'], gainDb: 0 })
@@ -1505,6 +1572,7 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
     'lib/shared-outbox': localOnlyOutboxStub,
     'context/app-preferences': `export const useAppPreferences = () => ({ appearance: { themeTokens: () => ({}) } })`,
   })
+
   const resultSchema = z.object({
     params: z.object({ bands: z.array(z.object({ id: z.string(), frequency: z.number(), gainDb: z.number() })) }),
     persistedParams: z.object({ bands: z.array(z.object({ id: z.string(), frequency: z.number(), gainDb: z.number() })) }),
@@ -1521,17 +1589,21 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
     escapeReachedDocument: z.boolean(),
     errors: z.array(z.object({ title: z.string(), message: z.string() })),
   })
+
   const evidence: Record<string, z.infer<typeof resultSchema>> = {}
+
   try {
     // Repeat a sent value before release: the terminal send must still include gain.
     await page.read(pointSchema, 'builtInEffectGestureFixture.mount("eq")')
     const repeatStart = await page.read(pointSchema, 'builtInEffectGestureFixture.gainKnobPoint()')
     await page.mouse('move', repeatStart.x, repeatStart.y)
     await page.mouse('down')
+
     for (const pixels of [35, 45, 35]) {
       await page.mouse('move', repeatStart.x, repeatStart.y - pixels)
       await page.evaluate('builtInEffectGestureFixture.settle()')
     }
+
     await page.mouse('up')
     await page.evaluate('builtInEffectGestureFixture.flushPending()')
     const repeated = await page.read(resultSchema, 'builtInEffectGestureFixture.result()')
@@ -1608,6 +1680,7 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
       const held = await page.read(resultSchema, 'builtInEffectGestureFixture.result()')
       evidence[`${cancel}:held`] = held
       expect(held.nativeValues.some(value => value.parameterId.endsWith('.gainDb') && value.value === -0.1)).toBe(true)
+
       if (cancel === 'escape') await page.press('Escape')
       else await page.evaluate('builtInEffectGestureFixture.cancel()')
       const cancelled = await page.read(resultSchema, 'builtInEffectGestureFixture.result()')
@@ -1884,6 +1957,7 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
     'lib/shared-outbox': localOnlyOutboxStub,
     'context/app-preferences': `export const useAppPreferences = () => ({ appearance: { themeTokens: () => ({}) } })`,
   })
+
   const schema = z.object({
     params: z.object({ state: z.object({ releaseMs: z.number() }) }),
     baseline: z.object({ state: z.object({ releaseMs: z.number() }) }),
@@ -1896,7 +1970,9 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
     nativeValues: z.array(z.object({ parameterId: z.string(), value: z.number() })),
     engineCalls: z.array(z.unknown()),
   })
+
   const evidence: Record<string, z.infer<typeof schema>> = {}
+
   try {
     for (const targetId of ['track:one', 'master']) {
       for (const legacy of [true, false]) {
@@ -1913,6 +1989,7 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
         expect(committed.history).toBe(1)
         expect(committed.params.state.releaseMs).not.toBe(committed.baseline.state.releaseMs)
         expect(committed.undo).toHaveLength(1)
+
         if (legacy) expect(committed.engineCalls.length).toBeGreaterThan(0)
         else expect(committed.flushes.length).toBe(1)
 
@@ -2188,14 +2265,18 @@ test('effect commits order flush, persist, and history without double flushes or
   const page = await openFixture('commit-contract', effectCommitContractFixture, effectCommitContractStubs)
   const read = () => page.read(effectCommitResultSchema, 'effectCommitContractFixture.result()')
   const peek = () => page.read(effectCommitResultSchema, 'effectCommitContractFixture.peek()')
+
   const drag = async (legacy: boolean, pixels: number) => {
     const start = await page.read(pointSchema, `effectCommitContractFixture.mount(${legacy})`)
     await page.mouse('move', start.x, start.y)
     await page.mouse('down')
     await page.mouse('move', start.x, start.y - pixels)
+
     return start
   }
+
   const evidence: Record<string, z.infer<typeof effectCommitResultSchema>> = {}
+
   try {
     // (a) The awaited portable leg must settle before remove-all deletes rows.
     await drag(false, 35)
@@ -2246,6 +2327,7 @@ test('effect commits order flush, persist, and history without double flushes or
       expect(unmapped.handlerFlushes).toBe(0)
       expect(unmapped.rebuilds).toBe(legacy ? 0 : 1)
       expect(unmapped.errors).toEqual([])
+
       if (legacy) expect(unmapped.engineCalls.length).toBeGreaterThan(0)
     }
 
@@ -2402,6 +2484,7 @@ window.midiFixture = {
 `
 
 const midiSnapshotSchema = z.object({ notes: z.array(z.string()), operations: z.array(z.unknown()) })
+
 const midiRunSchema = z.object({
   initial: midiSnapshotSchema,
   owned: midiSnapshotSchema,
@@ -2423,14 +2506,17 @@ test('MIDI note gestures belong to the pointer that started them', async () => {
       reconcile: () => {},
     })`,
   })
+
   const layoutSchema = z.object({ a: pointSchema, aRightEdge: pointSchema, b: pointSchema, empty: pointSchema, column: z.number() })
   const results: Record<string, z.infer<typeof midiRunSchema>> = {}
   let gridOwnsPointer: boolean | undefined
+
   try {
     const scenarios = [
       'move-release', 'resize-release', 'foreign-move', 'foreign-up', 'foreign-cancel',
       'foreign-down', 'foreign-draw', 'capture-owned', 'lost-capture', 'escape',
     ]
+
     for (const scenario of scenarios) {
       const layout = await page.read(layoutSchema, 'midiFixture.mount()')
       const initial = await page.read(midiSnapshotSchema, 'midiFixture.snapshot()')
@@ -2440,16 +2526,25 @@ test('MIDI note gestures belong to the pointer that started them', async () => {
       await page.mouse('move', start.x + layout.column * 2, start.y)
       const owned = await page.read(midiSnapshotSchema, 'midiFixture.snapshot()')
       const away = `{ clientX: ${layout.empty.x}, clientY: ${layout.b.y + 60} }`
+
       if (scenario === 'foreign-move') await page.evaluate(`midiFixture.pointer("pointermove", ${away})`)
+
       if (scenario === 'foreign-up') await page.evaluate(`midiFixture.pointer("pointerup", ${away})`)
+
       if (scenario === 'foreign-cancel') await page.evaluate(`midiFixture.pointer("pointercancel", ${away})`)
+
       if (scenario === 'foreign-down') await page.evaluate(`midiFixture.pointer("pointerdown", { clientX: ${layout.b.x}, clientY: ${layout.b.y} }, "b")`)
+
       if (scenario === 'foreign-draw') await page.evaluate(`midiFixture.pointer("pointerdown", { clientX: ${layout.empty.x}, clientY: ${layout.empty.y} }, "empty")`)
+
       if (scenario === 'capture-owned') gridOwnsPointer = await page.read(z.boolean(), 'midiFixture.gridOwnsPointer()')
+
       if (scenario === 'lost-capture') await page.evaluate('midiFixture.stealCapture()')
+
       if (scenario === 'escape') await page.press('Escape')
       const afterInterference = await page.read(midiSnapshotSchema, 'midiFixture.snapshot()')
       const continues = scenario.startsWith('foreign-') || scenario === 'lost-capture'
+
       if (continues) await page.mouse('move', start.x + layout.column * 3, start.y)
       const continued = await page.read(midiSnapshotSchema, 'midiFixture.snapshot()')
       await page.mouse('up')
@@ -2463,7 +2558,9 @@ test('MIDI note gestures belong to the pointer that started them', async () => {
     console.log(`MIDI note evidence: ${page.directory}/results.json`)
     await page.close()
   }
+
   const scenario = (name: string) => midiRunSchema.parse(results[name])
+
   for (const name of ['move-release', 'resize-release', 'capture-owned']) {
     const run = scenario(name)
     expect(run.owned.notes[0]).not.toBe(run.initial.notes[0])
@@ -2471,9 +2568,11 @@ test('MIDI note gestures belong to the pointer that started them', async () => {
     expect(run.released.operations[0]).toMatchObject({ kind: 'update', id: 'note:a' })
     expect(run.stray).toEqual(run.released)
   }
+
   expect(scenario('move-release').released.operations[0]).toMatchObject({ changes: { beat: 0.5, pitch: 100 } })
   expect(scenario('resize-release').released.operations[0]).toMatchObject({ changes: { length: 1 } })
   expect(gridOwnsPointer).toBe(true)
+
   for (const name of ['foreign-move', 'foreign-up', 'foreign-cancel', 'foreign-down', 'foreign-draw']) {
     const run = scenario(name)
     expect(run.afterInterference.notes).toEqual(run.owned.notes)
@@ -2482,6 +2581,7 @@ test('MIDI note gestures belong to the pointer that started them', async () => {
     expect(run.released.operations).toEqual([{ kind: 'update', id: 'note:a', changes: { beat: 0.75, pitch: 100 } }])
     expect(run.stray).toEqual(run.released)
   }
+
   for (const name of ['lost-capture', 'escape']) {
     const run = scenario(name)
     expect(run.continued.notes).toEqual(run.initial.notes)

@@ -110,6 +110,7 @@ describe('audio warp normalization', () => {
     })
 
     expect(operation?.kind).toBe('clips.setAudioWarp')
+
     if (operation?.kind !== 'clips.setAudioWarp') return
     expect(operation.payload.audioWarp.enabled).toBe(true)
     expect(operation.payload.audioWarp.sourceBpm).toBe(30)

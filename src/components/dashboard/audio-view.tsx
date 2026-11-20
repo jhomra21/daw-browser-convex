@@ -10,9 +10,11 @@ import { DashboardRow, DashboardScrollView, DashboardSection } from "./dashboard
 
 const formatLatency = (seconds: number | null) => seconds === null ? "Unavailable" : `${(seconds * 1000).toFixed(1)} ms`
 const formatFrames = (frames: number | null) => frames === null ? "unavailable" : String(frames)
+
 type OutputSelectableMediaDevices = MediaDevices & {
   selectAudioOutput: () => Promise<MediaDeviceInfo>
 }
+
 const supportsOutputSelection = (mediaDevices: MediaDevices): mediaDevices is OutputSelectableMediaDevices =>
   "selectAudioOutput" in mediaDevices && typeof mediaDevices.selectAudioOutput === "function"
 
@@ -24,6 +26,7 @@ function NativeDeviceSelect(props: {
   onSelect: (deviceId: string) => void
 }) {
   const unavailable = () => props.selectedId !== "" && !props.devices.some((device) => device.deviceId === props.selectedId)
+
   return (
     <select id={props.id} class="h-8 border border-border bg-background px-2 text-sm" onChange={(event) => props.onSelect(event.currentTarget.value)}>
       <option value="" selected={!props.selectedId}>System default</option>
@@ -57,25 +60,35 @@ export function DashboardAudioView() {
   const audioDevices = createMemo(() => filterAudioDevices(devices()))
   const selectedInputDeviceId = () => preferences.audio.preferences().inputDeviceId
   const [runtime, setRuntime] = createSignal(audioEngine.getRuntimeSnapshot())
+
   const hasPendingRuntimeChange = () => {
     const snapshot = runtime()
+
     if (snapshot.state === "uninitialized") return false
     const requested = resolveAudioRuntimeConfiguration(preferences.audio.preferences())
+
     return snapshot.requestedSampleRate !== (requested.sampleRate ?? null)
       || snapshot.latencyHint !== requested.latencyHint
   }
+
   const sinkStatusText = () => {
     const status = sinkStatus()
+
     if (status.state === "error") return status.message
+
     if (status.state === "unsupported") return "Live output routing is not supported by this browser."
+
     if (status.state === "uninitialized") return "Output saved and will be applied when audio starts."
+
     return `Route status: ${status.state}`
   }
 
   const refreshDevices = async () => {
     const requestId = ++deviceRequestId
+
     try {
       const nextDevices = await navigator.mediaDevices.enumerateDevices()
+
       if (requestId !== deviceRequestId) return
       setDevices((current) => areAudioDeviceListsEqual(current, nextDevices) ? current : nextDevices)
       setDeviceError("")
@@ -87,6 +100,7 @@ export function DashboardAudioView() {
 
   const refreshNativeDevices = async () => {
     const reply = await globalThis.window?.dawDesktop?.audioHost?.listDevices()
+
     if (reply?.ok) {
       setNativeDevices(reply.devices)
       setDeviceError("")
@@ -99,8 +113,10 @@ export function DashboardAudioView() {
     const requestId = ++inputProbeRequestId
     setActiveInputSettings(null)
     let stream: MediaStream | null = null
+
     try {
       stream = await navigator.mediaDevices.getUserMedia(buildActiveInputProbeConstraints(inputDeviceId))
+
       if (requestId !== inputProbeRequestId) return
       setActiveInputSettings(stream.getAudioTracks()[0]?.getSettings() ?? null)
       setDeviceError("")
@@ -119,6 +135,7 @@ export function DashboardAudioView() {
   }
 
   const recording = () => preferences.recording.preferences()
+
   const setRecording = (update: Partial<ReturnType<typeof recording>>) => {
     const current = recording()
     preferences.recording.setInputConfiguration({
@@ -129,10 +146,13 @@ export function DashboardAudioView() {
       invertPolarity: update.invertPolarity ?? current.invertPolarity,
     })
   }
+
   const exactCalibration = createMemo(() => {
     const identity = platformIdentity()
     const snapshot = runtime()
+
     if (!identity || snapshot.sampleRate === null) return null
+
     return findExactCalibration(recording().calibrations, {
       inputDeviceId: preferences.audio.preferences().inputDeviceId,
       outputDeviceId: preferences.audio.preferences().outputDeviceId,
@@ -142,38 +162,50 @@ export function DashboardAudioView() {
       userAgentData: navigator.userAgentData,
     })
   })
+
   const startCalibration = async () => {
     if (requiresNativeAudio) {
       setCalibrationState("failed")
       setCalibrationMessage("Browser loopback calibration is unavailable in the native desktop audio mode.")
+
       return
     }
+
     const audio = preferences.audio.preferences()
     const identity = await resolveCalibrationPlatformIdentity(navigator)
     setPlatformIdentity(identity)
+
     if (!audio.inputDeviceId || !audio.outputDeviceId || !identity) {
       setCalibrationState("failed")
       setCalibrationMessage("Choose explicit input and output devices. Stable browser and OS identity is also required.")
+
       return
     }
+
     calibrationController = new AbortController()
     setCalibrationState("running")
     setCalibrationMessage("Playing the calibration signal and measuring the returned input…")
     let stream: MediaStream | null = null
+
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: audio.inputDeviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+
       const result = await audioEngine.calibrateRecording({
         stream,
         inputDeviceId: audio.inputDeviceId,
         outputDeviceId: audio.outputDeviceId,
         signal: calibrationController.signal,
       })
+
       if (!result.accepted) {
         setCalibrationState("failed")
         setCalibrationMessage(`Measurement rejected: ${result.reason}. Confidence ${Math.round(result.confidence * 100)}%.`)
+
         return
       }
+
       const sampleRate = audioEngine.getRuntimeSnapshot().sampleRate
+
       if (sampleRate === null) throw new Error("Calibration sample rate is unavailable.")
       preferences.recording.setCalibrations(replaceExactCalibration(recording().calibrations, {
         inputDeviceId: audio.inputDeviceId,
@@ -200,8 +232,10 @@ export function DashboardAudioView() {
   const chooseOutput = async () => {
     if (!supportsOutputSelection(navigator.mediaDevices)) {
       setDeviceError("This browser does not support authorized audio output selection.")
+
       return
     }
+
     try {
       const device = await navigator.mediaDevices.selectAudioOutput()
       preferences.audio.setOutputDeviceId(device.deviceId)
@@ -218,8 +252,10 @@ export function DashboardAudioView() {
   const playTestTone = async () => {
     if (requiresNativeAudio) {
       setDeviceError("The desktop native audio host does not expose a browser test tone.")
+
       return
     }
+
     try {
       await playAudioOutputTestTone()
       setDeviceError("")
@@ -230,13 +266,16 @@ export function DashboardAudioView() {
 
   onMount(() => {
     void refreshDevices()
+
     if (requiresNativeAudio) void refreshNativeDevices()
     void resolveCalibrationPlatformIdentity(navigator).then(setPlatformIdentity)
+
     const onDeviceChange = () => {
       inputProbeRequestId += 1
       setActiveInputSettings(null)
       void refreshDevices()
     }
+
     navigator.mediaDevices.addEventListener("devicechange", onDeviceChange)
     const unsubscribe = subscribeAudioSinkStatus(() => setSinkStatus(getAudioSinkStatus()))
     const unsubscribeRuntime = audioEngine.subscribeRuntimeSnapshot(() => setRuntime(audioEngine.getRuntimeSnapshot()))

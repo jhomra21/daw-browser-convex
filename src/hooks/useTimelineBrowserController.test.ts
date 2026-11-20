@@ -22,6 +22,7 @@ const selection = (role: "effect" | "instrument"): NativeVst3CatalogSelection =>
     role,
     source: "factory" as const,
   }
+
   const entry: DesktopPluginCatalogEntry = {
     displayName: "Example",
     discoveredAtMs: 1,
@@ -38,6 +39,7 @@ const selection = (role: "effect" | "instrument"): NativeVst3CatalogSelection =>
       scannerCatalogVersion: 2,
     },
   }
+
   return { entry, pluginClass }
 }
 
@@ -74,6 +76,7 @@ const catalog = (
     scanHealth,
     binaryFingerprint: identity,
     }
+
     if (withReference) {
       entry.catalogReference = {
         version: 1,
@@ -83,6 +86,7 @@ const catalog = (
         scannerCatalogVersion: 2,
       }
     }
+
     return [entry]
   })(),
   diagnostics: [],
@@ -94,12 +98,15 @@ test("auto-heals an already-trusted stale catalog once and applies the scanned c
   const scanned = catalog("auto-heal-once", "ready", "scanned", true)
   let scans = 0
   let refreshed: DesktopPluginCatalog | undefined
+
   const bridge = { scan: async () => {
     scans += 1
+
     return { ok: true as const, catalog: scanned }
   } }
 
   expect(hasStaleVst3CatalogEntries(stale)).toBeTrue()
+
   const result = await autoHealStaleVst3Catalog({
     catalog: stale,
     bridge,
@@ -132,8 +139,10 @@ test("auto-heals an already-trusted stale catalog once and applies the scanned c
 test("does not auto-heal before trust or loop on a persistent failed result", async () => {
   const stale = catalog("persistent-failure", "failed", "scan-failed", false)
   let scans = 0
+
   const bridge = { scan: async () => {
     scans += 1
+
     return { ok: true as const, catalog: stale }
   } }
 
@@ -146,6 +155,7 @@ test("does not auto-heal before trust or loop on a persistent failed result", as
 
 test("does not rescan a persistent stale catalog when a read changes discovery time", async () => {
   const first = catalog("persistent-failure-timestamp", "failed", "scan-failed", false)
+
   const second: DesktopPluginCatalog = {
     ...first,
     entries: first.entries.map((entry) => ({
@@ -153,11 +163,15 @@ test("does not rescan a persistent stale catalog when a read changes discovery t
       discoveredAtMs: entry.discoveredAtMs + 1,
     })),
   }
+
   let scans = 0
+
   const bridge = { scan: async () => {
     scans += 1
+
     return { ok: true as const, catalog: first }
   } }
+
   let readTriggered: ReturnType<typeof autoHealStaleVst3Catalog> | undefined
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
   Object.defineProperty(globalThis, "window", {
@@ -171,6 +185,7 @@ test("does not rescan a persistent stale catalog when a read changes discovery t
             trustAcknowledged: true,
           })
         }
+
         return true
       },
     },
@@ -178,6 +193,7 @@ test("does not rescan a persistent stale catalog when a read changes discovery t
 
   try {
     await autoHealStaleVst3Catalog({ catalog: first, bridge, trustAcknowledged: true })
+
     if (!readTriggered) throw new Error("Expected catalog change to trigger a catalog read.")
     await readTriggered
     expect(scans).toBe(1)
@@ -194,8 +210,10 @@ test("auto-heals a new stale catalog identity once", async () => {
   const first = catalog("new-identity-one", "discovered", "filesystem-only", false)
   const second = catalog("new-identity-two", "discovered", "filesystem-only", false)
   let scans = 0
+
   const bridge = { scan: async () => {
     scans += 1
+
     return { ok: true as const, catalog: scans === 1 ? first : second }
   } }
 

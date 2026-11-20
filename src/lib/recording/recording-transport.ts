@@ -41,6 +41,7 @@ export const getRecordingTransportDiagnostics = (
     environment.sharedArrayBufferAvailable
     ? 'sab'
     : 'transferable'
+
   return {
     requested: environment.sabEnabled ? 'sab' : 'transferable',
     active,
@@ -57,6 +58,7 @@ export const createRecordingTransport = (
   environment?: RecordingTransportEnvironment,
  ) => {
   const diagnostics = getRecordingTransportDiagnostics(environment)
+
   return {
     transport: diagnostics.active === 'sab'
       ? createRecordingSabTransport(options)

@@ -118,14 +118,18 @@ const browserCommand = async (session: string, args: readonly string[]) => {
     stdout: 'pipe',
     stderr: 'pipe',
   })
+
   const [stdout, stderr] = await Promise.all([
     new Response(process.stdout).text(),
     new Response(process.stderr).text(),
   ])
+
   const exitCode = await process.exited
+
   if (exitCode !== 0) {
     throw new Error(`agent-browser ${args[0] ?? 'command'} failed: ${stderr || stdout}`)
   }
+
   return stdout.trim()
 }
 
@@ -136,6 +140,7 @@ const parseEvalResult = (output: string): RasterRegressionResult => {
 const measureInChromium = async (): Promise<RasterRegressionResult> => {
   const temporaryRoot = `${process.env.TMPDIR ?? '/tmp'}/daw-waveform-raster-${crypto.randomUUID()}`
   await mkdir(temporaryRoot, { recursive: true })
+
   const build = await Bun.build({
     entrypoints: [runtimePath],
     target: 'browser',
@@ -143,35 +148,44 @@ const measureInChromium = async (): Promise<RasterRegressionResult> => {
     outdir: temporaryRoot,
     naming: 'raster.js',
   })
+
   if (!build.success) {
     throw new Error(build.logs.map((log) => log.message).join('\n'))
   }
+
   const server = Bun.serve({
     port: 0,
     fetch(request) {
       const path = new URL(request.url).pathname
+
       if (path === '/') {
         return new Response(
           '<!doctype html><script type="module" src="/raster.js"></script>',
           { headers: { 'content-type': 'text/html' } },
         )
       }
+
       if (path === '/raster.js') {
         return new Response(Bun.file(`${temporaryRoot}/raster.js`), {
           headers: { 'content-type': 'text/javascript' },
         })
       }
+
       return new Response('Not found', { status: 404 })
     },
   })
+
   const session = `daw-waveform-raster-${crypto.randomUUID()}`
+
   try {
     await browserCommand(session, ['open', server.url.toString()])
     await browserCommand(session, ['wait', '100'])
+
     const output = await browserCommand(session, [
       'eval',
       'JSON.stringify(window.__waveformRasterRegressionResult)',
     ])
+
     return parseEvalResult(output)
   } finally {
     await browserCommand(session, ['close']).catch(() => undefined)
@@ -190,8 +204,10 @@ test('rasterizes the shared CSS floor and raw-center geometry consistently in Ch
   const colorDistanceSpread = Math.max(...alignedDistances) - Math.min(...alignedDistances)
   const legacyLuminanceSpread = Math.max(...legacyLuminances) - Math.min(...legacyLuminances)
   const legacyColorDistanceSpread = Math.max(...legacyDistances) - Math.min(...legacyDistances)
+
   const maxPhaseLuminanceSpread = (values: readonly number[]) => {
     let maximum = 0
+
     for (let dprIndex = 0; dprIndex < 3; dprIndex += 1) {
       for (let thicknessIndex = 0; thicknessIndex < 21; thicknessIndex += 1) {
         const start = dprIndex * 126 + thicknessIndex * 6
@@ -202,10 +218,13 @@ test('rasterizes the shared CSS floor and raw-center geometry consistently in Ch
         )
       }
     }
+
     return maximum
   }
+
   const maxAdjacentThresholdLuminanceSpread = (values: readonly number[]) => {
     let maximum = 0
+
     for (let dprIndex = 0; dprIndex < 3; dprIndex += 1) {
       for (let thicknessIndex = 1; thicknessIndex < 21; thicknessIndex += 1) {
         for (let phaseIndex = 0; phaseIndex < 6; phaseIndex += 1) {
@@ -215,6 +234,7 @@ test('rasterizes the shared CSS floor and raw-center geometry consistently in Ch
         }
       }
     }
+
     return maximum
   }
 
@@ -234,11 +254,13 @@ test('rasterizes the shared CSS floor and raw-center geometry consistently in Ch
   expect(result.samplesWithPoints.fullyCoveredBackingRows).toBe(
     result.samplesWithoutPoints.fullyCoveredBackingRows,
   )
+
   const centerJumps = result.centerRelease
     .filter((sample) => sample.rawCenter === 8.25)
     .map((sample, index, samples) => (
       index === 0 ? 0 : Math.abs(sample.center - (samples[index - 1]?.center ?? sample.center))
     ))
+
   const maxCenterJump = Math.max(...centerJumps)
   expect(maxCenterJump).toBeLessThan(0.25)
   expect(result.centerRelease
@@ -246,6 +268,7 @@ test('rasterizes the shared CSS floor and raw-center geometry consistently in Ch
     .every((sample) => sample.center === sample.rawCenter))
     .toBe(true)
   expect(result.fractionalCoverage).toHaveLength(30)
+
   for (const dpr of [1, 2, 3]) {
     const samples = result.fractionalCoverage.filter((sample) => sample.dpr === dpr)
     expect(samples.map((sample) => sample.fraction)).toEqual(
@@ -254,6 +277,7 @@ test('rasterizes the shared CSS floor and raw-center geometry consistently in Ch
     expect(samples.every((sample) => Number.isFinite(sample.darkestLuminance))).toBe(true)
     expect(samples.every((sample) => sample.fullyCoveredBackingRows >= 0)).toBe(true)
   }
+
   expect(result.floorExperiments).toHaveLength(12)
   expect(result.floorExperiments.every((experiment) => (
     experiment.luminanceSpread >= 0
@@ -264,16 +288,19 @@ test('rasterizes the shared CSS floor and raw-center geometry consistently in Ch
       && experiment.minimumEffectiveBackingThickness
         <= experiment.maximumEffectiveBackingThickness
   ))).toBe(true)
+
   for (const dpr of [1, 2, 3]) {
     const selectedFloor = result.floorExperiments.find((experiment) => (
       experiment.dpr === dpr && experiment.floorLabel === 'two-physical-pixels'
     ))
+
     if (!selectedFloor) throw new Error(`Missing two-physical-pixel floor diagnostics for DPR ${dpr}`)
     expect(selectedFloor.minimumEffectiveBackingThickness)
       .toBeGreaterThanOrEqual(1.99)
     expect(selectedFloor.effectiveThicknessSpread).toBeLessThanOrEqual(0.01)
     expect(selectedFloor.luminanceSpread).toBe(0)
   }
+
   expect(result.geometryDiagnostics).toHaveLength(3)
   expect(result.geometryDiagnostics.every((diagnostic) => (
     Math.abs(diagnostic.finalCenter - diagnostic.rawCenter) < 1e-12

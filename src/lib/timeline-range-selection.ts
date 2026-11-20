@@ -23,7 +23,9 @@ export const normalizeTimelineRangeSelection = (
 ): TimelineRangeSelection | null => {
   const startSec = Math.min(input.startSec, input.endSec)
   const endSec = Math.max(input.startSec, input.endSec)
+
   if (endSec - startSec <= 1e-6) return null
+
   if (input.trackIds.length === 0) return null
 
   return {
@@ -39,13 +41,16 @@ export const isTimelineRangeSelectionEqual = (
   right: TimelineRangeSelection | null,
 ) => {
   if (left === right) return true
+
   if (!left || !right) return false
+
   if (
     left.startSec !== right.startSec
     || left.endSec !== right.endSec
     || left.primaryTrackId !== right.primaryTrackId
     || left.trackIds.length !== right.trackIds.length
   ) return false
+
   return left.trackIds.every((trackId, index) => trackId === right.trackIds[index])
 }
 
@@ -61,11 +66,13 @@ const barDurationSec = (bpm: number) => beatsToSeconds(4, bpm)
 
 export const floorSecToBar = (timeSec: number, bpm: number) => {
   const bar = barDurationSec(bpm)
+
   return Math.floor(timeSec / bar) * bar
 }
 
 export const ceilSecToBar = (timeSec: number, bpm: number) => {
   const bar = barDurationSec(bpm)
+
   return Math.ceil(timeSec / bar) * bar
 }
 
@@ -78,7 +85,9 @@ export const snapTimeRangeToGridColumns = (
   const endSec = Math.max(range.startSec, range.endSec)
   const snappedStartSec = quantizeSecToGrid(startSec, bpm, gridDenominator, 'floor')
   const snappedEndSec = quantizeSecToGrid(endSec, bpm, gridDenominator, 'ceil')
+
   if (snappedEndSec - snappedStartSec <= 1e-6) return null
+
   return { startSec: snappedStartSec, endSec: snappedEndSec }
 }
 
@@ -90,7 +99,9 @@ export const clipRangeOverlap = (
   const clipEndSec = clip.startSec + clip.duration
   const startSec = Math.max(clip.startSec, range.startSec)
   const endSec = Math.min(clipEndSec, range.endSec)
+
   if (endSec - startSec <= 1e-6) return null
+
   return {
     startSec,
     endSec,
@@ -104,9 +115,11 @@ export const extendTimelineRangeSelectionToPoint = (
   input: { timeSec: number; trackIds?: readonly Track['id'][]; primaryTrackId?: Track['id'] | null },
 ): TimelineRangeSelection | null => {
   const midpointSec = (range.startSec + range.endSec) / 2
+
   const nextRange = input.timeSec <= midpointSec
     ? { startSec: input.timeSec, endSec: range.endSec }
     : { startSec: range.startSec, endSec: input.timeSec }
+
   return normalizeTimelineRangeSelection({
     startSec: nextRange.startSec,
     endSec: nextRange.endSec,

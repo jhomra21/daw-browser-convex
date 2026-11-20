@@ -21,18 +21,22 @@ export function createTransportClock(): TransportClock {
     getBpm: () => bpm,
     setBpm: (nextBpm) => {
       const sanitized = Math.min(300, Math.max(30, Math.round(nextBpm)))
+
       if (sanitized === bpm) return false
       bpm = sanitized
+
       return true
     },
     secondsPerBeat: () => 60 / Math.max(1, bpm),
     timelineToCtxTime: (timelineSec) => {
       const delta = timelineSec - epochTimelineSec
+
       return epochCtxTime + Math.max(0, delta)
     },
     ctxTimeToTimeline: (ctxTime) => {
       if (!running) return epochTimelineSec
       const delta = ctxTime - epochCtxTime
+
       return epochTimelineSec + Math.max(0, delta)
     },
     start: (ctxTime, playheadSec) => {

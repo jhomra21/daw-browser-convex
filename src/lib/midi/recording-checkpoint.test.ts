@@ -8,6 +8,7 @@ test('checkpoints dirty takes after one second and after 64 events', async () =>
   let events = 1
   let timer: (() => void) | undefined
   const writes: number[] = []
+
   const checkpoints = createMidiRecordingCheckpointController({
     snapshot: () => ({ checkpoint: events, eventCount: events, version: events }),
     state: () => ({ eventCount: events, version: events }),
@@ -15,6 +16,7 @@ test('checkpoints dirty takes after one second and after 64 events', async () =>
     isActive: () => true,
     setTimer: (callback) => {
       timer = callback
+
       return 1
     },
     clearTimer: () => {
@@ -41,12 +43,14 @@ test('coalesces writes and awaits a newest final checkpoint', async () => {
   let resolveFinal: (() => void) | undefined
   const writes: number[] = []
   const finalWrites: boolean[] = []
+
   const checkpoints = createMidiRecordingCheckpointController({
     snapshot: () => ({ checkpoint: events, eventCount: events, version: events }),
     state: () => ({ eventCount: events, version: events }),
     persist: (checkpoint, final) => new Promise<void>((resolve) => {
       writes.push(checkpoint)
       finalWrites.push(final)
+
       if (writes.length === 1) resolveFirst = resolve
       else resolveFinal = resolve
     }),
@@ -73,11 +77,13 @@ test('retries the newest final checkpoint after an in-flight periodic write fail
   let events = 1
   let rejectFirst: ((error: Error) => void) | undefined
   const writes: { checkpoint: number; final: boolean }[] = []
+
   const checkpoints = createMidiRecordingCheckpointController({
     snapshot: () => ({ checkpoint: events, eventCount: events, version: events }),
     state: () => ({ eventCount: events, version: events }),
     persist: (checkpoint, final) => new Promise<void>((resolve, reject) => {
       writes.push({ checkpoint, final })
+
       if (writes.length === 1) rejectFirst = reject
       else resolve()
     }),
@@ -99,9 +105,11 @@ test('retries the newest final checkpoint after an in-flight periodic write fail
 test('checks 500 incoming events without creating a snapshot before the checkpoint threshold', () => {
   let events = 0
   let snapshots = 0
+
   const checkpoints = createMidiRecordingCheckpointController({
     snapshot: () => {
       snapshots += 1
+
       return { checkpoint: events, eventCount: events, version: events }
     },
     state: () => ({ eventCount: events, version: events }),
@@ -117,11 +125,13 @@ test('checks 500 incoming events without creating a snapshot before the checkpoi
 test('stops automatic event checkpoint retries after the retry budget and preserves the final write', async () => {
   let events = 64
   const writes: { checkpoint: number; final: boolean }[] = []
+
   const checkpoints = createMidiRecordingCheckpointController({
     snapshot: () => ({ checkpoint: events, eventCount: events, version: events }),
     state: () => ({ eventCount: events, version: events }),
     persist: async (checkpoint, final) => {
       writes.push({ checkpoint, final })
+
       if (!final) throw new Error('network unavailable')
     },
     isActive: () => true,
@@ -133,6 +143,7 @@ test('stops automatic event checkpoint retries after the retry budget and preser
     if (checkpoints.shouldRequest()) await expect(checkpoints.request()).rejects.toThrow('network unavailable')
     events += 64
   }
+
   expect(writes).toEqual([
     { checkpoint: 64, final: false },
     { checkpoint: 128, final: false },

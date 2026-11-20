@@ -16,20 +16,28 @@ export function computeCompressorWorkletCurveDb(inputDb: number, params: Compres
   const threshold = normalized.thresholdDb
   const ratio = normalized.ratio
   const knee = normalized.kneeDb
+
   if (normalized.dynamicsMode === 'expand') {
     if (inputDb >= threshold) return inputDb
     const expanded = threshold + (inputDb - threshold) * ratio
+
     if (knee <= 0 || inputDb <= threshold - knee / 2) return expanded
     const distance = threshold - inputDb
+
     return inputDb - (2 * (ratio - 1) * distance * distance) / knee
   }
+
   const compressed = threshold + (inputDb - threshold) / ratio
+
   if (knee <= 0) return inputDb <= threshold ? inputDb : compressed
   const lower = threshold - knee / 2
   const upper = threshold + knee / 2
+
   if (inputDb <= lower) return inputDb
+
   if (inputDb >= upper) return compressed
   const x = inputDb - lower
+
   return inputDb + ((1 / ratio - 1) * x * x) / (2 * knee)
 }
 
@@ -63,10 +71,15 @@ const isFiniteNumber = <Value>(value: Value): value is Value & number => (
 
 export function readCompressorMeterFrame<Value>(data: Value): CompressorMeterFrame | null {
   if (!isCompressorMeterFields(data) || data.type !== 'meter') return null
+
   if (!isFiniteNumber(data.inputDb)) return null
+
   if (!isFiniteNumber(data.outputDb)) return null
+
   if (!isFiniteNumber(data.gainReductionDb)) return null
+
   if (!isFiniteNumber(data.thresholdDb)) return null
+
   return {
     inputDb: data.inputDb,
     outputDb: data.outputDb,

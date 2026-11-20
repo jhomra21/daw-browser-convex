@@ -31,6 +31,7 @@ export const Badge = <T extends ValidComponent = "span">(
   props: BadgeProps<T>
 ) => {
   const [local, others] = splitProps(props, ["class", "variant"])
+
   return (
     <span class={cn(badgeVariants({ variant: local.variant }), local.class)} {...others} />
   )

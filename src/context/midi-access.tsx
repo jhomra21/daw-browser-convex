@@ -23,21 +23,28 @@ const MidiAccessContext = createContext<MidiAccessContextValue | null>(null)
 export const MidiAccessProvider: ParentComponent = (props) => {
   const appPreferences = useAppPreferences()
   const getNavigator = () => "navigator" in globalThis ? globalThis.navigator : undefined
+
   const isMidiSupported = () => {
     const browserNavigator = getNavigator()
+
     return browserNavigator !== undefined && "requestMIDIAccess" in browserNavigator
   }
+
   const [status, setStatus] = createSignal<MidiAccessStatus>(
     isMidiSupported() ? "idle" : "unsupported"
   )
+
   const [inputs, setInputs] = createSignal<MidiInputDescriptor[]>([])
+
   const controller = createMidiAccessController({
     isSupported: isMidiSupported,
     requestAccess: () => {
       const browserNavigator = getNavigator()
+
       if (!browserNavigator || !("requestMIDIAccess" in browserNavigator)) {
         return Promise.reject(new Error("Web MIDI is not supported."))
       }
+
       return browserNavigator.requestMIDIAccess({ sysex: false })
     },
     initialSelectedInputIds: appPreferences.midi.selectedInputIds(),
@@ -69,5 +76,6 @@ export const MidiAccessProvider: ParentComponent = (props) => {
 
 export const useMidiAccess = () => {
   const context = useContext(MidiAccessContext)
+
   return assertDefined(context, "useMidiAccess must be used within MidiAccessProvider.")
 }

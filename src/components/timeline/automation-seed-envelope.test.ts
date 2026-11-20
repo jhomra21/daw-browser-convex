@@ -9,6 +9,7 @@ describe('automation seed envelope', () => {
       parameterId: 'volume',
       initialValue: 0.42,
     })
+
     const fallback = createAutomationSeedEnvelope({
       projectId: 'project:local',
       target: { kind: 'track', trackId: 'track-1' },

@@ -59,6 +59,7 @@ export const getExportAudioQuality = (
   bitrate = getExportAudioDefaultBitrate(format),
 ): Quality | undefined => {
   if (!isLossyExportAudioFormat(format) || bitrate === undefined) return
+
   return new Quality({ bitrate })
 }
 
@@ -67,6 +68,7 @@ export const getExportAudioEncodingConfig = (
   request: ExportAudioSupportRequest = {},
 ) => {
   const bitrate = isLossyExportAudioFormat(format) ? request.bitrateByFormat?.[format] : undefined
+
   return {
     sampleRate: request.sampleRate ?? 44100,
     numberOfChannels: request.numberOfChannels ?? 2,
@@ -81,10 +83,14 @@ export const createExportAudioOutputFormat = (format: ExportAudioFormat): Output
 export async function getSupportedExportAudioFormats(req: ExportAudioSupportRequest = {}): Promise<ExportAudioFormat[]> {
   const supportChecks = exportAudioFormats.map(async (format): Promise<ExportAudioFormat | undefined> => {
     const codec = getExportAudioCodec(format)
+
     if (format === 'wav') return format
     const canEncode = await canEncodeAudio(codec, getExportAudioEncodingConfig(format, req))
+
     return canEncode ? format : undefined
   })
+
   const checkedFormats = await Promise.all(supportChecks)
+
   return checkedFormats.filter((format) => format !== undefined)
 }

@@ -20,6 +20,7 @@ type EffectRowSnapshotInput = {
   index?: unknown
   params?: unknown
 }
+
 const effectRowSnapshotSchema = z.object({
   effect: z.string().optional(),
   type: z.string().optional(),
@@ -27,16 +28,20 @@ const effectRowSnapshotSchema = z.object({
   index: z.number().optional(),
   params: z.json(),
 })
+
 const normalizationInput = (value: z.infer<typeof effectRowSnapshotSchema>['params']) => (
   JSON.parse(JSON.stringify(value))
 )
 
 const snapshotAudioEffectRow = (row: EffectRowSnapshotInput): TrackAudioEffectSnapshot | null => {
   const parsed = effectRowSnapshotSchema.safeParse(row)
+
   if (!parsed.success) return null
   const effect = parsed.data.type ?? parsed.data.effect
+
   if (effect === undefined || !isAudioEffectKind(effect)) return null
   const { instanceId, index, params } = parsed.data
+
   switch (effect) {
     case 'utility':
       return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.utility.normalizeParams(params) }
@@ -73,13 +78,16 @@ const snapshotAudioEffectRow = (row: EffectRowSnapshotInput): TrackAudioEffectSn
 const buildEffectSnapshot = (rows: EffectRowSnapshotInput[]): TrackEffectSnapshot => {
   const audioEffects = rows.flatMap((row) => {
     const snapshot = snapshotAudioEffectRow(row)
+
     return snapshot ? [snapshot] : []
   })
+
   const instrument = rows.find((row) => row.type === 'instrument' || row.effect === 'instrument')
   const synth = rows.find((row) => row.type === 'synth' || row.effect === 'synth')
   const arp = rows.find((row) => row.type === 'arpeggiator' || row.effect === 'arp')
   const synthParams = z.json().safeParse(synth?.params)
   const arpParams = z.json().safeParse(arp?.params)
+
   return {
     audioEffects,
     instrument: instrument ? readInstrumentParamsFromEffectRow(instrument) : undefined,
@@ -96,11 +104,14 @@ export const loadTrackEffectSnapshot = async (
     const rows = (await listLocalEffects(projectId))
       .filter((row) => row.targetId === trackId)
       .map((row) => ({ ...row, effect: audioEffectKindFromLocalEffect(row.effect) ?? row.effect }))
+
     return buildEffectSnapshot(rows)
   }
+
   const rows = await convexClient.query(
     convexApi.effects.listByTrack,
     buildTrackEffectQueryArgs({ projectId, trackId }),
   )
+
   return buildEffectSnapshot(rows)
 }

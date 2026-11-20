@@ -32,6 +32,7 @@ const regionalBuffer = (length: number, sampleRate = 48_000, channelCount = 1): 
 
 const buffer = new TestAudioBuffer()
 const sampled = (value: AudioBuffer): SampledInstrumentBuffer => ({ buffer: value, sourceStartFrame: 0 })
+
 const track: RuntimeTrack = {
   id: "track-a",
   name: "Audio",
@@ -47,6 +48,7 @@ const track: RuntimeTrack = {
   }],
   sends: [{ targetId: "return-a", amount: 0.5, tap: "pre-fader" }],
 }
+
 const returnTrack: RuntimeTrack = {
   id: "return-a",
   name: "Return",
@@ -70,6 +72,7 @@ const input: LivePlaybackSnapshotInput = {
 test("compiles hydrated timeline tracks through existing mixer routing authority", () => {
   const result = compileLivePlaybackSnapshot(input)
   expect(result.supported).toBeTrue()
+
   if (!result.supported) return
   expect(result.snapshot.revision).toBe(7)
   expect(result.snapshot.assets).toEqual([{ assetId: "asset-a", buffer }])
@@ -86,6 +89,7 @@ test("rejects an invalid revision and unhydrated audio without creating a graph"
     revision: 0,
     tracks: [{ ...track, clips: [{ ...track.clips[0], buffer: null }] }],
   })
+
   expect(result).toEqual({
     supported: false,
     reasons: [
@@ -110,7 +114,9 @@ test("accepts an ordinary audio clip from persisted metadata without a buffer", 
       }],
     }],
   })
+
   expect(result.supported).toBeTrue()
+
   if (!result.supported) return
   expect(result.snapshot.assets).toEqual([{
     assetId: "asset-a",
@@ -131,6 +137,7 @@ test("rejects persisted ordinary metadata that conflicts with an eager buffer", 
       }],
     }],
   })
+
   expect(result).toEqual({
     supported: false,
     reasons: ['Audio asset "asset-a" resolves inconsistently.'],
@@ -139,12 +146,14 @@ test("rejects persisted ordinary metadata that conflicts with an eager buffer", 
 
 test("registers hydrated sampler assets with live portable playback", () => {
   const params = createDefaultSamplerParams()
+
   const sample = {
     assetKey: "asset-sampler",
     url: "/sample.wav",
     sourceKind: "upload" as const,
     source: { durationSec: 1, sampleRate: 48_000, channelCount: 2 },
   }
+
   const zone = {
     id: "zone-a",
     sample,
@@ -163,6 +172,7 @@ test("registers hydrated sampler assets with live portable playback", () => {
     crossfadeSec: 0,
     chokeGroup: 0,
   }
+
   const result = compileLivePlaybackSnapshot({
     ...input,
     tracks: [{
@@ -188,7 +198,9 @@ test("registers hydrated sampler assets with live portable playback", () => {
       },
     },
   })
+
   expect(result.supported).toBeTrue()
+
   if (!result.supported) return
   expect(result.snapshot.assets).toEqual([{
     assetId: sampledInstrumentRegionIdentity(sample, sampledInstrumentRegion(sample.source, 0, 1)),
@@ -203,6 +215,7 @@ test("registers distinct bounded sampler regions and localizes their configurati
     sourceKind: "upload" as const,
     source: { durationSec: 3, sampleRate: 48_000, channelCount: 1 },
   }
+
   const firstZone = {
     id: "first-region",
     sample,
@@ -222,9 +235,11 @@ test("registers distinct bounded sampler regions and localizes their configurati
     crossfadeSec: 0,
     chokeGroup: 0,
   }
+
   const secondZone = { ...firstZone, id: "second-region", keyLow: 64, keyHigh: 127, startSec: 2, endSec: 3 }
   const firstBuffer = { buffer: regionalBuffer(24_000), sourceStartFrame: 48_000 }
   const secondBuffer = { buffer: regionalBuffer(48_000), sourceStartFrame: 96_000 }
+
   const result = compileLivePlaybackSnapshot({
     ...input,
     tracks: [{
@@ -260,18 +275,23 @@ test("registers distinct bounded sampler regions and localizes their configurati
   })
 
   expect(result.supported).toBeTrue()
+
   if (!result.supported) return
+
   const firstIdentity = sampledInstrumentRegionIdentity(sample, {
     sourceStartFrame: 48_000,
     sourceEndFrame: 72_000,
   })
+
   const secondIdentity = sampledInstrumentRegionIdentity(sample, {
     sourceStartFrame: 96_000,
     sourceEndFrame: 144_000,
   })
+
   expect(firstIdentity).not.toBe(secondIdentity)
   expect(result.snapshot.assets.map((asset) => asset.assetId)).toEqual([firstIdentity, secondIdentity])
   const zones = result.snapshot.mixer.fx.trackFx?.["track-a"]?.instrument
+
   if (!zones || zones.kind !== "sampler") return
   expect(zones.params.zones.map((zone) => ({
     assetKey: zone.sample.assetKey,
@@ -291,7 +311,9 @@ test("registers distinct bounded sampler regions and localizes their configurati
     firstSequence: 1,
     fx: result.snapshot.mixer.fx,
   })
+
   expect(native.supported).toBeTrue()
+
   if (!native.supported) throw new Error(native.reasons.join(" "))
   expect(native.graph.nodes.find((node) => node.id === "track-a")?.instrument).toMatchObject({
     kind: "sampler",
@@ -305,17 +327,21 @@ test("registers distinct bounded sampler regions and localizes their configurati
 test("registers hydrated drum-rack and granular assets with live portable playback", () => {
   const drumParams = createDefaultDrumRackParams()
   const drumPad = drumParams.pads[0]
+
   if (!drumPad) throw new Error("Default drum rack has no pads.")
+
   const sample = {
     assetKey: "asset-shared",
     url: "/sample.wav",
     sourceKind: "upload" as const,
     source: { durationSec: 1, sampleRate: 48_000, channelCount: 2 },
   }
+
   const drumRack = {
     ...drumParams,
     pads: drumParams.pads.map((pad) => pad.id === drumPad.id ? { ...pad, sample } : pad),
   }
+
   const granularParams = {
     ...createDefaultGranularParams(),
     zone: {
@@ -337,6 +363,7 @@ test("registers hydrated drum-rack and granular assets with live portable playba
       chokeGroup: 0,
     },
   }
+
   const result = compileLivePlaybackSnapshot({
     ...input,
     tracks: [
@@ -385,7 +412,9 @@ test("registers hydrated drum-rack and granular assets with live portable playba
       },
     },
   })
+
   expect(result.supported).toBeTrue()
+
   if (!result.supported) return
   expect(result.snapshot.assets).toEqual([{
     assetId: sampledInstrumentRegionIdentity(sample, sampledInstrumentRegion(sample.source, 0, 1)),
@@ -395,12 +424,14 @@ test("registers hydrated drum-rack and granular assets with live portable playba
 
 test("clones hydrated instrument buffers without cloning AudioBuffer objects", () => {
   const samplerParams = createDefaultSamplerParams()
+
   const samplerSample = {
     assetKey: "asset-sampler",
     url: "/sampler.wav",
     sourceKind: "upload" as const,
     source: { durationSec: 1, sampleRate: 48_000, channelCount: 2 },
   }
+
   const samplerZone = {
     id: "sampler-zone",
     sample: samplerSample,
@@ -419,25 +450,31 @@ test("clones hydrated instrument buffers without cloning AudioBuffer objects", (
     crossfadeSec: 0,
     chokeGroup: 0,
   }
+
   const drumParams = createDefaultDrumRackParams()
   const drumPad = drumParams.pads[0]
+
   if (!drumPad) throw new Error("Default drum rack has no pads.")
+
   const drumSample = {
     assetKey: "asset-drum",
     url: "/drum.wav",
     sourceKind: "upload" as const,
     source: { durationSec: 1, sampleRate: 48_000, channelCount: 2 },
   }
+
   const drumRack = {
     ...drumParams,
     pads: drumParams.pads.map((pad) => pad.id === drumPad.id ? { ...pad, sample: drumSample } : pad),
   }
+
   const granularSample = {
     assetKey: "asset-granular",
     url: "/granular.wav",
     sourceKind: "upload" as const,
     source: { durationSec: 1, sampleRate: 48_000, channelCount: 2 },
   }
+
   const granularParams = {
     ...createDefaultGranularParams(),
     zone: {
@@ -446,12 +483,15 @@ test("clones hydrated instrument buffers without cloning AudioBuffer objects", (
       sample: granularSample,
     },
   }
+
   const samplerBuffers = new Map([[samplerZone.id, sampled(buffer)]])
   const drumRackBuffers = new Map([[drumPad.id, sampled(buffer)]])
+
   const granularBuffer = {
     assetKey: sampledInstrumentRegionIdentity(granularSample, sampledInstrumentRegion(granularSample.source, 0, 1)),
     ...sampled(buffer),
   }
+
   const fx = {
     masterVolume: 0.7,
     masterFxInstances: [],
@@ -475,6 +515,7 @@ test("clones hydrated instrument buffers without cloning AudioBuffer objects", (
   }
 
   expect(() => structuredClone({ fx })).toThrow()
+
   const result = compileLivePlaybackSnapshot({
     ...input,
     tracks: ["sampler-track", "drum-track", "granular-track"].map((id, index) => ({
@@ -492,6 +533,7 @@ test("clones hydrated instrument buffers without cloning AudioBuffer objects", (
   })
 
   expect(result.supported).toBeTrue()
+
   if (!result.supported) return
   const snapshotFx = result.snapshot.mixer.fx
   const samplerSnapshotBuffers = snapshotFx.trackFx?.["sampler-track"]?.samplerBuffers
@@ -524,6 +566,7 @@ test("rejects a configured sampler zone without its authoritative buffer", () =>
     sourceKind: "upload" as const,
     source: { durationSec: 1, sampleRate: 48_000, channelCount: 2 },
   }
+
   const zone = {
     id: "sampler-zone",
     sample,
@@ -542,6 +585,7 @@ test("rejects a configured sampler zone without its authoritative buffer", () =>
     crossfadeSec: 0,
     chokeGroup: 0,
   }
+
   const result = compileLivePlaybackSnapshot({
     ...input,
     tracks: [{ ...track, clips: [{ ...track.clips[0], midi: { wave: "sine", notes: [] }, sourceAssetKey: undefined, buffer: undefined }] }],
@@ -558,6 +602,7 @@ test("rejects a configured sampler zone without its authoritative buffer", () =>
       },
     },
   })
+
   expect(result).toEqual({
     supported: false,
     reasons: ['Sampler zone "sampler-zone" is missing its authoritative audio buffer.'],
@@ -567,13 +612,16 @@ test("rejects a configured sampler zone without its authoritative buffer", () =>
 test("rejects a configured Drum Rack pad when its buffer cache is absent", () => {
   const params = createDefaultDrumRackParams()
   const pad = params.pads[0]
+
   if (!pad) throw new Error("Default drum rack has no pads.")
+
   const sample = {
     assetKey: "asset-missing-drum",
     url: "/drum.wav",
     sourceKind: "upload" as const,
     source: { durationSec: 1, sampleRate: 48_000, channelCount: 2 },
   }
+
   const result = compileLivePlaybackSnapshot({
     ...input,
     tracks: [{ ...track, clips: [{ ...track.clips[0], midi: { wave: "sine", notes: [] }, sourceAssetKey: undefined, buffer: undefined }] }],
@@ -594,6 +642,7 @@ test("rejects a configured Drum Rack pad when its buffer cache is absent", () =>
       },
     },
   })
+
   expect(result).toEqual({
     supported: false,
     reasons: [`Drum Rack pad "${pad.id}" is missing its authoritative audio buffer.`],
@@ -607,6 +656,7 @@ test("rejects a configured Granular zone without its authoritative buffer", () =
     sourceKind: "upload" as const,
     source: { durationSec: 1, sampleRate: 48_000, channelCount: 2 },
   }
+
   const zone = {
     id: "granular-zone",
     sample,
@@ -625,6 +675,7 @@ test("rejects a configured Granular zone without its authoritative buffer", () =
     crossfadeSec: 0,
     chokeGroup: 0,
   }
+
   const result = compileLivePlaybackSnapshot({
     ...input,
     tracks: [{ ...track, clips: [{ ...track.clips[0], midi: { wave: "sine", notes: [] }, sourceAssetKey: undefined, buffer: undefined }] }],
@@ -641,6 +692,7 @@ test("rejects a configured Granular zone without its authoritative buffer", () =
       },
     },
   })
+
   expect(result).toEqual({
     supported: false,
     reasons: ['Granular zone "granular-zone" is missing its authoritative audio buffer.'],

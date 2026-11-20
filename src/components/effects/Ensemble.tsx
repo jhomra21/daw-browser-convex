@@ -12,8 +12,10 @@ type EnsembleProps = {
   onAutomationParameterTouch?: (parameterId: string) => void
   onManualAutomationOverride?: (parameterId: string) => void
 }
+
 const defaults = createDefaultEnsembleParams()
 const percent = formatDevicePercent
+
 export default function Ensemble(props: EnsembleProps) {
   return <EffectShell title="Ensemble" typeLabel="3 Voices" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="w-52 min-w-52"><div class="grid min-h-0 flex-1 grid-cols-2 grid-rows-3 items-center gap-x-8 px-4 py-3">
     <Knob label="Delay" value={props.params.delayMs} valueLabel={formatDeviceMilliseconds(props.params.delayMs, 1)} resetValue={defaults.delayMs} min={10} max={30} step={0.1} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get("ensemble.delayMs")} automated={props.automationRangesByParameterId?.has("ensemble.delayMs")} onAutomationSelect={() => props.onAutomationParameterTouch?.("ensemble.delayMs")} onValueChange={(delayMs) => { props.onManualAutomationOverride?.("ensemble.delayMs"); props.onChange({ delayMs }) }} />

@@ -22,6 +22,7 @@ type DesktopCapabilityBridge = {
 }
 
 const maximumCapabilityChunkBytes = 1024 * 1024
+
 const capabilityCommitErrorSchema = z.object({
   code: z.string().optional(),
   message: z.string().optional(),
@@ -36,21 +37,26 @@ const createSink = (bridge: DesktopCapabilityBridge, writer: CapabilityWriter): 
   let highWaterMark = 0
   let settled = false
   let operation = Promise.resolve()
+
   const abort = async () => {
     if (settled) return
     settled = true
     await operation
     await bridge.abort(writer.requestId, writer.writerId)
   }
+
   const commit = async () => {
     if (settled) return { byteLength: highWaterMark }
     await operation
+
     try {
       const result = await bridge.commit(writer.requestId, writer.writerId)
       settled = true
+
       return { byteLength: result.byteLength }
     } catch (error) {
       const parsed = capabilityCommitErrorSchema.safeParse(error)
+
       if (
         parsed.success
         && (
@@ -61,6 +67,7 @@ const createSink = (bridge: DesktopCapabilityBridge, writer: CapabilityWriter): 
       throw error
     }
   }
+
   return {
     name: writer.name,
     target: {
@@ -68,15 +75,19 @@ const createSink = (bridge: DesktopCapabilityBridge, writer: CapabilityWriter): 
       writable: new WritableStream<StreamTargetChunk>({
         async write(chunk) {
           if (settled) throw new Error("Desktop export output is closed.")
+
           const write = operation.then(async () => {
             let position = chunk.position
+
             for (let start = 0; start < chunk.data.byteLength; start += maximumCapabilityChunkBytes) {
               const data = chunk.data.subarray(start, Math.min(start + maximumCapabilityChunkBytes, chunk.data.byteLength))
               const result = await bridge.writeChunk(writer.requestId, writer.writerId, position, data)
               position = result.nextOffset
             }
+
             highWaterMark = Math.max(highWaterMark, position)
           })
+
           operation = write.catch(() => undefined)
           await write
         },
@@ -102,8 +113,10 @@ export const createDesktopCapabilityExportOutputTargetFactory = (
       output.token,
       output.directory ? name : undefined,
     )
+
     return createSink(bridge, { requestId, writerId, name: output.directory ? name : output.basename ?? name })
   }
+
   return {
     resourceLimits: desktopExportResourceLimits,
     async createMixdownTarget() {
@@ -135,6 +148,7 @@ const exportCanceled = () => new DOMException("The export was canceled.", "Abort
 
 const pickExportOutput = async <Value>(pick: () => Promise<Value>): Promise<Value> => {
   exportOutputPickerStatus.set(true)
+
   try {
     return await pick()
   } finally {
@@ -152,6 +166,7 @@ export const createDesktopRendererExportOutputTargetFactory = (
         openFile: async () => undefined,
         saveBuffer: async ({ blob, fileName, format, durationSec, sampleRate, signal }) => {
           if (!input.projectId || isLocalId("project", input.projectId)) throw new Error("Missing room")
+
           const upload = await saveCloudExport({
             projectId: input.projectId,
             blob,
@@ -161,37 +176,47 @@ export const createDesktopRendererExportOutputTargetFactory = (
             sampleRate,
             signal,
           })
+
           return { destination: "cloud" as const, name: fileName, url: upload.url }
         },
       }
     }
+
     const requestId = crypto.randomUUID()
+
     if (input.multiFormat) {
       const selected = await pickExportOutput(() => bridge.pickOutputDirectory(requestId))
+
       if (selected.canceled) {
         await bridge.releaseExportOutput(requestId)
         throw exportCanceled()
       }
+
       const target = createDesktopCapabilityExportOutputTargetFactory(bridge, requestId, {
         token: selected.directory.token,
         basename: selected.directory.basename,
         directory: true,
       })
+
       return {
         ...(await target.createMixdownTarget(input)),
         dispose: async () => { await bridge.releaseExportOutput(requestId) },
       }
     }
+
     const selected = await pickExportOutput(() => bridge.pickOutputFile(requestId, input.firstFormat))
+
     if (selected.canceled) {
       await bridge.releaseExportOutput(requestId)
       throw exportCanceled()
     }
+
     const target = createDesktopCapabilityExportOutputTargetFactory(bridge, requestId, {
       token: selected.file.token,
       basename: selected.file.basename,
       directory: false,
     })
+
     return {
       ...(await target.createMixdownTarget(input)),
       dispose: async () => { await bridge.releaseExportOutput(requestId) },

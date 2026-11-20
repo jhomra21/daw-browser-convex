@@ -32,9 +32,11 @@ const toDrainSummary = (result: ProjectR2DeleteDrainResult): R2DeleteDrainSummar
 
 const deleteR2Prefix = async (bucket: R2DeleteBucket, prefix: string) => {
   let cursor: string | undefined
+
   do {
     const page = await bucket.list({ prefix, cursor, limit: 1000 })
     const keys = page.objects.map((entry) => entry.key).filter(Boolean)
+
     if (keys.length > 0) await bucket.delete(keys)
     cursor = page.truncated ? page.cursor : undefined
   } while (cursor)
@@ -61,40 +63,51 @@ export const drainR2DeleteRows = async (input: {
   rows: R2DeleteQueueRow[]
 }) => {
   const rowsByProject = new Map<string, Id<'r2DeleteQueue'>[]>()
+
   for (const row of input.rows) {
     const ids = rowsByProject.get(row.projectId) ?? []
     ids.push(row._id)
     rowsByProject.set(row.projectId, ids)
   }
+
   const claimed = (await Promise.all(Array.from(rowsByProject, ([projectId, ids]) => (
     input.convex.mutation(convexApi.r2Deletes.claimRows, { projectId, ids, now: Date.now() })
   )))).flat()
+
   if (claimed.length === 0) return { processed: 0, deleted: 0, deletedKeys: [] }
   const deletedIdsByProject = new Map<string, Id<'r2DeleteQueue'>[]>()
   const deletedKeys: string[] = []
   const claimedById = new Map(claimed.map((row) => [String(row._id), row]))
+
   const recordDeleted = (row: R2DeleteQueueRow) => {
     let ids = deletedIdsByProject.get(row.projectId)
+
     if (!ids) {
       ids = []
       deletedIdsByProject.set(row.projectId, ids)
     }
+
     ids.push(row._id)
     deletedKeys.push(row.r2Key)
   }
+
   const objectRows: R2DeleteQueueRow[] = []
   const multipartRows: R2DeleteQueueRow[] = []
   const prefixRows: R2DeleteQueueRow[] = []
+
   for (const row of claimed) {
     if (row.kind === 'project-prefix') prefixRows.push(row)
     else if (row.kind === 'multipart-abort') multipartRows.push(row)
     else objectRows.push(row)
   }
+
   await Promise.all(multipartRows.map(async (row) => {
     if (!row.claimToken || !row.multipartUploadId) {
       await markFailed(input.convex, row, new Error('Multipart abort row is malformed'))
+
       return
     }
+
     try {
       await input.bucket.resumeMultipartUpload(row.r2Key, row.multipartUploadId).abort()
       recordDeleted(row)
@@ -104,6 +117,7 @@ export const drainR2DeleteRows = async (input: {
   }))
   const deletedPrefixKeys = new Set<string>()
   const failedPrefixKeys = new Set<string>()
+
   for (let index = 0; index < prefixRows.length; index += 2) {
     await Promise.all(prefixRows.slice(index, index + 2).map(async (row) => {
       try {
@@ -116,39 +130,50 @@ export const drainR2DeleteRows = async (input: {
       }
     }))
   }
+
   const remainingObjectRows: R2DeleteQueueRow[] = []
   const failedCoveredObjectRows: R2DeleteQueueRow[] = []
   const matchingPrefixKeyByObjectId = new Map<string, string | undefined>()
+
   for (const row of objectRows) {
     let matchingPrefixKey: string | undefined
+
     for (const prefix of prefixRows) {
       if (row.r2Key.startsWith(prefix.r2Key)) {
         matchingPrefixKey = prefix.r2Key
         break
       }
     }
+
     matchingPrefixKeyByObjectId.set(String(row._id), matchingPrefixKey)
   }
+
   for (const row of objectRows) {
     const matchingPrefixKey = matchingPrefixKeyByObjectId.get(String(row._id))
+
     if (matchingPrefixKey && deletedPrefixKeys.has(matchingPrefixKey)) {
       recordDeleted(row)
       continue
     }
+
     if (matchingPrefixKey && failedPrefixKeys.has(matchingPrefixKey)) {
       failedCoveredObjectRows.push(row)
       continue
     }
+
     remainingObjectRows.push(row)
   }
+
   await Promise.all(failedCoveredObjectRows.map((row) => markFailed(
     input.convex,
     row,
     new Error('R2 prefix delete failed'),
   )))
+
   if (remainingObjectRows.length > 0) {
     try {
       await deleteR2Keys(input.bucket, remainingObjectRows.map((row) => row.r2Key))
+
       for (const row of remainingObjectRows) recordDeleted(row)
     } catch (error) {
       await Promise.all(remainingObjectRows.map((row) => markFailed(
@@ -158,15 +183,18 @@ export const drainR2DeleteRows = async (input: {
       )))
     }
   }
+
   await Promise.all(Array.from(deletedIdsByProject).map(([projectId, ids]) => (
     input.convex.mutation(convexApi.r2Deletes.markDeleted, {
       projectId,
       claims: ids.flatMap((id) => {
         const row = claimedById.get(String(id))
+
         return row?.claimToken ? [{ id, claimToken: row.claimToken }] : []
       }),
     })
   )))
+
   return { processed: claimed.length, deleted: deletedKeys.length, deletedKeys }
 }
 
@@ -178,11 +206,13 @@ export const drainR2DeleteQueue = async (input: {
   limit?: number
 }): Promise<ProjectR2DeleteDrainResult> => {
   const convex = await createWorkerConvexClient(input.c, input.user)
+
   const rows = await convex.query(convexApi.r2Deletes.listDue, {
     projectId: input.projectId,
     now: Date.now(),
     limit: input.limit ?? 25,
   })
+
   return await drainR2DeleteRows({ convex, bucket: input.bucket, rows })
 }
 
@@ -200,11 +230,14 @@ export const drainDueR2DeleteQueue = async (input: {
     now: Date.now(),
     limit: 100,
   })
+
   const rows = await convex.query(convexApi.r2Deletes.listDueAny, {
     now: Date.now(),
     limit: input.limit ?? 25,
   })
+
   const result = await drainR2DeleteRows({ convex, bucket: input.bucket, rows })
+
   return toDrainSummary(result)
 }
 
@@ -215,18 +248,23 @@ export const drainProjectPrefixDelete = async (input: {
   projectId: string
 }): Promise<R2DeleteDrainSummary> => {
   const convex = await createWorkerConvexClient(input.c, input.user)
+
   const prefixRows = await convex.query(convexApi.r2Deletes.listDueProjectPrefixes, {
     projectId: input.projectId,
     now: Date.now(),
     limit: 100,
   })
+
   if (prefixRows.length === 0) return { processed: 0, deleted: 0 }
+
   const objectRows = await convex.query(convexApi.r2Deletes.listDue, {
     projectId: input.projectId,
     now: Date.now(),
     limit: 100,
   })
+
   const rows = [...new Map([...prefixRows, ...objectRows].map((row) => [row._id, row])).values()]
   const result = await drainR2DeleteRows({ convex, bucket: input.bucket, rows })
+
   return toDrainSummary(result)
 }

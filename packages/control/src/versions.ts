@@ -26,6 +26,7 @@ export const controlLimitsV1 = {
   defaultRecoveryPageSize: 50,
   maxRecoveryPageSize: 100,
 }
+
 export const controlLimitsV2 = {
   ...controlLimitsV1,
   maxMidiPerformanceEventsPerCommit: 500,
@@ -72,6 +73,7 @@ export const controlCapabilitiesSchemaV1 = z.object({
 }).strict()
 
 export const controlCapabilitiesQuerySchemaV1 = z.object({}).strict()
+
 const controlCapabilityLimitFields = {
   maxActions: z.number().int().positive(),
   maxSerializedBodyBytes: z.number().int().positive(),
@@ -93,6 +95,7 @@ const controlCapabilityLimitFields = {
   defaultRecoveryPageSize: z.number().int().positive(),
   maxRecoveryPageSize: z.number().int().positive(),
 }
+
 export const controlCapabilitiesSchemaV2 = controlCapabilitiesSchemaV1.extend({
   version: z.literal(CONTROL_API_VERSION_V2),
   limits: z.object({
@@ -103,6 +106,7 @@ export const controlCapabilitiesSchemaV2 = controlCapabilitiesSchemaV1.extend({
     maxMidiMappingsPerClip: z.number().int().positive(),
   }).strict(),
 }).strict()
+
 export const controlCapabilitiesQuerySchemaV2 = z.object({}).strict()
 
 const localOnlyControlActionKindsV1 = ['external-plugin.parameters.set']
@@ -140,16 +144,19 @@ export const controlCapabilitiesV1 = {
   },
   limits: controlLimitsV1,
 } satisfies z.input<typeof controlCapabilitiesSchemaV1>
+
 export const localControlCapabilitiesV1 = {
   ...controlCapabilitiesV1,
   executionTarget: 'local-project',
   actionKinds: [...controlCapabilitiesV1.actionKinds, ...localOnlyControlActionKindsV1],
 } satisfies z.input<typeof controlCapabilitiesSchemaV1>
+
 export const controlCapabilitiesV2 = {
   ...controlCapabilitiesV1,
   version: CONTROL_API_VERSION_V2,
   limits: controlLimitsV2,
 } satisfies z.input<typeof controlCapabilitiesSchemaV2>
+
 export const localControlCapabilitiesV2 = {
   ...localControlCapabilitiesV1,
   version: CONTROL_API_VERSION_V2,
@@ -181,6 +188,9 @@ export const controlCapabilities = canonicalControlCapabilities
 export const localControlCapabilities = canonicalLocalControlCapabilities
 
 export type ControlCapabilitiesV1 = z.infer<typeof controlCapabilitiesSchemaV1>
+
 export type ControlCapabilitiesV2 = z.infer<typeof controlCapabilitiesSchemaV2>
+
 export type CanonicalControlCapabilities = ControlCapabilitiesV2
+
 export type ControlCapabilities = CanonicalControlCapabilities

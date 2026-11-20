@@ -5,6 +5,7 @@ type DeferredStretchEngine = Pick<AudioEngine, 'scheduleAllClipsFromPlayhead' | 
 
 export const createDeferredStretch = (audioEngine: DeferredStretchEngine, resolveTracks: () => Track[]) => {
   let deferredStretchWindows: DeferredStretchWindow[] = []
+
   const deferredStretchQueue = {
     clear: () => {
       deferredStretchWindows = []
@@ -16,10 +17,12 @@ export const createDeferredStretch = (audioEngine: DeferredStretchEngine, resolv
           && deferred.startSec === window.startSec
           && deferred.endSec === window.endSec
         ))
+
         if (existingIndex === -1) {
           deferredStretchWindows = [...deferredStretchWindows, window]
           continue
         }
+
         if (!window.replaceExistingSource || deferredStretchWindows[existingIndex].replaceExistingSource) continue
         deferredStretchWindows = deferredStretchWindows.map((deferred, index) => (
           index === existingIndex ? { ...deferred, replaceExistingSource: true } : deferred
@@ -50,13 +53,17 @@ export const createDeferredStretch = (audioEngine: DeferredStretchEngine, resolv
 
   const retryDeferredStretchWindows = (sec: number, opts?: { includeNonImminent?: boolean }) => {
     const deferredWindows = deferredStretchQueue.read()
+
     if (deferredWindows.length === 0) return
     const tracks = resolveTracks()
+
     if (tracks.length === 0) return
 
     const retriedDeferred: DeferredStretchWindow[] = []
+
     for (const window of deferredWindows) {
       if (window.endSec <= sec) continue
+
       if (!opts?.includeNonImminent && !canFallbackToRepitchStretch({
         playheadSec: sec,
         timelineStartSec: window.startSec,
@@ -65,12 +72,15 @@ export const createDeferredStretch = (audioEngine: DeferredStretchEngine, resolv
         retriedDeferred.push(window)
         continue
       }
+
       if (!opts?.includeNonImminent && window.replaceExistingSource) {
         retriedDeferred.push(window)
         continue
       }
+
       const startLimitSec = Math.max(window.startSec, sec)
       const replaceExistingSource = opts?.includeNonImminent && window.replaceExistingSource
+
       const result = replaceExistingSource
         ? audioEngine.rescheduleClipsAtPlayhead(tracks, sec, [window.clipId], {
             startLimitSec,
@@ -82,10 +92,12 @@ export const createDeferredStretch = (audioEngine: DeferredStretchEngine, resolv
             endLimitSec: window.endSec,
             clipIds: [window.clipId],
           })
+
       if (result.deferredStretchWindows.length > 0) {
         retriedDeferred.push(...result.deferredStretchWindows)
       }
     }
+
     deferredStretchQueue.replace(retriedDeferred)
   }
 

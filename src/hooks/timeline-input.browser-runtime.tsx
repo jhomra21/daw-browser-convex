@@ -36,6 +36,7 @@ const createNative = (state: { available: boolean }) => {
   const calls: NativeCall[] = []
   const resetListeners = new Set<() => void>()
   let nextNoteId = 1
+
   return {
     calls,
     reset: () => { for (const listener of resetListeners) listener() },
@@ -44,6 +45,7 @@ const createNative = (state: { available: boolean }) => {
       isAvailable: () => state.available,
       start: (note: { trackId: string; pitch: number }): NativeLiveMidiNoteHandle | undefined => {
         calls.push({ kind: 'start', trackId: note.trackId, pitch: note.pitch })
+
         return state.available ? { backend: 'native', trackId: note.trackId, pitch: note.pitch, noteId: nextNoteId++ } : undefined
       },
       stop: (handle: NativeLiveMidiNoteHandle, force?: boolean) => {
@@ -51,6 +53,7 @@ const createNative = (state: { available: boolean }) => {
       },
       subscribeReset: (listener: () => void) => {
         resetListeners.add(listener)
+
         return () => resetListeners.delete(listener)
       },
     },
@@ -67,13 +70,17 @@ const mountOverlay = (config: {
   const engine = new AudioEngine()
   const browserStarts: number[] = []
   const startLiveMidiNote = engine.startLiveMidiNote.bind(engine)
-  engine.startLiveMidiNote = (note) => { browserStarts.push(note.pitch); return startLiveMidiNote(note) }
+  engine.startLiveMidiNote = (note) => { browserStarts.push(note.pitch);
+
+ return startLiveMidiNote(note) }
+
   const [bpm, setBpm] = createSignal(120)
   const [docked, setDocked] = createSignal<string | null>(config.dockedClipId ?? null)
   const host = document.createElement('div')
   document.body.append(host)
   let overlay: ReturnType<typeof useTimelineMidiOverlay> | undefined
   let selection: ReturnType<typeof useTimelineSelectionState> | undefined
+
   const dispose = render(() => (
     <ColorModeProvider>
     <AppPreferencesProvider initialPreferences={defaultAppPreferences}>
@@ -92,15 +99,18 @@ const mountOverlay = (config: {
             dockedMidiClipId: docked,
             nativeLiveMidi: config.native?.port,
           })
+
           return null
         })()}
       </MidiAccessProvider>
     </AppPreferencesProvider>
     </ColorModeProvider>
   ), host)
+
   if (!overlay || !selection) throw new Error('The MIDI overlay did not mount.')
   // The stored preference loads while the hook mounts; enabling afterwards is the user turning the keyboard on.
   overlay.midiKeyboard.toggle()
+
   return {
     overlay,
     selection,
@@ -122,11 +132,13 @@ const withLifecycleBridge = async <T,>(
         getLifecycle: async () => initial,
         onLifecycle: (listener: (lifecycle: DesktopAudioLifecycle) => void) => {
           listeners.add(listener)
+
           return () => listeners.delete(listener)
         },
       },
     },
   })
+
   try {
     return await run((lifecycle) => { for (const listener of listeners) listener(lifecycle) })
   } finally {
@@ -252,6 +264,7 @@ const runSelectionScenarios = () => {
   const rows: TimelineTrackLayoutRow[] = ['one', 'two'].map((trackId, index) => ({
     trackId, topPx: index * 50, heightPx: 50, clipLaneHeightPx: 50, automationHeightPx: 0, depth: 0,
   }))
+
   for (const playing of [false, true]) {
     const label = playing ? 'playing' : 'stopped'
     const host = document.createElement('div')
@@ -262,6 +275,7 @@ const runSelectionScenarios = () => {
     createRoot((dispose) => {
       const tracks = [track('one'), track('two')]
       const state = useTimelineSelectionState({ projectId: () => 'project:selection', tracks: () => tracks })
+
       const selection = useTimelineSelection({
         tracks: () => tracks,
         trackLayout: () => rows,
@@ -275,6 +289,7 @@ const runSelectionScenarios = () => {
         moveScrub: (clientX) => { moves.push(clientX) },
         stopScrub: () => {},
       })
+
       host.addEventListener('pointerdown', (event) => {
         if (event instanceof PointerEvent) selection.onLanePointerDown(event, { kind: 'scrolling', element: host, rows, rulerOffsetPx: 0 })
       })
@@ -300,4 +315,5 @@ const run = async () => {
     Object.assign(window, { __browserFixtureError: String(error) })
   }
 }
+
 void run()

@@ -10,10 +10,12 @@ export const useSharedOutboxFailure = (input: Accessor<{ projectId: string; user
   createEffect(() => {
     const { projectId, userId } = input();
     setFailure(undefined);
+
     if (!projectId || isLocalId("project", projectId) || !userId) return;
     let active = true;
     let inFlight = false;
     let changedDuringRead = false;
+
     // Reads are serialized (one in flight, one coalesced follow-up), so results always apply in order.
     const read = () => {
       inFlight = true;
@@ -25,16 +27,21 @@ export const useSharedOutboxFailure = (input: Accessor<{ projectId: string; user
         )
         .finally(() => {
           inFlight = false;
+
           if (active && changedDuringRead) read();
         });
     };
+
     const refresh = () => {
       if (inFlight) {
         changedDuringRead = true;
+
         return;
       }
+
       read();
     };
+
     const unsubscribe = subscribeToLocalProjectChanges(projectId, refresh);
     refresh();
     onCleanup(() => {
@@ -42,5 +49,6 @@ export const useSharedOutboxFailure = (input: Accessor<{ projectId: string; user
       unsubscribe();
     });
   });
+
   return failure;
 };

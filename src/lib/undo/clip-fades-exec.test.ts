@@ -44,6 +44,7 @@ test('undo and redo persist directional clip fades, update the projection, and r
     fades: to,
   })
   let tracks = [createTrack()]
+
   const entry: HistoryEntry = {
     type: 'clip-fades',
     projectId,
@@ -53,8 +54,10 @@ test('undo and redo persist directional clip fades, update the projection, and r
       to,
     },
   }
+
   const committed: Array<{ clipId: string; fades: NonNullable<Track['clips'][number]['fades']> }> = []
   const rescheduled: string[][] = []
+
   const deps: Parameters<typeof execUndo>[1] = {
     convexClient,
     convexApi,
@@ -119,6 +122,7 @@ test('timing history persists transformed fades atomically', async () => {
     duration: 4,
     fades: to,
   })
+
   const entry: HistoryEntry = {
     type: 'clip-timing',
     projectId,
@@ -128,7 +132,9 @@ test('timing history persists transformed fades atomically', async () => {
       to: { startSec: 0, duration: 4, fades: to },
     },
   }
+
   const timingCommits: Array<Extract<HistoryEntry, { type: 'clip-timing' }>['data']['from']> = []
+
   const deps: Parameters<typeof execUndo>[1] = {
     convexClient,
     convexApi,
@@ -175,6 +181,7 @@ test('undo recreates deleted legacy clips in the local repository without strict
   const projectId = 'project:history-recreated-faded-clip'
   const repository = createLocalTimelineRepository(projectId)
   await repository.createTrack({ id: 'track-1' })
+
   const entry: HistoryEntry = {
     type: 'clip-delete',
     projectId,
@@ -199,7 +206,9 @@ test('undo recreates deleted legacy clips in the local repository without strict
       }],
     },
   }
+
   const recreated = createTrack()
+
   const deps: Parameters<typeof execUndo>[1] = {
     convexClient,
     convexApi,
@@ -247,6 +256,7 @@ test('undo recreates deleted legacy clips in the local repository without strict
 test('undo recreates faded clips inside deleted local tracks', async () => {
   const projectId = 'project:history-recreated-faded-track-clip'
   const repository = createLocalTimelineRepository(projectId)
+
   const entry: HistoryEntry = {
     type: 'track-delete',
     projectId,
@@ -266,7 +276,9 @@ test('undo recreates faded clips inside deleted local tracks', async () => {
       }],
     },
   }
+
   let tracks: Track[] = []
+
   const deps: Parameters<typeof execUndo>[1] = {
     convexClient,
     convexApi,

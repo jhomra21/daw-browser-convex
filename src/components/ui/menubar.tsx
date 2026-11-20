@@ -36,11 +36,13 @@ const MenubarMenuValueContext = createContext<Accessor<string | undefined>>();
 
 const useMenubarAnimation = () => {
   const context = useContext(MenubarAnimationContext);
+
   return assertDefined(context, "MenubarContent must be used within Menubar.");
 };
 
 const useMenubarMenuValue = () => {
   const value = useContext(MenubarMenuValueContext);
+
   return () => assertDefined(value?.(), "MenubarContent must be used within MenubarMenu.");
 };
 
@@ -51,13 +53,16 @@ type MenubarProps = MenubarPrimitive.MenubarRootProps & {
 
 const Menubar: Component<MenubarProps> = (props) => {
   const initialValue = untrack(() => props.value ?? props.defaultValue);
+
   const [animation, setAnimation] = createSignal<MenubarAnimationState>({
     animate: true,
     value: initialValue,
   });
+
   const [currentValue, setCurrentValue] = createSignal<
     string | null | undefined
   >(initialValue);
+
   const [local, rest] = splitProps(props, ["onValueChange"]);
 
   createEffect(() => {
@@ -81,11 +86,13 @@ const Menubar: Component<MenubarProps> = (props) => {
     </MenubarAnimationContext.Provider>
   );
 };
+
 const MenubarPortal = MenubarPrimitive.Portal;
 
 const MenubarMenu: Component<MenubarPrimitive.MenubarMenuProps> = (props) => {
   const mergedProps = mergeProps({ gutter: 8, shift: -4 }, props);
   const value = createMemo(() => props.value);
+
   return (
     <MenubarMenuValueContext.Provider value={value}>
       <MenubarPrimitive.Menu {...mergedProps} />
@@ -95,6 +102,7 @@ const MenubarMenu: Component<MenubarPrimitive.MenubarMenuProps> = (props) => {
 
 const MenubarSub: Component<MenubarPrimitive.MenubarSubProps> = (props) => {
   const mergedProps = mergeProps({ gutter: 8 }, props);
+
   return <MenubarPrimitive.Sub {...mergedProps} />;
 };
 
@@ -110,6 +118,7 @@ function MenubarTrigger(
   props: PolymorphicProps<ValidComponent, MenubarTriggerProps<ValidComponent>>,
 ): JSX.Element {
   const [local, rest] = splitProps(props, ["class"]);
+
   return (
     <MenubarPrimitive.Trigger
       class={cn(
@@ -120,7 +129,9 @@ function MenubarTrigger(
       {...rest}
     />
   );
-};
+}
+
+;
 
 type MenubarContentProps<T extends ValidComponent = "div"> =
   MenubarPrimitive.MenubarContentProps<T> & {
@@ -136,9 +147,11 @@ function MenubarContent(
   const [local, rest] = splitProps(props, ["class"]);
   const animation = useMenubarAnimation();
   const menuValue = useMenubarMenuValue();
+
   const shouldAnimate = () =>
     animation.animation().animate !== false &&
     menuValue() === animation.animation().value;
+
   return (
     <MenubarPrimitive.Portal>
       <MenubarPrimitive.Content
@@ -153,7 +166,9 @@ function MenubarContent(
       />
     </MenubarPrimitive.Portal>
   );
-};
+}
+
+;
 
 type MenubarItemProps<T extends ValidComponent = "div"> =
   MenubarPrimitive.MenubarItemProps<T> & {
@@ -168,6 +183,7 @@ function MenubarItem(
   props: PolymorphicProps<ValidComponent, MenubarItemProps<ValidComponent>>,
 ): JSX.Element {
   const [local, rest] = splitProps(props, ["class", "inset"]);
+
   return (
     <MenubarPrimitive.Item
       class={cn(
@@ -178,10 +194,13 @@ function MenubarItem(
       {...rest}
     />
   );
-};
+}
+
+;
 
 const MenubarShortcut: Component<ComponentProps<"span">> = (props) => {
   const [local, rest] = splitProps(props, ["class"]);
+
   return (
     <span
       class={cn("ml-auto shrink-0 whitespace-nowrap pl-4 text-[11px] tracking-wide opacity-60", local.class)}
@@ -197,6 +216,7 @@ type MenubarLabelProps = ComponentProps<"div"> & {
 
 const MenubarLabel: Component<MenubarLabelProps> = (props) => {
   const [local, rest] = splitProps(props, ["class", "inset"]);
+
   return (
     <div
       class={cn(
@@ -221,13 +241,16 @@ function MenubarSeparator(
   props: PolymorphicProps<ValidComponent, MenubarSeparatorProps<ValidComponent>>,
 ): JSX.Element {
   const [local, rest] = splitProps(props, ["class"]);
+
   return (
     <MenubarPrimitive.Separator
       class={cn("-mx-0.5 my-0.5 h-px bg-muted", local.class)}
       {...rest}
     />
   );
-};
+}
+
+;
 
 type MenubarSubTriggerProps<T extends ValidComponent = "div"> =
   MenubarPrimitive.MenubarSubTriggerProps<T> & {
@@ -243,6 +266,7 @@ function MenubarSubTrigger(
   props: PolymorphicProps<ValidComponent, MenubarSubTriggerProps<ValidComponent>>,
 ): JSX.Element {
   const [local, rest] = splitProps(props, ["class", "children", "inset"]);
+
   return (
     <MenubarPrimitive.SubTrigger
       class={cn(
@@ -265,7 +289,9 @@ function MenubarSubTrigger(
       </svg>
     </MenubarPrimitive.SubTrigger>
   );
-};
+}
+
+;
 
 type MenubarSubContentProps<T extends ValidComponent = "div"> =
   MenubarPrimitive.MenubarSubContentProps<T> & {
@@ -279,6 +305,7 @@ function MenubarSubContent(
   props: PolymorphicProps<ValidComponent, MenubarSubContentProps<ValidComponent>>,
 ): JSX.Element {
   const [local, rest] = splitProps(props, ["class"]);
+
   return (
     <MenubarPrimitive.SubContent
       class={cn(
@@ -290,7 +317,9 @@ function MenubarSubContent(
       {...rest}
     />
   );
-};
+}
+
+;
 
 export {
   Menubar,

@@ -8,7 +8,9 @@ import type { AudioEffectRuntimeInstance } from '../src/effects/runtime-instance
 // test reads what the "node" holds instead of what the runtime believes it installed.
 
 type PostedMessage = { type: string; params?: { thresholdDb: number } }
+
 type ConnectionTarget = AudioNode | AudioParam
+
 type FakeWorkletPort = {
   postMessage: (message: PostedMessage) => void
   close: () => void
@@ -20,11 +22,13 @@ export const captureFxTransitions = () => {
   const originalClear = globalThis.clearTimeout
   const pending = new Map<ReturnType<typeof setTimeout>, () => void>()
   const all: Array<() => void> = []
+
   const scheduler = {
     schedule: (callback: () => void) => {
       const handle = originalSet(() => {}, 60_000)
       pending.set(handle, callback)
       all.push(callback)
+
       return handle
     },
     clear: (handle: ReturnType<typeof setTimeout>) => {
@@ -32,11 +36,13 @@ export const captureFxTransitions = () => {
       originalClear(handle)
     },
   }
+
   return {
     pending,
     all,
     run: () => {
       const entry = pending.entries().next().value
+
       if (!entry) throw new Error('No captured reconnect.')
       pending.delete(entry[0])
       originalClear(entry[0])
@@ -53,6 +59,7 @@ export const captureFxTransitions = () => {
 let gainRampCount = 0
 let failNextConnection = false
 let failRampValue: number | undefined
+
 const createParam = (value = 0) => ({
   get value() { return value },
   set value(next: number) { value = next },
@@ -62,34 +69,43 @@ const createParam = (value = 0) => ({
   },
   linearRampToValueAtTime: (target: number, _endTime: number) => {
     gainRampCount += 1
+
     if (failRampValue === target) {
       failRampValue = undefined
       throw new Error(`Audio ramp to ${target} failed.`)
     }
+
     value = target
   },
   setTargetAtTime: () => {},
 })
+
 const connections: Array<{ source: object; target: object }> = []
+
 const createNode = () => {
   const node = Object.create(null)
+
   return Object.assign(node, {
     connect: (target: ConnectionTarget) => {
       if (failNextConnection) {
         failNextConnection = false
         throw new Error('Audio connection failed.')
       }
+
       connections.push({ source: node, target })
     },
     disconnect: (target?: ConnectionTarget) => {
       for (let index = connections.length - 1; index >= 0; index -= 1) {
         const connection = connections[index]
+
         if (connection?.source === node && (!target || connection.target === target)) connections.splice(index, 1)
       }
     },
   })
 }
+
 const createGain = () => Object.assign(createNode(), { gain: createParam(1) })
+
 const createBiquad = () => Object.assign(createNode(), {
   type: 'peaking',
   frequency: createParam(),
@@ -113,6 +129,7 @@ class FakeWorkletNode {
         failNextParamsPost = false
         throw new Error('Worklet parameter post failed.')
       }
+
       this.posted.push(message)
     },
     close: () => {
@@ -127,11 +144,13 @@ class FakeWorkletNode {
       failNextConnection = false
       throw new Error('Audio connection failed.')
     }
+
     connections.push({ source: this, target })
   }
   disconnect = (target?: ConnectionTarget) => {
     for (let index = connections.length - 1; index >= 0; index -= 1) {
       const connection = connections[index]
+
       if (connection?.source === this && (!target || connection.target === target)) connections.splice(index, 1)
     }
   }
@@ -140,6 +159,7 @@ class FakeWorkletNode {
       failNextConstruction = false
       throw new Error('Worklet node construction failed.')
     }
+
     created.push(this)
   }
 }
@@ -163,6 +183,7 @@ export const createFxTestAudio = () => {
   let failNextModuleLoad = false
   const biquads: ReturnType<typeof createBiquad>[] = []
   const delays: Array<{ delayTime: ReturnType<typeof createParam> }> = []
+
   const context = Object.assign(Object.create(null), {
     currentTime: 0,
     sampleRate: 48_000,
@@ -178,12 +199,14 @@ export const createFxTestAudio = () => {
     createDelay: () => {
       const delay = Object.assign(createNode(), { delayTime: createParam() })
       delays.push(delay)
+
       return delay
     },
     createChannelSplitter: createNode,
     createChannelMerger: createNode,
     ['createWaveShaper']: () => {
       let curve: Float32Array | null = null
+
       return Object.defineProperty(createNode(), 'curve', {
         get: () => curve,
         set: (next: Float32Array | null) => {
@@ -191,6 +214,7 @@ export const createFxTestAudio = () => {
             failNextCurveWrite = false
             throw new Error('Wave shaper curve write failed.')
           }
+
           curve = next
         },
       })
@@ -198,9 +222,11 @@ export const createFxTestAudio = () => {
     createBiquadFilter: () => {
       const filter = createBiquad()
       biquads.push(filter)
+
       return filter
     },
   })
+
   return {
     context,
     masterInput: createGain(),
@@ -245,6 +271,7 @@ export const createFxTransitionHarness = (
   const audio = createFxTestAudio()
   let hasContext = true
   const budget = createLiveWorkletBudget(8)
+
   const track = createLiveMixerRuntime({
     ensureAudio: () => {},
     getAudioContext: () => hasContext ? audio.context : null,
@@ -259,12 +286,15 @@ export const createFxTransitionHarness = (
     transitionScheduler: timers.scheduler,
     onGraphLatencyChange,
   })
+
   const master = createMasterFxRuntime({
     getFaultGeneration: () => 0,
     workletBudget: budget,
     transitionScheduler: timers.scheduler,
   })
+
   if (owner === 'track') track.updateTrackGains([{ id: 't', name: 't', volume: 1, clips: [] }])
+
   return {
     timers,
     audio,
@@ -292,10 +322,13 @@ export const createFxTransitionHarness = (
 export const createCountingBudget = (refuseCommit = false) => {
   const budget = createLiveWorkletBudget()
   let begins = 0
+
   return {
     budget: {
       ...budget,
-      begin: (owner: string, count: number) => { begins += 1; return budget.begin(owner, count) },
+      begin: (owner: string, count: number) => { begins += 1;
+
+ return budget.begin(owner, count) },
       commit: (...args: Parameters<typeof budget.commit>) => !refuseCommit && budget.commit(...args),
     },
     begins: () => begins,
@@ -305,6 +338,7 @@ export const createCountingBudget = (refuseCommit = false) => {
 
 export const compressorInstance = (thresholdDb: number, id = 'compressor-1', enabled = true): AudioEffectRuntimeInstance => {
   const params: CompressorParams = { ...AUDIO_EFFECT_CONTRACTS.compressor.createDefaultParams(), enabled, thresholdDb }
+
   return { id, kind: 'compressor', params }
 }
 
@@ -334,6 +368,7 @@ export const syncedDelayInstance = (id = 'delay-1'): AudioEffectRuntimeInstance 
 
 export const staticGateInstance = (thresholdDb: number, ratio: number, id = 'gate-1'): AudioEffectRuntimeInstance => {
   const defaults = AUDIO_EFFECT_CONTRACTS.gate.createDefaultParams()
+
   return {
     id,
     kind: 'gate',
@@ -345,6 +380,7 @@ export const staticGateInstance = (thresholdDb: number, ratio: number, id = 'gat
 export const eqInstance = (gainDb: number, id = 'eq-1'): AudioEffectRuntimeInstance => {
   const defaults = AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams()
   const params: EqParams = { ...defaults, bands: defaults.bands.map((band, index) => index === 1 ? { ...band, gainDb } : band) }
+
   return { id, kind: 'eq', params }
 }
 
@@ -362,6 +398,7 @@ const failNextWrite = (parameter: { value?: number } | undefined) => {
         fail = false
         throw new Error('Audio parameter write failed.')
       }
+
       value = next
     },
   })

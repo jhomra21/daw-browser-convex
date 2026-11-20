@@ -11,6 +11,7 @@ describe("recording diagnostics", () => {
   })
   test("retains first terminal cause, sanitizes errors and bounds lifecycle history", () => {
     resetRecordingDiagnostics()
+
     for (let index = 0; index < 12; index++) recordRecordingLifecycle(index % 2 ? "ready" : "recovering")
     recordRecordingTermination("native-fatal", new Error("/Users/private/recording.wav failed " + "x".repeat(300)))
     recordRecordingTermination("controller-cleanup", new Error("later"))

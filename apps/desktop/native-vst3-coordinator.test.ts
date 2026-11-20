@@ -124,6 +124,7 @@ const first = attachment({
   nativeGraphNodeId: "1",
   classId: "0123456789abcdef0123456789abcdef",
 })
+
 const second = attachment({
   instanceId: "22222222-2222-4222-8222-222222222222",
   graphNodeId: "track-b",
@@ -175,6 +176,7 @@ const plan = (attachments: NativeExternalAttachmentPlan["attachments"]): string 
 
 test("exports stateless VST3 attachments with defaults and persisted parameters", async () => {
   const parameterValue = 0.592999
+
   const stateless = attachment({
     instanceId: first.instanceId,
     graphNodeId: first.graphNodeId,
@@ -182,7 +184,9 @@ test("exports stateless VST3 attachments with defaults and persisted parameters"
     classId: first.catalogIdentity.classId,
     parameterOverrides: { "48": parameterValue },
   })
+
   let stateReaderCalled = false
+
   const resolved = await resolveNativeVst3AttachmentPlan({
     plan: { version: 1, attachments: [stateless] },
     sampleRateHz: 48_000,
@@ -194,6 +198,7 @@ test("exports stateless VST3 attachments with defaults and persisted parameters"
     },
     preflight: async () => available(stateless),
   })
+
   expect(stateReaderCalled).toBeFalse()
   expect(resolved[0]).toMatchObject({
     initialParameterValues: [{ id: 48, value: parameterValue }],
@@ -204,13 +209,16 @@ test("exports stateless VST3 attachments with defaults and persisted parameters"
 test("requires and validates live state capture for stateful VST3 attachments", async () => {
   const bytes = new Uint8Array([1, 2, 3])
   const sha256 = createHash("sha256").update(bytes).digest("hex")
+
   const stateful = attachment({
     instanceId: first.instanceId,
     graphNodeId: first.graphNodeId,
     nativeGraphNodeId: first.nativeGraphNodeId,
     classId: first.catalogIdentity.classId,
   })
+
   const calls: string[] = []
+
   const resolved = await resolveNativeVst3AttachmentPlan({
     plan: { version: 1, attachments: [stateful] },
     sampleRateHz: 48_000,
@@ -218,10 +226,12 @@ test("requires and validates live state capture for stateful VST3 attachments", 
     catalogStore: { load: async () => catalog() },
     stateReader: async (instanceId) => {
       calls.push(instanceId)
+
       return { bytes, sha256 }
     },
     preflight: async () => available(stateful, { supportsState: true }),
   })
+
   expect(calls).toEqual([stateful.instanceId])
   expect(resolved[0]).toMatchObject({ initialState: { bytes, sha256 } })
   await expect(resolveNativeVst3AttachmentPlan({
@@ -251,6 +261,7 @@ test("requires and validates live state capture for stateful VST3 attachments", 
 
 test("bootstraps a new stateful attachment when no persisted state is required", async () => {
   const calls: string[] = []
+
   const result = await coordinateNativeVst3Attachments({
     serializedPlan: plan([first]),
     sampleRateHz: 48_000,
@@ -265,12 +276,14 @@ test("bootstraps a new stateful attachment when no persisted state is required",
     requiredVstStateInstanceIds: new Set(),
     preflight: async () => available(first, { supportsState: true }),
   })
+
   expect(result).toEqual({ ok: true, attached: 1 })
   expect(calls).toEqual(["attach-default"])
 })
 
 test("fails closed when an existing stateful attachment has no captured state", async () => {
   const calls: string[] = []
+
   const result = await coordinateNativeVst3Attachments({
     serializedPlan: plan([first]),
     sampleRateHz: 48_000,
@@ -284,6 +297,7 @@ test("fails closed when an existing stateful attachment has no captured state", 
     requiredVstStateInstanceIds: new Set([first.instanceId]),
     preflight: async () => available(first, { supportsState: true }),
   })
+
   expect(result).toEqual({
     ok: false,
     code: "state-invalid",
@@ -302,6 +316,7 @@ const host = (calls: string[]) => ({
 test("preflights every attachment before attaching to the active native transaction", async () => {
   const calls: string[] = []
   const attachments = new Map([[first.instanceId, first], [second.instanceId, second]])
+
   const result = await coordinateNativeVst3Attachments({
     serializedPlan: plan([second, first]),
     sampleRateHz: 48_000,
@@ -311,10 +326,13 @@ test("preflights every attachment before attaching to the active native transact
     preflight: async ({ attachment: input }) => {
       calls.push(`preflight:${input.instanceId}`)
       const source = attachments.get(input.instanceId)
+
       if (!source) throw new Error("missing fixture attachment")
+
       return available(source)
     },
   })
+
   expect(result).toEqual({ ok: true, attached: 2 })
   expect(calls).toEqual([
     `preflight:${first.instanceId}`,
@@ -328,16 +346,20 @@ test("uses the trusted same-session catalog without reloading persisted data", a
   let loadCalls = 0
   let reloadCalls = 0
   const calls: string[] = []
+
   const catalogStore = {
     load: async () => {
       loadCalls += 1
+
       return catalog()
     },
     reload: async () => {
       reloadCalls += 1
+
       return { ...catalog(), entries: [] }
     },
   }
+
   const result = await coordinateNativeVst3Attachments({
     serializedPlan: plan([first]),
     sampleRateHz: 48_000,
@@ -346,6 +368,7 @@ test("uses the trusted same-session catalog without reloading persisted data", a
     audioHost: host(calls),
     preflight: async () => available(first),
   })
+
   expect(result).toEqual({ ok: true, attached: 1 })
   expect(loadCalls).toBe(1)
   expect(reloadCalls).toBe(0)
@@ -360,8 +383,10 @@ test("fails before native transaction for stale, unsigned, and quarantined catal
   quarantinedValue.entries[0].launchEligibility.quarantinePresent = true
   expect(parsePluginCatalogData(quarantinedValue)).toBeUndefined()
   const quarantined: PluginCatalogData = { ...catalog(), entries: [] }
+
   for (const untrusted of [stale, unsigned, quarantined]) {
     const calls: string[] = []
+
     const result = await coordinateNativeVst3Attachments({
       serializedPlan: plan([first]),
       sampleRateHz: 48_000,
@@ -370,6 +395,7 @@ test("fails before native transaction for stale, unsigned, and quarantined catal
       audioHost: host(calls),
       preflight: async () => available(first),
     })
+
     expect(result).toMatchObject({ ok: false, code: "attachment-unresolved", instanceId: first.instanceId })
     expect(calls).toEqual([])
   }
@@ -377,6 +403,7 @@ test("fails before native transaction for stale, unsigned, and quarantined catal
 
 test("reports a failure when an active native transaction rejects an attachment", async () => {
   const calls: string[] = []
+
   const result = await coordinateNativeVst3Attachments({
     serializedPlan: plan([first]),
     sampleRateHz: 48_000,
@@ -390,6 +417,7 @@ test("reports a failure when an active native transaction rejects an attachment"
     },
     preflight: async () => available(first),
   })
+
   expect(result).toEqual({
     ok: false,
     code: "native-transaction-failed",
@@ -404,6 +432,7 @@ test("rejects worker role and bus manifest drift before attachment", async () =>
     available(first, { inputBuses: [{ name: "Main Input", channels: 1, enabled: true }] }),
   ]) {
     const calls: string[] = []
+
     const outcome = await coordinateNativeVst3Attachments({
       serializedPlan: plan([first]),
       sampleRateHz: 48_000,
@@ -412,6 +441,7 @@ test("rejects worker role and bus manifest drift before attachment", async () =>
       audioHost: host(calls),
       preflight: async () => result,
     })
+
     expect(outcome).toMatchObject({ ok: false, code: "manifest-mismatch", instanceId: first.instanceId })
     expect(calls).toEqual([])
   }
@@ -422,8 +452,10 @@ test("does not begin attachment when any worker preflight times out or crashes",
     "worker-timeout",
     "worker-crashed",
   ]
+
   for (const code of failureCodes) {
     const calls: string[] = []
+
     const outcome = await coordinateNativeVst3Attachments({
       serializedPlan: plan([first, second]),
       sampleRateHz: 48_000,
@@ -432,6 +464,7 @@ test("does not begin attachment when any worker preflight times out or crashes",
       audioHost: host(calls),
       preflight: async ({ attachment: input }) => {
         calls.push(`preflight:${input.instanceId}`)
+
         return input.instanceId === first.instanceId
           ? available(first)
           : {
@@ -445,6 +478,7 @@ test("does not begin attachment when any worker preflight times out or crashes",
           }
       },
     })
+
     expect(outcome).toMatchObject({ ok: false, code, instanceId: second.instanceId })
     expect(calls).toEqual([`preflight:${first.instanceId}`, `preflight:${second.instanceId}`])
   }
@@ -458,15 +492,20 @@ const ledgerHarness = (
   parkingLimits = { maximumParkedInstances: 4, parkedAgeMs: 60_000 },
 ) => {
   const calls: string[] = []
+
   const ledger = createNativeVst3AttachmentLedger({
     detachVst: async (instanceId) => {
       calls.push(`detach:${instanceId}`)
+
       if (retired.has(instanceId)) return { status: "refused" }
+
       return { status: "detached" }
     },
   }, () => clock.now, new Map(), parkingLimits)
+
   const stateBytes = new Uint8Array([1, 2, 3])
   const state = { bytes: stateBytes, sha256: createHash("sha256").update(stateBytes).digest("hex") }
+
   const run = (
     attachments: NativeExternalAttachmentPlan["attachments"],
     options: { sampleRateHz?: number; catalog?: PluginCatalogData; state?: { bytes: Uint8Array; sha256: string } } = {},
@@ -482,7 +521,9 @@ const ledgerHarness = (
     preflight: async ({ attachment: input }) => {
       calls.push(`preflight:${input.instanceId}`)
       const source = attachments.find((candidate) => candidate.instanceId === input.instanceId)
+
       if (!source) throw new Error("missing fixture attachment")
+
       if (refused.has(input.instanceId)) {
         return {
           version: 1,
@@ -494,9 +535,11 @@ const ledgerHarness = (
           requirements,
         }
       }
+
       return available(source, { supportsState: stateful })
     },
   })
+
   return { calls, ledger, run, clock }
 }
 
@@ -558,6 +601,7 @@ test("an undo state change replaces the running VST instance", async () => {
   ledger.published()
   calls.length = 0
   const restoredBytes = new Uint8Array([4, 5, 6])
+
   const restoredState = {
     bytes: restoredBytes,
     sha256: createHash("sha256").update(restoredBytes).digest("hex"),
@@ -574,10 +618,12 @@ test("a state just captured from the running instance does not replace it", asyn
   ledger.published()
   calls.length = 0
   const capturedBytes = new Uint8Array([7, 8, 9])
+
   const capturedState = {
     bytes: capturedBytes,
     sha256: createHash("sha256").update(capturedBytes).digest("hex"),
   }
+
   ledger.capturedFromLive(first.instanceId, capturedState.sha256)
 
   await run([first], { state: capturedState })
@@ -659,6 +705,7 @@ test("the ledger uses parking limits reported by the native host", async () => {
     maximumParkedInstances: 2,
     parkedAgeMs: 1_000,
   })
+
   const extras = [1, 2, 3].map(extraInstance)
   await run([second, ...extras])
   ledger.published()
@@ -722,6 +769,7 @@ test("a cached verdict is not reused when the sample rate or the fingerprints di
   const refingerprinted = { ...extraInstance(3), bundleFingerprint: "c".repeat(64) }
   const moved = catalog()
   const { launchEligibility } = moved.entries[0]
+
   if (!launchEligibility) throw new Error("Missing launch eligibility")
   launchEligibility.bundleFingerprint = "c".repeat(64)
   calls.length = 0
@@ -741,6 +789,7 @@ test("a captured state does not defeat the cached verdict", async () => {
 // would learn. The worker only echoes the state revision (native/plugin-host vst3-worker.cpp), and the preflight is given no state.
 const insertPlugin = async (session: ReturnType<typeof createNativeVst3SessionLedger>, source: typeof first, sampleRateHz = 48_000) => {
   const spawned: string[] = []
+
   const inserted = await preflightVst3Insertion({
     request: { instanceId: source.instanceId, reference: {
       version: 1, classId: source.catalogIdentity.classId, vendorId: source.catalogIdentity.vendorId, architecture: "arm64",
@@ -752,15 +801,18 @@ const insertPlugin = async (session: ReturnType<typeof createNativeVst3SessionLe
     rememberVerdict: (attachment, result) => session.rememberVerdict(attachment, sampleRateHz, result),
     preflight: async ({ attachment: input }) => {
       spawned.push(`preflight:${input.instanceId}`)
+
       return available({ ...source, stateRevision: input.stateRevision })
     },
   })
+
   return { inserted, spawned }
 }
 
 test("an inserted plug-in stages with no second preflight, and a changed fingerprint still preflights", async () => {
   const session = createNativeVst3SessionLedger()
   const calls: string[] = []
+
   const stage = (candidate: typeof first, trusted = catalog()) => coordinateNativeVst3Attachments({
     serializedPlan: plan([candidate]),
     sampleRateHz: 48_000,
@@ -772,9 +824,11 @@ test("an inserted plug-in stages with no second preflight, and a changed fingerp
     requiredVstStateInstanceIds: new Set(),
     preflight: async ({ attachment: input }) => {
       calls.push(`preflight:${input.instanceId}`)
+
       return available(candidate)
     },
   })
+
   const { inserted, spawned } = await insertPlugin(session, first)
   expect(inserted.ok).toBe(true)
   expect(spawned).toEqual([`preflight:${first.instanceId}`])
@@ -784,6 +838,7 @@ test("an inserted plug-in stages with no second preflight, and a changed fingerp
 
   const moved = catalog()
   const { launchEligibility } = moved.entries[0]
+
   if (!launchEligibility) throw new Error("Missing launch eligibility")
   launchEligibility.bundleFingerprint = "c".repeat(64)
   calls.length = 0
@@ -812,11 +867,13 @@ const faultOrigin = nativeVst3WorkerFaultOrigins
 
 test("only a crashed plug-in preflight is a plug-in failure; timeouts and staging errors are ours", async () => {
   expect(nativeVst3CoordinatorFailureOrigin("worker-crashed")).toBe("plugin")
+
   for (const code of [
     "worker-timeout", "worker-unavailable", "worker-invalid-response", "manifest-mismatch",
     "native-transaction-failed", "state-invalid", "attachment-unresolved", "invalid-plan", "catalog-unavailable",
   ] as const) expect(nativeVst3CoordinatorFailureOrigin(code)).toBe("host")
   const defects: NativeVst3Defect[] = []
+
   for (const code of ["worker-crashed", "worker-timeout"] as const) {
     const outcome = await coordinateNativeVst3Attachments({
       serializedPlan: plan([first]),
@@ -830,9 +887,12 @@ test("only a crashed plug-in preflight is a plug-in failure; timeouts and stagin
         message: "Worker preflight failed.", requirements,
       }),
     })
+
     expect(outcome).toMatchObject({ ok: false, code, instanceId: first.instanceId })
   }
+
   expect(defects).toEqual([{ source: "attachment-worker-timeout", instanceId: first.instanceId, detail: "Worker preflight failed." }])
+
   const staging = await coordinateNativeVst3Attachments({
     serializedPlan: plan([first]),
     sampleRateHz: 48_000,
@@ -842,6 +902,7 @@ test("only a crashed plug-in preflight is a plug-in failure; timeouts and stagin
     reportDefect: (defect) => { defects.push(defect) },
     preflight: async () => available(first),
   })
+
   expect(staging).toMatchObject({ ok: false, code: "native-transaction-failed" })
   expect(defects.at(-1)).toEqual({
     source: "attachment-native-transaction-failed",
@@ -859,6 +920,7 @@ test("a refused coordination reaches the renderer with its code, origin and inst
     preflight: async () => ({ version: 1, type: "preflight-result", requestId: "crashed", status: "unavailable",
       code: "worker-crashed", message: "The native VST3 worker preflight failed.", requirements }),
   })
+
   if (crashed.ok) throw new Error("A crashed preflight must be refused")
   expect(nativeVst3CoordinationFailureReply(crashed)).toEqual({
     ok: false, error: "The native VST3 worker preflight failed.",
@@ -870,15 +932,19 @@ test("a refused coordination reaches the renderer with its code, origin and inst
 
 test("host notifications reach the renderer as typed instance events and never end the session", () => {
   const defects: NativeVst3Defect[] = []
+
   const notify = (kind: "latency" | "fault" | "miss" | "restart" | "buses", value: number) => nativeVst3InstanceEvent({
     kind, value, graphRevision: 10, graphNodeId: 1n, instanceId: first.instanceId,
   }, (defect) => { defects.push(defect) })
+
   expect(notify("latency", 4096)).toEqual({ kind: "latency", instanceId: first.instanceId, latencyFrames: 4096 })
+
   for (const origin of [
     faultOrigin.childExit, faultOrigin.childSignal, faultOrigin.configureFailure,
     faultOrigin.configureException, faultOrigin.processFailure, faultOrigin.processException,
     faultOrigin.workerNotification,
   ]) expect(notify("fault", origin | (11 << 8))).toEqual({ kind: "failed", instanceId: first.instanceId })
+
   for (const origin of [
     faultOrigin.unknown, faultOrigin.transportFault, faultOrigin.dispatchFailure,
     faultOrigin.callbackMissTermination, faultOrigin.startupFailure, faultOrigin.startupException,
@@ -899,9 +965,11 @@ test("host notifications reach the renderer as typed instance events and never e
 // The worker's refusal of its launch record is our trust gate, not a crash: it reaches the renderer's trust flow.
 test("a refused worker launch record is its own event, not a plug-in failure and not a defect", () => {
   const defects: NativeVst3Defect[] = []
+
   const event = nativeVst3InstanceEvent({
     kind: "fault", value: 16, graphRevision: 10, graphNodeId: 1n, instanceId: first.instanceId,
   }, (defect) => { defects.push(defect) })
+
   expect(event).toEqual({ kind: "launch-not-trusted", instanceId: first.instanceId })
   expect(defects).toEqual([])
 })
@@ -912,6 +980,7 @@ const hostEventFixture = () => {
   const editorStates: unknown[] = []
   const ended: Error[] = []
   const defects: NativeVst3Defect[] = []
+
   const handlers = createNativeVst3HostEventHandlers({
     sendInstanceEvent: (event) => { sent.push(event) },
     sendParameterEdit: (input) => { edits.push(input) },
@@ -920,16 +989,20 @@ const hostEventFixture = () => {
     endSession: (error) => { ended.push(error) },
     reportDefect: (defect) => { defects.push(defect) },
   })
+
   const notify = (kind: "latency" | "fault" | "miss" | "restart", value: number, instanceId = first.instanceId) =>
     handlers.onNotification({ kind, value, graphRevision: 10, graphNodeId: 1n, instanceId })
+
   return { sent, edits, editorStates, ended, defects, handlers, notify }
 }
 
 test("main host events: an editor the playback worker hosts reports open and close for an instance a project owns", () => {
   const { editorStates, handlers } = hostEventFixture()
+
   const editorState = (instanceId: string, value: number) => handlers.onNotification({
     kind: "editor-state", graphRevision: 10, graphNodeId: 1n, instanceId, value,
   })
+
   editorState(first.instanceId, 1)
   editorState(first.instanceId, 0)
   editorState("unowned", 0)
@@ -949,7 +1022,9 @@ test("main host events: a latency notification reaches the renderer channel with
 test("main host events: a plug-in fault marks only that instance and does not end the session", () => {
   const { sent, ended, notify } = hostEventFixture()
   const logged = spyOn(console, "error").mockImplementation(() => undefined)
+
   try { notify("fault", faultOrigin.childSignal | (11 << 8), "other-instance") } finally { logged.mockRestore() }
+
   expect(sent).toEqual([{ kind: "failed", instanceId: "other-instance" }])
   expect(ended).toEqual([])
 })
@@ -957,11 +1032,13 @@ test("main host events: a plug-in fault marks only that instance and does not en
 test("main host events: our-side failures are logged as defects and never surfaced as a plug-in fault", () => {
   const { sent, ended, defects, notify } = hostEventFixture()
   const logged = spyOn(console, "error").mockImplementation(() => undefined)
+
   try {
     notify("fault", faultOrigin.transportFault)
     notify("miss", 0)
     notify("restart", 1)
   } finally { logged.mockRestore() }
+
   expect(sent).toEqual([])
   expect(ended).toEqual([])
   expect(defects.map((defect) => defect.source)).toEqual(["worker-fault", "worker-miss"])
@@ -969,9 +1046,11 @@ test("main host events: our-side failures are logged as defects and never surfac
 
 test("main host events: a parameter edit goes out only for an instance a project owns", () => {
   const { edits, handlers } = hostEventFixture()
+
   const edit = (instanceId: string) => handlers.onNotification({
     kind: "parameter-edit", graphRevision: 10, graphNodeId: 1n, instanceId, parameterId: 7, normalizedValue: 0.25,
   })
+
   edit("unowned")
   edit(first.instanceId)
   expect(edits).toEqual([{ projectId: "project-1", instanceId: first.instanceId, parameterId: 7, normalizedValue: 0.25 }])
@@ -987,6 +1066,7 @@ test("main host events: a lost host ends the session", () => {
 test("the session ledger reuses attachments across plans and starts clean for a new transaction", async () => {
   const session = createNativeVst3SessionLedger()
   const calls: string[] = []
+
   const coordinate = () => coordinateNativeVst3Attachments({
     serializedPlan: plan([first]),
     sampleRateHz: 48_000,
@@ -998,6 +1078,7 @@ test("the session ledger reuses attachments across plans and starts clean for a 
     requiredVstStateInstanceIds: new Set(),
     preflight: async () => available(first),
   })
+
   expect(await coordinate()).toEqual({ ok: true, attached: 1 })
   session.published()
   calls.length = 0

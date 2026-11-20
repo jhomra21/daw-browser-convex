@@ -18,9 +18,11 @@ const credentials = (overrides: Partial<ControlCredentials> = {}): ControlCreden
 
 test("cloud write authorization rejects deleted, replaced, and scope-revoked credentials", async () => {
   const expected = credentialIdentity(credentials())
+
   const authorize = (current: ControlCredentials | undefined) => (
     authorizeControlMcpScope("control:write", expected, { read: async () => current })
   )
+
   expect(await authorize(credentials())).toBeTrue()
   expect(await authorize(undefined)).toBeFalse()
   expect(await authorize(credentials({ clientId: "client-2" }))).toBeFalse()

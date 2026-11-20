@@ -25,7 +25,9 @@ export const isMenuKeyboardTarget = (target: EventTarget | null) => (
 // Who owns a keyboard event's composed path: a text field, an overlay, or (null) the timeline.
 export const keyboardTargetOwner = (path: readonly EventTarget[]): "editable" | "overlay" | null => {
   if (path.some(isEditableKeyboardTarget)) return "editable"
+
   if (path.some(isDialogKeyboardTarget) || path.some(isMenuKeyboardTarget)) return "overlay"
+
   return null
 }
 

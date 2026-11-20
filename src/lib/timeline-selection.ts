@@ -27,15 +27,19 @@ const findFirstSelectedClip = (tracks: Track[], selectedClipIds: Set<string>): S
       }
     }
   }
+
   return null
 }
 
 const setsEqual = (left: Set<string>, right: Set<string>) => {
   if (left === right) return true
+
   if (left.size !== right.size) return false
+
   for (const value of left) {
     if (!right.has(value)) return false
   }
+
   return true
 }
 
@@ -59,6 +63,7 @@ export function reconcileTimelineSelection(
 ): TimelineSelectionState {
   const trackIds = new Set(tracks.map((track) => track.id))
   const clipTrackIds = new Map<string, Track['id']>()
+
   for (const track of tracks) {
     for (const clip of track.clips) {
       clipTrackIds.set(clip.id, track.id)
@@ -70,9 +75,11 @@ export function reconcileTimelineSelection(
   )
 
   const currentSelectedClip = selection.selectedClip
+
   const currentSelectedClipTrackId = currentSelectedClip
     ? clipTrackIds.get(currentSelectedClip.clipId)
     : undefined
+
   const nextSelectedClip = currentSelectedClip && currentSelectedClipTrackId === currentSelectedClip.trackId
     ? currentSelectedClip
     : findFirstSelectedClip(tracks, nextSelectedClipIds)
@@ -83,12 +90,15 @@ export function reconcileTimelineSelection(
 
   const nextSelectedTrackId = nextSelectedClip?.trackId
     ?? (selection.selectedTrackId && trackIds.has(selection.selectedTrackId) ? selection.selectedTrackId : '')
+
   const nextSelectedFXTarget = selection.selectedFXTarget === 'master'
     ? 'master'
     : trackIds.has(selection.selectedFXTarget)
       ? selection.selectedFXTarget
       : nextSelectedTrackId || 'master'
+
   const nextRangeTrackIds = selection.rangeSelection?.trackIds.filter((trackId) => trackIds.has(trackId)) ?? []
+
   const nextRangeSelection = selection.rangeSelection && nextRangeTrackIds.length > 0
     ? {
         ...selection.rangeSelection,
@@ -117,9 +127,11 @@ export function selectPrimaryClip(
     setters.setSelectedTrackId(input.trackId)
     setters.setSelectedClip(input)
     setters.setRangeSelection(null)
+
     if (!options?.preserveClipIds) {
       setters.setSelectedClipIds(new Set([input.clipId]))
     }
+
     setters.setSelectedFXTarget(input.trackId)
   })
 }
@@ -135,6 +147,7 @@ export function appendClipToSelection(
     setters.setSelectedClipIds((prev) => {
       const next = new Set(prev)
       next.add(input.clipId)
+
       return next
     })
     setters.setSelectedFXTarget(input.trackId)
@@ -164,11 +177,14 @@ export function selectTrackTarget(
     setters.setSelectedTrackId(trackId)
     setters.setSelectedFXTarget(trackId)
     setters.setRangeSelection(null)
+
     if (options?.clearClipSelection) {
       setters.setSelectedClip(null)
       setters.setSelectedClipIds(new Set<string>())
+
       return
     }
+
     if (options?.clearPrimaryClip) {
       setters.setSelectedClip(null)
     }

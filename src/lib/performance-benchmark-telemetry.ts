@@ -20,8 +20,10 @@ export const measurePerformanceBenchmark = <Value>(
   work: () => Value,
 ): Value => {
   const collector = globalThis.__dawPerformanceBenchmark
+
   if (!collector) return work()
   const startedAt = performance.now()
+
   try { return work() }
   finally { collector.duration(owner, Math.max(0, performance.now() - startedAt)) }
 }
@@ -48,6 +50,7 @@ export const withPerformanceBenchmarkPhase = async <Value>(
   work: () => Promise<Value>,
 ): Promise<Value> => {
   globalThis.__dawPerformanceBenchmark?.phase(owner, true)
+
   try { return await work() }
   finally { globalThis.__dawPerformanceBenchmark?.phase(owner, false) }
 }

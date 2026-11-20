@@ -6,6 +6,7 @@ import type { LiveProcessorControlResult } from "~/lib/live-processor-control";
 import {
   automationTargetKey,
   automationEnvelopeFromRow,
+  isJsonObject as isParsedJsonObject,
   builtInOverriddenAutomationTargetKeys,
   createAutomationTarget,
   externalAutomationParameterId,
@@ -56,6 +57,7 @@ type RemoteAutomationRow = {
 };
 
 type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
+
 type JsonObject = { readonly [key: string]: JsonValue };
 
 const isJsonObject = (cause: unknown): cause is JsonObject => (
@@ -77,6 +79,7 @@ const isJsonValue = (cause: unknown): cause is JsonValue => (
 const isBoolean = (cause: unknown): cause is boolean => typeof cause === "boolean";
 const isFiniteNumber = (cause: unknown): cause is number => typeof cause === "number" && Number.isFinite(cause);
 const isString = (cause: unknown): cause is string => typeof cause === "string";
+
 const isAutomationTargetKey = (cause: JsonValue): cause is string => (
   typeof cause === "string" && cause.startsWith("automation:v2:")
 );
@@ -143,38 +146,50 @@ export type TimelineWorkspaceAutomationModel = {
 
 const readNumericPath = (value: JsonValue | undefined, path: readonly string[]): number | undefined => {
   let current = value;
+
   for (const key of path) {
     if (Array.isArray(current)) {
       const index = Number(key);
+
       if (!Number.isSafeInteger(index)) return undefined;
       current = current[index];
       continue;
     }
+
     if (!isJsonObject(current)) return undefined;
     current = current[key];
   }
+
   return isFiniteNumber(current) ? current : undefined;
 };
 
 const readEffectParameterValue = (params: JsonValue | undefined, parameterId: string): number | undefined => {
-  const object = isJsonObject(params) ? params : undefined;
-  const state = object && isJsonObject(object.state) ? object.state : object;
+  const object = isParsedJsonObject(params) ? params : undefined;
+  const state = object && isParsedJsonObject(object.state) ? object.state : object;
   const eq = parseEqBandParameterId(parameterId);
+
   if (eq && state && Array.isArray(state.bands)) {
-    const band = state.bands.find((entry) => isJsonObject(entry) && entry.id === eq.bandId);
-    if (!isJsonObject(band)) return undefined;
+    const band = state.bands.find((entry) => isParsedJsonObject(entry) && entry.id === eq.bandId);
+
+    if (!isParsedJsonObject(band)) return undefined;
     const field = eq.property === "frequencyHz" ? "frequency" : eq.property;
+
     return readNumericPath(band, [field]);
   }
+
   return readNumericPath(state, parameterId.split(".").slice(1));
 };
 
 const readInstrumentParameterValue = (instrument: TrackInstrumentParams, parameterId: string): number | undefined => {
   const sampler = parseInstrumentAutomationKey(parameterId);
+
   if (sampler && instrument.kind === "sampler" && instrument.instanceId === sampler.instanceId) {
     const samplerParams = instrument.params;
+
     if (sampler.parameterId === "output.gain") return 1;
+
     if (sampler.parameterId === "output.pan") return 0;
+
     if (sampler.parameterId.startsWith("amp.")) {
       const field = sampler.parameterId === "amp.attack"
         ? "attackSec"
@@ -183,11 +198,16 @@ const readInstrumentParameterValue = (instrument: TrackInstrumentParams, paramet
           : sampler.parameterId === "amp.sustain"
             ? "sustain"
             : "releaseSec";
+
       return readNumericPath(samplerParams.ampEnvelope, [field]);
     }
+
     if (sampler.parameterId === "filter.frequency") return samplerParams.filterFrequencyHz;
+
     if (sampler.parameterId === "filter.q") return samplerParams.filterQ;
+
     if (sampler.parameterId.startsWith("filter.env")) return samplerParams.filterEnvelope.amount;
+
     if (sampler.parameterId.startsWith("lfo.")) {
       const field = sampler.parameterId === "lfo.rate"
         ? "frequencyHz"
@@ -198,45 +218,79 @@ const readInstrumentParameterValue = (instrument: TrackInstrumentParams, paramet
             : sampler.parameterId === "lfo.ampDepth"
               ? "amp"
               : "pan";
+
       return readNumericPath(samplerParams.lfo, [field]);
     }
   }
+
   const granular = parseGranularAutomationKey(parameterId);
+
   if (granular && instrument.kind === "granular" && instrument.instanceId === granular.instanceId) {
     if (granular.parameterId === "grainSize") return instrument.params.grainSizeMs;
+
     if (granular.parameterId === "density") return instrument.params.densityHz;
+
     if (granular.parameterId === "position") return instrument.params.position;
+
     if (granular.parameterId === "spray") return instrument.params.spray;
+
     if (granular.parameterId === "pitch") return instrument.params.pitchSemitones;
+
     if (granular.parameterId === "reverseProbability") return instrument.params.reverseProbability;
+
     return instrument.params.stereoSpread;
   }
+
   const synth = parseSynthAutomationKey(parameterId);
+
   if (synth && instrument.kind === "synth" && instrument.instanceId === synth.instanceId) {
     if (synth.parameterId === "output.gain") return instrument.params.gain;
+
     if (synth.parameterId === "output.pan") return instrument.params.pan;
+
     if (synth.parameterId === "osc1.level") return instrument.params.oscillators[0].level;
+
     if (synth.parameterId === "osc1.detune") return instrument.params.oscillators[0].detuneCents;
+
     if (synth.parameterId === "osc2.level") return instrument.params.oscillators[1].level;
+
     if (synth.parameterId === "osc2.detune") return instrument.params.oscillators[1].detuneCents;
+
     if (synth.parameterId === "noise.level") return instrument.params.noise.level;
+
     if (synth.parameterId === "amp.attack") return instrument.params.ampEnvelope.attackSec;
+
     if (synth.parameterId === "amp.decay") return instrument.params.ampEnvelope.decaySec;
+
     if (synth.parameterId === "amp.sustain") return instrument.params.ampEnvelope.sustain;
+
     if (synth.parameterId === "amp.release") return instrument.params.ampEnvelope.releaseSec;
+
     if (synth.parameterId === "filter.frequency") return instrument.params.filter.frequencyHz;
+
     if (synth.parameterId === "filter.q") return instrument.params.filter.q;
+
     if (synth.parameterId === "filter.envAmount") return instrument.params.filter.envelopeAmountOctaves;
+
     if (synth.parameterId === "filter.attack") return instrument.params.filter.envelope.attackSec;
+
     if (synth.parameterId === "filter.decay") return instrument.params.filter.envelope.decaySec;
+
     if (synth.parameterId === "filter.sustain") return instrument.params.filter.envelope.sustain;
+
     if (synth.parameterId === "filter.release") return instrument.params.filter.envelope.releaseSec;
+
     if (synth.parameterId === "lfo.rate") return instrument.params.lfo.frequencyHz;
+
     if (synth.parameterId === "lfo.pitchDepth") return instrument.params.lfo.pitchCents;
+
     if (synth.parameterId === "lfo.filterDepth") return instrument.params.lfo.filterOctaves;
+
     if (synth.parameterId === "lfo.ampDepth") return instrument.params.lfo.amp;
+
     return instrument.params.lfo.pan;
   }
+
   return undefined;
 };
 
@@ -246,12 +300,15 @@ const replaceAutomationEnvelope = (
   envelope: AutomationEnvelope | undefined,
 ) => {
   const existingIndex = envelopes.findIndex((entry) => entry.targetKey === targetKey);
+
   if (!envelope) {
     return existingIndex === -1 ? envelopes : envelopes.filter((entry) => entry.targetKey !== targetKey);
   }
+
   if (existingIndex !== -1 && envelopes[existingIndex] === envelope) return envelopes;
   const next = existingIndex === -1 ? [...envelopes, envelope] : [...envelopes];
   next[existingIndex === -1 ? next.length - 1 : existingIndex] = envelope;
+
   return next;
 };
 
@@ -268,19 +325,25 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
   let lastReEnable = 0;
   const seededAutomationTargetKeys = new Set<string>();
   let seededProjectId: string | undefined;
+
   const visibleAutomationTracks = useProjectPersistedState<Record<string, boolean>>({
     projectId: options.projectId,
     createInitial: () => ({}),
     load: (rid) => {
       const raw = localStorage.getItem(`timeline:${rid}:automation-visible-tracks`);
+
       if (!raw) return {};
+
       try {
         const parsed: unknown = JSON.parse(raw);
+
         if (!isJsonObject(parsed)) return {};
         const next: Record<string, boolean> = {};
+
         for (const [key, value] of Object.entries(parsed)) {
           if (isBoolean(value)) next[key] = value;
         }
+
         return next;
       } catch {
         return {};
@@ -288,6 +351,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     },
     save: (rid, value) => localStorage.setItem(`timeline:${rid}:automation-visible-tracks`, JSON.stringify(value)),
   });
+
   const visibleAutomationLanes = useProjectPersistedState<Record<string, string[]>>({
     projectId: options.projectId,
     createInitial: () => ({}),
@@ -296,9 +360,11 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       const legacyRaw = localStorage.getItem(`timeline:${rid}:automation-visible-tracks`);
       const selectedRaw = localStorage.getItem(`timeline:${rid}:automation-parameters`);
       const legacySelected: Record<string, string> = {};
+
       if (selectedRaw) {
         try {
           const parsed: unknown = JSON.parse(selectedRaw);
+
           if (isJsonObject(parsed)) {
             for (const [key, value] of Object.entries(parsed)) {
               if (isString(value)) legacySelected[key] = value;
@@ -306,33 +372,45 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
           }
         } catch {}
       }
+
       const readLegacy = () => {
         if (!legacyRaw) return {};
+
         try {
           const parsed: unknown = JSON.parse(legacyRaw);
+
           if (!isJsonObject(parsed)) return {};
           const next: Record<string, string[]> = {};
+
           for (const [key, value] of Object.entries(parsed)) {
             if (key === "master" || value !== true) continue;
+
             if ((legacySelected[key] ?? "volume") === "volume") {
               next[key] = [automationTargetKey({ kind: "track", trackId: key }, "volume")];
             }
           }
+
           return next;
         } catch {
           return {};
         }
       };
+
       if (!raw) return readLegacy();
+
       try {
         const parsed: unknown = JSON.parse(raw);
+
         if (!isJsonObject(parsed)) return readLegacy();
         const next: Record<string, string[]> = {};
+
         for (const [key, value] of Object.entries(parsed)) {
           if (!Array.isArray(value)) continue;
           const targetKeys = value.filter(isAutomationTargetKey);
+
           if (targetKeys.length > 0) next[key] = Array.from(new Set(targetKeys));
         }
+
         return next;
       } catch {
         return readLegacy();
@@ -340,19 +418,25 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     },
     save: (rid, value) => localStorage.setItem(`timeline:${rid}:automation-visible-lanes`, JSON.stringify(value)),
   });
+
   const automationLaneHeights = useProjectPersistedState<Record<string, number>>({
     projectId: options.projectId,
     createInitial: () => ({}),
     load: (rid) => {
       const raw = localStorage.getItem(`timeline:${rid}:automation-lane-heights`);
+
       if (!raw) return {};
+
       try {
         const parsed: unknown = JSON.parse(raw);
+
         if (!isJsonObject(parsed)) return {};
         const next: Record<string, number> = {};
+
         for (const [key, value] of Object.entries(parsed)) {
           if (isFiniteNumber(value)) next[key] = clampAutomationLaneHeight(value);
         }
+
         return next;
       } catch {
         return {};
@@ -360,26 +444,34 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     },
     save: (rid, value) => localStorage.setItem(`timeline:${rid}:automation-lane-heights`, JSON.stringify(value)),
   });
+
   const selectedAutomationParameters = useProjectPersistedState<Record<string, AutomationParameterSelection>>({
     projectId: options.projectId,
     createInitial: () => ({}),
     load: (rid) => {
       const raw = localStorage.getItem(`timeline:${rid}:automation-parameters`);
+
       if (!raw) return {};
+
       try {
         const parsed: unknown = JSON.parse(raw);
+
         if (!isJsonObject(parsed)) return {};
         const next: Record<string, AutomationParameterSelection> = {};
+
         for (const [key, value] of Object.entries(parsed)) {
           if (value === "volume") next[key] = { parameterId: "volume" };
+
           if (isJsonObject(value)) {
             const parameterId = value.parameterId;
             const effectInstanceId = value.effectInstanceId;
+
             if (isString(parameterId) && (effectInstanceId === undefined || isString(effectInstanceId))) {
               next[key] = { parameterId, effectInstanceId };
             }
           }
         }
+
         return next;
       } catch {
         return {};
@@ -387,23 +479,30 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     },
     save: (rid, value) => localStorage.setItem(`timeline:${rid}:automation-parameters`, JSON.stringify(value)),
   });
+
   const automationTargetKeyAccessor = createMemo(() => {
     const trackId = options.selectedTrackId();
+
     if (!trackId) return undefined;
     const selection = selectedAutomationParameters.value()[trackId] ?? { parameterId: "volume" };
+
     return automationTargetKey(createAutomationTarget({ kind: "track", trackId }, selection.effectInstanceId), selection.parameterId);
   });
+
   const applyAutomationEnvelopeState = (envelope: AutomationEnvelope | undefined, targetKey: string) => {
     setAutomationEnvelopes((current) => {
       const rows = replaceAutomationEnvelope(current, targetKey, envelope);
       options.audioEngine.cancelAutomationSchedules(new Set([targetKey]), current);
       options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(rows, overriddenAutomationTargetKeys()));
+
       if (options.isPlaying() && !overriddenAutomationTargetKeys().has(targetKey)) {
         options.audioEngine.scheduleAutomationFromPlayhead(options.playheadSec(), { targetKeys: new Set([targetKey]) });
       }
+
       return rows;
     });
   };
+
   const applyAutomationRowsToEngine = (
     next: AutomationEnvelope[],
     previous: AutomationEnvelope[],
@@ -411,89 +510,117 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
   ) => {
     options.audioEngine.cancelAutomationSchedules(changedTargetKeys.size === 0 ? undefined : changedTargetKeys, previous);
     const nextTargetKeys = new Set(next.map((envelope) => envelope.targetKey));
+
     const removedTargetKeys = new Set(
       [...changedTargetKeys].filter((targetKey) => !nextTargetKeys.has(targetKey)),
     );
+
     if (removedTargetKeys.size > 0) {
       options.audioEngine.restoreAutomationTargets(removedTargetKeys, previous);
     }
+
     const overrides = overriddenAutomationTargetKeys();
     options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(next, overrides));
+
     if (options.isPlaying()) {
       const targetKeys = changedTargetKeys.size === 0
         ? undefined
         : new Set([...changedTargetKeys].filter((targetKey) => !overrides.has(targetKey)));
+
       if (targetKeys && targetKeys.size === 0) return;
       options.audioEngine.scheduleAutomationFromPlayhead(options.playheadSec(), { targetKeys });
     }
   };
+
   const overrideAutomationTarget = (targetKey: string) => {
     const envelope = automationEnvelopesByTargetKey().get(targetKey);
+
     if (!envelope?.enabled) return;
     setOverriddenAutomationTargetKeys((current) => {
       const next = automationTargetKeysForManualOverride(current, targetKey);
+
       if (next.size === current.size) return current;
       options.acceptance?.ui("ui-automation-override", () => targetKey);
       options.audioEngine.cancelAutomationSchedules(new Set([targetKey]), automationEnvelopes());
       options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(automationEnvelopes(), next));
+
       return next;
     });
   };
+
   const reEnableAutomation = async () => {
     const current = overriddenAutomationTargetKeys();
+
     if (current.size === 0) return;
     options.acceptance?.ui("ui-automation-reenable", () => [...current].join(","));
     const reEnabledTargetKeys = new Set(current);
     const operation = ++lastReEnable;
+
     for (const targetKey of reEnabledTargetKeys) reEnableOwners.set(targetKey, operation);
     const envelopes = automationEnvelopes().filter((envelope) => reEnabledTargetKeys.has(envelope.targetKey));
     const byProcessor = new Map<string, { instanceId: string; parameterIds: string[] }>();
+
     for (const envelope of envelopes) {
       if (!envelope.target.effectInstanceId) continue;
       const key = envelope.target.effectInstanceId;
       const entry = byProcessor.get(key) ?? { instanceId: key, parameterIds: [] };
+
       if (!entry.parameterIds.includes(envelope.parameterId)) entry.parameterIds.push(envelope.parameterId);
       byProcessor.set(key, entry);
     }
+
     // Native compiles its schedule without the overridden lanes, so the lanes are released before the playback backend
     // publishes the schedule that carries them again.
     setOverriddenAutomationTargetKeys(automationTargetKeysAfterReEnable(current, reEnabledTargetKeys));
     const reenableProcessorAutomation = options.reenableProcessorAutomation;
+
     if (reenableProcessorAutomation) {
       const results = await Promise.all(
         [...byProcessor.values()].map((processor) => (
           reenableProcessorAutomation(processor.instanceId, processor.parameterIds)
         )),
       );
+
       const owned = [...reEnabledTargetKeys].filter((targetKey) => reEnableOwners.get(targetKey) === operation);
+
       for (const targetKey of owned) reEnableOwners.delete(targetKey);
       const playbackControlAttempted = results.some((result) => result.accepted || result.reason !== "unavailable");
+
       if (playbackControlAttempted && results.some((result) => !result.accepted)) {
         setOverriddenAutomationTargetKeys((latest) => new Set([...latest, ...owned]));
+
         return;
       }
     }
+
     options.audioEngine.cancelAutomationSchedules(reEnabledTargetKeys, automationEnvelopes());
     // Overrides placed while the backend answered stay out of the schedule.
     const overrides = overriddenAutomationTargetKeys();
     options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(automationEnvelopes(), overrides));
     const scheduledTargetKeys = new Set([...reEnabledTargetKeys].filter((targetKey) => !overrides.has(targetKey)));
+
     if (!options.isPlaying()) options.audioEngine.applyAutomationAtTimelineSec(options.playheadSec());
     else if (scheduledTargetKeys.size > 0) options.audioEngine.scheduleAutomationFromPlayhead(options.playheadSec(), { targetKeys: scheduledTargetKeys });
   };
+
   const persistedAutomation = createPersistedAutomationState({
     targetKey: automationTargetKeyAccessor,
     envelopes: automationEnvelopes,
     applyToEngine: applyAutomationRowsToEngine,
     persistEnvelope: async (envelope) => {
       const rid = options.projectId();
+
       if (!rid) return;
+
       if (isLocalId("project", rid)) {
         const persisted = await setLocalAutomationEnvelope(rid, envelope);
         setAutomationEnvelopes((current) => replaceAutomationEnvelope(current, envelope.targetKey, persisted));
+
         return;
       }
+
       const uid = options.userId();
+
       if (!uid) throw new Error("Cannot persist shared automation without a user id.");
       await publishDurableSharedTimelineOperation({
         projectId: rid,
@@ -515,15 +642,20 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     },
     deleteEnvelope: async (targetKey) => {
       const rid = options.projectId();
+
       if (!rid) return;
       const envelope = automationEnvelopes().find((entry) => entry.targetKey === targetKey);
+
       if (isLocalId("project", rid)) {
         await deleteLocalAutomationEnvelope(rid, targetKey);
         setAutomationEnvelopes((current) => replaceAutomationEnvelope(current, targetKey, undefined));
+
         return;
       }
+
       if (!envelope) return;
       const uid = options.userId();
+
       if (!uid) throw new Error("Cannot persist shared automation without a user id.");
       await publishDurableSharedTimelineOperation({
         projectId: rid,
@@ -542,6 +674,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     },
     onEnvelopeCommitted: (previous, next) => {
       const rid = options.projectId();
+
       if (!rid) return;
       options.pushHistory(buildAutomationEnvelopeHistoryEntry({
         projectId: rid,
@@ -553,19 +686,26 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
 
   const seedVisibleAutomationLanes = () => {
     const rid = options.projectId();
+
     if (!rid) return;
+
     if (seededProjectId !== rid) {
       seededProjectId = rid;
       seededAutomationTargetKeys.clear();
     }
+
     const visibleByTrackId = visibleAutomationTracks.value();
     const visibleLanesByTrackId = visibleAutomationLanes.value();
+
     const seed = (target: AutomationTarget, parameterId: string) => {
       const targetKey = automationTargetKey(target, parameterId);
+
       if (persistedAutomation.envelopes().some((envelope) => envelope.targetKey === targetKey)) {
         seededAutomationTargetKeys.add(targetKey);
+
         return;
       }
+
       if (
         seededAutomationTargetKeys.has(targetKey)
         || (target.kind === "master" && !options.masterReady())
@@ -573,12 +713,14 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
         || !automationDataReady()
         || (target.kind === "track" && !options.tracks().some((track) => track.id === target.trackId))
       ) return;
+
       const envelope = createAutomationSeedEnvelope({
         projectId: rid,
         target,
         parameterId,
         initialValue: initialValueForTarget(target, parameterId),
       });
+
       if (!envelope) return;
       seededAutomationTargetKeys.add(targetKey);
       void persistedAutomation.commitEnvelope(envelope).catch((cause: unknown) => {
@@ -591,10 +733,13 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       const selection = selectedAutomationParameters.value().master ?? { parameterId: "volume" };
       seed(createAutomationTarget({ kind: "master" }, selection.effectInstanceId), selection.parameterId);
     }
+
     for (const [trackId, targetKeys] of Object.entries(visibleLanesByTrackId)) {
       if (visibleByTrackId[trackId] !== true) continue;
+
       for (const targetKey of targetKeys) {
         const existing = persistedAutomation.envelopes().find((envelope) => envelope.targetKey === targetKey);
+
         const selection = existing
           ? { parameterId: existing.parameterId, effectInstanceId: existing.target.effectInstanceId }
           : getAutomationParameterOptionsForTarget(effectInstancesByOwnerKey()[trackId] ?? [], trackId)
@@ -602,6 +747,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
               createAutomationTarget({ kind: "track", trackId }, option.effectInstanceId),
               option.parameterId,
             ) === targetKey);
+
         if (!selection) continue;
         seed(createAutomationTarget({ kind: "track", trackId }, selection.effectInstanceId), selection.parameterId);
       }
@@ -610,14 +756,18 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
 
   createEffect(() => {
     const rid = options.projectId();
+
     if (!rid) {
       setAutomationEnvelopes([]);
       setAutomationDataReady(false);
       setOverriddenAutomationTargetKeys(new Set<string>());
       options.audioEngine.setAutomationEnvelopes([]);
+
       return;
     }
+
     setOverriddenAutomationTargetKeys(new Set<string>());
+
     if (isLocalId("project", rid)) {
       setAutomationDataReady(false);
       void loadLocalAutomationEnvelopes(rid).then((rows) => {
@@ -631,27 +781,37 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
         setAutomationDataReady(true);
         untrack(persistedAutomation.syncRemote);
       });
+
       return;
     }
+
     const remoteRows = options.remoteRows();
+
     if (remoteRows === undefined) {
       setAutomationDataReady(false);
+
       return;
     }
+
     const next = remoteRows.flatMap((row) => {
       const envelope = automationEnvelopeFromRow(row);
+
       return envelope ? [envelope] : [];
     });
+
     setAutomationEnvelopes(next);
     setAutomationDataReady(true);
     untrack(persistedAutomation.syncRemote);
   });
   createEffect(() => {
     const rid = options.projectId();
+
     if (!rid) {
       setEffectInstancesByOwnerKey({});
+
       return;
     }
+
     const collect = (rows: Array<{
       targetId: string
       kind: string
@@ -663,6 +823,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     }>) => {
       const grouped = new Map<string, Array<AutomationTargetDeviceInstance & { index: number }>>();
       const values = new Map<string, number>();
+
       for (const row of rows) {
         if (row.external) {
           const entries = grouped.get(row.targetId) ?? [];
@@ -675,31 +836,39 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
           });
           grouped.set(row.targetId, entries);
           const externalInstanceId = row.instanceId ?? "external";
+
           for (const parameter of row.external.parameters) {
             const value = row.externalValues?.get(parameter.id);
+
             if (value !== undefined) {
               const target = row.targetId === "master"
                 ? { kind: "master" as const, effectInstanceId: externalInstanceId }
                 : { kind: "track" as const, trackId: row.targetId, effectInstanceId: externalInstanceId };
+
               values.set(automationTargetKey(
                 target,
                 externalAutomationParameterId(externalInstanceId, parameter.id),
               ), value);
             }
           }
+
           continue;
         }
+
         const normalizedKind = row.kind.startsWith("master-") ? row.kind.slice("master-".length) : row.kind;
+
         if (normalizedKind === "instrument" || normalizedKind === "synth") {
           const instrument = readInstrumentParamsFromEffectRow({
             effect: normalizedKind,
             instanceId: row.instanceId,
             params: row.params,
           });
+
           if (!instrument || (instrument.kind !== "sampler" && instrument.kind !== "granular" && instrument.kind !== "synth")) continue;
           const entries = grouped.get(row.targetId) ?? [];
           entries.push({ id: instrument.instanceId, kind: instrument.kind, index: row.index ?? entries.length });
           grouped.set(row.targetId, entries);
+
           if (row.targetId !== "master") {
             for (const parameter of getAutomationParameterOptionsForTarget(
               [{ id: instrument.instanceId, kind: instrument.kind }],
@@ -707,6 +876,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
             )) {
               if (parameter.parameterId === "volume") continue;
               const value = readInstrumentParameterValue(instrument, parameter.parameterId);
+
               if (value !== undefined) {
                 values.set(automationTargetKey(
                   { kind: "track", trackId: row.targetId },
@@ -715,25 +885,31 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
               }
             }
           }
+
           continue;
         }
+
         if (!isAudioEffectKind(normalizedKind)) continue;
         const entries = grouped.get(row.targetId) ?? [];
         entries.push({ id: row.instanceId ?? normalizedKind, kind: normalizedKind, index: row.index ?? entries.length });
         grouped.set(row.targetId, entries);
         const effectInstanceId = row.instanceId ?? normalizedKind;
+
         for (const parameter of getAutomationParameterOptionsForTarget(
           [{ id: effectInstanceId, kind: normalizedKind }],
           row.targetId === "master" ? undefined : row.targetId,
         )) {
           if (parameter.parameterId === "volume" || parameter.effectInstanceId !== effectInstanceId) continue;
+
           const value = isJsonValue(row.params)
             ? readEffectParameterValue(row.params, parameter.parameterId)
             : undefined;
+
           if (value !== undefined) {
             const target = row.targetId === "master"
               ? { kind: "master" as const, effectInstanceId }
               : { kind: "track" as const, trackId: row.targetId, effectInstanceId };
+
             values.set(automationTargetKey(
               target,
               parameter.parameterId,
@@ -741,7 +917,9 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
           }
         }
       }
+
       const next: Record<string, AutomationTargetDeviceInstance[]> = {};
+
       for (const [targetId, entries] of grouped) {
         next[targetId] = entries
           .sort((left, right) => left.index - right.index || left.id.localeCompare(right.id))
@@ -754,10 +932,13 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
             }
             : { id: entry.id, kind: entry.kind });
       }
+
       setEffectInstancesByOwnerKey(next);
       setAutomationValuesByTargetKey(values);
     };
+
     setEffectDataReady(false);
+
     if (isLocalId("project", rid)) {
       const reload = () => {
         setEffectDataReady(false);
@@ -795,12 +976,15 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
           setEffectDataReady(true);
         });
       };
+
       reload();
       const unsubscribe = subscribeToLocalProjectChanges(rid, reload);
       onCleanup(unsubscribe);
     }
+
     if (!isLocalId("project", rid)) {
       const remoteEffects = options.remoteEffects();
+
       if (remoteEffects === undefined) return;
       collect(remoteEffects.map((row) => ({
         targetId: row.targetType === "master" ? "master" : row.trackId ?? "",
@@ -812,9 +996,11 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       setEffectDataReady(true);
     }
   });
+
   const automationEnvelopesByTargetKey = createMemo(() => (
     new Map(persistedAutomation.envelopes().map((envelope) => [envelope.targetKey, envelope]))
   ));
+
   const evaluatedValuesByTargetKey = createMemo(() => (
     evaluatedAutomationValuesByTargetKey(
       persistedAutomation.envelopes(),
@@ -822,14 +1008,19 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       overriddenAutomationTargetKeys(),
     )
   ));
+
   const initialValueForTarget = (target: AutomationTarget, parameterId: string) => {
     const key = automationTargetKey(target, parameterId);
+
     if (parameterId === "volume") {
       if (target.kind === "master") return options.masterVolume();
+
       return options.tracks().find((track) => track.id === target.trackId)?.volume;
     }
+
     return automationValuesByTargetKey().get(key);
   };
+
   createEffect(() => {
     options.projectId();
     options.tracks();
@@ -842,91 +1033,118 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     persistedAutomation.envelopes();
     seedVisibleAutomationLanes();
   });
+
   const targetKeyForTrackSelection = (trackId: Track["id"], selection: AutomationParameterSelection) => (
     automationTargetKey(createAutomationTarget({ kind: "track", trackId }, selection.effectInstanceId), selection.parameterId)
   );
+
   const showAutomationLane = (trackId: Track["id"], selection: AutomationParameterSelection) => {
     const targetKey = targetKeyForTrackSelection(trackId, selection);
     visibleAutomationLanes.setValue((current) => {
       const lanes = current[trackId] ?? [];
+
       if (lanes.includes(targetKey)) return current;
+
       return { ...current, [trackId]: [...lanes, targetKey] };
     });
     visibleAutomationTracks.setValue((current) => (
       current[trackId] === true ? current : { ...current, [trackId]: true }
     ));
   };
+
   const hideAutomationLane = (trackId: Track["id"], targetKey: string) => {
     let hiddenLastLane = false;
     visibleAutomationLanes.setValue((current) => {
       const lanes = current[trackId] ?? [];
       const nextLanes = lanes.filter((entry) => entry !== targetKey);
+
       if (nextLanes.length === lanes.length) return current;
       const next = { ...current };
+
       if (nextLanes.length > 0) next[trackId] = nextLanes;
       else {
         delete next[trackId];
         hiddenLastLane = true;
       }
+
       return next;
     });
+
     if (hiddenLastLane) {
       visibleAutomationTracks.setValue((current) => ({ ...current, [trackId]: false }));
     }
   };
+
   const handleTogglePrimaryAutomationLane = (trackId: Track["id"]) => {
     const selection = selectedAutomationParameters.value()[trackId] ?? { parameterId: "volume" };
     const targetKey = targetKeyForTrackSelection(trackId, selection);
+
     const lanes = visibleAutomationLanes.value()[trackId] ?? (
       visibleAutomationTracks.value()[trackId] === true ? [targetKey] : []
     );
+
     if (lanes.length > 0) {
       visibleAutomationLanes.setValue((current) => {
         const next = { ...current };
         delete next[trackId];
+
         return next;
       });
       visibleAutomationTracks.setValue((current) => ({ ...current, [trackId]: false }));
+
       return;
     }
+
     showAutomationLane(trackId, selection);
   };
+
   const handleAddAutomationLane = (trackId: Track["id"]) => {
     const visible = new Set(visibleAutomationLanes.value()[trackId] ?? []);
+
     if (visible.size === 0) return;
     const selected = selectedAutomationParameters.value()[trackId] ?? { parameterId: "volume" };
     const selectedTargetKey = targetKeyForTrackSelection(trackId, selected);
+
     if (!visible.has(selectedTargetKey)) {
       showAutomationLane(trackId, selected);
+
       return;
     }
+
     const nextOption = getAutomationParameterOptionsForTarget(effectInstancesByOwnerKey()[trackId] ?? [], trackId)
       .find((option) => !visible.has(targetKeyForTrackSelection(trackId, option)));
+
     if (nextOption) {
       const selection = { parameterId: nextOption.parameterId, effectInstanceId: nextOption.effectInstanceId };
       showAutomationLane(trackId, selection);
       selectedAutomationParameters.setValue((current) => (
         { ...current, [trackId]: selection }
       ));
+
       return;
     }
+
     for (const envelope of persistedAutomation.envelopes()) {
       if (envelope.target.kind !== "track" || envelope.target.trackId !== trackId) continue;
+
       if (visible.has(envelope.targetKey)) continue;
       const selection = { parameterId: envelope.parameterId, effectInstanceId: envelope.target.effectInstanceId };
       showAutomationLane(trackId, selection);
       selectedAutomationParameters.setValue((current) => (
         { ...current, [trackId]: selection }
       ));
+
       return;
     }
   };
+
   const resizeLane = (targetKey: string, height: number) => {
     const nextHeight = clampAutomationLaneHeight(height || DEFAULT_AUTOMATION_LANE_HEIGHT);
     automationLaneHeights.setValue((current) => (
       current[targetKey] === nextHeight ? current : { ...current, [targetKey]: nextHeight }
     ));
   };
+
   const selectAutomationParameter = (
     targetKey: string,
     selection: AutomationParameterSelection,
@@ -935,6 +1153,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       { ...current, [targetKey]: selection }
     ));
   };
+
   const workspace = createMemo<TimelineWorkspaceAutomationModel>(() => ({
     projectId: options.projectId(),
     lanes: {
@@ -947,13 +1166,16 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       selectionByTargetKey: (() => {
         const selections = new Map<string, AutomationParameterSelection>();
         selections.set(automationTargetKey({ kind: "master" }, "volume"), { parameterId: "volume" });
+
         for (const track of options.tracks()) {
           selections.set(automationTargetKey({ kind: "track", trackId: track.id }, "volume"), { parameterId: "volume" });
         }
+
         for (const [ownerKey, effects] of Object.entries(effectInstancesByOwnerKey())) {
           const target = ownerKey === "master"
             ? { kind: "master" as const }
             : { kind: "track" as const, trackId: ownerKey };
+
           for (const option of getAutomationParameterOptionsForTarget(effects, ownerKey === "master" ? undefined : ownerKey)) {
             selections.set(
               automationTargetKey(createAutomationTarget(target, option.effectInstanceId), option.parameterId),
@@ -961,12 +1183,14 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
             );
           }
         }
+
         for (const envelope of persistedAutomation.envelopes()) {
           selections.set(envelope.targetKey, {
             parameterId: envelope.parameterId,
             effectInstanceId: envelope.target.effectInstanceId,
           });
         }
+
         return selections;
       })(),
       effectInstancesByOwnerKey: effectInstancesByOwnerKey(),
@@ -1005,6 +1229,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     // export still applies it.
     snapshotPlaybackPatches: (): ExportAutomationPatch[] => {
       const held = builtInOverriddenAutomationTargetKeys(persistedAutomation.envelopes(), overriddenAutomationTargetKeys());
+
       return [
         ...persistedAutomation.snapshotPatches().filter((patch) => !held.has(patch.targetKey)),
         ...[...held].map((targetKey) => ({ targetKey, envelope: undefined })),

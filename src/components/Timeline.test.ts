@@ -25,11 +25,15 @@ test("B6 production effect commit reads current project/tracks and preserves mer
   let projectId: string | undefined;
   let tracks: Track[] = [];
   const calls: { entry: HistoryEntry; mergeKey?: string; mergeWindowMs?: number }[] = [];
+
   const commit = createTimelineEffectCommit({ projectId: () => projectId, tracks: () => tracks,
     pushHistory: (entry, mergeKey, mergeWindowMs) => calls.push({ entry, mergeKey, mergeWindowMs }) });
+
   const from = createDefaultUtilityParams();
+
   const payload: EffectParamsCommitPayload = { effect: "utility", targetId: "track", instanceId: "utility:1",
     from: { version: 1, state: from }, to: { version: 1, state: { ...from, gainDb: -6 } } };
+
   commit.committed(payload);
   expect(calls).toHaveLength(0);
   projectId = "project:current";
@@ -58,12 +62,15 @@ test("B6 panel release records production history despite native refusal without
   const history: HistoryEntry[] = [];
   let deliveries = 0;
   let dispose = () => {};
+
   const mounted = createRoot(end => {
     dispose = end;
     const view = createLocalEffectsView({ projectId: () => projectId });
     const registry = createProcessorEditRegistry(() => 120);
+
     const commit = createTimelineEffectCommit({ projectId: () => projectId, tracks: () => [],
       pushHistory: entry => { history.push(entry); } });
+
     const device = createEffectsPanelAudioDevice({
       audioEngine: () => new AudioEngine(), projectId: () => projectId, userId: () => "local",
       projectGeneration: () => 1, roomEffects: () => [], sidechainRoutes: () => [],
@@ -71,13 +78,16 @@ test("B6 panel release records production history despite native refusal without
       allocateProcessorEdit: registry.allocate,
       deliverProcessor: () => {
         deliveries++;
+
         return { receipt: { key: instanceId, serial: deliveries },
           settled: Promise.resolve({ state: "refused", reason: "native-refused" }) };
       },
       onEffectParamsCommitted: commit.committed,
     }, () => "track", () => undefined);
+
     return { view, device };
   });
+
   try {
     await mounted.view.reload();
     mounted.device.utility.changeInstance(instanceId, value => ({ ...value, state: { ...value.state, gainDb: -6 } }));
@@ -98,6 +108,7 @@ test("settles preparation before comparing instrument-ready callbacks with the p
   const preparation = Promise.withResolvers<void>();
   const published: TrackInstrumentParams[] = [];
   const rebuilds: (TrackInstrumentParams | undefined)[] = [];
+
   const announce = createInstrumentPlaybackChange({
     mountedProjectGeneration: () => 0, awaitPlaybackPreparation: () => preparation.promise,
     preparedInstrument: () => published[0], isStructuralRebuildInProgress: () => false, isPreparingPlayback: () => false,
@@ -105,6 +116,7 @@ test("settles preparation before comparing instrument-ready callbacks with the p
     syncPlaybackBackend: async (_tracks, _intent, override) => { rebuilds.push(override?.instrument); },
     renderTracks: () => [], captureStructuralPlaybackIntent: () => ({}),
   });
+
   const announced = announce("track", instrument);
   // The preparation the announce waits on is what publishes the instrument.
   published.push(instrument);
@@ -116,10 +128,13 @@ test("settles preparation before comparing instrument-ready callbacks with the p
 test("scopes effect history to the committed project and keeps patch failures silent", () => {
   let projectId: string | undefined = "project:a";
   const pushed: HistoryEntry[] = [];
+
   const commit = createTimelineEffectCommit({ projectId: () => projectId,
     tracks: () => [{ id: "track", historyRef: "history:a", name: "A", volume: 1, clips: [] }],
     pushHistory: entry => { pushed.push(entry); } });
+
   const from = createDefaultUtilityParams();
+
   const payload: EffectParamsCommitPayload = { effect: "utility", targetId: "track", instanceId: "utility:1",
     from: { version: 1, state: from }, to: { version: 1, state: { ...from, gainDb: -6 } } };
 
@@ -162,7 +177,9 @@ const externalProcessor = (instanceId: string, supportsState: boolean) => ({
 const quietConsole = () => {
   const { info, error } = console;
   console.info = () => {};
+
   console.error = () => {};
+
   return () => { console.info = info; console.error = error; };
 };
 
@@ -173,8 +190,10 @@ const mountEditorRequests = (options: { captureOk?: boolean } = {}) => {
   const log: string[] = [];
   const intents: TimelineEditIntent[] = [];
   let dispose = () => {};
+
   const requests = createRoot(end => {
     dispose = end;
+
     return createExternalProcessorEditorRequests({
       projectId, mountedProjectGeneration: generation,
       openEffectsForTarget: targetId => { log.push(`open:${targetId}`); },
@@ -184,19 +203,24 @@ const mountEditorRequests = (options: { captureOk?: boolean } = {}) => {
       nativePlaybackEnabled: () => true,
       captureVstState: async instanceId => {
         log.push(`capture:${instanceId}`);
+
         return options.captureOk === false
           ? { ok: false as const, error: "worker gone" }
           : { ok: true as const, bytes: new Uint8Array([1]), sha256: "hash" };
       },
-      persistState: async (project, instanceId) => { log.push(`persist:${project}:${instanceId}`); return externalProcessor(instanceId, true); },
+      persistState: async (project, instanceId) => { log.push(`persist:${project}:${instanceId}`);
+
+ return externalProcessor(instanceId, true); },
     });
   });
+
   return { requests, sync, log, intents, setProjectId, setGeneration, dispose };
 };
 
 test("opens an inserted VST editor only after the matching playback rebuild and baseline state capture", async () => {
   const restore = quietConsole();
   const mounted = mountEditorRequests();
+
   try {
     const processor = externalProcessor("vst:ready", true);
     const inserted = mounted.requests.inserted(processor);
@@ -216,6 +240,7 @@ test("opens an inserted VST editor only after the matching playback rebuild and 
 test("a plug-in without saved state opens its editor without a capture", async () => {
   const restore = quietConsole();
   const mounted = mountEditorRequests();
+
   try {
     mounted.sync.resolve();
     await mounted.requests.inserted(externalProcessor("vst:stateless", false));
@@ -226,6 +251,7 @@ test("a plug-in without saved state opens its editor without a capture", async (
 
 test("never opens the editor of a plug-in that failed while staged, was refused by the browser engine, or lost its capture", async () => {
   const restore = quietConsole();
+
   try {
     const failed = mountEditorRequests();
     markVstInstanceFailed("vst:failed");
@@ -254,6 +280,7 @@ test("never opens the editor of a plug-in that failed while staged, was refused 
 
 test("drops the editor request when the project or generation changes during the rebuild, and persists to the drop's project", async () => {
   const restore = quietConsole();
+
   try {
     for (const navigate of [
       (mounted: ReturnType<typeof mountEditorRequests>) => mounted.setProjectId("project:b"),
@@ -273,13 +300,17 @@ test("drops the editor request when the project or generation changes during the
 
 test("persists a captured editor state to the project it names, even after navigation", async () => {
   const restore = quietConsole();
+
   try {
     const persisted: string[] = [];
     const state = { bytes: new Uint8Array([1]), sha256: "hash" };
+
     const persist = createCapturedEditorStatePersister(async (projectId, instanceId) => {
       persisted.push(`${projectId}:${instanceId}`);
+
       return instanceId === "vst:deleted" ? undefined : externalProcessor(instanceId, true);
     });
+
     await persist({ projectId: "project:old", instanceId: "vst:one", state });
     expect(persisted).toEqual(["project:old:vst:one"]);
     await expect(persist({ projectId: "project:old", instanceId: "vst:deleted", state }))

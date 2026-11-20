@@ -26,9 +26,11 @@ const createNode = () => {
   node.connect = (target: TestAudioNode) => node.connections.add(target)
   node.disconnect = (target?: TestAudioNode) => {
     node.disconnectCount += 1
+
     if (target) node.connections.delete(target)
     else node.connections.clear()
   }
+
   return node
 }
 
@@ -45,6 +47,7 @@ type FakeRetirementSource = {
 
 const createFakeAudioClock = () => {
   const sources: FakeRetirementSource[] = []
+
   return {
     createSource: () => {
       const source: FakeRetirementSource = {
@@ -54,7 +57,9 @@ const createFakeAudioClock = () => {
         stop: (time?: number) => { source.stopTime = time },
         disconnect: () => {},
       }
+
       sources.push(source)
+
       return source
     },
     advanceTo: (time: number) => {
@@ -75,19 +80,24 @@ const createRoutingFixture = () => {
       { id: 'return', name: 'Return', channelRole: 'return', clips: [], volume: 1 },
     ]),
   })
+
   const withoutSend = resolveMixerGraph({
     channels: createMixerChannels([
       { id: 'dry', name: 'Dry', clips: [], volume: 1 },
       { id: 'return', name: 'Return', channelRole: 'return', clips: [], volume: 1 },
     ]),
   })
+
   const masterInput = createGain()
+
   const trackNodes = new Map([
     ['dry', { input: createGain(), postFx: createGain(), gain: createGain(), output: createGain() }],
     ['return', { input: createGain(), postFx: createGain(), gain: createGain(), output: createGain() }],
   ])
+
   const edgeRuntimes = new Map()
   const clock = createFakeAudioClock()
+
   const apply = (nextGraph = graph, currentTime = 2) => applyLiveMixerGraph({
     graph: nextGraph,
     masterInput,
@@ -100,6 +110,7 @@ const createRoutingFixture = () => {
     sampleRate: 48_000,
     reconnectTrackMeters: () => {},
   })
+
   return { apply, clock, edgeRuntimes, graph, withoutSend }
 }
 
@@ -181,13 +192,16 @@ describe('live mixer edge runtime', () => {
         { id: 'post-fader', name: 'Post Fader', channelRole: 'return', clips: [], volume: 1 },
       ]),
     })
+
     const dry = { input: createGain(), postFx: createGain(), gain: createGain(), output: createGain() }
+
     const trackNodes = new Map([
       ['dry', dry],
       ['pre-fx', { input: createGain(), postFx: createGain(), gain: createGain(), output: createGain() }],
       ['pre-fader', { input: createGain(), postFx: createGain(), gain: createGain(), output: createGain() }],
       ['post-fader', { input: createGain(), postFx: createGain(), gain: createGain(), output: createGain() }],
     ])
+
     const edgeRuntimes = new Map()
     applyLiveMixerGraph({
       graph,

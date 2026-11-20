@@ -14,6 +14,7 @@ test('flushes pending MIDI writes before acquiring the local asset lock for a ge
   const project = await createLocalProject(`MIDI flush ${crypto.randomUUID()}`)
   const nested = createLocalControlService({ actor, excludePendingWriteKinds: ['midi'] })
   let flushed = 0
+
   const unregister = registerPendingLocalProjectWriteFlusher('midi', project.id, async () => {
     flushed += 1
     await nested.commit({
@@ -23,6 +24,7 @@ test('flushes pending MIDI writes before acquiring the local asset lock for a ge
       actions: [{ kind: 'project.rename', name: 'MIDI flushed' }],
     })
   })
+
   try {
     const service = createLocalControlService({ actor })
     await service.commit({
@@ -44,18 +46,21 @@ test('provides canonical local snapshot, preview, commit, and history with idemp
   const service = createLocalControlService({ actor })
   expect(service.capabilities().executionTarget).toBe('local-project')
   const initial = await service.snapshot({ projectId: project.id })
+
   const request = {
     version: 'v1',
     projectId: project.id,
     expectedRevision: initial.project.revision,
     actions: [{ kind: 'project.rename', name: 'Renamed locally' }],
   }
+
   expect((await service.preview(request)).applied).toBe(true)
   const committed = await service.commit({ ...request, idempotencyKey: 'local-commit-1' })
   expect(committed.idempotencyReplay).toBe(false)
   expect((await service.commit({ ...request, idempotencyKey: 'local-commit-1' })).idempotencyReplay).toBe(true)
   const history = await service.history({ projectId: project.id, limit: 10 })
   const entry = history.entries[0]
+
   if (!entry || !('actorSubject' in entry)) throw new Error('Expected a history entry.')
   expect(entry.actorSubject).toBe(actor.subject)
   expect(history.entries).toHaveLength(1)
@@ -67,11 +72,13 @@ test('projects historical finite MIDI values through the local V1 snapshot', asy
   const repository = createLocalTimelineRepository(project.id)
   const track = await repository.createTrack({ id: 'legacy-instrument', kind: 'instrument' })
   const db = await openLocalProjectDb(project.id)
+
   const midi = {
     wave: 'custom-legacy',
     gain: 7,
     notes: [{ beat: -2, length: -1, pitch: 200, velocity: 2 }],
   }
+
   await db.put('entities', createLocalProjectEntityRow('clip', 'legacy-midi-clip', {
     id: 'legacy-midi-clip', trackId: track.id, historyRef: 'legacy-midi-clip',
     name: 'Legacy MIDI', startSec: 0, duration: 1, color: 'clip-midi', midi,
@@ -100,39 +107,50 @@ test('previews, approves, and commits restore-then-delete asset recovery with a 
     updatedAt: 1,
   })
   const service = createLocalControlService({ actor })
+
   const initialRequest = {
     version: 'v1' as const,
     projectId: project.id,
     actions: [{ kind: 'asset.delete' as const, asset: { source: 'persisted' as const, id: 'restore-then-delete' } }],
   }
+
   const initialApproval = await service.requestApproval(initialRequest)
+
   const initialCommit = await service.commit({
     ...initialRequest,
     idempotencyKey: 'restore-then-delete-initial',
     approvalToken: initialApproval.approvalToken,
   })
+
   const recovery = initialCommit.recoveries[0]
+
   if (!recovery) throw new Error('Expected asset recovery.')
 
   const actions: JsonValue[] = [
     { kind: 'recovery.restore', recovery: { id: recovery.id } },
     { kind: 'asset.delete', asset: { source: 'persisted', id: 'restore-then-delete' } },
   ]
+
   const request = {
     version: 'v1' as const,
     projectId: project.id,
     actions,
   }
+
   expect((await service.preview(request)).applied).toBe(true)
   const approval = await service.requestApproval(request)
+
   const committed = await service.commit({
     ...request,
     idempotencyKey: 'restore-then-delete-commit',
     approvalToken: approval.approvalToken,
   })
+
   const recaptured = committed.recoveries[0]
+
   if (!recaptured) throw new Error('Expected recaptured asset recovery.')
   const row = await db.get('controlRecoveries', recaptured.id)
+
   if (!row) throw new Error('Expected recaptured recovery row.')
   expect(hashRecoveryPayloadSyncV1(row.payload)).toBe(row.payloadHash)
   expect(await db.get('assets', 'restore-then-delete')).toBeUndefined()
@@ -142,7 +160,9 @@ test('lists and restores an unexpired stored V1 local clip recovery', async () =
   const project = await createLocalProject(`Stored V1 recovery ${crypto.randomUUID()}`)
   const service = createLocalControlService({ actor })
   const track = (await service.snapshot({ projectId: project.id })).tracks[0]
+
   if (!track) throw new Error('Expected initial track.')
+
   const payload = canonicalRecoveryPayloadV1({
     version: 1,
     kind: 'clip.delete',
@@ -158,6 +178,7 @@ test('lists and restores an unexpired stored V1 local clip recovery', async () =
       },
     },
   })
+
   const recoveryId = 'local-recovery:stored-v1'
   const db = await openLocalProjectDb(project.id)
   await db.put('controlRecoveries', {
@@ -174,12 +195,14 @@ test('lists and restores an unexpired stored V1 local clip recovery', async () =
   })
   expect((await service.recoveries({ projectId: project.id, limit: 10 })).entries)
     .toEqual([expect.objectContaining({ id: recoveryId, kind: 'clip.delete' })])
+
   const restored = await service.commit({
     version: 'v1',
     projectId: project.id,
     idempotencyKey: 'stored-v1-recovery-restore',
     actions: [{ kind: 'recovery.restore', recovery: { id: recoveryId } }],
   })
+
   expect(restored.restored[0]?.entities).toEqual([
     expect.objectContaining({ entity: 'clip', sourceId: 'legacy-local-clip' }),
   ])
@@ -210,21 +233,26 @@ test('maps malformed inputs and duplicate recovery restores to parsed local erro
 test('execution guards prevent transaction reads and writes after availability is revoked', async () => {
   const project = await createLocalProject(`Guarded service ${crypto.randomUUID()}`)
   let available = true
+
   const service = createLocalControlService({
     actor,
     assertAvailable: () => {
       if (!available) throw new AvailabilityError()
     },
   })
+
   const initial = await service.snapshot({ projectId: project.id })
   const track = initial.tracks[0]
+
   if (!track) throw new Error('Expected local project track.')
   available = false
+
   const destructive = {
     version: 'v1' as const,
     projectId: project.id,
     actions: [{ kind: 'track.delete' as const, track: { source: 'persisted' as const, id: track.id } }],
   }
+
   await expect(service.preview({
     version: 'v1',
     projectId: project.id,
@@ -253,6 +281,7 @@ test('execution guards prevent transaction reads and writes after availability i
 test('refuses a commit that deletes the recording target and still applies an unrelated one', async () => {
   const project = await createLocalProject(`Recording lock ${crypto.randomUUID()}`)
   const track = (await createLocalControlService({ actor }).snapshot({ projectId: project.id })).tracks[0]
+
   if (!track) throw new Error('Expected local project track.')
   const lock = createRecordingTargetLock(() => [{ id: track.id }])
   lock.start(track.id)
@@ -275,14 +304,17 @@ test('refuses a commit that deletes the recording target and still applies an un
 test('refuses a commit whose take started after preview and approval', async () => {
   const project = await createLocalProject(`Recording lock after approval ${crypto.randomUUID()}`)
   const track = (await createLocalControlService({ actor }).snapshot({ projectId: project.id })).tracks[0]
+
   if (!track) throw new Error('Expected local project track.')
   const lock = createRecordingTargetLock(() => [{ id: track.id }])
   const service = createLocalControlService({ actor, refuseRecordingTargetChange: lock.refuseTransition })
+
   const request = {
     version: 'v1' as const,
     projectId: project.id,
     actions: [{ kind: 'track.delete' as const, track: { source: 'persisted' as const, id: track.id } }],
   }
+
   await service.preview(request)
   const approval = await service.requestApproval(request)
   lock.start(track.id)
@@ -303,12 +335,14 @@ test('refuses a commit whose take started after preview and approval', async () 
 test('replays only the original semantic request for an idempotency key', async () => {
   const project = await createLocalProject(`Idempotency ${crypto.randomUUID()}`)
   const service = createLocalControlService({ actor })
+
   const first = {
     version: 'v1',
     projectId: project.id,
     idempotencyKey: 'same-key',
     actions: [{ kind: 'project.rename', name: 'First name' }],
   }
+
   await service.commit(first)
   await expect(service.commit({
     ...first,
@@ -360,21 +394,27 @@ test('rejects an asset recovery while its GC lease is active', async () => {
     updatedAt: 1,
   })
   const service = createLocalControlService({ actor })
+
   const deleteRequest = {
     version: 'v1' as const,
     projectId: project.id,
     actions: [{ kind: 'asset.delete' as const, asset: { source: 'persisted' as const, id: 'asset-lease' } }],
   }
+
   const approval = await service.requestApproval(deleteRequest)
+
   const deleted = await service.commit({
     ...deleteRequest,
     idempotencyKey: 'delete-lease',
     approvalToken: approval.approvalToken,
   })
+
   const recovery = deleted.recoveries[0]
+
   if (!recovery) throw new Error('Expected asset recovery.')
   const gcId = `local-asset-gc:${recovery.id}`
   const gc = await db.get('controlAssetGc', gcId)
+
   if (!gc) throw new Error('Expected GC row.')
   await db.put('controlAssetGc', { ...gc, claimToken: 'a'.repeat(64), claimedAt: Date.now() })
   await expect(service.commit({
@@ -400,6 +440,7 @@ test('rejects a 129th protected asset recovery without orphaning its GC job', as
     updatedAt: 1,
   })))
   const service = createLocalControlService({ actor })
+
   const deleteRange = async (start: number, end: number, idempotencyKey: string) => {
     const request = {
       version: 'v1' as const,
@@ -409,6 +450,7 @@ test('rejects a 129th protected asset recovery without orphaning its GC job', as
         asset: { source: 'persisted' as const, id: `protected-${start + offset}` },
       })),
     }
+
     const approval = await service.requestApproval(request)
     await service.commit({
       ...request,
@@ -416,13 +458,16 @@ test('rejects a 129th protected asset recovery without orphaning its GC job', as
       approvalToken: approval.approvalToken,
     })
   }
+
   await deleteRange(0, 100, 'protected-0-99')
   await deleteRange(100, 128, 'protected-100-127')
+
   const request = {
     version: 'v1' as const,
     projectId: project.id,
     actions: [{ kind: 'asset.delete' as const, asset: { source: 'persisted' as const, id: 'protected-128' } }],
   }
+
   const approval = await service.requestApproval(request)
   await expect(service.commit({
     ...request,
@@ -434,22 +479,28 @@ test('rejects a 129th protected asset recovery without orphaning its GC job', as
   expect(await db.get('assets', 'protected-128')).toBeDefined()
 
   const oldestRecovery = (await db.getAll('controlRecoveries'))[0]
+
   if (!oldestRecovery) throw new Error('Expected protected recovery.')
+
   const balancedActions: JsonValue[] = [
     { kind: 'asset.delete', asset: { source: 'persisted', id: 'protected-128' } },
     { kind: 'recovery.restore', recovery: { id: oldestRecovery.id } },
   ]
+
   const balancedRequest = {
     version: 'v1' as const,
     projectId: project.id,
     actions: balancedActions,
   }
+
   const balancedApproval = await service.requestApproval(balancedRequest)
+
   const balancedCommit = await service.commit({
     ...balancedRequest,
     idempotencyKey: 'protected-balanced-replace',
     approvalToken: balancedApproval.approvalToken,
   })
+
   expect(balancedCommit).toMatchObject({ applied: true })
   expect(await db.count('controlRecoveries')).toBe(129)
   expect(await db.count('controlAssetGc')).toBe(128)
@@ -480,12 +531,14 @@ test('rejects a new asset deletion at the operational GC ceiling without changin
   })))
   const service = createLocalControlService({ actor })
   const initial = await service.snapshot({ projectId: project.id })
+
   const request = {
     version: 'v1' as const,
     projectId: project.id,
     idempotencyKey: 'reject-gc-ceiling',
     actions: [{ kind: 'asset.delete' as const, asset: { source: 'persisted' as const, id: 'ceiling-asset' } }],
   }
+
   await expect(service.requestApproval({
     version: request.version,
     projectId: request.projectId,
@@ -507,7 +560,9 @@ test('fails closed for malformed persisted control state without overwriting it'
   })
   const db = await openLocalProjectDb(project.id)
   const state = await db.get('controlState', 'snapshot')
+
   if (!state) throw new Error('Expected control state.')
+
   const malformed = {
     key: state.key,
     value: {
@@ -518,6 +573,7 @@ test('fails closed for malformed persisted control state without overwriting it'
     },
     updatedAt: state.updatedAt,
   }
+
   await db.put('controlState', malformed)
 
   await expect(service.snapshot({ projectId: project.id })).rejects.toMatchObject({ data: { code: 'internal' } })
@@ -543,11 +599,13 @@ test('validates and persists every injected actor claim', async () => {
   }
 
   const project = await createLocalProject(`Actor claims ${crypto.randomUUID()}`)
+
   const maxActor = {
     subject: 's'.repeat(256),
     issuer: 'i'.repeat(256),
     tokenIdentifier: 't'.repeat(256),
   }
+
   const service = createLocalControlService({ actor: maxActor })
   await service.commit({
     version: 'v1',

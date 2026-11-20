@@ -33,17 +33,22 @@ const chunkAssetId = (assetId: string, index: number) =>
 
 const instrumentAssetIds = (graph: AudioCoreGraphSnapshot) => {
   const ids = new Set<string>()
+
   for (const node of graph.nodes) {
     const instrument = node.instrument
+
     if (!instrument) continue
+
     if (instrument.kind === 'granular') {
       if (instrument.assetId) ids.add(instrument.assetId)
       continue
     }
+
     if (instrument.kind === 'sampler' || instrument.kind === 'drum-rack') {
       for (const zone of instrument.zones) ids.add(zone.assetId)
     }
   }
+
   return ids
 }
 
@@ -59,16 +64,21 @@ const splitEvent = (
   const sourceEnd = sourceStart + event.sourceFrameCount
   const timelineDuration = event.stopFrame - event.startFrame
   const output: NativeProjectedSourceEvent[] = []
+
   for (const [index, chunk] of descriptor.chunks.entries()) {
     const segmentStart = Math.max(sourceStart, chunk.sourceStartFrame)
     const segmentEnd = Math.min(sourceEnd, chunk.sourceEndFrame)
+
     if (segmentEnd <= segmentStart) continue
+
     const startFrame = Math.round(
       event.startFrame + (segmentStart - sourceStart) * timelineDuration / event.sourceFrameCount,
     )
+
     const stopFrame = Math.round(
       event.startFrame + (segmentEnd - sourceStart) * timelineDuration / event.sourceFrameCount,
     )
+
     if (stopFrame <= startFrame) continue
     const localPosition = segmentStart - chunk.sourceStartFrame
     const sourceOffsetFrame = Math.floor(localPosition)
@@ -85,6 +95,7 @@ const splitEvent = (
       sourceIdentity: `${identity}:chunk:${index}`,
     })
   }
+
   return output
 }
 
@@ -95,14 +106,18 @@ export const chunkNativeSourceEvents = (
 ) => {
   const bySourceAssetId = new Map(descriptors.map((descriptor) => [descriptor.sourceAssetId, descriptor]))
   const output: NativeProjectedSourceEvent[] = []
+
   for (const event of events) {
     const descriptor = bySourceAssetId.get(event.assetId)
+
     if (!descriptor) {
       output.push({ ...event, sequence: firstSequence + output.length })
       continue
     }
+
     output.push(...splitEvent(event, descriptor, firstSequence + output.length))
   }
+
   return output
 }
 
@@ -116,40 +131,49 @@ export const chunkNativePcmProjection = (input: {
   const occupiedAssetIds = new Set(input.assets.map(({ asset }) => asset.assetId))
   const descriptors: NativePcmChunkDescriptor[] = []
   const assets: { asset: AudioAssetRef; pcm: PlanarPcm }[] = []
+
   for (const entry of input.assets) {
     const capacity = nativeAudioHostMaximumAssetFramesForChannels(entry.asset.channelCount)
+
     if (entry.asset.frameCount <= capacity) {
       assets.push(entry)
       continue
     }
+
     if (capacity < 2) {
       return {
         supported: false,
         reason: `Native PCM asset "${entry.asset.assetId}" has no valid chunk capacity.`,
       }
     }
+
     if (instrumentIds.has(entry.asset.assetId)) {
       return {
         supported: false,
         reason: `Native PCM asset "${entry.asset.assetId}" is owned by an instrument and exceeds the native payload capacity.`,
       }
     }
+
     const chunks: NativePcmChunk[] = []
     const stride = capacity - 1
+
     for (let start = 0, index = 0; start < entry.asset.frameCount; start += stride, index += 1) {
       const end = Math.min(entry.asset.frameCount, start + capacity)
       const planes = entry.pcm.planes.map((plane) => plane.slice(start, end))
+
       const asset: AudioAssetRef = {
         ...entry.asset,
         assetId: chunkAssetId(entry.asset.assetId, index),
         frameCount: end - start,
       }
+
       if (occupiedAssetIds.has(asset.assetId)) {
         return {
           supported: false,
           reason: `Native PCM chunk identity "${asset.assetId}" conflicts with an existing asset.`,
         }
       }
+
       occupiedAssetIds.add(asset.assetId)
       chunks.push({
         asset,
@@ -157,11 +181,14 @@ export const chunkNativePcmProjection = (input: {
         sourceStartFrame: start,
         sourceEndFrame: end === entry.asset.frameCount ? end : end - 1,
       })
+
       if (end === entry.asset.frameCount) break
     }
+
     descriptors.push({ sourceAssetId: entry.asset.assetId, chunks })
     assets.push(...chunks)
   }
+
   return {
     assets,
     events: chunkNativeSourceEvents(input.events, descriptors, input.firstSequence),

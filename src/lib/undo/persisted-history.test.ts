@@ -73,6 +73,7 @@ describe('persisted undo history', () => {
         },
       },
     }
+
     const clipDelete: HistoryEntry = {
       type: 'clip-delete',
       projectId: 'project-1',
@@ -81,6 +82,7 @@ describe('persisted undo history', () => {
         items: [],
       },
     }
+
     expect(normalizePersistedHistory(serializePersistedHistory({
       undo: [clipCreate],
       redo: [clipDelete],
@@ -109,6 +111,7 @@ describe('persisted undo history', () => {
         to: { fadeInSec: 2, fadeOutSec: 1, fadeInCurve: 0.5, fadeOutCurve: -0.5 },
       },
     }
+
     expect(normalizePersistedHistory(serializePersistedHistory({
       undo: [entry],
       redo: [],
@@ -267,6 +270,7 @@ describe('persisted undo history', () => {
         collapsed: true,
       },
     }
+
     expect(normalizePersistedHistory(serializePersistedHistory({
       undo: [entry],
       redo: [],
@@ -292,6 +296,7 @@ describe('persisted undo history', () => {
         }],
       },
     }
+
     const ungroupEntry: HistoryEntry = {
       type: 'track-ungroup',
       projectId: 'project-1',

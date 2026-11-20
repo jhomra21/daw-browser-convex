@@ -79,6 +79,7 @@ export default function EqFilterTypeSelect(props: EqFilterTypeSelectProps) {
               disabled={!props.enabled || !props.band.enabled}
               onSelect={() => {
                 props.onSelectBand()
+
                 if (option.value !== props.band.type) props.onTypeChange(option.value)
               }}
             >

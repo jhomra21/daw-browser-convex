@@ -130,6 +130,7 @@ window.deletionFixture = {
   },
 }
 `
+
   const result = await build({
     root: repositoryRoot,
     configFile: false,
@@ -143,7 +144,9 @@ window.deletionFixture = {
     resolve: { alias: { '~': `${repositoryRoot}src` } },
     build: { write: false, minify: false, lib: { entry: fixtureId, formats: ['iife'], name: 'deletionFixture' } },
   })
+
   const output = Array.isArray(result) ? result[0] : result
+
   if (!output || !('output' in output)) throw new Error('Expected deletion fixture bundle')
   const directory = `/tmp/daw-deletion-round2-${crypto.randomUUID()}`
   await mkdir(directory, { recursive: true })
@@ -155,16 +158,22 @@ window.deletionFixture = {
   const env = { ...process.env }
   delete env.AGENT_BROWSER_CDP
   delete env.AGENT_BROWSER_SESSION
+
   const run = async (...args: string[]) => {
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
     const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
+
     if (await child.exited !== 0) throw new Error(stderr || stdout)
+
     return stdout.trim()
   }
+
   const read = async () => z.object({
     listed: z.boolean(), bytes: z.string().nullable(), jobs: z.number(),
   }).parse(JSON.parse(JSON.parse(await run('eval', 'deletionFixture.state().then(JSON.stringify)'))))
+
   await run('open', server.url.href)
+
   try {
     await run('eval', 'deletionFixture.prepare()')
     expect(JSON.parse(JSON.parse(await run('eval', 'deletionFixture.abortDeletion().then(JSON.stringify)')))).toMatchObject({

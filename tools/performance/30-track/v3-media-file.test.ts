@@ -6,6 +6,7 @@ test('writes a mixed-rate source through bounded pages with exact WAV length', a
   const source = planThirtyTrackV3().audio[1]!
   const chunks: Uint8Array[] = []
   let removed = false
+
   const directory = {
     getFileHandle: async () => ({
       createWritable: async () => ({
@@ -17,6 +18,7 @@ test('writes a mixed-rate source through bounded pages with exact WAV length', a
     }),
     removeEntry: async () => { removed = true },
   }
+
   const file = await writeThirtyTrackV3MediaFile(source, directory)
   expect(file.size).toBe(source.uncompressedBytes + 44)
   expect(Math.max(...chunks.map((chunk) => chunk.length))).toBeLessThanOrEqual(16_384 * 2 * 4)
@@ -27,6 +29,7 @@ test('cleans a partially written source on a failed page write', async () => {
   const source = planThirtyTrackV3().audio[1]!
   let removed = false
   let aborted = false
+
   const directory = {
     getFileHandle: async () => ({
       createWritable: async () => ({
@@ -38,6 +41,7 @@ test('cleans a partially written source on a failed page write', async () => {
     }),
     removeEntry: async () => { removed = true },
   }
+
   await expect(writeThirtyTrackV3MediaFile(source, directory)).rejects.toThrow('storage full')
   expect(aborted).toBeTrue()
   expect(removed).toBeTrue()

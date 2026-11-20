@@ -28,9 +28,11 @@ const defaultSampleResponseSchema = z.object({ samples: z.array(z.unknown()) })
 
 const withTimeout = async <T>(task: Promise<T>, timeoutMs: number): Promise<T | null> => {
   let timer: ReturnType<typeof setTimeout> | undefined
+
   const timeout = new Promise<null>((resolve) => {
     timer = setTimeout(() => resolve(null), timeoutMs)
   })
+
   try {
     return await Promise.race([task, timeout])
   } finally {
@@ -40,10 +42,14 @@ const withTimeout = async <T>(task: Promise<T>, timeoutMs: number): Promise<T | 
 
 const fallbackBaseUrl = (env: Env, requestUrl: string) => {
   const baseUrl = env.DEFAULT_SAMPLES_BASE_URL || env.BETTER_AUTH_URL
+
   if (!baseUrl || baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) return null
+
   try {
     const normalizedBaseUrl = baseUrl.replace(/\/$/, '')
+
     if (new URL(normalizedBaseUrl).origin === new URL(requestUrl).origin) return null
+
     return normalizedBaseUrl
   } catch {
     return null
@@ -57,10 +63,13 @@ const defaultSampleFromR2Object = (obj: R2Object): DefaultSample | null => {
   const duration = Number(metadata?.durationSec)
   const sampleRate = Number(metadata?.sampleRate)
   const channelCount = Number(metadata?.channelCount)
+
   const hasMetadata = Number.isFinite(duration) && duration > 0
     && Number.isFinite(sampleRate) && sampleRate > 0
     && Number.isFinite(channelCount) && channelCount > 0
+
   let decodedName = obj.key.slice(DEFAULT_SAMPLE_PREFIX.length)
+
   try {
     decodedName = decodeURIComponent(decodedName)
   } catch {}
@@ -79,23 +88,31 @@ const defaultSampleFromR2Object = (obj: R2Object): DefaultSample | null => {
 
 const fetchFallbackDefaultSamples = async (env: Env, requestUrl: string) => {
   const baseUrl = fallbackBaseUrl(env, requestUrl)
+
   if (!baseUrl) return null
   const response = await withTimeout(fetch(`${baseUrl}/api/default-samples`), DEFAULT_SAMPLE_LIST_TIMEOUT_MS)
+
   if (!response?.ok) return null
   const data = defaultSampleResponseSchema.safeParse(await response.json().catch(() => null))
+
   if (!data.success) return null
+
   return data.data.samples.flatMap((sample) => {
     const parsed = defaultSampleSchema.safeParse(sample)
+
     return parsed.success ? [parsed.data] : []
   }).slice(0, MAX_FALLBACK_SAMPLES)
 }
 
 const fallbackOrCache = async (env: Env, requestUrl: string) => {
   const fallbackSamples = await fetchFallbackDefaultSamples(env, requestUrl).catch(() => null)
+
   if (fallbackSamples) {
     cachedDefaultSamples = fallbackSamples
+
     return fallbackSamples
   }
+
   return cachedDefaultSamples
 }
 
@@ -110,11 +127,15 @@ export const listDefaultSamples = async (env: Env, requestUrl: string) => {
         bucket.list({ prefix: DEFAULT_SAMPLE_PREFIX, cursor, limit: 1000 }),
         DEFAULT_SAMPLE_LIST_TIMEOUT_MS,
       )
+
       if (!page) return { samples: await fallbackOrCache(env, requestUrl) }
+
       for (const obj of page.objects) {
         const sample = defaultSampleFromR2Object(obj)
+
         if (sample) samples.push(sample)
       }
+
       cursor = page.truncated ? page.cursor : undefined
     } while (cursor)
   } catch {
@@ -122,17 +143,22 @@ export const listDefaultSamples = async (env: Env, requestUrl: string) => {
   }
 
   samples.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+
   if (samples.length === 0) return { samples: await fallbackOrCache(env, requestUrl) }
   cachedDefaultSamples = samples
+
   return { samples }
 }
 
 export const fetchFallbackDefaultSample = async (env: Env, requestUrl: string, key: string) => {
   const baseUrl = fallbackBaseUrl(env, requestUrl)
+
   if (!baseUrl) return null
+
   const response = await withTimeout(
     fetch(`${baseUrl}/api/default-sample?key=${encodeURIComponent(key)}`),
     DEFAULT_SAMPLE_LIST_TIMEOUT_MS,
   )
+
   return response?.ok ? response : null
 }

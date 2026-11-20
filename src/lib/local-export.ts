@@ -20,6 +20,7 @@ export type LocalExportWritable = {
 
 export const chooseLocalExportFile = async (input: LocalExportWritableInput): Promise<FileSystemFileHandle | undefined> => {
   if (!globalThis.window?.showSaveFilePicker) return
+
   return await globalThis.window.showSaveFilePicker({
     suggestedName: input.suggestedName,
     types: input.types,
@@ -28,14 +29,18 @@ export const chooseLocalExportFile = async (input: LocalExportWritableInput): Pr
 
 export const createLocalExportWritable = async (handle: FileSystemFileHandle): Promise<LocalExportWritable> => {
   const writable = await handle.createWritable?.()
+
   if (!writable) throw new Error('Writable file streams are not supported.')
+
   return { writable }
 }
 
 const requestWritableExportDirectory = async (handle: FileSystemDirectoryHandle): Promise<void> => {
   const current = await queryFileSystemHandlePermission(handle)
+
   if (current === 'granted') return
   const requested = await requestFileSystemHandlePermission(handle)
+
   if (requested !== 'granted') throw new DOMException('Export folder permission is required.', 'NotAllowedError')
 }
 
@@ -43,8 +48,10 @@ export const chooseLocalExportDirectory = async (): Promise<FileSystemDirectoryH
   if (!globalThis.window?.showDirectoryPicker) {
     throw new Error('Folder selection is not supported in this browser.')
   }
+
   const directory = await globalThis.window.showDirectoryPicker()
   await requestWritableExportDirectory(directory)
+
   return directory
 }
 
@@ -53,11 +60,13 @@ export const createLocalExportDirectoryWritable = async (
   fileName: string,
 ): Promise<LocalExportWritable> => {
   const fileHandle = await directory.getFileHandle(fileName, { create: true })
+
   return createLocalExportWritable(fileHandle)
 }
 
 export const downloadBlob = (input: BlobDownloadInput): void => {
   const url = URL.createObjectURL(input.blob)
+
   try {
     const anchor = document.createElement('a')
     anchor.href = url
@@ -75,7 +84,9 @@ export const saveBlobLocally = async (input: SaveBlobInput): Promise<void> => {
       suggestedName: input.suggestedName,
       types: input.types,
     })
+
     const { writable } = await createLocalExportWritable(handle)
+
     try {
       await writable.write(input.blob)
       await writable.close()
@@ -83,8 +94,10 @@ export const saveBlobLocally = async (input: SaveBlobInput): Promise<void> => {
       try {
         await writable.abort()
       } catch {}
+
       throw error
     }
+
     return
   }
 

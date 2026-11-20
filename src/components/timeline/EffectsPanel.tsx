@@ -208,6 +208,7 @@ const EffectsPanelDeviceBoundary: Component<{
 }> = (props) => {
   const identity = () => props.identity;
   const collapsed = () => props.collapse.isCollapsed(identity());
+
   return (
     <DeviceCollapseProvider
       collapsed={collapsed}
@@ -391,10 +392,12 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
               automationRangesByParameterId={props.synthAutomationRangesByParameterId}
               onAutomationParameterTouch={(parameterId) => {
                 const automationParameterId = props.synthAutomationParameterIds?.get(parameterId)
+
                 if (automationParameterId) props.onSelectSynthAutomationParameter?.(automationParameterId)
               }}
               onManualAutomationOverride={(parameterId) => {
                 const automationParameterId = props.synthAutomationParameterIds?.get(parameterId)
+
                 if (automationParameterId) props.onManualSynthAutomationOverride?.(automationParameterId)
               }}
             />
@@ -451,7 +454,9 @@ type EffectsPanelAudioEffectCardProps = {
 };
 
 const audioEffectLabel = (kind: AudioEffectKind) => getAudioEffectDeviceCatalogEntry(kind).label;
+
 type EffectParamsInput = ReturnType<EffectsPanelAudioEffects["paramsForInstance"]>;
+
 const effectParamsInput = (params: EffectParamsInput | JsonObject): JsonObject => (
   isJsonObject(params) ? params : {}
 );
@@ -495,6 +500,7 @@ const createAudioEffectContextMenuControls = (
       void audioEffects.removeByInstanceFromTarget(targetId, effect).catch(() => undefined);
     }
     : undefined;
+
   if (effect.kind === "eq") {
     return {
       label: audioEffectLabel("eq"),
@@ -504,6 +510,7 @@ const createAudioEffectContextMenuControls = (
       remove,
     };
   }
+
   if (effect.kind === "utility") {
     return {
       label: audioEffectLabel("utility"),
@@ -513,6 +520,7 @@ const createAudioEffectContextMenuControls = (
       remove,
     };
   }
+
   if (effect.kind === "gate") {
     return {
       label: audioEffectLabel("gate"),
@@ -522,6 +530,7 @@ const createAudioEffectContextMenuControls = (
       remove,
     };
   }
+
   if (effect.kind === "compressor") {
     return {
       label: audioEffectLabel("compressor"),
@@ -531,6 +540,7 @@ const createAudioEffectContextMenuControls = (
       remove,
     };
   }
+
   if (effect.kind === "limiter") {
     return {
       label: audioEffectLabel("limiter"),
@@ -540,6 +550,7 @@ const createAudioEffectContextMenuControls = (
       remove,
     };
   }
+
   if (effect.kind === "saturator") {
     return {
       label: audioEffectLabel("saturator"),
@@ -549,6 +560,7 @@ const createAudioEffectContextMenuControls = (
       remove,
     };
   }
+
   if (effect.kind === "delay") {
     return {
       label: audioEffectLabel("delay"),
@@ -558,16 +570,27 @@ const createAudioEffectContextMenuControls = (
       remove,
     };
   }
+
   if (effect.kind === "autofilter") return { label: audioEffectLabel("autofilter"), enabled: () => AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(effectParamsInput(audioEffects.paramsForInstance(effect))).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.autofilter.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.autofilter.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams({})), remove };
+
   if (effect.kind === "chorus") return { label: audioEffectLabel("chorus"), enabled: () => AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(effectParamsInput(audioEffects.paramsForInstance(effect))).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.chorus.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.chorus.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams({})), remove };
+
   if (effect.kind === "flanger") return { label: audioEffectLabel("flanger"), enabled: () => AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(effectParamsInput(audioEffects.paramsForInstance(effect))).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.flanger.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.flanger.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams({})), remove };
+
   if (effect.kind === "phaser") return { label: audioEffectLabel("phaser"), enabled: () => AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(effectParamsInput(audioEffects.paramsForInstance(effect))).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.phaser.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.phaser.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams({})), remove };
+
   if (effect.kind === "tremolo") return { label: audioEffectLabel("tremolo"), enabled: () => AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(effectParamsInput(audioEffects.paramsForInstance(effect))).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.tremolo.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.tremolo.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams({})), remove };
+
   if (effect.kind === "autopan") return { label: audioEffectLabel("autopan"), enabled: () => AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(effectParamsInput(audioEffects.paramsForInstance(effect))).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.autopan.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.autopan.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams({})), remove };
+
   if (effect.kind === "ensemble") return { label: audioEffectLabel("ensemble"), enabled: () => AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(effectParamsInput(audioEffects.paramsForInstance(effect))).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.ensemble.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.ensemble.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams({})), remove };
+
   if (effect.kind === "lofi") return { label: audioEffectLabel("lofi"), enabled: () => AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(effectParamsInput(audioEffects.paramsForInstance(effect))).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.lofi.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.lofi.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams({})), remove };
+
   if (effect.kind === "spectrum") return { label: audioEffectLabel("spectrum"), enabled: () => AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(effectParamsInput(audioEffects.paramsForInstance(effect))).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.spectrum.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.spectrum.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.spectrum.createDefaultParams()), remove };
+
   if (effect.kind === "spectral") return { label: audioEffectLabel("spectral"), enabled: () => normalizeSpectralParamsEnvelope(effectParamsInput(audioEffects.paramsForInstance(effect))).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.spectral.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.spectral.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.spectral.createDefaultParams()), remove };
+
   return {
     label: audioEffectLabel("reverb"),
     enabled: () => normalizeReverbParams(effectParamsInput(audioEffects.paramsForInstance(effect))).enabled !== false,
@@ -585,13 +608,17 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
     ownerKey: () => `${props.projectId ?? ""}:${props.projectGeneration}:${props.effect.id}`,
   });
   const params = () => props.audioEffects.paramsForInstance(props.effect);
+
   const displayedParams = () => {
     let next = effectParamsInput(params());
     const targetId = props.targetId;
+
     if (!targetId) return next;
     const ranges = props.automationRangesByParameterId;
     const values = props.evaluatedValuesByTargetKey;
+
     if (!ranges || !values) return next;
+
     for (const parameterId of ranges.keys()) {
       const targetKey = automationTargetKey(
         targetId === "master"
@@ -599,18 +626,23 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
           : { kind: "track", trackId: targetId, effectInstanceId: props.effect.id },
         parameterId,
       );
+
       const evaluatedValue = values.get(targetKey);
+
       if (evaluatedValue !== undefined) {
         next = overlayEffectAutomationValue(next, parameterId, evaluatedValue);
       }
     }
+
     return next;
   };
+
   const sidechainSourceTrackId = () => (
     props.sidechainRoutes?.find(
       (route) => route.targetTrackId === props.targetId && route.effectInstanceId === props.effect.id,
     )?.sourceTrackId
   );
+
   return (
     <ParameterGestureProvider owner={props.audioEffects.gestureOwner(props.effect.id, props.effect.kind, props.targetId)}>
     <Switch>
@@ -659,6 +691,7 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
       <Show when={displayedParams()}>
         {(value) => {
           const eq = () => normalizeEqParams(effectParamsInput(value()));
+
           return <Eq bands={eq().bands} enabled={eq().enabled} channelMode={eq().channelMode} onBandChange={(bandId, updates) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, bands: prev.bands.map((band) => band.id === bandId ? { ...band, ...updates } : band) }))} onChannelModeChange={(channelMode) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => prev.channelMode === channelMode ? prev : normalizeEqParams({ ...prev, channelMode }))} onBandToggle={(bandId) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, bands: prev.bands.map((band) => band.id === bandId ? { ...band, enabled: !band.enabled } : band) }))} onToggleEnabled={(enabled) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, enabled }))} onReset={() => props.audioEffects.eq.changeInstance(props.effect.id, () => normalizeEqParams({}))} spectrumData={props.spectrum} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />
         }}
       </Show>
@@ -714,8 +747,10 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
   type MixedCard =
     | { kind: "builtin"; key: string; id: string; effect: AudioEffectInstance }
     | { kind: "external"; key: string; id: string; processor: ExternalProcessor };
+
   const model = createMemo<{ keys: string[]; byKey: Map<string, MixedCard> }>(() => {
     const builtinEffects = props.audioEffects.orderedEffects();
+
     const cards = [
       ...builtinEffects.map((effect) => ({
         kind: "builtin" as const,
@@ -732,27 +767,33 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
           processor,
         })),
     ];
+
     const indexForCard = (card: MixedCard) => card.kind === "builtin"
       ? props.audioEffects.effectIndexForTarget(props.targetId, card.id)
       : card.processor.index;
+
     const ordered = cards
       .map((card) => ({ card, index: indexForCard(card) ?? Number.MAX_SAFE_INTEGER }))
       .sort((left, right) => left.index - right.index || left.card.key.localeCompare(right.card.key))
       .map(({ card }) => card);
+
     return {
       keys: ordered.map((card) => card.key),
       byKey: new Map(ordered.map((card) => [card.key, card])),
     };
   });
+
   const [reorderPreview, setReorderPreview] = createSignal<EffectCardReorderPreview>();
   const [selection, setSelection] = createSignal<{ targetId: string; effectId: string }>();
   let effectCardsElement: HTMLDivElement | undefined;
+
   const contextMenuItems = (effect: AudioEffectInstance): TimelineContextMenuItem[] => {
     return createAudioEffectContextMenuItems({
       ...createAudioEffectContextMenuControls(effect, props.audioEffects, props.targetId),
       canWrite: props.canWrite,
     });
   };
+
   const externalProcessorContextMenuItems = (processor: ExternalProcessor): TimelineContextMenuItem[] => [
     { kind: "label", label: processor.manifest.identity.name },
     {
@@ -768,11 +809,15 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
       onSelect: () => props.onRemoveExternalProcessor(processor.instanceId),
     },
   ];
+
   const selectedEffect = createMemo(() => {
     const current = selection();
+
     if (!current || current.targetId !== props.targetId) return;
+
     return props.audioEffects.orderedEffects().find((effect) => effect.id === current.effectId);
   });
+
   createEffect(() => {
     if (selection() && !selectedEffect()) setSelection();
   });
@@ -782,10 +827,12 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
         setSelection();
       }
     };
+
     window.addEventListener("pointerdown", handlePointerDown, { capture: true });
     onCleanup(() => window.removeEventListener("pointerdown", handlePointerDown, { capture: true }));
   });
   onCleanup(() => props.onElementChange?.(undefined));
+
   const handleKeyDown = (event: KeyboardEvent) => {
     if (
       (event.key !== "Delete" && event.key !== "Backspace")
@@ -793,23 +840,28 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
       || isDeviceInteractiveTarget(event.target)
     ) return;
     const effect = selectedEffect();
+
     if (!effect || !props.canWrite) return;
     event.preventDefault();
     event.stopPropagation();
     setSelection();
     void props.audioEffects.removeByInstanceFromTarget(props.targetId, effect).catch(() => undefined);
   };
+
   const reorderMixedCards = (key: string, targetIndex: number) => {
     const current = model();
     const next = current.keys.filter((entry) => entry !== key);
     next.splice(Math.max(0, Math.min(targetIndex, next.length)), 0, key);
     props.onMixedReorder(next.flatMap((entry) => {
       const card = current.byKey.get(entry);
+
       return card ? [{ kind: card.kind, instanceId: card.id }] : [];
     }));
   };
+
   const previewBuiltinEffect = () => {
     const card = model().byKey.get(reorderPreview()?.key ?? "");
+
     return card?.kind === "builtin" ? card.effect : undefined;
   };
 
@@ -818,6 +870,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
       <Show when={props.externalInstrument}>
         {(processor) => {
           let element: HTMLDivElement | undefined;
+
           return (
             <EffectsPanelDeviceBoundary
               identity={deviceCollapseIdentity.external(processor().instanceId)}
@@ -868,15 +921,21 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
         <For each={model().keys}>
           {(key) => {
             const card = createMemo(() => model().byKey.get(key));
+
             const externalProcessor = createMemo(() => {
               const value = card();
+
               return value?.kind === "external" ? value.processor : undefined;
             });
+
             const builtinEffect = createMemo(() => {
               const value = card();
+
               return value?.kind === "builtin" ? value.effect : undefined;
             });
+
             let element: HTMLDivElement | undefined;
+
             const drag = createEffectCardReorderDrag({
               key,
               orderedKeys: () => model().keys,
@@ -884,6 +943,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
               onReorder: reorderMixedCards,
               onPreviewChange: setReorderPreview,
             });
+
             return (
               <Show when={card()}>
                 {(current) => (
@@ -948,6 +1008,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                             tabIndex={-1}
                             onPointerDown={(event) => {
                               setSelection({ targetId: props.targetId, effectId: effect().id });
+
                               if (!isDeviceInteractiveTarget(event.target)) element?.focus({ preventScroll: true });
                               drag.onPointerDown(event);
                             }}
@@ -1050,6 +1111,7 @@ const createEffectsPanelContextMenuItems = (input: {
       void input.audioEffects.addByKindToTarget(input.targetId, entry.kind).catch(() => undefined);
     },
   }));
+
   const addMidiEffectItems = (targetId: Track["id"]): TimelineContextMenuItem[] => (
     CONTEXT_MENU_MIDI_EFFECT_CATALOG.map((entry) => ({
       kind: "item",
@@ -1060,16 +1122,23 @@ const createEffectsPanelContextMenuItems = (input: {
       },
     }))
   );
+
   const resetCurrentDevices = () => {
     for (const effect of input.audioEffects.orderedEffects()) {
       createAudioEffectContextMenuControls(effect, input.audioEffects).reset();
     }
+
     if (input.instrument.arp.params()) input.instrument.arp.reset();
+
     if (input.instrument.synth.params()) input.instrument.synth.reset();
+
     if (input.instrument.drumRack.params()) input.instrument.drumRack.reset();
+
     if (input.instrument.sampler.params()) input.instrument.sampler.reset();
+
     if (input.instrument.granular.params()) input.instrument.granular.reset();
   };
+
   const hasCurrentDevices = () => (
     input.audioEffects.orderedEffects().length > 0
     || Boolean(input.instrument.arp.params())
@@ -1078,6 +1147,7 @@ const createEffectsPanelContextMenuItems = (input: {
     || Boolean(input.instrument.sampler.params())
     || Boolean(input.instrument.granular.params())
   );
+
   const hasAudioEffects = () => input.audioEffects.orderedEffects().length > 0;
 
   const items: TimelineContextMenuItem[] = [
@@ -1086,6 +1156,7 @@ const createEffectsPanelContextMenuItems = (input: {
   ];
 
   const targetTrackId = input.targetTrackId;
+
   if (targetTrackId) {
     items.push(
       { kind: "separator" },
@@ -1150,6 +1221,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const allocateProcessorEdit = untrack(() => props.allocateProcessorEdit);
   const deliverProcessor = untrack(() => props.deliverProcessor);
   const joinPublication = untrack(() => props.joinPublication);
+
   const controller = createEffectsPanelController({
     acceptance: untrack(() => props.acceptance),
     isOpen: () => props.isOpen,
@@ -1183,17 +1255,22 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     samplerBufferSync,
     drumRackBufferSync,
   });
+
   const { target, devices, spectrum, canWriteCurrentTargetEffects, isCurrentTargetReadOnly } = controller;
   const { instrument, audioEffects } = devices;
   const deviceCollapse = createEffectsPanelDeviceCollapse(() => props.projectId);
   const [externalProcessors, setExternalProcessors] = createSignal<ExternalProcessor[]>([]);
   createEffect(() => {
     const projectId = props.projectId;
+
     if (!projectId || !isLocalId("project", projectId)) {
       setExternalProcessors([]);
+
       return;
     }
+
     const isCurrentProject = () => untrack(() => props.projectId) === projectId;
+
     const reload = () => listLocalExternalProcessors(projectId)
       .then((processors) => {
         if (isCurrentProject()) setExternalProcessors(processors);
@@ -1201,17 +1278,22 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       .catch(() => {
         if (isCurrentProject()) setExternalProcessors([]);
       });
+
     void reload();
     const unsubscribe = subscribeToLocalProjectChanges(projectId, () => void reload());
     onCleanup(unsubscribe);
   });
+
   const externalProcessorsForTarget = createMemo(() => (
     selectExternalProcessorsForTarget(externalProcessors(), props.selectedFXTarget)
   ));
+
   const removeExternalProcessor = (instanceId: string) => {
     const projectId = props.projectId;
+
     if (!projectId || !isLocalId("project", projectId) || !canWriteCurrentTargetEffects()) return;
     const processor = externalProcessors().find((entry) => entry.instanceId === instanceId);
+
     if (!processor || processor.targetId !== props.selectedFXTarget) return;
     const playbackIntent = props.captureStructuralPlaybackIntent?.();
     props.acceptance?.ui("ui-device-remove", () => instanceId);
@@ -1219,6 +1301,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       .then(() => untrack(() => props.onMixedReorderCommitted?.(playbackIntent)))
       .catch(() => undefined);
   };
+
   const applyExternalProcessorCommit = (
     commit: {
     previous: ExternalProcessor;
@@ -1229,12 +1312,15 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     setExternalProcessors((processors) => processors.map((processor) => (
       processor.instanceId === commit.current.instanceId ? commit.current : processor
     )));
+
     if (commit.previous.bypassed !== commit.current.bypassed) {
       untrack(() => props.onExternalProcessorUpdated?.(commit.current, commit.previous, playbackIntent));
     }
   };
+
   const updateExternalProcessorParameter = (instanceId: string, parameterId: number, value: number) => {
     const projectId = props.projectId;
+
     if (!projectId || !isLocalId("project", projectId) || !canWriteCurrentTargetEffects()) return;
     void mergeLocalExternalProcessorParameterOverride(projectId, instanceId, parameterId, value)
       .then((commit) => {
@@ -1242,8 +1328,10 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       })
       .catch(() => undefined);
   };
+
   const updateExternalProcessorBypass = (instanceId: string, bypassed: boolean) => {
     const projectId = props.projectId;
+
     if (!projectId || !isLocalId("project", projectId) || !canWriteCurrentTargetEffects()) return;
     const playbackIntent = props.captureStructuralPlaybackIntent?.();
     void setLocalExternalProcessorBypassed(projectId, instanceId, bypassed)
@@ -1252,8 +1340,10 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       })
       .catch(() => undefined);
   };
+
   const reorderMixed = (order: readonly MixedEffectOrderItem[]) => {
     const projectId = props.projectId;
+
     if (!projectId || !isLocalId("project", projectId) || !canWriteCurrentTargetEffects()) return;
     const targetId = props.selectedFXTarget;
     const playbackIntent = props.captureStructuralPlaybackIntent?.();
@@ -1261,6 +1351,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       .then(() => untrack(() => props.onMixedReorderCommitted?.(playbackIntent)))
       .catch(() => undefined);
   };
+
   const panelContextMenuItems = () => createEffectsPanelContextMenuItems({
     targetId: props.selectedFXTarget,
     targetTrackId: target.isInstrumentTrack() ? props.selectedFXTarget : undefined,
@@ -1269,32 +1360,42 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     instrument,
     onHide: controller.close,
   });
+
   const automationRangesByInstanceId = createMemo(() => {
     const ranges = new Map<string, Map<string, { min: number; max: number }>>();
+
     for (const envelope of props.automationEnvelopes ?? []) {
       const targetMatches = envelope.target.kind === "master"
         ? props.selectedFXTarget === "master"
         : envelope.target.trackId === props.selectedFXTarget;
+
       const instanceId = envelope.target.effectInstanceId;
+
       if (!targetMatches || !instanceId || envelope.points.length === 0) continue;
       const range = automationEnvelopeValueRange(envelope);
+
       if (!range) continue;
       const instanceRanges = ranges.get(instanceId) ?? new Map<string, { min: number; max: number }>();
       instanceRanges.set(envelope.parameterId, range);
       ranges.set(instanceId, instanceRanges);
     }
+
     return ranges;
   });
+
   const synthAutomation = createMemo(() => {
     const synthInstanceId = instrument.synth.instanceId();
+
     return createSynthAutomationState(
       props.selectedFXTarget === "master" ? undefined : props.selectedFXTarget,
       synthInstanceId,
       props.automationEnvelopes ?? [],
     );
   });
+
   const synthAutomationDisplayParams = createMemo(() => {
     const params = instrument.synth.params();
+
     return params
       ? overlaySynthAutomationValues(params, synthAutomation().parameterIds, props.evaluatedValuesByTargetKey)
       : undefined;

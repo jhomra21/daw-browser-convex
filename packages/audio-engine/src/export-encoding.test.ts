@@ -30,7 +30,9 @@ class TestAudioBuffer {
 
   getChannelData(channel: number): Float32Array<ArrayBuffer> {
     const data = this.channels[channel]
+
     if (!data) throw new Error('Missing channel')
+
     return data
   }
 
@@ -50,11 +52,13 @@ const installTestAudioBuffer = () => {
 const audioBuffer = (samples: readonly number[], sampleRate = 48_000): TestAudioBuffer => {
   const buffer = new TestAudioBuffer({ numberOfChannels: 1, length: samples.length, sampleRate })
   buffer.getChannelData(0).set(samples)
+
   return buffer
 }
 
 const blobBytes = async (blob: Blob | undefined) => {
   if (!blob) throw new Error('Expected a buffer-target Blob.')
+
   return new Uint8Array(await blob.arrayBuffer())
 }
 
@@ -64,6 +68,7 @@ describe('chunked export encoding', () => {
     const first = audioBuffer([0.1, -0.2, 0.3])
     const second = audioBuffer([-0.4, 0.5, -0.6])
     const combined = audioBuffer([0.1, -0.2, 0.3, -0.4, 0.5, -0.6])
+
     const options: EncodeAudioBufferOptions = {
       format: 'wav',
       wav: { codec: 'pcm-s16', dither: 'none' },
@@ -88,6 +93,7 @@ describe('chunked export encoding', () => {
     second.getChannelData(1).set([-0.9, 0.25])
     combined.getChannelData(0).set([0.1, -0.2, 0.3, 0.7, -0.8])
     combined.getChannelData(1).set([-0.4, 0.5, -0.6, -0.9, 0.25])
+
     const options: EncodeAudioBufferOptions = {
       format: 'wav',
       wav: { codec: 'pcm-s16', dither: 'tpdf' },
@@ -102,6 +108,7 @@ describe('chunked export encoding', () => {
 
   test('never allocates an AudioBuffer sized to the total logical stream', async () => {
     let maximumConstructedLength = 0
+
     class BoundedAudioBuffer extends TestAudioBuffer {
       constructor(options: { numberOfChannels: number; length: number; sampleRate: number }) {
         if (options.length > 8) throw new Error('duration-sized AudioBuffer allocation')
@@ -109,13 +116,16 @@ describe('chunked export encoding', () => {
         maximumConstructedLength = Math.max(maximumConstructedLength, options.length)
       }
     }
+
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: BoundedAudioBuffer })
 
     const makeChunk = () => {
       const chunk = new BoundedAudioBuffer({ numberOfChannels: 1, length: 8, sampleRate: 48_000 })
       chunk.getChannelData(0).fill(0.25)
+
       return chunk
     }
+
     const result = await encodeAudioChunks([makeChunk(), makeChunk(), makeChunk()], {
       format: 'wav',
       wav: { codec: 'pcm-s16', dither: 'none' },
@@ -171,10 +181,12 @@ describe('chunked export encoding', () => {
     const first = audioBuffer([0.1, -0.2])
     const second = audioBuffer([0.3, -0.4])
     const combined = audioBuffer([0.1, -0.2, 0.3, -0.4])
+
     const options: EncodeAudioBufferOptions = {
       format: 'wav',
       wav: { codec: 'pcm-s16', dither: 'none' },
     }
+
     async function* chunks() {
       yield first
       await Promise.resolve()
@@ -192,9 +204,11 @@ describe('chunked export encoding', () => {
     const controller = new AbortController()
     let aborted = false
     let yielded = 0
+
     const writable = new WritableStream<StreamTargetChunk>({
       write() {},
     })
+
     async function* chunks() {
       yielded += 1
       yield audioBuffer([0.1, -0.2])
@@ -226,25 +240,30 @@ describe('chunked export encoding', () => {
     let writesBeforeFinalChunk = 0
     let chunkIndex = 0
     const progress: number[] = []
+
     const writable = new WritableStream<StreamTargetChunk>({
       write(chunk) {
         writes.push(chunk)
         positions.push(chunk.position)
       },
     })
+
     const makeLargeChunk = () => new TestAudioBuffer({
       numberOfChannels: 1,
       length: 1_000_000,
       sampleRate: 48_000,
     })
+
     async function* chunks() {
       for (let index = 0; index < 6; index += 1) {
         chunkIndex = index
         yield makeLargeChunk()
         await Promise.resolve()
+
         if (index === 4) writesBeforeFinalChunk = writes.length
       }
     }
+
     let closed = false
 
     const result = await encodeAudioChunks(chunks(), {
@@ -274,31 +293,41 @@ describe('chunked export encoding', () => {
     installTestAudioBuffer()
     let resolveWriteStarted: (() => void) | undefined
     let releaseFirstWrite: (() => void) | undefined
+
     const writeStarted = new Promise<void>((resolve) => {
       resolveWriteStarted = resolve
     })
+
     const firstWrite = new Promise<void>((resolve) => {
       releaseFirstWrite = resolve
     })
+
     let writeCount = 0
+
     const writable = new WritableStream<StreamTargetChunk>({
       write() {
         writeCount += 1
+
         if (writeCount === 1) {
           resolveWriteStarted?.()
+
           return firstWrite
         }
       },
     })
+
     const makeLargeChunk = () => new TestAudioBuffer({
       numberOfChannels: 1,
       length: 1_000_000,
       sampleRate: 48_000,
     })
+
     async function* chunks() {
       for (let index = 0; index < 6; index += 1) yield makeLargeChunk()
     }
+
     let settled = false
+
     const encoding = encodeAudioChunks(chunks(), {
       format: 'wav',
       wav: { codec: 'pcm-f32', dither: 'none' },
@@ -317,6 +346,7 @@ describe('chunked export encoding', () => {
 
   test('rejects malformed channel data explicitly', async () => {
     installTestAudioBuffer()
+
     class MalformedAudioBuffer extends TestAudioBuffer {
       override getChannelData(_channel: number): Float32Array<ArrayBuffer> {
         return new Float32Array(0)
@@ -334,6 +364,7 @@ describe('chunked export encoding', () => {
   test('invokes the stream abort hook on an encoding failure', async () => {
     installTestAudioBuffer()
     let aborted = false
+
     const writable = new WritableStream<StreamTargetChunk>({
       write() {},
     })

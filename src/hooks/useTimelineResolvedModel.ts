@@ -17,7 +17,9 @@ import type { Track, TrackRouting, TrackSend } from '@daw-browser/timeline-core/
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
+
 type PendingClipCreate = { trackId: Track['id']; clip: RuntimeClip }
+
 type ServerTrackState = {
   serverVolumes: Map<Track['id'], number>
   serverMuted: Map<Track['id'], boolean>
@@ -75,6 +77,7 @@ export function useTimelineResolvedModel(
     previewClipsByTrackId: Map<Track['id'], RuntimeClip[]>
   }): RuntimeTrack[] {
     options.bufferVersion()
+
     return resolveTimelineTracks({
       projectId: options.projectId(),
       server: {
@@ -119,7 +122,9 @@ export function useTimelineResolvedModel(
 
   const placementTracks = createMemo<RuntimeTrack[]>((previous) => {
     const draftClipEditsById = options.projection.draftClipEditsById()
+
     if (draftClipEditsById.size === 0) return resolvedTracks()
+
     return reuseResolvedTracks(previous, resolveTracks({
       draftClipEditsById,
       previewClipsByTrackId: emptyPreviewClipsByTrackId,
@@ -128,7 +133,9 @@ export function useTimelineResolvedModel(
 
   const renderTracks = createMemo<RuntimeTrack[]>((previous) => {
     const previewClipsByTrackId = options.projection.previewClipsByTrackId()
+
     if (previewClipsByTrackId.size === 0) return placementTracks()
+
     return reuseResolvedTracks(previous, resolveTracks({
       draftClipEditsById: options.projection.draftClipEditsById(),
       previewClipsByTrackId,
@@ -140,6 +147,7 @@ export function useTimelineResolvedModel(
   createEffect(() => {
     for (const track of resolvedTracks()) {
       options.identity.rememberTrackProjection(track)
+
       for (const clip of track.clips) {
         options.identity.rememberClipHistoryRef(clip)
       }

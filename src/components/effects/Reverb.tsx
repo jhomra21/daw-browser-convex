@@ -133,6 +133,7 @@ function FilterGraph(props: {
   const highCutX = () => 74 + clamp((props.params.highCutHz - REVERB_HIGH_CUT_HZ_MIN) / (REVERB_HIGH_CUT_HZ_MAX - REVERB_HIGH_CUT_HZ_MIN), 0, 1) * 88
   const pointToLowCut = (x: number) => REVERB_LOW_CUT_HZ_MIN + (clamp((x - 8) / 46, 0, 1) * (REVERB_LOW_CUT_HZ_MAX - REVERB_LOW_CUT_HZ_MIN))
   const pointToHighCut = (x: number) => REVERB_HIGH_CUT_HZ_MIN + (clamp((x - 74) / 88, 0, 1) * (REVERB_HIGH_CUT_HZ_MAX - REVERB_HIGH_CUT_HZ_MIN))
+
   const onLowCutKeyDown = (event: KeyboardEvent) => handleGraphKeyDelta(event, {
     ArrowRight: () => props.onLowCutChange(props.params.lowCutHz + 10),
     ArrowUp: () => props.onLowCutChange(props.params.lowCutHz + 10),
@@ -143,6 +144,7 @@ function FilterGraph(props: {
     Home: () => props.onLowCutChange(REVERB_LOW_CUT_HZ_MIN),
     End: () => props.onLowCutChange(REVERB_LOW_CUT_HZ_MAX),
   })
+
   const onHighCutKeyDown = (event: KeyboardEvent) => handleGraphKeyDelta(event, {
     ArrowRight: () => props.onHighCutChange(props.params.highCutHz + 100),
     ArrowUp: () => props.onHighCutChange(props.params.highCutHz + 100),
@@ -153,17 +155,22 @@ function FilterGraph(props: {
     Home: () => props.onHighCutChange(REVERB_HIGH_CUT_HZ_MIN),
     End: () => props.onHighCutChange(REVERB_HIGH_CUT_HZ_MAX),
   })
+
   const filterPath = () => {
     const startY = props.lowCutActive ? 42 : 30
     const endY = props.highCutActive ? 48 : 30
+
     const lowCurve = props.lowCutActive
       ? `M 0 ${startY} C ${lowCutX()} ${startY} ${lowCutX()} 30 ${lowCutX() + 24} 30`
       : 'M 0 30 L 54 30'
+
     const highCurve = props.highCutActive
       ? `L ${highCutX() - 22} 30 C ${highCutX()} 30 ${highCutX()} ${endY} 180 ${endY}`
       : 'L 180 30'
+
     return `${lowCurve} ${highCurve}`
   }
+
   const handles = () => [
     ...(props.lowCutActive ? [{ label: 'Low cut frequency', x: lowCutX, y: () => 31, onDrag: (point: { x: number, y: number }) => props.onLowCutChange(pointToLowCut(point.x)), onKeyDown: onLowCutKeyDown }] : []),
     ...(props.highCutActive ? [{ label: 'High cut frequency', x: highCutX, y: () => 32, onDrag: (point: { x: number, y: number }) => props.onHighCutChange(pointToHighCut(point.x)), onKeyDown: onHighCutKeyDown }] : []),
@@ -194,12 +201,14 @@ function SpaceGraph(props: {
   const pointToDecay = (x: number) => REVERB_DECAY_SEC_MIN + (clamp((x - 112) / 42, 0, 1) * (REVERB_DECAY_SEC_MAX - REVERB_DECAY_SEC_MIN))
   const firstPointToDiffusion = (y: number) => clamp((36 - y) / 18, 0, 1)
   const secondPointToDiffusion = (y: number) => clamp((y - 28) / 18, 0, 1)
+
   const updateSpace = (updates: Partial<Pick<ReverbParams, 'size' | 'decaySec' | 'diffusion'>>) => props.onSpaceChange({
     size: props.params.size,
     decaySec: props.params.decaySec,
     diffusion: props.params.diffusion,
     ...updates,
   })
+
   const onFirstHandleKeyDown = (event: KeyboardEvent) => handleGraphKeyDelta(event, {
     ArrowRight: () => updateSpace({ size: props.params.size + 0.02 }),
     ArrowLeft: () => updateSpace({ size: props.params.size - 0.02 }),
@@ -208,6 +217,7 @@ function SpaceGraph(props: {
     ArrowUp: () => updateSpace({ diffusion: props.params.diffusion + 0.02 }),
     ArrowDown: () => updateSpace({ diffusion: props.params.diffusion - 0.02 }),
   })
+
   const onSecondHandleKeyDown = (event: KeyboardEvent) => handleGraphKeyDelta(event, {
     ArrowRight: () => updateSpace({ decaySec: props.params.decaySec + 0.1 }),
     ArrowLeft: () => updateSpace({ decaySec: props.params.decaySec - 0.1 }),
@@ -420,82 +430,115 @@ function EarlyReflectionsPanel(props: {
 export default function Reverb(props: ReverbProps) {
   const automationRange = (parameterId: string) => props.automationRangesByParameterId?.get(parameterId)
   const touchAutomation = (parameterId: string) => props.onAutomationParameterTouch?.(parameterId)
+
   const updateWet = (value: number) => {
     const wet = normalizeWet(value)
+
     if (wet !== props.params.wet) {
       props.onManualAutomationOverride?.('reverb.wet')
       props.onChange({ wet })
     }
   }
+
   const updateDecay = (value: number) => {
     const decaySec = normalizeDecay(value)
+
     if (decaySec !== props.params.decaySec) props.onChange({ decaySec })
   }
+
   const updatePreDelay = (value: number) => {
     const preDelayMs = normalizePreDelay(value)
+
     if (preDelayMs !== props.params.preDelayMs) {
       props.onManualAutomationOverride?.('reverb.preDelayMs')
       props.onChange({ preDelayMs })
     }
   }
+
   const updateReflections = (value: number) => {
     const reflections = normalizeUnitParam(value)
+
     if (reflections !== props.params.reflections) props.onChange({ reflections })
   }
+
   const updateReflectionAmount = (value: number) => {
     const reflectionAmount = normalizeUnitParam(value)
+
     if (reflectionAmount !== props.params["reflectionShape"]) props.onChange({ ["reflectionShape"]: reflectionAmount })
   }
+
   const updateReflectionModAmount = (value: number) => {
     const reflectionModAmountMs = normalizeReflectionModAmount(value)
+
     if (reflectionModAmountMs !== props.params.reflectionModAmountMs) props.onChange({ reflectionModAmountMs })
   }
+
   const updateReflectionModRate = (value: number) => {
     const reflectionModRateHz = normalizeReflectionModRate(value)
+
     if (reflectionModRateHz !== props.params.reflectionModRateHz) props.onChange({ reflectionModRateHz })
   }
+
   const updateDiffuse = (value: number) => {
     const diffuse = normalizeUnitParam(value)
+
     if (diffuse !== props.params.diffuse) props.onChange({ diffuse })
   }
+
   const updateDiffusion = (value: number) => {
     const diffusion = normalizeUnitParam(value)
+
     if (diffusion !== props.params.diffusion) props.onChange({ diffusion })
   }
+
   const updateDensity = (value: number) => {
     const density = normalizeUnitParam(value)
+
     if (density !== props.params.density) props.onChange({ density })
   }
+
   const updateLowCut = (value: number) => {
     const lowCutHz = normalizeLowCut(value)
+
     if (lowCutHz !== props.params.lowCutHz) props.onChange({ lowCutHz })
   }
+
   const updateHighCut = (value: number) => {
     const highCutHz = normalizeHighCut(value)
+
     if (highCutHz !== props.params.highCutHz) props.onChange({ highCutHz })
   }
+
   const updateDiffusionLowCut = (value: number) => {
     const diffusionLowCutHz = normalizeDiffusionLowCut(value)
+
     if (diffusionLowCutHz !== props.params.diffusionLowCutHz) props.onChange({ diffusionLowCutHz })
   }
+
   const updateDiffusionHighCut = (value: number) => {
     const diffusionHighCutHz = normalizeDiffusionHighCut(value)
+
     if (diffusionHighCutHz !== props.params.diffusionHighCutHz) props.onChange({ diffusionHighCutHz })
   }
+
   const updateStereoWidth = (value: number) => {
     const stereoWidth = normalizeStereoWidth(value)
+
     if (stereoWidth !== props.params.stereoWidth) {
       props.onManualAutomationOverride?.('reverb.stereoWidth')
       props.onChange({ stereoWidth })
     }
   }
+
   const updateSpace = (updates: Pick<ReverbParams, 'size' | 'decaySec' | 'diffusion'>) => {
     const size = normalizeUnitParam(updates.size)
     const decaySec = normalizeDecay(updates.decaySec)
     const diffusion = normalizeUnitParam(updates.diffusion)
+
     if (size === props.params.size && decaySec === props.params.decaySec && diffusion === props.params.diffusion) return
     props.onChange({ size, decaySec, diffusion })
   }
+
   const lowCutActive = () => props.params.lowCutHz > REVERB_LOW_CUT_HZ_MIN
   const highCutActive = () => props.params.highCutHz < REVERB_HIGH_CUT_HZ_MAX
   const toggleLowCut = () => updateLowCut(lowCutActive() ? REVERB_LOW_CUT_HZ_MIN : LOW_CUT_TOGGLE_HZ)

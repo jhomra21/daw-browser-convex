@@ -9,6 +9,7 @@ import { createDefaultSpectralParams } from '@daw-browser/shared'
 const root = new URL('../../../', import.meta.url).pathname.replace(/\/$/u, '')
 const evidence = process.env.DAW_INSTRUMENT_EVIDENCE ?? `/tmp/daw-native-lifecycle-evidence-${crypto.randomUUID()}`
 const runtime = `${root}/src/lib/desktop/native-playback-lifecycle.browser-runtime.ts`
+
 const stateSchema = z.object({
   isPlaying: z.boolean(), prepared: z.boolean(), preparing: z.boolean(), active: z.boolean(),
   projectGeneration: z.number(),
@@ -26,9 +27,11 @@ const stateSchema = z.object({
 
 const fixtureHtml = async () => {
   const graphEnvelopeUrl = `data:text/javascript;base64,${Buffer.from(await Bun.file(`${root}/public/audio-worklets/daw-portable-graph-envelope-v3.js`).text()).toString('base64')}`
+
   const portableHost = (await Bun.file(`${root}/public/audio-worklets/daw-portable-audio-core-host-v2.js`).text())
     .replace('export class DawPortableAudioCoreHost', 'window.FixturePortableHost = class DawPortableAudioCoreHost')
     .replace("'./daw-portable-graph-envelope-v3.js'", JSON.stringify(graphEnvelopeUrl))
+
   const result = await build({
     root, configFile: false, logLevel: 'silent',
     define: { 'process.env.NODE_ENV': '"production"', 'import.meta.env.VITE_DESKTOP': '"true"', 'import.meta.env.VITE_CONVEX_URL': '"https://fixture.convex.cloud"' },
@@ -47,7 +50,9 @@ const fixtureHtml = async () => {
         if (id === '\0observed-panel-controller') {
           return `export { observePanelController as createEffectsPanelController } from ${JSON.stringify(runtime)}`
         }
+
         if (id === `${root}/src/lib/auth-client.ts`) return `export const authClient = { getSession: async () => ({ data: null }), signOut: async () => undefined };`
+
         // This journey is local-only. Keep cloud I/O disconnected.
         if (id === `${root}/src/lib/convex.ts`) return `
           import { createSignal } from 'solid-js';
@@ -57,24 +62,31 @@ const fixtureHtml = async () => {
           export const convexClient = { mutation: async () => { throw new Error('Cloud mutation in local journey') }, query: async () => undefined };
           export const useConvexQuery = (_fn, _args, key) => ({ get data() { return key?.()[0] === 'effects' && key?.()[1] === 'room' ? roomRows() : undefined }, status: 'success', isPending: false, isLoading: false, isError: false, refetch: async () => ({ data: undefined }) });
         `
+
         if (id === '\0observed-native-controller') {
           return `export { observeController as createNativePlaybackController } from ${JSON.stringify(runtime)};
             export { nativePlaybackFaultText } from ${JSON.stringify(`${root}/src/lib/desktop/native-playback-controller.ts`)}`
         }
+
         if (id === '\0observed-timeline-playback') {
           return `export { observePlayback as useTimelinePlayback } from ${JSON.stringify(runtime)}`
         }
+
         return undefined
       },
     }],
     resolve: { alias: { '~': `${root}/src` } },
     build: { write: false, minify: false, rollupOptions: { output: { inlineDynamicImports: true } }, lib: { entry: runtime, formats: ['iife'], name: 'nativeLifecycleFixture' } },
   })
+
   const output = Array.isArray(result) ? result[0] : result
+
   if (!output || !('output' in output)) throw new Error('Expected fixture bundle.')
   const chunk = output.output.find((value) => value.type === 'chunk')
+
   if (!chunk) throw new Error('Fixture JavaScript missing.')
   const css = output.output.flatMap(value => value.type === 'asset' && value.fileName.endsWith('.css') ? [z.union([z.string(), z.instanceof(Uint8Array).transform(bytes => new TextDecoder().decode(bytes))]).parse(value.source)] : []).join('\n')
+
   return `<!doctype html><meta charset="utf-8"><body><script type="module">${portableHost.replaceAll('</script', '<\\/script')}</script><script>if(location.search.includes("layout")){const s=document.createElement("style");s.textContent=${JSON.stringify(css + "\nhtml,body{height:100%;margin:0}")};document.head.append(s)}window.fixtureErrors=[];window.addEventListener('error',e=>window.fixtureErrors.push(JSON.stringify({message:e.message,error:String(e.error),stack:e.error?.stack})));window.addEventListener('unhandledrejection',e=>document.body.append(String(e.reason?.stack ?? e.reason)))</script><script>${chunk.code.replaceAll('</script', '<\\/script')}</script>`
 }
 
@@ -87,23 +99,31 @@ test('Chromium prepares instrument-only regions before notes and balances replac
   const env = { ...process.env }
   delete env.AGENT_BROWSER_CDP
   delete env.AGENT_BROWSER_SESSION
+
   const browser = async (...args: string[]) => {
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
     const [out, error, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+
     if (exit !== 0) throw new Error(error || out)
+
     return out.trim()
   }
+
   const schema = stateSchema.extend({
     installCalls: z.number(), maximumPagePayload: z.number(), configuredInstruments: z.number(),
     liveNotes: z.number(), instrumentBytes: z.number(), instrumentReservedBytes: z.number(), pageHeld: z.boolean(),
   })
+
   const read = async () => schema.parse(JSON.parse(JSON.parse(await browser('eval', 'JSON.stringify(nativeLifecycle.snapshot())'))))
   const wait = (condition: string) => browser('wait', '--fn', condition)
+
   const save = async (kind: string, stage: string) => {
     const state = await read()
     await Bun.write(`${evidence}/paging-${kind}-${stage}.json`, JSON.stringify(state, null, 2))
+
     return state
   }
+
   try {
     for (const kind of ['sampler', 'granular', 'drum-rack']) {
       await browser('open', `file://${directory}/index.html?sampled=${kind}`)
@@ -195,17 +215,23 @@ test('3B1 full Timeline desired instruments reconcile post-capture and exclude a
   await Bun.write(`${directory}/index.html`, await fixtureHtml())
   const session = `dv01-timeline-desired-${crypto.randomUUID()}`
   const { AGENT_BROWSER_CDP: _cdp, AGENT_BROWSER_SESSION: _session, ...env } = process.env
+
   const browser = async (...args: string[]) => {
     const child = Bun.spawn(['perl', '-e', 'alarm shift; exec @ARGV', '90', 'agent-browser', '--session', session, ...args],
       { env, stdout: 'pipe', stderr: 'pipe' })
+
     const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+
     if (code !== 0) throw new Error(`${args.join(" ")}: ${err || out}`)
+
     return out.trim()
   }
+
   const read = async () => z.object({ reads: z.array(z.object({ afterStart: z.boolean(), capture: z.number(),
     instruments: z.array(z.tuple([z.string(), z.object({ kind: z.string(), state: z.object({ filterCutoffHz: z.number() }).optional() })])) })),
     trace: z.array(z.object({ event: z.string() })),
   }).parse(JSON.parse(JSON.parse(await browser('eval', 'JSON.stringify(dv01Timeline.evidence())'))))
+
   try {
     await browser('open', `file://${directory}/index.html?timeline&layout`)
     await browser('wait', '--fn', '!!window.timelineJourney?.instrumentTrackId')
@@ -240,6 +266,7 @@ test('3B1 full Timeline desired instruments reconcile post-capture and exclude a
     expect(stale.trace.some(row => row.event === 'session.start')).toBeTrue()
     expect(stale.trace.some(row => row.event === 'instrument.configure')).toBeTrue()
     await Bun.write(`${evidence}/3b1-timeline-desired.json`, JSON.stringify({ current, stale }, null, 2))
+
     if (process.env.DV01_3B1_REPORT === '1') console.log(`DV01-3B1 ${JSON.stringify({
       name: 'R2-B6a full Timeline desired-instrument callback', location: 'src/components/Timeline.tsx',
       flip: 'Actual Timeline projection after capture/start', status: 'green', failure: null, expectedFailure: null, standIn: null,
@@ -262,22 +289,30 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
   const env = { ...process.env }
   delete env.AGENT_BROWSER_CDP
   delete env.AGENT_BROWSER_SESSION
+
   const browser = async (...args: string[]) => {
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
+
     const [stdout, stderr, exit] = await Promise.all([
       new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
     ])
+
     if (exit !== 0) throw new Error(`Isolated browser ${args[0]}: ${stderr || stdout}`)
+
     return stdout.trim()
   }
+
   const read = async (script = 'nativeLifecycle.snapshot()') => stateSchema.parse(
     JSON.parse(JSON.parse(await browser('eval', `(async () => JSON.stringify(await ${script}))()`))),
   )
+
   const save = async (name: string, script?: string) => {
     const state = await read(script)
     await Bun.write(`${evidence}/${name}.json`, JSON.stringify(state, null, 2))
+
     return state
   }
+
   const idle = (state: z.infer<typeof stateSchema>) => {
     expect(state.isPlaying).toBe(false)
     expect(state.prepared).toBe(false)
@@ -294,6 +329,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     expect(state.lossSubscriptions).toBe(0)
     expect(state.mappedAssets).toBe(0)
   }
+
   try {
     await browser('open', `file://${directory}/index.html`)
     await browser('wait', '--fn', '!!window.nativeLifecycle')
@@ -546,6 +582,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     expect(wrappedAt24.isPlaying).toBe(true)
     await browser('eval', 'nativeLifecycle.setLoopProbePosition(0)')
     await browser('wait', '--fn', 'nativeLifecycle.snapshot().position === 0 && nativeLifecycle.snapshot().hostRunning')
+
     for (let cycle = 0; cycle < 3; cycle += 1) {
       await browser('eval', 'nativeLifecycle.holdNextPause()')
       await browser('click', '#seek')
@@ -579,6 +616,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
       await browser('click', '#play')
       await browser('eval', 'nativeLifecycle.settlePlaying()')
     }
+
     await browser('eval', 'nativeLifecycle.holdNextPause()')
     await browser('click', '#stop')
     await browser('wait', '--fn', 'nativeLifecycle.pauseHeld()')
@@ -609,6 +647,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     expect(uiAfterLoop.teardowns).toBe(uiBeforeLoop.teardowns)
     expect(uiAfterLoop.stops).toBe(uiBeforeLoop.stops)
     await Bun.write(`${evidence}/15-production-loop-button.json`, JSON.stringify({ uiBeforeLoop, uiAfterLoop }, null, 2))
+
     const drag = async () => {
       await browser('eval', `(() => {
       const ruler = document.querySelector('[data-timeline-ruler="1"]');
@@ -616,6 +655,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
       const rect = ruler.getBoundingClientRect();
       ruler.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, clientX: rect.left + 20, clientY: rect.top + 5, pointerId: 7 }));
       })()`)
+
       // Separate browser tasks model real pointer delivery, not a synthetic
       // same-task burst that would hide repeated native reconciliations.
       for (let move = 1; move <= 12; move += 1) {
@@ -624,12 +664,14 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
           window.dispatchEvent(new PointerEvent('pointermove', { clientX: rect.left + 20 + ${move}, clientY: rect.top + 5, pointerId: 7 }));
         })()`)
       }
+
       return browser('eval', `(() => {
       const beforeRelease = timelineJourney.snapshot();
       window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 7 }));
       return JSON.stringify(beforeRelease);
     })()`)
     }
+
     const beforeDrag = await uiState()
     const dragPreview = JSON.parse(JSON.parse(await drag()))
     expect(dragPreview.pauses).toBe(beforeDrag.pauses)
@@ -637,6 +679,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     const afterDrag = await uiState()
     expect(afterDrag.teardowns).toBe(beforeDrag.teardowns)
     await Bun.write(`${evidence}/16-production-ruler-drag.json`, JSON.stringify({ beforeDrag, dragPreview, afterDrag }, null, 2))
+
     for (const end of ['pointercancel', 'escape']) {
       // Start a create gesture away from the current brace.
       await browser('eval', `(() => {
@@ -647,6 +690,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
       })()`)
       expect((await uiState()).pauses).toBe(afterDrag.pauses)
     }
+
     await browser('eval', 'timelineJourney.commitLoop()')
     await browser('wait', '--fn', 'timelineJourney.snapshot().cycleStart === 0.3 && timelineJourney.snapshot().cycleEnd === 0.7 && timelineJourney.snapshot().running')
     const controlCommit = await uiState()
@@ -700,6 +744,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     expect(refresh.coverage).toHaveLength(2)
     expect(refresh.coverage[1].endFrame).toBeGreaterThan(50_000)
     expect(refresh.nextRefresh).toBe('started')
+
     const workletLive = JSON.parse(JSON.parse(await browser('eval', `(() => {
       const faults=[];
       const host=new window.FixturePortableHost({sampleRate:48000,postMessage:message=>faults.push(message),close:()=>{}});
@@ -716,6 +761,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
       for(let i=0;i<host.scheduleInstrumentEventCount;i++){const at=4+i*48;events.push({kind:host.scheduleInstrumentEventView.getUint32(at+32,true),target:host.scheduleInstrumentEventView.getUint32(at+40,true),value:host.scheduleInstrumentEventView.getFloat32(at+44,true),epoch:host.scheduleInstrumentEventView.getUint32(at+24,true)})}
       return JSON.stringify({materialized,events,faults});
     })()`)))
+
     await Bun.write(`${evidence}/19-portable-worklet-live-merge.json`, JSON.stringify(workletLive, null, 2))
     expect(workletLive.materialized).toBe(true)
     expect(workletLive.faults).toEqual([])
@@ -727,6 +773,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     await browser('eval', 'timelineJourney.loseHost()')
     await browser('wait', '--fn', '!timelineJourney.snapshot().playing && !timelineJourney.snapshot().prepared')
     await browser('eval', 'Array.from(document.querySelectorAll("button")).find(button => button.textContent.trim() === "OK")?.click()')
+
     for (const seconds of [10, 15]) {
       await browser('eval', `(() => {
         const ruler = document.querySelector('[data-timeline-ruler="1"]');
@@ -739,6 +786,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
       expect(stoppedRecoveredSeek.playing).toBe(false)
       await Bun.write(`${evidence}/20-stopped-ruler-after-loss-${seconds}.json`, JSON.stringify(stoppedRecoveredSeek, null, 2))
     }
+
     await browser('click', '[aria-label="Play"]')
     await browser('wait', '--fn', 'timelineJourney.snapshot().running && timelineJourney.snapshot().playing')
     const recoveredRulerPlay = await uiState()
@@ -754,6 +802,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     await browser('eval', 'timelineJourney.seek(70)')
     await browser('click', '[aria-label="Play"]')
     await browser('wait', '--fn', 'timelineJourney.snapshot().running && timelineJourney.snapshot().position === 70')
+
     const followLocate = JSON.parse(JSON.parse(await browser('eval', `(() => {
       const viewport = document.querySelector('[data-timeline-scroll-viewport="1"]');
       const ruler = document.querySelector('[data-timeline-ruler="1"]');
@@ -764,6 +813,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
       viewport.dispatchEvent(new Event('scroll'));
       return JSON.stringify({start,pps,scrollLeft:viewport.scrollLeft});
     })()`)))
+
     await browser('eval', `(() => {
       const ruler=document.querySelector('[data-timeline-ruler="1"]');
       const rect=ruler.getBoundingClientRect();
@@ -812,6 +862,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     expect(knobAfter.starts).toBe(knobBefore.starts)
     expect(knobAfter.stops).toBe(knobBefore.stops)
     expect(knobAfter.teardowns).toBe(knobBefore.teardowns)
+
     for (const [shiftKey, cutoff] of [[false, 12000], [true, 913]]) {
       await browser('eval', `document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,shiftKey:${shiftKey},bubbles:true,cancelable:true}))`)
       await browser('wait', '--fn', `timelineJourney.instrumentEvidence("${knobTrackId}").nativeParameters.filter(event=>event.target===3).at(-1)?.value === ${cutoff}`)
@@ -821,6 +872,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
       expect(replay.state.starts).toBe(knobBefore.starts)
       expect(replay.state.stops).toBe(knobBefore.stops)
     }
+
     const immediateGeometry = JSON.parse(JSON.parse(await browser('eval', `(() => {
       document.querySelector('[aria-label="Stop"]').click();
       const viewport=document.querySelector('[data-timeline-scroll-viewport="1"]');
@@ -832,6 +884,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
       window.dispatchEvent(new PointerEvent('pointerup',{pointerId:11}));
       return JSON.stringify({rect:rect.toJSON(),scrollLeft:viewport.scrollLeft,markers:[...ruler.querySelectorAll(':scope > .absolute.bottom-0')].map(e=>({left:e.style.left,label:e.textContent})),state:timelineJourney.snapshot()});
     })()`)))
+
     await browser('wait','150')
     const immediateStopLocate=await uiState()
     await Bun.write(`${evidence}/24-layout-immediate-stop-locate.json`,JSON.stringify({immediateGeometry,immediateStopLocate},null,2))
@@ -853,6 +906,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     expect(localStoreAfter.state.stops).toBe(localStoreBefore.stops)
     await browser('eval', `timelineJourney.setPanelInstrument("${localStoreTrackId}", "local-store:replacement", 531); timelineJourney.flushInstrument()`)
     await browser('wait', '--fn', `timelineJourney.preparedInstrumentIdentity("${localStoreTrackId}")?.instanceId === "local-store:replacement"`)
+
     for (const [shiftKey, instanceId, cutoff] of [[false, 'local-store:first', 372], [true, 'local-store:replacement', 531], [false, 'local-store:first', 372]]) {
       await browser('eval', `document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,shiftKey:${shiftKey},bubbles:true,cancelable:true}))`)
       await browser('wait', '--fn', `timelineJourney.preparedInstrumentIdentity("${localStoreTrackId}")?.instanceId === "${instanceId}"`)
@@ -862,6 +916,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
       expect(replay.boundary.nativeStates.at(-1).cutoff).toBe(cutoff)
       expect(replay.state.playing).toBe(true)
     }
+
     const remoteTrackId = JSON.parse(await browser('eval', 'timelineJourney.remoteTrackId'))
     const remoteBefore = await uiState()
     await browser('eval', `(() => {
@@ -958,17 +1013,24 @@ const liveEditSchema = z.object({
   revisions: z.array(z.object({ operation: z.string(), revision: z.number(), status: z.string() })),
   trace: z.array(z.object({ event: z.string() })),
 })
+
 const publishedBanks = (state: z.infer<typeof liveEditSchema>) => [...new Set(state.revisions.filter((entry) => entry.status === 'published').map((entry) => entry.revision))]
 const trackSchema = z.object({ id: z.string(), name: z.string(), kind: z.string() }).passthrough()
 const observedSchema = z.object({ tracks: z.array(trackSchema), processors: z.array(z.object({ id: z.string(), processor: z.object({ kind: z.string(), params: z.object({ state: z.record(z.string(), z.json()).optional() }).passthrough().optional() }).passthrough() }).passthrough()) }).passthrough()
 const persisted = (id: string) => ({ source: 'persisted', id })
+
 type LiveEditState = z.infer<typeof observedSchema>
+
 const trackNamed = (state: LiveEditState, name: string) => {
   const track = state.tracks.find((entry) => entry.name === name)
+
   if (!track) throw new Error(`Track ${name} is absent`)
+
   return track
 }
+
 type LiveEditKey = { key: string; code: string; shiftKey: boolean }
+
 // A canonical action list, or the key the Timeline's own shortcut handles; `publishes` is false for a change that is not a graph revision.
 const liveEditClasses: ({ name: string; publishes?: false } & ({ actions: (state: LiveEditState) => unknown[] } | { keyboard: LiveEditKey }))[] = [
   { name: 'mixer volume', actions: (state) => [{ kind: 'track.mix.set', track: persisted(trackNamed(state, 'Audio').id), volume: 0.5 }] },
@@ -985,17 +1047,22 @@ const liveEditClasses: ({ name: string; publishes?: false } & ({ actions: (state
       .map((entry) => ({ effect: persisted(entry.id), kind: entry.processor.kind })) }] },
   { name: 'effect remove', actions: (state) => {
     const effect = state.processors.find((entry) => entry.processor.kind === 'utility')
+
     if (!effect) throw new Error('Utility effect is absent')
+
     return [{ kind: 'effect.remove', target: { kind: 'track', track: persisted(trackNamed(state, 'Added').id) }, effectKind: 'utility', effect: persisted(effect.id) }]
   } },
   { name: 'spectral insert', actions: (state) => {
     const target = { kind: 'track', track: persisted(trackNamed(state, 'Audio').id) }
+
     return [{ kind: 'effect.upsert', target, effectKind: 'spectral', params: { version: 1, state: { ...createDefaultSpectralParams(), fftSize: 512, mix: 1 } } },
       { kind: 'effect.upsert', target, effectKind: 'utility' }]
   } },
   { name: 'spectral fft size', actions: (state) => {
     const spectral = state.processors.find((entry) => entry.processor.kind === 'spectral')
+
     if (!spectral) throw new Error('Spectral effect is absent')
+
     return [{ kind: 'effect.upsert', target: { kind: 'track', track: persisted(trackNamed(state, 'Audio').id) }, effect: persisted(spectral.id), effectKind: 'spectral',
       params: { version: 1, state: { ...spectral.processor.params?.state, fftSize: 4096 } } }]
   } },
@@ -1003,6 +1070,7 @@ const liveEditClasses: ({ name: string; publishes?: false } & ({ actions: (state
   { name: 'track reorder', actions: (state) => {
     const ordinary = state.tracks.filter((entry) => entry.name !== 'Added return')
     const returns = state.tracks.filter((entry) => entry.name === 'Added return')
+
     return [{ kind: 'track.reorder', tracks: [...ordinary.reverse(), ...returns].map((entry, index) => ({ track: persisted(entry.id), index, group: null })) }]
   } },
   { name: 'track delete', actions: (state) => [{ kind: 'track.delete', track: persisted(trackNamed(state, 'Added').id) }] },
@@ -1018,28 +1086,37 @@ for (const paused of [false, true]) {
     await Bun.write(`${directory}/index.html`, await fixtureHtml())
     const session = `ae08-live-edits-${crypto.randomUUID()}`
     const { AGENT_BROWSER_CDP: _cdp, AGENT_BROWSER_SESSION: _session, ...env } = process.env
+
     const browser = async (...args: string[]) => {
       const child = Bun.spawn(['perl', '-e', 'alarm shift; exec @ARGV', '90', 'agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
       const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+
       if (code !== 0) throw new Error(`${args.join(' ')}: ${err || out}`)
+
       return out.trim()
     }
+
     const page = async (expression: string) => JSON.parse(JSON.parse(await browser('eval', `(async () => JSON.stringify(await ${expression}))()`)))
     const snapshot = async () => liveEditSchema.parse(await page('timelineJourney.snapshot()'))
     const rows: { edit: string; paused: boolean; banks: number }[] = []
+
     try {
       await browser('open', `file://${directory}/index.html?timeline&layout&live`)
       await browser('wait', '--fn', '!!window.timelineJourney?.instrumentTrackId')
       await browser('click', '[aria-label="Play"]')
       await browser('wait', '--fn', 'timelineJourney.snapshot().running')
+
       if (paused) {
         await browser('click', '[aria-label="Pause"]')
         await browser('wait', '--fn', '!timelineJourney.snapshot().running')
       }
+
       const baseline = await snapshot()
       expect(baseline.prepared).toBeTrue()
+
       for (const edit of liveEditClasses) {
         const before = await snapshot()
+
         if ('keyboard' in edit) {
           await browser('eval', `(() => { document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown', { ...${JSON.stringify(edit.keyboard)}, ctrlKey: true, metaKey: true, bubbles: true })); return true })()`)
         } else await page(`timelineJourney.commit(${JSON.stringify(edit.actions(observedSchema.parse(await page('timelineJourney.observe()'))))})`)
@@ -1058,6 +1135,7 @@ for (const paused of [false, true]) {
           published: banks.length > publishedBanks(before).length })
           .toEqual({ edit: edit.name, lifecycle: [], starts: 0, stops: 0, teardowns: 0, prepared: true, running: !paused, faults: [], monotonic: true, published: edit.publishes !== false })
       }
+
       console.info(`AE-08 live-edit rows: ${JSON.stringify(rows)}`)
     } finally {
       await browser('eval', 'timelineJourney.close()').catch(() => undefined)

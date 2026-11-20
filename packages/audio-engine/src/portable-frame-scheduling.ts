@@ -72,6 +72,7 @@ export type PortableFrameScheduleBlock = {
 }
 
 type ScheduleValue = string | number | boolean | null | readonly ScheduleValue[] | ScheduleObject
+
 type ScheduleObject = { [key: string]: ScheduleValue }
 
 const isNumber = <Value>(value: Value): value is Value & number => typeof value === 'number'
@@ -115,6 +116,7 @@ const validEvent = <Value>(event: Value): event is Value & PortableFrameSchedule
 
 export const isPortableFrameSchedule = <Value>(value: Value): value is Value & PortableFrameSchedule => {
   if (!isRecord(value) || !isRecord(value.timeOrigin) || !Array.isArray(value.events)) return false
+
   if (
     !positiveSafeInteger(value.revision)
     || !positiveSafeInteger(value.transportEpoch)
@@ -126,20 +128,25 @@ export const isPortableFrameSchedule = <Value>(value: Value): value is Value & P
   let priorFrame = -1
   let priorSequence = 0
   const sequences = new Set<number>()
+
   for (const event of value.events) {
     if (!validEvent(event) || sequences.has(event.sequence)) return false
+
     if (event.frame < value.timeOrigin.frame || event.frame < priorFrame || event.frame === priorFrame && event.sequence <= priorSequence) {
       return false
     }
+
     sequences.add(event.sequence)
     priorFrame = event.frame
     priorSequence = event.sequence
   }
+
   return true
 }
 
 export const assertPortableFrameSchedule = (value: PortableFrameSchedule): PortableFrameSchedule => {
   if (!isPortableFrameSchedule(value)) throw new Error('Portable frame schedule has invalid identity or event ordering.')
+
   return value
 }
 
@@ -161,8 +168,10 @@ export const eventsForPortableFrameBlock = (
   if (!nonnegativeSafeInteger(startFrame) || !positiveSafeInteger(frameCount)) {
     throw new Error('Portable frame block bounds are invalid.')
   }
+
   assertPortableFrameSchedule(schedule)
   const endFrame = startFrame + frameCount
+
   return {
     startFrame,
     frameCount,

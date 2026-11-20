@@ -3,6 +3,7 @@ import { type AudioSourceKind,
   type AudioSourceMetadata,createLocalAssetId } from '@daw-browser/shared'
 
 export type { AudioSourceKind } from '@daw-browser/shared'
+
 export type { AudioSourceMetadata } from '@daw-browser/shared'
 
 type PersistedAudioSource = {
@@ -48,6 +49,7 @@ export function getPersistedAudioSource(source: AudioSourceMetadataLike): Persis
   }
 
   const metadata = getPersistableAudioSourceMetadata(source)
+
   if (!metadata) {
     return undefined
   }

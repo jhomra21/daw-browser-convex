@@ -40,7 +40,9 @@ type UseMidiKeyboardInputOptions = {
 
 export const midiKeyboardCodeToSemitone = (code: string): number | undefined => {
   const white = whiteKeySemitones.get(code)
+
   if (white !== undefined) return white
+
   return blackKeySemitones.get(code)
 }
 
@@ -50,28 +52,37 @@ export const clampMidiKeyboardVelocity = (value: number) => Math.max(0.1, Math.m
 export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
   const octaveKey = () => `mb:midi_kb_oct:${options.projectId() || 'default'}`
   const velocityKey = () => `mb:midi_kb_vel:${options.projectId() || 'default'}`
+
   const readStoredOctave = () => {
     if (!canUseLocalStorage()) return 0
+
     try {
       const raw = window.localStorage.getItem(octaveKey())
+
       if (raw === null) return 0
       const value = Number.parseInt(raw, 10)
+
       return Number.isFinite(value) ? clampMidiKeyboardOctave(value) : 0
     } catch {
       return 0
     }
   }
+
   const readStoredVelocity = () => {
     if (!canUseLocalStorage()) return DEFAULT_NOTE_VELOCITY
+
     try {
       const raw = window.localStorage.getItem(velocityKey())
+
       if (raw === null) return DEFAULT_NOTE_VELOCITY
       const value = Number.parseFloat(raw)
+
       return Number.isFinite(value) ? clampMidiKeyboardVelocity(value) : DEFAULT_NOTE_VELOCITY
     } catch {
       return DEFAULT_NOTE_VELOCITY
     }
   }
+
   const [octave, setOctave] = createSignal(readStoredOctave())
   const [velocity, setVelocity] = createSignal(readStoredVelocity())
   const [activeRows, setActiveRows] = createSignal<Set<number>>(new Set(), { equals: false })
@@ -81,45 +92,58 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
     for (const pitch of new Set(pressed.values())) {
       options.onStopLiveNote?.(pitch)
     }
+
     pressed.clear()
     setActiveRows(new Set<number>())
   }
 
   const handleKeyDown = (event: KeyboardEvent) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return
+
     if (isEditableKeyboardTarget(event.target)) return
+
     if (!options.canPlay()) return
 
     if (event.code === 'KeyZ') {
       setOctave(value => clampMidiKeyboardOctave(value - 1))
       event.preventDefault()
       event.stopPropagation()
+
       return
     }
+
     if (event.code === 'KeyX') {
       setOctave(value => clampMidiKeyboardOctave(value + 1))
       event.preventDefault()
       event.stopPropagation()
+
       return
     }
+
     if (event.code === 'KeyC') {
       setVelocity(value => clampMidiKeyboardVelocity(value - VELOCITY_STEP))
       event.preventDefault()
       event.stopPropagation()
+
       return
     }
+
     if (event.code === 'KeyV') {
       setVelocity(value => clampMidiKeyboardVelocity(value + VELOCITY_STEP))
       event.preventDefault()
       event.stopPropagation()
+
       return
     }
 
     const semitone = midiKeyboardCodeToSemitone(event.code)
+
     if (semitone === undefined) return
+
     if (pressed.has(event.code)) {
       event.preventDefault()
       event.stopPropagation()
+
       return
     }
 
@@ -133,12 +157,15 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
 
   const handleKeyUp = (event: KeyboardEvent) => {
     const pitch = pressed.get(event.code)
+
     if (pitch === undefined) return
 
     pressed.delete(event.code)
+
     if (![...pressed.values()].includes(pitch)) {
       options.onStopLiveNote?.(pitch)
     }
+
     setActiveRows(new Set(pressed.values()))
     event.preventDefault()
     event.stopPropagation()
@@ -156,6 +183,7 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
 
   createEffect(() => {
     if (!canUseLocalStorage()) return
+
     try {
       window.localStorage.setItem(octaveKey(), String(octave()))
     } catch {}
@@ -163,6 +191,7 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
 
   createEffect(() => {
     if (!canUseLocalStorage()) return
+
     try {
       window.localStorage.setItem(velocityKey(), velocity().toFixed(2))
     } catch {}
@@ -177,9 +206,11 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
   createEffect(() => {
     if (!options.enabled()) return
     const listenerOptions: AddEventListenerOptions = { capture: true }
+
     const handleVisibilityChange = () => {
       if (document.hidden) stopPressedNotes()
     }
+
     // Window blur also fires when focus moves to the native editor window.
     window.addEventListener('keydown', handleKeyDown, listenerOptions)
     window.addEventListener('keyup', handleKeyUp, listenerOptions)

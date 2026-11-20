@@ -11,6 +11,7 @@ const modules = {
 test("project prefix drain paginates and keeps failed prefix rows independent", async () => {
   const t = convexTest(schema, modules);
   const now = Date.now();
+
   const rows = await t.run(async (ctx) => {
     const firstPrefix = await ctx.db.insert("r2DeleteQueue", {
       projectId: "project-1",
@@ -22,6 +23,7 @@ test("project prefix drain paginates and keeps failed prefix rows independent", 
       createdAt: now,
       updatedAt: now,
     });
+
     const secondPrefix = await ctx.db.insert("r2DeleteQueue", {
       projectId: "project-1",
       r2Key: "projects/project-1/",
@@ -32,6 +34,7 @@ test("project prefix drain paginates and keeps failed prefix rows independent", 
       createdAt: now,
       updatedAt: now,
     });
+
     await ctx.db.insert("r2DeleteQueue", {
       projectId: "project-1",
       r2Key: "asset-namespaces/namespace-1/sample",
@@ -72,14 +75,19 @@ test("project prefix drain paginates and keeps failed prefix rows independent", 
       createdAt: now,
       updatedAt: now,
     });
+
     return { firstPrefix, secondPrefix };
   });
+
   const deletedObjects = new Set<string>();
   const listCalls: string[] = [];
+
   const bucket = {
     list: async ({ prefix, cursor }: { prefix: string; cursor?: string }) => {
       listCalls.push(`${prefix}:${cursor ?? ""}`);
+
       if (prefix === "projects/project-1/") throw new Error("projects prefix unavailable");
+
       return cursor
         ? { objects: [{ key: `${prefix}second` }], truncated: false }
         : { objects: [{ key: `${prefix}first` }], truncated: true, cursor: "next" };
@@ -89,7 +97,9 @@ test("project prefix drain paginates and keeps failed prefix rows independent", 
     },
     resumeMultipartUpload: () => ({ abort: async () => undefined }),
   };
+
   const worker = t.withIdentity({ subject: "worker", tokenIdentifier: "token", dawWorker: true });
+
   const result = await drainR2DeleteRows({
     convex: worker,
     bucket,
@@ -111,6 +121,7 @@ test("project prefix drain paginates and keeps failed prefix rows independent", 
   expect(storedRows.find((row) => row._id === rows.secondPrefix)?.status).toBe("pending");
   expect(storedRows.filter((row) => row.r2Key.startsWith("asset-namespaces/namespace-1/")).every((row) => row.status === "deleted")).toBe(true);
   expect(storedRows.filter((row) => row.r2Key.startsWith("projects/project-1/")).every((row) => row.status === "pending")).toBe(true);
+
   for (const key of ["projects/project-1/object-a", "projects/project-1/object-b"]) {
     const row = storedRows.find((candidate) => candidate.r2Key === key);
     expect(row).toMatchObject({
@@ -126,6 +137,7 @@ test("project prefix drain paginates and keeps failed prefix rows independent", 
 test("multipart abort rows use the retained upload identity", async () => {
   const t = convexTest(schema, modules);
   const now = Date.now();
+
   const rowId = await t.run(async (ctx) => await ctx.db.insert("r2DeleteQueue", {
     projectId: "project-1",
     r2Key: "asset-namespaces/namespace-1/sample",
@@ -137,8 +149,10 @@ test("multipart abort rows use the retained upload identity", async () => {
     createdAt: now,
     updatedAt: now,
   }));
+
   const calls: string[] = [];
   const worker = t.withIdentity({ subject: "worker", tokenIdentifier: "token", dawWorker: true });
+
   const result = await drainR2DeleteRows({
     convex: worker,
     bucket: {
@@ -150,6 +164,7 @@ test("multipart abort rows use the retained upload identity", async () => {
     },
     rows: await t.run(async (ctx) => await ctx.db.query("r2DeleteQueue").collect()),
   });
+
   expect(result).toMatchObject({ processed: 1, deleted: 1 });
   expect(calls).toEqual(["asset-namespaces/namespace-1/sample:upload-1"]);
   expect(await t.run(async (ctx) => (await ctx.db.get(rowId))?.status)).toBe("deleted");

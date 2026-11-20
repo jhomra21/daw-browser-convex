@@ -39,6 +39,7 @@ export const getAutomationEnvelopeSchedulePlan = (
   const nextAfterEndIndex = points.findIndex((point) => point.timeSec > window.endLimitSec)
   const nextAfterEnd = nextAfterEndIndex === -1 ? undefined : points[nextAfterEndIndex]
   const previousBeforeEnd = nextAfterEndIndex <= 0 ? undefined : points[nextAfterEndIndex - 1]
+
   const shouldRampToWindowEnd = Boolean(
     !endBoundaryPoint
       && nextAfterEnd
@@ -46,14 +47,18 @@ export const getAutomationEnvelopeSchedulePlan = (
       && previousBeforeEnd.timeSec < window.endLimitSec
       && previousBeforeEnd.interpolation === 'linear',
   )
+
   const schedulePoints: AutomationSchedulePoint[] = [{
     timeSec: window.startLimitSec,
     value: startValue,
     kind: 'set',
   }]
+
   for (let index = 0; index < points.length; index += 1) {
     const point = points[index]
+
     if (!point || point.timeSec <= window.startLimitSec) continue
+
     if (point.timeSec > window.endLimitSec) break
     const previous = points[index - 1]
     schedulePoints.push({
@@ -62,6 +67,7 @@ export const getAutomationEnvelopeSchedulePlan = (
       kind: !previous || previous.interpolation === 'hold' ? 'set' : 'ramp',
     })
   }
+
   if (shouldRampToWindowEnd) {
     schedulePoints.push({
       timeSec: window.endLimitSec,
@@ -69,6 +75,7 @@ export const getAutomationEnvelopeSchedulePlan = (
       kind: 'ramp',
     })
   }
+
   return schedulePoints
 }
 
@@ -82,15 +89,18 @@ export function scheduleAutomationEnvelope(
   const startCtx = timelineToCtxTime(window.startLimitSec)
   const plan = getAutomationEnvelopeSchedulePlan(envelope, window, fallbackValue)
   const first = plan[0]
+
   if (!first) return
 
   for (const binding of bindings) {
     const param = binding.param
     param.cancelScheduledValues(startCtx)
     param.setValueAtTime(binding.valueToAudioValue(first.value), timelineToCtxTime(first.timeSec))
+
     for (const point of plan.slice(1)) {
       const value = binding.valueToAudioValue(point.value)
       const time = timelineToCtxTime(point.timeSec)
+
       if (point.kind === 'set') param.setValueAtTime(value, time)
       else param.linearRampToValueAtTime(value, time)
     }
@@ -107,6 +117,7 @@ export function applyAutomationEnvelopeAtTime(
   const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
   const points = descriptor ? normalizeAutomationPoints(envelope.points, descriptor) : envelope.points
   const value = valueAtAutomationTime(points, timelineSec, fallbackValue)
+
   for (const binding of bindings) {
     binding.param.cancelScheduledValues(audioCtxTime)
     binding.param.setValueAtTime(binding.valueToAudioValue(value), audioCtxTime)

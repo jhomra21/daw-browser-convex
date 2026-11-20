@@ -33,7 +33,9 @@ const readBackupConflict = (
   baseManifestVersion?: string,
 ) => {
   const manifestUpdatedAt = Number(manifest.updatedAt) || 0;
+
   if (!existing) return null;
+
   if (baseManifestVersion !== existing.manifestVersion || manifestUpdatedAt < existing.manifestUpdatedAt) {
     return {
       localUpdatedAt: manifestUpdatedAt,
@@ -44,6 +46,7 @@ const readBackupConflict = (
       cloudAssetCount: existing.assetCount,
     };
   }
+
   return null;
 };
 
@@ -69,6 +72,7 @@ const readSupersededCloudKeys = (
   nextManifest: ProjectManifest,
 ) => {
   const nextKeys = new Set(readProjectManifestCloudKeys(projectId, nextManifest));
+
   return readProjectManifestCloudKeys(projectId, previousManifest).filter((key) => !nextKeys.has(key));
 };
 
@@ -77,6 +81,7 @@ export const getLatest = query({
   handler: async (ctx, { projectId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor", "viewer"]);
+
     return await latestBackup(ctx, projectId);
   },
 });
@@ -89,6 +94,7 @@ export const checkConflict = query({
     await assertProjectNotDeleting(ctx, projectId);
     const normalizedManifest = normalizeProjectManifest(manifest);
     assertConflictManifest(projectId, normalizedManifest);
+
     return readBackupConflict(await latestBackup(ctx, projectId), normalizedManifest, baseManifestVersion);
   },
 });
@@ -110,9 +116,11 @@ export const upsertLatest = mutation({
     const existing = await latestBackup(ctx, projectId);
     const existingManifest = existing ? normalizeProjectManifest(existing.manifest) : undefined;
     const conflict = readBackupConflict(existing, normalizedManifest, baseManifestVersion);
+
     if (conflictAction === "detect" && conflict) {
       return { ok: false, conflict };
     }
+
     const supersededCloudKeys = readSupersededCloudKeys(projectId, existingManifest, normalizedManifest);
     const queuedDeletedCloudKeys = [...new Set([...(pendingDeletedCloudKeys ?? []), ...supersededCloudKeys])];
     const project = await requireProjectRow(ctx, projectId);
@@ -122,6 +130,7 @@ export const upsertLatest = mutation({
 
     const now = Date.now();
     const manifestVersion = `${now}-${crypto.randomUUID()}`;
+
     const row = {
       projectId,
       ownerUserId: userId,
@@ -132,11 +141,13 @@ export const upsertLatest = mutation({
       entityCount: Number(normalizedManifest.entityCount) || 0,
       assetCount: Number(normalizedManifest.assetCount) || 0,
     };
+
     if (existing) {
       await ctx.db.patch(existing._id, row);
     } else {
       await ctx.db.insert("cloudBackups", row);
     }
+
     return { ok: true, manifestVersion, supersededCloudKeys, queuedDeletedCloudKeys };
   },
 });

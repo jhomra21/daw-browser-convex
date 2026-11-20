@@ -5,7 +5,9 @@ export const resolveAudioRuntimeConfiguration = (
   preferences: Pick<AudioPreferences, "sampleRate" | "latencyMode">
 ): AudioRuntimeOptions => {
   const options: AudioRuntimeOptions = { latencyHint: preferences.latencyMode }
+
   if (preferences.sampleRate !== "default") options.sampleRate = preferences.sampleRate
+
   return options
 }
 
@@ -14,10 +16,15 @@ export const buildRecordingConstraints = (
   supported: MediaTrackSupportedConstraints
 ): MediaTrackConstraints => {
   const constraints: MediaTrackConstraints = {}
+
   if (preferences.inputDeviceId) constraints.deviceId = { exact: preferences.inputDeviceId }
+
   if (supported.echoCancellation) constraints.echoCancellation = preferences.echoCancellation
+
   if (supported.noiseSuppression) constraints.noiseSuppression = preferences.noiseSuppression
+
   if (supported.autoGainControl) constraints.autoGainControl = preferences.autoGainControl
+
   return constraints
 }
 
@@ -39,6 +46,7 @@ export const areAudioDeviceListsEqual = (
   next: readonly MediaDeviceInfo[]
 ): boolean => previous.length === next.length && previous.every((device, index) => {
   const candidate = next[index]
+
   return candidate?.kind === device.kind
     && candidate.deviceId === device.deviceId
     && candidate.groupId === device.groupId
@@ -47,13 +55,17 @@ export const areAudioDeviceListsEqual = (
 
 export const filterAudioDevices = (devices: readonly MediaDeviceInfo[]): AudioDeviceLists => {
   const seen = new Set<string>()
+
   const unique = devices.filter((device) => {
     if (browserDeviceAliases.has(device.deviceId)) return false
     const key = `${device.kind}:${device.deviceId}`
+
     if (seen.has(key)) return false
     seen.add(key)
+
     return true
   })
+
   return {
     inputs: unique.filter((device) => device.kind === "audioinput"),
     outputs: unique.filter((device) => device.kind === "audiooutput")
@@ -71,6 +83,7 @@ export const resolveRecordingChannelOptions = (
   const available = Number.isSafeInteger(activeChannelCount) && activeChannelCount !== undefined
     ? Math.max(1, Math.min(32, activeChannelCount))
     : 32
+
   return Array.from({ length: 32 }, (_, channel) => ({
     channel,
     label: `Input ${channel + 1}`,

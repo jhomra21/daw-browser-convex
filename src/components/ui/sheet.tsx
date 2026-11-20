@@ -27,6 +27,7 @@ type PortalProps = SheetPrimitive.DialogPortalProps & VariantProps<typeof portal
 
 const SheetPortal: Component<PortalProps> = (props) => {
   const [local, others] = splitProps(props, ["position", "children"])
+
   return (
     <SheetPrimitive.Portal {...others}>
       <div class={portalVariants({ position: local.position })}>{local.children}</div>
@@ -45,6 +46,7 @@ function SheetOverlay(
   props: PolymorphicProps<ValidComponent, DialogOverlayProps<ValidComponent>>,
 ): JSX.Element {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <SheetPrimitive.Overlay
       class={cn(
@@ -85,6 +87,7 @@ function SheetContent(
   props: PolymorphicProps<ValidComponent, DialogContentProps<ValidComponent>>,
 ): JSX.Element {
   const [local, others] = splitProps(props, ["position", "class", "children"])
+
   return (
     <SheetPortal position={local.position}>
       <SheetOverlay />
@@ -119,6 +122,7 @@ function SheetContent(
 
 const SheetHeader: Component<ComponentProps<"div">> = (props) => {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <div class={cn("flex flex-col space-y-2 text-center sm:text-left", local.class)} {...others} />
   )
@@ -126,6 +130,7 @@ const SheetHeader: Component<ComponentProps<"div">> = (props) => {
 
 const SheetFooter: Component<ComponentProps<"div">> = (props) => {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <div
       class={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2", local.class)}
@@ -145,6 +150,7 @@ function SheetTitle(
   props: PolymorphicProps<ValidComponent, DialogTitleProps<ValidComponent>>,
 ): JSX.Element {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <SheetPrimitive.Title
       class={cn("text-lg font-semibold text-foreground", local.class)}
@@ -163,6 +169,7 @@ function SheetDescription(
   props: PolymorphicProps<ValidComponent, DialogDescriptionProps<ValidComponent>>,
 ): JSX.Element {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <SheetPrimitive.Description
       class={cn("text-sm text-muted-foreground", local.class)}

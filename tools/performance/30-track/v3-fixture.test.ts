@@ -6,6 +6,7 @@ test("detects a changed source sample after a page boundary", async () => {
   const source = planThirtyTrackV3().audio[1]!
   const { streamThirtyTrackMixedRateWav } = await import("./mixed-rate-media")
   const chunks: Uint8Array[] = []
+
   for await (const chunk of streamThirtyTrackMixedRateWav(source)) chunks.push(chunk)
   const file = new File(chunks.map((chunk) => Uint8Array.from(chunk).buffer), "source.wav")
   await expect(assertThirtyTrackV3WavSamples(source, file)).resolves.toBeUndefined()
@@ -36,10 +37,12 @@ describe("archive budget", () => {
 
 test("v3 rejects missing assets and inactive MIDI tracks", () => {
   const plan = planThirtyTrackV3()
+
   const tracks = [
     ...plan.audio.map((source) => ({ index: source.trackIndex, kind: "audio", asset: source.trackIndex, notes: 0 })),
     ...plan.instruments.map((instrument) => ({ index: instrument.index, kind: "instrument", asset: null, notes: instrument.notes.length })),
   ]
+
   expect(() => assertThirtyTrackV3Fixture(plan, tracks, plan.audio.length)).not.toThrow()
   expect(() => assertThirtyTrackV3Fixture(plan, tracks, 23)).toThrow()
   expect(() => assertThirtyTrackV3Fixture(plan, tracks.map((track) => track.index === 25 ? { ...track, notes: 0 } : track), 24)).toThrow()

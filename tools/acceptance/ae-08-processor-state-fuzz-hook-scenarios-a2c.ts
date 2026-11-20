@@ -2,6 +2,7 @@ import type createHookFixture from "./ae-08-processor-state-fuzz-hook"
 import type { Action } from "./ae-08-processor-state-fuzz-host"
 
 type Fixture = Awaited<ReturnType<typeof createHookFixture>>
+
 export type A2cDriver = { fixture: Fixture; act: (action: Action) => Promise<void>; drain: () => Promise<void>
   until: (predicate: () => boolean) => Promise<void>; seed: number }
 
@@ -9,10 +10,13 @@ export type A2cDriver = { fixture: Fixture; act: (action: Action) => Promise<voi
 const savePermutations = [["G2", "F", "E"], ["G2", "E", "F"], ["F", "G2", "E"], ["F", "E", "G2"], ["E", "G2", "F"], ["E", "F", "G2"]]
 const withoutExternal = [["G2", "F"], ["F", "G2"]]
 const gaps = 3
+
 // The newer gesture lands while the history write is not yet created, just open, or open after more tasks.
 const historyPositions = 3
+
 const cellCount = (name: string) => name === "history-save-newer" ? historyPositions * 2 // 3 positions x open/committed gesture
   : name === "save-fail-positions" ? savePermutations.length * gaps ** 3 + withoutExternal.length * gaps ** 2 : 1
+
 export const a2cScenarios = ["history-equal-undo-return", "history-redo", "history-save-newer", "history-save-failed", "save-fail-positions",
   "commit-after-removal", "context-matrix", "stale-compile-asset-wait", "candidate-page-hold", "sample-swap", "sample-swap-window",
   "paused-flush", "identity-unchanged", "cancel-other-save", "instrument-urgent", "gesture-equal-return", "gesture-cancel-unchanged",
@@ -21,36 +25,47 @@ export const a2cScenarios = ["history-equal-undo-return", "history-redo", "histo
 
 export default async function runA2cScenario(name: string, driver: A2cDriver) {
   const { fixture, act, drain, until, seed } = driver
+
   const idbTasks = async (count: number) => {
     for (let index = 0; index < count; index++) {
       const task = fixture.time.enabled().find((entry) => entry.kind === "idb-task")
+
       if (!task) return
       await act({ kind: "idb-task", id: task.id })
     }
   }
+
   // Context publication and schedule adoption ride native progress, so a change settles only after audio renders.
   const rendered = async () => {
     for (let count = 0; count < 6; count++) { await act({ kind: "render-block" }); await act({ kind: "deliver-progress" }); await drain() }
   }
+
   const settled = async () => { await drain(); await act({ kind: "observe-persisted" }); await drain() }
+
   // The first effect write started after `base`: the write a history operation or save began.
   const writeSince = (base: number) => fixture.state().effectTransactions.find((entry) => entry.ordinal > base)
   const writesStarted = () => fixture.state().effectWrites.started
+
   const completeWrite = async (base: number) => {
     for (let count = 0; count < 200 && writeSince(base)?.state === "open"; count++) await idbTasks(1)
+
     if (writeSince(base)?.state === "open") throw new Error("Held write never completed")
   }
+
   // Hold the next control command named `command` (a real deferred native completion) without delivering it.
   const hold = async (command: string) => {
     await until(() => fixture.state().pendingControl?.name === command)
     await act({ kind: "mark", mode: "asset-hold", value: fixture.state().pendingControl?.name === command ? 1 : 0 })
   }
+
   const cell = (seed - 1) % cellCount(name)
+
   if (name === "history-equal-undo-return") {
     // The value history restores equals the value the project already shows.
     await act({ kind: "gain", value: -6 }); await drain()
     await act({ kind: "external-adoption", value: 0 }); await settled(); await rendered()
     await act({ kind: "mark", mode: "pre-history", value: 0 })
+
     // The project already shows the value history will restore.
     if (fixture.state().knob !== 0 || fixture.state().persistedGain !== 0) throw new Error("Equal-current witness does not start at the restored value")
     await act({ kind: "undo" }); await settled(); await rendered()
@@ -78,13 +93,17 @@ export default async function runA2cScenario(name: string, driver: A2cDriver) {
     await act({ kind: "mark", mode: "pre-undo", value: -13 })
     const base = writesStarted()
     await act({ kind: "undo" })
+
     // position 0: the write is not created yet; 1: open before any task; 2: open after further tasks.
     if (position === 0) { if (writeSince(base)) throw new Error("History write already exists at position 0") }
     else {
       for (let count = 0; count < 200 && !writeSince(base); count++) await idbTasks(1)
+
       if (position === 2) await idbTasks(2)
     }
+
     const landing = writeSince(base)
+
     if (position > 0 && landing?.state !== "open") throw new Error(`History write is not open at position ${position}`)
     const open = cell % 2 === 0
     await act({ kind: "arm-drop", value: 1 })
@@ -95,9 +114,11 @@ export default async function runA2cScenario(name: string, driver: A2cDriver) {
     await act({ kind: "check", mode: "history-newer" })
     // The planted dispatch drop stays armed until the checkpoint, so a later resend cannot heal it.
     await act({ kind: "arm-drop", value: 0 })
+
     // An open gesture ends after the replay and is then the newest write; a committed one
     // landed before it, so the replay is.
     if (open) { await act({ kind: "commit" }); await settled(); await rendered() }
+
     await act({ kind: "check", mode: "history-agreement" })
   } else if (name === "history-save-failed") {
     await act({ kind: "gain", value: -6 }); await drain()
@@ -117,20 +138,24 @@ export default async function runA2cScenario(name: string, driver: A2cDriver) {
     const external = cell < savePermutations.length * gaps ** 3
     const order = external ? savePermutations[cell % savePermutations.length] : withoutExternal[(cell - savePermutations.length * gaps ** 3) % withoutExternal.length]
     const spacing = external ? Math.floor(cell / savePermutations.length) : Math.floor((cell - savePermutations.length * gaps ** 3) / withoutExternal.length)
+
     if (!order) throw new Error(`No save-fail cell ${cell}`)
     const base = writesStarted()
     await act({ kind: "gain", value: -6 })
     await until(() => writeSince(base)?.state === "open")
     const landings: string[] = []
     let failed = false
+
     for (const [index, event] of order.entries()) {
       await idbTasks(Math.floor(spacing / gaps ** index) % gaps)
       const state = writeSince(base)?.state ?? "missing"
       landings.push(`${event}@${state}`)
+
       if (event === "G2") await act({ kind: "preview", value: -13 })
       else if (event === "E") await act({ kind: "external-adoption", value: -11 })
       else if (state === "open") { await act({ kind: "persist-fail" }); failed = true }
     }
+
     await drain()
     await act({ kind: "mark", mode: "cell", value: cell })
     await act({ kind: "mark", mode: "external", value: external ? 1 : 0 })
@@ -172,6 +197,7 @@ export default async function runA2cScenario(name: string, driver: A2cDriver) {
     await act({ kind: "clip-timing", value: 0 })
     await until(() => fixture.state().compilationIds.length > 0)
     await act({ kind: "resolve-compile", id: fixture.state().compilationIds[0] })
+
     if (fixture.state().mutation === "no-hold") await drain()
     else await hold(command)
     await act({ kind: "mark", mode: "asset-hold", value: fixture.state().pendingControl?.name === command ? 1 : 0 })
@@ -187,21 +213,26 @@ export default async function runA2cScenario(name: string, driver: A2cDriver) {
     await act({ kind: "check", mode: "drained" })
   } else if (name === "sample-swap" || name === "sample-swap-window") {
     await act({ kind: "clip-timing", value: 0 }); await drain(); await rendered()
+
     if (name === "sample-swap-window") {
       // The swap lands while a refill window is queued and unanswered by the host.
       await act({ kind: "long-loop" }); await drain()
       await until(() => fixture.state().pendingControl?.name === "window")
     }
+
     await act({ kind: "mark", mode: "pre-swap", value: name === "sample-swap-window" ? 1 : 0 })
     await act({ kind: "sample-swap" })
     await drain(); await rendered()
+
     if (name === "sample-swap-window") { await rendered(); await rendered() }
+
     await act({ kind: "check", mode: "sample-swap" })
     await act({ kind: "check", mode: "drained" })
   } else if (name === "paused-flush") {
     // A successful pause leaves the backend prepared; the flush must settle by progress or proof.
     const firedBefore = fixture.state().timerFires
     await act({ kind: "pause" }); await drain()
+
     if (!fixture.state().prepared || fixture.state().playing) throw new Error("Paused-flush witness is not prepared and paused")
     await act({ kind: "gain", value: -9 }); await settled()
     await act({ kind: "mark", mode: "timers", value: fixture.state().timerFires - firedBefore })
@@ -211,24 +242,34 @@ export default async function runA2cScenario(name: string, driver: A2cDriver) {
     // Preview, then the terminal flush with no publication between them: the same binding,
     // so the unchanged flush dispatches nothing additional.
     const parameters = () => fixture.state().counts.parameters ?? 0
+
     const step = async (kinds: string[]) => {
       for (const kind of kinds) {
         const next = fixture.enabled().find((entry) => entry.kind === kind)
-        if (next) { await act(next); return }
+
+        if (next) { await act(next);
+
+ return }
       }
+
       throw new Error(`No enabled ${kinds.join("/")}`)
     }
+
     await drain()
     const publishes = fixture.state().counts.publish ?? 0
     await act({ kind: "preview", value: -6 })
+
     for (let count = 0; count < 40 && (parameters() < 1 || fixture.state().pendingControl || fixture.state().replies.length); count++)
       await step(["raf-tick", "control-wake", "deliver-reply"])
     const dispatched = parameters()
+
     if (fixture.state().mutation === "dirty-flush") await act({ kind: "preview", value: -9 })
     await act({ kind: "commit" })
+
     // The flush waits on the compile it needs; until that resolves nothing has been published, so
     // the only way it can dispatch again is by not recognising the preview's binding.
     for (let count = 0; count < 40; count++) await step(["control-wake", "deliver-reply", "raf-tick", "render-block", "deliver-progress"])
+
     if ((fixture.state().counts.publish ?? 0) !== publishes) throw new Error("A publication landed between preview and flush")
     await act({ kind: "mark", mode: "unchanged-flush", value: parameters() - dispatched })
     await drain()
@@ -280,6 +321,7 @@ export default async function runA2cScenario(name: string, driver: A2cDriver) {
       && fixture.state().replies.some((reply) => reply.name === "parameters"))
     const held = fixture.state().replies.find((reply) => reply.name === "parameters")
     await act({ kind: "pause" })
+
     if (held) await act({ kind: "deliver-reply", id: held.id })
     await drain()
     await act({ kind: "check", mode: "preview-accepted" })

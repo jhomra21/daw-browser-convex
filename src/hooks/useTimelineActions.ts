@@ -125,11 +125,14 @@ export const projectLocalTrackCreation = (
     track.id,
     { track, index },
   ]))
+
   for (const repairedRow of canonicalRows) {
     if (repairedRow.id === createdTrack.id) continue
     const entry = trackEntryById.get(repairedRow.id)
+
     if (!entry) continue
     const groupId = repairedRow.groupId ?? undefined
+
     if (entry.index === repairedRow.index && entry.track.groupId === groupId) continue
     updateLocalTrack(
       entry.track,
@@ -137,6 +140,7 @@ export const projectLocalTrackCreation = (
       { index: repairedRow.index, groupId },
     )
   }
+
   insertLocalTrack(createdTrack, creationIndex)
 }
 
@@ -148,14 +152,17 @@ export function useTimelineActions(
     behavior: TimelineTrackCreateBehavior = {},
   ): Promise<Track | null> {
     const projectId = options.room.projectId()
+
     if (!projectId) return null
 
     const channelRole = trackOptions.channelRole ?? 'track'
     const color = trackOptions.color ?? (channelRole === 'group' ? options.defaultColors?.group() : options.defaultColors?.track())
     const collapsed = trackCreationCollapsed(channelRole, trackOptions.collapsed)
     const index = trackCreationIndex(options.tracks(), channelRole, trackOptions.index)
+
     if (isLocalId('project', projectId)) {
       const repository = createLocalTimelineRepository(projectId)
+
       const row = await repository.createTrack({
         index,
         kind: trackOptions.kind,
@@ -163,16 +170,22 @@ export function useTimelineActions(
         collapsed,
         color,
       })
+
       if (options.room.projectId() !== projectId) {
         await repository.deleteTrack(row.id)
+
         return null
       }
+
       const track = toLocalTimelineTrack(row)
       const snapshot = await repository.loadSnapshot()
+
       if (options.room.projectId() !== projectId) {
         await repository.deleteTrack(row.id)
+
         return null
       }
+
       projectLocalTrackCreation(
         options.tracks(),
         track,
@@ -182,19 +195,24 @@ export function useTimelineActions(
         options.creation.insertLocalTrack,
       )
       options.creation.grantTrackWrite(track.id, { projectId, userId: options.room.userId() })
+
       if (behavior.pushHistory !== false) {
         pushTrackCreateHistory(options.creation.pushHistory, projectId, options.tracks(), track)
       }
+
       if (behavior.select !== false) {
         options.creation.selection.selectTrackTarget(track.id)
       }
+
       return track
     }
 
     const userId = options.room.userId()
+
     if (!userId) return null
 
     let inserted = false
+
     const track = await createOptimisticTrack({
       projectId,
       insertLocalTrack: (createdTrack, trackIndex) => {
@@ -212,15 +230,19 @@ export function useTimelineActions(
       collapsed,
       color,
     })
+
     if (!track) return null
+
     if (!inserted) {
       await options.creation.removeCloudTrack(track)
+
       return null
     }
 
     if (behavior.pushHistory !== false) {
       pushTrackCreateHistory(options.creation.pushHistory, projectId, options.tracks(), track)
     }
+
     if (behavior.select !== false) {
       options.creation.selection.selectTrackTarget(track.id)
     }
@@ -230,17 +252,22 @@ export function useTimelineActions(
 
   async function handleShare(): Promise<string | undefined> {
     const currentProjectId = options.room.projectId()
+
     if (isLocalId('project', currentProjectId)) return undefined
     const projectId = ensureRoomShareLink(currentProjectId, options.room.setProjectId)
     const userId = options.room.userId()
+
     if (!projectId || !userId) return undefined
+
     const response = await fetch('/api/share-invites', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ projectId, role: 'viewer' }),
     })
+
     if (!response.ok) throw new Error('Failed to create share invite.')
     const result: unknown = await response.json()
+
     return isSharedOperationPayload(result) && isString(result.token)
       ? getInviteShareUrl(projectId, result.token)
       : undefined
@@ -248,6 +275,7 @@ export function useTimelineActions(
 
   const refuseLockedTarget = (refusal: string | undefined) => {
     if (refusal) options.notify?.(RECORDING_TARGET_LOCKED_BADGE, refusal)
+
     return refusal !== undefined
   }
 
@@ -261,6 +289,7 @@ export function useTimelineActions(
     const hasOutput = Object.hasOwn(patch, 'outputTargetId')
     const hasCollapsed = Object.hasOwn(patch, 'collapsed')
     const hasColor = Object.hasOwn(patch, 'color')
+
     if (isLocalId('project', projectId)) {
       await createLocalTimelineRepository(projectId).updateTrack({
         trackId,
@@ -269,17 +298,22 @@ export function useTimelineActions(
         collapsed: hasCollapsed ? patch.collapsed : undefined,
         color: hasColor ? patch.color ?? null : undefined,
       })
+
       return
     }
+
     if (hasGroup) {
       await publishSharedTimelineOperation(projectId, { kind: 'tracks.setGroup', payload: { trackId, groupId: patch.groupId ?? null } })
     }
+
     if (hasOutput) {
       await publishSharedTimelineOperation(projectId, { kind: 'tracks.setRouting', payload: { trackId, routing: { outputTargetId: patch.outputTargetId, sends: currentSends ?? [] } } })
     }
+
     if (hasCollapsed && patch.collapsed !== undefined) {
       await publishSharedTimelineOperation(projectId, { kind: 'tracks.setCollapsed', payload: { trackId, collapsed: patch.collapsed } })
     }
+
     if (hasColor) {
       await publishSharedTimelineOperation(projectId, { kind: 'tracks.setColor', payload: { trackId, color: patch.color } })
     }
@@ -287,6 +321,7 @@ export function useTimelineActions(
 
   const applyTrackPatch = (track: Track, patch: Pick<Track, 'groupId' | 'outputTargetId' | 'collapsed' | 'color'>) => {
     const index = options.tracks().findIndex((entry) => entry.id === track.id)
+
     if (index < 0) return
     options.creation.updateLocalTrack(track, index, patch)
   }
@@ -297,28 +332,35 @@ export function useTimelineActions(
     updates: readonly ClipColorUpdate[],
   ): Promise<HistoryEntry[]> => {
     if (updates.length === 0) return []
+
     const localTimelineRepository = isLocalId('project', projectId)
       ? createLocalTimelineRepository(projectId)
       : null
+
     await runWithConcurrency(updates, 8, async (update) => {
       if (localTimelineRepository) {
         const row = await localTimelineRepository.updateClip({ clipId: update.clipId, color: update.to })
         assertDefined(row, 'Failed to assign track color to clip')
+
         return
       }
+
       const result = await publishSharedTimelineOperation(projectId, { kind: 'clips.setColor', payload: { clipId: update.clipId, color: update.to } })
       assertAppliedSharedTimelineOperationResult(result)
     })
     const clipById = new Map<string, Track['clips'][number]>()
+
     for (const track of tracks) {
       for (const clip of track.clips) {
         clipById.set(clip.id, clip)
       }
     }
+
     return updates.flatMap((update) => {
       const clip = clipById.get(update.clipId)
       const resolvedClip = assertDefined(clip, 'Planned clip color update references a missing clip')
       options.creation.replaceLocalClip(update.trackId, { ...resolvedClip, color: update.to })
+
       return [buildClipColorHistoryEntry({ projectId, clip: resolvedClip, from: update.from, to: update.to })]
     })
   }
@@ -326,14 +368,18 @@ export function useTimelineActions(
   async function reorderTracks(moveRootIds: Track['id'][], target: Parameters<typeof planTrackReorder>[0]['target']): Promise<void> {
     const projectId = options.room.projectId()
     const tracks = options.tracks()
+
     if (!projectId) return
     const tracksForReorder = tracks.map((track, index) => ({ ...track, index }))
     const plan = planTrackReorder({ tracks: tracksForReorder, moveRootIds, target })
+
     if (!plan || refuseLockedTarget(options.recordingTargetLock?.refuseChange(plan.patches))) return
     const trackById = new Map(tracks.map((track) => [track.id, track]))
     const patchByTrackId = new Map(plan.patches.map((patch) => [patch.trackId, patch]))
+
     const updates = tracksForReorder.map((track) => {
       const patch = patchByTrackId.get(track.id)
+
       return {
         trackId: track.id,
         index: patch?.index ?? track.index,
@@ -341,6 +387,7 @@ export function useTimelineActions(
         outputTargetId: (patch ? patch.outputTargetId : track.outputTargetId) ?? null,
       }
     })
+
     if (isLocalId('project', projectId)) {
       await createLocalTimelineRepository(projectId).reorderAndGroup(updates)
     } else {
@@ -348,18 +395,24 @@ export function useTimelineActions(
         kind: 'tracks.reorderAndGroup',
         payload: { updates },
       })
+
       assertAppliedSharedTimelineOperationResult(result)
     }
+
     for (const patch of plan.patches) {
       const track = trackById.get(patch.trackId)
+
       if (!track) continue
       options.creation.updateLocalTrack(track, tracks.findIndex((entry) => entry.id === track.id), patch)
     }
+
     if (plan.patches.length > 0) {
       options.creation.pushHistory(buildTrackReorderHistoryEntry({ projectId, tracks, patches: plan.patches }))
     }
+
     for (const groupId of plan.expandGroupIds) {
       const track = trackById.get(groupId)
+
       if (!track) continue
       await persistTrackPatch(projectId, groupId, { collapsed: false })
       options.creation.updateLocalTrack(track, tracks.findIndex((entry) => entry.id === groupId), { collapsed: false })
@@ -368,26 +421,34 @@ export function useTimelineActions(
 
   async function groupSelectedTracks(trackIds: Track['id'][]): Promise<void> {
     const projectId = options.room.projectId()
+
     if (!projectId) return
     const tracks = options.tracks()
     const pendingGroupTrackId = '__pending_group_track__'
     const plan = planGroupTracks({ tracks, selectedTrackIds: trackIds, groupTrackId: pendingGroupTrackId })
+
     if (!plan || refuseLockedTarget(options.recordingTargetLock?.refuseChange(plan.childUpdates))) return
+
     const groupTrack = await createTimelineTrack({
       channelRole: 'group',
       color: plan.groupTrack.color,
       index: plan.groupTrack.index,
     }, { pushHistory: false, select: false })
+
     if (!groupTrack) return
+
     // A take can start while the group track is being created; it is discarded instead of rerouting the target.
     if (refuseLockedTarget(options.recordingTargetLock?.refuseChange(plan.childUpdates))) {
       if (isLocalId('project', projectId)) await createLocalTimelineRepository(projectId).deleteTrack(groupTrack.id)
       else await options.creation.removeCloudTrack(groupTrack)
       options.creation.removeLocalTrack(groupTrack.id)
+
       return
     }
+
     const trackById = new Map(tracks.map((track) => [track.id, track]))
     const childUpdateByTrackId = new Map(plan.childUpdates.map((update) => [update.trackId, update]))
+
     const reorderUpdates = [
       {
         trackId: groupTrack.id,
@@ -397,9 +458,11 @@ export function useTimelineActions(
       },
       ...tracks.map((track, index) => {
         const update = childUpdateByTrackId.get(track.id)
+
         const outputTargetId = update?.outputTargetId === pendingGroupTrackId
           ? groupTrack.id
           : update?.outputTargetId ?? track.outputTargetId
+
         return {
           trackId: track.id,
           index: index >= plan.groupTrack.index ? index + 1 : index,
@@ -408,6 +471,7 @@ export function useTimelineActions(
         }
       }),
     ]
+
     if (isLocalId('project', projectId)) {
       await createLocalTimelineRepository(projectId).reorderAndGroup(reorderUpdates)
     } else {
@@ -415,18 +479,23 @@ export function useTimelineActions(
         kind: 'tracks.reorderAndGroup',
         payload: { updates: reorderUpdates },
       })
+
       assertAppliedSharedTimelineOperationResult(result)
     }
+
     for (const update of plan.childUpdates) {
       const track = trackById.get(update.trackId)
       const outputTargetId = update.outputTargetId === pendingGroupTrackId ? groupTrack.id : update.outputTargetId
+
       if (!track) continue
       applyTrackPatch(track, { groupId: groupTrack.id, outputTargetId })
     }
+
     const nextOutputTargetIdsByTrackId = new Map(plan.childUpdates.map((update) => [
       update.trackId,
       update.outputTargetId === pendingGroupTrackId ? groupTrack.id : update.outputTargetId,
     ]))
+
     options.creation.pushHistory(buildTrackGroupHistoryEntry({
       projectId,
       tracks,
@@ -439,20 +508,28 @@ export function useTimelineActions(
 
   async function ungroupTrack(groupId: Track['id']): Promise<void> {
     const projectId = options.room.projectId()
+
     if (!projectId) return
     const tracks = options.tracks()
     const groupTrack = tracks.find((track) => track.id === groupId)
+
     if (!groupTrack) return
     const plan = planUngroupTracks({ tracks, groupId })
+
     if (!plan) return
     const refuseUngroup = () => refuseLockedTarget(options.recordingTargetLock?.refuseChange(plan.childUpdates, [groupId]))
+
     if (refuseUngroup()) return
     const effects = await loadTrackEffectSnapshot(projectId, groupId)
+
     // A take can start while the effects load; the write must see the lock as it is now.
     if (refuseUngroup()) return
+
     const automation = options.automationEnvelopes()
       .filter((envelope) => envelope.target.kind === 'track' && envelope.target.trackId === groupId)
+
     const trackById = new Map(tracks.map((track) => [track.id, track]))
+
     if (isLocalId('project', projectId)) {
       await createLocalTimelineRepository(projectId).ungroupTrack(groupId)
     } else {
@@ -473,18 +550,23 @@ export function useTimelineActions(
         },
         completionOwner: 'caller',
       })
+
       const completion = isSharedOperationPayload(result)
         && result.completionOwner !== undefined
         && result.result !== undefined
         ? result
         : undefined
+
       if (completion?.completionOwner === 'background') return
       const committedResult = completion?.result ?? result
       const committedValue = parseJsonValue(committedResult)
+
       const committed = committedValue === undefined
         ? undefined
         : readSharedUngroupResult(committedValue)
+
       const resolvedCommitted = assertDefined(committed, 'Invalid shared ungroup result')
+
       const historyEntry = buildCommittedSharedUngroupHistoryEntry({
         projectId,
         tracks,
@@ -493,18 +575,25 @@ export function useTimelineActions(
         automation,
         result: resolvedCommitted,
       })
+
       options.creation.pushHistory(historyEntry)
+
       for (const envelope of historyEntry.data.automation ?? []) {
         options.applyAutomationEnvelope(undefined, envelope.targetKey)
       }
+
       for (const update of resolvedCommitted.children) {
         const track = trackById.get(update.trackId)
+
         if (!track) continue
         applyTrackPatch(track, { groupId: resolvedCommitted.group.parentGroupId, outputTargetId: update.nextOutputTargetId })
       }
+
       options.creation.removeLocalTrack(groupId)
+
       return
     }
+
     options.creation.pushHistory(buildTrackUngroupHistoryEntry({
       projectId,
       tracks,
@@ -515,23 +604,29 @@ export function useTimelineActions(
       automation,
       sidechainRoutes: options.sidechainRoutes(),
     }))
+
     for (const envelope of automation) {
       options.applyAutomationEnvelope(undefined, envelope.targetKey)
     }
+
     for (const update of plan.childUpdates) {
       const track = trackById.get(update.trackId)
+
       if (!track) continue
       applyTrackPatch(track, { groupId: update.groupId, outputTargetId: update.outputTargetId })
     }
+
     options.creation.removeLocalTrack(groupId)
   }
 
   async function moveTrackToGroup(trackId: Track['id'], groupId: Track['id'] | undefined): Promise<void> {
     const projectId = options.room.projectId()
+
     if (!projectId) return
     const tracks = options.tracks()
     const plan = planMoveTrackToGroup({ tracks, trackId, groupId })
     const track = tracks.find((entry) => entry.id === trackId)
+
     if (!plan || !track || refuseLockedTarget(options.recordingTargetLock?.refuseChange([plan]))) return
     await persistTrackPatch(projectId, trackId, { groupId: plan.groupId, outputTargetId: plan.outputTargetId }, track.sends)
     applyTrackPatch(track, { groupId: plan.groupId, outputTargetId: plan.outputTargetId })
@@ -540,6 +635,7 @@ export function useTimelineActions(
   async function toggleTrackCollapsed(trackId: Track['id']): Promise<void> {
     const projectId = options.room.projectId()
     const track = options.tracks().find((entry) => entry.id === trackId)
+
     if (!projectId || !track) return
     const collapsed = track.collapsed !== true
     await persistTrackPatch(projectId, trackId, { collapsed })
@@ -548,19 +644,24 @@ export function useTimelineActions(
 
   async function setTracksCollapsed(updates: Array<{ trackId: Track['id']; collapsed: boolean }>): Promise<void> {
     const projectId = options.room.projectId()
+
     if (!projectId || updates.length === 0) return
     const tracks = options.tracks()
     const trackById = new Map(tracks.map((track) => [track.id, track]))
+
     const changed = updates.flatMap((update) => {
       const track = trackById.get(update.trackId)
+
       return track && track.collapsed !== update.collapsed
         ? [{ track, collapsed: update.collapsed }]
         : []
     })
+
     if (changed.length === 0) return
     await runWithConcurrency(changed, 8, async (update) => {
       await persistTrackPatch(projectId, update.track.id, { collapsed: update.collapsed })
     })
+
     for (const update of changed) {
       applyTrackPatch(update.track, { collapsed: update.collapsed })
     }
@@ -572,15 +673,20 @@ export function useTimelineActions(
     cascadeClipColors?: boolean
   }): Promise<void> {
     const projectId = options.room.projectId()
+
     if (!projectId) return
     const tracks = options.tracks()
+
     const planOptions = input.cascadeClipColors === undefined
       ? { cascadeClipColors: tracks.find((candidate) => candidate.id === input.trackId)?.channelRole === 'group' }
       : { cascadeClipColors: input.cascadeClipColors }
+
     const plan = planSetTrackColor(tracks, input.trackId, input.color, planOptions)
+
     if (!plan) return
     const trackIndex = createTimelineTrackIndex(tracks)
     const trackById = trackIndex.trackById
+
     if (isLocalId('project', projectId)) {
       await createLocalTimelineRepository(projectId).applyColorBatch({
         tracks: plan.trackUpdates.map((update) => ({ trackId: update.trackId, color: update.to ?? null })),
@@ -595,8 +701,10 @@ export function useTimelineActions(
           cascadeClipColors: planOptions.cascadeClipColors,
         },
       })
+
       assertAppliedSharedTimelineOperationResult(result)
       assert(isSharedOperationPayload(result) && Array.isArray(result.trackUpdates) && Array.isArray(result.clipUpdates), 'Invalid shared color cascade result')
+
       const committedTrackUpdates = result.trackUpdates.flatMap((update) => (
         isSharedOperationPayload(update) && isString(update.trackId)
           ? [{
@@ -606,6 +714,7 @@ export function useTimelineActions(
             }]
           : []
       ))
+
       const committedClipUpdates = result.clipUpdates.flatMap((update) => (
         isSharedOperationPayload(update) && isString(update.clipId) && isString(update.to)
           ? [{
@@ -617,42 +726,54 @@ export function useTimelineActions(
             }]
           : []
       ))
+
       assert(
         committedTrackUpdates.length === result.trackUpdates.length
         && committedClipUpdates.length === result.clipUpdates.length,
         'Invalid shared color cascade updates',
       )
+
       for (const update of committedTrackUpdates) {
         const track = trackById.get(update.trackId)
+
         if (track) applyTrackPatch(track, { color: update.to })
       }
+
       for (const update of committedClipUpdates) {
         const entry = trackIndex.clipEntryById.get(update.clipId)
+
         if (entry) options.creation.replaceLocalClip(entry.trackId, { ...entry.clip, color: update.to })
       }
+
       options.creation.pushHistory(buildTrackColorCascadeHistoryEntry({
         projectId,
         tracks,
         trackUpdates: committedTrackUpdates,
         clipUpdates: committedClipUpdates,
       }))
+
       return
     }
+
     for (const update of plan.trackUpdates) {
       const track = trackById.get(update.trackId)
       const resolvedTrack = assertDefined(track, 'Planned track color update references a missing track')
       applyTrackPatch(resolvedTrack, { color: update.to })
     }
+
     for (const update of plan.clipUpdates) {
       const track = trackById.get(update.trackId)
       const clip = track?.clips.find((candidate) => candidate.id === update.clipId)
       const resolvedTrack = assertDefined(track, 'Planned clip color update references a missing track')
+
       const resolvedClip = assertDefined(
         clip,
         'Planned clip color update references a missing clip',
       )
+
       options.creation.replaceLocalClip(resolvedTrack.id, { ...resolvedClip, color: update.to })
     }
+
     options.creation.pushHistory(buildTrackColorCascadeHistoryEntry({
       projectId,
       tracks,
@@ -667,9 +788,11 @@ export function useTimelineActions(
 
   async function resetTrackColor(trackId: Track['id']): Promise<void> {
     const track = options.tracks().find((candidate) => candidate.id === trackId)
+
     if (!track) return
     const isGroup = track.channelRole === 'group'
     const defaultCreateColor = isGroup ? options.defaultColors?.group() : options.defaultColors?.track()
+
     if (!track.color && !defaultCreateColor) return
     await persistTrackColorPlan({
       trackId,
@@ -680,11 +803,14 @@ export function useTimelineActions(
 
   async function assignTrackColorToClips(trackId: Track['id']): Promise<void> {
     const projectId = options.room.projectId()
+
     if (!projectId) return
     const tracks = options.tracks()
     const plan = planAssignTrackColorToClips(tracks, trackId)
+
     if (!plan) return
     const historyEntries = await persistClipColorUpdates(projectId, tracks, plan.clipUpdates)
+
     if (historyEntries.length > 0) {
       options.creation.pushHistory({ type: 'section-edit', projectId, data: { entries: historyEntries } })
     }
@@ -692,11 +818,14 @@ export function useTimelineActions(
 
   async function resetClipColors(trackId: Track['id']): Promise<void> {
     const projectId = options.room.projectId()
+
     if (!projectId) return
     const tracks = options.tracks()
     const plan = planResetClipColors(tracks, trackId)
+
     if (!plan) return
     const historyEntries = await persistClipColorUpdates(projectId, tracks, plan.clipUpdates)
+
     if (historyEntries.length > 0) {
       options.creation.pushHistory({ type: 'section-edit', projectId, data: { entries: historyEntries } })
     }
@@ -705,12 +834,15 @@ export function useTimelineActions(
   function jumpToClip(trackId: Track['id'], clipId: string, startSec: number): void {
     options.navigation.selection.selectPrimaryClip({ trackId, clipId })
     const targetStartSec = Math.max(0, startSec)
+
     if (!options.navigation.isPlaying()) {
       options.navigation.setPlayhead(targetStartSec, options.tracks())
     }
+
     options.navigation.openClipDetailFor(clipId)
 
     const match = options.navigation.trackLookup().clipEntryById.get(clipId)
+
     try {
       if (match && match.trackId === trackId && !match.clip.buffer) {
         void options.navigation.ensureClipBuffer(clipId, match.clip.sampleUrl)
@@ -719,10 +851,12 @@ export function useTimelineActions(
 
     try {
       const scrollElement = options.navigation.getScrollElement()
+
       if (!scrollElement) return
       const visibleStartSec = options.navigation.visibleStartSec()
       const visibleSec = scrollElement.clientWidth / Math.max(1e-9, options.navigation.pixelsPerSecond())
       const targetEndSec = targetStartSec + (match?.clip.duration ?? 0)
+
       if (targetEndSec > visibleStartSec && targetStartSec < visibleStartSec + visibleSec) return
       options.navigation.setVisibleStartSec(Math.max(0, targetStartSec - visibleSec / 2))
     } catch {}

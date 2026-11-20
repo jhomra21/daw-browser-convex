@@ -32,6 +32,7 @@ const rootElement = document.getElementById('root')
 const resolvedRootElement = assertDefined(rootElement, 'Root element with id "root" not found in index.html')
 const initialAppPreferences = loadInitialAppPreferences()
 const initialColorMode = initialAppPreferences.appearance.theme
+
 const appPreferencesColorModeManager: ColorModeStorageManager = {
   type: 'localStorage',
   get: () => initialColorMode,

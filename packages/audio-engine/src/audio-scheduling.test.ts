@@ -56,6 +56,7 @@ describe('audio clip playback duration', () => {
     })
 
     expect(map).not.toBeNull()
+
     if (!map) return
 
     expect(map.timelineDurationSec).toBe(4)
@@ -81,6 +82,7 @@ describe('audio clip playback duration', () => {
     })
 
     expect(map).not.toBeNull()
+
     if (!map) return
 
     expect(map.sourceDurationSec).toBe(8)
@@ -109,6 +111,7 @@ describe('audio clip playback duration', () => {
     })
 
     expect(map).not.toBeNull()
+
     if (!map) return
 
     expect(map.timelineStartSec).toBe(10.5)
@@ -137,6 +140,7 @@ describe('audio clip playback duration', () => {
     })
 
     expect(map).not.toBeNull()
+
     if (!map) return
 
     expect(map.timelineStartSec).toBe(10.5)
@@ -163,6 +167,7 @@ describe('audio clip playback duration', () => {
     })
 
     expect(map).not.toBeNull()
+
     if (!map) return
 
     expect(map.timelineStartSec).toBe(10)
@@ -190,6 +195,7 @@ describe('audio clip playback duration', () => {
     })
 
     expect(map).not.toBeNull()
+
     if (!map) return
 
     expect(map.timelineStartSec).toBe(0)
@@ -240,6 +246,7 @@ describe('clip fade scheduling', () => {
       contextStartTime: 3,
       gain: 0.5,
     })
+
     expect(plan[0]).toEqual({ time: 3, gain: 0.25 })
     expect(plan.at(-1)).toEqual({ time: 10, gain: 0.25 })
     expect(plan.some((point) => point.time === 5 && point.gain === 0.5)).toBe(true)
@@ -255,6 +262,7 @@ describe('clip fade scheduling', () => {
       contextStartTime: 1,
       gain: 0.5,
     })
+
     expect(plan[0]).toEqual({ time: 1, gain: 0.25 })
     expect(getClipFadeSchedulePlan({
       fades: undefined,
@@ -286,6 +294,7 @@ describe('clip fade scheduling', () => {
       contextStartTime: 0,
       gain: 1,
     })
+
     expect(plan.find((point) => point.time === 2)?.gain).toBe(0)
     expect(plan.find((point) => point.time === 4)?.gain).toBe(1)
     expect(plan.find((point) => point.time === 7)?.gain).toBe(1)

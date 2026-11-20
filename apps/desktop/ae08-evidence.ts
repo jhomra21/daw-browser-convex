@@ -5,6 +5,7 @@ import { z } from "zod"
 import type { DesktopRequestV2 } from "@daw-browser/desktop-protocol"
 
 export type HostEvidence = (event: string, fields?: Record<string, string | number | boolean | null>) => void
+
 type AppEvidence = HostEvidence & { rendererSend(): void; rendererSendCount(): number }
 
 // Private, opt-in acceptance evidence. Never serialize native payloads or state. A write that fails is dropped, so evidence
@@ -12,6 +13,7 @@ type AppEvidence = HostEvidence & { rendererSend(): void; rendererSendCount(): n
 export const createAe08Evidence = (directory: string | undefined): AppEvidence | undefined => {
   if (!directory) return undefined
   let rendererSends = 0
+
   return Object.assign(
     (event: string, fields: Record<string, string | number | boolean | null> = {}) => {
       try {
@@ -28,6 +30,7 @@ export const createAe08Evidence = (directory: string | undefined): AppEvidence |
     },
   )
 }
+
 // Opt-in Chromium trace of every process (DAW_AE08_TRACE=1 beside the evidence directory), written to trace.json at quit. Names the
 // main-thread tasks that overlap a stalled window. Tracing slows the app, so latency gate runs must not carry it.
 // The tracer is passed in, because the module is also loaded outside Electron, where a value import of it fails.
@@ -48,6 +51,7 @@ export const ae08StartTrace = async (contentTracing: ContentTracing) => {
 export const ae08StopTrace = async () => {
   const directory = process.env.DAW_AE08_EVIDENCE_DIR
   const tracer = tracing
+
   if (!directory || !tracer) return
   tracing = undefined
   await tracer.stopRecording(path.join(directory, "trace.json"))
@@ -63,6 +67,7 @@ export const ae08ControlCommitReceived = (
 ) => {
   if (frame.operation !== "control.commit") return
   const commit = commitKey.safeParse(frame.input)
+
   if (!commit.success) return
   evidence?.("control-commit-received", { idempotencyKey: commit.data.idempotencyKey })
 }

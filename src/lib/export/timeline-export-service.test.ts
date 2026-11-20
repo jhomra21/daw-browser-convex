@@ -93,12 +93,14 @@ class TestAudioBuffer implements AudioBuffer {
     return new Float32Array(this.length)
   }
 }
+
 const sampled = (value: AudioBuffer): SampledInstrumentBuffer => ({ buffer: value, sourceStartFrame: 0 })
 
 test("local export snapshot flushes pending writes and remains submission-consistent", async () => {
   const projectId = "project:export-snapshot"
   const trackId = "track:export-snapshot"
   const target: AutomationTarget = { kind: "track", trackId }
+
   const envelope = (id: string, value: number, updatedAt: number): AutomationEnvelope => ({
     id,
     projectId,
@@ -109,10 +111,13 @@ test("local export snapshot flushes pending writes and remains submission-consis
     points: [{ id: `${id}-point`, timeSec: 0, value, interpolation: "linear" }],
     updatedAt,
   })
+
   const utilityParams = (gainDb: number) => {
     const defaults = AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams()
+
     return { ...defaults, state: { ...defaults.state, gainDb } }
   }
+
   const unregister = registerPendingLocalProjectWriteFlusher("effects", projectId, async () => {
     await Promise.all([
       setLocalEffectInstance(projectId, trackId, "utility", utilityParams(3), { instanceId: "utility-1" }),
@@ -126,6 +131,7 @@ test("local export snapshot flushes pending writes and remains submission-consis
     masterVolume: 0.75,
     cloudRows: undefined,
   })
+
   unregister()
   await Promise.all([
     setLocalEffectInstance(projectId, trackId, "utility", utilityParams(9), { instanceId: "utility-1" }),
@@ -179,13 +185,16 @@ test('a native playback render state flushes no pending write when the effects d
   const projectId = `project:native-no-flush-${crypto.randomUUID()}`
   const flushed: string[] = []
   const kinds: PendingWriteKind[] = ["effects", "history", "midi", "project-state"]
+
   const unregister = kinds.map((kind) => (
     registerPendingLocalProjectWriteFlusher(kind, projectId, async () => { flushed.push(kind) })
   ))
+
   const render = (projected: boolean) => createExportRenderStateSnapshot({
     projectId, userId: undefined, masterVolume: 1, cloudRows: undefined, externalPluginPolicy: 'native-playback',
     effectsProjection: projected ? { replaceAudioEffectTargets: [], upsertDeviceRows: [] } : undefined,
   })
+
   await render(true)
   expect(flushed).toEqual([])
   await render(false)
@@ -227,13 +236,16 @@ test("persisted devices and automation survive absent and intentionally empty au
   const projectId = "project:export-projection-merge"
   const ownedTrackId = "track:owned"
   const unvisitedTrackId = "track:unvisited"
+
   const instrument: TrackInstrumentParams = {
     kind: "synth",
     instanceId: "instrument:unvisited",
     params: createDefaultSynthParams(),
   }
+
   const arp = createDefaultArpeggiatorParams()
   const target: AutomationTarget = { kind: "track", trackId: unvisitedTrackId }
+
   const envelope: AutomationEnvelope = {
     id: "automation:unvisited",
     projectId,
@@ -244,6 +256,7 @@ test("persisted devices and automation survive absent and intentionally empty au
     points: [],
     updatedAt: 1,
   }
+
   await Promise.all([
     setLocalEffectInstance(projectId, ownedTrackId, "utility", AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams(), { instanceId: "utility:owned" }),
     setLocalEffectInstance(projectId, unvisitedTrackId, "delay", AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams(), { instanceId: "delay:unvisited" }),
@@ -258,6 +271,7 @@ test("persisted devices and automation survive absent and intentionally empty au
     masterVolume: 1,
     cloudRows: undefined,
   })
+
   expect(persisted.fx.trackFx?.[unvisitedTrackId]?.instances).toEqual([
     expect.objectContaining({ id: "delay:unvisited", kind: "delay" }),
   ])
@@ -276,6 +290,7 @@ test("persisted devices and automation survive absent and intentionally empty au
     },
     automationPatches: [],
   })
+
   expect(projected.fx.trackFx?.[ownedTrackId]?.instances).toEqual([])
   expect(projected.fx.trackFx?.[unvisitedTrackId]?.instances).toEqual([
     expect.objectContaining({ id: "delay:unvisited", kind: "delay" }),
@@ -291,11 +306,13 @@ test("persisted devices and automation survive absent and intentionally empty au
     cloudRows: undefined,
     automationPatches: [{ targetKey: envelope.targetKey, envelope: undefined }],
   })
+
   expect(patchedAutomation.automationEnvelopes).toEqual([])
 })
 
 test("normalizes projected Solid EQ params at the export snapshot boundary", async () => {
   const defaults = AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams()
+
   const [projectedEq] = createStore({
     ...defaults,
     bands: defaults.bands.map((band) => ({
@@ -303,6 +320,7 @@ test("normalizes projected Solid EQ params at the export snapshot boundary", asy
       onChange: () => undefined,
     })),
   })
+
   const snapshot = await createExportRenderStateSnapshot({
     projectId: "cloud-project-solid-eq",
     userId: "user-1",
@@ -329,6 +347,7 @@ test("normalizes projected Solid EQ params at the export snapshot boundary", asy
 
 test("detaches Solid-wrapped local runtime domains before export submission", async () => {
   const defaults = AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams()
+
   const [tracks] = createStore([{
     id: "track-solid-runtime",
     name: "Solid runtime track",
@@ -348,6 +367,7 @@ test("detaches Solid-wrapped local runtime domains before export submission", as
       },
     }],
   }])
+
   const [projectedEq] = createStore({
     ...defaults,
     bands: defaults.bands.map((band) => ({
@@ -355,11 +375,13 @@ test("detaches Solid-wrapped local runtime domains before export submission", as
       onChange: () => undefined,
     })),
   })
+
   const routes = createMutable([{
     sourceTrackId: "track-solid-runtime",
     targetTrackId: "track-solid-runtime",
     effectInstanceId: "eq-solid-runtime",
   }])
+
   const automation = createMutable([{
     targetKey: "track:solid-runtime",
     envelope: {
@@ -379,6 +401,7 @@ test("detaches Solid-wrapped local runtime domains before export submission", as
       onChange: () => undefined,
     } satisfies AutomationEnvelope & { onChange: () => void },
   }])
+
   const [exportSettings] = createStore({
     ...settings,
     render: {
@@ -386,13 +409,16 @@ test("detaches Solid-wrapped local runtime domains before export submission", as
       onChange: () => undefined,
     },
   })
+
   const clip = untrack(() => tracks[0]?.clips[0])
+
   if (!clip?.fades) throw new Error("Expected the reactive clip fades.")
   expect(() => structuredClone(projectedEq)).toThrow()
   expect(() => structuredClone(clip.fades)).toThrow()
   expect(() => structuredClone(exportSettings)).toThrow()
 
   const queue = createExportQueue(() => "job-solid-runtime")
+
   const service = createTimelineExportService({
     queue,
     getProjectGeneration: () => 1,
@@ -443,15 +469,18 @@ test("detaches Solid-wrapped local runtime domains before export submission", as
 test("uses one hydrated sampled render state for native planning and queued rendering", async () => {
   const trackId = "track-hydrated-sampler"
   const buffer = new TestAudioBuffer()
+
   const instrument: TrackInstrumentParams = {
     kind: "sampler",
     instanceId: "sampler-hydrated",
     params: createDefaultSamplerParams(),
   }
+
   let hydrationCalls = 0
   let nativeRenderState: ExportRenderStateSnapshot | undefined
   let queuedRenderState: ExportRenderStateSnapshot | undefined
   const queue = createExportQueue(() => "job-hydrated-sampler")
+
   const service = createTimelineExportService({
     queue,
     getProjectGeneration: () => 1,
@@ -461,6 +490,7 @@ test("uses one hydrated sampled render state for native planning and queued rend
     },
     runTimelineExport: async (input) => {
       queuedRenderState = input.renderStateSnapshot
+
       return { type: "success", outputs: [] }
     },
     getTracks: () => [{
@@ -487,6 +517,7 @@ test("uses one hydrated sampled render state for native planning and queued rend
         hydrationCalls += 1
         const trackFx = snapshot.fx.trackFx ?? {}
         const existing = trackFx[trackId] ?? { instances: [] }
+
         return {
           ...snapshot,
           fx: {
@@ -506,6 +537,7 @@ test("uses one hydrated sampled render state for native planning and queued rend
     getSidechainRoutes: () => [],
     getNativeOfflineExternalAttachments: async ({ renderState }) => {
       nativeRenderState = renderState
+
       return undefined
     },
     loadCapturedClipBuffer: async () => ({ status: "missing" }),
@@ -528,6 +560,7 @@ test("uses one hydrated sampled render state for native planning and queued rend
       throw new Error("unexpected stem target")
     },
   })
+
   expect((await submitted.completion).type).toBe("success")
   expect(queuedRenderState).toBe(prepared.snapshot.renderStateSnapshot)
   expect(queuedRenderState?.fx.trackFx?.[trackId]?.samplerBuffers?.get("zone-hydrated")?.buffer).toBe(buffer)
@@ -538,6 +571,7 @@ test("uses one hydrated sampled render state for native planning and queued rend
 test("snapshot failure rejects before queue insertion or output target creation", async () => {
   const queue = createExportQueue(() => "job-1")
   let targetCreated = false
+
   const outputTargets: ExportOutputTargetFactory = {
     async createMixdownTarget() {
       targetCreated = true
@@ -548,6 +582,7 @@ test("snapshot failure rejects before queue insertion or output target creation"
       throw new Error("target should not be created")
     },
   }
+
   const service = createTimelineExportService({
     queue,
     getProjectGeneration: () => 1,
@@ -577,6 +612,7 @@ test("native desktop export rejects unavailable mixdown and unsupported stems be
   let trackReads = 0
   let effectsReads = 0
   let outputTargetCreates = 0
+
   const outputTargets: ExportOutputTargetFactory = {
     async createMixdownTarget() {
       outputTargetCreates += 1
@@ -587,12 +623,14 @@ test("native desktop export rejects unavailable mixdown and unsupported stems be
       throw new Error("native export must not create a stem target")
     },
   }
+
   const service = createTimelineExportService({
     queue,
     getProjectGeneration: () => 1,
     nativeRendererRequired: true,
     getTracks: () => {
       trackReads += 1
+
       return []
     },
     getBpm: () => 120,
@@ -603,6 +641,7 @@ test("native desktop export rejects unavailable mixdown and unsupported stems be
     getAutomationPatches: () => [],
     getEffectsExportSnapshot: () => {
       effectsReads += 1
+
       return undefined
     },
     getSidechainRoutes: () => [],
@@ -630,8 +669,10 @@ test("native desktop export rejects unavailable mixdown and unsupported stems be
 test("native export admits oversized PCM before external state capture", async () => {
   const queue = createExportQueue(() => "native-memory-limit")
   let externalStateCaptureCalls = 0
+
   const totalFrames = 8 * 1024 * 1024 * 1024
     / (2 * Float32Array.BYTES_PER_ELEMENT) + 1
+
   const service = createTimelineExportService({
     queue,
     getProjectGeneration: () => 1,
@@ -662,6 +703,7 @@ test("native export admits oversized PCM before external state capture", async (
     getSidechainRoutes: () => [],
     getNativeOfflineExternalAttachments: async () => {
       externalStateCaptureCalls += 1
+
       return undefined
     },
     loadCapturedClipBuffer: async () => ({ status: "missing" as const }),
@@ -681,6 +723,7 @@ test("restarts export capture through successive project switches during MIDI fl
   let projectId = "project-a"
   let projectReads = 0
   const queue = createExportQueue(() => "job-project-switch")
+
   const service = createTimelineExportService({
     queue,
     getProjectGeneration: () => 1,
@@ -689,8 +732,11 @@ test("restarts export capture through successive project switches during MIDI fl
     getMasterVolume: () => 1,
     getProjectId: () => {
       projectReads += 1
+
       if (projectReads === 2) projectId = "project-b"
+
       if (projectReads === 4) projectId = "project-c"
+
       return projectId
     },
     getUserId: () => "user-1",
@@ -700,6 +746,7 @@ test("restarts export capture through successive project switches during MIDI fl
     getSidechainRoutes: () => [],
     loadCapturedClipBuffer: async () => ({ status: "missing" }),
   })
+
   const prepared = await service.prepareTimelineExport(settings)
   expect(prepared.snapshot.projectId).toBe("project-c")
   expect(prepared.snapshot.tracks).toEqual([
@@ -711,11 +758,13 @@ test("restarts export capture through successive project switches during MIDI fl
 test("captures mounted project generation with the export snapshot", async () => {
   let capturedGeneration = 0
   const queue = createExportQueue(() => "job-generation-capture")
+
   const service = createTimelineExportService({
     queue,
     getProjectGeneration: () => 9,
     runTimelineExport: async (input) => {
       capturedGeneration = input.projectGeneration
+
       return { type: "success", outputs: [] }
     },
     getTracks: () => [],
@@ -729,6 +778,7 @@ test("captures mounted project generation with the export snapshot", async () =>
     getSidechainRoutes: () => [],
     loadCapturedClipBuffer: async () => ({ status: "missing" }),
   })
+
   const submitted = await service.submitTimelineExport(settings, {
     async createMixdownTarget() {
       throw new Error("unexpected output target")
@@ -746,6 +796,7 @@ test("captures mounted project generation with the export snapshot", async () =>
 test("rejects a native snapshot if generation changes while capturing attachments", async () => {
   let generation = 9
   const queue = createExportQueue(() => "job-native-generation")
+
   const service = createTimelineExportService({
     queue,
     nativeRendererRequired: true,
@@ -764,6 +815,7 @@ test("rejects a native snapshot if generation changes while capturing attachment
     getSidechainRoutes: () => [],
     getNativeOfflineExternalAttachments: async () => {
       generation = 10
+
       return undefined
     },
     loadCapturedClipBuffer: async () => ({ status: "missing" }),
@@ -782,6 +834,7 @@ test("captures effects projection and routes after flushing effect persistence",
   let bpm = 120
   let masterVolume = 0.5
   let routes = [{ sourceTrackId: trackId, targetTrackId: trackId, effectInstanceId: "utility-before" }]
+
   let automation: AutomationEnvelope[] = [{
     id: "before",
     projectId,
@@ -792,9 +845,11 @@ test("captures effects projection and routes after flushing effect persistence",
     points: [],
     updatedAt: 1,
   }]
+
   const utility = AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams()
   let effects = [{ targetId: trackId, effect: "utility" as const, instanceId: "utility-before", index: 0, params: utility }]
   const queue = createExportQueue(() => "job-pre-flush")
+
   const service = createTimelineExportService({
     queue,
     getProjectGeneration: () => 1,
@@ -849,10 +904,13 @@ test("captures effects projection and routes after flushing effect persistence",
 test("rejects when effects flushing switches projects before capturing remaining domains", async () => {
   let projectId = "project-before"
   let queued = false
+
   const queue = createExportQueue(() => {
     queued = true
+
     return "job-project-race"
   })
+
   const service = createTimelineExportService({
     queue,
     getProjectGeneration: () => 1,
@@ -900,22 +958,27 @@ test("hydrates queued clips from captured media identity after live replacement"
       sourceAssetKey: "asset:captured",
     }],
   }]
+
   const loadedReferences: Array<{
     projectId?: string
     sampleUrl?: string
     sourceAssetKey?: string
   }> = []
+
   const queue = createExportQueue(() => "job-captured")
+
   const service = createTimelineExportService({
     queue,
     getProjectGeneration: () => 1,
     runTimelineExport: async (input) => {
       renderedTracks = input.getTracks()
+
       for (const track of renderedTracks) {
         for (const clip of track.clips) {
           if (!clip.midi && !clip.buffer) await input.loadCapturedClipBuffer(clip, input.signal)
         }
       }
+
       return { type: "success", outputs: [] }
     },
     getTracks: () => tracks,
@@ -929,9 +992,11 @@ test("hydrates queued clips from captured media identity after live replacement"
     getSidechainRoutes: () => [],
     loadCapturedClipBuffer: async (reference) => {
       loadedReferences.push(reference)
+
       return { status: "ready", buffer: renderedBuffer }
     },
   })
+
   const prepared = await service.prepareTimelineExport(settings)
   tracks = [{
     id: "track-captured",
@@ -947,6 +1012,7 @@ test("hydrates queued clips from captured media identity after live replacement"
       sourceAssetKey: "asset:replacement",
     }],
   }]
+
   const submitted = service.submitPreparedTimelineExport(prepared, {
     async createMixdownTarget() {
       return {
@@ -977,12 +1043,15 @@ test("hydrates queued clips from captured media identity after live replacement"
 test("derives a captured default sample URL without replacing its asset identity", async () => {
   const renderedBuffer = new TestAudioBuffer()
   const sourceAssetKey = "asset:default:test-kick"
+
   const loadedReferences: Array<{
     projectId?: string
     sampleUrl?: string
     sourceAssetKey?: string
   }> = []
+
   const queue = createExportQueue(() => "job-default-sample")
+
   const service = createTimelineExportService({
     queue,
     getProjectGeneration: () => 1,
@@ -992,6 +1061,7 @@ test("derives a captured default sample URL without replacing its asset identity
           if (!clip.midi && !clip.buffer) await input.loadCapturedClipBuffer(clip, input.signal)
         }
       }
+
       return { type: "success", outputs: [] }
     },
     getTracks: () => [{
@@ -1017,12 +1087,16 @@ test("derives a captured default sample URL without replacing its asset identity
     getSidechainRoutes: () => [],
     loadCapturedClipBuffer: async (reference) => {
       loadedReferences.push(reference)
+
       return { status: "ready", buffer: renderedBuffer }
     },
   })
+
   const prepared = await service.prepareTimelineExport(settings)
   const detached = prepared.snapshot.tracks[0]?.clips[0]
+
   if (!detached) throw new Error("Expected a detached default sample clip.")
+
   const submitted = service.submitPreparedTimelineExport(prepared, {
     async createMixdownTarget() {
       return {
@@ -1053,6 +1127,7 @@ test("a queued export renders its snapshot after a live project switch", async (
   let generation = 1
   const trackId = "track:queued-generation"
   const target: AutomationTarget = { kind: "track", trackId }
+
   const submissionAutomation: AutomationEnvelope = {
     id: "submission-envelope",
     projectId,
@@ -1063,17 +1138,21 @@ test("a queued export renders its snapshot after a live project switch", async (
     points: [{ id: "submission-point", timeSec: 0, value: 0.4, interpolation: "linear" }],
     updatedAt: 1,
   }
+
   const liveAutomation: AutomationEnvelope = {
     ...submissionAutomation,
     id: "live-envelope",
     points: [{ id: "live-point", timeSec: 0, value: 0.9, interpolation: "linear" }],
     updatedAt: 2,
   }
+
   const submissionUtility = AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams()
+
   const liveUtility = {
     ...submissionUtility,
     state: { ...submissionUtility.state, gainDb: 9 },
   }
+
   await Promise.all([
     setLocalEffectInstance(projectId, trackId, "utility", submissionUtility, { instanceId: "utility-queued" }),
     setLocalAutomationEnvelope(projectId, submissionAutomation),
@@ -1090,12 +1169,15 @@ test("a queued export renders its snapshot after a live project switch", async (
   let nextId = 0
   const queue = createExportQueue(() => `job-${++nextId}`)
   let releaseBlocker: (() => void) | undefined
+
   const blocker = queue.submit({ name: "blocker" }, async () => {
     await new Promise<void>((resolve) => {
       releaseBlocker = resolve
     })
+
     return { type: "success", outputs: [] }
   })
+
   let tracks: RuntimeTrack[] = [{
     id: trackId,
     name: "Submission track",
@@ -1109,13 +1191,16 @@ test("a queued export renders its snapshot after a live project switch", async (
       midi: { wave: "sine", notes: [] },
     }],
   }]
+
   let bpm = 120
   let masterVolume = 0.7
+
   let sidechainRoutes = [{
     sourceTrackId: trackId,
     targetTrackId: trackId,
     effectInstanceId: "utility-queued",
   }]
+
   const service = createTimelineExportService({
     queue,
     getProjectGeneration: () => generation,
@@ -1128,6 +1213,7 @@ test("a queued export renders its snapshot after a live project switch", async (
         automationEnvelopes: [...input.renderStateSnapshot.automationEnvelopes],
         sidechainRoutes: input.sidechainRoutes,
       }
+
       return { type: "success", outputs: [] }
     },
     getTracks: () => tracks,
@@ -1141,6 +1227,7 @@ test("a queued export renders its snapshot after a live project switch", async (
     getSidechainRoutes: () => sidechainRoutes,
     loadCapturedClipBuffer: async () => ({ status: "missing" }),
   })
+
   const outputTargets: ExportOutputTargetFactory = {
     async createMixdownTarget() {
       return {
@@ -1152,6 +1239,7 @@ test("a queued export renders its snapshot after a live project switch", async (
       throw new Error("unexpected stem target")
     },
   }
+
   await Promise.resolve()
   const submitted = await service.submitTimelineExport(settings, outputTargets)
 
@@ -1168,6 +1256,7 @@ test("a queued export renders its snapshot after a live project switch", async (
   releaseBlocker?.()
   await blocker.completion
   expect((await submitted.completion).type).toBe("success")
+
   if (!rendered) throw new Error("Export did not render.")
   expect(rendered.tracks[0]?.name).toBe("Submission track")
   expect(rendered.bpm).toBe(120)
@@ -1185,11 +1274,13 @@ test("a queued export renders its snapshot after a live project switch", async (
 
 test("active cancellation remains running until stalled clip loading settles", async () => {
   const queue = createExportQueue(() => "job-active-cancel")
+
   const stalledMediaLoader = createCapturedClipMediaLoader({
     readAsset: async () => ({ status: "missing" }),
     fetch: async () => await new Promise<Response>(() => undefined),
     decode: async () => new TestAudioBuffer(),
   })
+
   const service = createTimelineExportService({
     queue,
     getProjectGeneration: () => 1,
@@ -1216,6 +1307,7 @@ test("active cancellation remains running until stalled clip loading settles", a
     getSidechainRoutes: () => [],
     loadCapturedClipBuffer: stalledMediaLoader.load,
   })
+
   const submitted = await service.submitTimelineExport(settings, {
     async createMixdownTarget() {
       return {
@@ -1227,6 +1319,7 @@ test("active cancellation remains running until stalled clip loading settles", a
       throw new Error("unexpected stem target")
     },
   })
+
   await Promise.resolve()
   expect(service.status(submitted.id)?.status).toBe("running")
   service.cancel(submitted.id)
@@ -1241,12 +1334,15 @@ test("queued cancellation publishes canceled only after completion settlement", 
   let releaseBlocker: (() => void) | undefined
   let nextId = 0
   const queue = createExportQueue(() => `job-queued-cancel-${++nextId}`)
+
   const blocker = queue.submit({ name: "blocker" }, async () => {
     await new Promise<void>((resolve) => {
       releaseBlocker = resolve
     })
+
     return { type: "success", outputs: [] }
   })
+
   const service = createTimelineExportService({
     queue,
     getProjectGeneration: () => 1,
@@ -1261,7 +1357,9 @@ test("queued cancellation publishes canceled only after completion settlement", 
     getSidechainRoutes: () => [],
     loadCapturedClipBuffer: async () => ({ status: "missing" }),
   })
+
   await Promise.resolve()
+
   const submitted = await service.submitTimelineExport(settings, {
     async createMixdownTarget() {
       throw new Error("queued target should not open")
@@ -1270,6 +1368,7 @@ test("queued cancellation publishes canceled only after completion settlement", 
       throw new Error("queued target should not open")
     },
   })
+
   expect(service.status(submitted.id)?.status).toBe("queued")
   service.cancel(submitted.id)
   expect(service.status(submitted.id)?.status).toBe("queued")

@@ -5,6 +5,7 @@ const runtimeFaultSchemaV2 = z.object({
   kind: z.enum(["compressor", "owned-processor", "track-meter", "recorder"]),
   codePresent: z.boolean(),
 }).strict()
+
 const runtimeFaultSnapshotSchemaV2 = z.object({
   eventCount: z.number().int().nonnegative(),
   uniqueSignatureCount: z.number().int().nonnegative(),
@@ -16,6 +17,7 @@ const runtimeFaultSnapshotSchemaV2 = z.object({
   }).strict(),
     last: runtimeFaultSchemaV2.nullable(),
 }).strict()
+
 export const desktopDiagnosticsSchemaV2 = z.object({
   version: z.literal("v2"),
   scheduler: z.object({

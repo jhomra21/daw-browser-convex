@@ -46,9 +46,12 @@ export const parseGranularAutomationKey = (value: string): {
   parameterId: GranularAutomationParameterId
 } | undefined => {
   const parts = value.split(':')
+
   if (parts.length < 4 || parts[0] !== 'instrument' || !parts[1]) return undefined
   const parameterId = parts.at(-1)
   const instanceId = parts.slice(2, -1).join(':')
+
   if (!parameterId || !instanceId || !isGranularAutomationParameterId(parameterId)) return undefined
+
   return { kind: 'instrument', trackId: parts[1], instanceId, parameterId }
 }

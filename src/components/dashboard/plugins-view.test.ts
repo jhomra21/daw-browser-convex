@@ -5,14 +5,17 @@ test("scans only after trust consent and refreshes catalog consumers", async () 
   const source = await readFile(new URL("./plugins-view.tsx", import.meta.url), "utf8");
   const consentStart = source.indexOf("onChange={(event) => {");
   const consentEnd = source.indexOf("\n                }}", consentStart);
+
   if (consentStart < 0 || consentEnd < 0) throw new Error("Expected the trust consent handler.");
   const consent = source.slice(consentStart, consentEnd);
   const rescanStart = source.indexOf("const rescan = async () =>");
   const rescanEnd = source.indexOf("\n\n  return", rescanStart);
+
   if (rescanStart < 0 || rescanEnd < 0) throw new Error("Expected the rescan handler.");
   const rescan = source.slice(rescanStart, rescanEnd);
   const updateStart = source.indexOf("const update = (");
   const updateEnd = source.indexOf("\n\n  onMount", updateStart);
+
   if (updateStart < 0 || updateEnd < 0) throw new Error("Expected the catalog update handler.");
   const update = source.slice(updateStart, updateEnd);
 

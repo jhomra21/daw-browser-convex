@@ -117,38 +117,47 @@ const nonnegativeSafeInteger = (value: number) => Number.isSafeInteger(value) &&
 
 const indexPortableAssets = (input: PortableAssetRegistryInput | undefined): PortableAssetRegistry => {
   if (!input) return { assets: new Map(), unavailableProjectAssetIds: new Set(), errors: ['No portable asset registry was provided.'] }
+
   if (!positiveSafeInteger(input.projectGeneration)) {
     return { assets: new Map(), unavailableProjectAssetIds: new Set(), errors: ['The portable asset registry project generation is invalid.'] }
   }
+
   const assets = new Map<string, PortableAssetRegistryEntry>()
   const portableIds = new Set<string>()
   const errors: string[] = []
+
   for (const entry of input.assets) {
     if (!entry.projectAssetId || !entry.portableAssetId) {
       errors.push('A portable asset registration has an empty identity.')
       continue
     }
+
     if (entry.projectGeneration !== input.projectGeneration) {
       errors.push(`${entry.projectAssetId}: portable asset registration is stale.`)
       continue
     }
+
     if (!nonnegativeSafeInteger(entry.handle.slot) || !positiveSafeInteger(entry.handle.generation)) {
       errors.push(`${entry.projectAssetId}: portable asset handle is invalid.`)
       continue
     }
+
     if (!positiveSafeInteger(entry.decoded.sampleRateHz)
       || !positiveSafeInteger(entry.decoded.channelCount)
       || !positiveSafeInteger(entry.decoded.frameCount)) {
       errors.push(`${entry.projectAssetId}: decoded portable asset metadata is invalid.`)
       continue
     }
+
     if (assets.has(entry.projectAssetId) || portableIds.has(entry.portableAssetId)) {
       errors.push(`${entry.projectAssetId}: portable asset registration is ambiguous.`)
       continue
     }
+
     assets.set(entry.projectAssetId, entry)
     portableIds.add(entry.portableAssetId)
   }
+
   return { assets, unavailableProjectAssetIds: new Set(input.unavailableProjectAssetIds ?? []), errors }
 }
 
@@ -157,15 +166,18 @@ const assetForSample = (
   sample: { assetKey: string; source: { durationSec: number; sampleRate: number; channelCount: number } },
 ) => {
   const entry = registry.assets.get(sample.assetKey)
+
   if (!entry) {
     if (registry.unavailableProjectAssetIds.has(sample.assetKey)) return undefined
     throw new Error(`Sample asset "${sample.assetKey}" is not registered for the portable session.`)
   }
+
   if (entry.decoded.sampleRateHz !== sample.source.sampleRate
     || entry.decoded.channelCount !== sample.source.channelCount
     || entry.decoded.frameCount !== frameAt(sample.source.durationSec, sample.source.sampleRate)) {
     throw new Error(`Sample asset "${sample.assetKey}" decoded metadata does not match its browser configuration.`)
   }
+
   return entry
 }
 
@@ -176,22 +188,28 @@ const samplerZone = (
   registry: PortableAssetRegistry,
 ): AudioCoreSampleZone | undefined => {
   const asset = assetForSample(registry, zone.sample)
+
   if (!asset) return undefined
   const startFrame = frameAt(zone.startSec, asset.decoded.sampleRateHz)
+
   const endFrame = Math.min(
     asset.decoded.frameCount,
     frameAt(zone.endSec ?? zone.sample.source.durationSec, asset.decoded.sampleRateHz),
   )
+
   // One-shot zones never loop; the loop collapses to the zone start so the graph contract's loop bounds hold.
   const loopStartFrame = zone.playbackMode !== 'one-shot'
     ? frameAt(zone.loopStartSec ?? zone.startSec, asset.decoded.sampleRateHz)
     : startFrame
+
   const loopEndFrame = zone.playbackMode !== 'one-shot'
     ? Math.min(asset.decoded.frameCount, frameAt(zone.loopEndSec ?? zone.endSec ?? zone.sample.source.durationSec, asset.decoded.sampleRateHz))
     : startFrame
+
   if (endFrame <= startFrame || (zone.playbackMode !== 'one-shot' && loopEndFrame > 0 && loopEndFrame <= loopStartFrame)) {
     throw new Error(`${zone.id}: browser sample bounds resolve to an empty portable range.`)
   }
+
   return {
     assetId: asset.portableAssetId,
     keyLow: zone.keyLow,
@@ -227,8 +245,11 @@ export const compilePortableSamplerConfiguration = (
 ): PortableSamplerConfiguration => {
   const params = normalizeSamplerParams(input)
   const registry = indexPortableAssets(registryInput)
+
   if (params.zones.length > 0 && registry.errors.length > 0) throw new Error(registry.errors.join(' '))
+
   if (params.zones.length > 32) throw new Error('Sampler exceeds the portable zone limit.')
+
   return {
     nodeId,
     instanceId,
@@ -259,6 +280,7 @@ export const compilePortableSamplerConfiguration = (
       retrigger: params.retrigger,
       zones: params.zones.flatMap((zone) => {
         const compiled = samplerZone(zone, registry)
+
         return compiled ? [compiled] : []
       }),
     },
@@ -273,17 +295,23 @@ export const compilePortableDrumRackConfiguration = (
 ): PortableDrumRackConfiguration => {
   const params = normalizeDrumRackParams(input)
   const registry = indexPortableAssets(registryInput)
+
   if (params.pads.some((pad) => pad.sample) && registry.errors.length > 0) throw new Error(registry.errors.join(' '))
+
   const validatedPads = params.pads.flatMap((pad) => {
     if (!pad.sample) return []
     const asset = assetForSample(registry, pad.sample)
+
     return asset ? [{ pad, sample: pad.sample, asset }] : []
   })
+
   const zones: AudioCoreSampleZone[] = validatedPads.flatMap(({ pad, sample, asset }) => {
     if (pad.mute) return []
     const startFrame = frameAt(pad.startSec, asset.decoded.sampleRateHz)
     const endFrame = Math.min(asset.decoded.frameCount, frameAt(pad.endSec ?? sample.source.durationSec, asset.decoded.sampleRateHz))
+
     if (endFrame <= startFrame) throw new Error(`${pad.id}: browser sample bounds resolve to an empty portable range.`)
+
     return [{
       assetId: asset.portableAssetId,
       keyLow: pad.note,
@@ -305,7 +333,9 @@ export const compilePortableDrumRackConfiguration = (
       chokeGroup: pad.chokeGroup,
     }]
   })
+
   if (zones.length > 32) throw new Error('Drum rack exceeds the portable zone limit.')
+
   return {
     nodeId,
     instanceId,
@@ -347,8 +377,10 @@ export const compilePortableGranularConfiguration = (
 ): PortableGranularConfiguration => {
   const params = normalizeGranularParams(input)
   const registry = indexPortableAssets(registryInput)
+
   if (params.zone && registry.errors.length > 0) throw new Error(registry.errors.join(' '))
   const asset = params.zone ? assetForSample(registry, params.zone.sample) : undefined
+
   return {
     nodeId,
     instanceId,
@@ -380,6 +412,7 @@ export const compilePortableSynthConfiguration = (
   input: SynthParamsInput,
 ): PortableSynthConfiguration => {
   const state = compilePortableSynthState(input)
+
   return {
     nodeId,
     instanceId,
@@ -396,6 +429,7 @@ export const legacySynthFallback = (
   if (instrument?.kind === 'synth') {
     return compilePortableSynthConfiguration(nodeId, instrument.instanceId, instrument.params)
   }
+
   return synth === undefined
     ? undefined
     : compilePortableSynthConfiguration(nodeId, `legacy-synth:${nodeId}`, synth)
@@ -415,9 +449,11 @@ const compileSampledInstrument = (
     if (instrument.kind === 'sampler') {
       return { configuration: compilePortableSamplerConfiguration(trackId, instrument.instanceId, instrument.params, assetRegistry) }
     }
+
     if (instrument.kind === 'drum-rack') {
       return { configuration: compilePortableDrumRackConfiguration(trackId, instrument.instanceId, instrument.params, assetRegistry) }
     }
+
     return { configuration: compilePortableGranularConfiguration(trackId, instrument.instanceId, instrument.params, assetRegistry) }
   } catch (error) {
     return { reason: error instanceof Error ? error.message : 'portable instrument compilation failed.' }
@@ -442,15 +478,20 @@ export const compilePortableSessionInput = (input: PortableSessionCompilerInput)
   const assets = input.assetRegistry
     ? indexPortableAssets(input.assetRegistry)
     : { assets: new Map<string, PortableAssetRegistryEntry>(), unavailableProjectAssetIds: new Set<string>(), errors: [] }
+
   const sampled = Object.entries(input.fx.trackFx ?? {}).flatMap(([trackId, fx]) => {
     const instrument = fx.instrument
+
     return !instrument || instrument.kind === 'synth' ? [] : [{ trackId, ...compileSampledInstrument(trackId, instrument, input.assetRegistry) }]
   })
+
   const sampledConfigurations = sampled.flatMap((entry) => 'configuration' in entry ? [entry.configuration] : [])
+
   const unsupportedInstruments = [
     ...sampled.flatMap((entry) => 'reason' in entry ? [`${entry.trackId}: ${entry.reason}`] : []),
     ...assets.errors.filter((error) => !sampled.some((entry) => 'reason' in entry && entry.reason === error)),
   ]
+
   return {
     portableAssets: [...assets.assets.values()],
     mixers: input.mixer.channels.map((entry) => mixerState(
@@ -458,6 +499,7 @@ export const compilePortableSessionInput = (input: PortableSessionCompilerInput)
     )),
     synths: Object.entries(input.fx.trackFx ?? {}).flatMap(([trackId, fx]) => {
       const configuration = legacySynthFallback(trackId, fx.instrument, fx.synth)
+
       return configuration === undefined ? [] : [configuration]
     }),
     samplers: sampledConfigurations.flatMap((configuration) => configuration.state.kind === 'sampler' ? [configuration] : []),
@@ -466,6 +508,7 @@ export const compilePortableSessionInput = (input: PortableSessionCompilerInput)
     unsupportedInstruments,
     synthAutomation: input.automationEnvelopes.flatMap((envelope) => {
     const target = parseSynthAutomationKey(envelope.parameterId)
+
     return target === undefined || !envelope.enabled ? [] : [{ trackId: target.trackId, instanceId: target.instanceId, parameterId: target.parameterId, points: envelope.points }]
     }),
   }
@@ -557,33 +600,44 @@ export const graphWithInstruments = (
 ): { graph?: AudioCoreGraphSnapshot; reasons: readonly string[] } => {
   const byNodeId = new Map<string, PortableInstrumentConfiguration>()
   const reasons: string[] = []
+
   for (const instrument of instruments) {
     if (byNodeId.has(instrument.nodeId)) reasons.push(`${instrument.nodeId}: multiple portable instruments target the same mixer node.`)
     byNodeId.set(instrument.nodeId, instrument)
   }
+
   const nodes = graph.nodes.map((node) => {
     const instrument = byNodeId.get(node.id)
+
     if (!instrument) return node
+
     if (node.kind !== 'source') {
       reasons.push(`${node.id}: portable instruments require a source mixer node.`)
+
       return node
     }
+
     if (node.inputLayout !== 'stereo' || node.outputLayout !== 'stereo') {
       reasons.push(`${node.id}: portable instruments require stereo mixer layouts.`)
+
       return node
     }
+
     const instrumentNode: AudioCoreGraphSnapshot['nodes'][number] = {
       ...node,
       kind: 'instrument',
       instrument: instrument.state,
     }
+
     return instrumentNode
   })
+
   for (const instrument of instruments) {
     if (!graph.nodes.some((node) => node.id === instrument.nodeId)) {
       reasons.push(`${instrument.nodeId}: portable instrument target is absent from the graph snapshot.`)
     }
   }
+
   return reasons.length > 0 ? { reasons } : { graph: { ...graph, nodes }, reasons: [] }
 }
 
@@ -594,33 +648,43 @@ const targetReasons = (
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]))
   const target = event.target
   const noteEvent = event.type === 'note-on' || event.type === 'note-off'
+
   if (!noteEvent && target.kind === 'parameter' && (
     target.parameterId.startsWith('synth-instrument:')
     || target.parameterId.startsWith('instrument:')
   )) {
     return [`${target.trackId}: scheduled instrument parameter "${target.parameterId}" is not portable.`]
   }
+
   if (noteEvent && target.kind !== 'instrument') {
     return ['Portable note events must target an instrument node.']
   }
+
   if (!noteEvent && target.kind !== 'parameter') {
     return ['Portable parameter events must target a mixer or processor parameter.']
   }
+
   if (target.kind === 'instrument') {
     const node = nodeById.get(target.trackId)
+
     return node?.kind === 'instrument' && node.instrument
       ? []
       : [`${target.trackId}: scheduled note targets no portable instrument.`]
   }
+
   const nodeId = target.scope === 'master' ? graph.masterNodeId : target.trackId
   const node = nodeId === undefined ? undefined : nodeById.get(nodeId)
+
   if (!node) return [`${nodeId ?? 'unknown'}: scheduled parameter targets no graph node.`]
+
   if (target.effectInstanceId) {
     const processor = resolveGraphProcessor(graph, target.effectInstanceId, node.id)
+
     return processor?.parameterTargets.has(target.parameterId)
       ? []
       : [`${target.effectInstanceId}: scheduled parameter "${target.parameterId}" is not portable.`]
   }
+
   return node.mixer?.parameterTargets.some((parameter) => parameter.id === target.parameterId)
     ? []
     : [`${node.id}: scheduled mixer parameter "${target.parameterId}" is not portable.`]
@@ -631,38 +695,51 @@ const capabilityReasons = (
   schedule: PortableFrameSchedule,
 ): readonly string[] => {
   const reasons: string[] = []
+
   if (!portableWasmCapabilityMatrix.sampleRatesHz.includes(schedule.sampleRateHz)) {
     reasons.push(`The portable core does not support ${schedule.sampleRateHz} Hz.`)
   }
+
   if (graph.nodes.length > portableWasmMaxGraphNodes) reasons.push('The portable graph exceeds the node capacity.')
+
   if (graph.edges.length > portableWasmMaxGraphEdges) reasons.push('The portable graph exceeds the edge capacity.')
+
   if (graph.assets.length > portableWasmMaxAssets) reasons.push('The portable graph exceeds the asset capacity.')
+
   const reverbCount = graph.nodes.reduce((count, node) => count + [
     ...node.processorOrder,
   ].filter((processor) => processor.kind === 'reverb').length, 0)
+
   if (reverbCount > portableWasmCapabilityMatrix.maxReverbProcessors) {
     reasons.push(`The portable graph exceeds the ${portableWasmCapabilityMatrix.maxReverbProcessors}-Reverb processor capacity.`)
   }
+
   for (const node of graph.nodes) {
     for (const processor of node.processorOrder) {
       if (!portableWasmCapabilityMatrix.processorKinds.includes(processor.kind)) {
         reasons.push(`${processor.id}: processor "${processor.kind}" is not fixture-proven for portable sessions.`)
       }
     }
+
     if (node.instrument?.kind !== undefined && node.instrument.kind !== 'synth' && !portableWasmCapabilityMatrix.sampledInstruments) {
       reasons.push(`${node.id}: sampled instruments are not fixture-proven for portable sessions.`)
     }
   }
+
   if (graph.edges.some((edge) => edge.sidechain) && !portableWasmCapabilityMatrix.sidechains) {
     reasons.push('Portable sidechains are not fixture-proven.')
   }
+
   for (const event of schedule.events) {
     reasons.push(...targetReasons(event, graph))
+
     if (event.target.kind === 'instrument') {
       const instrument = graph.nodes.find((node) => node.id === event.target.trackId)?.instrument
+
       if (instrument?.kind === 'synth' && !portableWasmCapabilityMatrix.synthMidi) {
         reasons.push(`${event.target.trackId}: synth MIDI is not fixture-proven.`)
       }
+
       if (instrument !== undefined && instrument.kind !== 'synth' && !portableWasmCapabilityMatrix.sampledInstruments) {
         reasons.push(`${event.target.trackId}: sampled instrument MIDI is not fixture-proven.`)
       }
@@ -674,6 +751,7 @@ const capabilityReasons = (
       reasons.push('Portable mixer automation is not fixture-proven.')
     }
   }
+
   return reasons
 }
 
@@ -695,9 +773,11 @@ const prepareSources = (
   if (!positiveSafeInteger(input.sourceFirstSequence)) {
     return { reasons: ['Portable source event sequence namespace is invalid.'] }
   }
+
   if (!Number.isFinite(input.sourceRangeEndSec) || input.sourceRangeEndSec <= input.schedule.timeOrigin.timelineSec) {
     return { reasons: ['Portable source scheduling range is invalid.'] }
   }
+
   const projection = projectPortableClipEvents({
     tracks: input.tracks,
     assets: new Map<string, AudioAssetRef>(
@@ -721,13 +801,17 @@ const prepareSources = (
     allowInstruments: true,
     loop: input.loop,
   })
+
   if (!projection.supported) return { reasons: [...projection.reasons] }
   const frameRange = sourceFrameRange(input.schedule, input.sourceRangeEndSec)
+
   if (!Number.isSafeInteger(frameRange.endFrame) || frameRange.endFrame <= frameRange.startFrame) {
     return { reasons: ['Portable source scheduling range resolves to invalid frames.'] }
   }
+
   const assetById = new Map(assets.map((asset) => [asset.assetId, asset]))
   const identities = new Set<string>()
+
   const ordered = [...projection.events].sort((left, right) => (
     // Source ordering is canonical: timeline start frame, then the
     // project-domain track/clip identity. Source sequences are assigned only
@@ -735,35 +819,46 @@ const prepareSources = (
     left.startFrame - right.startFrame
     || (left.sourceIdentity ?? '').localeCompare(right.sourceIdentity ?? '')
   ))
+
   if (ordered.length > 0
     && !Number.isSafeInteger(input.sourceFirstSequence + ordered.length - 1)) {
     return { reasons: ['Portable source event sequence namespace exceeds its safe integer range.'] }
   }
+
   const reasons: string[] = []
   const sources: PreparedPortableSource[] = []
+
   for (let index = 0; index < ordered.length; index += 1) {
     const event = ordered[index]
+
     if (!event) continue
     const identity = event.sourceIdentity
+
     if (!identity) {
       reasons.push('Portable source event is missing its stable identity.')
       continue
     }
+
     if (identities.has(identity)) {
       reasons.push(`${identity}: duplicate portable source identity.`)
       continue
     }
+
     identities.add(identity)
     const asset = assetById.get(event.assetId)
+
     if (!asset) {
       reasons.push(`${identity}: portable source asset "${event.assetId}" is absent from the asset manifest.`)
       continue
     }
+
     const sourceNode = graph.nodes.find((node) => node.id === event.sourceNodeId)
+
     if (!sourceNode || sourceNode.kind !== 'source') {
       reasons.push(`${identity}: portable source target "${event.sourceNodeId}" is absent from the graph snapshot.`)
       continue
     }
+
     if (event.epoch !== input.schedule.transportEpoch
       || event.startFrame < frameRange.startFrame
       || event.stopFrame <= event.startFrame
@@ -785,15 +880,18 @@ const prepareSources = (
       reasons.push(`${identity}: portable source event bounds or epoch are invalid.`)
       continue
     }
+
     sources.push({
       ...event,
       sourceIdentity: identity,
       sequence: input.sourceFirstSequence + index,
     })
   }
+
   if (sources.length > portableWasmMaxPendingEvents) {
     reasons.push(`Portable source schedule exceeds the ${portableWasmMaxPendingEvents}-event capacity.`)
   }
+
   return reasons.length > 0 ? { reasons } : { sources, reasons: [] }
 }
 
@@ -810,26 +908,33 @@ export const compilePreparedPortableSession = (
   } catch (error) {
     return unsupported([error instanceof Error ? error.message : 'Portable frame schedule is invalid.'])
   }
+
   if (input.schedule.revision !== input.revision
     || input.schedule.sampleRateHz !== input.sampleRateHz
     || input.schedule.bpm !== input.bpm) {
     return unsupported(['Portable graph and frame schedule identities do not match.'])
   }
+
   const compilation = compilePortableSessionInput(input)
+
   if (compilation.unsupportedInstruments.length > 0) return unsupported(compilation.unsupportedInstruments)
+
   const preparedAssetIds = new Set(
     input.preparedStretchAssets
       ? [...input.preparedStretchAssets.values()].map((asset) => asset.portableAssetId)
       : [],
   )
+
   const assetCandidates = [
     ...assetRefs(compilation.portableAssets).filter((asset) => !preparedAssetIds.has(asset.assetId)),
     ...(input.preparedStretchAssets
       ? [...input.preparedStretchAssets.values()].map((asset) => asset.asset)
       : []),
   ]
+
   const assets = [...new Map(assetCandidates.map((asset) => [asset.assetId, asset])).values()]
   let graph: AudioCoreGraphSnapshot
+
   try {
     graph = createPortableGraphSnapshot({
       graph: input.mixer,
@@ -842,15 +947,20 @@ export const compilePreparedPortableSession = (
   } catch (error) {
     return unsupported([error instanceof Error ? error.message : 'Portable graph projection failed.'])
   }
+
   const instruments = instrumentConfigurations(compilation)
   const withInstruments = graphWithInstruments(graph, instruments)
+
   if (!withInstruments.graph) return unsupported(withInstruments.reasons)
   graph = withInstruments.graph
   const sourceCompilation = prepareSources(input, assets, graph)
+
   if (!sourceCompilation.sources) return unsupported(sourceCompilation.reasons)
   const scheduleRange = sourceFrameRange(input.schedule, input.sourceRangeEndSec)
   const reasons = capabilityReasons(graph, input.schedule)
+
   if (reasons.length > 0) return unsupported(reasons)
+
   if (parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion,
     type: 'prepare-graph',
@@ -859,6 +969,7 @@ export const compilePreparedPortableSession = (
   }) === null) {
     return unsupported(['Portable graph snapshot does not satisfy the portable protocol.'])
   }
+
   const qualification: PortablePreparedQualification = {
     processorKinds: graph.nodes.flatMap((node) => [
       ...node.processorOrder,
@@ -873,6 +984,7 @@ export const compilePreparedPortableSession = (
     channelCount: 2,
     hasSynthMidi: input.schedule.events.some((event) => event.type === 'note-on' || event.type === 'note-off'),
   }
+
   return {
     supported: true,
     graph,

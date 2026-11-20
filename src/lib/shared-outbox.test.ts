@@ -20,6 +20,7 @@ import {
 const parseRequestBody = (init: RequestInit | undefined): JsonValue => (
   JSON.parse(init?.body?.toString() ?? 'null')
 )
+
 const volumeOperationSchema = z.object({
   payload: z.object({ volume: z.number() }),
 })
@@ -35,6 +36,7 @@ const midiOperationSchema = z.object({
 const createRetryFileStorage = () => {
   const files = new Map<string, File>()
   let failRemoval = false
+
   const assets = {
     getFileHandle: async (name: string) => ({
       getFile: async () => files.get(name),
@@ -44,19 +46,25 @@ const createRetryFileStorage = () => {
       files.delete(name)
     },
   }
+
   const projects = new Map<string, { getDirectoryHandle: (name: string) => Promise<typeof assets> }>()
+
   const storageRoot = {
     getDirectoryHandle: async (projectId: string) => {
       const project = projects.get(projectId) ?? {
         getDirectoryHandle: async (name: string) => {
           if (name !== 'assets') throw new Error(`Unexpected directory: ${name}`)
+
           return assets
         },
       }
+
       projects.set(projectId, project)
+
       return project
     },
   }
+
   return {
     files,
     storage: { getDirectory: async () => storageRoot },
@@ -102,6 +110,7 @@ test('sanitizes legacy queued MIDI through the strict endpoint and continues wit
   const userId = 'user-1'
   const db = await openLocalProjectDb(projectId)
   const timestamp = Date.now()
+
   const entries = [
     {
       id: 'legacy-midi',
@@ -128,6 +137,7 @@ test('sanitizes legacy queued MIDI through the strict endpoint and continues wit
       payload: { trackId: 'track-1', volume: 0.5 },
     },
   ]
+
   await Promise.all(entries.map((entry, index) => db.put('syncState', {
     key: `shared-outbox:${entry.id}`,
     value: {
@@ -143,6 +153,7 @@ test('sanitizes legacy queued MIDI through the strict endpoint and continues wit
 
   const requests: Array<{ url: string; operation: unknown }> = []
   const originalFetch = globalThis.fetch
+
   const replayFetch: typeof globalThis.fetch = Object.assign(
     async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [input, init] = arguments_
@@ -150,11 +161,14 @@ test('sanitizes legacy queued MIDI through the strict endpoint and continues wit
         url: String(input),
         operation: parseRequestBody(init),
       })
+
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
   )
+
   globalThis.fetch = replayFetch
+
   try {
     expect(await flushSharedOutbox(projectId, userId)).toEqual({ pending: 0, failed: 0 })
   } finally {
@@ -177,6 +191,7 @@ test('sanitizes legacy queued MIDI through the strict endpoint and continues wit
     },
   })
   const firstOperation = midiOperationSchema.safeParse(requests[0]?.operation)
+
   if (!firstOperation.success) throw new Error('Expected sanitized queued MIDI payload.')
   expect(firstOperation.data.payload.midi.notes).toHaveLength(500)
   expect(firstOperation.data.payload.midi).not.toHaveProperty('gain')
@@ -211,6 +226,7 @@ test('migrates legacy queued clip deletion operation IDs before publishing and r
   const requests: unknown[] = []
   let historyReady = false
   let attachedRecoveryId: string | undefined
+
   const unregisterHistory = registerSharedOutboxHistoryHandler((update) => {
     if (
       update.kind !== 'clip-deletion-recoveries'
@@ -218,15 +234,20 @@ test('migrates legacy queued clip deletion operation IDs before publishing and r
       || !historyReady
     ) return false
     attachedRecoveryId = update.recoveryIdsBySourceClipId.get('clip-1')
+
     return true
   })
+
   const originalFetch = globalThis.fetch
   let fail = true
+
   const replayFetch: typeof globalThis.fetch = Object.assign(
     async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
       requests.push(parseRequestBody(init))
+
       if (fail) return new Response('retry', { status: 500 })
+
       return new Response(JSON.stringify({
         removedClipIds: ['clip-1'],
         recoveries: [{ sourceClipId: 'clip-1', recoveryId: 'recovery-1' }],
@@ -236,7 +257,9 @@ test('migrates legacy queued clip deletion operation IDs before publishing and r
     },
     { preconnect: originalFetch.preconnect },
   )
+
   globalThis.fetch = replayFetch
+
   try {
     expect(await flushSharedOutbox(projectId, userId)).toEqual({ pending: 0, failed: 1 })
     const retained = await db.get('syncState', 'shared-outbox:legacy-delete')
@@ -252,6 +275,7 @@ test('migrates legacy queued clip deletion operation IDs before publishing and r
     unregisterHistory()
     globalThis.fetch = originalFetch
   }
+
   expect(attachedRecoveryId).toBe('recovery-1')
   expect(requests).toEqual([
     { kind: 'clips.removeMany', payload: { clipIds: ['clip-1'], operationId: 'outbox:legacy-delete' } },
@@ -287,12 +311,14 @@ test('migrates legacy queued track creation IDs before a response-loss retry', a
     async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
       requests.push(parseRequestBody(init))
+
       return responseLost
         ? new Response('response lost', { status: 500 })
         : new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
   )
+
   try {
     await flushSharedOutbox(projectId, userId)
     expect((await db.get('syncState', 'shared-outbox:legacy-track'))?.value).toMatchObject({
@@ -303,6 +329,7 @@ test('migrates legacy queued track creation IDs before a response-loss retry', a
   } finally {
     globalThis.fetch = originalFetch
   }
+
   expect(requests).toEqual([
     expect.objectContaining({ kind: 'tracks.create', payload: expect.objectContaining({ operationId: 'outbox:legacy-track' }) }),
     expect.objectContaining({ kind: 'tracks.create', payload: expect.objectContaining({ operationId: 'outbox:legacy-track' }) }),
@@ -337,10 +364,12 @@ test('queues newer durable operations behind an existing backlog and replays the
       const [, init] = arguments_
       const operation = volumeOperationSchema.parse(parseRequestBody(init))
       volumes.push(operation.payload.volume)
+
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
   )
+
   try {
     await publishDurableSharedTimelineOperation({
       projectId,
@@ -357,6 +386,7 @@ test('queues newer durable operations behind an existing backlog and replays the
   } finally {
     globalThis.fetch = originalFetch
   }
+
   expect(volumes).toEqual([0.5, 0.8, 0.9])
 })
 
@@ -387,10 +417,13 @@ test('dead-letters a rejected operation and continues with later FIFO rows', asy
     async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
       const operation = volumeOperationSchema.parse(parseRequestBody(init))
+
       if (operation.payload.volume === 0.5) {
         return new Response(JSON.stringify({ status: 'rejected', reason: 'Track was deleted.' }), { status: 200 })
       }
+
       volumes.push(operation.payload.volume)
+
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
@@ -411,11 +444,13 @@ test('dead-letters a rejected operation and continues with later FIFO rows', asy
     },
     updatedAt: timestamp,
   })
+
   try {
     expect(await flushSharedOutbox(projectId, userId)).toEqual({ pending: 0, failed: 1 })
   } finally {
     globalThis.fetch = originalFetch
   }
+
   expect((await db.get('syncState', 'shared-outbox:rejected'))?.value).toMatchObject({
     status: 'dead-letter',
     lastError: 'Permanent failure: Track was deleted.',
@@ -450,15 +485,18 @@ test('serializes concurrent flushes for one project and user', async () => {
     async () => {
       requests += 1
       await Promise.resolve()
+
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
   )
+
   try {
     await Promise.all([flushSharedOutbox(projectId, userId), flushSharedOutbox(projectId, userId)])
   } finally {
     globalThis.fetch = originalFetch
   }
+
   expect(requests).toBe(1)
 })
 
@@ -467,6 +505,7 @@ test('dead-letters HTTP 400 failures without blocking later rows', async () => {
   const userId = 'user-1'
   const db = await openLocalProjectDb(projectId)
   const timestamp = Date.now()
+
   for (const [id, volume] of [['invalid', 0.5], ['later', 0.8]] as const) {
     await db.put('syncState', {
       key: `shared-outbox:${id}`,
@@ -485,23 +524,28 @@ test('dead-letters HTTP 400 failures without blocking later rows', async () => {
       updatedAt: timestamp,
     })
   }
+
   const originalFetch = globalThis.fetch
   const published: number[] = []
   globalThis.fetch = Object.assign(
     async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
       const operation = volumeOperationSchema.parse(parseRequestBody(init))
+
       if (operation.payload.volume === 0.5) return new Response('invalid track', { status: 400 })
       published.push(operation.payload.volume)
+
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
   )
+
   try {
     await flushSharedOutbox(projectId, userId)
   } finally {
     globalThis.fetch = originalFetch
   }
+
   expect((await db.get('syncState', 'shared-outbox:invalid'))?.value).toMatchObject({
     status: 'dead-letter',
     lastError: 'Permanent failure: Shared timeline operation failed: 400 invalid track',
@@ -555,14 +599,18 @@ test('dead-letters uploaded audio clip creates with null results before completi
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL) => {
       const url = String(input)
+
       if (url.startsWith('/api/samples?projectId=')) {
         uploadUrls.push(url)
+
         return new Response(JSON.stringify({ url: 'https://example.test/clip.wav', assetKey: 'asset-1' }), { status: 200 })
       }
+
       return new Response(JSON.stringify(null), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
   )
+
   try {
     await flushSharedOutbox(projectId, userId)
   } finally {
@@ -597,14 +645,17 @@ test('records uploaded clip completion before retry-file cleanup and retries cle
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL) => {
       publicationRequests += 1
+
       if (String(input).startsWith('/api/samples?')) {
         return new Response(JSON.stringify({ assetKey: 'asset-1', url: 'https://example.test/asset-1.wav' }), { status: 200 })
       }
+
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
   )
   storage.setFailRemoval(true)
+
   try {
     expect(await flushSharedOutbox(projectId, userId)).toEqual({ pending: 0, failed: 0 })
     expect(publicationRequests).toBe(2)
@@ -622,6 +673,7 @@ test('records uploaded clip completion before retry-file cleanup and retries cle
     expect(storage.files.has('outbox-source.bin')).toBe(false)
   } finally {
     globalThis.fetch = originalFetch
+
     if (originalStorage) Object.defineProperty(navigator, 'storage', originalStorage)
     else Reflect.deleteProperty(navigator, 'storage')
   }
@@ -650,17 +702,21 @@ test('resumes completed uploaded clip cleanup after a crash without republishing
   globalThis.fetch = Object.assign(
     async () => {
       requests += 1
+
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
   )
+
   try {
     expect(await flushSharedOutbox(projectId, userId)).toEqual({ pending: 0, failed: 0 })
   } finally {
     globalThis.fetch = originalFetch
+
     if (originalStorage) Object.defineProperty(navigator, 'storage', originalStorage)
     else Reflect.deleteProperty(navigator, 'storage')
   }
+
   expect(requests).toBe(0)
   expect(await db.get('syncState', 'shared-outbox:uploaded-audio')).toBeUndefined()
   expect(storage.files.has('outbox-source.bin')).toBe(false)
@@ -672,33 +728,41 @@ test('assigns a durable FIFO sequence before publishing same-millisecond admissi
   const db = await openLocalProjectDb(projectId)
   const originalFetch = globalThis.fetch
   let releaseFirst: (() => void) | undefined
+
   const firstStarted = new Promise<void>((resolve) => {
     globalThis.fetch = Object.assign(
       async (...arguments_: Parameters<typeof globalThis.fetch>) => {
         const [, init] = arguments_
         const operation = volumeOperationSchema.parse(parseRequestBody(init))
+
         if (operation.payload.volume === 0.5) {
           resolve()
           await new Promise<void>((release) => { releaseFirst = release })
         }
+
         return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
       },
       { preconnect: originalFetch.preconnect },
     )
   })
+
   const first = publishDurableSharedTimelineOperation({
     projectId,
     userId,
     operation: { kind: 'tracks.setVolume', payload: { trackId: 'track-1', volume: 0.5 } },
   })
+
   await firstStarted
+
   const second = publishDurableSharedTimelineOperation({
     projectId,
     userId,
     operation: { kind: 'tracks.setVolume', payload: { trackId: 'track-1', volume: 0.8 } },
   })
+
   await new Promise<void>((resolve) => { setTimeout(resolve, 0) })
   const rows = await db.getAll('syncState')
+
   const entries = rows
     .filter((row) => row.key.startsWith('shared-outbox:'))
     .map((row) => row.value)
@@ -706,6 +770,7 @@ test('assigns a durable FIFO sequence before publishing same-millisecond admissi
       typeof value === 'object' && value !== null && 'sequence' in value && typeof value.sequence === 'number'
     ))
     .sort((left, right) => left.sequence - right.sequence)
+
   expect(entries.map((entry) => entry.sequence)).toEqual([1, 2])
   releaseFirst?.()
   await Promise.all([first, second])
@@ -744,10 +809,12 @@ test('requires explicit stale-claim recovery when Web Locks are unavailable', as
   globalThis.fetch = Object.assign(
     async () => {
       requests += 1
+
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
   )
+
   try {
     Object.defineProperty(globalThis, 'window', { configurable: true, value: {} })
     Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks: undefined } })
@@ -762,10 +829,12 @@ test('requires explicit stale-claim recovery when Web Locks are unavailable', as
   } finally {
     if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator)
     else Reflect.deleteProperty(globalThis, 'navigator')
+
     if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow)
     else Reflect.deleteProperty(globalThis, 'window')
     globalThis.fetch = originalFetch
   }
+
   expect(requests).toBe(1)
   expect(await db.get('syncState', 'shared-outbox:expired')).toBeUndefined()
 })
@@ -802,6 +871,7 @@ test('uses the project-user Web Lock before recovering an expired publication cl
     locks: {
       request: async <T>(name: string, callback: () => Promise<T>) => {
         lockNames.push(name)
+
         return await callback()
       },
     },
@@ -810,12 +880,14 @@ test('uses the project-user Web Lock before recovering an expired publication cl
     async () => new Response(JSON.stringify({ status: 'applied' }), { status: 200 }),
     { preconnect: originalFetch.preconnect },
   )
+
   try {
     await flushSharedOutbox(projectId, userId)
   } finally {
     Reflect.set(globalThis, 'navigator', originalNavigator)
     globalThis.fetch = originalFetch
   }
+
   expect(lockNames).toEqual([`daw-browser:shared-outbox:${projectId}:${userId}`])
   expect(await db.get('syncState', 'shared-outbox:expired')).toBeUndefined()
 })
@@ -825,6 +897,7 @@ test('retains authentication failures for reauthentication and preserves FIFO', 
   const userId = 'user-1'
   const db = await openLocalProjectDb(projectId)
   const timestamp = Date.now()
+
   for (const [id, volume] of [['auth', 0.5], ['later', 0.8]] as const) {
     await db.put('syncState', {
       key: `shared-outbox:${id}`,
@@ -835,6 +908,7 @@ test('retains authentication failures for reauthentication and preserves FIFO', 
       updatedAt: timestamp,
     })
   }
+
   const originalFetch = globalThis.fetch
   const published: number[] = []
   let authenticated = false
@@ -842,12 +916,15 @@ test('retains authentication failures for reauthentication and preserves FIFO', 
     async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
       const operation = volumeOperationSchema.parse(parseRequestBody(init))
+
       if (!authenticated) return new Response('authentication required', { status: 401 })
       published.push(operation.payload.volume)
+
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
   )
+
   try {
     expect(await flushSharedOutbox(projectId, userId)).toEqual({ pending: 1, failed: 1 })
     expect(published).toEqual([])
@@ -857,6 +934,7 @@ test('retains authentication failures for reauthentication and preserves FIFO', 
   } finally {
     globalThis.fetch = originalFetch
   }
+
   expect(published).toEqual([0.5, 0.8])
 })
 
@@ -872,6 +950,7 @@ test('renews an active lease before it expires', async () => {
       heartbeat = callback
       const handle = setTimeout(() => undefined, 60_000)
       clearTimeout(handle)
+
       return handle
     },
     cancel: () => undefined,
@@ -893,10 +972,12 @@ test('renews an active lease before it expires', async () => {
     async () => {
       started()
       await new Promise<void>((resolve) => { release = resolve })
+
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
   )
+
   try {
     const flushing = flushSharedOutbox(projectId, userId)
     await publishing
@@ -934,6 +1015,7 @@ test('reads a persisted completion when a background drain consumed the target r
     async () => new Response(JSON.stringify({ status: 'applied' }), { status: 200 }),
     { preconnect: originalFetch.preconnect },
   )
+
   try {
     await flushSharedOutbox(projectId, userId)
     expect(await flushSharedOutboxOperation(projectId, userId, 'target')).toEqual({
@@ -970,6 +1052,7 @@ test('stops the current drain after lease ownership is lost', async () => {
   const db = await openLocalProjectDb(projectId)
   const timestamp = 0
   setSharedOutboxRuntimeForTesting({ now: () => timestamp })
+
   for (const [id, volume] of [['first', 0.5], ['second', 0.8]] as const) {
     await db.put('syncState', {
       key: `shared-outbox:${id}`,
@@ -989,35 +1072,43 @@ test('stops the current drain after lease ownership is lost', async () => {
       updatedAt: timestamp,
     })
   }
+
   const originalFetch = globalThis.fetch
   let releaseFirst: (() => void) | undefined
   let requests = 0
+
   const firstStarted = new Promise<void>((resolve) => {
     globalThis.fetch = Object.assign(
       async (...arguments_: Parameters<typeof globalThis.fetch>) => {
         requests += 1
         const [, init] = arguments_
         const operation = volumeOperationSchema.parse(parseRequestBody(init))
+
         if (operation.payload.volume === 0.5) {
           resolve()
           await new Promise<void>((release) => { releaseFirst = release })
         }
+
         return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
       },
       { preconnect: originalFetch.preconnect },
     )
   })
+
   try {
     const flushing = flushSharedOutbox(projectId, userId)
     await firstStarted
     const claimed = await db.get('syncState', 'shared-outbox:first')
+
     const parsedClaimedValue = z.record(
       z.string(),
       z.union([z.json(), z.undefined()]),
     ).safeParse(claimed?.value)
+
     if (!claimed || !parsedClaimedValue.success) {
       throw new Error('Expected first outbox row to be claimed.')
     }
+
     await db.put('syncState', {
       ...claimed,
       value: { ...parsedClaimedValue.data, claimOwner: 'other-context', claimToken: 'other-token' },
@@ -1029,6 +1120,7 @@ test('stops the current drain after lease ownership is lost', async () => {
     setSharedOutboxRuntimeForTesting(undefined)
     globalThis.fetch = originalFetch
   }
+
   expect((await db.get('syncState', 'shared-outbox:first'))?.value).toMatchObject({ claimOwner: 'other-context' })
   expect((await db.get('syncState', 'shared-outbox:second'))?.value).toMatchObject({ status: 'pending' })
   expect(requests).toBe(1)
@@ -1042,6 +1134,7 @@ test('returns a terminal rejection instead of pending for a targeted dead-letter
     async () => new Response('forbidden', { status: 403 }),
     { preconnect: originalFetch.preconnect },
   )
+
   try {
     await expect(publishDurableSharedTimelineOperation({
       projectId,
@@ -1057,10 +1150,13 @@ test('caller-owned foreground completion does not publish background history', a
   const projectId = `outbox-caller-completion-${crypto.randomUUID()}`
   const userId = 'user-1'
   let historyUpdates = 0
+
   const unregister = registerSharedOutboxHistoryHandler((update) => {
     if (update.kind === 'entry') historyUpdates += 1
+
     return false
   })
+
   const originalFetch = globalThis.fetch
   globalThis.fetch = Object.assign(
     async () => new Response(JSON.stringify({
@@ -1070,6 +1166,7 @@ test('caller-owned foreground completion does not publish background history', a
     }), { status: 200 }),
     { preconnect: originalFetch.preconnect },
   )
+
   try {
     await publishDurableSharedTimelineOperation({
       projectId,
@@ -1099,6 +1196,7 @@ test('caller-owned foreground completion does not publish background history', a
     unregister()
     globalThis.fetch = originalFetch
   }
+
   expect(historyUpdates).toBe(0)
 })
 
@@ -1122,6 +1220,7 @@ test('retains recovery operation correlation after attaching recovery IDs', () =
     }],
     redo: [],
   }
+
   expect(attachClipDeletionRecoveriesToHistory(history, 'operation-1', new Map([['source-1', 'recovery-1']]))).toBe(true)
   expect(history.undo[0]?.data.items[0]?.clip).toMatchObject({
     recoveryId: 'recovery-1',
@@ -1133,6 +1232,7 @@ const utilityOperation = (instanceId = 'utility-1'): SharedTimelineOperation => 
   kind: 'effects.setUtilityParams',
   payload: { trackId: 'track-1', instanceId, params: AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams() },
 })
+
 const stubFetch = (respond: (body: JsonValue) => Response | Promise<Response>) => {
   const originalFetch = globalThis.fetch
   const bodies: JsonValue[] = []
@@ -1140,18 +1240,23 @@ const stubFetch = (respond: (body: JsonValue) => Response | Promise<Response>) =
     async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const body = parseRequestBody(arguments_[1])
       bodies.push(body)
+
       return await respond(body)
     },
     { preconnect: originalFetch.preconnect },
   )
+
   return { bodies, restore: () => { globalThis.fetch = originalFetch } }
 }
+
 const typedResult = (revision: number) => ({ status: 'applied', effectId: 'effect-1', revision })
+
 const decodedTypedResult = (revision: number) => ({
   status: 'applied',
   effectId: 'effect-1',
   revision: { kind: 'ordered', revision },
 })
+
 // What a drain in another tab leaves behind: the completion and the removed entry land in one transaction.
 const settleInAnotherTab = async (
   projectId: string,
@@ -1163,6 +1268,7 @@ const settleInAnotherTab = async (
   const tx = db.transaction('syncState', 'readwrite')
   const entryKey = `shared-outbox:${entryId}`
   const current = await tx.store.get(entryKey)
+
   if ('deadLetter' in settlement) {
     tx.store.put({
       key: entryKey,
@@ -1177,6 +1283,7 @@ const settleInAnotherTab = async (
     })
     tx.store.delete(entryKey)
   }
+
   await tx.done
 }
 
@@ -1184,16 +1291,20 @@ test('an effects publication returns its typed result and its record stays reada
   const projectId = `outbox-effects-direct-${crypto.randomUUID()}`
   const userId = 'user-1'
   const fetchStub = stubFetch(() => new Response(JSON.stringify(typedResult(4)), { status: 200 }))
+
   try {
     const published = await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
     expect(published).toMatchObject({ kind: 'applied', result: decodedTypedResult(4) })
+
     if (published.kind !== 'applied') throw new Error('Expected a direct result.')
+
     // The duplicate notification: the same result is read back from the durable record, any number of times.
     const duplicate = {
       status: 'applied',
       result: decodedTypedResult(4),
       completionOwner: 'caller',
     } satisfies Awaited<ReturnType<typeof outbox.readSharedOutboxOperation>>
+
     expect(await outbox.readSharedOutboxOperation(projectId, userId, published.entryId)).toEqual(duplicate)
     expect(await outbox.readSharedOutboxOperation(projectId, userId, published.entryId)).toEqual(duplicate)
     // The publisher already had its result; consuming it again is harmless.
@@ -1209,8 +1320,10 @@ test('no age decides whether a stored result is still the answer', async () => {
   const projectId = `outbox-effects-age-${crypto.randomUUID()}`
   const userId = 'user-1'
   const fetchStub = stubFetch(() => new Response(JSON.stringify(typedResult(2)), { status: 200 }))
+
   try {
     const published = await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
+
     if (published.kind !== 'applied') throw new Error('Expected a direct result.')
     setSharedOutboxRuntimeForTesting({ now: () => Date.now() + 30 * 24 * 60 * 60 * 1000 })
     expect(await outbox.readSharedOutboxOperation(projectId, userId, published.entryId)).toMatchObject({ status: 'applied' })
@@ -1225,9 +1338,11 @@ test('a permanent rejection is a typed outcome and its dead letter outlives cons
   const projectId = `outbox-effects-rejected-${crypto.randomUUID()}`
   const userId = 'user-1'
   const fetchStub = stubFetch(() => new Response('forbidden', { status: 403 }))
+
   try {
     const published = await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
     expect(published).toMatchObject({ kind: 'rejected', reason: 'Permanent failure: Shared timeline operation failed: 403 forbidden' })
+
     if (published.kind !== 'rejected') throw new Error('Expected a rejection.')
     expect(await outbox.readSharedOutboxOperation(projectId, userId, published.entryId))
       .toEqual({ status: 'rejected', lastError: 'Permanent failure: Shared timeline operation failed: 403 forbidden' })
@@ -1243,9 +1358,11 @@ test('a retryable failure is admitted and reads as pending', async () => {
   const projectId = `outbox-effects-admitted-${crypto.randomUUID()}`
   const userId = 'user-1'
   const fetchStub = stubFetch(() => new Response('unavailable', { status: 503 }))
+
   try {
     const published = await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
     expect(published.kind).toBe('admitted')
+
     if (published.kind !== 'admitted') throw new Error('Expected admission.')
     expect(await outbox.readSharedOutboxOperation(projectId, userId, published.entryId)).toEqual({ status: 'pending' })
   } finally {
@@ -1256,11 +1373,13 @@ test('a retryable failure is admitted and reads as pending', async () => {
 test('wakes the admitting owner when a dead letter settles behind a stalled outbox tail', async () => {
   const projectId = `outbox-settlement-wake-${crypto.randomUUID()}`
   const userId = 'user-1'
+
   const firstId = await outbox.enqueueSharedTimelineOperationOnFailure({
     projectId,
     userId,
     operation: utilityOperation(),
   })
+
   await outbox.enqueueSharedTimelineOperationOnFailure({
     projectId,
     userId,
@@ -1275,10 +1394,13 @@ test('wakes the admitting owner when a dead letter settles behind a stalled outb
   let requests = 0
   globalThis.fetch = Object.assign(async () => {
     requests += 1
+
     if (requests === 1) return new Response('deleted', { status: 403 })
     releaseSecondRequest?.()
+
     return await new Promise<Response>((resolve) => { releaseTail = resolve })
   }, { preconnect: originalFetch.preconnect })
+
   try {
     const draining = flushSharedOutbox(projectId, userId)
     await secondStarted
@@ -1310,6 +1432,7 @@ test('broadcasts a terminal settlement to an idle foreign owner without a manual
     async () => new Response('deleted', { status: 403 }),
     { preconnect: originalFetch.preconnect },
   )
+
   try {
     await flushSharedOutbox(projectId, userId)
     await observed;
@@ -1335,9 +1458,11 @@ test('a completion that a foreign drainer wrote before the owner bound is read f
     updatedAt: timestamp,
   })
   const fetchStub = stubFetch(() => new Response(JSON.stringify(typedResult(9)), { status: 200 }))
+
   try {
     const published = await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
     expect(published.kind).toBe('admitted')
+
     if (published.kind !== 'admitted') throw new Error('Expected admission behind the foreign claim.')
     expect(fetchStub.bodies).toHaveLength(0)
     // The event fires before the owner ever looked: the settlement is already durable when it reads.
@@ -1364,8 +1489,10 @@ test('a rejection a foreign drainer recorded is read as rejected, and the next f
     updatedAt: timestamp,
   })
   const fetchStub = stubFetch(() => new Response(JSON.stringify(typedResult(1)), { status: 200 }))
+
   try {
     const published = await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
+
     if (published.kind !== 'admitted') throw new Error('Expected admission behind the foreign claim.')
     await settleInAnotherTab(projectId, userId, published.entryId, { deadLetter: 'Permanent failure: Track was deleted.' })
     expect(await outbox.readSharedOutboxOperation(projectId, userId, published.entryId))
@@ -1390,9 +1517,11 @@ test('rows ahead of the publication drain first and each keeps its own readable 
     },
     updatedAt: timestamp,
   })
+
   const fetchStub = stubFetch((body) => new Response(JSON.stringify(
     z.object({ kind: z.string() }).parse(body).kind === 'tracks.setVolume' ? { status: 'applied' } : typedResult(3),
   ), { status: 200 }))
+
   try {
     const published = await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
     expect(published).toMatchObject({ kind: 'applied', result: decodedTypedResult(3) })
@@ -1420,14 +1549,17 @@ test('one read of an operation is one readonly transaction over the entry and it
     configurable: true,
     value: function transaction(this: IDBDatabase, storeNames: string, mode: IDBTransactionMode = 'readonly') {
       modes.push(mode)
+
       return original.call(this, storeNames, mode)
     },
   })
+
   try {
     expect(await outbox.readSharedOutboxOperation(projectId, userId, 'done')).toMatchObject({ status: 'applied' })
   } finally {
     Object.defineProperty(IDBDatabase.prototype, 'transaction', { configurable: true, value: original })
   }
+
   expect(modes).toEqual(['readonly'])
 })
 
@@ -1436,6 +1568,7 @@ test('the count cap is the only collector: an old legacy-dated completion surviv
   const userId = 'user-1'
   const db = await openLocalProjectDb(projectId)
   const timestamp = Date.now()
+
   for (let index = 1; index <= 64; index += 1) {
     // old-2 is a legacy record whose expiry passed long ago; age must not decide.
     const legacyExpiry = index === 2 ? { expiresAt: 1 } : { expiresAt: undefined }
@@ -1445,7 +1578,9 @@ test('the count cap is the only collector: an old legacy-dated completion surviv
       updatedAt: timestamp,
     })
   }
+
   const fetchStub = stubFetch(() => new Response(JSON.stringify(typedResult(1)), { status: 200 }))
+
   try {
     await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
     expect(await outbox.readSharedOutboxOperation(projectId, userId, 'old-1')).toEqual({ status: 'missing' })
@@ -1460,31 +1595,41 @@ test('an admitted effects result another drain records is kept past the history 
   const projectId = `outbox-effects-unconsumed-${crypto.randomUUID()}`
   const userId = 'user-1'
   let online = false
+
   const fetchStub = stubFetch(() => online
     ? new Response(JSON.stringify(typedResult(7)), { status: 200 })
     : new Response('unavailable', { status: 503 }))
+
   try {
     const admitted: string[] = []
+
     for (let index = 0; index < 65; index += 1) {
       const published = await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation(`utility-${index}`) })
+
       if (published.kind !== 'admitted') throw new Error('Expected admission while offline.')
       admitted.push(published.entryId)
     }
+
     online = true
     await outbox.flushSharedOutbox(projectId, userId, { retryFailed: true })
+
     // Background history past the cap collects consumed rows only.
     for (let index = 0; index < 65; index += 1) {
       await outbox.publishDurableSharedTimelineOperation({ projectId, userId, operation: utilityOperation(`history-${index}`) })
     }
+
     const first = admitted[0]
+
     if (!first) throw new Error('Expected an admitted write.')
     const awaited = { status: 'applied', result: decodedTypedResult(7), completionOwner: 'background' } satisfies Awaited<ReturnType<typeof outbox.readSharedOutboxOperation>>
     expect(await outbox.readSharedOutboxOperation(projectId, userId, first)).toEqual(awaited)
     await outbox.consumeSharedOutboxCompletion(projectId, userId, first)
     expect(await outbox.readSharedOutboxOperation(projectId, userId, first)).toEqual(awaited)
+
     for (let index = 0; index < 65; index += 1) {
       await outbox.publishDurableSharedTimelineOperation({ projectId, userId, operation: utilityOperation(`later-${index}`) })
     }
+
     expect(await outbox.readSharedOutboxOperation(projectId, userId, first)).toEqual({ status: 'missing' })
     expect(await outbox.readSharedOutboxOperation(projectId, userId, admitted[64] ?? '')).toEqual(awaited)
   } finally {
@@ -1495,25 +1640,32 @@ test('an admitted effects result another drain records is kept past the history 
 test('a completion is consumed once, and only by the project and user that admitted it', async () => {
   const projectId = `outbox-effects-scope-${crypto.randomUUID()}`
   let online = false
+
   const fetchStub = stubFetch(() => online
     ? new Response(JSON.stringify(typedResult(7)), { status: 200 })
     : new Response('unavailable', { status: 503 }))
+
   try {
     const admit = async (id: string) => {
       const published = await outbox.publishDurableEffectsOperation({ projectId, userId: 'user-1', operation: utilityOperation(id) })
+
       if (published.kind !== 'admitted') throw new Error('Expected admission while offline.')
+
       return published.entryId
     }
+
     const unread = await admit('utility-unread')
     const consumed = await admit('utility-consumed')
     online = true
     await outbox.flushSharedOutbox(projectId, 'user-1', { retryFailed: true })
     const awaited = { status: 'applied', result: decodedTypedResult(7), completionOwner: 'background' } satisfies Awaited<ReturnType<typeof outbox.readSharedOutboxOperation>>
+
     const collectHistory = async (prefix: string) => {
       for (let index = 0; index < 65; index += 1) {
         await outbox.publishDurableSharedTimelineOperation({ projectId, userId: 'user-1', operation: utilityOperation(`${prefix}-${index}`) })
       }
     }
+
     await outbox.consumeSharedOutboxCompletion(projectId, 'user-2', consumed)
     await outbox.consumeSharedOutboxCompletion(`${projectId}-other`, 'user-1', consumed)
     await collectHistory('foreign')

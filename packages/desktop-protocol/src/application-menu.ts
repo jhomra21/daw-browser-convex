@@ -51,12 +51,16 @@ export const desktopApplicationMenuExtensionCommandSchema = z.object({
   id: z.string().min(1).max(128).regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)+$/),
   commandId: z.string().min(1).max(128).regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)+$/),
 }).strict()
+
 export const desktopApplicationMenuCommandSchema = z.enum(desktopApplicationMenuCommands)
+
 export type DesktopApplicationMenuCommand = z.infer<typeof desktopApplicationMenuCommandSchema>
+
 export const desktopApplicationMenuMessageSchema = z.union([
   desktopApplicationMenuCommandSchema,
   desktopApplicationMenuExtensionCommandSchema,
 ])
+
 export type DesktopApplicationMenuMessage = z.infer<typeof desktopApplicationMenuMessageSchema>
 
 export const desktopApplicationMenuExtensionContributionSchema = z.object({
@@ -67,9 +71,11 @@ export const desktopApplicationMenuExtensionContributionSchema = z.object({
   enabled: z.boolean(),
   checked: z.boolean().optional(),
 }).strict()
+
 export const desktopApplicationMenuExtensionContributionsSchema = z.array(
   desktopApplicationMenuExtensionContributionSchema,
 ).max(16).refine((items) => new Set(items.map((item) => item.id)).size === items.length)
+
 export type DesktopApplicationMenuExtensionContribution = z.infer<typeof desktopApplicationMenuExtensionContributionSchema>
 
 export const desktopApplicationMenuStateSchema = z.object({
@@ -93,4 +99,5 @@ export const desktopApplicationMenuStateSchema = z.object({
   gridDenominator: z.union([z.literal(2), z.literal(4), z.literal(8), z.literal(12), z.literal(16)]),
   extensionContributions: desktopApplicationMenuExtensionContributionsSchema.optional(),
 }).strict()
+
 export type DesktopApplicationMenuState = z.infer<typeof desktopApplicationMenuStateSchema>

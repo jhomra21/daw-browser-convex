@@ -114,6 +114,7 @@ type ServerTimelineIndex<TTrackId extends string = Track['id']> = {
 
 const nearlyEqual = (left: number | undefined, right: number | undefined) => {
   if (left === undefined || right === undefined) return left === right
+
   return Math.abs(left - right) < 1e-6
 }
 
@@ -129,9 +130,12 @@ const trackSendsEqual = (
 ) => {
   const leftSends = left ?? []
   const rightSends = right ?? []
+
   if (leftSends.length !== rightSends.length) return false
+
   return leftSends.every((send, index) => {
     const other = rightSends[index]
+
     return !!other
       && optionalIdEqual(send.targetId, other.targetId)
       && nearlyEqual(send.amount, other.amount)
@@ -141,6 +145,7 @@ const trackSendsEqual = (
 
 const normalizeTrackKind = (value: string | undefined): Track['kind'] => {
   if (value === 'audio' || value === 'instrument') return value
+
   return undefined
 }
 
@@ -150,6 +155,7 @@ const normalizeSourceKind = (value: string | undefined): Clip['sourceKind'] => {
 
 const normalizeMidi = (value: FullTimelineView['clips'][number]['midi']): Clip['midi'] => {
   if (!value) return undefined
+
   try {
     return normalizeLegacyMidiClip(value)
   } catch {
@@ -159,6 +165,7 @@ const normalizeMidi = (value: FullTimelineView['clips'][number]['midi']): Clip['
 
 const getWaveformAssetKey = (projectId: string | undefined, sourceAssetKey: string | undefined) => {
   if (!projectId || !sourceAssetKey) return sourceAssetKey
+
   return isLocalId('project', projectId) && isLocalProjectAssetKey(sourceAssetKey)
     ? `${projectId}:${sourceAssetKey}`
     : sourceAssetKey
@@ -187,12 +194,15 @@ const resolveTrackName = (input: {
 }) => {
   if (input.explicitName) return input.explicitName
   const rememberedName = input.namesByHistoryRef.get(input.historyRef)
+
   if (rememberedName) return rememberedName
+
   return `Track ${input.fallbackIndex}`
 }
 
 const applyClipPatch = (clip: RuntimeClip, patch: ClipTimelinePatch | undefined): RuntimeClip => {
   if (!patch) return clip
+
   return {
     ...clip,
     startSec: patch.startSec ?? clip.startSec,
@@ -229,18 +239,21 @@ const applyTrackMix = (
   const pendingMix = options.client.mix.pendingSharedMixByTrackId.get(track.id)
   const pendingTrack = options.client.tracks.pendingEntriesById.get(track.id)?.track
   const serverRouting = serverState?.serverRouting.get(track.id)
+
   const localRouting = localMixState?.sends !== undefined || localMixState?.outputTargetId !== undefined
     ? {
         sends: localMixState.sends ?? track.sends ?? [],
         outputTargetId: localMixState.outputTargetId ?? undefined,
       }
     : undefined
+
   const pendingTrackRouting = pendingTrack
     ? {
         sends: pendingTrack.sends ?? track.sends ?? [],
         outputTargetId: pendingTrack.outputTargetId,
       }
     : undefined
+
   const resolvedMix = resolveTrackMixView({
     canWriteSharedMix,
     syncMix: options.client.mix.syncMix,
@@ -269,6 +282,7 @@ const applyTrackMix = (
   const routingSource = localRouting ?? (canWriteSharedMix && pendingRouting
     ? pendingRouting
     : pendingTrackRouting ?? serverRouting ?? { sends: track.sends ?? [], outputTargetId: track.outputTargetId })
+
   const normalizedRouting = normalizeTrackRouting(track, routingSource, tracks)
   track.sends = normalizedRouting.sends
   track.outputTargetId = normalizedRouting.outputTargetId
@@ -319,13 +333,21 @@ export function isTrackEntryReflected<TTrackId extends string>(
   serverTrack: TimelineViewTrackLike<TTrackId>,
 ): boolean {
   if (entry.index !== serverTrack.index) return false
+
   if (normalizeTrackKind(serverTrack.kind) !== normalizeTrackKind(entry.track.kind)) return false
+
   if (normalizeTrackChannelRole(serverTrack.channelRole) !== normalizeTrackChannelRole(entry.track.channelRole)) return false
+
   if (!optionalIdEqual(entry.track.groupId, serverTrack.groupId)) return false
+
   if (entry.track.collapsed !== serverTrack.collapsed) return false
+
   if (entry.track.color !== serverTrack.color) return false
+
   if (!optionalIdEqual(entry.track.outputTargetId, serverTrack.outputTargetId)) return false
+
   if (!trackSendsEqual(entry.track.sends, serverTrack.sends)) return false
+
   return true
 }
 
@@ -334,15 +356,25 @@ export function isClipPatchReflected<TTrackId extends string>(
   serverClip: ServerTimelineIndex<TTrackId>['clipRowsById'] extends Map<string, infer TValue> ? TValue : never,
 ): boolean {
   if (patch.color !== undefined && patch.color !== serverClip.color) return false
+
   if (patch.trackId !== undefined && patch.trackId !== serverClip.trackId) return false
+
   if (patch.startSec !== undefined && !nearlyEqual(patch.startSec, serverClip.startSec)) return false
+
   if (patch.duration !== undefined && !nearlyEqual(patch.duration, serverClip.duration)) return false
+
   if (patch.leftPadSec !== undefined && !nearlyEqual(patch.leftPadSec, serverClip.leftPadSec)) return false
+
   if (patch.bufferOffsetSec !== undefined && !nearlyEqual(patch.bufferOffsetSec, serverClip.bufferOffsetSec)) return false
+
   if (patch.audioWarp !== undefined && !audioWarpEqual(normalizeAudioWarp(patch.audioWarp), serverClip.audioWarp)) return false
+
   if (patch.gain !== undefined && !nearlyEqual(patch.gain, serverClip.gain)) return false
+
   if (patch.fades !== undefined && !clipFadesEqual(patch.fades, serverClip.fades, serverClip.duration)) return false
+
   if (patch.midiOffsetBeats !== undefined && !nearlyEqual(patch.midiOffsetBeats, serverClip.midiOffsetBeats)) return false
+
   return true
 }
 
@@ -373,6 +405,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
   const projectedTracks: RuntimeTrack[] = []
   const projectedTrackIds = new Set<Track['id']>()
   const localSnapshot = options.server.localSnapshot
+
   const serverTracks = localSnapshot
     ? localSnapshot.tracks.map((track) => ({
         ...track,
@@ -380,17 +413,20 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
         lockedBy: null,
       }))
     : options.server.data?.tracks ?? []
+
   const serverClips = localSnapshot
     ? localSnapshot.clips.map((clip) => ({
         ...clip,
         _id: clip.id,
       }))
     : options.server.data?.clips ?? []
+
   const projectedTrackOrderById = new Map<Track['id'], number>()
 
   for (let index = 0; index < serverTracks.length; index++) {
     const trackRow = serverTracks[index]
     const trackId = trackRow._id
+
     if (options.client.tracks.removedIds.has(trackId)) continue
 
     const localTrackRow = localSnapshot ? localSnapshot.tracks[index] : undefined
@@ -428,6 +464,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
   projectedTracks.sort((left, right) => {
     const leftIndex = projectedTrackOrderById.get(left.id) ?? 0
     const rightIndex = projectedTrackOrderById.get(right.id) ?? 0
+
     return leftIndex - rightIndex
   })
 
@@ -460,9 +497,11 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
     const trackId = clipRow.trackId
     const track = trackById.get(trackId)
     const clipId = String(clipRow._id)
+
     if (!track || options.client.clips.removedIds.has(clipId)) continue
     const sourceKind = normalizeSourceKind(clipRow.sourceKind)
     const midi = normalizeMidi(clipRow.midi)
+
     const clip: RuntimeClip = {
       id: clipId,
       historyRef: options.client.clips.historyRefsById.get(clipId) ?? clipId,
@@ -487,6 +526,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
       midi,
       midiOffsetBeats: clipRow.midiOffsetBeats ?? 0,
     }
+
     pushClipToTrack(track, clip)
     clipById.set(clip.id, clip)
     clipTrackIdById.set(clip.id, trackId)
@@ -495,34 +535,42 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
   for (const [clipId, pending] of options.client.clips.pendingCreatesById) {
     if (options.client.clips.removedIds.has(clipId)) continue
     const track = trackById.get(pending.trackId)
+
     if (!track) continue
     const clip = attachClipBuffer(cloneTimelineClip(pending.clip), options.projectId, options.buffers)
     const currentTrackId = clipTrackIdById.get(clipId)
     const currentTrack = currentTrackId ? trackById.get(currentTrackId) : undefined
+
     if (currentTrack && currentTrack !== track) {
       removeClipFromTrack(currentTrack, clipId)
     }
+
     if (currentTrack === track) {
       track.clips = track.clips.map((entry) => entry.id === clipId ? clip : entry)
     } else {
       pushClipToTrack(track, clip)
     }
+
     clipById.set(clipId, clip)
     clipTrackIdById.set(clipId, pending.trackId)
   }
 
   const applyClipEdits = (edits: Map<string, ClipTimelinePatch>) => {
     const replacementsByTrack = new Map<RuntimeTrack, Map<string, RuntimeClip>>()
+
     for (const [clipId, patch] of edits) {
       const currentTrackId = clipTrackIdById.get(clipId)
       const currentTrack = currentTrackId ? trackById.get(currentTrackId) : undefined
       const currentClip = clipById.get(clipId)
+
       if (!currentClip) continue
       const nextTrackId = patch.trackId ?? currentTrackId
       const nextTrack = nextTrackId ? trackById.get(nextTrackId) : undefined
+
       if (!nextTrack || !currentTrackId || !currentTrack) continue
       const resolvedNextTrackId = nextTrack.id
       const nextClip = attachClipBuffer(applyClipPatch(currentClip, patch), options.projectId, options.buffers)
+
       if (resolvedNextTrackId !== currentTrackId) {
         removeClipFromTrack(currentTrack, clipId)
         pushClipToTrack(nextTrack, nextClip)
@@ -532,8 +580,10 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
         replacements.set(clipId, nextClip)
         replacementsByTrack.set(currentTrack, replacements)
       }
+
       clipById.set(clipId, nextClip)
     }
+
     for (const [track, replacements] of replacementsByTrack) {
       track.clips = track.clips.map((clip) => replacements.get(clip.id) ?? clip)
     }
@@ -544,7 +594,9 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
 
   for (const [trackId, clips] of options.client.clips.previewByTrackId) {
     const track = trackById.get(trackId)
+
     if (!track) continue
+
     for (const clip of clips) {
       pushClipToTrack(track, attachClipBuffer(cloneTimelineClip(clip), options.projectId, options.buffers))
     }
@@ -554,6 +606,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
     if (options.client.tracks.pendingLocksById.has(track.id)) {
       track.lockedBy = options.client.tracks.pendingLocksById.get(track.id) ?? null
     }
+
     applyTrackMix(track, options, projectedTracks)
     track.clips = track.clips
       .filter((clip) => !options.client.clips.removedIds.has(clip.id))
@@ -568,8 +621,10 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
 // waveforms and sidebar rows keyed on it mounted when another track changes.
 export const reuseResolvedTracks = (previous: RuntimeTrack[], next: RuntimeTrack[]): RuntimeTrack[] => {
   const previousById = new Map(previous.map((track) => [track.id, track]))
+
   return reuseEqualByKey(previous, next.map((track) => {
     const before = previousById.get(track.id)
+
     return before ? { ...track, clips: reuseEqualByKey(before.clips, track.clips, (clip) => clip.id) } : track
   }), (track) => track.id)
 }

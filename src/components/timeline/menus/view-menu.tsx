@@ -16,6 +16,7 @@ const viewMenuItemClass = cn(nativeMenuItemClass, "flex w-full items-center gap-
 
 export const ViewMenu: Component<ViewMenuProps> = (props) => {
   const toolbar = () => props.toolbar;
+
   const selectBrowserTab = (tab: (typeof timelineBrowserTabs)[number]) => {
     toolbar().browser.onSelectTab(tab);
     toolbar().browser.onOpen();

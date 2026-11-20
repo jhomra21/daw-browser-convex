@@ -17,6 +17,7 @@ describe('RecordingPreview viewport geometry', () => {
       visibleEndSec: 106,
       pixelsPerSecond: 100_000,
     })
+
     expect(clipped?.leftPx).toBe(0)
     expect(clipped?.widthPx).toBe(200_000)
     expect(clipped?.points.map((point) => point.offset)).toEqual([0, 1, 2])

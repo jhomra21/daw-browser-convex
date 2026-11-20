@@ -5,7 +5,9 @@ export const SAMPLER_STATE_VERSION = 1
 export const MAX_SAMPLED_INSTRUMENT_VOICES = 32
 
 export type SamplerPlaybackMode = 'one-shot' | 'forward-loop' | 'crossfade-loop'
+
 export type SamplerFilterMode = 'lowpass' | 'highpass' | 'bandpass' | 'notch'
+
 export type SamplerCachePolicy = 'preload' | 'lazy'
 
 export type SamplerEnvelope = {
@@ -90,6 +92,7 @@ export function createDefaultSamplerParams(): SamplerParams {
 
 const normalizeEnvelope = (value: SamplerEnvelope | undefined, fallback: SamplerEnvelope): SamplerEnvelope => {
   if (value === undefined) return fallback
+
   return {
     attackSec: clamp(finite(value.attackSec, fallback.attackSec), 0, 60),
     decaySec: clamp(finite(value.decaySec, fallback.decaySec), 0, 60),
@@ -102,8 +105,10 @@ const normalizeEnvelope = (value: SamplerEnvelope | undefined, fallback: Sampler
 const normalizeZone = (value: JsonValue, index: number): SamplerZone | undefined => {
   if (!record(value) || !record(value.sample) || !isJsonString(value.sample.assetKey) || !isJsonString(value.sample.url)) return undefined
   const source = record(value.sample.source) ? value.sample.source : undefined
+
   if (!source || !isJsonNumber(source.durationSec) || !isJsonNumber(source.sampleRate) || !isJsonNumber(source.channelCount)) return undefined
   const sourceKind = value.sample.sourceKind
+
   if (sourceKind !== 'upload' && sourceKind !== 'url' && sourceKind !== 'recording') return undefined
   const startSec = clamp(finite(value.startSec, 0), 0, source.durationSec)
   const endSec = clamp(finite(value.endSec, source.durationSec), startSec, source.durationSec)
@@ -111,6 +116,7 @@ const normalizeZone = (value: JsonValue, index: number): SamplerZone | undefined
   const loopStartSec = clamp(finite(value.loopStartSec, startSec), startSec, endSec)
   const loopEndSec = clamp(finite(value.loopEndSec, endSec), loopStartSec, endSec)
   const maxCrossfade = Math.max(0, (loopEndSec - loopStartSec) / 2)
+
   return {
     id: isJsonString(value.id) && value.id ? value.id : `zone-${index}`,
     sample: {
@@ -148,16 +154,21 @@ export function applySamplerZoneEdit(zone: SamplerZone, updates: Partial<Sampler
   const edited = { ...zone, ...updates, id: zone.id }
   const [keyLow, keyHigh] = clampEditedBound(edited.keyLow, edited.keyHigh, updates.keyLow !== undefined, updates.keyHigh !== undefined)
   const [velocityLow, velocityHigh] = clampEditedBound(edited.velocityLow, edited.velocityHigh, updates.velocityLow !== undefined, updates.velocityHigh !== undefined)
+
   return { ...edited, keyLow, keyHigh, velocityLow, velocityHigh }
 }
 
 export function normalizeSamplerParams(input: SamplerParamsInput): SamplerParams {
   const defaults = createDefaultSamplerParams()
+
   const zones = (input.zones ?? []).flatMap((zone, index) => {
     const normalized = normalizeZone(zone, index)
+
     return normalized && normalized.keyLow <= normalized.keyHigh && normalized.velocityLow <= normalized.velocityHigh ? [normalized] : []
   })
+
   const filterMode = input.filterMode === 'highpass' || input.filterMode === 'bandpass' || input.filterMode === 'notch' ? input.filterMode : 'lowpass'
+
   return {
     version: SAMPLER_STATE_VERSION,
     zones,

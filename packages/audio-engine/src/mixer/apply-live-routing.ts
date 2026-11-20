@@ -48,6 +48,7 @@ type ApplyLiveMixerGraphOptions = {
 
 const cancelEdgeRetirement = (edge: LiveMixerEdgeRuntime) => {
   const source = edge.retirementSource
+
   if (!source) return
   edge.retirementSource = undefined
   source.onended = null
@@ -57,11 +58,17 @@ const cancelEdgeRetirement = (edge: LiveMixerEdgeRuntime) => {
 
 const disconnectEdge = (edge: LiveMixerEdgeRuntime) => {
   cancelEdgeRetirement(edge)
+
   try { edge.source.disconnect(edge.gain ?? edge.delay) } catch {}
+
   try { edge.gain?.disconnect(edge.delay) } catch {}
+
   try { edge.delay.disconnect(edge.target) } catch {}
+
   try { edge.gain?.disconnect() } catch {}
+
   try { edge.delay.disconnect() } catch {}
+
   for (const release of edge.releaseResources ?? []) release()
   edge.releaseResources = []
 }
@@ -77,6 +84,7 @@ const updateDelay = (delay: DelayNode, seconds: number, currentTime: number) => 
 export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
   const plan = createMixerRoutingPlan(options.graph)
   const timing = resolveMixerTiming(options.graph, options.sampleRate, options.bpm)
+
   if (initializedMasterInputs.has(options.masterInput)) {
     if (!options.automatedVolumeTargets?.has('master')) {
       rampAudioParam(options.masterInput.gain, plan.masterVolume, options.currentTime)
@@ -85,23 +93,30 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
     if (!options.automatedVolumeTargets?.has('master')) {
       setAudioParamValue(options.masterInput.gain, plan.masterVolume)
     }
+
     initializedMasterInputs.add(options.masterInput)
   }
+
   const activeEdgeIds = new Set<string>()
   const resolvedChannels = new Map(options.graph.channels.map((entry) => [entry.channel.id, entry]))
 
   for (const channel of plan.channels) {
     const channelId = channel.channelId
     const resolvedChannel = resolvedChannels.get(channelId)
+
     const nodes = assertDefined(
       options.trackNodes.get(channelId),
       `Missing live mixer nodes for track ${channelId}`,
     )
+
     const staticGainSync = options.staticGainSync?.get(channelId)
+
     const channelGain = resolvedChannel && Number.isFinite(resolvedChannel.channel.volume)
       ? resolvedChannel.channel.volume
       : 0
+
     const muteGain = resolvedChannel?.channel.muted ? 0 : 1
+
     if (!options.staticGainSync) {
       setAudioParamValue(nodes.gain.gain, channelGain)
       setAudioParamValue(nodes.output.gain, channel.outputGain)
@@ -111,31 +126,37 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
         else rampAudioParam(nodes.gain.gain, channelGain, options.currentTime)
       }
     }
+
     if (options.staticGainSync && staticGainSync?.outputGain) {
       if (staticGainSync.created) setAudioParamValue(nodes.output.gain, channel.outputGain)
       else rampAudioParam(nodes.output.gain, channel.outputGain, options.currentTime)
     }
+
     if (options.staticGainSync && staticGainSync?.muteGain) {
       if (nodes.mute) {
         if (staticGainSync.created) setAudioParamValue(nodes.mute.gain, muteGain)
         else rampAudioParam(nodes.mute.gain, muteGain, options.currentTime)
       }
     }
+
     nodes.postFx.connect(nodes.mute ?? nodes.gain)
     nodes.mute?.connect(nodes.gain)
     nodes.gain.connect(nodes.output)
+
     const targetNodes = channel.outputTargetId
       ? assertDefined(
         options.trackNodes.get(channel.outputTargetId),
         `Missing output target nodes for track ${channel.outputTargetId}`,
       )
       : undefined
+
     const outputTarget = targetNodes?.input ?? options.masterInput
     const outputTargetId = channel.outputTargetId ?? MASTER_ROUTE_TARGET
     const outputEdgeId = mixerRouteKey(channelId, outputTargetId, 'output')
     activeEdgeIds.add(outputEdgeId)
     const outputDelaySeconds = (timing.routeDelayFrames.get(outputEdgeId) ?? 0) / options.sampleRate
     const existingOutputEdge = options.edgeRuntimes.get(outputEdgeId)
+
     if (existingOutputEdge) {
       updateDelay(existingOutputEdge.delay, outputDelaySeconds, options.currentTime)
     } else {
@@ -156,16 +177,19 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
         options.trackNodes.get(send.targetId),
         `Missing send target nodes for track ${send.targetId}`,
       )
+
       const sendSource = send.tap === 'pre-fx'
         ? nodes.input
         : send.tap === 'pre-fader'
           ? nodes.postFx
           : nodes.output
+
       const edgeId = mixerRouteKey(channelId, send.targetId, 'send', send.tap)
       activeEdgeIds.add(edgeId)
       const delaySeconds = (timing.routeDelayFrames.get(edgeId) ?? 0) / options.sampleRate
       const sendGainValue = resolvedChannel?.channel.muted ? 0 : send.amount
       const existing = options.edgeRuntimes.get(edgeId)
+
       if (existing) {
         cancelEdgeRetirement(existing)
         delete existing.fadeEndTime
@@ -198,6 +222,7 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
 
   for (const [edgeId, edge] of Array.from(options.edgeRuntimes.entries())) {
     if (activeEdgeIds.has(edgeId)) continue
+
     if (edge.gain) {
       if (edge.fadeEndTime === undefined) {
         rampAudioParam(edge.gain.gain, 0, options.currentTime)
@@ -208,16 +233,20 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
           if (edge.retirementSource !== retirementSource) return
           edge.retirementSource = undefined
           retirementSource.disconnect()
+
           if (options.edgeRuntimes.get(edgeId) !== edge) return
           disconnectEdge(edge)
           options.edgeRuntimes.delete(edgeId)
         }
+
         retirementSource.start(options.currentTime)
         retirementSource.stop(edge.fadeEndTime)
       }
+
       // A routing pass after the fade retires the edge even if `ended` has not been delivered yet.
       if (options.currentTime < edge.fadeEndTime) continue
     }
+
     disconnectEdge(edge)
     options.edgeRuntimes.delete(edgeId)
   }

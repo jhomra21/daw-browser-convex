@@ -5,6 +5,7 @@ describe('compressor processor fault fallback', () => {
   test('transitions to the dry path once and suppresses duplicate faults', () => {
     const ramps: Array<[number, number]> = []
     let cancellations = 0
+
     const createGain = (value: number) => ({
       gain: {
         value,
@@ -15,6 +16,7 @@ describe('compressor processor fault fallback', () => {
         },
       },
     })
+
     const chain: CompressorFaultTransition = {
       state: 'active',
       fault: null,
@@ -35,6 +37,7 @@ describe('compressor processor fault fallback', () => {
 describe('routing transitions', () => {
   const createTestGain = () => {
     const ramp: Array<[string, number, number]> = []
+
     return {
       ramp,
       gain: {
@@ -51,11 +54,13 @@ describe('routing transitions', () => {
     const scheduled: Array<() => void> = []
     const timers: Array<ReturnType<typeof setTimeout>> = []
     const { gain, ramp } = createTestGain()
+
     const owner = createGainTransitionOwner({ gain }, () => 4, {
       schedule: (callback) => {
         scheduled.push(callback)
         const timer = setTimeout(() => undefined, 60_000)
         timers.push(timer)
+
         return timer
       },
       clear: (timer) => {
@@ -77,12 +82,14 @@ describe('routing transitions', () => {
       ['set', 1, 4],
       ['ramp', 0, 4.01],
     ])
+
     for (const callback of scheduled) callback()
     expect(events).toEqual(['clear', 'clear', 'third'])
     expect(ramp.at(-2)).toEqual(['set', 0, 4.01])
     expect(ramp.at(-1)?.slice(0, 2)).toEqual(['ramp', 1])
     expect(ramp.at(-1)?.[2]).toBeCloseTo(4.03, 10)
     owner.dispose()
+
     for (const timer of timers) clearTimeout(timer)
   })
 
@@ -90,11 +97,13 @@ describe('routing transitions', () => {
     const { gain, ramp } = createTestGain()
     const scheduled: Array<() => void> = []
     const timers: Array<ReturnType<typeof setTimeout>> = []
+
     const owner = createGainTransitionOwner({ gain }, () => 7, {
       schedule: (callback) => {
         scheduled.push(callback)
         const timer = setTimeout(() => undefined, 60_000)
         timers.push(timer)
+
         return timer
       },
       clear: clearTimeout,
@@ -120,6 +129,7 @@ describe('routing transitions', () => {
       throw new Error('Disposed owner scheduled a new transition.')
     })
     expect(scheduled.length).toBe(scheduledCount)
+
     for (const timer of timers) clearTimeout(timer)
   })
 
@@ -127,15 +137,18 @@ describe('routing transitions', () => {
     const { gain } = createTestGain()
     const scheduled: Array<() => void> = []
     const timers: Array<ReturnType<typeof setTimeout>> = []
+
     const owner = createGainTransitionOwner({ gain }, () => 2, {
       schedule: (callback) => {
         scheduled.push(callback)
         const timer = setTimeout(() => undefined, 60_000)
         timers.push(timer)
+
         return timer
       },
       clear: clearTimeout,
     })
+
     let settled = 0
     owner.request(() => {}, () => { settled += 1 })
     scheduled[0]?.()
@@ -146,10 +159,12 @@ describe('routing transitions', () => {
       if (value === 1) throw new Error('Fade-in failed.')
       originalRamp(value, time)
     }
+
     owner.request(() => {}, () => { settled += 1 })
     expect(() => scheduled[1]?.()).toThrow('Fade-in failed.')
     expect(settled).toBe(1)
     owner.dispose()
+
     for (const timer of timers) clearTimeout(timer)
   })
 })

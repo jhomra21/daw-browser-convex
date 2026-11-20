@@ -18,9 +18,12 @@ const pool = jobLimit()
 
 const shards = fixtures.flatMap((fixture) => {
   const size = exp.seeds[fixture].shardCap
+
   return Array.from({ length: Math.ceil(total / size) }, (_, index) => ({ fixture, first: index * size + 1, count: Math.min(size, total - index * size) }))
 })
+
 const template = (fixture: "controller" | "hook") => exp.campaigns.find((campaign) => campaign.name === `${fixture}-b6`)?.command.argv ?? []
+
 const run = async ({ fixture, first, count }: (typeof shards)[number]) => {
   const dir = path.join(out, `${fixture}-${first}`)
   mkdirSync(dir, { recursive: true })
@@ -28,26 +31,35 @@ const run = async ({ fixture, first, count }: (typeof shards)[number]) => {
   const child = spawn("perl", ["-e", "alarm shift; exec @ARGV", "900", ...argv], { cwd: repoRoot, env: { ...process.env, ...exp.env }, stdio: "ignore" })
   await once(child, "exit")
 }
+
 const queue = [...shards]
+
 await Promise.all(Array.from({ length: pool }, async () => {
   for (let shard = queue.shift(); shard; shard = queue.shift()) await run(shard)
 }))
 
 const records = { controller: new Array<SeedRecord>(), hook: new Array<SeedRecord>() }
 const problems: string[] = []
+
 for (const { fixture, first, count } of shards) {
   const dir = path.join(out, `${fixture}-${first}`, "out")
   const verdict = judgeSeeds(undefined, fixture, dir, first, count)
   problems.push(...verdict.reasons.filter((reason) => !reason.includes("no invariant record")))
+
   for (let seed = first; seed < first + count; seed++) {
     const file = path.join(dir, `seed-${seed}`, "summary.json")
+
     if (existsSync(file)) records[fixture].push(recordOf(readFileSync(file, "utf8")))
   }
 }
+
 if (problems.length > 0 || fixtures.some((fixture) => records[fixture].length !== total)) {
   console.error(`not written: ${problems.slice(0, 10).join("; ")} (records ${records.controller.length}/${records.hook.length} of ${total})`)
   process.exit(1)
 }
+
 writeFileSync(seedRecordsFile, formatSeedRecords(records))
+
 seedRecords.parse(JSON.parse(readFileSync(seedRecordsFile, "utf8")))
+
 console.log(`wrote ${seedRecordsFile}`)

@@ -83,8 +83,10 @@ type TestFilter = {
 const createTestAudio = () => {
   const oscillators: TestOscillator[] = []
   const bufferSources: TestBufferSource[] = []
+
   const param = (): TestParam => {
     const events: ParamEvent[] = []
+
     return {
       value: 0,
       events,
@@ -96,9 +98,11 @@ const createTestAudio = () => {
       cancelAndHoldAtTime: (time) => events.push({ kind: 'hold', time }),
     }
   }
+
   const gains: TestGain[] = []
   const filters: TestFilter[] = []
   const pans: TestPan[] = []
+
   const ctx = Object.assign(Object.create(null), {
     currentTime: 0,
     sampleRate: 48_000,
@@ -116,11 +120,14 @@ const createTestAudio = () => {
         stop: (when) => { oscillator.stops.push(when) },
         type: 'sine',
       }
+
       oscillators.push(oscillator)
+
       return oscillator
     },
     createBuffer: (channels: number, length: number) => {
       const data = Array.from({ length: channels }, () => new Float32Array(length))
+
       return {
         getChannelData: (channel: number) => data[channel] ?? new Float32Array(),
       }
@@ -138,11 +145,14 @@ const createTestAudio = () => {
         start: (when) => { source.starts.push(when) },
         stop: (when) => { source.stops.push(when) },
       }
+
       bufferSources.push(source)
+
       return source
     },
     createGain: () => {
       const events: ParamEvent[] = []
+
       const gain = {
         connections: Array<TestConnectionTarget>(),
         disconnects: 0,
@@ -171,7 +181,9 @@ const createTestAudio = () => {
         connect: (destination: TestConnectionTarget) => { gain.connections.push(destination) },
         disconnect: () => { gain.disconnects += 1 },
       }
+
       gains.push(gain)
+
       return gain
     },
     createBiquadFilter: () => {
@@ -184,11 +196,14 @@ const createTestAudio = () => {
         connect: () => {},
         disconnect: () => { filter.disconnects += 1 },
       }
+
       filters.push(filter)
+
       return filter
     },
     createStereoPanner: () => {
       const events: ParamEvent[] = []
+
       const pan = {
         connections: Array<TestConnectionTarget>(),
         disconnects: 0,
@@ -205,10 +220,13 @@ const createTestAudio = () => {
         connect: (destination: TestConnectionTarget) => { pan.connections.push(destination) },
         disconnect: () => { pan.disconnects += 1 },
       }
+
       pans.push(pan)
+
       return pan
     },
   })
+
   return { ctx, oscillators, bufferSources, gains, filters, pans }
 }
 
@@ -234,6 +252,7 @@ const createMidiClip = (id: string): Clip<AudioBuffer> => ({
 const createRuntime = (automationEnvelopes: AutomationEnvelope[] = []) => {
   const audio = createTestAudio()
   const sources = createSourceRegistry()
+
   const runtime = createSynthRuntime({
     ensureAudio: () => {},
     getAudioContext: () => audio.ctx,
@@ -243,7 +262,9 @@ const createRuntime = (automationEnvelopes: AutomationEnvelope[] = []) => {
     sources,
     getAutomationEnvelopes: () => automationEnvelopes,
   })
+
   runtime.setTrackSynth('track-1', createDefaultSynthParams(), 'instrument:synth:1')
+
   return { ...audio, runtime, sources }
 }
 
@@ -268,6 +289,7 @@ describe('synth runtime characterization', () => {
     const params = createDefaultSynthParams()
     runtime.setTrackSynth('track-1', { ...params, retrigger: false })
     const live = runtime.startPreviewNote('track-1', 60)
+
     if (live === undefined) throw new Error('Expected live synth note.')
 
     runtime.scheduleMidiClip(createTrack('track-1'), createMidiClip('timeline-clip'), 0, 0)
@@ -281,7 +303,9 @@ describe('synth runtime characterization', () => {
     runtime.scheduleMidiClip(createTrack('track-1'), createMidiClip('clip-1'), 0, 0)
 
     expect(sources.snapshot()).toHaveLength(3)
+
     for (const oscillator of oscillators) oscillator.onended?.()
+
     for (const source of bufferSources) source.onended?.()
 
     expect(sources.snapshot()).toHaveLength(0)
@@ -291,6 +315,7 @@ describe('synth runtime characterization', () => {
   test('schedules legacy MIDI through configured synth waves without repairing the source clip', () => {
     const { oscillators, runtime } = createRuntime()
     const clip = createMidiClip('legacy-wave')
+
     if (!clip.midi) throw new Error('Expected MIDI clip.')
     clip.midi = { ...clip.midi, wave: 'custom-legacy', gain: 7 }
 
@@ -303,6 +328,7 @@ describe('synth runtime characterization', () => {
   test('skips invalid persisted MIDI notes without modifying their source clip', () => {
     const { oscillators, runtime } = createRuntime()
     const clip = createMidiClip('invalid-legacy')
+
     if (!clip.midi) throw new Error('Expected MIDI clip.')
     clip.midi = {
       wave: 'custom-legacy',
@@ -338,18 +364,24 @@ describe('synth runtime characterization', () => {
     runtime.triggerNote({ trackId: 'track-1', pitch: 60, velocity: 0.5, clipGain: 0.5, when: 0, durationSec: 1 })
 
     const voicePan = pans[1]
+
     if (!voicePan) throw new Error('Expected voice pan.')
+
     const amplitudeModulation = gains.find((gain) => (
       gain.gain.events.some((event) => event.kind === 'set' && event.value === 1 && event.time === 0)
       && gain.connections.includes(voicePan)
     ))
+
     if (!amplitudeModulation) throw new Error('Expected amplitude modulation gain.')
     const amplitude = gains.find((gain) => gain.connections.includes(amplitudeModulation))
+
     if (!amplitude) throw new Error('Expected amplitude gain.')
+
     const ampDepth = gains.find((gain) => (
       gain.gain.events.some((event) => event.kind === 'set' && event.value === 1 && event.time === 0)
       && gain.connections.includes(amplitudeModulation.gain)
     ))
+
     if (!ampDepth) throw new Error('Expected amplitude modulation depth gain.')
 
     expect(amplitude.connections).toContain(amplitudeModulation)
@@ -363,6 +395,7 @@ describe('synth runtime characterization', () => {
     expect(amplitudeModulation.gain.events).toContainEqual({ kind: 'set', value: 1, time: 0 })
 
     for (const oscillator of oscillators) oscillator.onended?.()
+
     for (const source of bufferSources) source.onended?.()
     expect(amplitudeModulation.disconnects).toBe(1)
   })
@@ -395,6 +428,7 @@ describe('synth runtime characterization', () => {
   test('gates oscillators independently without recreating held voices', () => {
     const { ctx, filters, gains, oscillators, runtime } = createRuntime()
     const initial = createDefaultSynthParams()
+
     const disabledFirstOscillator = {
       ...initial,
       oscillators: [
@@ -402,15 +436,19 @@ describe('synth runtime characterization', () => {
         initial.oscillators[1],
       ],
     }
+
     runtime.setTrackSynth('track-1', disabledFirstOscillator)
     runtime.startPreviewNote('track-1', 60)
 
     const voiceFilter = filters.at(-1)
+
     if (!voiceFilter) throw new Error('Expected voice filter.')
     const oscillatorGates = gains.filter((gain) => gain.connections.includes(voiceFilter))
+
     const firstGate = oscillatorGates.find((gate) => (
       gate.gain.events.some((event) => event.kind === 'set' && event.value === 0 && event.time === 0)
     ))
+
     const secondGate = oscillatorGates.find((gate) => (
       gate.gain.events.some((event) => event.kind === 'set' && event.value === 1 && event.time === 0)
     ))
@@ -442,12 +480,16 @@ describe('synth runtime characterization', () => {
     runtime.startPreviewNote('track-1', 60)
 
     const voiceFilter = filters.at(-1)
+
     if (!voiceFilter) throw new Error('Expected voice filter.')
+
     const noiseGate = gains.find((gain) => (
       gain.connections.includes(voiceFilter)
       && gain.gain.events.some((event) => event.kind === 'set' && event.value === 0)
     ))
+
     if (!noiseGate) throw new Error('Expected noise gate.')
+
     const noiseLevel = gains.find((gain) => (
       gain.connections.includes(noiseGate)
       && gain.gain.events.some((event) => event.kind === 'set' && event.value === 0.25)
@@ -465,6 +507,7 @@ describe('synth runtime characterization', () => {
   test('resolves noise level automation while disabled noise remains gated', () => {
     const { gains, runtime } = createRuntime()
     runtime.triggerNote({ trackId: 'track-1', pitch: 60, when: 0, durationSec: 1 })
+
     const bindings = runtime.resolveAutomationBindings(
       'track-1',
       'synth-instrument:track-1:instrument:synth:1:noise.level',
@@ -516,6 +559,7 @@ describe('synth runtime characterization', () => {
     runtime.scheduleMidiClip(createTrack('track-1'), createMidiClip('clip-1'), 0, 0)
 
     for (const oscillator of oscillators) oscillator.onended?.()
+
     for (const source of bufferSources) source.onended?.()
 
     expect(oscillators.every((oscillator) => oscillator.disconnects === 1)).toBe(true)
@@ -613,6 +657,7 @@ describe('synth runtime characterization', () => {
       ],
       updatedAt: 1,
     }
+
     const { ctx, gains, runtime } = createRuntime([lfoDepth])
     runtime.scheduleMidiClip(createTrack('track-1'), createMidiClip('clip-1'), 0, 0, undefined, {
       scheduleVoiceAutomation: false,
@@ -627,6 +672,7 @@ describe('synth runtime characterization', () => {
     const ampDepth = gains.find((gain) => gain.gain.events.some((event) => (
       event.kind === 'set' && Math.abs((event.value ?? 0) - 0.32) < 1e-8 && event.time === 0.1
     )))
+
     expect(ampDepth?.gain.events.some((event) => (
       event.kind === 'ramp' && Math.abs((event.value ?? 0) - 0.8) < 1e-8 && event.time === 0.5
     ))).toBe(true)
@@ -740,6 +786,7 @@ describe('synth runtime characterization', () => {
       points: [{ id: 'point', timeSec: 0, value: 12, interpolation: 'linear' }],
       updatedAt: 1,
     }
+
     const offline = createRuntime([lfoRate])
     offline.runtime.scheduleMidiClip(createTrack('track-1'), createMidiClip('clip-1'), 0, 0, undefined, {
       scheduleVoiceAutomation: true,
@@ -773,6 +820,7 @@ describe('synth runtime characterization', () => {
       points: [{ id: 'point', timeSec: 0, value: 5, interpolation: 'linear' }],
       updatedAt: 1,
     }
+
     const { oscillators, runtime } = createRuntime([disabledRelease])
 
     runtime.scheduleMidiClip(createTrack('track-1'), createMidiClip('clip-1'), 0, 0)
@@ -783,6 +831,7 @@ describe('synth runtime characterization', () => {
   test('applies persisted MIDI gain to synth voice amplitude', () => {
     const { gains, runtime } = createRuntime()
     const clip = createMidiClip('clip-1')
+
     if (!clip.midi) throw new Error('Expected MIDI clip')
     clip.midi.gain = 0.5
 
@@ -817,6 +866,7 @@ describe('synth runtime characterization', () => {
   test('resolves synth output gain on the persistent track output', () => {
     const { gains, runtime } = createRuntime()
     runtime.setTrackSynth('track-1', { ...createDefaultSynthParams(), pan: 0.2 })
+
     const bindings = runtime.resolveAutomationBindings(
       'track-1',
       'synth-instrument:track-1:instrument:synth:1:output.gain',
@@ -852,6 +902,7 @@ describe('synth runtime characterization', () => {
       'track-1',
       'synth-instrument:track-1:instrument:synth:1:filter.frequency',
     )
+
     const ampBindings = runtime.resolveAutomationBindings(
       'track-1',
       'synth-instrument:track-1:instrument:synth:1:lfo.ampDepth',
@@ -888,6 +939,7 @@ describe('synth runtime characterization', () => {
     runtime.triggerNote({ trackId: 'track-1', pitch: 60, when: 0, durationSec: 1 })
     const parameterId = 'synth-instrument:track-1:instrument:synth:1:osc1.level'
     const bindings = runtime.resolveAutomationBindings('track-1', parameterId)
+
     const envelope: AutomationEnvelope = {
       id: 'osc1-level',
       projectId: 'project-1',
@@ -904,6 +956,7 @@ describe('synth runtime characterization', () => {
       startLimitSec: 0,
       endLimitSec: 1,
     }, (time) => time, 0.7)
+
     for (const binding of runtime.resolveAutomationBindings('track-1', parameterId)) binding.param.cancelScheduledValues(0.1)
 
     expect(bindings).toHaveLength(1)
@@ -931,9 +984,11 @@ describe('synth runtime characterization', () => {
         updatedAt: 1,
       }]]),
     })
+
     const automatedGain = gains.find((gain) => (
       gain.gain.events.some((event) => event.kind === 'set' && event.value === 0.2)
     ))
+
     const cancellations = automatedGain?.gain.events.filter((event) => event.kind === 'cancel').length
 
     runtime.setTrackSynth('track-1', { ...createDefaultSynthParams(), gain: 0.6 })
@@ -951,6 +1006,7 @@ describe('synth runtime characterization', () => {
       points: [{ id: 'point', timeSec: 0, value: 1_000, interpolation: 'linear' }],
       updatedAt: 1,
     }
+
     const ampDepth: AutomationEnvelope = {
       id: 'amp-depth',
       projectId: 'project-1',
@@ -961,6 +1017,7 @@ describe('synth runtime characterization', () => {
       points: [{ id: 'point', timeSec: 0, value: 0.8, interpolation: 'linear' }],
       updatedAt: 1,
     }
+
     const params = createDefaultSynthParams()
     const { filters, gains, runtime } = createRuntime([filterFrequency, ampDepth])
     runtime.setTrackSynth('track-1', { ...params, lfo: { ...params.lfo, enabled: true } })
@@ -1004,6 +1061,7 @@ describe('synth runtime characterization', () => {
     const params = createDefaultSynthParams()
     runtime.setTrackSynth('track-1', { ...params, polyphony: 1 })
     const clip = createMidiClip('clip-1')
+
     if (!clip.midi) throw new Error('Expected MIDI clip')
     clip.duration = 4
     clip.midi.notes = [
@@ -1033,6 +1091,7 @@ describe('synth runtime characterization', () => {
   test('reallocates future scheduled voices after a polyphony decrease and keeps them stoppable', () => {
     const { ctx, oscillators, runtime } = createRuntime()
     runtime.setTrackSynth('track-1', { ...createDefaultSynthParams(), polyphony: 3 })
+
     for (const [pitch, when] of [[60, 1], [62, 2], [64, 3]]) {
       runtime.triggerNote({ trackId: 'track-1', pitch, when, durationSec: 4, clipId: 'clip-1' })
     }
@@ -1049,6 +1108,7 @@ describe('synth runtime characterization', () => {
   test('keeps dense completed allocations bounded while stopClip and stopAll cancel their scheduled handles', () => {
     const { ctx, oscillators, runtime } = createRuntime()
     runtime.setTrackSynth('track-1', { ...createDefaultSynthParams(), polyphony: 1 })
+
     for (let index = 0; index < 32; index += 1) {
       runtime.triggerNote({
         trackId: 'track-1',
@@ -1093,6 +1153,7 @@ describe('synth runtime characterization', () => {
   test('does not release a recreated synth voice through a stale live generation', () => {
     const { ctx, oscillators, runtime } = createRuntime()
     const staleGeneration = runtime.getLiveVoiceGeneration('track-1')
+
     if (staleGeneration === undefined) throw new Error('Expected a synth generation.')
     runtime.startPreviewNote('track-1', 60)
     runtime.clearTrackSynth('track-1')
@@ -1115,6 +1176,7 @@ describe('synth runtime characterization', () => {
     runtime.clearTrackSynth('track-1')
     runtime.setTrackSynth('track-1', createDefaultSynthParams())
     runtime.startPreviewNote('track-1', 62)
+
     for (const ended of staleEnded) ended?.()
 
     ctx.currentTime = 0.01
@@ -1286,6 +1348,7 @@ describe('synth runtime characterization', () => {
 
     const initialPlan = createSynthEnvelopePlan(0, 86_400, envelope, 0.75, 0.0001)
     const levelAtRelease = estimateSynthEnvelopeLevel(initialPlan, 0.1)
+
     const releasePlan = {
       startTime: 0.1,
       attackEndTime: 0.1,
@@ -1297,6 +1360,7 @@ describe('synth runtime characterization', () => {
       sustain: levelAtRelease,
       levelAtNoteOff: levelAtRelease,
     }
+
     const voiceGain = gains.find((gain) => gain.gain.events.some((event) => event.kind === 'set' && event.time === 0.15))
 
     expect(voiceGain?.gain.events).toContainEqual({
@@ -1307,6 +1371,7 @@ describe('synth runtime characterization', () => {
     expect(oscillators.every((oscillator) => oscillator.stops.includes(0.156))).toBe(true)
   })
 })
+
 describe('synth runtime delivery', () => {
   test('skips equal params', () => {
     const { runtime } = createRuntime()

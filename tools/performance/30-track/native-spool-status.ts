@@ -4,7 +4,9 @@ export const createSpoolStatusObservation = () => {
   const statuses: { capturedFrames: number; droppedFrames: number; droppedBlocks: number; availableBlocks: number;
     queuedBlocks: number; fatal: boolean; active: boolean; configured: boolean;
     spool?: { state: number; error: number; systemError: number } | null }[] = []
+
   const summary = { count: 0, overwritten: 0, maxQueuedBlocks: 0, maxPoolBlocks: 0, failed: false }
+
   return {
     statuses, summary,
     observe(status: typeof statuses[number]) {
@@ -15,7 +17,9 @@ export const createSpoolStatusObservation = () => {
         || !Number.isInteger(status.availableBlocks) || !Number.isInteger(status.queuedBlocks)
         || status.availableBlocks < 0 || status.queuedBlocks < 0 || summary.maxPoolBlocks > 32
         || !status.spool || status.spool.error !== 0 || status.spool.systemError !== 0
+
       if (statuses.length === 64) { statuses.shift(); summary.overwritten++ }
+
       statuses.push(status)
     },
   }

@@ -5,13 +5,16 @@ import { createReliabilityResourceLedger } from '../reliability-characterization
 type FakeAudioConnection = {
   connectionType: 'fake'
 }
+
 type FakeMessage = {
   type: string
 }
+
 const fakeConnectionType: FakeAudioConnection['connectionType'] = 'fake'
 
 const eventTarget = () => {
   const listeners = new Map<string, Set<() => void>>()
+
   return {
     addEventListener: (type: string, listener: () => void) => {
       const current = listeners.get(type) ?? new Set()
@@ -31,11 +34,13 @@ const graph = () => {
   const connections: FakeAudioConnection[] = []
   const disconnections: FakeAudioConnection[] = []
   const ramps: number[] = []
+
   const source = Object.assign(Object.create(null), {
     connectionType: fakeConnectionType,
     connect: (target: FakeAudioConnection) => connections.push(target),
     disconnect: () => disconnections.push(source),
   })
+
   const gain = Object.assign(Object.create(null), {
     connectionType: fakeConnectionType,
     gain: {
@@ -47,8 +52,10 @@ const graph = () => {
     connect: (target: FakeAudioConnection) => connections.push(target),
     disconnect: () => disconnections.push(gain),
   })
+
   const messages: FakeMessage[] = []
   let processorError: (() => void) | null = null
+
   const port = Object.assign(Object.create(null), {
     onmessage: null,
     messages,
@@ -56,6 +63,7 @@ const graph = () => {
       port.messages.push(message)
     },
   })
+
   const worklet = Object.assign(Object.create(null), {
     port,
     connectionType: fakeConnectionType,
@@ -68,14 +76,17 @@ const graph = () => {
     connect: (target: FakeAudioConnection) => connections.push(target),
     disconnect: () => disconnections.push(worklet),
   })
+
   const track = Object.assign(Object.create(null), trackEvents, {
     readyState: 'live',
     muted: false,
     getSettings: () => ({ channelCount: 2 }),
   })
+
   const stream = Object.assign(Object.create(null), {
     getAudioTracks: () => [track],
   })
+
   const context = Object.assign(Object.create(null), contextEvents, {
     state: 'running',
     currentTime: 2,
@@ -83,6 +94,7 @@ const graph = () => {
     createMediaStreamSource: () => source,
     createGain: () => gain,
   })
+
   return { context, track, stream, source, gain, worklet, port, connections, disconnections, ramps }
 }
 
@@ -105,6 +117,7 @@ describe('recording runtime', () => {
     for (const terminal of ['complete', 'cancel', 'failure'] as const) {
       const fake = graph()
       const ledger = createReliabilityResourceLedger()
+
       const runtime = createRecordingRuntime({
         getContext: () => fake.context,
         loadWorklet: async () => undefined,
@@ -112,7 +125,9 @@ describe('recording runtime', () => {
         connectMonitor: () => () => undefined,
         resourceObserver: ledger,
       })
+
       await runtime.start(startOptions(fake.stream))
+
       if (terminal === 'complete') {
         const stopping = runtime.stop()
         fake.port.onmessage?.({ data: {
@@ -126,12 +141,14 @@ describe('recording runtime', () => {
         fake.track.dispatch('ended')
         await Bun.sleep(0)
       }
+
       runtime.cancel()
       ledger.assertEmpty()
     }
 
     const fake = graph()
     const ledger = createReliabilityResourceLedger()
+
     const runtime = createRecordingRuntime({
       getContext: () => fake.context,
       loadWorklet: async () => undefined,
@@ -139,6 +156,7 @@ describe('recording runtime', () => {
       connectMonitor: () => { throw new Error('startup-failure') },
       resourceObserver: ledger,
     })
+
     await expect(runtime.start(startOptions(fake.stream))).rejects.toThrow('startup-failure')
     ledger.assertEmpty()
   })
@@ -148,18 +166,23 @@ describe('recording runtime', () => {
     let sourceCreations = 0
     fake.context.createMediaStreamSource = () => {
       sourceCreations += 1
+
       return fake.source
     }
+
     let monitorTrack = ''
+
     const runtime = createRecordingRuntime({
       getContext: () => fake.context,
       loadWorklet: async () => undefined,
       createWorkletNode: () => fake.worklet,
       connectMonitor: (trackId) => {
         monitorTrack = trackId
+
         return () => undefined
       },
     })
+
     await runtime.start(startOptions(fake.stream))
     expect(sourceCreations).toBe(1)
     expect(monitorTrack).toBe('track-1')
@@ -171,12 +194,14 @@ describe('recording runtime', () => {
   test('enforces one session, validates channels, reports mute, and tears down device loss', async () => {
     const fake = graph()
     const statuses: string[] = []
+
     const runtime = createRecordingRuntime({
       getContext: () => fake.context,
       loadWorklet: async () => undefined,
       createWorkletNode: () => fake.worklet,
       connectMonitor: () => () => undefined,
     })
+
     runtime.subscribe((status) => statuses.push(status.state === 'failed' ? status.reason : status.state))
     await runtime.start(startOptions(fake.stream))
     await expect(runtime.start(startOptions(fake.stream))).rejects.toThrow('already active')
@@ -187,12 +212,14 @@ describe('recording runtime', () => {
     expect(fake.disconnections.length).toBeGreaterThan(1)
 
     const invalid = graph()
+
     const invalidRuntime = createRecordingRuntime({
       getContext: () => invalid.context,
       loadWorklet: async () => undefined,
       createWorkletNode: () => invalid.worklet,
       connectMonitor: () => () => undefined,
     })
+
     await expect(invalidRuntime.start({
       ...startOptions(invalid.stream),
       layout: 'stereo',
@@ -203,9 +230,11 @@ describe('recording runtime', () => {
   test('reserves startup synchronously and rolls back every allocated graph resource after setup failure', async () => {
     const fake = graph()
     let releaseLoad: (() => void) | undefined
+
     const loading = new Promise<void>((resolve) => {
       releaseLoad = resolve
     })
+
     const runtime = createRecordingRuntime({
       getContext: () => fake.context,
       loadWorklet: () => loading,
@@ -214,6 +243,7 @@ describe('recording runtime', () => {
         throw new Error('monitor-routing-failed')
       },
     })
+
     const firstStart = runtime.start(startOptions(fake.stream))
     await expect(runtime.start(startOptions(fake.stream))).rejects.toThrow('already active')
     releaseLoad?.()
@@ -224,24 +254,28 @@ describe('recording runtime', () => {
     expect(fake.disconnections).toContain(fake.gain)
 
     const retry = graph()
+
     const retryRuntime = createRecordingRuntime({
       getContext: () => retry.context,
       loadWorklet: async () => undefined,
       createWorkletNode: () => retry.worklet,
       connectMonitor: () => () => undefined,
     })
+
     await retryRuntime.start(startOptions(retry.stream))
     expect(retryRuntime.getStatus()).toMatchObject({ state: 'recording' })
   })
 
   test('configures epoch and punch before capture and finalizes at the synchronous context frame', async () => {
     const fake = graph()
+
     const runtime = createRecordingRuntime({
       getContext: () => fake.context,
       loadWorklet: async () => undefined,
       createWorkletNode: () => fake.worklet,
       connectMonitor: () => () => undefined,
     })
+
     await runtime.start({
       ...startOptions(fake.stream),
       punchOutContextFrame: 144_000,
@@ -277,6 +311,7 @@ describe('recording runtime', () => {
   test('waits for the audible monitor fade before disconnecting and resolves stop once', async () => {
     const fake = graph()
     let monitorDisconnects = 0
+
     const runtime = createRecordingRuntime({
       getContext: () => fake.context,
       loadWorklet: async () => undefined,
@@ -285,6 +320,7 @@ describe('recording runtime', () => {
         monitorDisconnects += 1
       },
     })
+
     await runtime.start(startOptions(fake.stream))
     const stopping = runtime.stop()
     fake.port.onmessage?.({ data: {
@@ -304,18 +340,22 @@ describe('recording runtime', () => {
 
   test('off and unarmed auto monitoring never connect to the mixer', async () => {
     const modes: readonly RecordingMonitorMode[] = ['off', 'auto']
+
     for (const monitor of modes) {
       const fake = graph()
       let monitorConnections = 0
+
       const runtime = createRecordingRuntime({
         getContext: () => fake.context,
         loadWorklet: async () => undefined,
         createWorkletNode: () => fake.worklet,
         connectMonitor: () => {
           monitorConnections += 1
+
           return () => undefined
         },
       })
+
       await runtime.start({ ...startOptions(fake.stream), monitor, armed: false })
       expect(monitorConnections).toBe(0)
       runtime.cancel()
@@ -326,16 +366,19 @@ describe('recording runtime', () => {
     const success = graph()
     const routed: unknown[] = []
     let terminations = 0
+
     const runtime = createRecordingRuntime({
       getContext: () => success.context,
       loadWorklet: async () => undefined,
       createWorkletNode: () => success.worklet,
       connectMonitor: () => () => undefined,
     })
+
     await runtime.start({
       ...startOptions(success.stream),
       createTransport: ({ worklet }) => {
         worklet.setMessageHandler((message) => routed.push(message))
+
         return {
           ready: Promise.resolve(),
           finalize: async () => ({ capturedFrames: 321 }),
@@ -344,6 +387,7 @@ describe('recording runtime', () => {
         }
       },
     })
+
     const blockMessage = {
       type: 'block',
       generation: 0,
@@ -354,6 +398,7 @@ describe('recording runtime', () => {
       channelCount: 1,
       buffer: new ArrayBuffer(2048 * Float32Array.BYTES_PER_ELEMENT),
     }
+
     success.port.onmessage?.({ data: {
       type: 'meter',
       generation: 0,
@@ -368,12 +413,14 @@ describe('recording runtime', () => {
     expect(runtime.getStatus()).toMatchObject({ state: 'complete', capturedFrames: 321 })
     expect(terminations).toBe(1)
     const startup = graph()
+
     const startupRuntime = createRecordingRuntime({
       getContext: () => startup.context,
       loadWorklet: async () => undefined,
       createWorkletNode: () => startup.worklet,
       connectMonitor: () => () => undefined,
     })
+
     let startupAborts = 0
     let startupTerminations = 0
     await expect(startupRuntime.start({
@@ -390,12 +437,14 @@ describe('recording runtime', () => {
     expect(startup.disconnections).toContain(startup.worklet)
 
     const finalize = graph()
+
     const finalizeRuntime = createRecordingRuntime({
       getContext: () => finalize.context,
       loadWorklet: async () => undefined,
       createWorkletNode: () => finalize.worklet,
       connectMonitor: () => () => undefined,
     })
+
     await finalizeRuntime.start({
       ...startOptions(finalize.stream),
       createTransport: () => ({
@@ -410,12 +459,14 @@ describe('recording runtime', () => {
 
     const cancelled = graph()
     let aborts = 0
+
     const cancelRuntime = createRecordingRuntime({
       getContext: () => cancelled.context,
       loadWorklet: async () => undefined,
       createWorkletNode: () => cancelled.worklet,
       connectMonitor: () => () => undefined,
     })
+
     await cancelRuntime.start({
       ...startOptions(cancelled.stream),
       createTransport: () => ({
@@ -434,6 +485,7 @@ describe('recording runtime', () => {
   test('fails and releases resources when the processor faults', async () => {
     const fake = graph()
     const ledger = createReliabilityResourceLedger()
+
     const runtime = createRecordingRuntime({
       getContext: () => fake.context,
       loadWorklet: async () => undefined,
@@ -441,6 +493,7 @@ describe('recording runtime', () => {
       connectMonitor: () => () => undefined,
       resourceObserver: ledger,
     })
+
     await runtime.start(startOptions(fake.stream))
     fake.worklet.onprocessorerror?.()
     await Promise.resolve()
@@ -455,6 +508,7 @@ describe('recording runtime', () => {
   test('bounds worklet finalization and releases resources after timeout', async () => {
     const fake = graph()
     const ledger = createReliabilityResourceLedger()
+
     const runtime = createRecordingRuntime({
       getContext: () => fake.context,
       loadWorklet: async () => undefined,
@@ -463,6 +517,7 @@ describe('recording runtime', () => {
       finalizeTimeoutMs: 1,
       resourceObserver: ledger,
     })
+
     await runtime.start(startOptions(fake.stream))
     await runtime.stop()
     expect(runtime.getStatus()).toEqual({

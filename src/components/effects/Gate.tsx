@@ -31,12 +31,16 @@ export default function Gate(props: GateProps) {
   const [gainReductionDb, setGainReductionDb] = createSignal(0)
   createEffect(() => {
     setGainReductionDb(0)
+
     if (!props.audioEngine) return
+
     const unsubscribe = props.targetId === 'master'
       ? props.audioEngine.subscribeMasterGateMeter(props.effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
       : props.audioEngine.subscribeTrackGateMeter(props.targetId, props.effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
+
     onCleanup(unsubscribe)
   })
+
   return (
     <EffectShell title="Gate" typeLabel="Audio" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="device-gate">
       <div class="device-gate-grid grid min-h-0 flex-1 gap-3 px-3 py-3">

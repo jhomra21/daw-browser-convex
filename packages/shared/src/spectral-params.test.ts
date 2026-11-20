@@ -15,6 +15,7 @@ describe('spectral params', () => {
       gateThresholdDb: -200,
       blur: 2,
     })
+
     expect(normalized.version).toBe(1)
     expect(normalized.state).toEqual({
       ...createDefaultSpectralParams(),

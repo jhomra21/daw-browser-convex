@@ -15,7 +15,9 @@ export function DashboardSamplesView(props: { model?: DashboardTimelineModel }) 
 
   const canDeleteSample = (model: DashboardTimelineModel, sample: ProjectSampleListItem) => {
     if (sample.count > 0) return false;
+
     if (isLocalId("project", model.projectMenu.currentProjectId)) return isLocalId("asset", sample.assetKey);
+
     return Boolean(model.projectMenu.currentUserId);
   };
 
@@ -24,12 +26,14 @@ export function DashboardSamplesView(props: { model?: DashboardTimelineModel }) 
     const projectId = model.projectMenu.currentProjectId;
     setDeletingSampleKey(sample.key);
     setDeleteError("");
+
     try {
       if (isLocalId("project", projectId)) {
         await deleteLocalAsset(projectId, sample.assetKey);
       } else {
         await deleteProjectSample(projectId, sample.assetKey);
       }
+
       model.refreshSamples();
     } catch {
       setDeleteError("Sample could not be deleted.");

@@ -35,12 +35,15 @@ type RecordFields = {
 const isRecord = <Value>(value: Value): value is Value & RecordFields => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
 )
+
 const isNumber = <Value>(value: Value): value is Value & number => (
   typeof value === 'number' && Number.isFinite(value)
 )
+
 const isInteger = <Value>(value: Value): value is Value & number => (
   typeof value === 'number' && Number.isSafeInteger(value)
 )
+
 const isString = <Value>(value: Value): value is Value & string => typeof value === 'string'
 
 const sourceIdentity = <Value>(value: Value): value is Value & WaveformSourceIdentity => (
@@ -77,6 +80,7 @@ const assetRecord = <Value>(value: Value): value is Value & PeakAssetRecord => (
 
 const parseChunkData = <Value>(value: Value): WaveformChunkData | null => {
   if (!Array.isArray(value) || value.length === 0) return null
+
   return value.every((channel) => channel instanceof Uint8Array) ? value : null
 }
 
@@ -94,17 +98,21 @@ const canUseIndexedDb = () => 'indexedDB' in globalThis && Boolean(globalThis.in
 
 async function getDb() {
   if (!canUseIndexedDb()) return null
+
   if (!dbPromise) {
     dbPromise = new Promise((resolve) => {
       try {
         const request = globalThis.indexedDB.open(DB_NAME, PEAK_DB_VERSION)
         request.onupgradeneeded = () => {
           const db = request.result
+
           if (db.objectStoreNames.contains(META_STORE)) db.deleteObjectStore(META_STORE)
+
           if (db.objectStoreNames.contains(CHUNK_STORE)) db.deleteObjectStore(CHUNK_STORE)
           db.createObjectStore(META_STORE)
           db.createObjectStore(CHUNK_STORE)
         }
+
         request.onsuccess = () => resolve(request.result)
         request.onerror = () => resolve(null)
       } catch {
@@ -112,12 +120,15 @@ async function getDb() {
       }
     })
   }
+
   return await dbPromise
 }
 
 export async function loadPeakAssetRecord(assetKey: string): Promise<PeakAssetRecord | null> {
   const db = await getDb()
+
   if (!db) return null
+
   return await new Promise((resolve) => {
     try {
       const request = db.transaction(META_STORE, 'readonly').objectStore(META_STORE).get(assetKey)
@@ -131,6 +142,7 @@ export async function loadPeakAssetRecord(assetKey: string): Promise<PeakAssetRe
 
 export async function storePeakAssetRecord(record: PeakAssetRecord): Promise<void> {
   const db = await getDb()
+
   if (!db) return
   await new Promise<void>((resolve, reject) => {
     try {
@@ -147,7 +159,9 @@ export async function storePeakAssetRecord(record: PeakAssetRecord): Promise<voi
 
 export async function loadPeakChunk(chunkKey: string): Promise<WaveformChunkData | null> {
   const db = await getDb()
+
   if (!db) return null
+
   return await new Promise((resolve) => {
     try {
       const request = db.transaction(CHUNK_STORE, 'readonly').objectStore(CHUNK_STORE).get(chunkKey)
@@ -161,6 +175,7 @@ export async function loadPeakChunk(chunkKey: string): Promise<WaveformChunkData
 
 export async function storePeakChunk(chunkKey: string, data: WaveformChunkData): Promise<void> {
   const db = await getDb()
+
   if (!db) return
   await new Promise<void>((resolve, reject) => {
     try {
@@ -193,6 +208,7 @@ export function getPeakChunkRecord(
 ): PeakChunkRecord {
   const intervalStart = chunkIndex * level.intervalsPerChunk
   const intervalCount = Math.min(level.intervalsPerChunk, level.intervalCount - intervalStart)
+
   return {
     chunkKey: peakChunkKey(assetKey, generationId, level.framesPerInterval, chunkIndex),
     generationId,
@@ -206,20 +222,25 @@ export function getPeakChunkRecord(
 
 export async function deletePeakGenerationChunks(assetKey: string, generationId: string): Promise<void> {
   const db = await getDb()
+
   if (!db) return
   await new Promise<void>((resolve, reject) => {
     try {
       const tx = db.transaction(CHUNK_STORE, 'readwrite')
       const prefix = `${assetKey}:${generationId}:`
+
       const cursorRequest = tx.objectStore(CHUNK_STORE).openCursor(
         IDBKeyRange.bound(prefix, `${prefix}\uffff`),
       )
+
       cursorRequest.onsuccess = () => {
         const cursor = cursorRequest.result
+
         if (!cursor) return
         cursor.delete()
         cursor.continue()
       }
+
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error ?? new Error('Failed to delete waveform generation.'))
       tx.onabort = () => reject(tx.error ?? new Error('Waveform generation deletion aborted.'))

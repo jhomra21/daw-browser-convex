@@ -7,6 +7,7 @@ import type { Observation } from "./expectations"
 // failures, rejections), what it says about cost (ceilings) and which checks ran (exercised); ids, step numbers and every other
 // count move whenever the product legitimately changes and are not part of it.
 export const seedRecordsFile = path.join(import.meta.dir, "seed-records.json")
+
 export const seedRecord = z.object({
   status: z.string(),
   // "invariant|class|domain" and "name|classification|domain", sorted: a multiset compared by value, never by id.
@@ -17,10 +18,13 @@ export const seedRecord = z.object({
   // Native activity counters. A live value above the recorded one is a regression.
   ceilings: z.record(z.string(), z.number()),
 })
+
 export type SeedRecord = z.infer<typeof seedRecord>
+
 export const seedRecords = z.object({ controller: z.array(seedRecord), hook: z.array(seedRecord) })
 
 const text = (value: string | null | undefined) => value ?? ""
+
 const summary = z.object({
   status: z.string().nullish(),
   failures: z.array(z.object({ invariant: z.string().nullish(), class: z.string().nullish(), domain: z.string().nullish() })).optional(),
@@ -31,6 +35,7 @@ const summary = z.object({
 
 export const recordOf = (summaryText: string): SeedRecord => {
   const parsed = summary.parse(JSON.parse(summaryText))
+
   return {
     status: parsed.status ?? "none",
     failures: (parsed.failures ?? []).map((failure) => `${text(failure.invariant)}|${text(failure.class)}|${text(failure.domain)}`).sort(),
@@ -61,19 +66,24 @@ export const judgeSeeds = (records: z.infer<typeof seedRecords> | undefined, fix
   const reasons: string[] = []
   // Each seed's live record, addressed into seed-records.json (rebase.ts diffs these against the file on a bless).
   const recorded: Observation[] = []
+
   for (let seed = first; seed < first + count; seed++) {
     const file = path.join(out, `seed-${seed}`, "summary.json")
+
     if (!existsSync(file)) {
       reasons.push(`seed ${seed}: no summary`)
       continue
     }
+
     const contents = readFileSync(file, "utf8")
     const live = recordOf(contents)
     recorded.push({ path: [seedRecordsKey, fixture, `#${seed - 1}`], value: live })
     const known = records?.[fixture][seed - 1]
+
     if (!known) reasons.push(`seed ${seed}: no invariant record in seed-records.json`)
     else reasons.push(...judgeRecord(known, live).map((reason) => `seed ${seed}: ${reason}`))
   }
+
   return { reasons, recorded }
 }
 
@@ -82,6 +92,7 @@ export const seedRecordsKey = "seedRecords"
 
 export const formatSeedRecords = (records: z.infer<typeof seedRecords>) => {
   const line = (record: SeedRecord) => `  ${JSON.stringify(record)}`
+
   return `{\n "controller": [\n${records.controller.map(line).join(",\n")}\n ],\n "hook": [\n${records.hook.map(line).join(",\n")}\n ]\n}\n`
 }
 

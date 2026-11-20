@@ -21,7 +21,9 @@ export const themeColorInputValue = (
     if (themeId === DEFAULT_DAW_THEME_ID) {
       return mode === "dark" ? DEFAULT_DARK_TIMELINE_SURFACE_INPUT_VALUE : DEFAULT_LIGHT_TIMELINE_SURFACE_INPUT_VALUE
     }
+
     return colorInputValue(tokens[TIMELINE_DEFAULT_TRACK_COLOR], FALLBACK_COLOR_INPUT_VALUE)
   }
+
   return colorInputValue(color, FALLBACK_COLOR_INPUT_VALUE)
 }

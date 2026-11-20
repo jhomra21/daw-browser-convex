@@ -13,6 +13,7 @@ describe('waveform level of detail', () => {
       backingPixelsPerCssPixel: 1,
       tiers: [1, 2, 4, 8, 16, 32, 64, 128],
     }
+
     expect(selectWaveformTier(input)?.framesPerInterval).toBe(8)
     expect(selectWaveformTier({
       ...input,
@@ -27,12 +28,14 @@ describe('waveform level of detail', () => {
       backingPixelsPerCssPixel: 1,
       tiers: [1, 2, 4],
     })?.framesPerInterval
+
     const second = selectWaveformTier({
       sourceFrameSpan: 20,
       cssSegmentWidth: 7,
       backingPixelsPerCssPixel: 1,
       tiers: [1, 2, 4],
     })?.framesPerInterval
+
     expect(first).toBe(1)
     expect(second).toBe(1)
   })

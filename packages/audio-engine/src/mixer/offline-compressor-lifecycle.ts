@@ -5,6 +5,7 @@ import { compressorWorklet } from '../worklet-manifest'
 export type OfflineProcessorTarget = { kind: 'track'; trackId: string } | { kind: 'master' }
 
 type OfflineCompressorChain = Pick<CompressorNodeChain, 'state' | 'fault'>
+
 type CompressorProcessorMessage = CompressorMeterFrame | {
   type?: string
   inputDb?: number
@@ -59,6 +60,7 @@ export function createOfflineCompressorLifecycle<Chain extends OfflineCompressor
   return {
     async create(target, instanceId, createChain) {
       let chain: Chain
+
       try {
         chain = await createChain()
       } catch (error) {
@@ -69,6 +71,7 @@ export function createOfflineCompressorLifecycle<Chain extends OfflineCompressor
           error,
         )
       }
+
       const processor: RetainedOfflineCompressor & { chain: Chain } = { target, instanceId, chain, protocolFault: null }
       setMessageHandler(chain, (data) => {
         if (readCompressorMeterFrame(data)) return
@@ -78,11 +81,13 @@ export function createOfflineCompressorLifecycle<Chain extends OfflineCompressor
         )
       })
       retained.push(processor)
+
       return chain
     },
     assertHealthy: () => {
       for (const processor of retained) {
         if (processor.protocolFault) throw processor.protocolFault
+
         if (processor.chain.state !== 'faulted') continue
         throw new OfflineProcessorError(
           { target: processor.target, instanceId: processor.instanceId, phase: 'runtime' },
@@ -96,6 +101,7 @@ export function createOfflineCompressorLifecycle<Chain extends OfflineCompressor
         setMessageHandler(processor.chain, null)
         teardown(processor.chain)
       }
+
       retained.length = 0
     },
   }

@@ -90,9 +90,11 @@ const isNativeHelperErrorCode = (value: string): value is NativeHelperErrorCode 
 
 const readIdentityPart = (value: DesktopJsonValue | undefined, name: string) => {
   const parsed = z.string().regex(/^(0|[1-9][0-9]*)$/).safeParse(value)
+
   if (!parsed.success) {
     throw new Error(`Native file helper returned an invalid ${name}.`)
   }
+
   return parsed.data
 }
 
@@ -110,6 +112,7 @@ const readIdentity = (
 const exactKeys = <Value extends object>(value: Value, keys: string[]) => {
   const actual = Object.keys(value).sort()
   const expected = [...keys].sort()
+
   return actual.length === expected.length && actual.every((key, index) => key === expected[index])
 }
 
@@ -119,14 +122,17 @@ const isJsonObject = (value: DesktopJsonValue): value is NativeHelperJsonObject 
 
 const parseObject = (result: InvocationResult): NativeHelperJsonObject => {
   let value: DesktopJsonValue
+
   try {
     value = JSON.parse(result.stdout)
   } catch {
     throw new Error("Native file helper returned invalid JSON.")
   }
+
   if (!isJsonObject(value)) {
     throw new Error("Native file helper returned an invalid reply.")
   }
+
   return value
 }
 
@@ -148,20 +154,27 @@ const parseFailure = <Value extends object>(value: Value, exitCode: number) => {
   if (!exactKeys(value, ["ok", "code"]) || !("ok" in value) || value.ok !== false || !("code" in value)) {
     throw new Error("Native file helper returned an invalid failure.")
   }
+
   const code = "code" in value ? z.string().safeParse(value.code) : undefined
+
   if (!code?.success || !isNativeHelperErrorCode(code.data)) {
     throw new Error("Native file helper returned an unknown failure.")
   }
+
   if (exitCode !== expectedExitCode(code.data)) {
     throw new Error("Native file helper returned a mismatched failure code.")
   }
+
   throw new NativeFileCapabilityError(code.data)
 }
 
 const parseEmptySuccess = (result: InvocationResult) => {
   const value = parseObject(result)
+
   if ("ok" in value && value.ok === false) parseFailure(value, result.exitCode)
+
   if (result.exitCode !== 0) throw new Error("Native file helper exited unsuccessfully.")
+
   if (!exactKeys(value, ["ok"]) || !("ok" in value) || value.ok !== true) {
     throw new Error("Native file helper returned an invalid success reply.")
   }
@@ -169,11 +182,15 @@ const parseEmptySuccess = (result: InvocationResult) => {
 
 const parseDirectorySuccess = (result: InvocationResult): FileIdentity => {
   const value = parseObject(result)
+
   if ("ok" in value && value.ok === false) parseFailure(value, result.exitCode)
+
   if (result.exitCode !== 0) throw new Error("Native file helper exited unsuccessfully.")
+
   if (!exactKeys(value, ["ok", "dev", "ino"]) || !("ok" in value) || value.ok !== true) {
     throw new Error("Native file helper returned an invalid directory reply.")
   }
+
   return readIdentity(
     "dev" in value ? value.dev : undefined,
     "ino" in value ? value.ino : undefined,
@@ -183,8 +200,11 @@ const parseDirectorySuccess = (result: InvocationResult): FileIdentity => {
 
 const parseFileSuccess = (invocation: InvocationResult): OutputFileGrant => {
   const value = parseObject(invocation)
+
   if ("ok" in value && value.ok === false) parseFailure(value, invocation.exitCode)
+
   if (invocation.exitCode !== 0) throw new Error("Native file helper exited unsuccessfully.")
+
   if (
     !exactKeys(value, ["ok", "parentDev", "parentIno", "basename", "file"])
     || !("ok" in value)
@@ -193,7 +213,9 @@ const parseFileSuccess = (invocation: InvocationResult): OutputFileGrant => {
   ) {
     throw new Error("Native file helper returned an invalid file reply.")
   }
+
   const basename = z.string().safeParse(value.basename)
+
   if (
     !basename.success
     || basename.data.length === 0
@@ -204,6 +226,7 @@ const parseFileSuccess = (invocation: InvocationResult): OutputFileGrant => {
   ) {
     throw new Error("Native file helper returned an invalid file reply.")
   }
+
   const grant: OutputFileGrant = {
     parent: readIdentity(
       "parentDev" in value ? value.parentDev : undefined,
@@ -212,13 +235,16 @@ const parseFileSuccess = (invocation: InvocationResult): OutputFileGrant => {
     ),
     basename: basename.data,
   }
+
   if (!("file" in value) || value.file === null) return grant
+
   if (
     !isJsonObject(value.file)
     || !exactKeys(value.file, ["dev", "ino"])
   ) {
     throw new Error("Native file helper returned an invalid target identity.")
   }
+
   return {
     ...grant,
     file: readIdentity(
@@ -238,6 +264,7 @@ const helperPath = () => {
     path.join(import.meta.dirname, "..", "..", ".native", "file-capability-helper"),
     path.join(process.cwd(), ".native", "file-capability-helper"),
   ]
+
   return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]
 }
 
@@ -253,8 +280,10 @@ const invoke = (
     signal?.throwIfAborted()
   } catch (error) {
     reject(error)
+
     return
   }
+
   const child = spawn(executable, arguments_, {
     env: { LANG: "C", LC_ALL: "C", PATH: "/usr/bin:/bin" },
     stdio: inheritedFd === undefined
@@ -262,13 +291,16 @@ const invoke = (
       : ["ignore", "pipe", "pipe", inheritedFd],
     windowsHide: true,
   })
+
   if (!child.stdout || !child.stderr) {
     child.kill()
     reject(indeterminateAfterSpawn
       ? new NativeFileCapabilityError("commit-indeterminate")
       : new Error("Native file helper pipes were unavailable."))
+
     return
   }
+
   const stdoutStream = child.stdout
   const stderrStream = child.stderr
   let output = ""
@@ -276,28 +308,34 @@ const invoke = (
   let settled = false
   let spawned = false
   let timeout: ReturnType<typeof setTimeout> | undefined
+
   const rejectTransport = (error: Error) => {
     reject(indeterminateAfterSpawn && spawned
       ? new NativeFileCapabilityError("commit-indeterminate")
       : error)
   }
+
   const finish = (result: () => void) => {
     if (settled) return
     settled = true
+
     if (timeout) clearTimeout(timeout)
     signal?.removeEventListener("abort", abort)
     result()
   }
+
   const abort = () => {
     child.kill()
     finish(() => rejectTransport(
       signal?.reason instanceof Error ? signal.reason : new Error("Native helper aborted."),
     ))
   }
+
   child.once("spawn", () => {
     spawned = true
   })
   signal?.addEventListener("abort", abort, { once: true })
+
   if (timeoutMs !== undefined) {
     // Non-commit operations are safe to terminate because they cannot publish.
     timeout = setTimeout(() => {
@@ -305,9 +343,11 @@ const invoke = (
       finish(() => rejectTransport(new Error("Native file helper timed out.")))
     }, timeoutMs)
   }
+
   child.once("error", (error) => finish(() => rejectTransport(error)))
   stdoutStream.on("data", (chunk: Buffer) => {
     output += chunk.toString("utf8")
+
     if (Buffer.byteLength(output) > maximumReplyBytes) {
       child.kill()
       finish(() => rejectTransport(new Error("Native file helper reply exceeded its limit.")))
@@ -315,6 +355,7 @@ const invoke = (
   })
   stderrStream.on("data", (chunk: Buffer) => {
     errorOutput += chunk.toString("utf8")
+
     if (Buffer.byteLength(errorOutput) > maximumErrorBytes) {
       child.kill("SIGKILL")
       finish(() => rejectTransport(new Error("Native file helper error output exceeded its limit.")))
@@ -323,12 +364,16 @@ const invoke = (
   child.once("close", (code) => finish(() => {
     if (errorOutput.length > 0) {
       rejectTransport(new Error("Native file helper wrote unexpected error output."))
+
       return
     }
+
     if (code === null || code < 0) {
       rejectTransport(new Error("Native file helper terminated unexpectedly."))
+
       return
     }
+
     resolve({ stdout: output, exitCode: code })
   }))
 })
@@ -336,9 +381,11 @@ const invoke = (
 export const createNativeFileCapabilityHelper = (executablePath?: string): NativeFileCapabilityHelper => {
   const executable = executablePath ?? helperPath()
   const supported = process.platform === "darwin" || process.platform === "linux"
+
   const commit = async (arguments_: string[], signal?: AbortSignal, inheritedFd?: number) => {
     signal?.throwIfAborted()
     const result = await invoke(executable, arguments_, undefined, undefined, inheritedFd, true)
+
     try {
       parseEmptySuccess(result)
     } catch (error) {
@@ -346,12 +393,15 @@ export const createNativeFileCapabilityHelper = (executablePath?: string): Nativ
       throw new NativeFileCapabilityError("commit-indeterminate")
     }
   }
+
   return {
     available: () => supported && existsSync(executable),
     selfTest: async (signal) => {
       if (!supported || !existsSync(executable)) return false
+
       try {
         parseEmptySuccess(await invoke(executable, ["self-test"], signal))
+
         return true
       } catch {
         return false
@@ -365,14 +415,18 @@ export const createNativeFileCapabilityHelper = (executablePath?: string): Nativ
     },
     retainFile: async (filePath, signal) => {
       const grant = parseFileSuccess(await invoke(executable, ["stat-file", filePath], signal))
+
       if (!grant.file) return grant
       signal?.throwIfAborted()
+
       const handle = await open(
         filePath,
         constants.O_RDWR | (constants.O_NOFOLLOW ?? 0),
       )
+
       try {
         const status = await handle.stat({ bigint: true })
+
         if (
           !status.isFile()
           || `${status.dev}` !== grant.file.device
@@ -380,6 +434,7 @@ export const createNativeFileCapabilityHelper = (executablePath?: string): Nativ
         ) {
           throw new NativeFileCapabilityError("target-changed")
         }
+
         return { ...grant, retained: { ...grant.file, handle } }
       } catch (error) {
         await handle.close()

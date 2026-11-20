@@ -56,13 +56,17 @@ function resolveMultiDragClipPlacements(
 ): MultiDragClipPlacement[] | null {
   const deltaIdx = anchorTargetIdx - multi.anchorOrigTrackIdx
   const placements: MultiDragClipPlacement[] = []
+
   for (const item of multi.items) {
     const clip = lookup.clipById.get(item.clipId)
+
     if (!clip) return null
     const targetIndex = Math.max(0, Math.min(tracks.length - 1, item.origTrackIdx + deltaIdx))
+
     if (!canPlaceClipOnTrack(tracks[targetIndex], clip)) return null
     placements.push({ item, clip, targetIndex })
   }
+
   return placements
 }
 
@@ -74,7 +78,9 @@ export function resolveNonDupTargetTrackId(
   if (laneIdx >= tracks.length) {
     return addedTrackDuringDrag
   }
+
   const boundedLaneIdx = Math.max(0, Math.min(laneIdx, tracks.length - 1))
+
   return tracks[boundedLaneIdx]?.id
 }
 
@@ -97,14 +103,17 @@ export function resolveNonDupClipDragPlacement(input: {
 
   const lookup = input.lookup ?? createTimelineTrackIndex(input.tracks)
   const targetTrackId = resolveNonDupTargetTrackId(input.tracks, input.laneIdx, input.addedTrackDuringDrag)
+
   if (!targetTrackId) {
     return { status: 'invalid' }
   }
 
   const targetTrack = lookup.trackById.get(targetTrackId)
+
   if (!targetTrack) {
     return { status: 'invalid' }
   }
+
   if (targetTrack.lockedBy && targetTrack.lockedBy !== input.userId) {
     return { status: 'invalid' }
   }
@@ -112,10 +121,13 @@ export function resolveNonDupClipDragPlacement(input: {
   if (input.multiDragging) {
     const multi = input.multiDragging
     const targetIdx = lookup.trackIndexById.get(targetTrackId) ?? -1
+
     if (targetIdx < 0) {
       return { status: 'invalid' }
     }
+
     const clipPlacements = resolveMultiDragClipPlacements(input.tracks, multi, targetIdx, lookup)
+
     if (!clipPlacements) {
       return { status: 'invalid' }
     }
@@ -126,14 +138,18 @@ export function resolveNonDupClipDragPlacement(input: {
 
     for (const { item, clip, targetIndex } of clipPlacements) {
       let nextStart = Math.max(0, input.desiredStart + (item.origStartSec - multi.anchorOrigStartSec))
+
       if (input.gridEnabled) {
         nextStart = quantizeSecToGrid(nextStart, input.bpm, input.gridDenominator, 'round')
       }
+
       const trackClips = [...input.tracks[targetIndex].clips.filter((trackClip) => !selectedClipIds.has(trackClip.id)), ...(adds.get(targetIndex) ?? [])]
       const overlap = willOverlap(trackClips, clip.id, nextStart, clip.duration)
+
       const safeStart = input.gridEnabled
         ? calcNonOverlapStartGridAligned(trackClips, clip.id, nextStart, clip.duration, input.bpm, input.gridDenominator)
         : (overlap ? calcNonOverlapStart(trackClips, clip.id, nextStart, clip.duration) : nextStart)
+
       const trackId = input.tracks[targetIndex].id
       moves.push({ clipId: item.clipId, trackId, startSec: safeStart })
       const existingAdds = adds.get(targetIndex) ?? []
@@ -142,6 +158,7 @@ export function resolveNonDupClipDragPlacement(input: {
     }
 
     const anchorMove = moves.find((move) => move.clipId === multi.anchorClipId)
+
     if (!anchorMove) {
       return { status: 'invalid' }
     }
@@ -162,15 +179,18 @@ export function resolveNonDupClipDragPlacement(input: {
   const movingClip = lookup.clipById.get(clipId)
   const sourceTrackIndex = lookup.trackIndexById.get(input.draggingIds.trackId) ?? -1
   const targetTrackIndex = lookup.trackIndexById.get(targetTrackId) ?? -1
+
   if (!movingClip || sourceTrackIndex < 0 || targetTrackIndex < 0) {
     return { status: 'invalid' }
   }
+
   if (!canPlaceClipOnTrack(targetTrack, movingClip)) {
     return { status: 'invalid' }
   }
 
   const destinationClips = targetTrack.clips.filter((clip) => clip.id !== clipId)
   const overlap = willOverlap(destinationClips, sourceTrackIndex === targetTrackIndex ? clipId : null, input.desiredStart, movingClip.duration)
+
   const safeStart = input.gridEnabled
     ? calcNonOverlapStartGridAligned(destinationClips, sourceTrackIndex === targetTrackIndex ? clipId : null, input.desiredStart, movingClip.duration, input.bpm, input.gridDenominator)
     : (overlap ? calcNonOverlapStart(destinationClips, sourceTrackIndex === targetTrackIndex ? clipId : null, input.desiredStart, movingClip.duration) : input.desiredStart)
@@ -196,18 +216,22 @@ export function planDuplicatedClipPlacements(input: {
 }): DuplicatedClipPlacement[] | null {
   const lookup = input.lookup ?? createTimelineTrackIndex(input.tracks)
   const targetIndex = lookup.trackIndexById.get(input.targetTrackId) ?? -1
+
   if (targetIndex < 0) return null
 
   const placements: DuplicatedClipPlacement[] = []
   const pendingByTrackIndex = new Map<number, RuntimeClip[]>()
+
   const addPlacement = (originalClip: RuntimeClip, trackIndex: number, nextStart: number): void => {
     const existingClips = input.tracks[trackIndex].clips
     const pendingClips = pendingByTrackIndex.get(trackIndex) ?? []
     const trackClips = [...existingClips, ...pendingClips]
     const overlap = willOverlap(trackClips, null, nextStart, originalClip.duration)
+
     const safeStart = input.gridEnabled
       ? calcNonOverlapStartGridAligned(trackClips, null, nextStart, originalClip.duration, input.bpm, input.gridDenominator)
       : (overlap ? calcNonOverlapStart(trackClips, null, nextStart, originalClip.duration) : nextStart)
+
     const placedClip = { ...originalClip, startSec: safeStart }
     const nextPending = pendingByTrackIndex.get(trackIndex) ?? []
     nextPending.push(placedClip)
@@ -222,20 +246,28 @@ export function planDuplicatedClipPlacements(input: {
   if (input.multiDragging) {
     const multi = input.multiDragging
     const clipPlacements = resolveMultiDragClipPlacements(input.tracks, multi, targetIndex, lookup)
+
     if (!clipPlacements) return null
+
     for (const { item, clip, targetIndex: trackIndex } of clipPlacements) {
       let nextStart = Math.max(0, input.desiredStart + (item.origStartSec - multi.anchorOrigStartSec))
+
       if (input.gridEnabled) {
         nextStart = quantizeSecToGrid(nextStart, input.bpm, input.gridDenominator, 'round')
       }
+
       addPlacement(clip, trackIndex, nextStart)
     }
+
     return placements
   }
 
   const originalClip = lookup.clipById.get(input.draggingIds.clipId)
+
   if (!originalClip) return null
+
   if (!canPlaceClipOnTrack(input.tracks[targetIndex], originalClip)) return null
   addPlacement(originalClip, targetIndex, input.desiredStart)
+
   return placements
 }

@@ -21,13 +21,16 @@ const actorId = "9d8ab7cb-6203-4a25-84d5-b7a58436b7f4"
 const temporaryDirectory = async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "daw-host-identity-"))
   directories.push(directory)
+
   return directory
 }
 
 const writeIdentity = async (file: string, contents: string, mode = 0o600) => {
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 })
+
   if (process.platform !== "win32") await chmod(path.dirname(file), 0o700)
   await writeFile(file, contents, { mode })
+
   if (process.platform !== "win32") await chmod(file, mode)
 }
 
@@ -57,6 +60,7 @@ describe("host actor identity", () => {
       version: "v1",
       actorId: first,
     })
+
     if (process.platform !== "win32") {
       expect((await lstat(path.dirname(file))).mode & 0o777).toBe(0o700)
       expect((await lstat(file)).mode & 0o777).toBe(0o600)
@@ -141,6 +145,7 @@ describe("host actor identity", () => {
     const target = path.join(root, "target.json")
     const file = path.join(directory, "host-actor-v1.json")
     await mkdir(directory, { mode: 0o700 })
+
     if (process.platform !== "win32") await chmod(directory, 0o700)
     await writeFile(target, "unchanged")
     await symlink(target, file, "file")
@@ -155,6 +160,7 @@ describe("host actor identity", () => {
     const root = await temporaryDirectory()
     const file = path.join(root, "identity", "host-actor-v1.json")
     await mkdir(file, { recursive: true, mode: 0o700 })
+
     if (process.platform !== "win32") {
       await chmod(path.dirname(file), 0o700)
       await chmod(file, 0o700)

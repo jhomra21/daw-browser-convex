@@ -14,6 +14,7 @@ export const resolveGraphProcessor = (
   for (const node of graph.nodes) {
     if (nodeId !== undefined && node.id !== nodeId) continue
     const processor = node.processorOrder.find((candidate) => candidate.id === instanceId)
+
     if (processor) {
       return {
         node,
@@ -22,5 +23,6 @@ export const resolveGraphProcessor = (
       }
     }
   }
+
   return undefined
 }

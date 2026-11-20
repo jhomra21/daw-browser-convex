@@ -32,6 +32,7 @@ const asset = (id: string, complete: boolean): LocalProjectAssetRow => ({
 
 test('projects complete local assets while omitting incomplete clip sources', () => {
   const track = buildTimelineTrackRow({ id: 'track-1', index: 0, timestamp: 1 })
+
   const snapshot = projectLocalControlSnapshotV1({
     projectId: 'project-1',
     fallbackMetadata: metadata,
@@ -47,12 +48,14 @@ test('projects complete local assets while omitting incomplete clip sources', ()
     projectState: [],
     revision: 0,
   })
+
   expect(snapshot.assets.map((entry) => entry.id)).toEqual(['complete'])
   expect(snapshot.clips[0]?.source).toBeUndefined()
 })
 
 test('omits assets that violate canonical limits while retaining unrelated snapshot data', () => {
   const track = buildTimelineTrackRow({ id: 'track-1', index: 0, timestamp: 1 })
+
   const snapshot = projectLocalControlSnapshotV1({
     projectId: 'project-1',
     fallbackMetadata: metadata,
@@ -74,26 +77,32 @@ test('omits assets that violate canonical limits while retaining unrelated snaps
     projectState: [],
     revision: 0,
   })
+
   expect(snapshot.assets.map((entry) => entry.id)).toEqual(['complete'])
   expect(snapshot.clips[0]?.source).toBeUndefined()
   expect(snapshot.tracks.map((entry) => entry.id)).toEqual(['track-1'])
 })
+
 test('v2 retains large locally imported audio assets', () => {
   const large = { ...asset('large', true), sizeBytes: 105_840_044 }
+
   const input = {
     projectId: 'project-1', fallbackMetadata: metadata,
     entities: [], assets: [large], projectState: [], revision: 0,
   }
+
   expect(projectLocalControlSnapshotV2(input).assets.map((entry) => entry.id)).toEqual(['large'])
   expect(projectLocalControlSnapshotV1(input).assets).toEqual([])
 })
 
 test('omits tracks with malformed nested routing before shared projection', () => {
   const valid = buildTimelineTrackRow({ id: 'track-valid', index: 0, timestamp: 1 })
+
   const malformed = {
     ...buildTimelineTrackRow({ id: 'track-malformed', index: 1, timestamp: 1 }),
     sends: [{ targetId: 42, amount: 1 }],
   }
+
   const snapshot = projectLocalControlSnapshotV1({
     projectId: 'project-1',
     fallbackMetadata: metadata,
@@ -105,15 +114,18 @@ test('omits tracks with malformed nested routing before shared projection', () =
     projectState: [],
     revision: 0,
   })
+
   expect(snapshot.tracks.map((track) => track.id)).toEqual(['track-valid'])
 })
 
 test('omits tracks with oversized routing IDs or duplicate send targets', () => {
   const valid = buildTimelineTrackRow({ id: 'track-valid', index: 0, timestamp: 1 })
+
   const oversized = {
     ...buildTimelineTrackRow({ id: 'track-oversized', index: 1, timestamp: 1 }),
     groupId: 'a'.repeat(257),
   }
+
   const duplicateTargets = {
     ...buildTimelineTrackRow({ id: 'track-duplicate', index: 2, timestamp: 1 }),
     sends: [
@@ -121,6 +133,7 @@ test('omits tracks with oversized routing IDs or duplicate send targets', () => 
       { targetId: 'return-1', amount: 0.5, tap: 'pre-fader' },
     ],
   }
+
   const snapshot = projectLocalControlSnapshotV1({
     projectId: 'project-1',
     fallbackMetadata: metadata,
@@ -133,6 +146,7 @@ test('omits tracks with oversized routing IDs or duplicate send targets', () => 
     projectState: [],
     revision: 0,
   })
+
   expect(snapshot.tracks.map((track) => track.id)).toEqual(['track-valid'])
 })
 
@@ -154,6 +168,7 @@ test('falls back from invalid metadata signatures while preserving canonical bou
     }],
     revision: 0,
   })
+
   expect(snapshot.project.timeSignature).toEqual({ numerator: 4, denominator: 4 })
 
   const boundary = projectLocalControlSnapshotV1({
@@ -173,5 +188,6 @@ test('falls back from invalid metadata signatures while preserving canonical bou
     }],
     revision: 0,
   })
+
   expect(boundary.project.timeSignature).toEqual({ numerator: 32, denominator: 32 })
 })

@@ -65,48 +65,63 @@ export const createMidiRecordingCheckpointController = <T>(
     ) return
     timer = setTimer(() => {
       timer = null
+
       if (options.isActive()) void request().catch(() => undefined)
     }, options.delayMs ?? 1_000)
   }
 
   const request = (final = false): Promise<void> => {
     clear()
+
     if (cancelled) return Promise.resolve()
+
     if (!final && retryAttempts >= (options.maxRetryAttempts ?? 3)) return Promise.resolve()
+
     if (write) {
       pending = true
+
       if (final) finalPending = true
+
       if (!final) return write
+
       return write.catch(async () => {
         // A final request cannot be satisfied by a failed periodic write.
         // Retry from the latest snapshot after the in-flight write releases.
         await Promise.resolve()
+
         return request(true)
       })
     }
+
     const run = async () => {
       do {
         pending = false
+
         if (cancelled) return
         const snapshot = options.snapshot()
         const isFinal = final || finalPending
         finalPending = false
+
         try {
           await options.persist(snapshot.checkpoint, isFinal, abortController.signal)
         } catch (error) {
           retryAttempts += 1
           throw error
         }
+
         lastEventCount = snapshot.eventCount
         lastVersion = snapshot.version
         lastCheckpoint = snapshot.checkpoint
         retryAttempts = 0
       } while (pending || options.state().version > lastVersion)
     }
+
     write = run().finally(() => {
       write = null
+
       if (options.isActive()) schedule()
     })
+
     return write
   }
 

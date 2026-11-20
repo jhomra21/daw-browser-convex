@@ -29,11 +29,13 @@ export function useTimelineIdentity(
   const rememberTrackHistoryRef = (track: Pick<Track, 'id' | 'historyRef'> | null | undefined) => {
     const trackId = track?.id
     const historyRef = track?.historyRef
+
     if (!trackId || !historyRef) return
     setTrackHistoryRefsById((current) => {
       if (current.get(trackId) === historyRef) return current
       const next = new Map(current)
       next.set(trackId, historyRef)
+
       return next
     })
   }
@@ -41,11 +43,13 @@ export function useTimelineIdentity(
   const rememberTrackName = (track: Pick<Track, 'historyRef' | 'name'> | null | undefined) => {
     const historyRef = track?.historyRef
     const name = track?.name
+
     if (!historyRef || !name) return
     setTrackNamesByHistoryRef((current) => {
       if (current.get(historyRef) === name) return current
       const next = new Map(current)
       next.set(historyRef, name)
+
       return next
     })
   }
@@ -58,11 +62,13 @@ export function useTimelineIdentity(
   const rememberClipHistoryRef = (clip: Pick<Track['clips'][number], 'id' | 'historyRef'> | null | undefined) => {
     const clipId = clip?.id
     const historyRef = clip?.historyRef
+
     if (!clipId || !historyRef) return
     setClipHistoryRefsById((current) => {
       if (current.get(clipId) === historyRef) return current
       const next = new Map(current)
       next.set(clipId, historyRef)
+
       return next
     })
   }
@@ -75,40 +81,53 @@ export function useTimelineIdentity(
 
   createEffect(() => {
     const data = options.serverData()
+
     if (!data) return
 
     setTrackHistoryRefsById((current) => {
       let next: Map<Track['id'], string> | null = null
+
       for (const track of data.tracks) {
         const trackId = track._id
+
         if (current.has(trackId)) continue
+
         if (!next) next = new Map(current)
         next.set(trackId, trackId)
       }
+
       return next ?? current
     })
 
     setTrackNamesByHistoryRef((current) => {
       let next: Map<string, string> | null = null
+
       for (let index = 0; index < data.tracks.length; index++) {
         const trackId = data.tracks[index]._id
         const historyRef = trackHistoryRefsById().get(trackId) ?? trackId
         const name = data.tracks[index]?.name
+
         if (!name || current.get(historyRef) === name) continue
+
         if (!next) next = new Map(current)
         next.set(historyRef, name)
       }
+
       return next ?? current
     })
 
     setClipHistoryRefsById((current) => {
       let next: Map<string, string> | null = null
+
       for (const clip of data.clips) {
         const clipId = String(clip._id)
+
         if (current.has(clipId)) continue
+
         if (!next) next = new Map(current)
         next.set(clipId, clipId)
       }
+
       return next ?? current
     })
   })

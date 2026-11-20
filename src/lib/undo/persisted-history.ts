@@ -45,6 +45,7 @@ const isNumber = (value: JsonValue): value is number => isJsonNumber(value) && N
 const isBoolean = (value: JsonValue): value is boolean => isJsonBoolean(value)
 const isScope = (value: JsonValue) => value === 'shared' || value === 'local'
 const isAudioWarp = (value: JsonValue) => normalizeAudioWarp(value) !== undefined
+
 const isClipFades = (value: JsonValue) => isJsonObject(value)
   && isNumber(value.fadeInSec)
   && isNumber(value.fadeOutSec)
@@ -162,6 +163,7 @@ const isTrackAutomationSnapshot = (value: JsonValue) => (
 const isTrackEffectSnapshot = (value: JsonValue) => {
   if (!isJsonObject(value)) return false
   const audioEffects = value.audioEffects
+
   return (audioEffects === undefined || (Array.isArray(audioEffects) && audioEffects.every((effect) => (
     isJsonObject(effect)
     && isAudioEffectKind(effect.effect)
@@ -319,7 +321,9 @@ function isHistoryEntry(value: JsonValue, version: number): value is JsonObject 
 function readHistoryEntries(entries: JsonValue[], version: number): HistoryEntry[] {
   return entries.flatMap((entry): HistoryEntry[] => {
     if (!isHistoryEntry(entry, version)) return []
+
     if (version >= PERSISTED_HISTORY_VERSION) return [entry]
+
     if (entry.type === 'section-edit') {
       return [{
         ...entry,
@@ -329,6 +333,7 @@ function readHistoryEntries(entries: JsonValue[], version: number): HistoryEntry
         },
       }]
     }
+
     if (entry.type === 'clip-delete' && entry.data.items.some((item) => !item.clip.recoveryId)) {
       return [{
         ...entry,
@@ -342,18 +347,21 @@ function readHistoryEntries(entries: JsonValue[], version: number): HistoryEntry
         },
       }]
     }
+
     return [entry]
   })
 }
 
 export function normalizePersistedHistory<Value>(value: Value): PersistedHistory {
   const parsed = z.json().safeParse(value)
+
   if (parsed.success && isPersistedHistoryEnvelope(parsed.data)) {
     return {
       undo: readHistoryEntries(parsed.data.undo, parsed.data.version),
       redo: readHistoryEntries(parsed.data.redo, parsed.data.version),
     }
   }
+
   return { undo: [], redo: [] }
 }
 

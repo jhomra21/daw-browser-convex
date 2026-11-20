@@ -80,6 +80,7 @@ describe('timeline range selection helpers', () => {
       { trackId: 'a', topPx: 0, heightPx: 100, clipLaneHeightPx: 64, automationHeightPx: 36 },
       { trackId: 'b', topPx: 100, heightPx: 80, clipLaneHeightPx: 64, automationHeightPx: 16 },
     ]
+
     expect(trackIndexAtY(rows, 90)).toBe(0)
     expect(trackIdsInYRange(rows, 90, 120)).toEqual(['a', 'b'])
   })
@@ -129,6 +130,7 @@ describe('timeline section edit helpers', () => {
       section: { range: { startSec: 0, endSec: 4 }, trackIds: ['track-1'] },
       bpm: 120,
     })
+
     expect(fragments[0]?.clip.startSec).toBe(1)
     expect(4 + (fragments[0]?.startOffsetSec ?? 0)).toBe(5)
   })
@@ -139,6 +141,7 @@ describe('timeline section edit helpers', () => {
       section: { range: { startSec: 1, endSec: 4 }, trackIds: ['track-1'] },
       bpm: 120,
     })
+
     expect(fragment?.startOffsetSec).toBe(1)
     expect(fragment?.duration).toBe(1)
   })
@@ -149,6 +152,7 @@ describe('timeline section edit helpers', () => {
       section: { range: { startSec: 1, endSec: 4 }, trackIds: ['track-1'] },
       bpm: 120,
     })
+
     expect(fragment?.clip.startSec).toBe(0)
     expect(fragment?.clip.duration).toBe(1)
   })
@@ -159,6 +163,7 @@ describe('timeline section edit helpers', () => {
       section: { range: { startSec: 1, endSec: 3 }, trackIds: ['track-1'] },
       bpm: 120,
     })
+
     expect(fragment?.clip.timing?.midiOffsetBeats).toBe(2)
   })
 
@@ -168,6 +173,7 @@ describe('timeline section edit helpers', () => {
       section: { range: { startSec: 1, endSec: 4 }, trackIds: ['track-1'] },
       bpm: 120,
     })
+
     expect(fragment?.clip.startSec).toBe(2)
     expect(fragment?.clip.duration).toBe(1)
   })
@@ -178,6 +184,7 @@ describe('timeline section edit helpers', () => {
       section: { range: { startSec: 2, endSec: 6 }, trackIds: ['track-1'] },
       bpm: 120,
     })
+
     expect(fragment?.clip.startSec).toBe(0)
     expect(fragment?.clip.duration).toBe(4)
   })
@@ -188,6 +195,7 @@ describe('timeline section edit helpers', () => {
       section: { range: { startSec: 1, endSec: 4 }, trackIds: ['track-1'] },
       bpm: 120,
     })
+
     expect(fragment?.clip.duration).toBe(3)
     expect(fragment?.clip.timing?.leftPadSec).toBe(1)
     expect(fragment?.clip.timing?.bufferOffsetSec).toBe(1)
@@ -199,6 +207,7 @@ describe('timeline section edit helpers', () => {
       section: { range: { startSec: 1, endSec: 4 }, trackIds: ['track-1'] },
       bpm: 120,
     })
+
     expect(patch.deleteClipIds).toEqual(['clip-1'])
   })
 
@@ -212,6 +221,7 @@ describe('timeline section edit helpers', () => {
       ])],
       section: { range: { startSec: 1, endSec: 8 }, trackIds: ['track-1'] },
     })
+
     expect(ids).toEqual(['left', 'inside', 'right'])
   })
 
@@ -221,6 +231,7 @@ describe('timeline section edit helpers', () => {
       section: { range: { startSec: 1, endSec: 4 }, trackIds: ['track-1'] },
       bpm: 120,
     })
+
     expect(patch.updateClips[0]?.timing).toEqual({ startSec: 0, duration: 1 })
   })
 
@@ -230,6 +241,7 @@ describe('timeline section edit helpers', () => {
       section: { range: { startSec: 1, endSec: 4 }, trackIds: ['track-1'] },
       bpm: 120,
     })
+
     expect(patch.updateClips[0]?.timing.startSec).toBe(4)
     expect(patch.updateClips[0]?.timing.duration).toBe(2)
     expect(patch.updateClips[0]?.timing.bufferOffsetSec).toBe(1)
@@ -241,6 +253,7 @@ describe('timeline section edit helpers', () => {
       section: { range: { startSec: 1, endSec: 4 }, trackIds: ['track-1'] },
       bpm: 120,
     })
+
     expect(patch.updateClips[0]?.timing).toEqual({
       startSec: 4,
       duration: 4,
@@ -263,6 +276,7 @@ describe('timeline section edit helpers', () => {
       section: { range: { startSec: 1, endSec: 4 }, trackIds: ['track-1'] },
       bpm: 120,
     })
+
     expect(patch.updateClips[0]?.timing).toEqual({
       startSec: 4,
       duration: 4,
@@ -279,6 +293,7 @@ describe('timeline section edit helpers', () => {
       section: { range: { startSec: 2, endSec: 6 }, trackIds: ['track-1'] },
       bpm: 120,
     })
+
     expect(patch.updateClips[0]?.timing.duration).toBe(2)
     expect(patch.createClips[0]?.clip.startSec).toBe(6)
     expect(patch.createClips[0]?.clip.duration).toBe(2)
@@ -286,11 +301,13 @@ describe('timeline section edit helpers', () => {
 
   test('section copy clears fade endpoints at trimmed boundaries and preserves full copies', () => {
     const fades = { fadeInSec: 1, fadeOutSec: 1, fadeInCurve: 0, fadeOutCurve: 0 }
+
     const [trimmed] = buildSectionClipFragments({
       tracks: [track([clip({ id: 'clip-1', startSec: 0, duration: 8, fades })])],
       section: { range: { startSec: 2, endSec: 6 }, trackIds: ['track-1'] },
       bpm: 120,
     })
+
     expect(trimmed?.clip.fades).toMatchObject({ fadeInSec: 0, fadeOutSec: 0, fadeInCurve: 0, fadeOutCurve: 0 })
 
     const [whole] = buildSectionClipFragments({
@@ -298,6 +315,7 @@ describe('timeline section edit helpers', () => {
       section: { range: { startSec: 1, endSec: 7 }, trackIds: ['track-1'] },
       bpm: 120,
     })
+
     expect(whole?.clip.fades).toMatchObject(fades)
   })
 
@@ -312,6 +330,7 @@ describe('timeline section edit helpers', () => {
       section: { range: { startSec: 2, endSec: 6 }, trackIds: ['track-1'] },
       bpm: 120,
     })
+
     expect(patch.updateClips[0]?.timing.fades).toMatchObject({ fadeInSec: 1, fadeOutSec: 0, fadeInCurve: 0, fadeOutCurve: 0 })
     expect(patch.createClips[0]?.clip.fades).toMatchObject({ fadeInSec: 0, fadeOutSec: 1, fadeInCurve: 0, fadeOutCurve: 0 })
   })
@@ -324,7 +343,9 @@ describe('timeline section edit helpers', () => {
   test('automation paste replaces destination range points', () => {
     const fragment = buildAutomationFragment(envelope(), { startSec: 1, endSec: 5 })
     expect(fragment).not.toBeNull()
+
     if (!fragment) return
+
     const pasted = pasteAutomationFragment({
       envelope: envelope(),
       fragment,
@@ -332,6 +353,7 @@ describe('timeline section edit helpers', () => {
       destinationStartSec: 8,
       updatedAt: 2,
     })
+
     expect(pasted.points.some((point) => point.timeSec === 8)).toBe(true)
     expect(pasted.points.some((point) => point.timeSec === 10)).toBe(false)
   })

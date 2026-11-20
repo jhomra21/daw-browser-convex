@@ -19,10 +19,12 @@ export const nativeTransportFor = (
     cycleActive: snapshot.transport.loopEnabled,
     transitionId,
   }
+
   if (snapshot.transport.loopEnabled) {
     transport.cycleStartSec = snapshot.transport.loopStartSec
     transport.cycleEndSec = snapshot.transport.loopEndSec
   }
+
   return transport
 }
 
@@ -50,6 +52,7 @@ const planarPageBytes = (
       index * bytesPerPlane,
     )
   })
+
   return output
 }
 
@@ -64,18 +67,25 @@ export const nativeVstParameterEventsForSnapshot = (
   includeCurrent = true,
 ) => {
   const plan = snapshot.nativeExternalAttachmentPlan
+
   if (!plan) return []
+
   return plan.attachments.filter((attachment) => !attachment.bypassed).flatMap((attachment) => {
     const descriptors = new Map((attachment.parameters ?? []).map((parameter) => [parameter.id, parameter]))
     const events = new Map<string, { id: number; value: number; sampleOffset: number }>()
+
     for (const [rawId, value] of Object.entries(attachment.parameterOverrides ?? {})) {
       const id = Number(rawId)
+
       if (!descriptors.has(id) || !Number.isFinite(value)) continue
+
       if (includeCurrent) events.set(`${id}:0`, { id, value: Math.min(1, Math.max(0, value)), sampleOffset: 0 })
     }
+
     const eventsInBlock = [...events.values()]
       .sort((left, right) => left.sampleOffset - right.sampleOffset || left.id - right.id)
       .slice(0, attachment.workerTransport.maximumEventsPerBlock)
+
     return eventsInBlock.length > 0 ? [{ instanceId: attachment.instanceId, events: eventsInBlock }] : []
   })
 }
@@ -93,7 +103,9 @@ export const nativeSnapshotLimitations = (snapshot: LivePlaybackSnapshot) => [
 
 export const nativeSnapshotSupportError = (snapshot: LivePlaybackSnapshot): string | undefined => {
   const limitation = nativeSnapshotLimitations(snapshot)[0]
+
   if (limitation) return limitation.reason
+
   if (snapshot.requiresNativePlayback && !snapshot.nativeExternalAttachmentPlan)
     return "The active VST3 attachment plan is unavailable."
 }
@@ -109,13 +121,18 @@ export const validateInstrumentAssetBudget = (
 ) => {
   const bytesById = new Map(assets.map((asset) =>
     [asset.assetId, asset.frameCount * asset.channelCount * Float32Array.BYTES_PER_ELEMENT]))
+
   for (const instrument of instruments) {
     if (instrument.kind === "synth") continue
+
     const assetIds = new Set(instrument.kind === "granular"
       ? [instrument.assetId]
       : instrument.zones.map((zone) => zone.assetId))
+
     let bytes = 0
+
     for (const assetId of assetIds) bytes += bytesById.get(assetId) ?? 0
+
     if (bytes > maximumBytes) throw new Error(errorMessage)
   }
 }
@@ -139,5 +156,6 @@ export const attachmentsChanged = (previous: LivePlaybackSnapshot, snapshot: Liv
     states: candidate.nativeExternalAttachmentStates,
     requirements: candidate.nativeExternalAttachmentStateRequirements,
   })
+
   return bindings(snapshot) !== bindings(previous)
 }

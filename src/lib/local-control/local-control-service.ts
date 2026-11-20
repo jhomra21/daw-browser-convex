@@ -64,21 +64,28 @@ import {
 const commitLifetimeMs = 90 * 24 * 60 * 60 * 1_000
 const approvalLifetimeMs = 10 * 60 * 1_000
 const apiVersion = 'v1'
+
 const hashApprovalToken = (value: string) => (
   Array.from(sha256(new TextEncoder().encode(value)), (byte) => byte.toString(16).padStart(2, '0')).join('')
 )
+
 const compareNewest = (left: { createdAt: number; id: string }, right: { createdAt: number; id: string }) => (
   right.createdAt - left.createdAt || right.id.localeCompare(left.id)
 )
+
 const isBoundedText = (value: JsonValue | undefined): value is string => isJsonString(value)
   && value.length >= 1 && value.length <= 256
+
 type ControlParserInput = Parameters<typeof parseControlPreviewRequestV1>[0]
+
 type ErrorInput = Parameters<typeof controlErrorSchemaV1.safeParse>[0]
+
 const controlPlanningErrorSchema = z.object({
   code: z.string(),
   message: z.string(),
   actionIndex: z.number().optional(),
 })
+
 const localControlCommitRowSchema = z.object({
   version: z.literal(1),
   status: z.literal('completed'),
@@ -96,6 +103,7 @@ const localControlCommitRowSchema = z.object({
   revision: z.number().int().nonnegative(),
   applied: z.boolean(),
 })
+
 const localControlApprovalRowSchema = z.object({
   version: z.literal(1),
   id: z.string(),
@@ -109,6 +117,7 @@ const localControlApprovalRowSchema = z.object({
   tokenHash: z.string().regex(/^[0-9a-f]{64}$/u),
   consumedAt: z.number().int().nonnegative().optional(),
 })
+
 const assetGcJobLimit = 1_000
 const maintenanceByProject = new Map<string, Promise<void>>()
 
@@ -145,11 +154,14 @@ const parse = <Value>(callback: () => Value, message: string) => {
 
 const duplicateRecoveryIndex = (actions: readonly { kind: string; recovery?: { id: string } }[]) => {
   const seen = new Set<string>()
+
   for (const [index, action] of actions.entries()) {
     if (action.kind !== 'recovery.restore' || action.recovery === undefined) continue
+
     if (seen.has(action.recovery.id)) return index
     seen.add(action.recovery.id)
   }
+
   return undefined
 }
 
@@ -160,7 +172,9 @@ const parseRequest = <Value extends { actions: readonly { kind: string; recovery
 ) => {
   const request = parse(() => parser(input), `Invalid ${label} request.`)
   const duplicate = duplicateRecoveryIndex(request.actions)
+
   if (duplicate !== undefined) fail('validation', 'A recovery can only be restored once per request.', duplicate)
+
   return request
 }
 
@@ -173,16 +187,22 @@ const loadedRecoveries = (
   const wanted = new Set(actions.flatMap((action) => (
     action.kind === 'recovery.restore' && action.recovery ? [action.recovery.id] : []
   )))
+
   const values = new Map<string, { payload: RecoveryPayload }>()
+
   for (const row of rows) {
     if (!wanted.has(row.id)) continue
     const parsed = parseLocalControlRecoveryRow(row)
+
     if (!parsed || parsed.projectId !== projectId || parsed.consumedAt !== undefined || parsed.expiresAt <= now) {
       return fail('not-found', 'Recovery is unavailable.')
     }
+
     values.set(parsed.id, { payload: parsed.recovery })
   }
+
   if (values.size !== wanted.size) fail('not-found', 'Recovery is unavailable.')
+
   return values
 }
 
@@ -197,12 +217,15 @@ const plan = (
     })
   } catch (error) {
     const parsedError = controlPlanningErrorSchema.safeParse(error)
+
     if (parsedError.success) {
       const actionIndex = parsedError.data.actionIndex
+
       if (parsedError.data.code === 'validation' || parsedError.data.code === 'not-found' || parsedError.data.code === 'limit-exceeded') {
         return fail(parsedError.data.code, parsedError.data.message, actionIndex)
       }
     }
+
     return fail('internal', 'Control planning failed.')
   }
 }
@@ -225,6 +248,7 @@ const requestResult = (
 
 const token = () => {
   const bytes = crypto.getRandomValues(new Uint8Array(32))
+
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
@@ -232,6 +256,7 @@ const parseCommitRow = (value: LocalControlCommitRow): LocalControlCommitRow | u
   try {
     const row = localControlCommitRowSchema.parse(value)
     const result = controlCommitResultSchemaV1.parse(row.result)
+
     if (
       result.idempotencyReplay
       || result.projectId !== row.projectId
@@ -240,6 +265,7 @@ const parseCommitRow = (value: LocalControlCommitRow): LocalControlCommitRow | u
       || result.revision !== row.revision
       || result.applied !== row.applied
     ) return undefined
+
     return {
       id: row.id, version: 1, projectId: row.projectId, createdAt: row.createdAt,
       actorSubject: row.actorSubject,
@@ -256,7 +282,9 @@ const parseCommitRow = (value: LocalControlCommitRow): LocalControlCommitRow | u
 
 const parseApprovalRow = (value: LocalControlApprovalRow): LocalControlApprovalRow | undefined => {
   const row = localControlApprovalRowSchema.safeParse(value)
+
   if (!row.success) return undefined
+
   return {
     id: row.data.id,
     version: 1,
@@ -280,21 +308,29 @@ const serviceOperation = async <Value>(
     return await callback()
   } catch (error) {
     if (isAvailabilityFailure?.(error)) throw error
+
     if (error instanceof LocalControlServiceError) throw error
+
     if (error instanceof LocalControlTransactionError) {
       if (error.kind === 'not-found') return fail('not-found', 'Local project was not found.')
+
       if (error.kind === 'limit-exceeded') {
         return fail('limit-exceeded', 'Local control retention exceeded its safety ceiling.')
       }
+
       return fail('internal', 'Local control state is malformed.')
     }
+
     const parsedError = controlPlanningErrorSchema.safeParse(error)
+
     if (parsedError.success) {
       const actionIndex = parsedError.data.actionIndex
+
       if (parsedError.data.code === 'validation' || parsedError.data.code === 'not-found' || parsedError.data.code === 'limit-exceeded') {
         return fail(parsedError.data.code, parsedError.data.message, actionIndex)
       }
     }
+
     return fail('internal', 'Local control operation failed.')
   }
 }
@@ -304,14 +340,18 @@ const runAssetGcMaintenance = (
   removeAssetFile?: typeof removeLocalAssetFileUnlocked,
 ) => {
   const existing = maintenanceByProject.get(projectId)
+
   if (existing) return existing
+
   const maintenance = runLocalControlAssetGc(projectId, { removeAssetFile })
     .then(() => undefined)
     .catch(() => undefined)
     .finally(() => {
       if (maintenanceByProject.get(projectId) === maintenance) maintenanceByProject.delete(projectId)
     })
+
   maintenanceByProject.set(projectId, maintenance)
+
   return maintenance
 }
 
@@ -324,11 +364,14 @@ const validateProjectedAssetGcLimit = (
   const additions = controlPlan.actions.filter((entry) => (
     entry.changed && entry.action.kind === 'asset.delete'
   )).length
+
   const removals = controlPlan.actions.filter((entry) => {
     if (!entry.changed || entry.action.kind !== 'recovery.restore') return false
     const recovery = actions[entry.actionIndex]?.recovery
+
     return recovery !== undefined && recoveries.get(recovery.id)?.payload.kind === 'asset.delete'
   }).length
+
   if (assetGcCount + additions - removals > assetGcJobLimit) {
     fail('limit-exceeded', 'Local control asset GC limit exceeded.')
   }
@@ -356,38 +399,51 @@ const validateLocalDestructivePreflight = (
 ) => {
   validateProjectedAssetGcLimit(context.rows.assetGc.length, controlPlan, request.actions, recoveries)
   const plannedRefs = new Map(controlPlan.resolvedRefs.map((ref) => [ref.clientRef, ref.id]))
+
   try {
     let retainedExternalRecoveryBytes = context.rows.recoveries.reduce((total, row) => {
       if (row.projectId !== request.projectId || row.consumedAt !== undefined || row.expiresAt <= Date.now()) return total
       const parsed = parseLocalControlRecoveryRow(row)
+
       if (!parsed?.externalProcessors) return total
+
       return total + localExternalRecoveryUsage(parsed.externalProcessors).byteLength
     }, 0)
+
     const restoredRecoveries = new Map<string, { payload: RecoveryPayload }>()
     planControlRequestV1(context.snapshot, request, recoveries, {
       trace: {
         onActionPlanned: (entry) => {
           if (!entry.changed) return
           const action = entry.action
+
           if (action.kind === 'recovery.restore') {
             const recoveryRow = context.rows.recoveries.find((row) => row.id === action.recovery.id)
             const parsedRecovery = recoveryRow === undefined ? undefined : parseLocalControlRecoveryRow(recoveryRow)
+
             if (parsedRecovery?.externalProcessors) {
               retainedExternalRecoveryBytes -= localExternalRecoveryUsage(parsedRecovery.externalProcessors).byteLength
             }
+
             const gc = context.rows.assetGc.find((row) => row.recoveryId === action.recovery.id)
+
             if (gc?.claimedAt !== undefined && gc.claimedAt > Date.now() - localControlAssetGcLeaseMs) {
               fail('validation', 'Recovery asset bytes are being deleted.', entry.actionIndex)
             }
+
             const recovery = recoveries.get(action.recovery.id)
+
             if (recovery) restoredRecoveries.set(action.recovery.id, recovery)
+
             return
           }
+
           if (!isRecoverableAction(action)) return
           // Recovery capture must see the same reference form that the executor
           // will use after resolving client references, without allocating rows.
           const rewrittenAction = rewriteLocalControlActionReferences(action, new Map(), plannedRefs)
           const beforeSnapshot = projectSnapshotSchemaV2.parse({ ...entry.beforeSnapshot, version: 'v2' })
+
           const payload = captureLocalRecoveryPayload({
             projectId: request.projectId,
             actorSubject,
@@ -400,8 +456,10 @@ const validateLocalDestructivePreflight = (
               restoredRecoveries,
             ),
           })
+
           if (payload !== undefined) {
             serializeLocalRecoveryPayload(payload)
+
             if (
               rewrittenAction.kind === 'track.delete'
               || rewrittenAction.kind === 'track.ungroup'
@@ -412,18 +470,23 @@ const validateLocalDestructivePreflight = (
                 entities: context.rows.entities,
                 artifacts: context.rows.externalPluginArtifacts,
               })
+
               if (externalProcessors.length > 0) {
                 const usage = localExternalRecoveryUsage(externalProcessors)
+
                 try {
                   validateLocalProjectExternalRecoveryBytes(retainedExternalRecoveryBytes + usage.byteLength)
                 } catch {
                   fail('limit-exceeded', 'Local project external recovery bytes exceeded.', entry.actionIndex)
                 }
+
                 retainedExternalRecoveryBytes += usage.byteLength
               }
             }
+
             return
           }
+
           fail('limit-exceeded', 'Recovery payload cannot be captured.', entry.actionIndex)
         },
       },
@@ -446,68 +509,91 @@ const prune = (
 ) => {
   const now = Date.now()
   const commits = context.rows.commits.filter((row) => row.projectId === projectId)
+
   if (commits.length > 2049 || context.rows.approvals.length > 129 || context.rows.recoveries.length > 2049) {
     fail('limit-exceeded', 'Local control retention exceeded its safety ceiling.')
   }
+
   for (const row of commits) {
     const parsed = parseCommitRow(row)
+
     if (!parsed && row.actorSubject === actorSubject) fail('internal', 'Control commit ledger is malformed.')
+
     if (row.createdAt < now - commitLifetimeMs && row.id !== currentCommitId) context.remove.commit(row.id)
   }
+
   const retained = commits
     .filter((row) => row.createdAt >= now - commitLifetimeMs && row.id !== currentCommitId)
     .sort(compareNewest)
+
   for (const row of retained.slice(999)) context.remove.commit(row.id)
 
   for (const row of context.rows.approvals) {
     const parsed = parseApprovalRow(row)
+
     if (!parsed) {
       if (row.projectId === projectId) fail('internal', 'Control approval retention is malformed.')
       continue
     }
+
     if (parsed.projectId === projectId && (parsed.expiresAt <= now || parsed.consumedAt !== undefined)) {
       context.remove.approval(parsed.id)
     }
   }
+
   const recoveries = context.rows.recoveries.filter((row) => row.projectId === projectId)
   const assetGcRecoveryIds = new Set(context.rows.assetGc.map((row) => row.recoveryId))
+
   for (const id of pendingAssetGcRecoveryIds) assetGcRecoveryIds.add(id)
+
   for (const id of consumedRecoveryIds) assetGcRecoveryIds.delete(id)
+
   for (const row of recoveries) {
     const parsed = parseLocalControlRecoveryRow(row)
+
     if (!parsed) {
       if (row.actorSubject === actorSubject) fail('internal', 'Control recovery retention is malformed.')
       continue
     }
+
     if ((parsed.expiresAt <= now || parsed.consumedAt !== undefined) && !assetGcRecoveryIds.has(parsed.id)) {
       context.remove.recovery(parsed.id)
     }
   }
+
   const active = [...recoveries, ...pendingRecoveries]
     .filter((row) => !consumedRecoveryIds.has(row.id))
     .filter((row) => {
       const parsed = parseLocalControlRecoveryRow(row)
+
       return parsed !== undefined && parsed.expiresAt > now && parsed.consumedAt === undefined
     })
     .sort(compareNewest)
+
   const existingRecoveryIds = new Set(recoveries.map((row) => row.id))
+
   const retainWithin = (
     activeRows: readonly LocalControlRecoveryRow[],
     cap: number,
   ) => {
     const protectedCount = activeRows.filter((row) => assetGcRecoveryIds.has(row.id)).length
     const excess = activeRows.length - cap
+
     if (protectedCount > cap || excess <= 0) {
       if (protectedCount <= cap) return
       fail('limit-exceeded', 'Local control retention exceeded its safety ceiling.')
     }
+
     const candidates = activeRows
       .filter((row) => !assetGcRecoveryIds.has(row.id) && existingRecoveryIds.has(row.id))
+
     if (candidates.length < excess) {
       fail('limit-exceeded', 'Local control retention exceeded its safety ceiling.')
     }
+
     for (const row of candidates.slice(-excess)) context.remove.recovery(row.id)
   }
+
   retainWithin(active, 1000)
   const actorActive = active.filter((row) => row.actorSubject === actorSubject)
   retainWithin(actorActive, 128)
@@ -543,22 +629,28 @@ export const createLocalControlService = (input: {
   ) {
     fail('authorization', 'Local control actor subject is invalid.')
   }
+
   const actor = input.actor
   const availabilityFailures = new WeakSet<object>()
   const availabilityFailureSchema = z.custom<object>((value) => value === Object(value))
+
   const assertAvailable = () => {
     try {
       input.assertAvailable?.()
     } catch (error) {
       const availabilityFailure = availabilityFailureSchema.safeParse(error)
+
       if (availabilityFailure.success) availabilityFailures.add(availabilityFailure.data)
       throw error
     }
   }
+
   const isAvailabilityFailure = (error: ErrorInput) => {
     const availabilityFailure = availabilityFailureSchema.safeParse(error)
+
     return availabilityFailure.success && availabilityFailures.has(availabilityFailure.data)
   }
+
   const withTransaction = async <Value>(
     projectId: string,
     callback: (context: LocalControlTransactionResult) => Value,
@@ -567,6 +659,7 @@ export const createLocalControlService = (input: {
       excludeKinds: input.excludePendingWriteKinds,
     })
     assertAvailable()
+
     return await withLocalControlTransactionOptions(
       projectId,
       callback,
@@ -576,18 +669,23 @@ export const createLocalControlService = (input: {
       },
     )
   }
+
   const preview = async (inputValue: JsonValue) => {
     const request = parseRequest(inputValue, parseControlPreviewRequestV1, 'control preview')
     const requestDigest = controlRequestDigestSyncV1(request)
     assertAvailable()
+
     return withTransaction(request.projectId, (context) => {
       assertAvailable()
+
       if (request.expectedRevision !== undefined && request.expectedRevision !== context.snapshot.project.revision) {
         fail('revision-conflict', 'Project revision does not match the expected revision.')
       }
+
       const controlPlan = plan(context.snapshot, request, loadedRecoveries(
         context.rows.recoveries, request.projectId, request.actions, Date.now(),
       ))
+
       return controlPreviewResultSchemaV1.parse({
         ...requestResult(requestDigest, request, controlPlan),
         approval: controlApprovalRequirementV1(controlPlan, requestDigest),
@@ -599,14 +697,18 @@ export const createLocalControlService = (input: {
     const request = parseRequest(inputValue, parseControlApprovalRequestV1, 'control approval')
     const requestDigest = controlRequestDigestSyncV1(request)
     assertAvailable()
+
     return withTransaction(request.projectId, (context) => {
       assertAvailable()
+
       if (request.expectedRevision !== undefined && request.expectedRevision !== context.snapshot.project.revision) {
         fail('revision-conflict', 'Project revision does not match the expected revision.')
       }
+
       const controlPlan = plan(context.snapshot, request, loadedRecoveries(
         context.rows.recoveries, request.projectId, request.actions, Date.now(),
       ))
+
       validateLocalDestructivePreflight(
         context,
         request,
@@ -615,30 +717,39 @@ export const createLocalControlService = (input: {
         actor.subject,
       )
       const requirement = controlApprovalRequirementV1(controlPlan, requestDigest)
+
       if (!requirement.required) fail('validation', 'Approval requires a material destructive action.')
       const approvalToken = token()
       const tokenHash = hashApprovalToken(approvalToken)
       const now = Date.now()
       const approvals = context.rows.approvals.map(parseApprovalRow)
+
       if (approvals.some((row) => row === undefined)) fail('internal', 'Control approval retention is malformed.')
+
       const active = approvals.flatMap((row) => row !== undefined && row.projectId === request.projectId
         && row.expiresAt > now && row.consumedAt === undefined ? [row] : [])
+
       if (active.filter((row) => row.actorSubject === actor.subject).length >= 16) {
         fail('limit-exceeded', 'Too many active destructive approvals.')
       }
+
       if (active.length >= 64) fail('limit-exceeded', 'Project destructive approval retention is full.')
+
       for (const row of context.rows.approvals) {
         const parsed = parseApprovalRow(row)
+
         if (parsed?.projectId === request.projectId && (parsed.expiresAt <= now || parsed.consumedAt !== undefined)) {
           context.remove.approval(parsed.id)
         }
       }
+
       const expiresAt = now + approvalLifetimeMs
       context.write.approval({
         id: `local-approval:${crypto.randomUUID()}`, version: 1, projectId: request.projectId,
         actorSubject: actor.subject, requestDigest, baseRevision: requirement.baseRevision,
         actionIndexes: [...requirement.actionIndexes], tokenHash, createdAt: now, expiresAt,
       })
+
       return controlApprovalResultSchemaV1.parse({
         version: 'v1', approvalToken, requestDigest, baseRevision: requirement.baseRevision,
         actionIndexes: requirement.actionIndexes, expiresAt,
@@ -649,77 +760,103 @@ export const createLocalControlService = (input: {
   const commit = async (inputValue: JsonValue) => {
     const request = parseRequest(inputValue, parseControlCommitRequestV1, 'control commit')
     const requestDigest = controlRequestDigestSyncV1(request)
+
     const approvalTokenHash = request.approvalToken === undefined
       ? undefined
       : hashApprovalToken(request.approvalToken)
+
     assertAvailable()
     await flushLocalProjectPendingWrites(request.projectId, {
       excludeKinds: input.excludePendingWriteKinds,
     })
     assertAvailable()
+
     // GC rows are only written by asset.delete and removed by recovery.restore. Rows that expire
     // meanwhile are collected by the next such commit and by the snapshot, history and recovery reads.
     const touchesAssetStorage = request.actions.some((action) => (
       action.kind === 'recovery.restore' || action.kind === 'asset.delete'
     ))
+
     const outcome = await withLocalProjectAssetLock(request.projectId, () => {
       assertAvailable()
+
       // Recovery/asset deletion atomically moves references between assets and
       // GC retention. Serialize that publication with shared-root cleanup only,
       // after pending writes were flushed and the project lock was acquired.
       const publish = () => withLocalControlTransactionOptions(request.projectId, (context) => {
         assertAvailable()
+
       const matching = context.rows.commits.filter((row) => (
         row.projectId === request.projectId && row.actorSubject === actor.subject
         && row.idempotencyKey === request.idempotencyKey
       ))
+
       if (matching.length > 1 || matching.some((row) => !parseCommitRow(row))) {
         fail('internal', 'Control idempotency ledger is malformed.')
       }
+
       const existing = matching[0]
+
       if (existing) {
         if (existing.createdAt >= Date.now() - commitLifetimeMs) {
           const parsed = parseCommitRow(existing)
+
           if (parsed === undefined) return fail('internal', 'Control idempotency ledger is malformed.')
+
           if (parsed.requestDigest !== requestDigest) {
             fail('idempotency-conflict', 'Idempotency key was already used for a different request.')
           }
+
           const result = controlCommitResultSchemaV1.parse(parsed.result)
+
           return { result: controlCommitResultSchemaV1.parse({ ...result, idempotencyReplay: true }), notify: false }
         }
+
         context.remove.commit(existing.id)
       }
+
       if (request.expectedRevision !== undefined && request.expectedRevision !== context.snapshot.project.revision) {
         fail('revision-conflict', 'Project revision does not match the expected revision.')
       }
+
       const recoveries = loadedRecoveries(context.rows.recoveries, request.projectId, request.actions, Date.now())
       const controlPlan = plan(context.snapshot, request, recoveries)
       validateLocalDestructivePreflight(context, request, controlPlan, recoveries, actor.subject)
+
       const lockedReason = input.refuseRecordingTargetChange?.(
         recordingRoutingTracks(context.snapshot.tracks),
         recordingRoutingTracks(controlPlan.snapshot.tracks),
       )
+
       if (lockedReason) fail('validation', lockedReason)
       const requirement = controlApprovalRequirementV1(controlPlan, requestDigest)
+
       if (requirement.required) {
         if (approvalTokenHash === undefined) {
           fail('approval-required', 'A valid approval token is required for destructive actions.')
         }
+
         const approvals = context.rows.approvals.map(parseApprovalRow)
+
         if (approvals.some((row) => row === undefined)) fail('internal', 'Control approval ledger is malformed.')
         const approval = approvals.find((row) => row?.tokenHash === approvalTokenHash)
+
         if (!approval || approval.actorSubject !== actor.subject || approval.projectId !== request.projectId
           || approval.requestDigest !== requestDigest || approval.baseRevision !== controlPlan.priorRevision
           || approval.expiresAt <= Date.now() || approval.consumedAt !== undefined
           || approval.actionIndexes.join(',') !== requirement.actionIndexes.join(',')) {
           return fail('approval-required', 'A valid approval token is required for destructive actions.')
         }
+
         context.write.approval({ ...approval, consumedAt: Date.now() })
       }
+
       const execution = executeLocalControlRequestInTransactionV1(context, {
         projectId: request.projectId, actions: [...request.actions], actorSubject: actor.subject,
       })
+
       if (execution.changed !== controlPlan.applied) fail('internal', 'Control execution changed-state mismatch.')
+
       const result = controlCommitResultSchemaV1.parse({
         ...requestResult(requestDigest, request, controlPlan),
         resolvedRefs: execution.resolvedRefs,
@@ -727,6 +864,7 @@ export const createLocalControlService = (input: {
         recoveries: execution.recoveries,
         restored: execution.restored,
       })
+
       const commitId = `local-commit:${crypto.randomUUID()}`
       context.write.commit({
         id: commitId, version: 1, projectId: request.projectId, createdAt: Date.now(),
@@ -736,9 +874,11 @@ export const createLocalControlService = (input: {
         result, priorRevision: result.priorRevision, revision: result.revision,
         applied: result.applied, status: 'completed',
       })
+
       for (const recovery of execution.recoveryRows) {
         context.write.recovery({ ...recovery, sourceCommitId: commitId })
       }
+
       prune(
         context,
         request.projectId,
@@ -750,14 +890,18 @@ export const createLocalControlService = (input: {
         ))),
         new Set(execution.restored.map((restored) => restored.recoveryId)),
       )
+
       return { result, notify: result.applied }
       }, {
         excludePendingWriteKinds: input.excludePendingWriteKinds,
         flushPendingWrites: false,
       })
+
       return touchesAssetStorage ? withLocalStorageRootLock(publish) : publish()
     })
+
     let gcFinalized = false
+
     try {
       if (touchesAssetStorage && input.excludePendingWriteKinds === undefined) {
         gcFinalized = (await runLocalControlAssetGc(request.projectId, {
@@ -766,7 +910,9 @@ export const createLocalControlService = (input: {
         })).finalized
       }
     } catch {}
+
     if (outcome.notify || gcFinalized) notifyLocalProjectChanged(request.projectId)
+
     return outcome.result
   }
 
@@ -777,15 +923,20 @@ export const createLocalControlService = (input: {
       excludeKinds: input.excludePendingWriteKinds,
     })
     assertAvailable()
+
     if (input.excludePendingWriteKinds === undefined) {
       await runAssetGcMaintenance(request.projectId, input.removeAssetFile)
     }
+
     assertAvailable()
+
     return withTransaction(request.projectId, (context) => {
       assertAvailable()
+
       return projectCanonicalProjectSnapshotV1(context.snapshot)
     })
   }
+
   const snapshotV2 = async (inputValue: JsonValue) => {
     const request = parse(() => parseControlSnapshotQueryV1(inputValue), 'Invalid control snapshot request.')
     assertAvailable()
@@ -793,12 +944,16 @@ export const createLocalControlService = (input: {
       excludeKinds: input.excludePendingWriteKinds,
     })
     assertAvailable()
+
     if (input.excludePendingWriteKinds === undefined) {
       await runAssetGcMaintenance(request.projectId, input.removeAssetFile)
     }
+
     assertAvailable()
+
     return withTransaction(request.projectId, (context) => {
       assertAvailable()
+
       return projectSnapshotSchemaV2.parse(context.snapshot)
     })
   }
@@ -807,27 +962,36 @@ export const createLocalControlService = (input: {
     const request = parse(() => (
       kind === 'history' ? parseControlHistoryQueryV1(inputValue) : parseControlRecoveriesQueryV1(inputValue)
     ), `Invalid ${kind} request.`)
+
     const cursor = parse(() => parseLocalControlCursor(request.cursor, kind), `Invalid ${kind} cursor.`)
     assertAvailable()
     await flushLocalProjectPendingWrites(request.projectId, {
       excludeKinds: input.excludePendingWriteKinds,
     })
     assertAvailable()
+
     if (input.excludePendingWriteKinds === undefined) {
       await runAssetGcMaintenance(request.projectId, input.removeAssetFile)
     }
+
     assertAvailable()
+
     return withTransaction(request.projectId, (context) => {
       assertAvailable()
+
       if (kind === 'history') {
         const rows = context.rows.commits.filter((row) => row.projectId === request.projectId).sort(compareNewest)
+
         const filtered = cursor === undefined ? rows : rows.filter((row) => (
           row.createdAt < cursor.createdAt || row.createdAt === cursor.createdAt && row.id < cursor.id
         ))
+
         const entries = filtered.slice(0, request.limit).map((row) => {
           const parsed = parseCommitRow(row)
+
           if (!parsed) return fail('internal', 'Control history is malformed.')
           const result = controlCommitResultSchemaV1.parse(parsed.result)
+
           return controlHistoryEntrySchemaV1.parse({
             id: parsed.id, projectId: parsed.projectId, actorSubject: parsed.actorSubject,
             actorIssuer: parsed.actorIssuer,
@@ -838,8 +1002,10 @@ export const createLocalControlService = (input: {
             recoveries: result.recoveries, restored: result.restored,
           })
         })
+
         const last = entries.at(-1)
         const isDone = filtered.length <= entries.length
+
         return controlHistoryResultSchemaV1.parse({
           entries, isDone,
           continueCursor: encodeLocalControlCursor({
@@ -848,23 +1014,31 @@ export const createLocalControlService = (input: {
           }),
         })
       }
+
       const now = Date.now()
+
       const rows = context.rows.recoveries
         .filter((row) => row.projectId === request.projectId && row.consumedAt === undefined && row.expiresAt > now)
         .sort(compareNewest)
+
       const filtered = cursor === undefined ? rows : rows.filter((row) => (
         row.createdAt < cursor.createdAt || row.createdAt === cursor.createdAt && row.id < cursor.id
       ))
+
       const entries = filtered.slice(0, request.limit).map((row) => {
         const parsed = parseLocalControlRecoveryRow(row)
+
         if (!parsed) return fail('internal', 'Recovery history is malformed.')
+
         return {
           actionIndex: parsed.sourceActionIndex, id: parsed.id, kind: parsed.kind,
           expiresAt: parsed.expiresAt, createdAt: parsed.createdAt,
         }
       })
+
       const last = entries.at(-1)
       const isDone = filtered.length <= entries.length
+
       return controlRecoveriesResultSchemaV1.parse({
         entries: entries.map(({ createdAt: _createdAt, ...entry }) => entry), isDone,
         continueCursor: encodeLocalControlCursor({

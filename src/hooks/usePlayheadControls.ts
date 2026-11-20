@@ -57,6 +57,7 @@ export function usePlayheadControls({ audioEngine, tracks, bpm, ensureClipBuffer
     preflightPlayback,
     hydrateLegacyAudio: async () => {
       const pendingBuffers: Promise<void>[] = []
+
       for (const track of tracks()) {
         for (const clip of track.clips) {
           if (!clip.buffer && !(clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')) {
@@ -64,6 +65,7 @@ export function usePlayheadControls({ audioEngine, tracks, bpm, ensureClipBuffer
           }
         }
       }
+
       await Promise.all(pendingBuffers)
     },
   }, nativePlayback ? { ...nativePlayback, requiresNativeAudio, resolveAudioSource } : undefined, portableBrowserPlayback ? { ...portableBrowserPlayback, resolveAudioSource } : undefined)
@@ -106,6 +108,7 @@ export function usePlayheadControls({ audioEngine, tracks, bpm, ensureClipBuffer
     const sec = Math.max(0, (visibleStartSec?.() ?? 0) + (clientX - rect.left) / pixelsPerSecond())
     playback.setPlayhead(sec, tracks())
     scrubbing = true
+
     if (options?.listen === false || scrubListenersActive) return
     scrubListenersActive = true
     window.addEventListener('pointermove', onScrubMove)

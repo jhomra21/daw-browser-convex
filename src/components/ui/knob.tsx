@@ -39,7 +39,9 @@ const clampFraction = (value: number) => Math.max(0, Math.min(1, value))
 
 function zeroAwareLogFraction(value: number, max: number, zeroFloor: number): number {
   if (value <= 0) return 0
+
   if (value <= zeroFloor) return value / zeroFloor * ZERO_AWARE_LOG_FRACTION
+
   return ZERO_AWARE_LOG_FRACTION + (
     (Math.log(value) - Math.log(zeroFloor)) / (Math.log(max) - Math.log(zeroFloor))
   ) * (1 - ZERO_AWARE_LOG_FRACTION)
@@ -47,6 +49,7 @@ function zeroAwareLogFraction(value: number, max: number, zeroFloor: number): nu
 
 function zeroAwareLogValue(fraction: number, max: number, zeroFloor: number): number {
   if (fraction <= ZERO_AWARE_LOG_FRACTION) return fraction / ZERO_AWARE_LOG_FRACTION * zeroFloor
+
   return Math.exp(
     Math.log(zeroFloor)
     + (fraction - ZERO_AWARE_LOG_FRACTION) / (1 - ZERO_AWARE_LOG_FRACTION)
@@ -63,14 +66,18 @@ export function valueToKnobFraction(
   zeroFloor = 0.001,
 ) {
   if (max === min) return 0
+
   if (logarithmic && zeroAwareLogarithmic && min === 0 && max > zeroFloor) {
     return clampFraction(zeroAwareLogFraction(value, max, zeroFloor))
   }
+
   if (logarithmic && min > 0 && max > 0 && value > 0) {
     const logMin = Math.log(min)
     const logMax = Math.log(max)
+
     return clampFraction((Math.log(value) - logMin) / (logMax - logMin))
   }
+
   return clampFraction((value - min) / (max - min))
 }
 
@@ -85,15 +92,20 @@ export function knobValueFromDrag(
   zeroFloor = 0.001,
 ) {
   const deltaFraction = deltaY / DEFAULT_DRAG_TRAVERSAL_PIXELS * (fine ? FINE_DRAG_MULTIPLIER : 1)
+
   if (logarithmic && zeroAwareLogarithmic && min === 0 && max > zeroFloor) {
     const startFraction = valueToKnobFraction(startValue, min, max, true, true, zeroFloor)
+
     return zeroAwareLogValue(clampFraction(startFraction + deltaFraction), max, zeroFloor)
   }
+
   if (logarithmic && min > 0 && max > 0 && startValue > 0) {
     const startFraction = valueToKnobFraction(startValue, min, max, true)
     const fraction = clampFraction(startFraction + deltaFraction)
+
     return Math.exp(Math.log(min) + fraction * (Math.log(max) - Math.log(min)))
   }
+
   return startValue + deltaFraction * (max - min)
 }
 
@@ -101,6 +113,7 @@ export default function Knob(props: KnobProps) {
   const size = () => props.size ?? 36
   const step = () => props.step ?? 0.1
   const bipolar = () => props.bipolar ?? false
+
   const control = useSteppedValueControl({
     value: () => props.value,
     min: () => props.min,
@@ -110,6 +123,7 @@ export default function Knob(props: KnobProps) {
     onValueChange: (value) => props.onValueChange(value),
     valueFromDrag: ({ startValue, startPosition, currentPosition, fine }) => {
       const deltaY = startPosition.y - currentPosition.y
+
       return knobValueFromDrag(
         startValue,
         deltaY,
@@ -121,6 +135,7 @@ export default function Knob(props: KnobProps) {
       )
     },
   })
+
   const visualValue = control.visualValue
   const displayValue = () => props.valueLabel ?? formatValue()
   
@@ -137,36 +152,49 @@ export default function Knob(props: KnobProps) {
       props.zeroAwareLogarithmic ?? false,
     )
   }
+
   const centerArcFraction = () => bipolar() ? valueToArcFraction(KNOB_CENTER_VALUE) : 0
   const fillArcFraction = () => valueToArcFraction(visualValue())
+
   const arcDashArray = () => {
     if (bipolar()) {
       const visible = Math.abs(fillArcFraction() - centerArcFraction()) * 100
+
       return `${visible} ${100 - visible}`
     }
 
     const visible = Math.max(0, Math.min(100, fillArcFraction() * 100))
+
     return `${visible} ${100 - visible}`
   }
+
   const arcDashOffset = () => {
     if (!bipolar()) return undefined
     const center = centerArcFraction() * 100
     const fill = fillArcFraction() * 100
+
     return `${fill < center ? -fill : -center}`
   }
+
   const automationArcDashArray = () => {
     const range = props.automationRange
+
     if (!range) return '0 100'
     const start = valueToArcFraction(Math.min(range.min, range.max)) * 100
     const end = valueToArcFraction(Math.max(range.min, range.max)) * 100
     const visible = Math.max(0, end - start)
+
     return `${visible} ${100 - visible}`
   }
+
   const automationArcDashOffset = () => {
     const range = props.automationRange
+
     if (!range) return '0'
+
     return `${-valueToArcFraction(Math.min(range.min, range.max)) * 100}`
   }
+
   const formatValue = () => {
     const unit = props.unit ?? ''
     const value = visualValue()

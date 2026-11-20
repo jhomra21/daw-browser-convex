@@ -78,6 +78,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
 
   const replaceMap = <Value,>(target: Map<string, Value>, source: Map<string, Value>) => {
     target.clear()
+
     for (const [id, value] of source) target.set(id, value)
   }
 
@@ -106,6 +107,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     instanceDelayChains.get(instanceId)?.close()
     instanceDelayChains.delete(instanceId)
     const staticWorklet = instanceStaticWorkletChains.get(instanceId)
+
     if (staticWorklet) disconnectStaticWorkletNodeChain(staticWorklet)
     instanceStaticWorkletChains.delete(instanceId)
     liveParams.delete(instanceId)
@@ -115,6 +117,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     gateMeterSubscriptions.get(instanceId)?.()
     gateMeterSubscriptions.delete(instanceId)
     const listeners = gateMeterListeners.get(instanceId)
+
     if (chain.kind !== 'gate' && chain.kind !== 'limiter' || !listeners || listeners.size === 0) return
     gateMeterSubscriptions.set(instanceId, subscribeStaticGateMeter(chain, (frame) => {
       for (const listener of listeners) listener(frame)
@@ -125,6 +128,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     compressorMeterSubscriptions.get(instanceId)?.()
     compressorMeterSubscriptions.delete(instanceId)
     const listeners = compressorMeterListeners.get(instanceId)
+
     if (!listeners || listeners.size === 0) return
     compressorMeterSubscriptions.set(instanceId, state.subscribeMeter((frame) => {
       for (const listener of listeners) listener(frame)
@@ -133,12 +137,19 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
 
   const closeAllInstanceStates = () => {
     const ids = new Set<string>()
+
     for (const id of instanceEqChains.keys()) ids.add(id)
+
     for (const id of instanceCompressorChains.keys()) ids.add(id)
+
     for (const id of instanceReverbChains.keys()) ids.add(id)
+
     for (const id of instanceSaturatorChains.keys()) ids.add(id)
+
     for (const id of instanceDelayChains.keys()) ids.add(id)
+
     for (const id of instanceStaticWorkletChains.keys()) ids.add(id)
+
     for (const id of ids) closeInstanceState(id)
   }
 
@@ -163,6 +174,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   ) => {
     let wasPending = false
     let nextRoutingGain = routingGain
+
     if (!nextRoutingGain) {
       nextRoutingGain = ctx.createGain()
       nextRoutingGain.gain.value = 1
@@ -171,10 +183,13 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       masterGain.connect(nextRoutingGain)
       routingTransitionOwner = createGainTransitionOwner(nextRoutingGain, () => ctx.currentTime, options.transitionScheduler)
     }
+
     if (analyserConnected && analyser) {
       try { masterGain.disconnect(analyser) } catch {}
     }
+
     analyserConnected = false
+
     const reconnect = () => {
       wasPending = graphPublicationPending
       graphPublicationPending = true
@@ -182,12 +197,15 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       connectFxChain(nextRoutingGain, destination, {
         instances: createInstanceStageConfigs(masterChainInstances),
       })
+
       if (analyser) {
         masterGain.connect(analyser)
         analyserConnected = true
       }
+
       drainRetiredResources()
     }
+
     routingTransitionOwner?.request(
       reconnect,
       () => {
@@ -198,6 +216,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
 
   const ensureAnalyser = (ctx: AudioContext | null, masterGain: GainNode | null) => {
     if (!ctx || !masterGain) return
+
     if (!analyser) {
       const next = ctx.createAnalyser()
       next.fftSize = 2048
@@ -205,6 +224,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       analyser = next
       releaseAnalyser = observeResource(options.resourceObserver, 'audio-nodes', next)
     }
+
     if (analyser && !analyserConnected) {
       masterGain.connect(analyser)
       analyserConnected = true
@@ -222,11 +242,13 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     fxInstanceRevision += 1
     closeInstanceState(instanceId)
     const requested = admission.intent()
+
     if (requested) admission.adopt(requested.filter((instance) => instance.id !== instanceId))
     masterChainInstances = masterChainInstances.filter((instance) => instance.id !== instanceId)
     masterFxInstances = masterChainInstances
     const transaction = options.workletBudget.begin('master', 0)
     options.workletBudget.commit(transaction, countStaticWorklets(masterChainInstances))
+
     try {
       rebuildRouting(ctx, masterGain, destination)
     } catch (error) {
@@ -266,11 +288,13 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     bindCompressorMeter,
     route: ({ previous, instances: installed, ownedIds, requiresRoutingRebuild, publicationPending }) => {
       const rebuild = requiresRoutingRebuild || publicationPending
+
       if (rebuild) {
         rebuildRouting(ctx, masterGain, destination)
       } else if (!routingTransitionOwner?.pending()) {
         drainRetiredResources()
       }
+
       return {
         settled: true,
         inPlace: ownedIds.size === 0 && !rebuild &&
@@ -279,6 +303,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       }
     },
   }).apply(ctx, instances)
+
   const noInstall: MasterFxOutcome = { disposition: 'dropped', inPlace: false }
 
   return {
@@ -290,15 +315,20 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     },
     subscribeCompressorMeter: (instanceId: string, listener: CompressorMeterListener) => {
       let listeners = compressorMeterListeners.get(instanceId)
+
       if (!listeners) {
         listeners = new Set()
         compressorMeterListeners.set(instanceId, listeners)
       }
+
       listeners.add(listener)
       const state = instanceCompressorChains.get(instanceId)
+
       if (state && !compressorMeterSubscriptions.has(instanceId)) bindCompressorMeter(instanceId, state)
+
       return () => {
         listeners.delete(listener)
+
         if (listeners.size > 0) return
         compressorMeterSubscriptions.get(instanceId)?.()
         compressorMeterSubscriptions.delete(instanceId)
@@ -307,16 +337,21 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     },
     subscribeGateMeter: (instanceId: string, listener: GateMeterListener) => {
       let listeners = gateMeterListeners.get(instanceId)
+
       if (!listeners) {
         listeners = new Set()
         gateMeterListeners.set(instanceId, listeners)
       }
+
       listeners.add(listener)
       const chain = instanceStaticWorkletChains.get(instanceId)
+
       if (chain && !gateMeterSubscriptions.has(instanceId)) bindGateMeter(instanceId, chain)
+
       return () => {
         listener({ gainReductionDb: 0 })
         listeners.delete(listener)
+
         if (listeners.size > 0) return
         gateMeterSubscriptions.get(instanceId)?.()
         gateMeterSubscriptions.delete(instanceId)
@@ -333,6 +368,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       instances: AudioEffectRuntimeInstance[],
     ): Promise<MasterFxOutcome> => {
       if (!ctx || !masterGain) fxInstanceRevision += 1
+
       return admission.admit(
         normalizeAudioEffectRuntimeInstances(instances),
         ctx && masterGain ? (chain) => installFxInstances(ctx, masterGain, destination ?? ctx.destination, chain) : undefined,
@@ -344,6 +380,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     setBpm: (bpm: number) => {
       currentBpm = bpm
       let failure: unknown
+
       for (const [instanceId, state] of instanceDelayChains) {
         try {
           state.setBpm(bpm)
@@ -353,6 +390,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
           failure ??= error
         }
       }
+
       if (failure !== undefined) throw failure
     },
     getMixerFx: (): Pick<
@@ -363,6 +401,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     }),
     resolveMasterAutomationBindings: (parameterId: string, masterGain: GainNode | null, effectInstanceId?: string): AutomationAudioBinding[] => {
       if (parameterId === 'volume') return masterGain ? [{ param: masterGain.gain, valueToAudioValue: (value) => value }] : []
+
       if (effectInstanceId) {
         return [
           ...resolveEqAutomationBindings(instanceEqChains.get(effectInstanceId)?.nodesByBand() ?? new Map(), parameterId),
@@ -372,10 +411,13 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
           ...resolveStaticWorkletAutomationBinding(instanceStaticWorkletChains.get(effectInstanceId), parameterId),
         ]
       }
+
       const eqNodes = new Map<string, BiquadFilterNode>()
+
       for (const state of instanceEqChains.size === 1 ? instanceEqChains.values() : []) {
         for (const [bandId, node] of state.nodesByBand()) eqNodes.set(bandId, node)
       }
+
       return [
         ...resolveEqAutomationBindings(eqNodes, parameterId),
         ...Array.from(instanceSaturatorChains.size === 1 ? instanceSaturatorChains.values() : []).flatMap((state) => resolveSaturatorAutomationBindings(state, parameterId)),
@@ -386,19 +428,29 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     rebuildRouting,
     getSpectrum: (ctx: AudioContext | null, masterGain: GainNode | null) => {
       ensureAnalyser(ctx, masterGain)
+
       if (!analyser) return spectrumLast
+
       if (!spectrumTmp || spectrumTmp.length !== analyser.frequencyBinCount) {
         spectrumTmp = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount))
       }
+
       try { analyser.getByteFrequencyData(spectrumTmp) } catch { return spectrumLast }
+
       let sum = 0
+
       for (let i = 0; i < spectrumTmp.length; i++) sum += spectrumTmp[i]
+
       if (sum === 0) {
         spectrumLast = null
+
         return null
       }
+
       let out = spectrumLast?.data
+
       if (!out || out.length !== spectrumTmp.length) out = new Float32Array(spectrumTmp.length)
+
       for (let i = 0; i < out.length; i++) out[i] = spectrumTmp[i] / 255
       spectrumLast = {
         data: out,
@@ -406,6 +458,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
         fftSize: analyser.fftSize,
         binCount: analyser.frequencyBinCount,
       }
+
       return spectrumLast
     },
     close: () => {

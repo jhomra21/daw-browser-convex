@@ -11,8 +11,10 @@ const kindIds = { utility: 1, spectral: 15 }
 export const fixtureEdit = (payload: NativeBuiltInParameterPayload, order: number, bpm: number, incarnation: number, valued = false): LiveProcessorEditIdentity | undefined => {
   const state = encodeNativeBuiltInStateCommit(payload, bpm)?.state
   const kindId = payload.effect === "utility" ? kindIds.utility : payload.effect === "spectral" ? kindIds.spectral : undefined
+
   if (!state || !payload.instanceId || kindId === undefined) return undefined
   const values = valued ? captureNativeBuiltInParameterValues(payload, bpm) : undefined
+
   return { id: `edit:${order}`, order, target: { nodeId: payload.targetId, instanceId: payload.instanceId, kindId, incarnation },
     content: { params: payload.to, state, timing: nativeBuiltInPatchTiming(payload), ...(values && { values }) } }
 }

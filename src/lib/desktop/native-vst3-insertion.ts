@@ -30,11 +30,14 @@ type NativeVst3TargetTrack = Pick<
   Track,
   "id" | "kind" | "channelRole" | "groupId" | "outputTargetId" | "sends"
 >
+
 type NativeVst3InsertionUnavailable = Extract<NativeVst3InsertionAvailability, { enabled: false }>
 
 const persistenceFailureMessage = (code: LocalExternalProcessorPersistenceCode): string => {
   if (code === "target-not-found") return "the selected track was not found"
+
   if (code === "corrupt-row") return "an existing external plugin row is corrupt or incompatible"
+
   return "the local project write failed"
 }
 
@@ -48,7 +51,9 @@ const validateTargetTrack = (
   targetTrack: NativeVst3TargetTrack | undefined,
 ): NativeVst3InsertionUnavailable | undefined => {
   if (targetId === "master") return unavailable("unsupported-bus", "Native VST3 insertion currently requires a directly routed stereo track target.")
+
   if (!targetTrack || targetTrack.id !== targetId) return unavailable("project-unavailable", "The selected track is no longer available.")
+
   if (
     (targetTrack.channelRole !== undefined && targetTrack.channelRole !== "track")
     || targetTrack.groupId !== undefined
@@ -57,6 +62,7 @@ const validateTargetTrack = (
   ) {
     return unavailable("unsupported-bus", "Native VST3 plug-ins require a directly routed stereo track.")
   }
+
   return undefined
 }
 
@@ -70,22 +76,31 @@ export const nativeVst3InsertionAvailability = (input: {
   busy: boolean
 }): NativeVst3InsertionAvailability => {
   if (!input.bridgeAvailable) return unavailable("browser", "Native VST3 insertion is available only in the macOS desktop app.")
+
   if (!isLocalId("project", input.projectId)) return unavailable("project-unavailable", "Native VST3 insertion requires a local desktop project.")
   const targetError = validateTargetTrack(input.targetId, input.targetTrack)
+
   if (targetError) return targetError
+
   if (input.selection.pluginClass.role === "instrument" && input.targetTrack?.kind !== "instrument") {
     return unavailable("unsupported-role", "Native VST3 instruments require a directly routed instrument track.")
   }
+
   if (!input.canWrite) return unavailable("project-unavailable", "The selected track is read-only.")
+
   if (input.busy) return unavailable("host-unavailable", "Native VST3 preflight is already running.")
+
   if (input.selection.entry.hostingStatus === "failed") {
     return unavailable("stale-catalog", input.selection.entry.unavailableReason ?? "The VST3 scan failed and must be refreshed.")
   }
+
   if (input.selection.entry.scanHealth === "scan-failed") return unavailable("stale-catalog", input.selection.entry.unavailableReason ?? "The VST3 scan failed and must be refreshed.")
+
   if (
     input.selection.entry.scanHealth !== "scanned"
     || !input.selection.entry.catalogReference
   ) return unavailable("untrusted-catalog", "The VST3 plug-in has not passed trusted native scanning.")
+
   return {
     enabled: true,
     message: input.selection.pluginClass.role === "instrument"
@@ -108,15 +123,21 @@ export const insertNativeVst3Effect = async (input: {
   persist?: typeof appendLocalExternalProcessor
 }): Promise<NativeVst3InsertionResult> => {
   const targetError = validateTargetTrack(input.targetId, input.targetTrack)
+
   if (targetError) return { ok: false, code: targetError.code, message: targetError.message }
+
   if (input.selection.pluginClass.role === "instrument" && input.targetTrack?.kind !== "instrument") {
     return { ok: false, code: "unsupported-role", message: "Native VST3 instruments require a directly routed instrument track." }
   }
+
   const catalogReference = input.selection.entry.catalogReference
+
   if (!catalogReference) {
     return { ok: false, code: "untrusted-catalog", message: "The VST3 plug-in has no trusted native catalog reference." }
   }
+
   const instanceId = input.createInstanceId?.() ?? crypto.randomUUID()
+
   const preflight = await input.bridge.preflightInsertion({
     instanceId,
     reference: {
@@ -125,15 +146,20 @@ export const insertNativeVst3Effect = async (input: {
       vendorId: input.selection.pluginClass.vendor,
     },
   })
+
   if (!preflight.ok) return preflight
+
   if (preflight.manifest.role !== input.selection.pluginClass.role) {
     return { ok: false, code: "unsupported-role", message: "The native VST3 worker role does not match the selected plug-in." }
   }
+
   if (input.validateBeforePersist && !input.validateBeforePersist()) {
     return { ok: false, code: "project-unavailable", message: "The selected project or track changed during VST3 preflight." }
   }
+
   const updatedAt = (input.now ?? Date.now)()
   let processor: ExternalProcessor
+
   try {
     processor = await (input.persist ?? appendLocalExternalProcessor)(input.projectId, {
       instanceId,
@@ -179,11 +205,13 @@ export const insertNativeVst3Effect = async (input: {
     const persistence = error instanceof LocalExternalProcessorPersistenceError
       ? error
       : new LocalExternalProcessorPersistenceError("write-failed", "Local project write failed.")
+
     return {
       ok: false,
       code: "project-unavailable",
       message: `Native VST3 passed preflight but local persistence failed (${persistence.code}): ${persistenceFailureMessage(persistence.code)}.`,
     }
   }
+
   return { ok: true, processor }
 }

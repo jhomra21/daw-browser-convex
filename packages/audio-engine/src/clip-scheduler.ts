@@ -6,6 +6,7 @@ import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
 
 type RuntimeClip = Clip<AudioBuffer>
+
 type RuntimeTrack = Track<AudioBuffer>
 
 export type ScheduleOptions = {
@@ -58,11 +59,14 @@ const DEFAULT_STRETCH_RENDER_AHEAD_SEC = Number.POSITIVE_INFINITY
 const findFirstScheduleEntryEndingAfter = (entries: ScheduledClipEntry[], playheadSec: number) => {
   let low = 0
   let high = entries.length
+
   while (low < high) {
     const mid = Math.floor((low + high) / 2)
+
     if (entries[mid].endSec <= playheadSec) low = mid + 1
     else high = mid
   }
+
   return low
 }
 
@@ -81,8 +85,10 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
 
   const getScheduleIndex = (tracks: RuntimeTrack[]) => {
     const cached = scheduleIndexCache.get(tracks)
+
     if (cached) return cached
     const entries: ScheduledClipEntry[] = []
+
     for (const track of tracks) {
       for (const clip of track.clips) {
         entries.push({
@@ -93,9 +99,11 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
         })
       }
     }
+
     entries.sort((left, right) => left.endSec - right.endSec)
     const index = { byEnd: entries }
     scheduleIndexCache.set(tracks, index)
+
     return index
   }
 
@@ -103,9 +111,12 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
 
   const scheduleAudioClip = (clip: RuntimeClip, input: GainNode, playheadSec: number, nowCtx: number, startLimitSec?: number, endLimitSec?: number): DeferredStretchWindow | null => {
     const ctx = options.getAudioContext()
+
     if (!ctx) return null
     const sourceDurationSec = clip.buffer?.duration ?? clip.sourceDurationSec
+
     if (sourceDurationSec === undefined) return null
+
     const map = getAudioClipTimeMap({
       clip,
       bufferDurationSec: sourceDurationSec,
@@ -113,7 +124,9 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
       rangeStartSec: startLimitSec ?? playheadSec,
       rangeEndSec: endLimitSec,
     })
+
     if (!map) return null
+
     const stretchInHorizon = map.mode === 'stretch' && shouldScheduleStretchSource({
       playheadSec,
       renderAheadSec: stretchRenderAheadSec,
@@ -121,13 +134,17 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
       timelineStartSec: map.timelineStartSec,
       timelineDurationSec: map.timelineDurationSec,
     })
+
     if (map.mode === 'stretch' && !stretchInHorizon) return null
+
     if (stretchInHorizon) options.ensureStretchedClip(clip)
 
     const stretched = map.mode === 'stretch' ? options.getStretchedClip(clip) : null
     let deferredFallbackWindow: DeferredStretchWindow | null = null
+
     if (map.mode === 'stretch' && !stretched) {
       const deferredWindow = { clipId: clip.id, startSec: map.timelineStartSec, endSec: map.timelineEndSec }
+
       if (!clip.buffer || !canFallbackToRepitchStretch({
         playheadSec,
         timelineStartSec: map.timelineStartSec,
@@ -135,15 +152,19 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
       })) return deferredWindow
       deferredFallbackWindow = { ...deferredWindow, replaceExistingSource: true }
     }
+
     const sourceBuffer = clip.buffer ?? stretched?.buffer
+
     if (!sourceBuffer) return deferredFallbackWindow
 
     const source = ctx.createBufferSource()
+
     const playback = getAudioBufferPlaybackParams({
       sourceBuffer,
       map,
       stretched: stretched ? { ...stretched, bufferDurationSec: stretched.buffer.duration } : null,
     })
+
     if (playback.durationSec <= 0) return null
     source.buffer = playback.buffer
     source.playbackRate.value = playback.playbackRate
@@ -162,13 +183,16 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
     )
     source.onended = () => options.sources.remove(clip.id, source)
     options.sources.add(clip.id, source)
+
     return deferredFallbackWindow
   }
 
   return {
     scheduleAllClipsFromPlayhead: (tracks: RuntimeTrack[], playheadSec: number, opts?: ScheduleOptions) => {
       const result = createScheduleResult()
+
       if (!options.getAudioContext()) return result
+
       if (!opts?.preserveExisting) options.stopClipSources()
       const now = opts?.atCtxTime !== undefined ? opts.atCtxTime : options.timelineToCtxTime(playheadSec)
       options.updateTrackGains(tracks)
@@ -178,34 +202,47 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
       const clipIds = opts?.clipIds ? new Set(opts.clipIds) : null
       const entries = getScheduleIndex(tracks).byEnd
       const scheduleStartSec = startLimitSec ?? playheadSec
+
       for (let index = findFirstScheduleEntryEndingAfter(entries, scheduleStartSec); index < entries.length; index++) {
         const entry = entries[index]
+
         if (clipIds && !clipIds.has(entry.clip.id)) continue
+
         if (!shouldScheduleEntryInRange(entry, scheduleStartSec, endLimitSec)) continue
+
         if (options.scheduleMidiClip(entry.track, entry.clip, playheadSec, now, startLimitSec, endLimitSec)) continue
         const deferred = scheduleAudioClip(entry.clip, options.ensureTrackInput(entry.track.id), playheadSec, now, startLimitSec, endLimitSec)
+
         if (deferred) result.deferredStretchWindows.push(deferred)
       }
+
       return result
     },
     rescheduleClipsAtPlayhead: (tracks: RuntimeTrack[], playheadSec: number, clipIds: string[], opts?: ScheduleOptions) => {
       const result = createScheduleResult()
+
       if (!options.getAudioContext()) return result
+
       if (!clipIds || clipIds.length === 0) return result
       const idsSet = new Set<string>(clipIds)
       const now = options.timelineToCtxTime(playheadSec)
       options.updateTrackGains(tracks)
+
       for (const id of idsSet) options.stopSourcesForClip(id)
 
       for (const track of tracks) {
         const input = options.ensureTrackInput(track.id)
+
         for (const clip of track.clips) {
           if (!idsSet.has(clip.id)) continue
+
           if (options.scheduleMidiClip(track, clip, playheadSec, now, opts?.startLimitSec, opts?.endLimitSec)) continue
           const deferred = scheduleAudioClip(clip, input, playheadSec, now, opts?.startLimitSec, opts?.endLimitSec)
+
           if (deferred) result.deferredStretchWindows.push(deferred)
         }
       }
+
       return result
     },
   }
@@ -219,10 +256,12 @@ const shouldScheduleStretchSource = (input: {
   timelineDurationSec: number
 }) => {
   const renderEndSec = input.timelineStartSec + input.timelineDurationSec
+
   const horizonEndSec = Math.min(
     input.endLimitSec ?? Number.POSITIVE_INFINITY,
     input.playheadSec + Math.max(0, input.renderAheadSec),
   )
+
   return input.timelineStartSec < horizonEndSec && renderEndSec > input.playheadSec
 }
 

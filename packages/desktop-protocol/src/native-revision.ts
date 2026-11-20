@@ -16,14 +16,17 @@ export type NativeGraphRevisionStatus = {
 }
 
 export type NativeRevisionBinding = { projectId: string }
+
 export type NativeRevisionRequest = NativeRevisionBinding & {
   revision: number
   hostGeneration: number
   requestedPublicationFrame?: bigint
 }
+
 // The same three-way status as every other native command: `refused` (native answered and said no), `unavailable`
 // (nothing was delivered) and `unconfirmed` (the request may have been taken and no answer came).
 export type NativeRevisionFailureKind = "refused" | "unavailable" | "unconfirmed"
+
 export type NativeRevisionReply = {
   ok: true
   hostGeneration: number

@@ -18,4 +18,5 @@ export type ApiBindings = {
 }
 
 export type ApiContext = Context<ApiBindings>
+
 export type App = Hono<ApiBindings>

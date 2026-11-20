@@ -49,12 +49,14 @@ describe("expanded synth automation state", () => {
 
   test("overlays evaluated values onto normalized synth display params without mutating persisted params", () => {
     const params = createDefaultSynthParams();
+
     const parameterIds = new Map([
       ["output.gain", synthAutomationKey("track-a", "instrument:synth:a", "output.gain")],
       ["filter.frequency", synthAutomationKey("track-a", "instrument:synth:a", "filter.frequency")],
       ["lfo.ampDepth", synthAutomationKey("track-a", "instrument:synth:a", "lfo.ampDepth")],
       ["noise.level", synthAutomationKey("track-a", "instrument:synth:a", "noise.level")],
     ]);
+
     const evaluated = new Map([
       [automationTargetKey(
         { kind: "track", trackId: "track-a" },

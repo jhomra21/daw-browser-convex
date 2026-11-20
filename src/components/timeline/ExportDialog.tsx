@@ -14,6 +14,7 @@ import type { WavEncodingSettings } from '@daw-browser/audio-engine/export-fidel
 import type { StemMode } from '@daw-browser/audio-engine/export-mixdown'
 
 type ExportSource = 'mixdown' | 'all-stems' | 'selected-stems'
+
 type ExportRangeMode = ExportRange['mode']
 
 type Props = {
@@ -95,6 +96,7 @@ const ExportFormatOption: Component<{
   onChange: (checked: boolean) => void
 }> = (props) => {
   const metadata = () => getExportAudioFormatMetadata(props.format)
+
   return (
     <label
       class="flex h-7 min-w-0 items-center gap-2 whitespace-nowrap text-xs"
@@ -117,6 +119,7 @@ const ExportDialog: Component<Props> = (props) => {
   const nativeDesktop = import.meta.env.VITE_DESKTOP === 'true'
   const persisted = loadPersistedExportSettings()
   const initialDuration = () => getExportRangeDuration(props.getTracks(), { mode: 'whole' })
+
   const initialRange = untrack(() => ({
     mode: props.loopEnabled ? 'loop' as const : 'whole' as const,
     startSec: props.loopEnabled ? props.loopStartSec : 0,
@@ -124,6 +127,7 @@ const ExportDialog: Component<Props> = (props) => {
       ? Math.max(0.001, props.loopEndSec - props.loopStartSec)
       : initialDuration(),
   }))
+
   const initialRangeMode: ExportRangeMode = initialRange.mode
   const [rangeMode, setRangeMode] = createSignal<ExportRangeMode>(initialRangeMode)
   const [source, setSource] = createSignal<ExportSource>('mixdown')
@@ -161,6 +165,7 @@ const ExportDialog: Component<Props> = (props) => {
           ? Math.max(0.001, props.loopEndSec - props.loopStartSec)
           : initialDuration())
       }
+
       wasOpen = isOpen
     },
   ))
@@ -184,15 +189,20 @@ const ExportDialog: Component<Props> = (props) => {
         ? { mode: 'automatic' as const, thresholdDbfs: -60, holdSec: 1, maximumSec: 10 }
         : { mode: 'none' as const },
   })
+
   const wavSettings = (): WavEncodingSettings => {
     const codec = wavCodec()
+
     if (codec === 'pcm-f32') return { codec, dither: 'none' }
+
     return { codec, dither: wavDither() }
   }
+
   const encodingSettings = () => ({
     bitrateByFormat: { mp3: mp3Bitrate(), 'ogg-opus': opusBitrate() },
     wav: wavSettings(),
   })
+
   const supportRequest = createMemo(() => ({
     sampleRate: sampleRate(),
     numberOfChannels: numberOfChannels(),
@@ -202,35 +212,48 @@ const ExportDialog: Component<Props> = (props) => {
   createEffect(() => {
     const request = supportRequest()
     let canceled = false
+
     const applySupportedFormats = (formats: ExportAudioFormat[]) => {
       if (canceled) return
       setSupportedFormats(formats)
       setSelectedFormats((selected) => {
         const supportedSelected = selected.filter((format) => formats.includes(format))
+
         if (supportedSelected.length === selected.length) return selected
+
         if (supportedSelected.length > 0) return supportedSelected
+
         return ['wav']
       })
     }
+
     const cached = getCachedSupportedExportAudioFormats(request)
+
     if (cached) {
       applySupportedFormats(cached)
+
       return
     }
+
     setSupportedFormats(null)
     void probeSupportedExportAudioFormats(request).then(applySupportedFormats)
     onCleanup(() => { canceled = true })
   })
 
   const formatSupported = (format: ExportAudioFormat) => supportedFormats()?.includes(format) ?? format === 'wav'
+
   const bitrateControlVisible = (format: 'mp3' | 'ogg-opus') => (
     selectedFormats().includes(format)
     || (supportedFormats() !== null && !formatSupported(format))
   )
+
   const selectedStemAvailable = () => props.selectedTrackIds.length > 0
+
   const currentRange = (): ExportRange => {
     const mode = rangeMode()
+
     if (mode === 'whole') return { mode }
+
     if (mode === 'loop') {
       return {
         mode,
@@ -238,15 +261,22 @@ const ExportDialog: Component<Props> = (props) => {
         endSec: props.loopEndSec,
       }
     }
+
     return createCustomExportRange(renderStartSec(), renderLengthSec())
   }
+
   const durationSec = createMemo(() => getExportRangeDuration(props.getTracks(), currentRange()))
+
   const selectedFormatLabels = () => selectedFormats().map((format) => {
     const label = getExportAudioFormatMetadata(format).label
+
     if (format === 'mp3') return `${label} ${mp3Bitrate() / 1000} kbps`
+
     if (format === 'ogg-opus') return `${label} ${opusBitrate() / 1000} kbps`
+
     return label
   }).join(', ')
+
   const sourceLabel = () => source() === 'mixdown'
     ? 'Main'
     : source() === 'all-stems' ? 'All Individual Tracks' : 'Selected Tracks Only'
@@ -256,19 +286,23 @@ const ExportDialog: Component<Props> = (props) => {
     setRenderStartSec(0)
     setRenderLengthSec(initialDuration())
   }
+
   const setLoopRegion = () => {
     setRangeMode('loop')
     setRenderStartSec(props.loopStartSec)
     setRenderLengthSec(Math.max(0.001, props.loopEndSec - props.loopStartSec))
   }
+
   const updateCustomStart = (value: number) => {
     setRenderStartSec(Number.isFinite(value) ? value : 0)
     setRangeMode('custom')
   }
+
   const updateCustomLength = (value: number) => {
     setRenderLengthSec(Number.isFinite(value) ? value : 0.001)
     setRangeMode('custom')
   }
+
   const toggleFormat = (format: ExportAudioFormat, checked: boolean) => {
     if (!formatSupported(format)) return
     setSelectedFormats((formats) => checked
@@ -279,6 +313,7 @@ const ExportDialog: Component<Props> = (props) => {
   const cloudOutputs = createMemo(() => outputs().filter((output) => output.destination === 'cloud'))
   const localOutputs = createMemo(() => outputs().filter((output) => output.destination === 'local'))
   const activeExportJob = () => exportContext.activeJob()
+
   const exportDisabled = () => (
     busy()
     || selectedFormats().length === 0
@@ -290,8 +325,10 @@ const ExportDialog: Component<Props> = (props) => {
     setError(null)
     setOutputs([])
     setBusy(true)
+
     try {
       const currentSource = source()
+
       const baseRequest = {
         getTracks: props.getTracks,
         bpm: props.bpm,
@@ -305,7 +342,9 @@ const ExportDialog: Component<Props> = (props) => {
         sidechainRoutes: props.sidechainRoutes,
         ensureClipBuffer: props.ensureClipBuffer,
       }
+
       savePersistedExportSettings({ render: baseRequest.render, encoding: baseRequest.encoding })
+
       const outcome = currentSource === 'mixdown'
         ? await exportContext.enqueueTimelineExport(baseRequest)
         : currentSource === 'all-stems'
@@ -316,7 +355,9 @@ const ExportDialog: Component<Props> = (props) => {
             stemMode: stemMode(),
             selectedTrackIds: props.selectedTrackIds,
           })
+
       setOutputs(outcome.outputs)
+
       if (outcome.type === 'error') setError(outcome.message)
       else if (outcome.type === 'canceled') setError(outcome.outputs.length > 0 ? 'Export canceled after saving completed outputs.' : 'Export canceled.')
     } catch (error) {

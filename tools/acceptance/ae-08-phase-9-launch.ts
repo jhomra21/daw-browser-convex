@@ -26,16 +26,20 @@ const move = (fromLatencyFrames: number, toLatencyFrames: number) => ({ fromLate
 const unmoved = move(0, 0)
 const spectralFrames = (fftSize: 512 | 4096) => getSpectralLatencyFrames(fftSize, createDefaultSpectralParams().overlap)
 const silentTrack = "Silent publication target"
+
 // An out-of-process plug-in adds one transport block of latency to what it declares (audio-host.cpp: transport_latency_frames equals
 // the attachment's transport.maximum_frames); the packaged runs use the 512-frame device block.
 const vstTransportFrames = 512
+
 // Native progress frames are lower bounds on what has been heard, so a window is closed this long after its second.
 const windowMarginMs = 250
+
 export type Phase9Launch = { rows: Row[]; requested: Requested; directory: string; contentSeconds: number }
 
 // The ids a performer needs from the project; `observe` reads them from a fresh snapshot, so a performer never holds a stale one.
 export type Observed = { spectralEffectId: string | undefined; limiterEffectId: string | undefined; externalEffectId: string | undefined; trackId: (name: string) => string | undefined; clipId: (name: string) => string | undefined
   clipStartSec: (name: string) => number | undefined; effectId: (trackName: string, kind: string) => string | undefined; asset: (name: string) => SampleAsset | undefined }
+
 export const observeSnapshot = (state: ProjectSnapshotV2, changedTrackId: string): Observed => ({
   spectralEffectId: state.processors.find((entry) => "trackId" in entry.target && entry.target.trackId === changedTrackId && entry.processor.kind === "spectral")?.id,
   limiterEffectId: state.processors.find((entry) => "trackId" in entry.target && entry.target.trackId === changedTrackId && entry.processor.kind === "limiter")?.id,
@@ -45,10 +49,12 @@ export const observeSnapshot = (state: ProjectSnapshotV2, changedTrackId: string
   clipStartSec: (name) => state.clips.find((clip) => clip.name.includes(name))?.startSec,
   effectId: (trackName, kind) => {
     const trackId = state.tracks.find((track) => track.name === trackName)?.id
+
     return state.processors.find((entry) => "trackId" in entry.target && entry.target.trackId === trackId && entry.processor.kind === kind)?.id
   },
   asset: (name) => {
     const found = state.assets.find((entry) => entry.name.includes(name))
+
     return found?.durationSec === undefined || found.sampleRate === undefined || found.channelCount === undefined ? undefined
       : { id: found.id, name: found.name, durationSec: found.durationSec, sampleRate: found.sampleRate, channelCount: found.channelCount }
   },
@@ -74,50 +80,74 @@ export const createPerformer = ({ context, runtime, playThenPause, transportStat
   // An edit through the control protocol is stamped when the app receives its commit.
   const commit = async (actions: Parameters<Performers["context"]["mutate"]>[0]) => ({ ...unmoved, wallMs: await context.mutate(actions) })
   const target = { kind: "track", track: ref(setup.changedTrackId) }
+
   const changedClip = (present: boolean) => waitForUi(context, `Changed clip ${present ? "not restored" : "not removed"} in the UI`,
     `${present ? "" : "!"}[...document.querySelectorAll('[data-timeline-clip]')].some(e=>e.getAttribute('title')?.includes('changed'))`)
+
   const settings = (tempoBpm: number) => () => commit([{ kind: "project.settings.set", tempoBpm }])
-  const fft = (from: 512 | 4096, to: 512 | 4096) => async () => { await selectFftSize(context, to); return move(spectralFrames(from), spectralFrames(to)) }
-  const history = (redo: boolean, clipPresent: boolean) => async () => { await pressHistoryKey(context, redo); await changedClip(clipPresent); return unmoved }
+
+  const fft = (from: 512 | 4096, to: 512 | 4096) => async () => { await selectFftSize(context, to);
+
+ return move(spectralFrames(from), spectralFrames(to)) }
+
+  const history = (redo: boolean, clipPresent: boolean) => async () => { await pressHistoryKey(context, redo); await changedClip(clipPresent);
+
+ return unmoved }
+
   const deleteImportedClip = async () => {
     const committed = await commit([{ kind: "clip.delete", clip: ref(required((await observe()).clipId("changed"), "Imported changed clip")) }])
     await changedClip(false)
+
     return committed
   }
+
   // The test plug-in's Latency parameter (id 1, four steps) in normalized units: 0 is 0 frames, 1 is 4096 (run-ae08-test-plugin.ts). The
   // host reports the plug-in's declared latency plus one transport block (vstTransportFrames), so the moves are declared with it.
   const testPluginLatency = (normalizedValue: number, from: number, to: number) => async () => {
     const { wallMs } = await commit([{ kind: "external-plugin.parameters.set", target,
       processor: ref(required((await observe()).externalEffectId, "Test plug-in processor")), changes: [{ parameterId: 1, normalizedValue }] }])
+
     return { ...move(from, to), wallMs }
   }
+
   // The armed recording target can be neither deleted nor rerouted: the commit must be refused with the lock's reason, and a commit that goes
   // through fails the row.
   const refuseTargetChange = (change: string, action: () => Promise<z.infer<ReturnType<typeof z.json>>>) => async () => {
     const refusal = await context.mutate([await action()]).then(() => undefined, (error) => String(error))
+
     if (refusal === undefined) throw new Error(`${change} the armed recording target was committed`)
+
     if (!refusal.includes(recordingTargetLockedReason)) throw new Error(`${change} the armed recording target was refused for another reason: ${refusal}`)
+
     return unmoved
   }
+
   // The held-instrument rows edit the instrument or an unrelated track under a note that holds on the right channel.
   const trackNamed = async (name: string) => ({ kind: "track", track: ref(required((await observe()).trackId(name), name)) })
+
   const instrumentEdit = (kind: "sampler" | "drum-rack" | "granular", assetName: string, change: { gain?: number; densityHz?: number }) => async () =>
     commit([{ kind: "instrument.set", target: await trackNamed(heldInstrumentTrack), instrumentKind: kind,
       params: sampledInstrumentParams(kind, required((await observe()).asset(assetName), `${assetName} asset`), change) }])
+
   const polyphony = (voices: number) => async () => commit([{ kind: "instrument.set", target: await trackNamed(heldSynthTrack), instrumentKind: "synth", params: sineSynthParams(voices) }])
+
   // The Utility then the Saturator on the target track, or the other way round.
   const reorder = (saturatorFirst: boolean) => async () => {
     const observed = await observe()
     const [utility, saturator] = [required(observed.effectId(reorderTargetTrack, "utility"), "Utility device"), required(observed.effectId(reorderTargetTrack, "saturator"), "Saturator device")]
     const order = [{ effect: ref(utility), kind: "utility" }, { effect: ref(saturator), kind: "saturator" }]
+
     return commit([{ kind: "effect.reorder", target: await trackNamed(reorderTargetTrack), order: saturatorFirst ? order.toReversed() : order }])
   }
+
   const lookahead = (lookaheadMs: number) => async () => commit([{ kind: "effect.upsert", target, effectKind: "limiter",
     effect: ref(required((await observe()).limiterEffectId, "Limiter device")), params: { version: 1, state: { ...createDefaultLimiterParams(), lookaheadMs } } }])
+
   // The transport rows (PackagedRun.transport) start and cancel the transport themselves and mark what they observed for the judge
   // (compareHostLoss, compareCancelledStart). `cancelWallMs` is when the command that cancels or kills was issued.
   const observeTransport = async (edit: string, cancelWallMs: number, status: { state: string; playheadSec: number }, failure = "") =>
     context.mark("transport-observed", { edit, pid: await hostPid(), cancelWallMs, state: status.state, playheadSec: status.playheadSec, failure })
+
   // A Play whose start has not landed. The Play button is aria-busy while its start is pending, stays "Play" until a start lands (then it
   // reads "Pause"), and has no Pause to press meanwhile. A trail of its attribute changes shows the cancel arrived while the Play was
   // pending: it went busy and the label never left "Play". A run without that trail fails as oracle, whatever the transport shows.
@@ -125,23 +155,31 @@ export const createPerformer = ({ context, runtime, playThenPause, transportStat
     window.ae08PlayWatch?.disconnect();const trail=[];window.ae08PlayTrail=trail
     window.ae08PlayWatch=new MutationObserver(records=>{for(const r of records)trail.push(r.attributeName+':'+r.oldValue)})
     window.ae08PlayWatch.observe(b,{attributes:true,attributeOldValue:true,attributeFilter:['aria-busy','aria-label']});return true})()`)
+
   const provePendingCancel = async (cancel: string) => {
     await waitForUi(context, `${cancel} never cleared the pending Play`, `document.querySelector('button[aria-label="Play"]')?.getAttribute('aria-busy')!=='true'`)
     const trail = await context.read(`JSON.stringify(window.ae08PlayTrail)`, z.array(z.string()))
+
     if (!trail.includes("aria-busy:true")) throw new Error(`Oracle: the Play was never pending when ${cancel} cancelled it`)
+
     if (trail.includes("aria-label:Play")) throw new Error(`Oracle: the Play's start landed (the button read Pause) before ${cancel} cancelled it`)
   }
+
   // Stop is always pressable, so one renderer task presses Play and then Stop. Pause is not (the control protocol's pause is the only one a
   // pending Play meets), so the two requests go in order down one control connection.
   const cancelledPlay = (cancel: "pause" | "stop") => async () => {
     await watchPlayButton()
+
     const cancelWallMs = cancel === "pause" ? await playThenPause() : await context.read(`JSON.stringify((()=>{
       const play=document.querySelector('button[aria-label="Play"]'),stop=document.querySelector('button[aria-label="Stop"]')
       if(!play||!stop)throw new Error('Play or Stop unavailable');play.click();const at=Date.now();stop.click();return at})())`, z.number())
+
     await provePendingCancel(cancel)
     await observeTransport(`play-then-${cancel}`, cancelWallMs, await transportStatus())
+
     return unmoved
   }
+
   const performers = new Map([
     ["target-delete-refused", refuseTargetChange("Deleting", async () => ({ kind: "track.delete", track: ref(setup.changedTrackId) }))],
     // The armed track already outputs to Master, so a null output is no change, and the planner drops a send to anything but a return track.
@@ -151,6 +189,7 @@ export const createPerformer = ({ context, runtime, playThenPause, transportStat
       const returnLabel = `[...document.querySelectorAll('button[aria-label]')].map(b=>b.getAttribute('aria-label')??'').find(label=>/: Return \\d+$/.test(label))`
       await waitForUi(context, "No return track appeared", `Boolean(${returnLabel})`)
       const name = (await context.read(`JSON.stringify(${returnLabel}?.split(': ').at(-1))`, z.string()))
+
       return { kind: "track.routing.set", track: ref(setup.changedTrackId), sends: [{ target: ref(required((await observe()).trackId(name), name)), amount: 0.5 }] }
     })],
     ["instrument-remove", async () => commit([{ kind: "instrument.remove", target: await trackNamed(insertTargetTrack) }])],
@@ -179,6 +218,7 @@ export const createPerformer = ({ context, runtime, playThenPause, transportStat
       await waitForUi(context, "No native-unavailable fault was reported", `/native[^.\\n]*(unavailable|stopped)/i.test(document.body.innerText)`)
       const stopped = await context.read(`JSON.stringify(document.querySelector('button[aria-label="Pause"]')===null)`, z.boolean())
       await context.mark("transport-observed", { edit: "play-kill-host", pid, cancelWallMs, state: stopped ? "stopped" : "playing", playheadSec: 0, failure: nativeUnavailableReported })
+
       return unmoved
     }],
     // A paused session to cancel over: from a stopped or paused transport it plays first.
@@ -187,6 +227,7 @@ export const createPerformer = ({ context, runtime, playThenPause, transportStat
       const cancelWallMs = Date.now()
       await runtime(["pause"])
       await observeTransport("session-pause", cancelWallMs, await transportStatus())
+
       return unmoved
     }],
     ["play-then-pause", cancelledPlay("pause")],
@@ -196,29 +237,37 @@ export const createPerformer = ({ context, runtime, playThenPause, transportStat
       const cancelWallMs = Date.now()
       await runtime(["play"])
       await observeTransport("play-resume", cancelWallMs, await transportStatus())
+
       return unmoved
     }],
     ["lookahead-1ms", lookahead(1)],
     ["lookahead-5ms", lookahead(5)],
     // The drag overrides the lane on the Utility Gain knob; the transport's red button re-enables it.
-    ["knob-drag", async () => { await dragUtilityGainKnob(context, 10); return unmoved }],
+    ["knob-drag", async () => { await dragUtilityGainKnob(context, 10);
+
+ return unmoved }],
     ["lane-rearm", async () => {
       await context.evaluate(`(()=>{const b=document.querySelector('button[aria-label^="Re-enable automation"]');if(!b)throw new Error('Re-enable automation unavailable');b.click();return true})()`)
       await waitForUi(context, "Automation not re-enabled", `!document.querySelector('button[aria-label^="Re-enable automation"]')`)
+
       return unmoved
     }],
     ["fft-4096", fft(512, 4096)],
     ["fft-512", fft(4096, 512)],
     ["spectral-remove", async () => {
       const { wallMs } = await commit([{ kind: "effect.remove", target, effectKind: "spectral", effect: ref(required((await observe()).spectralEffectId, "Spectral device")) }])
+
       return { ...move(spectralFrames(512), 0), wallMs }
     }],
     ["spectral-attach", async () => {
       const { wallMs } = await commit([{ kind: "effect.upsert", target, effectKind: "spectral",
         params: { version: 1, state: { ...createDefaultSpectralParams(), fftSize: 512, mix: 1 } } }])
+
       return { ...move(0, spectralFrames(512)), wallMs }
     }],
-    ["track-delete", async () => { await deleteTrackThroughUi(context, "Changed right"); await changedClip(false); return unmoved }],
+    ["track-delete", async () => { await deleteTrackThroughUi(context, "Changed right"); await changedClip(false);
+
+ return unmoved }],
     ["undo", history(false, true)],
     ["redo", history(true, false)],
     // The import takes the playhead for its start; the oracle needs the start the clip really took (placedAt in the compare).
@@ -229,30 +278,41 @@ export const createPerformer = ({ context, runtime, playThenPause, transportStat
       await runtime(["import", "--path", setup.changedFile])
       const deadline = Date.now() + pageDeadlineMs
       let startSec = (await observe()).clipStartSec("changed")
+
       while (startSec === undefined) {
         if (Date.now() > deadline) throw new Error("Import UI deadline: changed")
         await Bun.sleep(50)
         startSec = (await observe()).clipStartSec("changed")
       }
+
       return { ...unmoved, startSec }
     }],
     ["asset-clip-delete", deleteImportedClip],
     ["clip-delete", deleteImportedClip],
-    ["vst-insert", async () => { await insertTestPlugin(context); return unmoved }],
-    ["vst-remove", async () => { await removeTestPlugin(context); return unmoved }],
+    ["vst-insert", async () => { await insertTestPlugin(context);
+
+ return unmoved }],
+    ["vst-remove", async () => { await removeTestPlugin(context);
+
+ return unmoved }],
     ["editor-open", async () => {
       await stateCaptured(await closeTestPluginEditor(context))
       await openTestPluginEditor(context)
+
       return unmoved
     }],
     // The test plug-in's Fault parameter (id 2): its second step, 1/3 normalized, aborts the worker's next process call.
     ["vst-fault", async () => {
       const { wallMs } = await commit([{ kind: "external-plugin.parameters.set", target,
         processor: ref(required((await observe()).externalEffectId, "Test plug-in processor")), changes: [{ parameterId: 2, normalizedValue: 1 / 3 }] }])
+
       await awaitTestPluginFailure(context)
+
       return { ...unmoved, wallMs }
     }],
-    ["untrusted-insert", async () => { await refuseUntrustedPlugin(context); return unmoved }],
+    ["untrusted-insert", async () => { await refuseUntrustedPlugin(context);
+
+ return unmoved }],
     ["latency-high", testPluginLatency(1, vstTransportFrames, vstTransportFrames + 4096)],
     ["latency-low", testPluginLatency(0, vstTransportFrames + 4096, vstTransportFrames)],
     ["silent-track-create", () => commit([{ kind: "track.create", name: silentTrack, trackKind: "audio" }])],
@@ -262,9 +322,12 @@ export const createPerformer = ({ context, runtime, playThenPause, transportStat
     ["tempo-137", settings(137)],
     ["tempo-120", settings(120)],
   ])
+
   return async (edit) => {
     const perform = performers.get(edit)
+
     if (!perform) throw new Error(`No phase 9 performer for ${edit}`)
+
     return perform()
   }
 }
@@ -278,41 +341,57 @@ export const contentSecondsFor = (rows: readonly Row[], requested: Requested, ti
 const fixtureRow = (rows: readonly Row[]) => {
   const names = new Set(rows.map((row) => row.fixture))
   const [only] = names
+
   if (names.size !== 1 || !only?.startsWith("phase5:")) throw new Error(`A phase 9 launch needs one phase 5 fixture, got ${[...names].join(", ")}`)
+
   return only.slice("phase5:".length)
 }
 
 // What a row's `prepare` steps do. They run on the fixture's start state before the capture, except the held note, which is played
 // once the transport runs and released after the last window.
 const heldNote = 69
+
 export const performPrepare = async (context: Pick<Phase5Context, "evaluate" | "interact" | "reload">, step: string) => {
   if (step === "record-select-input") {
     await context.evaluate(selectAudioInputScript(blackhole))
+
     return context.reload()
   }
+
   if (step === "record-arm") return armRecordTarget(context)
+
   if (step === "vst-trust") return prepareTestPlugin(context, "Changed right")
+
   if (step === "vst-insert") return insertTestPlugin(context)
+
   if (step === "vst-untrusted-browser") return showUntrustedEffectsBrowser(context, "Changed right")
+
   if (step === "midi-select-iac") {
     await context.evaluate(selectMidiInputScript(iacPort))
     await context.reload()
+
     return context.evaluate(`(()=>{const b=[...document.querySelectorAll('button[aria-label]')].find(b=>b.getAttribute('aria-label')?.endsWith(': ${liveMidiTrack}'));if(!b)throw new Error('Live MIDI track selector missing');b.click();return true})()`)
   }
+
   if (step === "midi-hold") return void await sendMidiNote("on", heldNote)
   throw new Error(`No phase 9 prepare step ${step}`)
 }
+
 export const stateName = (row: string, state: string) => `state-${row}-${state}`
 const transportStatusSchema = z.object({ state: z.string(), playheadSec: z.number() })
+
 // The audio host still running: the main process's host-spawn lines name its pid. A spawn the host-exit lines already closed (the app
 // starts and ends a short-lived host while it inserts a plug-in) is not the session's host.
 const lastHostPid = async (out: string) => {
   const events = parseHostLines(await readFile(path.join(out, "host.jsonl"), "utf8"))
   const exited = new Set(events.filter((event) => event.event === "host-exit").map((event) => event.pid))
   const spawned = events.findLast((event) => event.event === "host-spawn" && event.pid > 0 && !exited.has(event.pid))
+
   if (!spawned) throw new Error("The app logged no running audio host")
+
   return spawned.pid
 }
+
 const diagnosticsSchema = z.object({ native: z.object({ diagnostics: z.object({ installedAssets: z.number() }) }) })
 const refusedDiagnosticsSchema = z.object({ native: z.object({ status: z.literal("failed") }) })
 const refusedDiagnosticsAttempts = 40
@@ -322,33 +401,45 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
   const runtime = (args: string[]) => command(profile, ["host", ...args])
   const setup = await setupPhase5Fixture({ ...context, row: fixtureRow(launch.rows), contentSeconds: launch.contentSeconds })
   const prepare = [...new Set(launch.rows.flatMap((row) => row.prepare ?? []))]
+
   for (const step of prepare.filter((entry) => entry !== "midi-hold")) await performPrepare(context, step)
+
   if (prepare.includes("record-select-input")) {
     const listed = await context.read(describeAudioInputScript(blackhole), nativeInputDeviceSchema)
     await mark("native-input-device", listed)
   }
+
   const transportStatus = async () => transportStatusSchema.parse(await runtime(["transport-status"]))
+
   const playThenPause = async () => {
     const client = await createAvailableDesktopHostClient({ userDataDirectory: profile, actorPath: path.join(profile, "host-actor-v1.json") })
+
     try {
       const play = client.request("transport.play", {})
       const cancelWallMs = Date.now()
       await Promise.allSettled([play, client.request("transport.pause", {})])
+
       return cancelWallMs
     } finally { client.close() }
   }
+
   const performEdit = createPerformer({ context, runtime: async (args) => { await runtime(args) }, playThenPause, transportStatus,
     hostPid: () => lastHostPid(out), kill: (pid) => process.kill(pid, "SIGKILL"),
     stateCaptured: async (sinceWallMs) => { await awaitPublicationComplete(out, sinceWallMs, false, 10_000, "state-capture") },
     setup: { changedTrackId: setup.changedTrack.id, changedFile: setup.changedFile },
     observe: async () => observeSnapshot(await context.snapshot(), setup.changedTrack.id) })
+
   const outputDeviceSteps = createOutputDeviceSteps({ context, out, transportStatus })
+
   const perform: Perform = async (edit) => {
     const step = outputDeviceSteps.get(edit)
+
     if (!step) return performEdit(edit)
     await step()
+
     return unmoved
   }
+
   await runtime(["seek", "0"])
   await mark("capture-start")
   const playWallMs = Date.now()
@@ -358,9 +449,12 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
   // lands inside the take.
   const takeRow = launch.rows.find((row) => row.judge === "take")
   const before = takeRow ? await startRecording(context) : driven ? undefined : (await runtime(["play"]), undefined)
+
   if (!driven) await waitNativeFrame(context, warmupFrames)
+
   if (prepare.includes("midi-hold")) await performPrepare(context, "midi-hold")
   const tone = takeRow ? playToneIntoBlackhole(path.join(out, "tone.wav"), toneSeconds).then(() => undefined, (error) => error instanceof Error ? error : new Error(String(error))) : undefined
+
   // Asset inventory: the installed-asset count the host reports, recorded before the burst and after each publication with that
   // publication's revision.
   // The main process refuses a native diagnostics read while another host request is pending (it answers status "failed"), and a
@@ -368,50 +462,66 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
   const installedAssets = async () => {
     for (let attempt = 1; ; attempt++) {
       const reply = await runtime(["diagnostics-v2"])
+
       if (attempt < refusedDiagnosticsAttempts && refusedDiagnosticsSchema.safeParse(reply).success) {
         await Bun.sleep(50)
         continue
       }
+
       return diagnosticsSchema.parse(reply).native.diagnostics.installedAssets
     }
   }
+
   if (!driven) await mark("asset-inventory", { revision: 0, installedAssets: await installedAssets() })
+
   for (const row of launch.rows) {
     const logged = await runBurst({ out, directory: path.join(launch.directory, row.name), row, perform, mark, sampleRate,
       frameAt: (wallMs) => Math.max(1, Math.round((wallMs - playWallMs) * sampleRate / 1000)),
       repetitions: repetitionsFor(row, launch.requested),
       afterSettle: async (settled) => { if (!driven) await mark("asset-inventory", { revision: settled.revision, installedAssets: await installedAssets() }) },
       hold: async (frame) => { if (!driven) await waitNativeFrame(context, frame) } })
+
     // The last edit's window needs its second (and the next row's first window starts after it), so hold until the transport
     // has rendered that far. The transport started at frame 0 at playWallMs.
     const lastSettled = logged.at(-1)?.settledWallMs
+
     if (lastSettled !== undefined && !driven) await waitNativeFrame(context, Math.ceil((lastSettled + MIN_WINDOW_MS + windowMarginMs - playWallMs) * sampleRate / 1000))
   }
+
   if (prepare.includes("midi-hold")) await sendMidiNote("off", heldNote)
+
   if (takeRow && before) {
     const toneFailure = await tone
+
     if (toneFailure !== undefined) throw toneFailure
     const verdict = await finishRecording(context, { before, file: path.join(out, "take.wav") })
     await writeFile(path.join(launch.directory, takeRow.name, takeFile), JSON.stringify(verdict))
   }
+
   await mark("capture-end")
+
   // The host of a driven row may be the one it killed, or paused mid-cancel; the runner quits the app.
   if (driven) return
   await writeFile(path.join(out, "diagnostics-active.json"), JSON.stringify(await runtime(["diagnostics-v2"]), null, 2))
   await runtime(["stop"])
+
   // One offline export per state of each compared row, with the project in that state: the references of judgeBurst. Each row's burst
   // ended on its start state, and one pass over its cycle returns it there.
   for (const row of launch.rows.filter((entry) => entry.judge === "states")) {
     const wanted = (state: string) => row.reference === undefined || row.reference === state
     const exported = new Set([row.start])
+
     if (wanted(row.start)) await exportReference(context, stateName(row.name, row.start), launch.contentSeconds)
     // The transport is stopped: put the playhead at 0 so an import places its clip at 0, the start placedAt shifts from.
     await runtime(["seek", "0"])
+
     for (const step of row.cycle) {
       for (const edit of step.edits) {
         const { startSec } = await perform(edit)
+
         if (startSec !== undefined && startSec !== 0) throw new Error(`The reference ${edit} placed its clip at ${startSec} s, not 0`)
       }
+
       if (wanted(step.state) && !exported.has(step.state)) await exportReference(context, stateName(row.name, step.state), launch.contentSeconds)
       exported.add(step.state)
     }
@@ -427,18 +537,22 @@ const lines = async (file: string) => (await readFile(file, "utf8")).split("\n")
 export const exportRowEvidence = async (launchOut: string, directory: string, rows: readonly Row[]) => {
   const starts = await Promise.all(rows.map(async (row) => edits.parse(JSON.parse(await readFile(path.join(directory, row.name, "phase9-edits.json"), "utf8")))
     .edits.reduce((first, edit) => Math.min(first, edit.wallMs), Number.POSITIVE_INFINITY)))
+
   const host = await lines(path.join(launchOut, "host.jsonl"))
   const events = parseHostLines(host.join("\n") + "\n")
   const actions = await lines(path.join(launchOut, "actions.jsonl"))
+
   for (const [position, row] of rows.entries()) {
     const from = starts[position] ?? Number.POSITIVE_INFINITY, to = starts[position + 1] ?? Number.POSITIVE_INFINITY
     const inRow = (wallMs: number) => wallMs >= from && wallMs < to
     await writeFile(path.join(directory, row.name, "host.jsonl"), host.filter((_, index) => {
       const event = events[index]
+
       return event !== undefined && (event.event === "device-session" || inRow(event.wallMs))
     }).join("\n") + "\n")
     await writeFile(path.join(directory, row.name, "actions.jsonl"), actions.map((line) => {
       const action = z.object({ event: z.string() }).passthrough().parse(JSON.parse(line))
+
       return action.event === "capture-end" && to !== Number.POSITIVE_INFINITY ? JSON.stringify({ ...action, wallMs: to }) : line
     }).join("\n") + "\n")
   }
@@ -451,33 +565,46 @@ export const selfTest = async () => {
   const calls: string[] = []
   let trail = ["aria-busy:false", "aria-busy:true"]
   const transport = { state: "stopped", playheadSec: 0 }
+
   const observed: Observed = { spectralEffectId: "spectral-1", limiterEffectId: "limiter-1", externalEffectId: "external-1", trackId: (name) => name === silentTrack ? "silent-1" : `track-of-${name}`, clipId: (name) => name === "changed" ? "clip-1" : undefined, clipStartSec: (name) => name === "changed" ? 2 : undefined,
     effectId: (trackName, kind) => trackName === reorderTargetTrack ? `${kind}-1` : undefined,
     asset: (name) => ({ id: `asset-${name}`, name: `${name}.wav`, durationSec: 30, sampleRate: 48000, channelCount: 2 }) }
+
   const perform = createPerformer({
     context: {
-      mutate: async (actions) => { calls.push(`mutate ${JSON.stringify(actions)}`); return 4242 },
+      mutate: async (actions) => { calls.push(`mutate ${JSON.stringify(actions)}`);
+
+ return 4242 },
       evaluate: async (script) => { calls.push(`evaluate ${script}`) },
       interact: async (args) => { calls.push(`interact ${args.join(" ")}`) },
-      read: async (script, schema) => { calls.push(`read ${script}`); return schema.parse(script.includes("getBoundingClientRect") ? { x: 300, y: 200 } : script.includes("ae08PlayTrail") ? trail
+      read: async (script, schema) => { calls.push(`read ${script}`);
+
+ return schema.parse(script.includes("getBoundingClientRect") ? { x: 300, y: 200 } : script.includes("ae08PlayTrail") ? trail
         : script.includes("play.click()") ? 4242 : script.includes("Pause") ? true : 0) },
       reload: async () => { calls.push("reload") },
       mark: async (event, fields) => { calls.push(`mark ${event} ${JSON.stringify(fields)}`) },
     },
     runtime: async (args) => { calls.push(`runtime ${args.join(" ")}`) },
-    playThenPause: async () => { calls.push("control play then pause"); return 4243 },
-    transportStatus: async () => { calls.push("runtime transport-status"); return { state: transport.state, playheadSec: transport.playheadSec } },
+    playThenPause: async () => { calls.push("control play then pause");
+
+ return 4243 },
+    transportStatus: async () => { calls.push("runtime transport-status");
+
+ return { state: transport.state, playheadSec: transport.playheadSec } },
     hostPid: async () => 4711,
     stateCaptured: async (sinceWallMs) => { calls.push(`state-captured ${sinceWallMs > 0}`) },
     kill: (pid) => { calls.push(`kill ${pid}`) },
     observe: async () => observed,
     setup: { changedTrackId: "track-1", changedFile: "/tmp/changed.wav" },
   })
+
   const run = async (edit: string) => {
     calls.length = 0
     const moved = await perform(edit)
+
     return { moved, calls: [...calls] }
   }
+
   const spectral512 = spectralFrames(512), spectral4096 = spectralFrames(4096)
   check(spectral512 > 0 && spectral4096 > spectral512, "the Spectral latency grows with the FFT size")
 
@@ -504,6 +631,7 @@ export const selfTest = async () => {
   // The lookahead rows patch the observed Limiter in place; the lane row drags the knob once and re-enables the lane from the transport.
   const limiterAction = (lookaheadMs: number) => `mutate ${JSON.stringify([{ kind: "effect.upsert", target: { kind: "track", track: ref("track-1") }, effectKind: "limiter",
     effect: ref("limiter-1"), params: { version: 1, state: { ...createDefaultLimiterParams(), lookaheadMs } } }])}`
+
   check((await run("lookahead-1ms")).calls[0] === limiterAction(1) && (await run("lookahead-5ms")).calls[0] === limiterAction(5), "the lookahead edits upsert the observed Limiter at 1 and 5 ms")
   const drag = await run("knob-drag")
   check(drag.calls.filter((call) => call.startsWith("interact mouse")).join("|") === "interact mouse move 300 200|interact mouse down|interact mouse move 300 210|interact mouse up",
@@ -571,11 +699,13 @@ export const selfTest = async () => {
   check(stopped.calls.at(-1)?.includes(`"cancelWallMs":4242`) === true, "play-then-stop marks the time between the two presses")
   // A cancel that was not over a pending Play fails as oracle, whatever the transport shows afterwards.
   const badTrails: [string, string[]][] = [["never pending", ["aria-busy:false"]], ["start landed", ["aria-busy:true", "aria-label:Play"]]]
+
   for (const [label, bad] of badTrails) {
     trail = bad
     const refused = await run("play-then-pause").then(() => "", (error) => String(error))
     check(refused.includes("Oracle:"), `a cancel with a trail of ${label} fails as oracle: ${refused}`)
   }
+
   trail = ["aria-busy:false", "aria-busy:true"]
   const preparing = await run("session-pause")
   check(preparing.calls.slice(0, 3).join("|") === "runtime transport-status|runtime play|runtime pause", `session-pause plays a session that is not playing, then pauses it: ${preparing.calls}`)
@@ -602,8 +732,10 @@ export const selfTest = async () => {
   check((await run("clip-delete")).calls[0] === `mutate ${JSON.stringify([{ kind: "clip.delete", clip: ref("clip-1") }])}`, "clip-delete names the observed clip")
   // Prepare steps: the trust flow opens the plug-ins dashboard and acknowledges trust; an unknown step is refused.
   const prepared: string[] = []
+
   const prepareContext = { evaluate: async (script: string) => { prepared.push(`evaluate ${script}`) }, interact: async (args: string[]) => { prepared.push(`interact ${args.join(" ")}`) },
     reload: async () => { prepared.push("reload") } }
+
   await performPrepare(prepareContext, "vst-trust")
   check(prepared[0]?.includes("dashboard") === true && prepared.some((call) => call.includes("input[type=checkbox]")) && prepared.includes("reload") && prepared.includes("interact press Escape"), "vst-trust opens the plug-ins dashboard, acknowledges trust and reloads")
   prepared.length = 0
@@ -619,15 +751,19 @@ export const selfTest = async () => {
   await performPrepare(prepareContext, "record-arm")
   check(prepared[0]?.includes("Arm track") === true && prepared[0]?.includes("Changed right") === true && prepared[0]?.includes(".click()") === true && prepared[1]?.includes("Disarm track") === true,
     "record-arm clicks the arm button of the changed track and waits for it to be pressed")
+
   // The armed target's delete must be refused with the lock's reason; a commit that goes through, or another refusal, fails the row.
   const guard = (mutate: () => Promise<number>) => createPerformer({
     context: { mutate, evaluate: async () => undefined, interact: async () => undefined, read: async (_, schema) => schema.parse(0), reload: async () => undefined, mark: async () => undefined },
     runtime: async () => undefined, playThenPause: async () => 0, transportStatus: async () => ({ state: "paused", playheadSec: 0 }), hostPid: async () => 1, stateCaptured: async () => undefined, kill: () => undefined, observe: async () => observed, setup: { changedTrackId: "track-1", changedFile: "/tmp/changed.wav" } })("target-delete-refused")
+
   check((await guard(async () => { throw new Error(`validation: ${recordingTargetLockedReason}`) })).toLatencyFrames === 0, "a refusal carrying the lock's reason is the expected outcome")
+
   const reroute = (mutate: (actions: unknown[]) => Promise<number>) => createPerformer({
     context: { mutate, evaluate: async () => undefined, interact: async () => undefined, read: async (_, schema) => schema.parse("Return 4"), reload: async () => undefined, mark: async () => undefined },
     runtime: async () => undefined, playThenPause: async () => 0, transportStatus: async () => ({ state: "paused", playheadSec: 0 }), hostPid: async () => 1, stateCaptured: async () => undefined, kill: () => undefined, observe: async () => observed,
     setup: { changedTrackId: "track-1", changedFile: "/tmp/changed.wav" } })("target-reroute-refused")
+
   let requested = ""
   await reroute(async (actions) => { requested = JSON.stringify(actions); throw new Error(`validation: ${recordingTargetLockedReason}`) })
   check(requested === JSON.stringify([{ kind: "track.routing.set", track: ref("track-1"), sends: [{ target: ref("track-of-Return 4"), amount: 0.5 }] }]), `the reroute row asks the armed target for a send to a new return track: ${requested}`)
@@ -636,26 +772,33 @@ export const selfTest = async () => {
   check(await guard(async () => { throw new Error("validation: stale revision") }).then(() => "performed", (error) => error instanceof Error && /another reason/.test(error.message) ? "other reason" : "other") === "other reason", "a refusal for another reason fails the row")
   // The take as the page hands it over: the tone behind a silent lead is the tone; the same take with one sample changed is not.
   const handedOver = await mkdtemp(path.join(tmpdir(), "ae08-phase9-take-"))
+
   try {
     const tone = makeTone(toneSeconds)
+
     const take = (change?: (samples: Float32Array) => void) => {
       const samples = new Float32Array(tone.samples.length + 2 * 4800)
       samples.set(tone.samples, 2 * 2400)
       change?.(samples)
+
       return writeWav(path.join(handedOver, "built.wav"), { ...tone, samples }).then(() => readFile(path.join(handedOver, "built.wav")).then((bytes) => bytes.toString("base64")))
     }
+
     const exact = await verifyHandedOverTake(await take(), path.join(handedOver, "take.wav"))
     check(exact.passed && exact.offset === 2400, `a take equal to the tone passes at its own offset: ${JSON.stringify(exact)}`)
     check(!(await verifyHandedOverTake(await take((samples) => { samples[2 * 2400 + 1000] += 1e-6 }), path.join(handedOver, "take.wav"))).passed, "a take with one changed sample fails")
   } finally { await rm(handedOver, { recursive: true }) }
+
   check(await performPrepare(prepareContext, "no-such-step").then(() => false, (error) => error instanceof Error && error.message === "No phase 9 prepare step no-such-step"), "an unknown prepare step is refused")
   const rejected = await perform("no-such-edit").then(() => "performed", (error) => error instanceof Error ? error.message : "other")
   check(rejected === "No phase 9 performer for no-such-edit", `an unknown edit is refused, got ${rejected}`)
 
   // One merged launch's host.jsonl is split per row at each row's first step, and each row is judged from its own part.
   const [first, second] = [phase9Presets.cert.find((row) => row.name === "fft-transition"), phase9Presets.cert.find((row) => row.name === "raise-lower-burst")]
+
   if (!first || !second) throw new Error("phase 9 launch self-test: rows missing")
   const directory = await mkdtemp(path.join(tmpdir(), "ae08-phase9-export-"))
+
   try {
     const publication = (wallMs: number, publicationFrame: number) => ({ event: "graph-publish", cause: "block-boundary", wallMs, publicationFrame, revision: 1, transportEpoch: 1 })
     const host = [{ event: "device-session", wallMs: 1, sampleRate: 48000, blockSize: 512 }, publication(2_000, 96_000), publication(5_000, 240_000), publication(12_000, 576_000)]
@@ -664,11 +807,13 @@ export const selfTest = async () => {
     await writeFile(path.join(launchOut, "host.jsonl"), host.map((line) => JSON.stringify(line)).join("\n") + "\n")
     await writeFile(path.join(launchOut, "actions.jsonl"), [{ event: "capture-start", wallMs: 0 }, { event: "capture-end", wallMs: 20_000 }].map((line) => JSON.stringify(line)).join("\n") + "\n")
     const stored = [{ row: first, edits: [{ index: 1, wallMs: 1_500 }, { index: 2, wallMs: 4_500 }] }, { row: second, edits: [{ index: 1, wallMs: 10_000 }] }]
+
     for (const { row, edits } of stored) {
       await mkdir(path.join(directory, row.name))
       await writeFile(path.join(directory, row.name, "phase9-edits.json"), JSON.stringify({ phase: 9, row: row.name,
         edits: edits.map((edit) => ({ ...edit, fromLatencyFrames: 0, toLatencyFrames: 0 })) }))
     }
+
     await exportRowEvidence(launchOut, directory, [first, second])
     const firstHost = (await lines(path.join(directory, first.name, "host.jsonl"))).map((line) => JSON.parse(line).wallMs)
     const secondHost = (await lines(path.join(directory, second.name, "host.jsonl"))).map((line) => JSON.parse(line).wallMs)
@@ -685,6 +830,7 @@ export const selfTest = async () => {
     check(withFailure.length === 3 && withFailure.find((entry) => entry.row === "failed-launch")?.verdict.outcome === "setup"
       && withFailure.filter((entry) => entry.verdict.outcome === "pass").length === 2, `a row with no host.jsonl is a setup failure and the rest are judged: ${JSON.stringify(withFailure)}`)
   } finally { await rm(directory, { recursive: true }) }
+
   console.log("ae-08 phase 9 launch self-test: pass")
 }
 

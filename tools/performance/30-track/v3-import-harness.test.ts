@@ -32,16 +32,21 @@ const launchFixture = async (idle = false) => {
   await mkdir(profile, { mode: 0o700 })
   const script = path.join(directory, "fixture.ts")
   await Bun.write(script, fixture)
+
   const child = spawn(process.execPath, [script, "--remote-debugging-address=127.0.0.1",
     "--remote-debugging-port=0", `--user-data-dir=${profile}`, ...(idle ? ["--fixture-idle"] : [])], {
     detached: true, stdio: ["pipe", "pipe", "pipe"],
   })
+
   const exited = once(child, "close")
+
   try {
     const [chunk] = await Promise.race([once(child.stdout, "data"), exited])
     expect(String(chunk).trim()).toBe("ready")
+
     if (!child.pid) throw new Error("Fixture PID unavailable")
     const pid = child.pid
+
     return {
       directory, profile, child, pid, exited,
       dispose: async () => {
@@ -62,6 +67,7 @@ const launchFixture = async (idle = false) => {
 test("owned v3 launch correlates capability, listener, root and cleanup without touching another process", async () => {
   const app = await launchFixture()
   let unrelated: Awaited<ReturnType<typeof launchFixture>> | undefined
+
   try {
     unrelated = await launchFixture(true)
     const unrelatedPid = unrelated.pid
@@ -82,6 +88,7 @@ test("owned v3 launch correlates capability, listener, root and cleanup without 
 
 test("missing CDP readiness fails but pre-attachment v3 cleanup still terminates the owned app", async () => {
   const app = await launchFixture(true)
+
   try {
     await expect(ownedV3CdpEndpoint(app.profile, app.pid, process.execPath)).rejects.toThrow("ENOENT")
     const cleanup = await cleanupV3Run(app.directory, app.pid, process.execPath)
@@ -95,6 +102,7 @@ test("missing CDP readiness fails but pre-attachment v3 cleanup still terminates
 test("a copied CDP capability never establishes ownership of an unrelated listener", async () => {
   const app = await launchFixture(true)
   let unrelated: Awaited<ReturnType<typeof launchFixture>> | undefined
+
   try {
     unrelated = await launchFixture()
     const unrelatedPid = unrelated.pid
@@ -112,6 +120,7 @@ test("a copied CDP capability never establishes ownership of an unrelated listen
 test("v3 readiness rejects wrong executable, profile and malformed capability", async () => {
   const app = await launchFixture()
   let other: Awaited<ReturnType<typeof launchFixture>> | undefined
+
   try {
     other = await launchFixture(true)
     await expect(ownedV3CdpEndpoint(app.profile, app.pid, "/not-the-fixture"))
@@ -133,6 +142,7 @@ test("v3 readiness rejects wrong executable, profile and malformed capability", 
 
 test("v3 cleanup refuses a mismatched root and retains the still-in-use profile", async () => {
   const app = await launchFixture(true)
+
   try {
     const cleanup = await cleanupV3Run(app.directory, app.pid, "/not-the-fixture")
     expect(cleanup.removed).toBe(false)
@@ -145,6 +155,7 @@ test("v3 cleanup refuses a mismatched root and retains the still-in-use profile"
 
 test("an exited root cannot be declared ready from its remaining capability file", async () => {
   const app = await launchFixture()
+
   try {
     app.child.kill("SIGTERM")
     await app.exited

@@ -67,25 +67,33 @@ export const updateFadeDraft = (update: FadeDraftUpdate): NormalizedClipFades =>
   if (update.mode === 'curve') {
     const curveKey = update.side === 'fadeIn' ? 'fadeInCurve' : 'fadeOutCurve'
     const positionKey = update.side === 'fadeIn' ? 'fadeInCurvePosition' : 'fadeOutCurvePosition'
+
     const fadeStart = update.side === 'fadeIn'
       ? update.baseline.fadeInStartSec
       : update.duration - update.baseline.fadeOutSec
+
     const fadeEnd = update.side === 'fadeIn'
       ? update.baseline.fadeInSec
       : update.duration - update.baseline.fadeOutEndSec
+
     const span = fadeEnd - fadeStart
     const overlayStartSec = update.overlayStartSec ?? 0
     const overlayDurationSec = update.overlayDurationSec ?? update.duration
+
     const localTime = overlayStartSec
       + (update.currentX / update.overlayWidth) * overlayDurationSec
+
     const position = span > 0
       ? Math.min(1, Math.max(0, (localTime - fadeStart) / span))
       : 0.5
+
     const linearGain = update.side === 'fadeIn' ? position : 1 - position
     const gain = Math.min(1, Math.max(0, 1 - update.currentY / update.overlayHeight))
+
     const curve = gain >= linearGain
       ? (gain - linearGain) / Math.max(0.000001, 1 - linearGain)
       : (gain - linearGain) / Math.max(0.000001, linearGain)
+
     return normalizeClipFades({
       ...update.baseline,
       [curveKey]: curve,
@@ -95,10 +103,12 @@ export const updateFadeDraft = (update: FadeDraftUpdate): NormalizedClipFades =>
 
   const overlayStartSec = update.overlayStartSec ?? 0
   const overlayDurationSec = update.overlayDurationSec ?? update.duration
+
   const time = Math.min(
     update.duration,
     Math.max(0, overlayStartSec + (update.currentX / update.overlayWidth) * overlayDurationSec),
   )
+
   const patch = update.mode === 'fadeInStart'
     ? { fadeInStartSec: time }
     : update.mode === 'fadeInEnd'
@@ -106,6 +116,7 @@ export const updateFadeDraft = (update: FadeDraftUpdate): NormalizedClipFades =>
       : update.mode === 'fadeOutStart'
         ? { fadeOutSec: update.duration - time }
         : { fadeOutEndSec: update.duration - time }
+
   return normalizeClipFades({
     ...update.baseline,
     ...patch,
@@ -125,20 +136,27 @@ export const updateFadeDraftForKeyboard = (
     const isLarge = key === 'PageUp' || key === 'PageDown'
     const positionStep = isLarge ? fadeCurveKeyboardLargeStep : fadeCurveKeyboardStep
     const curveStep = isLarge ? fadeCurveKeyboardLargeStep : fadeCurveKeyboardStep
+
     if (key === 'ArrowLeft' || key === 'PageDown') {
       return normalizeClipFades({ ...baseline, [positionKey]: baseline[positionKey] - positionStep }, duration, side)
     }
+
     if (key === 'ArrowRight' || key === 'PageUp') {
       return normalizeClipFades({ ...baseline, [positionKey]: baseline[positionKey] + positionStep }, duration, side)
     }
+
     if (key === 'ArrowDown') {
       return normalizeClipFades({ ...baseline, [curveKey]: baseline[curveKey] - curveStep }, duration, side)
     }
+
     if (key === 'ArrowUp') {
       return normalizeClipFades({ ...baseline, [curveKey]: baseline[curveKey] + curveStep }, duration, side)
     }
+
     if (key === 'Home') return normalizeClipFades({ ...baseline, [positionKey]: 0 }, duration, side)
+
     if (key === 'End') return normalizeClipFades({ ...baseline, [positionKey]: 1 }, duration, side)
+
     return null
   }
 
@@ -149,14 +167,18 @@ export const updateFadeDraftForKeyboard = (
       : mode === 'fadeOutStart'
         ? 'fadeOutSec'
         : 'fadeOutEndSec'
+
   const direction = key === 'ArrowRight' || key === 'ArrowUp' || key === 'PageUp' ? 1
     : key === 'ArrowLeft' || key === 'ArrowDown' || key === 'PageDown' ? -1
       : 0
+
   const step = key === 'PageUp' || key === 'PageDown' ? fadeKeyboardLargeStepSec : fadeKeyboardStepSec
+
   const next = key === 'Home' ? 0
     : key === 'End' ? duration
       : direction === 0 ? null
         : clamp(baseline[field] + direction * step, 0, duration)
+
   return next === null
     ? null
     : normalizeClipFades({ ...baseline, [field]: next }, duration, side)
@@ -168,6 +190,7 @@ export const clipFadeControlValueText = (
   bpm: number,
 ): string => {
   if (mode === 'curve') return ''
+
   const value = mode === 'fadeInStart'
     ? fades.fadeInStartSec
     : mode === 'fadeInEnd'
@@ -175,6 +198,7 @@ export const clipFadeControlValueText = (
       : mode === 'fadeOutStart'
         ? fades.fadeOutSec
         : fades.fadeOutEndSec
+
   return mode === 'fadeInStart' || mode === 'fadeOutEnd'
     ? formatBarsBeatsSixteenths(value, bpm)
     : formatBarsBeatsSixteenthsDuration(value, bpm)

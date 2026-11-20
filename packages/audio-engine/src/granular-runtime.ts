@@ -53,6 +53,7 @@ const bufferBytes = (buffer: AudioBuffer) =>
 export async function createGranularRuntime(options: GranularRuntimeOptions) {
   const params = normalizeGranularParams(options.params)
   let node: GranularWorkletNode
+
   if (options.createNode) {
     node = options.createNode(options.context, params)
   } else {
@@ -73,41 +74,51 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
       },
     )
   }
+
   if (options.destination) node.connect(options.destination)
   const releaseResource = observeResource(options.resourceObserver, 'granular-worklet', node)
   let closed = false
   let generation = 0
   const scheduledNotes = new Map<string, { start: number; end: number }[]>()
+
   const rebuildGate = (fromTime: number) => {
     const gate = node.parameters.get('gate')
+
     if (!gate) return
     gate.cancelScheduledValues(fromTime)
     gate.setValueAtTime(0, fromTime)
     const intervals = [...scheduledNotes.values()].flat().filter((interval) => interval.end > fromTime).sort((a, b) => a.start - b.start)
     let start = -1
     let end = -1
+
     for (const interval of intervals) {
       const intervalStart = Math.max(fromTime, interval.start)
+
       if (start < 0) {
         start = intervalStart
         end = interval.end
         continue
       }
+
       if (intervalStart <= end) {
         end = Math.max(end, interval.end)
         continue
       }
+
       gate.setValueAtTime(1, start)
       gate.setValueAtTime(0, end)
       start = intervalStart
       end = interval.end
     }
+
     if (start >= 0) {
       gate.setValueAtTime(1, start)
       gate.setValueAtTime(0, end)
     }
+
     scheduledGateEnd = Math.max(0, end)
   }
+
   let installedBuffer: AudioBuffer | undefined
   let installedAssetKey: string | undefined
   const pending = new Map<number, PendingInstall>()
@@ -121,7 +132,9 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
   node.port.onmessage = (event) => {
     const data = event.data
     const request = pending.get(data.generation)
+
     if (!request) return
+
     if (data.type === 'installed') {
       pending.delete(data.generation)
       request.resolve()
@@ -132,6 +145,7 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
       options.onFault?.(code)
     }
   }
+
   node.onprocessorerror = () => {
     rejectPending(new Error('Granular sample installation failed: processor-error'))
     options.onFault?.('processor-error')
@@ -151,21 +165,28 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
     node,
     installSample: async ({ assetKey, buffer, sourceStartFrame }: GranularInstalledBuffer): Promise<EngineDisposition> => {
       if (closed) return Promise.reject(new Error('Granular runtime is closed.'))
+
       if (buffer === installedBuffer && assetKey === installedAssetKey) return 'skipped'
       const bytes = bufferBytes(buffer)
+
       if (bytes > params.maxDecodedBytes) {
         const error = new Error(`Granular sample exceeds the ${params.maxDecodedBytes} byte limit.`)
         options.onFault?.('sample-too-large')
+
         return Promise.reject(error)
       }
+
       rejectPending(new Error('Granular sample installation was superseded by a newer generation.'))
       generation += 1
       const requestGeneration = generation
+
       const channels = Array.from(
         { length: Math.min(2, buffer.numberOfChannels) },
         (_, channel) => new Float32Array(buffer.getChannelData(channel)),
       )
+
       const transfer = channels.map((channel) => channel.buffer)
+
       const promise = new Promise<void>((resolve, reject) => {
         pending.set(requestGeneration, { resolve: () => {
           installedBuffer = buffer
@@ -173,6 +194,7 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
           resolve()
         }, reject })
       })
+
       node.port.postMessage({
         type: 'install',
         version: 1,
@@ -182,6 +204,7 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
         channels,
       }, transfer)
       await promise
+
       return 'applied'
     },
     releaseSample: () => {
@@ -201,6 +224,7 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
     stop: () => {
       if (closed) return
       const gate = node.parameters.get('gate')
+
       if (!gate) return
       scheduledGateEnd = 0
       scheduledNotes.clear()
@@ -217,11 +241,13 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
     }) => {
       const gate = node.parameters.get('gate')
       const end = input.when + Math.max(0, input.durationSec)
+
       if (input.clipId) scheduledNotes.set(input.clipId, [...(scheduledNotes.get(input.clipId) ?? []), { start: input.when, end }])
       scheduledGateEnd = scheduledGateEnd > input.when ? Math.max(scheduledGateEnd, end) : end
       gate?.cancelScheduledValues(input.when)
       gate?.setValueAtTime(1, input.when)
       gate?.setValueAtTime(0, scheduledGateEnd)
+
       const bindings = {
         grainSize: node.parameters.get('grainSizeMs'),
         density: node.parameters.get('densityHz'),
@@ -231,10 +257,13 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
         reverseProbability: node.parameters.get('reverseProbability'),
         stereoSpread: node.parameters.get('stereoSpread'),
       }
+
       for (const envelope of input.automationEnvelopes) {
         const key = parseGranularAutomationKey(envelope.parameterId)
+
         if (!key || !envelope.enabled) continue
         const param = bindings[key.parameterId]
+
         if (!param) continue
         const descriptor = GRANULAR_AUTOMATION_DESCRIPTORS[key.parameterId]
         scheduleAutomationEnvelope(
@@ -259,8 +288,11 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
       rejectPending(new Error('Granular runtime is closed.'))
       node.port.onmessage = null
       node.onprocessorerror = null
+
       try { node.port.postMessage({ type: 'release', version: 1, generation }) } catch {}
+
       try { node.port.close() } catch {}
+
       node.disconnect()
       releaseResource()
     },

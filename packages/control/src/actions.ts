@@ -45,6 +45,7 @@ const projectRenameActionSchema = z.object({
   kind: z.literal('project.rename'),
   name: nameSchema,
 }).strict()
+
 const projectSettingsActionSchema = z.object({
   kind: z.literal('project.settings.set'),
   tempoBpm: finiteNumberSchema.int().min(30).max(300).optional(),
@@ -56,6 +57,7 @@ const projectSettingsActionSchema = z.object({
   loopStartSec: secondsSchema.optional(),
   loopEndSec: secondsSchema.optional(),
 }).strict().refine((action) => Object.keys(action).length > 1, 'Project settings action must change a setting.')
+
 const trackCreateActionSchema = z.object({
   kind: z.literal('track.create'),
   clientRef: clientRefValueSchema.optional(),
@@ -65,11 +67,13 @@ const trackCreateActionSchema = z.object({
   channelRole: trackRoleSchema.optional(),
   color: trackColorSchema.optional(),
 }).strict()
+
 const trackRenameActionSchema = z.object({
   kind: z.literal('track.rename'),
   track: trackRefSchemaV1,
   name: nameSchema.describe('New track name.'),
 }).strict().describe('Rename a track. Existing tracks use {source:"persisted",id:"<id from snapshot>"}.')
+
 const trackMixActionSchema = z.object({
   kind: z.literal('track.mix.set'),
   track: trackRefSchemaV1,
@@ -78,6 +82,7 @@ const trackMixActionSchema = z.object({
   soloed: z.boolean().optional().describe('Optional solo state.'),
 }).strict().refine((action) => Object.keys(action).length > 2, 'Track mix action must change a value.')
   .describe('Set one or more track mix values; provide at least one of volume, muted, or soloed.')
+
 const trackRoutingActionSchema = z.object({
   kind: z.literal('track.routing.set'),
   track: trackRefSchemaV1,
@@ -88,6 +93,7 @@ const trackRoutingActionSchema = z.object({
     tap: z.enum(['pre-fx', 'pre-fader', 'post-fader']).optional(),
   }).strict()).max(64).optional(),
 }).strict().refine((action) => Object.keys(action).length > 2, 'Track routing action must change routing.')
+
 const trackReorderActionSchema = z.object({
   kind: z.literal('track.reorder'),
   tracks: z.array(z.object({
@@ -96,27 +102,34 @@ const trackReorderActionSchema = z.object({
     group: groupRefSchemaV1.nullable(),
   }).strict()).min(1).max(500),
 }).strict()
+
 const trackGroupActionSchema = z.object({
   kind: z.literal('track.group.set'),
   track: trackRefSchemaV1,
   group: groupRefSchemaV1.nullable(),
 }).strict()
+
 const trackDeleteActionSchema = z.object({
   kind: z.literal('track.delete'),
   track: trackRefSchemaV1,
 }).strict().describe('Destructively delete a track; preview reports whether approval is required.')
+
 const trackCollapsedSetActionSchema = z.object({
   kind: z.literal('track.collapsed.set'), track: trackRefSchemaV1, collapsed: z.boolean(),
 }).strict()
+
 const trackColorSetActionSchema = z.object({
   kind: z.literal('track.color.set'), track: trackRefSchemaV1, color: trackColorSchema.nullable(),
 }).strict()
+
 const trackColorCascadeActionSchema = z.object({
   kind: z.literal('track.color.cascade'), root: trackRefSchemaV1, color: trackColorSchema.nullable(), cascadeClipColors: z.boolean(),
 }).strict()
+
 const trackUngroupActionSchema = z.object({
   kind: z.literal('track.ungroup'), group: trackRefSchemaV1,
 }).strict()
+
 const midiActionFields = {
   inputChannel: midiClipReadSchema['shape'].inputChannel.nullable(),
   cc: midiClipReadSchema['shape'].cc,
@@ -125,6 +138,7 @@ const midiActionFields = {
   polyPressure: midiClipReadSchema['shape'].polyPressure,
   mappings: midiClipReadSchema['shape'].mappings,
 }
+
 const validateMidiActionIds = (
   action: {
     notes: Array<{ id?: string }>
@@ -143,6 +157,7 @@ const validateMidiActionIds = (
     ...(action.channelPressure ?? []),
     ...(action.polyPressure ?? []),
   ].flatMap((event) => event.id === undefined ? [] : [event.id])
+
   const eventArrays = [
     action.notes,
     action.cc ?? [],
@@ -150,20 +165,26 @@ const validateMidiActionIds = (
     action.channelPressure ?? [],
     action.polyPressure ?? [],
   ]
+
   if (eventArrays.some((events) => events.length > controlLimitsV2.maxMidiEventsPerArray)) {
     context.addIssue({ code: 'custom', message: `MIDI event arrays support at most ${controlLimitsV2.maxMidiEventsPerArray} events.` })
   }
+
   if (eventArrays.reduce((total, events) => total + events.length, 0) > controlLimitsV2.maxMidiPerformanceEventsPerClip) {
     context.addIssue({ code: 'custom', message: `MIDI clips support at most ${controlLimitsV2.maxMidiPerformanceEventsPerClip} performance events.` })
   }
+
   if (new Set(eventIds).size !== eventIds.length) {
     context.addIssue({ code: 'custom', message: 'MIDI event IDs must be unique.' })
   }
+
   const mappingIds = (action.mappings ?? []).map((mapping) => mapping.id)
+
   if (new Set(mappingIds).size !== mappingIds.length) {
     context.addIssue({ code: 'custom', message: 'MIDI mapping IDs must be unique.' })
   }
 }
+
 const validateMidiSetActionIds = (
   action: {
     notes: Array<{ id?: string }>
@@ -182,14 +203,18 @@ const validateMidiSetActionIds = (
     ...(action.channelPressure ?? []),
     ...(action.polyPressure ?? []),
   ].flatMap((event) => event.id === undefined ? [] : [event.id])
+
   if (new Set(eventIds).size !== eventIds.length) {
     context.addIssue({ code: 'custom', message: 'MIDI event IDs must be unique.' })
   }
+
   const mappingIds = (action.mappings ?? []).map((mapping) => mapping.id)
+
   if (new Set(mappingIds).size !== mappingIds.length) {
     context.addIssue({ code: 'custom', message: 'MIDI mapping IDs must be unique.' })
   }
 }
+
 const clipCreateMidiActionSchema = z.object({
   kind: z.literal('clip.midi.create'),
   clientRef: clientRefValueSchema.optional(),
@@ -202,6 +227,7 @@ const clipCreateMidiActionSchema = z.object({
   gain: finiteNumberSchema.min(0).max(2).optional(),
   ...midiActionFields,
 }).strict().superRefine(validateMidiActionIds)
+
 const clipCreateAudioActionSchema = z.object({
   kind: z.literal('clip.audio.create'),
   clientRef: clientRefValueSchema.optional(),
@@ -218,9 +244,11 @@ const clipCreateAudioActionSchema = z.object({
   fades: clipFadesSnapshotSchema.optional(),
   audioWarp: audioWarpSchema.optional(),
 }).strict()
+
 const clipSourceSetActionSchema = z.object({
   kind: z.literal('clip.source.set'), clip: clipRefSchemaV1, asset: assetRefSchemaV1,
 }).strict()
+
 const clipMidiSetActionSchema = z.object({
   kind: z.literal('clip.midi.set'),
   clip: clipRefSchemaV1,
@@ -239,21 +267,26 @@ const clipMidiSetActionSchema = z.object({
   gain: finiteNumberSchema.optional(),
   ...midiActionFields,
 }).strict().superRefine(validateMidiSetActionIds)
+
 const clipFadesSetActionSchema = z.object({
   kind: z.literal('clip.fades.set'), clip: clipRefSchemaV1, fades: clipFadesSnapshotSchema,
 }).strict()
+
 const clipAudioWarpSetActionSchema = z.object({
   kind: z.literal('clip.audioWarp.set'), clip: clipRefSchemaV1, audioWarp: audioWarpSchema,
 }).strict()
+
 const clipColorSetActionSchema = z.object({
   kind: z.literal('clip.color.set'), clip: clipRefSchemaV1, color: clipColorSchema.nullable(),
 }).strict()
+
 const clipMoveActionSchema = z.object({
   kind: z.literal('clip.move'),
   clip: clipRefSchemaV1,
   track: trackRefSchemaV1,
   startSec: secondsSchema,
 }).strict()
+
 const clipTimingActionSchema = z.object({
   kind: z.literal('clip.timing.set'),
   clip: clipRefSchemaV1,
@@ -265,15 +298,18 @@ const clipTimingActionSchema = z.object({
   bufferOffsetSec: secondsSchema.optional(),
   midiOffsetBeats: secondsSchema.optional(),
 }).strict().refine((action) => Object.keys(action).length > 2, 'Clip timing action must change a value.')
+
 const clipNameActionSchema = z.object({
   kind: z.literal('clip.rename'),
   clip: clipRefSchemaV1,
   name: nameSchema,
 }).strict()
+
 const clipDeleteActionSchema = z.object({
   kind: z.literal('clip.delete'),
   clip: clipRefSchemaV1,
 }).strict()
+
 const timelineRangeDeleteActionSchema = z.object({
   kind: z.literal('timeline.range.delete'),
   tracks: z.array(trackRefSchemaV1).min(1).max(500),
@@ -283,18 +319,23 @@ const timelineRangeDeleteActionSchema = z.object({
   if (action.endSec <= action.startSec) {
     context.addIssue({ code: 'custom', message: 'Range end must be greater than range start.', path: ['endSec'] })
   }
+
   const identifiers = action.tracks.map((track) => (
     track.source === 'persisted' ? `persisted:${track.id}` : `client:${track.clientRef}`
   ))
+
   if (new Set(identifiers).size !== identifiers.length) {
     context.addIssue({ code: 'custom', message: 'Range tracks must be unique.', path: ['tracks'] })
   }
 })
+
 const masterVolumeActionSchema = z.object({
   kind: z.literal('master.volume.set'),
   volume: finiteNumberSchema.min(0).max(2),
 }).strict()
+
 const audioEffectKindSchema = z.enum(['utility', 'eq', 'autofilter', 'gate', 'compressor', 'saturator', 'limiter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'delay', 'reverb', 'spectral', 'spectrum'])
+
 const effectUpsertActionSchema = z.object({
   kind: z.literal('effect.upsert'),
   target: processorTargetSchemaV1,
@@ -310,18 +351,22 @@ const effectUpsertActionSchema = z.object({
       path: ['clientRef'],
     })
   }
+
   const result = audioEffectAddPayloadSchema.safeParse({
     effectKind: action.effectKind,
     params: action.params,
   })
+
   if (!result.success) context.addIssue({ code: 'custom', message: result.error.message, path: ['params'] })
 })
+
 const effectRemoveActionSchema = z.object({
   kind: z.literal('effect.remove'),
   target: processorTargetSchemaV1,
   effectKind: audioEffectKindSchema,
   effect: z.object({ source: z.literal('persisted'), id: stableIdSchema }).strict(),
 }).strict()
+
 const externalPluginParametersSetActionSchema = z.object({
   kind: z.literal('external-plugin.parameters.set'),
   target: processorTargetSchemaV1,
@@ -332,10 +377,12 @@ const externalPluginParametersSetActionSchema = z.object({
   }).strict()).min(1).max(256),
 }).strict().superRefine((action, context) => {
   const parameterIds = action.changes.map((change) => change.parameterId)
+
   if (new Set(parameterIds).size !== parameterIds.length) {
     context.addIssue({ code: 'custom', message: 'External plugin parameter IDs must be unique.', path: ['changes'] })
   }
 })
+
 const effectReorderActionSchema = z.object({
   kind: z.literal('effect.reorder'),
   target: processorTargetSchemaV1,
@@ -344,6 +391,7 @@ const effectReorderActionSchema = z.object({
     kind: audioEffectKindSchema,
   }).strict()).max(64),
 }).strict()
+
 const instrumentSetActionSchema = z.object({
   kind: z.literal('instrument.set'),
   target: trackProcessorTargetSchemaV1,
@@ -354,19 +402,24 @@ const instrumentSetActionSchema = z.object({
     instrumentKind: action.instrumentKind,
     params: action.params,
   })
+
   if (!result.success) context.addIssue({ code: 'custom', message: result.error.message, path: ['params'] })
 })
+
 const arpeggiatorSetActionSchema = z.object({
   kind: z.literal('arpeggiator.set'),
   target: trackProcessorTargetSchemaV1,
   params: arpeggiatorParamsSchema,
 }).strict()
+
 const instrumentRemoveActionSchema = z.object({
   kind: z.literal('instrument.remove'), target: trackProcessorTargetSchemaV1,
 }).strict()
+
 const arpeggiatorRemoveActionSchema = z.object({
   kind: z.literal('arpeggiator.remove'), target: trackProcessorTargetSchemaV1,
 }).strict()
+
 const automationSetActionSchema = z.object({
   kind: z.literal('automation.set'),
   target: processorTargetSchemaV1,
@@ -375,27 +428,32 @@ const automationSetActionSchema = z.object({
   enabled: z.boolean(),
   points: z.array(automationPointSchema).max(controlLimitsV1.maxAutomationPointsPerCommit),
 }).strict()
+
 const automationDeleteActionSchema = z.object({
   kind: z.literal('automation.delete'),
   target: processorTargetSchemaV1,
   effect: processorRefSchemaV1.optional(),
   parameterId: stableIdSchema,
 }).strict()
+
 const sidechainSetActionSchema = z.object({
   kind: z.literal('sidechain.set'),
   source: sourceRefSchemaV1,
   target: targetRefSchemaV1,
   effect: processorRefSchemaV1,
 }).strict()
+
 const sidechainRemoveActionSchema = z.object({
   kind: z.literal('sidechain.remove'),
   target: targetRefSchemaV1,
   effect: processorRefSchemaV1,
 }).strict()
+
 const assetDeleteActionSchema = z.object({
   kind: z.literal('asset.delete'),
   asset: assetRefSchemaV1,
 }).strict()
+
 const recoveryRestoreActionSchema = z.object({
   kind: z.literal('recovery.restore'),
   recovery: z.object({
@@ -425,6 +483,7 @@ const creationClientRef = (action: z.infer<typeof controlActionSchemaV1>): strin
     || action.kind === 'clip.audio.create'
     || action.kind === 'effect.upsert'
   ) return action.clientRef
+
   return undefined
 }
 
@@ -433,12 +492,16 @@ export const findDuplicateCreationClientRefsV1 = (
 ): string[] => {
   const seen = new Set<string>()
   const duplicates = new Set<string>()
+
   for (const action of actions) {
     const clientRef = creationClientRef(action)
+
     if (clientRef === undefined) continue
+
     if (seen.has(clientRef)) duplicates.add(clientRef)
     seen.add(clientRef)
   }
+
   return [...duplicates].sort()
 }
 
@@ -448,6 +511,7 @@ const addAggregateIssues = (
 ) => {
   let midiEvents = 0
   let automationPoints = 0
+
   for (const action of request.actions) {
     if (action.kind === 'clip.midi.create' || action.kind === 'clip.midi.set') {
       const events = action.notes.length
@@ -455,6 +519,7 @@ const addAggregateIssues = (
         + (action.pitchBends?.length ?? 0)
         + (action.channelPressure?.length ?? 0)
         + (action.polyPressure?.length ?? 0)
+
       // Historical clips can legally be resubmitted unchanged above the
       // current write limit. The planner compares those sets to persisted
       // state before enforcing their resolved delta.
@@ -462,8 +527,10 @@ const addAggregateIssues = (
         midiEvents += events
       }
     }
+
     if (action.kind === 'automation.set') automationPoints += action.points.length
   }
+
   if (midiEvents > controlLimitsV2.maxMidiPerformanceEventsPerCommit) {
     context.addIssue({
       code: 'custom',
@@ -471,6 +538,7 @@ const addAggregateIssues = (
       path: ['actions'],
     })
   }
+
   if (automationPoints > controlLimitsV1.maxAutomationPointsPerCommit) {
     context.addIssue({
       code: 'custom',
@@ -478,7 +546,9 @@ const addAggregateIssues = (
       path: ['actions'],
     })
   }
+
   const duplicateClientRefs = findDuplicateCreationClientRefsV1(request.actions)
+
   if (duplicateClientRefs.length > 0) {
     context.addIssue({
       code: 'custom',
@@ -492,11 +562,14 @@ export const findDuplicateRecoveryActionIndexV1 = (
   actions: readonly z.infer<typeof controlActionSchemaV1>[],
 ) => {
   const recoveryIds = new Set<string>()
+
   for (const [actionIndex, action] of actions.entries()) {
     if (action.kind !== 'recovery.restore') continue
+
     if (recoveryIds.has(action.recovery.id)) return actionIndex
     recoveryIds.add(action.recovery.id)
   }
+
   return undefined
 }
 
@@ -558,6 +631,7 @@ const controlImpactSchemaV1 = z.object({
   assets: z.number().int().nonnegative(),
   routingChanges: z.number().int().nonnegative(),
 }).strict()
+
 const controlApprovalRequirementSchemaV1 = z.object({
   required: z.boolean(),
   actionIndexes: z.array(z.number().int().nonnegative()).max(controlLimitsV1.maxActions),
@@ -574,20 +648,24 @@ export const resolvedRefSchemaV1 = z.object({
   id: stableIdSchema,
   persisted: z.boolean(),
 }).strict()
+
 export const controlWarningSchemaV1 = z.object({
   code: z.string().min(1).max(64),
   message: z.string().min(1).max(1000),
   actionIndex: z.number().int().nonnegative().optional(),
 }).strict()
+
 export const controlChangeSummaryEntrySchemaV1 = z.object({
   actionIndex: z.number().int().nonnegative(),
   kind: z.string().min(1).max(64),
   description: z.string().min(1).max(1000),
 }).strict()
+
 export const controlChangeSummarySchemaV1 = z.object({
   actionCount: z.number().int().nonnegative().max(controlLimitsV1.maxActions),
   changes: z.array(controlChangeSummaryEntrySchemaV1).max(controlLimitsV1.maxActions),
 }).strict()
+
 const recoveryDescriptorSchemaV1 = z.object({
   actionIndex: z.number().int().nonnegative(),
   id: stableIdSchema,
@@ -598,7 +676,9 @@ const recoveryDescriptorSchemaV1 = z.object({
   ]),
   expiresAt: z.number().int().nonnegative(),
 }).strict()
+
 const recoveryMappingEntitySchemaV1 = z.enum(['track', 'clip', 'effect', 'automation', 'sidechain', 'asset'])
+
 const restoredMappingSchemaV1 = z.object({
   actionIndex: z.number().int().nonnegative(),
   recoveryId: stableIdSchema,
@@ -625,6 +705,7 @@ export const controlPreviewResultSchemaV1 = z.object({
   applied: z.boolean(),
   approval: controlApprovalRequirementSchemaV1.optional(),
 }).strict()
+
 export const controlApprovalResultSchemaV1 = z.object({
   version: z.literal(CONTROL_API_VERSION_V1),
   approvalToken: approvalTokenSchemaV1,
@@ -633,6 +714,7 @@ export const controlApprovalResultSchemaV1 = z.object({
   actionIndexes: z.array(z.number().int().nonnegative()).min(1).max(controlLimitsV1.maxActions),
   expiresAt: z.number().int().nonnegative(),
 }).strict()
+
 export const controlCommitResultSchemaV1 = z.object({
   ...planningResultFields,
   revision: revisionSchema,
@@ -693,25 +775,43 @@ export const controlRecoveriesResultSchemaV1 = z.object({
 
 
 export type ControlActionV1 = z.infer<typeof controlActionSchemaV1>
+
 export type ControlCommitRequestV1 = z.infer<typeof controlCommitRequestSchemaV1>
+
 export type ControlPreviewRequestV1 = z.infer<typeof controlPreviewRequestSchemaV1>
+
 export type ControlApprovalRequestV1 = z.infer<typeof controlApprovalRequestSchemaV1>
+
 export type ControlPreviewResultV1 = z.infer<typeof controlPreviewResultSchemaV1>
+
 export type ControlApprovalResultV1 = z.infer<typeof controlApprovalResultSchemaV1>
+
 export type ControlCommitResultV1 = z.infer<typeof controlCommitResultSchemaV1>
+
 export type ControlErrorV1 = z.infer<typeof controlErrorSchemaV1>
+
 export type ControlSnapshotQueryV1 = z.infer<typeof controlSnapshotQuerySchemaV1>
+
 export type ControlHistoryQueryV1 = z.infer<typeof controlHistoryQuerySchemaV1>
+
 export type ControlHistoryEntryV1 = z.infer<typeof controlHistoryEntrySchemaV1>
+
 export type ControlHistoryResultV1 = z.infer<typeof controlHistoryResultSchemaV1>
+
 export type ControlRecoveriesQueryV1 = z.infer<typeof controlRecoveriesQuerySchemaV1>
+
 export type ControlRecoveriesResultV1 = z.infer<typeof controlRecoveriesResultSchemaV1>
 
 export const controlSnapshotQuerySchemaV2 = controlSnapshotQuerySchemaV1
 export const canonicalControlSnapshotQuerySchema = controlSnapshotQuerySchemaV2
 export const controlSnapshotQuerySchema = canonicalControlSnapshotQuerySchema
+
 export type CanonicalControlSnapshotQuery = ControlSnapshotQueryV1
+
 export type ControlSnapshotQuery = CanonicalControlSnapshotQuery
+
 export type ResolvedRefV1 = z.infer<typeof resolvedRefSchemaV1>
+
 export type ControlWarningV1 = z.infer<typeof controlWarningSchemaV1>
+
 export type ControlChangeSummaryV1 = z.infer<typeof controlChangeSummarySchemaV1>

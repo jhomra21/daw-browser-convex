@@ -17,18 +17,22 @@ const claimToken = () => Array.from(
 ).join('')
 
 const isText = (value: JsonValue | undefined): value is string => isJsonString(value) && value.length > 0
+
 const isBoundedText = (value: JsonValue | undefined, maximum: number): value is string => (
   isText(value) && value.length <= maximum
 )
+
 const isLocalAssetStoragePath = (value: JsonValue | undefined): value is string => (
   isBoundedText(value, 2_048)
   && value !== '.'
   && value !== '..'
   && !/[\\/:]/u.test(value)
 )
+
 const isTime = (value: JsonValue | undefined): value is number => (
   isJsonNumber(value) && Number.isInteger(value) && value >= 0
 )
+
 const isClaimToken = (value: JsonValue | undefined): value is string => (
   isJsonString(value) && /^[0-9a-f]{64}$/u.test(value)
 )
@@ -38,6 +42,7 @@ const parseAssetGcRow = (value: LocalControlAssetGcRow): LocalControlAssetGcRow 
     id, version, projectId, assetId, eligibleAt, storagePath, recoveryId,
     cloudAssetKey, claimToken: rowClaimToken, claimedAt,
   } = value
+
   if (
     version !== 1
     || !isBoundedText(id, 512)
@@ -53,6 +58,7 @@ const parseAssetGcRow = (value: LocalControlAssetGcRow): LocalControlAssetGcRow 
     || rowClaimToken === undefined && claimedAt !== undefined
     || rowClaimToken !== undefined && claimedAt === undefined
   ) return undefined
+
   const row: LocalControlAssetGcRow = {
     id,
     version: 1,
@@ -65,6 +71,7 @@ const parseAssetGcRow = (value: LocalControlAssetGcRow): LocalControlAssetGcRow 
     claimToken: rowClaimToken,
     claimedAt,
   }
+
   return row
 }
 
@@ -81,8 +88,10 @@ const inactiveRecoveryFor = (
   const recovery = rows
     .map(parseLocalControlRecoveryRow)
     .find((candidate) => candidate?.id === job.recoveryId)
+
   if (!recovery || recovery.recovery.kind !== 'asset.delete') return undefined
   const payload = recovery.recovery
+
   if (
     recovery.projectId !== job.projectId
     || recovery.kind !== payload.kind
@@ -91,6 +100,7 @@ const inactiveRecoveryFor = (
     || !('storagePath' in payload.data.asset)
     || payload.data.asset.storagePath !== job.storagePath
   ) return undefined
+
   return recovery.consumedAt !== undefined || recovery.expiresAt <= now ? recovery : undefined
 }
 
@@ -102,6 +112,7 @@ export const runLocalControlAssetGc = async (
   } = {},
 ) => {
   const now = Date.now()
+
   const due = await withLocalControlTransaction(projectId, 'readwrite', (context) => (
     context.rows.assetGc
       .map(parseAssetGcRow)
@@ -116,43 +127,58 @@ export const runLocalControlAssetGc = async (
         const claim = claimToken()
         const claimed = { ...row, claimToken: claim, claimedAt: now }
         context.write.assetGc(claimed)
+
         return claimed
       })
   ))
+
   let finalized = false
+
   try {
     for (const job of due) {
       try {
         await flushLocalProjectPendingWrites(projectId)
+
         const completed = await withLocalProjectAssetLock(projectId, () => withLocalStorageRootLock(async () => {
           const stillEligible = await withLocalControlTransactionOptions(projectId, (context) => {
             const current = context.rows.assetGc
               .map(parseAssetGcRow)
               .find((row) => row?.id === job.id)
+
             return current !== undefined
               && sameJob(current, job)
               && current.eligibleAt <= Date.now()
               && !hasLiveAssetReference(context.rows.assets, current)
               && inactiveRecoveryFor(current, context.rows.recoveries, Date.now()) !== undefined
           }, { pendingWritesFlushedUnderAssetLock: true })
+
           if (!stillEligible) return false
+
           const retained = await retainedAssetPaths(await getProjectDirectoryHandle(projectId), {
             projectId, excludingAssetGcId: job.id,
           })
+
           if (!retained.has(job.storagePath)) {
             const removal = await (options.removeAssetFile ?? removeLocalAssetFileUnlocked)(projectId, job.storagePath)
+
             if (removal.status !== 'deleted' && removal.status !== 'already-missing') return false
           }
+
           return withLocalControlTransactionOptions(projectId, (context) => {
             const current = context.rows.assetGc
               .map(parseAssetGcRow)
               .find((row) => row?.id === job.id)
+
             if (!current || !sameJob(current, job)) return false
+
             if (current.eligibleAt > Date.now()) return false
+
             if (hasLiveAssetReference(context.rows.assets, current)) return false
             const recovery = inactiveRecoveryFor(current, context.rows.recoveries, Date.now())
+
             if (!recovery) return false
             const mapping = context.rows.syncState.find((row) => row.key === assetCloudIdMappingKey(current.assetId))
+
             if (mapping && isAssetCloudMappingRow(mapping)) {
               context.write.syncState({
                 key: `cloud-delete:asset:${current.assetId}`,
@@ -160,17 +186,21 @@ export const runLocalControlAssetGc = async (
                 updatedAt: Date.now(),
               })
             }
+
             context.remove.assetGc(current.id)
             context.remove.recovery(recovery.id)
+
             return true
           }, { pendingWritesFlushedUnderAssetLock: true })
         }))
+
         finalized = finalized || completed
       } catch {}
     }
   } finally {
     if (finalized && options.notify !== false) notifyLocalProjectChanged(projectId)
   }
+
   return { finalized }
 }
 

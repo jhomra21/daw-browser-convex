@@ -158,8 +158,10 @@ type TimelinePanelsContainerProps = {
 const TimelinePanels: Component<TimelinePanelsContainerProps> = (props) => {
   const panels = () => props.panels
   const floatingButtonOffset = () => panels().chat.bottomOffsetPx > 0 ? `${panels().chat.bottomOffsetPx}px` : '16px'
+
   const canUseSharedChat = () => {
     const projectId = panels().chat.projectId
+
     return Boolean(projectId && !isLocalId('project', projectId))
   }
 

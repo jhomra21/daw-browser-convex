@@ -35,6 +35,7 @@ test("serializes bounded same-core processor state patches", () => {
     latencyFrames: 0,
     tailFrames: 99,
   })
+
   const view = new DataView(bytes.buffer)
   expect(bytes.byteLength).toBe(68)
   expect(view.getUint32(0, true)).toBe(1)
@@ -64,6 +65,7 @@ test("serializes native processor batches with revision, epoch, and sequence ide
   const bytes = serializeNativeProcessorEvents([
     { processorInstanceId: 11, parameterTarget: 2, frameOffset: 0, value: 0.75 },
   ], { revision: 7, epoch: 3, sequence: 19 })
+
   const view = new DataView(bytes.buffer)
   expect(view.getUint32(0, true)).toBe(1)
   expect(view.getUint32(4, true)).toBe(7)
@@ -121,6 +123,7 @@ test("serializes source events using the session asset identifier", () => {
     fadeOutCurve: -0.5,
     fadeOutCurvePosition: 0.8,
   }], mapNativeSessionAssets([asset("a")]))
+
   const view = new DataView(bytes.buffer)
 
   expect(bytes.byteLength).toBe(116)
@@ -150,6 +153,7 @@ test("rejects source events that are not sorted by native schedule order", () =>
     fadeOutStartFrame: startFrame + 1,
     fadeOutEndFrame: startFrame + 1,
   })
+
   expect(() => serializeNativeScheduleWindow({
     revision: 1,
     epoch: 1,
@@ -176,6 +180,7 @@ test("serializes absent native fade curves with defaults and keeps signed anchor
     fadeOutStartFrame: 150,
     fadeOutEndFrame: 240,
   }], mapNativeSessionAssets([asset("a")]))
+
   const view = new DataView(bytes.buffer)
   expect(view.getBigInt64(64, true)).toBe(-20n)
   expect(view.getBigInt64(72, true)).toBe(120n)
@@ -187,6 +192,7 @@ test("serializes bounded native VST parameter events with normalized values", ()
   const bytes = serializeNativeVstParameterEvents("instance", [
     { id: 17, sampleOffset: 3, value: 0.75 },
   ])
+
   const view = new DataView(bytes.buffer)
   expect(view.getUint32(0, true)).toBe(8)
   expect(new TextDecoder().decode(bytes.slice(4, 12))).toBe("instance")
@@ -194,10 +200,12 @@ test("serializes bounded native VST parameter events with normalized values", ()
   expect(view.getUint32(16, true)).toBe(17)
   expect(view.getUint32(20, true)).toBe(3)
   expect(view.getFloat64(24, true)).toBe(0.75)
+
   const highBytes = serializeNativeVstParameterEvents("instance", [
     { id: 0x8000_0000, sampleOffset: 0, value: 0.25 },
     { id: 0xffff_ffff, sampleOffset: 0, value: 0.5 },
   ])
+
   const highView = new DataView(highBytes.buffer)
   expect(highView.getUint32(16, true)).toBe(0x8000_0000)
   expect(highView.getUint32(32, true)).toBe(0xffff_ffff)
@@ -217,6 +225,7 @@ test("serializes native instrument events with absolute transport frames", () =>
     note: 60,
     value: 0.75,
   }])
+
   const view = new DataView(bytes.buffer)
   expect(view.getUint32(0, true)).toBe(1)
   expect(view.getBigUint64(12, true)).toBe(4n)
@@ -235,6 +244,7 @@ test("serializes native instrument events with absolute transport frames", () =>
 
 test("preserves recording-scale sequence identities above the uint32 range on native wire", () => {
   const sequence = 0x1_0000_0001
+
   const bytes = serializeNativeInstrumentEvents(3, [{
     nodeId: "track",
     noteId: 4,
@@ -245,6 +255,7 @@ test("preserves recording-scale sequence identities above the uint32 range on na
     note: 60,
     value: 0.75,
   }])
+
   const view = new DataView(bytes.buffer)
   expect(view.getBigUint64(20, true)).toBe(BigInt(sequence))
 })
@@ -263,6 +274,7 @@ test("serializes native synth state with its bounded ABI payload", () => {
       outputPan: -0.25,
     },
   }], [])
+
   const view = new DataView(bytes.buffer)
 
   expect(bytes.byteLength).toBe(184)
@@ -301,6 +313,7 @@ test("serializes empty sampled instruments without staged assets", () => {
     retrigger: true,
     zones: [],
   }
+
   const bytes = serializeNativeInstrumentStates([
     { nodeId: "sampler", state: { ...base, kind: "sampler" } },
     { nodeId: "drums", state: { ...base, kind: "drum-rack" } },
@@ -326,6 +339,7 @@ test("serializes empty sampled instruments without staged assets", () => {
       },
     },
   ], [])
+
   const view = new DataView(bytes.buffer)
   expect(view.getUint32(0, true)).toBe(3)
   expect(view.getUint32(16, true)).toBe(88)
@@ -353,6 +367,7 @@ test("serializes bounded native schedule ownership events", () => {
       value: 0,
     }],
   })
+
   const view = new DataView(bytes.buffer)
   expect(bytes.byteLength).toBe(120)
   expect(view.getUint32(0, true)).toBe(8)
@@ -397,6 +412,7 @@ test("prefixes each native graph envelope with a big-endian revision and payload
       pdcDelayFrames: 0,
     }],
   }
+
   const bytes = serializeNativeGraph(snapshot)
   const view = new DataView(bytes.buffer)
 
@@ -424,6 +440,7 @@ test("stamping a runtime revision rewrites both revision fields of a serialized 
     nodes: [{ id: "master", kind: "master", inputLayout: "stereo", outputLayout: "stereo", processorOrder: [], latencyFrames: 0 }],
     edges: [],
   }
+
   const bytes = serializeNativeGraph(snapshot)
   const stamped = stampGraphRevision(bytes, 0x1234_5678)
   const view = new DataView(stamped.buffer)
@@ -447,6 +464,7 @@ test("keeps portable playback sources off the live input buses", () => {
       latencyFrames: 0,
     }),
   )
+
   const snapshot: AudioCoreGraphSnapshot = {
     version: audioCoreContractVersion,
     revision: 9,
@@ -466,6 +484,7 @@ test("keeps portable playback sources off the live input buses", () => {
     ],
     edges: [],
   }
+
   const bytes = encodePortableGraphEnvelope(snapshot)
   const view = new DataView(bytes.buffer)
 
@@ -474,6 +493,7 @@ test("keeps portable playback sources off the live input buses", () => {
   for (let index = 0; index < sourceNodes.length; index += 1) {
     expect(view.getUint32(24 + index * 132 + 20, true)).toBe(0xffff_ffff)
   }
+
   expect(view.getUint32(24 + sourceNodes.length * 132 + 20, true)).toBe(0)
 })
 
@@ -489,6 +509,7 @@ test("serializes native playback sources as disconnected after the native frame 
       latencyFrames: 0,
     }),
   )
+
   const snapshot: AudioCoreGraphSnapshot = {
     version: audioCoreContractVersion,
     revision: 9,
@@ -508,6 +529,7 @@ test("serializes native playback sources as disconnected after the native frame 
     ],
     edges: [],
   }
+
   const bytes = serializeNativeGraph(snapshot)
   const view = new DataView(bytes.buffer)
 
@@ -554,6 +576,7 @@ test("serializes external native latency separately from built-in node latency",
       pdcDelayFrames: 0,
     }],
   }
+
   const bytes = serializeNativeGraph(snapshot)
   const view = new DataView(bytes.buffer)
 
@@ -602,5 +625,6 @@ test("keeps the browser worklet graph envelope byte-for-byte equal to the native
       pdcDelayFrames: 2,
     }],
   }
+
   expect([...graphEnvelope(snapshot)]).toEqual([...encodePortableGraphEnvelope(snapshot)])
 })

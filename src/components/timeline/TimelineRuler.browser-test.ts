@@ -6,8 +6,10 @@ describe('TimelineRuler indexed marker slots', () => {
     createRoot((dispose) => {
       const [indices, setIndices] = createSignal([0, 1, 2])
       let mappedCount = 0
+
       const slots = indexArray(indices, (index) => {
         mappedCount += 1
+
         return { index }
       })
 

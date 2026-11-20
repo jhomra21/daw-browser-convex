@@ -35,6 +35,7 @@ import type {
 import type { ExportOutcome } from "~/lib/export/run-export-job"
 
 const token = "0".repeat(64)
+
 const exportInput = {
   mode: "mixdown",
   format: "wav",
@@ -139,6 +140,7 @@ const createController = (
   overrides: Partial<Parameters<typeof createAttachedHostController>[0]> = {},
 ) => {
   const queue = createExportQueue()
+
   return {
     controller: createAttachedHostController({
       hasReflectableOverlays,
@@ -205,18 +207,23 @@ const requestControl = (
 
 const registrations = new Set<() => void>()
 const bridgeCleanups = new Set<() => void>()
+
 const registerController = (controller: ReturnType<typeof createController>["controller"]) => {
   const unregister = registerAttachedHostController(controller)
+
   const cleanup = () => {
     unregister()
     registrations.delete(cleanup)
   }
+
   registrations.add(cleanup)
+
   return cleanup
 }
 
 afterEach(async () => {
   for (const cleanup of registrations) cleanup()
+
   for (const cleanup of bridgeCleanups) cleanup()
   bridgeCleanups.clear()
   await resetHermeticBrowserEnvironment()
@@ -238,15 +245,20 @@ test("accepted exports outlive the initiating request and remain queryable and c
   let submissions = 0
   const jobs = new Map<string, TimelineExportJobStatus>()
   const completions = new Map<string, (outcome: ExportOutcome) => void>()
+
   const submit = () => {
     submissions += 1
     const id = `job-${++nextJob}`
+
     const completion = new Promise<ExportOutcome>((resolve) => {
       completions.set(id, resolve)
     })
+
     jobs.set(id, { id, status: "queued" })
+
     return { id, completion }
   }
+
   const service: TimelineExportService = {
     enqueueTimelineExport: async () => ({ type: "error", message: "unused", outputs: [] }),
     enqueueStemExport: async () => ({ type: "error", message: "unused", outputs: [] }),
@@ -264,7 +276,9 @@ test("accepted exports outlive the initiating request and remain queryable and c
     },
     status: (jobId) => jobId ? jobs.get(jobId) : [...jobs.values()].at(-1),
   }
+
   const queue = createExportQueue()
+
   const controller = createAttachedHostController({
     projectId: () => "project-1",
     mountedProjectGeneration: () => 0,
@@ -281,22 +295,27 @@ test("accepted exports outlive the initiating request and remain queryable and c
     importFiles: async () => ({ outcomes: [] }),
     setPlayhead: () => undefined,
   })
+
   const unregister = registerController(controller)
 
   const firstInitiator = new AbortController()
+
   const firstPreflight = await controller.request({
     id: "request-1",
     operation: "host.export.run",
     input: { ...exportInput, preflightOnly: true },
     signal: firstInitiator.signal,
   })
+
   expect(firstPreflight.error).toBeUndefined()
+
   const firstAccepted = await controller.request({
     id: "request-1",
     operation: "host.export.run",
     input: exportInput,
     signal: firstInitiator.signal,
   })
+
   expect(firstAccepted.result).toEqual({ jobId: "job-1", status: "queued" })
   firstInitiator.abort()
   expect((await controller.request({
@@ -346,12 +365,14 @@ test("accepted exports outlive the initiating request and remain queryable and c
     input: { ...exportInput, preflightOnly: true },
     signal: secondInitiator.signal,
   })
+
   const secondAccepted = await controller.request({
     id: "request-2",
     operation: "host.export.run",
     input: exportInput,
     signal: secondInitiator.signal,
   })
+
   expect(secondAccepted.result).toEqual({ jobId: "job-2", status: "queued" })
   secondInitiator.abort()
   expect((await controller.request({
@@ -374,6 +395,7 @@ test("returns the authoritative stopped transport state after stop settles", asy
   let playing = true
   let playhead = 12
   const queue = createExportQueue()
+
   const controller = createAttachedHostController({
     projectId: () => "project-1",
     mountedProjectGeneration: () => 0,
@@ -404,13 +426,16 @@ test("returns the authoritative stopped transport state after stop settles", asy
     importFiles: async () => ({ outcomes: [] }),
     setPlayhead: () => undefined,
   })
+
   const unregister = registerController(controller)
+
   const stop = await controller.request({
     id: "stop-1",
     operation: "transport.stop",
     input: {},
     signal: new AbortController().signal,
   })
+
   expect(stop.result).toEqual({ state: "stopped", playheadSec: 0 })
   expect((await controller.request({
     id: "status-1",
@@ -432,6 +457,7 @@ test("imports desktop capabilities lazily in bounded ranges", async () => {
       onPrepareToClose: () => undefined,
       readChunk: async (_requestId: string, _token: string, offset: number, length: number) => {
         reads.push({ offset, length })
+
         return bytes.slice(offset, offset + length)
       },
       beginWrite: async () => ({ writerId: "writer-1" }),
@@ -442,6 +468,7 @@ test("imports desktop capabilities lazily in bounded ranges", async () => {
     },
   }))
   const queue = createExportQueue()
+
   const controller = createAttachedHostController({
     projectId: () => "project-1",
     mountedProjectGeneration: () => 0,
@@ -473,16 +500,20 @@ test("imports desktop capabilities lazily in bounded ranges", async () => {
       expect(importedFile?.type).toBe("audio/wav")
       expect(reads).toEqual([])
       const reader = importedFile?.stream().getReader()
+
       if (!reader) throw new Error("Expected a capability-backed file.")
       const first = await reader.read()
       expect(first.value?.byteLength).toBe(1024 * 1024)
       expect(reads).toEqual([{ offset: 0, length: 1024 * 1024 }])
       await reader.cancel()
+
       return { outcomes: [{ fileName: "large.wav", status: "created", assetId: "asset-1", clipId: "clip-1" }] }
     },
     setPlayhead: () => undefined,
   })
+
   const unregister = registerController(controller)
+
   const result = await controller.request({
     id: "lazy-import",
     operation: "host.import.audio",
@@ -492,6 +523,7 @@ test("imports desktop capabilities lazily in bounded ranges", async () => {
     },
     signal: new AbortController().signal,
   })
+
   expect(result.result).toMatchObject({ status: "queued", count: 0 })
   await Promise.resolve()
   await Promise.resolve()
@@ -510,6 +542,7 @@ test("does not start a queued import after its project binding changes", async (
   const releaseFirst = Promise.withResolvers<void>()
   let importCalls = 0
   const queue = createExportQueue()
+
   const controller = createAttachedHostController({
     projectId: () => projectId,
     mountedProjectGeneration: () => projectGeneration,
@@ -539,10 +572,12 @@ test("does not start a queued import after its project binding changes", async (
       importCalls += 1
       await releaseFirst.promise
       signal?.throwIfAborted()
+
       return { outcomes: [] }
     },
     setPlayhead: () => undefined,
   })
+
   const unregister = registerController(controller)
 
   const first = await controller.request({
@@ -551,12 +586,14 @@ test("does not start a queued import after its project binding changes", async (
     input: { canceled: false, files: [{ token, basename: "first.wav", byteLength: 1, mime: "audio/wav" }] },
     signal: new AbortController().signal,
   })
+
   const second = await controller.request({
     id: "stale-second",
     operation: "host.import.audio",
     input: { canceled: false, files: [{ token, basename: "second.wav", byteLength: 1, mime: "audio/wav" }] },
     signal: new AbortController().signal,
   })
+
   await Promise.resolve()
   expect(first.result).toMatchObject({ status: "queued" })
   expect(second.result).toMatchObject({ status: "queued" })
@@ -578,6 +615,7 @@ test("does not start a queued import after its project binding changes", async (
 test("reports bounded import failure details without exposing source paths", async () => {
   installBridge([])
   const importQueue = createImportJobQueue(() => "failed-import")
+
   const submitted = importQueue.submit("samples", async () => ({
     outcomes: [{
       fileName: "/Users/Jane Doe/Private Audio/failure.wav",
@@ -607,20 +645,24 @@ test("reports bounded import failure details without exposing source paths", asy
       ].join("\n"),
     }],
   }))
+
   await submitted.completion
   const { controller, dispose } = createController(() => "project-1", undefined, () => 0, undefined, undefined, importQueue)
   const unregister = registerController(controller)
+
   const response = await controller.request({
     id: "failed-import-status",
     operation: "host.import.status",
     input: {},
     signal: new AbortController().signal,
   })
+
   expect(response.result).toMatchObject({
     status: "failed",
     job: { id: "failed-import" },
   })
   const error = JSON.stringify(response.result)
+
   for (const directoryFragment of [
     "Jane Doe",
     "O'Connor",
@@ -634,6 +676,7 @@ test("reports bounded import failure details without exposing source paths", asy
   ]) {
     expect(error).not.toContain(directoryFragment)
   }
+
   expect(error).toContain("failure.wav")
   expect(error).toContain("second.wav")
   expect(error).toContain("drive.wav")
@@ -653,6 +696,7 @@ test("reports bounded import failure details without exposing source paths", asy
 test("includes skipped import reasons in bounded host status", async () => {
   installBridge([])
   const importQueue = createImportJobQueue(() => "skipped-import")
+
   const submitted = importQueue.submit("unsupported-target.wav", async () => ({
     outcomes: [{
       fileName: "unsupported-target.wav",
@@ -660,15 +704,18 @@ test("includes skipped import reasons in bounded host status", async () => {
       message: "The requested track cannot receive audio clips.",
     }],
   }))
+
   await submitted.completion
   const { controller, dispose } = createController(() => "project-1", undefined, () => 0, undefined, undefined, importQueue)
   const unregister = registerController(controller)
+
   const response = await controller.request({
     id: "skipped-import-status",
     operation: "host.import.status",
     input: {},
     signal: new AbortController().signal,
   })
+
   expect(response.result).toMatchObject({
     status: "failed",
     job: { error: "1 files failed or skipped: unsupported-target.wav (The requested track cannot receive audio clips.)" },
@@ -680,6 +727,7 @@ test("includes skipped import reasons in bounded host status", async () => {
 
 test("sanitizes import errors when the job has no summary", async () => {
   installBridge([])
+
   const importQueue: ImportJobQueue = {
     submit: () => ({ id: "unused", completion: Promise.resolve({ outcomes: [] }) }),
     cancel: () => undefined,
@@ -692,14 +740,17 @@ test("sanitizes import errors when the job has no summary", async () => {
     }),
     dispose: () => undefined,
   }
+
   const { controller, dispose } = createController(() => "project-1", undefined, () => 0, undefined, undefined, importQueue)
   const unregister = registerController(controller)
+
   const response = await controller.request({
     id: "failed-import-without-summary-status",
     operation: "host.import.status",
     input: {},
     signal: new AbortController().signal,
   })
+
   expect(JSON.stringify(response.result)).toContain("Failed [path]/a.wav")
   expect(JSON.stringify(response.result)).not.toContain("/Users/x")
   unregister()
@@ -715,6 +766,7 @@ test("cancels active import file work during project transition", async () => {
   const release = Promise.withResolvers<void>()
   let observedAbort = false
   const queue = createExportQueue()
+
   const controller = createAttachedHostController({
     projectId: () => projectId,
     mountedProjectGeneration: () => projectGeneration,
@@ -744,10 +796,12 @@ test("cancels active import file work during project transition", async () => {
       await release.promise
       observedAbort = signal?.aborted ?? false
       signal?.throwIfAborted()
+
       return { outcomes: [{ fileName: "audio.wav", status: "created", assetId: "asset", clipId: "clip" }] }
     },
     setPlayhead: () => undefined,
   })
+
   const unregister = registerController(controller)
 
   const response = await controller.request({
@@ -756,6 +810,7 @@ test("cancels active import file work during project transition", async () => {
     input: { canceled: false, files: [{ token, basename: "active.wav", byteLength: 1, mime: "audio/wav" }] },
     signal: new AbortController().signal,
   })
+
   await Promise.resolve()
   projectId = "project-b"
   projectGeneration = 2
@@ -796,6 +851,7 @@ test("attaches control only to an existing mounted local project", async () => {
       message: "A mounted local project is required.",
     })
   }
+
   mountedProjectId = project.id
   await deleteLocalProject(project.id)
   expect((await requestControl(controller, "control.capabilities", {}, undefined, controlActor)).error).toEqual({
@@ -826,8 +882,10 @@ test("rejects an unmounted local project without dispatching to it", async () =>
     code: "invalid-request",
     message: "The requested project is not mounted.",
   })
+
   const otherHistory = await createLocalControlService({ actor: { subject: controlActor } })
     .history({ projectId: other.id, limit: 10 })
+
   expect(otherHistory.entries).toEqual([])
 
   unregister()
@@ -843,12 +901,15 @@ test("runs the complete local control flow with the trusted actor", async () => 
   const initial = await requestControl(controller, "control.snapshot", { projectId: project.id }, undefined, controlActor)
   const snapshot = projectSnapshotSchemaV1.parse(initial.result)
   const track = snapshot.tracks[0]
+
   if (!track) throw new Error("Expected control snapshot track.")
+
   const destructive = {
     version: "v1" as const,
     projectId: project.id,
     actions: [{ kind: "track.delete" as const, track: { source: "persisted" as const, id: track.id } }],
   }
+
   expect((await requestControl(controller, "control.preview", {
     version: "v1",
     projectId: project.id,
@@ -875,6 +936,7 @@ test("reconciles persisted overlays before commit and adopts the applied non-rep
   const project = await createLocalProject(`Reconcile external commit ${crypto.randomUUID()}`)
   const service = createLocalControlService({ actor: { subject: controlActor } })
   const reconciliations: Array<{ projectId: string; mountedProjectGeneration: number; name: string | undefined }> = []
+
   const { controller, dispose } = createController(
     () => project.id,
     undefined,
@@ -892,13 +954,16 @@ test("reconciles persisted overlays before commit and adopts the applied non-rep
     undefined,
     () => true,
   )
+
   const unregister = registerController(controller)
+
   const input = {
     version: "v1" as const,
     projectId: project.id,
     idempotencyKey: "reconcile-track-rename",
     actions: [{ kind: "track.rename" as const, track: { source: "persisted" as const, id: (await service.snapshot({ projectId: project.id })).tracks[0]?.id ?? "" }, name: "Drums Acceptance" }],
   }
+
   expect((await requestControl(controller, "control.preview", {
     version: "v1",
     projectId: project.id,
@@ -945,9 +1010,11 @@ test("a commit reloads the mounted timeline before it only while reflected overl
   const project = await createLocalProject(`Overlay gated reload ${crypto.randomUUID()}`)
   const initial = await createLocalControlService({ actor: { subject: controlActor } }).snapshot({ projectId: project.id })
   const track = initial.tracks[0]
+
   if (!track) throw new Error("Expected initial track.")
   let overlays = false
   let reconciliations = 0
+
   const { controller, dispose } = createController(
     () => project.id,
     undefined,
@@ -958,7 +1025,9 @@ test("a commit reloads the mounted timeline before it only while reflected overl
     undefined,
     () => overlays,
   )
+
   const unregister = registerController(controller)
+
   const rename = (name: string) => requestControl(controller, "control.commit", {
     version: "v1",
     projectId: project.id,
@@ -981,6 +1050,7 @@ test("a pending user write is durable before a commit that skips the pre-commit 
   const project = await createLocalProject(`Flush before commit ${crypto.randomUUID()}`)
   const initial = await createLocalControlService({ actor: { subject: controlActor } }).snapshot({ projectId: project.id })
   const track = initial.tracks[0]
+
   if (!track) throw new Error("Expected initial track.")
   const order: string[] = []
   const unregisterFlusher = registerPendingLocalProjectWriteFlusher("midi", project.id, async () => { order.push("flush") })
@@ -994,6 +1064,7 @@ test("a pending user write is durable before a commit that skips the pre-commit 
     idempotencyKey: "flush-before-commit",
     actions: [{ kind: "track.rename", track: { source: "persisted", id: track.id }, name: "Flushed first" }],
   }, undefined, controlActor)
+
   expect(result.result).toMatchObject({ applied: true })
   expect(order.indexOf("flush")).toBeGreaterThanOrEqual(0)
   expect(order.indexOf("flush")).toBeLessThan(order.indexOf("commit"))
@@ -1009,8 +1080,10 @@ test("surfaces mounted timeline reconciliation failures after an applied commit"
   const project = await createLocalProject(`Failed reconciliation ${crypto.randomUUID()}`)
   const initial = await createLocalControlService({ actor: { subject: controlActor } }).snapshot({ projectId: project.id })
   const track = initial.tracks[0]
+
   if (!track) throw new Error("Expected initial track.")
   let reconciliations = 0
+
   const { controller, dispose } = createController(
     () => project.id,
     undefined,
@@ -1020,6 +1093,7 @@ test("surfaces mounted timeline reconciliation failures after an applied commit"
       if (++reconciliations === 1) throw new Error("Injected timeline reconciliation failure.")
     },
   )
+
   const unregister = registerController(controller)
 
   const result = await requestControl(controller, "control.commit", {
@@ -1046,6 +1120,7 @@ test("suppresses reconciliation when native delivery changes the mounted generat
   const project = await createLocalProject(`Stale reconciliation ${crypto.randomUUID()}`)
   const initial = await createLocalControlService({ actor: { subject: controlActor } }).snapshot({ projectId: project.id })
   const track = initial.tracks[0]
+
   if (!track) throw new Error("Expected default track.")
   const instanceId = "00000000-0000-4000-8000-000000000013"
   await setLocalExternalProcessor(project.id, {
@@ -1093,6 +1168,7 @@ test("suppresses reconciliation when native delivery changes the mounted generat
   let generation = 1
   let deliveries = 0
   let reconciliations = 0
+
   const { controller, dispose } = createController(
     () => project.id,
     undefined,
@@ -1100,6 +1176,7 @@ test("suppresses reconciliation when native delivery changes the mounted generat
     async () => {
       generation += 1
       deliveries += 1
+
       return "delivered"
     },
     async () => {
@@ -1109,7 +1186,9 @@ test("suppresses reconciliation when native delivery changes the mounted generat
     undefined,
     () => true,
   )
+
   const unregister = registerController(controller)
+
   const result = await requestControl(controller, "control.commit", {
     version: "v1",
     projectId: project.id,
@@ -1121,6 +1200,7 @@ test("suppresses reconciliation when native delivery changes the mounted generat
       changes: [{ parameterId: 1, normalizedValue: 0.75 }],
     }],
   }, undefined, controlActor)
+
   expect(result.result).toMatchObject({ applied: true })
   expect(deliveries).toBe(1)
   expect(reconciliations).toBe(1)
@@ -1134,6 +1214,7 @@ test("delivers committed external VST3 parameters after durable local commit", a
   const project = await createLocalProject(`External control ${crypto.randomUUID()}`)
   const initial = await createLocalControlService({ actor: { subject: controlActor } }).snapshot({ projectId: project.id })
   const track = initial.tracks[0]
+
   if (!track) throw new Error("Expected default track.")
   const instanceId = "00000000-0000-4000-8000-000000000011"
   await setLocalExternalProcessor(project.id, {
@@ -1193,21 +1274,25 @@ test("delivers committed external VST3 parameters after durable local commit", a
   let reports = 0
   let releaseFirstDelivery: (() => void) | undefined
   let signalFirstDeliveryStarted: (() => void) | undefined
+
   const firstDeliveryStarted = new Promise<void>((resolve) => {
     signalFirstDeliveryStarted = resolve
   })
+
   const { controller, dispose } = createController(
     () => project.id,
     undefined,
     () => 0,
     async (event) => {
       events.push(event)
+
       if (event.id === 1) {
         signalFirstDeliveryStarted?.()
         await new Promise<void>((resolve) => {
           releaseFirstDelivery = resolve
         })
       }
+
       return "delivered"
     },
     undefined,
@@ -1216,7 +1301,9 @@ test("delivers committed external VST3 parameters after durable local commit", a
     undefined,
     { requestNativeVstStateCapture: (captured) => captures.push(captured), reportUndeliveredNativeVstParameters: () => { reports += 1 } },
   )
+
   const unregister = registerController(controller)
+
   const input = {
     version: "v1" as const,
     projectId: project.id,
@@ -1231,6 +1318,7 @@ test("delivers committed external VST3 parameters after durable local commit", a
       ],
     }],
   }
+
   const { idempotencyKey: _idempotencyKey, ...previewInput } = input
   const preview = await requestControl(controller, "control.preview", previewInput, undefined, controlActor)
   expect(preview.result).toMatchObject({ applied: true })
@@ -1259,12 +1347,14 @@ const deliveryCases: [string, () => Promise<NativeVstParameterQueueResult>, numb
   ["reported when the host refuses the delivery", async () => "rejected", 1],
   ["not reported when a newer value replaces the delivery", async () => "superseded", 0],
 ]
+
 for (const [outcome, deliver, reported] of deliveryCases) {
   test(`keeps a durable external parameter commit applied and ${outcome}`, async () => {
     installBridge([])
     const project = await createLocalProject(`External control failure ${crypto.randomUUID()}`)
     const initial = await createLocalControlService({ actor: { subject: controlActor } }).snapshot({ projectId: project.id })
     const track = initial.tracks[0]
+
     if (!track) throw new Error("Expected default track.")
     const instanceId = "00000000-0000-4000-8000-000000000012"
     const captures: string[] = []
@@ -1311,6 +1401,7 @@ for (const [outcome, deliver, reported] of deliveryCases) {
       health: { state: "ready", updatedAt: 1 },
       updatedAt: 1,
     })
+
     const { controller, dispose } = createController(
       () => project.id,
       undefined,
@@ -1322,7 +1413,9 @@ for (const [outcome, deliver, reported] of deliveryCases) {
       undefined,
       { requestNativeVstStateCapture: (captured) => captures.push(captured), reportUndeliveredNativeVstParameters: () => { reports += 1 } },
     )
+
     const unregister = registerController(controller)
+
     const result = await requestControl(controller, "control.commit", {
       version: "v1",
       projectId: project.id,
@@ -1334,6 +1427,7 @@ for (const [outcome, deliver, reported] of deliveryCases) {
         changes: [{ parameterId: 1, normalizedValue: 0.75 }],
       }],
     }, undefined, controlActor)
+
     expect(result.result).toMatchObject({ applied: true })
     expect(captures).toEqual([])
     expect(reports).toBe(reported)
@@ -1353,6 +1447,7 @@ const settleMicrotasks = async () => {
 test("two requests during one in-flight state capture share a single follow-up capture", async () => {
   const started: string[] = []
   const gates: Array<() => void> = []
+
   const request = createNativeVstStateCapture({
     capture: async (instanceId) => {
       started.push(instanceId)
@@ -1360,6 +1455,7 @@ test("two requests during one in-flight state capture share a single follow-up c
     },
     report: () => { throw new Error("unexpected report") },
   })
+
   request("a")
   request("b")
   expect(started).toEqual(["a", "b"])
@@ -1381,13 +1477,16 @@ test("a refused state capture is reported and does not block the next request", 
   const reported: Array<{ instanceId: string; message: string }> = []
   let refuse = true
   const started: string[] = []
+
   const request = createNativeVstStateCapture({
     capture: async (instanceId) => {
       started.push(instanceId)
+
       if (refuse) throw new Error("vstStateGet refused")
     },
     report: (instanceId, error) => reported.push({ instanceId, message: error.message }),
   })
+
   request("a")
   await settleMicrotasks()
   expect(reported).toEqual([{ instanceId: "a", message: "vstStateGet refused" }])
@@ -1399,6 +1498,7 @@ test("a refused state capture is reported and does not block the next request", 
 test("closing the window captures plug-in state before the transport stops", async () => {
   installBridge([])
   const events: string[] = []
+
   const { controller, dispose } = createController(
     () => "project-1",
     undefined,
@@ -1413,6 +1513,7 @@ test("closing the window captures plug-in state before the transport stops", asy
       stop: async () => { events.push("stop") },
     },
   )
+
   expect(await controller.prepareToClose()).toBe(true)
   expect(events).toEqual(["capture", "stop"])
   dispose()
@@ -1421,6 +1522,7 @@ test("closing the window captures plug-in state before the transport stops", asy
 test("a refused capture at close is reported by the close preparation failing", async () => {
   installBridge([])
   const events: string[] = []
+
   const { controller, dispose } = createController(
     () => "project-1",
     undefined,
@@ -1435,6 +1537,7 @@ test("a refused capture at close is reported by the close preparation failing", 
       stop: async () => { events.push("stop") },
     },
   )
+
   expect(await controller.prepareToClose()).toBe(false)
   expect(events).toEqual([])
   dispose()
@@ -1469,12 +1572,15 @@ test("cancels or rejects control requests that change mount during lookup", asyn
   const first = await createLocalProject(`First mount ${crypto.randomUUID()}`)
   const second = await createLocalProject(`Second mount ${crypto.randomUUID()}`)
   const localProject = await getLocalProject(first.id)
+
   if (!localProject) throw new Error("Expected local project.")
   let mountedProjectId = first.id
   let releaseLookup: ((project: typeof localProject | undefined) => void) | undefined
+
   const lookup = async () => new Promise<Awaited<ReturnType<typeof getLocalProject>>>((resolve) => {
     releaseLookup = resolve
   })
+
   const { controller, dispose } = createController(() => mountedProjectId, lookup)
   const unregister = registerController(controller)
 
@@ -1489,6 +1595,7 @@ test("cancels or rejects control requests that change mount during lookup", asyn
 
   mountedProjectId = first.id
   const abortDuringLookup = new AbortController()
+
   const abortedPending = requestControl(
     controller,
     "control.snapshot",
@@ -1496,6 +1603,7 @@ test("cancels or rejects control requests that change mount during lookup", asyn
     abortDuringLookup.signal,
     controlActor,
   )
+
   abortDuringLookup.abort()
   releaseLookup?.(localProject)
   expect((await abortedPending).error?.code).toBe("cancelled")
@@ -1511,28 +1619,34 @@ test("cancels or rejects control requests that change mount during lookup", asyn
 test("does not commit after cancellation while waiting for the asset lock", async () => {
   installBridge([])
   const project = await createLocalProject(`Locked cancellation ${crypto.randomUUID()}`)
+
   const initial = await createLocalControlService({ actor: { subject: controlActor } })
     .snapshot({ projectId: project.id })
+
   let releaseLock: (() => void) | undefined
   let lockHeld: (() => void) | undefined
+
   const lock = withLocalProjectAssetLock(project.id, async () => {
     lockHeld?.()
     await new Promise<void>((resolve) => {
       releaseLock = resolve
     })
   })
+
   await new Promise<void>((resolve) => {
     lockHeld = resolve
   })
   const { controller, dispose } = createController(() => project.id)
   const unregister = registerController(controller)
   const abort = new AbortController()
+
   const pending = requestControl(controller, "control.commit", {
     version: "v1",
     projectId: project.id,
     idempotencyKey: "locked-cancel",
     actions: [{ kind: "project.rename", name: "Should not commit" }],
   }, abort.signal, controlActor)
+
   for (let index = 0; index < 10; index += 1) await Promise.resolve()
   abort.abort()
   releaseLock?.()
@@ -1551,33 +1665,41 @@ test("does not commit after a mount switch while waiting for the asset lock", as
   installBridge([])
   const first = await createLocalProject(`Locked first ${crypto.randomUUID()}`)
   const second = await createLocalProject(`Locked second ${crypto.randomUUID()}`)
+
   const initial = await createLocalControlService({ actor: { subject: controlActor } })
     .snapshot({ projectId: first.id })
+
   let mountedProjectId = first.id
   let mountedProjectGeneration = 0
   let releaseLock: (() => void) | undefined
   let lockHeld: (() => void) | undefined
+
   const lock = withLocalProjectAssetLock(first.id, async () => {
     lockHeld?.()
     await new Promise<void>((resolve) => {
       releaseLock = resolve
     })
   })
+
   await new Promise<void>((resolve) => {
     lockHeld = resolve
   })
+
   const { controller, dispose } = createController(
     () => mountedProjectId,
     undefined,
     () => mountedProjectGeneration,
   )
+
   const unregister = registerController(controller)
+
   const pending = requestControl(controller, "control.commit", {
     version: "v1",
     projectId: first.id,
     idempotencyKey: "locked-switch",
     actions: [{ kind: "project.rename", name: "Should not commit" }],
   }, undefined, controlActor)
+
   for (let index = 0; index < 10; index += 1) await Promise.resolve()
   mountedProjectId = second.id
   mountedProjectGeneration += 1
@@ -1603,6 +1725,7 @@ test("pre-accept cancellation does not retain prepared export state", async () =
   installBridge([])
   let releasePreparation: (() => void) | undefined
   let submissions = 0
+
   const service: TimelineExportService = {
     enqueueTimelineExport: async () => ({ type: "error", message: "unused", outputs: [] }),
     enqueueStemExport: async () => ({ type: "error", message: "unused", outputs: [] }),
@@ -1616,6 +1739,7 @@ test("pre-accept cancellation does not retain prepared export state", async () =
       await new Promise<void>((resolve) => {
         releasePreparation = resolve
       })
+
       return prepared
     },
     prepareStemExport: async () => {
@@ -1623,6 +1747,7 @@ test("pre-accept cancellation does not retain prepared export state", async () =
     },
     submitPreparedTimelineExport: () => {
       submissions += 1
+
       return { id: "unexpected", completion: Promise.resolve({ type: "success", outputs: [] }) }
     },
     submitPreparedStemExport: () => {
@@ -1631,7 +1756,9 @@ test("pre-accept cancellation does not retain prepared export state", async () =
     cancel: () => undefined,
     status: () => undefined,
   }
+
   const queue = createExportQueue()
+
   const controller = createAttachedHostController({
     projectId: () => "project-1",
     mountedProjectGeneration: () => 0,
@@ -1648,23 +1775,28 @@ test("pre-accept cancellation does not retain prepared export state", async () =
     importFiles: async () => ({ outcomes: [] }),
     setPlayhead: () => undefined,
   })
+
   const unregister = registerController(controller)
   const initiator = new AbortController()
+
   const preflight = controller.request({
     id: "request-canceled",
     operation: "host.export.run",
     input: { ...exportInput, preflightOnly: true },
     signal: initiator.signal,
   })
+
   initiator.abort()
   releasePreparation?.()
   expect((await preflight).error?.code).toBe("cancelled")
+
   const final = await controller.request({
     id: "request-canceled",
     operation: "host.export.run",
     input: exportInput,
     signal: new AbortController().signal,
   })
+
   expect(final.error?.code).toBe("invalid-request")
   expect(submissions).toBe(0)
 
@@ -1675,6 +1807,7 @@ test("pre-accept cancellation does not retain prepared export state", async () =
 test("renderer cancellation immediately deletes prepared export state before final submission", async () => {
   installBridge([])
   let submissions = 0
+
   const service: TimelineExportService = {
     enqueueTimelineExport: async () => ({ type: "error", message: "unused", outputs: [] }),
     enqueueStemExport: async () => ({ type: "error", message: "unused", outputs: [] }),
@@ -1684,13 +1817,16 @@ test("renderer cancellation immediately deletes prepared export state before fin
     prepareStemExport: async () => { throw new Error("unused") },
     submitPreparedTimelineExport: () => {
       submissions += 1
+
       return { id: "unexpected", completion: Promise.resolve({ type: "success", outputs: [] }) }
     },
     submitPreparedStemExport: () => { throw new Error("unused") },
     cancel: () => undefined,
     status: () => undefined,
   }
+
   const queue = createExportQueue()
+
   const controller = createAttachedHostController({
     projectId: () => "project-1",
     mountedProjectGeneration: () => 0,
@@ -1707,6 +1843,7 @@ test("renderer cancellation immediately deletes prepared export state before fin
     importFiles: async () => ({ outcomes: [] }),
     setPlayhead: () => undefined,
   })
+
   const unregister = registerController(controller)
   const requestId = "picker-unresolved"
   await controller.request({
@@ -1721,12 +1858,14 @@ test("renderer cancellation immediately deletes prepared export state before fin
     input: { canceled: true, mode: "mixdown" },
     signal: new AbortController().signal,
   })
+
   const final = await controller.request({
     id: requestId,
     operation: "host.export.run",
     input: exportInput,
     signal: new AbortController().signal,
   })
+
   expect(final.error?.code).toBe("invalid-request")
   expect(submissions).toBe(0)
   unregister()
@@ -1737,6 +1876,7 @@ test("discovers only mounted VST instances and paginates safe parameter values",
   installBridge([])
   const project = await createLocalProject(`VST discovery ${crypto.randomUUID()}`)
   const other = await createLocalProject(`Other VST discovery ${crypto.randomUUID()}`)
+
   const processor = (instanceId: string, targetId: string, index: number) => ({
     instanceId,
     targetId,
@@ -1789,12 +1929,14 @@ test("discovers only mounted VST instances and paginates safe parameter values",
     health: { state: "ready" as const, updatedAt: 1 },
     updatedAt: 1,
   })
+
   const firstInstance = "00000000-0000-4000-8000-000000000021"
   const secondInstance = "00000000-0000-4000-8000-000000000022"
   await setLocalExternalProcessor(project.id, processor(secondInstance, "master", 1))
   await setLocalExternalProcessor(project.id, processor(firstInstance, "track-1", 0))
   const { controller, dispose } = createController(() => project.id)
   const unregister = registerController(controller)
+
   const request = <Operation extends "host.vst.instances" | "host.vst.parameters">(
     operation: Operation,
     input: {
@@ -1889,6 +2031,7 @@ test("strict attached diagnostics preserves native-spool and interrupted; legacy
   const f = createController(() => "cloud-project", undefined, undefined, undefined, undefined, undefined, engine)
   registerController(f.controller)
   const transports: DesktopOperationMapV1["diagnostics.snapshot.v2"]["result"]["recording"]["transport"][] = [null, "sab", "transferable", "native-spool"]
+
   try {
     for (const transport of transports) {
       resetRecordingDiagnostics(); updateRecordingDiagnostics({ transport })
@@ -1897,6 +2040,7 @@ test("strict attached diagnostics preserves native-spool and interrupted; legacy
       expect(parsed.recording.transport).toBe(transport)
       expect(parsed.audio.state).toBe("interrupted")
       const legacy = await f.controller.request({ id: "diagnostic-v1", operation: "diagnostics.snapshot", input: {}, signal: new AbortController().signal })
+
       if (transport === "native-spool") {
         expect(legacy.error).toMatchObject({ code: "unavailable", message: "Native recording diagnostics require diagnostics.snapshot.v2." })
       } else {
@@ -1941,6 +2085,7 @@ test("maps the main-process native diagnostics reply through strict diagnostics 
     lastRejectedInstrumentEventCount: 0,
     lastRejectedGraphRevision: 0,
   }
+
   const mainProcessReply = {
     ok: true,
     hello: {
@@ -1952,6 +2097,7 @@ test("maps the main-process native diagnostics reply through strict diagnostics 
     diagnostics: nativeDiagnostics,
     artifactVerification: { status: "verified" },
   }
+
   const mapped = {
     ...desktopDiagnosticsSchemaV2.parse({
       version: "v2",
@@ -1966,5 +2112,6 @@ test("maps the main-process native diagnostics reply through strict diagnostics 
       },
     }),
   }
+
   expect(mapped.native.status).toBe("available")
 })

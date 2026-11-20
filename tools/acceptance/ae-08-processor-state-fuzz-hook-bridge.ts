@@ -19,6 +19,7 @@ export default function createHookBridge({ h, time, mutation, compilations }: {
   let lifecycleReady = false
   let resolveLifecycle: ((value: { state: "ready"; powerGeneration: number }) => void) | undefined
   let supervisor: { command: number; timer: number; kind: string } | undefined
+
   const audioHost = {
     ...h.bridge,
     session: { ...h.bridge.session,
@@ -30,13 +31,17 @@ export default function createHookBridge({ h, time, mutation, compilations }: {
       setTransport: (value: Parameters<typeof h.bridge.session.setTransport>[0]) => dropTransport
         ? h.simple("mutation-dropped-transport") : h.bridge.session.setTransport(value) },
     getLifecycle: () => new Promise<{ state: "ready"; powerGeneration: number }>((resolve) => { resolveLifecycle = resolve }),
-    onLifecycle: (listener: typeof lifecycleListener) => { lifecycleListener = listener; return () => { lifecycleListener = undefined } },
+    onLifecycle: (listener: typeof lifecycleListener) => { lifecycleListener = listener;
+
+ return () => { lifecycleListener = undefined } },
   }
+
   return {
     audioHost,
     rejectNative: () => { rejectNative = true },
     arm: (action: Action) => {
       if (mutation === "drop-dispatch" && action.mode !== "transport") dropDispatch = action.value !== 0
+
       if (mutation === "drop-transport" && action.mode === "transport") dropTransport = action.value !== 0
     },
     lifecycle: {
@@ -50,15 +55,20 @@ export default function createHookBridge({ h, time, mutation, compilations }: {
     },
     synchronizeSupervisor: () => {
       const pending = h.pendingControl
+
       if (supervisor?.command === pending?.id) return
+
       if (supervisor) time.cancelExternal(supervisor.timer)
       supervisor = undefined
+
       if (!pending) return
       const kind = ["prepare", "publish", "inspect", "rollback", "retire"].includes(pending.name) ? "revision-deadline" : "control-watchdog"
       const command = pending.id
+
       const timer = time.scheduleDeadline(`audio-host supervisor ${kind} (${pending.name})`, () => {
         h.act({ kind, id: command }, compilations, h.lose, () => {})
       })
+
       supervisor = { command, kind, timer }
     },
   }

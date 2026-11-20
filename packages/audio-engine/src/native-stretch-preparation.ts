@@ -80,12 +80,14 @@ export const prepareNativeStretchArtifacts = async (input: {
   const manifests = new Map<string, PreparedStretchArtifactManifest>()
   const leases = new Map<string, PreparedStretchArtifactLease>()
   let disposed = false
+
   const dispose = async () => {
     if (disposed) return
     disposed = true
     await Promise.allSettled([...leases.values()].map((lease) => lease.release()))
     leases.clear()
   }
+
   try {
     for (const track of input.tracks) {
       for (const clip of track.clips.filter(isStretchClip)) {
@@ -93,15 +95,20 @@ export const prepareNativeStretchArtifacts = async (input: {
           diagnostics.push(diagnostic(clip.id, `${clip.id}: duplicate Stretch clip IDs are not supported.`))
           continue
         }
+
         clipIds.add(clip.id)
+
         try {
           input.signal?.throwIfAborted()
+
           const rendered = await input.cache.renderArtifactNow(
             runtimeClip(clip),
             input.projectBpm,
             input.signal,
           )
+
           const manifest = await input.repository.find(rendered.binding.artifactId)
+
           if (!manifest || !artifactMatchesManifest(rendered.binding.artifactId, manifest)) {
             diagnostics.push(diagnostic(
               clip.id,
@@ -109,6 +116,7 @@ export const prepareNativeStretchArtifacts = async (input: {
             ))
             continue
           }
+
           const asset: AudioAssetRef = {
             version: audioCoreContractVersion,
             assetId: rendered.binding.artifactId,
@@ -116,6 +124,7 @@ export const prepareNativeStretchArtifacts = async (input: {
             sampleRateHz: manifest.descriptor.output.sampleRate,
             channelCount: manifest.descriptor.output.channelCount,
           }
+
           const prepared: NativePreparedStretchAsset = {
             clipId: clip.id,
             preparedStretchArtifactId: rendered.binding.artifactId,
@@ -128,12 +137,16 @@ export const prepareNativeStretchArtifacts = async (input: {
             sourceStartSec: rendered.binding.sourceStartSec,
             manifest,
           }
+
           const invalid = validatePreparedStretchProjectionMetadata(prepared)
+
           if (invalid) {
             diagnostics.push(diagnostic(clip.id, invalid))
             continue
           }
+
           const existing = manifests.get(manifest.artifactId)
+
           if (existing && !sameManifestGeneration(existing, manifest)) {
             diagnostics.push(diagnostic(
               clip.id,
@@ -141,10 +154,12 @@ export const prepareNativeStretchArtifacts = async (input: {
             ))
             continue
           }
+
           if (!existing) {
             leases.set(manifest.artifactId, await input.repository.acquireLease(manifest))
             manifests.set(manifest.artifactId, manifest)
           }
+
           assets.push(prepared)
         } catch (error) {
           if (input.signal?.aborted) throw error
@@ -155,10 +170,13 @@ export const prepareNativeStretchArtifacts = async (input: {
         }
       }
     }
+
     if (diagnostics.length > 0) {
       await dispose()
+
       return { supported: false, diagnostics }
     }
+
     return { supported: true, assets, manifests: [...manifests.values()], dispose }
   } catch (error) {
     await dispose()

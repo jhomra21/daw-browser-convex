@@ -41,6 +41,7 @@ const audioBackendRolloutPolicy = {
 }
 
 type DesktopAudioHostBridge = NonNullable<DesktopBridge["audioHost"]>
+
 type NativePlaybackBridge = NonNullable<
   Parameters<typeof createNativePlaybackController>[0]["bridge"]
 >
@@ -76,6 +77,7 @@ export function useTimelinePlayback(
   // Schedule a little ahead to avoid past-time starts under scheduling jitter.
   // This keeps metronome ticks and clip audio locked to the same transport timestamp.
   const SCHED_AHEAD_SEC = 0.02
+
   // Centralize loop state (start/end/active) so timing logic stays in sync across handlers
   const getLoopParams = () => {
     const enabled = loopOptions?.loopEnabled?.() ?? false
@@ -83,11 +85,13 @@ export function useTimelinePlayback(
     const end = loopOptions?.loopEndSec?.() ?? 0
     const length = end - start
     const isActive = enabled && length > LOOP_EPS
+
     return { enabled, start, end, length, isActive }
   }
 
   const cancelRaf = () => {
     const id = rafId()
+
     if (id !== null) {
       cancelAnimationFrame(id)
       setRafId(null)
@@ -95,15 +99,19 @@ export function useTimelinePlayback(
   }
 
   const desktopAudioHostBridge = globalThis.window?.dawDesktop?.audioHost
+
   const audioHostBridge = desktopAudioHostBridge && supportsNativePlayback(desktopAudioHostBridge)
     ? desktopAudioHostBridge
     : undefined
+
   const requiresNativeAudio = nativeOptions?.requiresNativeAudio === true
   const acceptance = nativeOptions?.acceptance
   const externalNativeSession = acceptance?.ownsNativeSession === false
+
   const hasAudioLifecycle = audioHostBridge !== undefined
     && audioHostBridge.onLifecycle !== undefined
     && audioHostBridge.getLifecycle !== undefined
+
   let recoveryRetryPromise: Promise<unknown> | undefined
   let recoveryRetryGeneration: number | undefined
   let mounted = true
@@ -115,28 +123,35 @@ export function useTimelinePlayback(
   let rebuildStartingPlay = false
   let rebuildPromise: Promise<void> | undefined
   let rebuildRequestVersion = 0
+
   let pendingRebuild: {
     tracks: Track[]
     intent: TimelinePlaybackRebuildIntent
     requestVersion: number
     transportIntentToken: number
   } | undefined
+
   let playAttemptToken = 0
+
   let playAttempt: {
     token: number
     promise: Promise<void>
     waitingForRebuild: boolean
   } | undefined
+
   const [isPlayPending, setIsPlayPending] = createSignal(false)
+
   let playAttemptPhase: {
     token: number
     backend: 'native' | 'fallback'
     state: 'startup' | 'prepared' | 'active'
   } | undefined
+
   let pendingBackendPause: {
     ownerToken: number
     promise: Promise<void>
   } | undefined
+
   let pendingStop: Promise<void> | undefined
   let backendOwnerToken = 0
   const playbackPreparationWaiters = new Set<() => void>()
@@ -144,6 +159,7 @@ export function useTimelinePlayback(
   const invalidatePlayAttempt = () => {
     playAttemptToken += 1
     playAttemptPhase = undefined
+
     for (const cancel of playbackPreparationWaiters) cancel()
     playbackPreparationWaiters.clear()
   }
@@ -159,6 +175,7 @@ export function useTimelinePlayback(
   )
 
   const reportNativeStopped = (message: string) => nativeOptions?.reportFault?.({ kind: "session-stopped", message })
+
   const nativePlayback = createNativePlaybackController({
     bridge: audioHostBridge,
     getProjectId: nativeOptions?.projectId,
@@ -188,38 +205,51 @@ export function useTimelinePlayback(
     reportFault: (fault, options) => {
       const message = nativePlaybackFaultText(fault)
       lastNativeFault = message
+
       // Publication faults retain the active bank; reporting one must not
       // turn uninterrupted native playback into a stopped UI transport.
       if (options?.retainPlayback) {
         nativeOptions?.reportFault?.(fault, { retainPlayback: true })
+
         return
       }
+
       if (portableBrowserPlayback.isActive() && isPlaying()) {
         portableBrowserOptions?.reportFault?.(message)
+
         return
       }
+
       if (isRebuildingPlayback()) {
         setIsRebuildingPlayback(false)
         transportIntentToken += 1
         invalidatePlayAttempt()
       }
+
       setActiveBackend('idle')
+
       if (!isPlaying()) {
         if (requiresNativeAudio) nativeOptions?.reportFault?.(fault)
+
         return
       }
+
       setIsPlaying(false)
       cancelRaf()
       nativeOptions?.reportFault?.(fault)
     },
   })
+
   let removeRebuildHostLoss: (() => void) | undefined
+
   const clearRebuildHostLoss = () => {
     removeRebuildHostLoss?.()
     removeRebuildHostLoss = undefined
   }
+
   const subscribeRebuildHostLoss = () => {
     if (removeRebuildHostLoss || !audioHostBridge) return
+
     // A cold rebuild retires its schedule coordinator before replacement
     // preparation, so observe host loss while no coordinator owns the host.
     // This host event reads current state imperatively, not reactively.
@@ -236,14 +266,17 @@ export function useTimelinePlayback(
       reportNativeStopped(message ?? "Native playback host connection was lost.")
       clearRebuildHostLoss()
     })
+
     removeRebuildHostLoss = remove
   }
+
   createEffect(() => {
     nativeOptions?.keepLatencyNodeIds?.()
     untrack(() => {
       void nativePlayback.updateKeepLatency().then((result) => {
         if (result.handled || result.reason === "unprepared") return
         const message = result.error ?? "Native Keep Latency update failed."
+
         if (result.reason === "latency-unsupported") nativeOptions?.reportFault?.({ kind: "latency-unsupported", message })
         else reportNativeStopped(message)
       }).catch((error) => {
@@ -251,42 +284,53 @@ export function useTimelinePlayback(
       })
     })
   })
+
   const capturePreparedNativeVstStates = async () => {
     if (!nativePlayback.isPrepared()) return
     const capture = nativePlayback.preparedVstCapture()
+
     if (!capture) return
+
     try {
       await nativeOptions?.captureNativeVstStates?.(capture)
     } catch (cause) {
       throw new NativeStateCaptureError(cause instanceof Error ? cause.message : "Native VST3 state capture failed.", { cause })
     }
   }
+
   const disposeNativeAfterCapture = async () => {
     let captureError: unknown
     let disposeError: unknown
     const pendingStart = nativePlayback.cancelPendingStart()
     await pendingStart.catch(() => undefined)
+
     try {
       await capturePreparedNativeVstStates()
     } catch (error) {
       captureError = error
     }
+
     try {
       await nativePlayback.dispose(undefined, "native-state-capture-complete")
     } catch (error) {
       disposeError = error
     }
+
     if (captureError !== undefined) throw captureError
+
     if (disposeError !== undefined) throw disposeError
   }
+
   const reportNativeStateCaptureFailure = (error: Error) => {
     reportNativeStopped(error.message || "Native VST state capture failed.")
   }
+
   const portableBrowserPlayback = createPortableBrowserPlaybackController({
     // The desired state each compile reads, so a portable start's commit can tell whether an edit landed meanwhile. A
     // warm resume compiles nothing: its commit takes what the last compile read, an adoption's included.
     compileSnapshot: async (transport, context) => {
       schedule.portableCompiledFingerprint = untrack(() => readDesiredScheduleFingerprint())
+
       return portableBrowserOptions
         ? portableBrowserOptions.compileSnapshot(transport, context)
         : { supported: false, reasons: ['Portable browser playback is not configured.'] }
@@ -299,16 +343,19 @@ export function useTimelinePlayback(
     reportFault: (message) => {
       audioEngine.onTransportPause()
       setActiveBackend('idle')
+
       if (!isPlaying()) return
       setIsPlaying(false)
       cancelRaf()
       portableBrowserOptions?.reportFault?.(message)
     },
   })
+
   const disposePortableBrowserPlayback = () => {
     if (portableBrowserPlayback.isActive() || portableBrowserPlayback.isPrepared()) {
       audioEngine.onTransportPause()
     }
+
     return portableBrowserPlayback.dispose()
   }
 
@@ -316,11 +363,13 @@ export function useTimelinePlayback(
     const unsubscribeNative = nativePlayback.subscribeTrackMeters((levels) => {
       if (nativePlayback.isPrepared()) listener(levels)
     })
+
     const unsubscribeBrowser = requiresNativeAudio
       ? () => undefined
       : audioEngine.subscribeTrackStereoLevels?.((levels) => {
         if (!nativePlayback.isPrepared()) listener(levels)
       }) ?? (() => undefined)
+
     return () => {
       unsubscribeNative()
       unsubscribeBrowser()
@@ -331,11 +380,13 @@ export function useTimelinePlayback(
     const unsubscribeNative = nativePlayback.subscribeMasterMeter((levels) => {
       if (nativePlayback.isPrepared()) listener(levels)
     })
+
     const unsubscribeBrowser = requiresNativeAudio
       ? () => undefined
       : audioEngine.subscribeMasterStereoLevels?.((levels) => {
         if (!nativePlayback.isPrepared()) listener(levels)
       }) ?? (() => undefined)
+
     return () => {
       unsubscribeNative()
       unsubscribeBrowser()
@@ -361,10 +412,13 @@ export function useTimelinePlayback(
 
   const resolveTracks = () => {
     const fromAccessor = loopOptions?.getTracks?.()
+
     if (Array.isArray(fromAccessor)) {
       setLastTracks(fromAccessor)
+
       return fromAccessor
     }
+
     return lastTracks()
   }
 
@@ -372,8 +426,11 @@ export function useTimelinePlayback(
 
   const applyLoopIfNeeded = (candidateSec: number) => {
     const { isActive, start, end } = getLoopParams()
+
     if (!isActive) return { sec: candidateSec, looped: false }
+
     if (candidateSec < start) return { sec: candidateSec, looped: false }
+
     if (candidateSec < end - LOOP_EPS) return { sec: candidateSec, looped: false }
 
     // Wrap cleanly to the start of the loop; schedule immediately with slight ahead offset
@@ -389,6 +446,7 @@ export function useTimelinePlayback(
       horizonSec: scheduledUntilSec - wrapped,
       tracks,
     })
+
     return { sec: wrapped, looped: true }
   }
 
@@ -409,10 +467,13 @@ export function useTimelinePlayback(
 
   const refreshScheduleHorizon = (sec: number) => {
     const tracks = resolveTracks()
+
     if (tracks.length === 0) return
     const { isActive, end } = getLoopParams()
     const nextEnd = getScheduleHorizonEnd(sec, isActive ? end : undefined)
+
     if (nextEnd <= scheduledUntilSec) return
+
     if (scheduledUntilSec - sec > LIVE_SCHEDULE_REFRESH_MARGIN_SEC) return
     scheduleAndTrackDeferred(tracks, sec, {
       preserveExisting: true,
@@ -428,30 +489,39 @@ export function useTimelinePlayback(
 
   const tick = () => {
     if (!isPlaying()) return
+
     if (nativePlayback.isActive() || portableBrowserPlayback.isActive()) {
       const sec = nativePlayback.isActive()
         ? nativePlayback.currentPositionSec() ?? lastPublishedPlayheadSec
         : portableBrowserPlayback.currentPositionSec() ?? lastPublishedPlayheadSec
+
       if (portableBrowserPlayback.isActive()) void portableBrowserPlayback.refreshSchedule()
       const nowMs = readNowMs()
+
       if (
         nowMs - lastPlayheadUiUpdateMs >= PLAYHEAD_UI_UPDATE_INTERVAL_MS
         || Math.abs(sec - lastPublishedPlayheadSec) >= 0.25
       ) publishPlayhead(sec)
       setRafId(requestAnimationFrame(tick))
+
       return
     }
+
     if (requiresNativeAudio) {
       setIsPlaying(false)
       cancelRaf()
       setActiveBackend("idle")
       reportNativeStopped("Native audio playback stopped because the native graph is no longer active.")
+
       return
     }
+
     const { sec, looped } = resolveCurrentPlayhead()
+
     if (!looped) refreshScheduleHorizon(sec)
     retryDeferredStretchWindows(sec)
     const nowMs = readNowMs()
+
     if (
       looped ||
       nowMs - lastPlayheadUiUpdateMs >= PLAYHEAD_UI_UPDATE_INTERVAL_MS ||
@@ -459,6 +529,7 @@ export function useTimelinePlayback(
     ) {
       publishPlayhead(sec)
     }
+
     setRafId(requestAnimationFrame(tick))
   }
 
@@ -474,49 +545,69 @@ export function useTimelinePlayback(
     requestedIntentToken = transportIntentToken,
   ) => {
     const pendingAttempt = playAttempt
+
     if (pendingAttempt) {
       if (pendingAttempt.token === playAttemptToken) return pendingAttempt.promise
       await pendingAttempt.promise.catch(() => undefined)
+
       if (!mounted || requestedIntentToken !== transportIntentToken) return
+
       return handlePlayForIntent(tracks, compileContext, requestedIntentToken)
     }
+
     if (!mounted || requestedIntentToken !== transportIntentToken) {
       setIsPlayPending(false)
+
       return
     }
 
     const token = ++playAttemptToken
     setIsPlayPending(true)
+
     const attemptState = {
       waitingForRebuild: rebuildInProgress && !rebuildStartingPlay && rebuildPromise !== undefined,
     }
+
     let relocated = false
+
     const attempt = (async () => {
       const stop = pendingStop
+
       if (stop) await stop.catch(() => undefined)
+
       if (!isCurrentPlayAttempt(token)) return
       const pendingDispose = preparedBackendDisposePromise
+
       if (pendingDispose && preparedBackendDisposeHasPendingNativeStart) {
         await pendingDispose.catch(() => undefined)
       }
+
       if (!isCurrentPlayAttempt(token)) return
+
       if (rebuildInProgress && !rebuildStartingPlay && rebuildPromise) {
         if (playAttempt?.token === token) playAttempt.waitingForRebuild = true
         await rebuildPromise.catch(() => undefined)
+
         if (playAttempt?.token === token) playAttempt.waitingForRebuild = false
         attemptState.waitingForRebuild = false
+
         if (!isCurrentPlayAttempt(token)) return
       }
+
       const requestedProjectGeneration = nativeOptions?.projectGeneration?.()
         ?? portableBrowserOptions?.projectGeneration?.()
+
       const pendingPause = pendingBackendPause
+
       if (pendingPause) {
         await pendingPause.promise.catch(() => undefined)
         // A structural edit during Pause may still owe preview invalidation.
         // Do not compile a new start into the session that disposal is retiring.
         await pendingNativeDispose
       }
+
       if (!isCurrentPlayAttempt(token)) return
+
       if (
         requestedProjectGeneration !== undefined
         && requestedProjectGeneration !== (
@@ -524,15 +615,19 @@ export function useTimelinePlayback(
           ?? portableBrowserOptions?.projectGeneration?.()
         )
       ) return
+
       if (loopOptions?.preflightPlayback && !await loopOptions.preflightPlayback()) return
+
       if (!isCurrentPlayAttempt(token)) return
       // Backend selection is a startup-only rollout decision. Preference changes
       // cannot replace an active playback or recording backend in place.
       let lifecycleState = audioLifecycleState()
       let recoveryRetryAccepted = false
+
       if (lifecycleState === "suspended") return reportNativePlaySkip(
         "Native audio was suspended before playback could start.",
       )
+
       if (
         isPlaying()
         || nativePlayback.isRecording()
@@ -543,8 +638,10 @@ export function useTimelinePlayback(
             ? "Playback was already marked active before the native graph start."
             : "Native playback could not start while recording was active.",
         )
+
         return
       }
+
       if (
         lifecycleState === "failed"
         && audioHostBridge
@@ -555,8 +652,10 @@ export function useTimelinePlayback(
         const retryGeneration = audioLifecycleGeneration()
         const retry = Promise.resolve().then(() => audioHostBridge.retryRecovery())
         recoveryRetryPromise = retry
+
         try {
           const result = await retry
+
           if (result.accepted) {
             recoveryRetryGeneration = retryGeneration
             recoveryRetryAccepted = true
@@ -567,9 +666,12 @@ export function useTimelinePlayback(
         } finally {
           if (recoveryRetryPromise === retry) recoveryRetryPromise = undefined
         }
+
         lifecycleState = audioLifecycleState()
       }
+
       const nativeLifecycleReady = !hasAudioLifecycle || lifecycleState === "ready"
+
       if (requiresNativeAudio && lifecycleState !== "ready") {
         if (!recoveryRetryAccepted) {
           reportNativeStopped(
@@ -580,26 +682,38 @@ export function useTimelinePlayback(
                 : "Native audio is unavailable. Playback remains stopped.",
           )
         }
+
         reportNativePlaySkip(`Native audio lifecycle was ${lifecycleState} before playback could start.`)
+
         return
       }
+
       if (requiresNativeAudio && recoveryRetryAccepted) {
         reportNativePlaySkip("Native audio recovery was accepted but had not completed before playback restart.")
+
         return
       }
+
       if (!nativeLifecycleReady && nativePlayback.isPrepared()) {
         await disposeNativeAfterCapture()
+
         if (!isCurrentPlayAttempt(token)) {
           reportNativePlaySkip("Native playback preparation was superseded during disposal.")
+
           return
         }
+
         setActiveBackend("idle")
       }
+
       if (!isCurrentPlayAttempt(token)) {
         reportNativePlaySkip("Native playback start was superseded before graph preparation.")
+
         return
       }
+
       const { isActive, start, end } = getLoopParams()
+
       const transport = {
         state: 'playing' as const,
         playheadSec: playheadSec(),
@@ -607,9 +721,11 @@ export function useTimelinePlayback(
         loopStartSec: start,
         loopEndSec: end,
       }
+
       const seekSequence = nativeSeekSequence
       // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.
       const desiredAtStart = readDesiredScheduleFingerprint()
+
       const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {
         backendOwnerToken += 1
         setActiveBackend(backend)
@@ -618,12 +734,16 @@ export function useTimelinePlayback(
         setLastTracks(tracks)
         lastPublishedPlayheadSec = playheadSec()
         lastPlayheadUiUpdateMs = 0
+
         if (backend === 'portable-browser') audioEngine.onTransportStart(playheadSec())
         setRafId(requestAnimationFrame(tick))
+
         // A locate made before the start committed had no graph to seek: apply it to the running one.
         if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)
       }
+
       const pendingNativePreview = nativePlayback.getPendingStart()
+
       if (
         !requiresNativeAudio
         && pendingNativePreview?.mode === 'preview'
@@ -633,13 +753,17 @@ export function useTimelinePlayback(
           disposeNativePreview(),
           pendingNativePreview.promise,
         ])
+
         if (!isCurrentPlayAttempt(token)) {
           reportNativePlaySkip("Native preview disposal was superseded before portable playback could start.")
+
           return
         }
       }
+
       const resumeNative = nativePlayback.isPrepared()
       const resumePortableBrowser = portableBrowserPlayback.isPrepared()
+
       if (requiresNativeAudio || resumeNative) {
         lastNativeFault = undefined
         playAttemptPhase = {
@@ -647,29 +771,39 @@ export function useTimelinePlayback(
           backend: 'native',
           state: resumeNative ? 'prepared' : 'startup',
         }
+
         const nativeStart = await nativePlayback.start({
           ...transport,
         }, compileContext)
+
         if (!isCurrentPlayAttempt(token)) {
           reportNativePlaySkip("Native playback start completed after the request was invalidated.")
+
           // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.
           // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.
           if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {
             await disposePreparedBackends(undefined, "play-attempt-superseded")
           }
+
           return
         }
+
         if (nativeStart === 'started') {
           playAttemptPhase = { token, backend: 'native', state: 'active' }
           commitPortableStart('native')
+
           return
         }
+
         playAttemptPhase = undefined
+
         // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.
         if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {
           relocated = true
+
           return
         }
+
         if (requiresNativeAudio) {
           if (lastNativeFault) return
           reportNativeStopped(
@@ -677,13 +811,19 @@ export function useTimelinePlayback(
               ? "Native audio playback is blocked for the current project."
               : "Native audio playback is unavailable.",
           )
+
           return
         }
+
         if (nativeStart === 'blocked') return
+
         if (resumeNative) return
       }
+
       if (requiresNativeAudio) return
+
       if (!isCurrentPlayAttempt(token)) return
+
       if (resumePortableBrowser) {
         playAttemptPhase = {
           token,
@@ -694,24 +834,35 @@ export function useTimelinePlayback(
         // required before a portable AudioWorklet can be selected and prepared.
         audioEngine.ensureAudio({ applyCachedTrackGains: false })
         await audioEngine.resume()
+
         if (!isCurrentPlayAttempt(token)) {
           await disposePreparedBackends(undefined, "play-attempt-superseded")
+
           return
         }
+
         const portableStart = await portableBrowserPlayback.start(transport, compileContext)
+
         if (!isCurrentPlayAttempt(token)) {
           await disposePreparedBackends(undefined, "play-attempt-superseded")
+
           return
         }
+
         if (portableStart === 'started') {
           playAttemptPhase = { token, backend: 'fallback', state: 'active' }
           commitPortableStart('portable-browser')
+
           return
         }
+
         playAttemptPhase = undefined
+
         return
       }
+
       if (!isCurrentPlayAttempt(token)) return
+
       if (portableBrowserOptions) {
         playAttemptPhase = {
           token,
@@ -720,23 +871,33 @@ export function useTimelinePlayback(
         }
         audioEngine.ensureAudio({ applyCachedTrackGains: false })
         await audioEngine.resume()
+
         if (!isCurrentPlayAttempt(token)) {
           await disposePreparedBackends(undefined, "play-attempt-superseded")
+
           return
         }
+
         const portableStart = await portableBrowserPlayback.start(transport, compileContext)
+
         if (!isCurrentPlayAttempt(token)) {
           await disposePreparedBackends(undefined, "play-attempt-superseded")
+
           return
         }
+
         if (portableStart === 'started') {
           playAttemptPhase = { token, backend: 'fallback', state: 'active' }
           commitPortableStart('portable-browser')
+
           return
         }
+
         playAttemptPhase = undefined
       }
+
       if (!isCurrentPlayAttempt(token)) return
+
       if (nativeLifecycleReady && nativeOptions?.enabled?.()) {
         lastNativeFault = undefined
         playAttemptPhase = {
@@ -744,37 +905,51 @@ export function useTimelinePlayback(
           backend: 'native',
           state: 'startup',
         }
+
         const nativeStart = await nativePlayback.start({
           ...transport,
         }, compileContext)
+
         if (!isCurrentPlayAttempt(token)) {
           reportNativePlaySkip("Native playback start completed after the request was invalidated.")
           await disposePreparedBackends(undefined, "play-attempt-superseded")
+
           return
         }
+
         if (nativeStart === 'started') {
           playAttemptPhase = { token, backend: 'native', state: 'active' }
           commitPortableStart('native')
+
           return
         }
+
         playAttemptPhase = undefined
+
         if (nativeStart === 'blocked') return
       }
+
       if (!isCurrentPlayAttempt(token)) return
       playAttemptPhase = { token, backend: 'fallback', state: 'startup' }
       audioEngine.ensureAudio({ applyCachedTrackGains: false })
       await audioEngine.resume()
+
       if (!isCurrentPlayAttempt(token)) {
         await disposePreparedBackends(undefined, "play-attempt-superseded")
         audioEngine.stopAllSources()
+
         return
       }
+
       await loopOptions?.hydrateLegacyAudio?.()
+
       if (!isCurrentPlayAttempt(token)) {
         await disposePreparedBackends(undefined, "play-attempt-superseded")
         audioEngine.stopAllSources()
+
         return
       }
+
       const readyTracks = loopOptions?.getTracks?.() ?? tracks
       backendOwnerToken += 1
       setActiveBackend('legacy')
@@ -794,18 +969,23 @@ export function useTimelinePlayback(
       setRafId(requestAnimationFrame(tick))
       playAttemptPhase = { token, backend: 'fallback', state: 'active' }
     })()
+
     playAttempt = { token, promise: attempt, ...attemptState }
+
     try {
       await attempt
     } finally {
       if (playAttempt?.promise === attempt) {
         playAttempt = undefined
+
         // The replay below keeps the Play pending.
         if (!relocated) setIsPlayPending(false)
         followPortableEdits()
       }
+
       if (playAttemptPhase?.token === token && !isPlaying()) playAttemptPhase = undefined
     }
+
     if (relocated) return handlePlayForIntent(tracks, compileContext, requestedIntentToken)
   }
 
@@ -819,26 +999,34 @@ export function useTimelinePlayback(
   const ensureLivePortableSession = async (): Promise<void> => {
     const owned = () => mounted && portableBrowserOptions !== undefined && Boolean(audioEngine.getAudioContext?.())
       && !untrack(isPlaying) && playAttempt === undefined && !rebuildInProgress
+
     // A locate inside a Pause's round trip waits for the Pause, so the session ends at the locate, not the pause position.
     await pendingBackendPause?.promise.catch(() => undefined)
+
     if (!owned()) return
     await audioEngine.resume()
+
     if (!owned()) return
     const sec = untrack(playheadSec)
     const { isActive, start, end } = getLoopParams()
+
     const result = await portableBrowserPlayback.ensurePrepared({
       state: "paused", playheadSec: sec, loopEnabled: isActive, loopStartSec: start, loopEndSec: end,
     })
+
     if (result !== "started" || !owned()) return
     setActiveBackend("portable-browser")
+
     // A pending ensurePrepared answers a newer locate with the older position: seek again.
     if (untrack(playheadSec) !== sec) return ensureLivePortableSession()
   }
 
   const ensureLiveGraph = async () => {
     if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === "started") return
+
     return ensureLivePortableSession()
   }
+
   // A cancelled start takes the paused graph this hook keeps live with it. Once the cancelled Play or rebuild and the
   // dispose settle, prepare it again where the transport now stands: Stop and Pause win over the resume, not the graph.
   const cancelStartKeepingGraph = (reason: string, after?: Promise<void>) => {
@@ -847,8 +1035,10 @@ export function useTimelinePlayback(
     void nativePlayback.cancelPendingStart()
     // A newer owner keeps its own graph: ensureLivePreview answers a live or pending start without replacing it.
     void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(ensureLiveGraph).catch(() => undefined)
+
     return cancellation
   }
+
   // A Pause or Stop over a native Play resuming the paused session keeps that session: once the abandoned resume
   // settles, it moves to where the transport now stands. Only a session that no longer exists is prepared again.
   const keepGraphAfter = (resume: Promise<void>) => resume
@@ -859,50 +1049,64 @@ export function useTimelinePlayback(
     setIsRebuildingPlayback(false)
     transportIntentToken += 1
     const pendingPause = pendingBackendPause
+
     if (pendingPause) {
       await pendingPause.promise.catch(() => undefined)
+
       return
     }
+
     // A rebuild retires the graph it replaces and prepares none once superseded, so it is a start to cancel like a Play.
     const hadPendingPlay = hasStartUnderway()
     invalidatePlayAttempt()
+
     // A Play whose resume has run the transport but not yet committed is running: it pauses like one and keeps its graph.
     if (!isPlaying() && !nativePlayback.isActive()) {
       if (hadPendingPlay) {
         // A rebuild retires its graph, so only a Play resuming this one can be abandoned.
         const resume = rebuildInProgress ? undefined : nativePlayback.abandonResume()
+
         if (resume) void keepGraphAfter(resume).catch(() => undefined)
         else void cancelStartKeepingGraph("pause-cancelled-play").catch(reportNativeStateCaptureFailure)
       }
+
       return
     }
+
     if (nativePlayback.isActive() || portableBrowserPlayback.isActive()) {
       const sec = nativePlayback.isActive()
         ? nativePlayback.currentPositionSec() ?? lastPublishedPlayheadSec
         : portableBrowserPlayback.currentPositionSec() ?? lastPublishedPlayheadSec
+
       publishPlayhead(sec)
       setIsPlaying(false)
       cancelRaf()
       const ownerToken = backendOwnerToken
+
       const pausePromise = requiresNativeAudio
         ? nativePlayback.pause(sec).then(() => undefined)
         : Promise.allSettled([
           nativePlayback.pause(sec),
           portableBrowserPlayback.pause(sec),
         ]).then(() => undefined)
+
       if (!requiresNativeAudio && portableBrowserPlayback.isActive()) {
         audioEngine.onTransportPause()
       }
+
       const trackedPause = { ownerToken, promise: pausePromise }
       pendingBackendPause = trackedPause
+
       // The paused-preview effect skips edits while a rebuild runs, and the rebuild this Pause supersedes keeps the
       // graph it was replacing or retires the one it started: replace it once the pause settles.
       if (rebuildInProgress) void cancelStartKeepingGraph("pause-superseded-rebuild", pausePromise).catch(reportNativeStateCaptureFailure)
+
       try {
         await pausePromise
       } finally {
         if (pendingBackendPause === trackedPause) {
           pendingBackendPause = undefined
+
           if (
             ownerToken === backendOwnerToken
             && !isPlaying()
@@ -911,14 +1115,18 @@ export function useTimelinePlayback(
           ) setActiveBackend('idle')
         }
       }
+
       return
     }
+
     if (requiresNativeAudio) {
       setIsPlaying(false)
       cancelRaf()
       setActiveBackend('idle')
+
       return
     }
+
     const { sec } = resolveCurrentPlayhead()
     publishPlayhead(sec)
     setIsPlaying(false)
@@ -934,24 +1142,30 @@ export function useTimelinePlayback(
     transportIntentToken += 1
     clearRebuildHostLoss()
     const pendingStart = nativePlayback.getPendingStart()
+
     // The paused preview this hook keeps live stays live: Stop waits for it and returns it to the start. A Play, a
     // rebuild in progress, or a preview this hook does not keep is cancelled.
     const pendingPreview = requiresNativeAudio && nativePreviewRequested && playAttempt === undefined && !rebuildInProgress
       && pendingStart?.mode === "preview"
       ? pendingStart.promise
       : undefined
+
     const hadPendingPlay = !nativePlayback.isActive() && (hasStartUnderway() || (pendingStart !== undefined && !pendingPreview))
     invalidatePlayAttempt()
+
     if (pendingStop) return pendingStop
     const resume = rebuildInProgress ? undefined : nativePlayback.abandonResume()
     const stopSeekSequence = ++nativeSeekSequence
+
     const stop = (async () => {
       const pause = handlePause()
       // Publish the Stop destination now. A ruler locate made while the host
       // settles is newer intent and must not be overwritten on completion.
       publishPlayhead(0)
       await pause
+
       if (pendingPreview) await pendingPreview.catch(() => undefined)
+
       if (resume) {
         await keepGraphAfter(resume)
       } else if (hadPendingPlay) {
@@ -962,6 +1176,7 @@ export function useTimelinePlayback(
           const result = await nativePlayback.seekPrepared(0)
           // A dispose or rebuild that retired the sought graph owns the next one, as for a superseded locate.
           const superseded = lifecycle !== nativeLifecycleToken || rebuildInProgress || preparedBackendDisposePromise !== undefined
+
           if (result !== "started" && !superseded) {
             reportNativeStopped("Native playback could not return to the start position.")
           }
@@ -971,38 +1186,46 @@ export function useTimelinePlayback(
         // Stop leaves the browser's paused session live at the start, as seekPrepared(0) does for native.
         await ensureLivePortableSession().catch(() => undefined)
       }
+
       if (!requiresNativeAudio && stopSeekSequence === nativeSeekSequence) {
         audioEngine.onTransportStop()
         audioEngine.cancelAutomationSchedules()
         audioEngine.applyAutomationAtTimelineSec(0)
       }
     })()
+
     pendingStop = stop
     void stop.finally(() => {
       if (pendingStop === stop) pendingStop = undefined
     }).catch(() => undefined)
+
     return stop
   }
+
   // Reserves the transport intent of a Stop that runs later, once a take has saved. A Play or Pause pressed meanwhile
   // supersedes it; a locate only stops the transport, since the Stop's return to the start is older than the locate.
   // A Pause reads the position the engine reached, which a locate still in flight has not moved, so the locate is repeated.
   const reserveStop = () => {
     const intent = transportIntentToken
     const seek = nativeSeekSequence
+
     // The returned Stop runs once from the recording transport, an imperative caller outside any tracked scope.
     // eslint-disable-next-line solid/reactivity
     return async () => {
       if (intent !== transportIntentToken) return
+
       if (seek === nativeSeekSequence) return handleStop()
       const located = untrack(playheadSec)
       const pause = handlePause()
       const pausedIntent = transportIntentToken
       const pausedSeek = nativeSeekSequence
       await pause
+
       if (pausedIntent !== transportIntentToken || pausedSeek !== nativeSeekSequence) return
       setPlayhead(located, untrack(lastTracks))
     }
   }
+
   const updateNativeLoop = (
     loop: Pick<ReturnType<typeof getLoopParams>, "enabled" | "start" | "end" | "isActive"> = getLoopParams(),
   ) => nativePlayback.updateLoop({
@@ -1013,11 +1236,13 @@ export function useTimelinePlayback(
 
   const awaitPendingStop = async () => {
     const stop = pendingStop
+
     if (stop) await stop.catch(() => undefined)
   }
 
   const awaitPendingPauseAndStop = async () => {
     const pendingPause = pendingBackendPause
+
     if (pendingPause) await pendingPause.promise.catch(() => undefined)
     await awaitPendingStop()
   }
@@ -1034,25 +1259,32 @@ export function useTimelinePlayback(
     const seekSequence = ++nativeSeekSequence
     publishPlayhead(sec)
     setLastTracks(tracks)
+
     if (requiresNativeAudio) {
       const pendingStart = nativePlayback.getPendingStart()
       const pendingPreview = !nativePlayback.isPrepared() && pendingStart?.mode === "preview" ? pendingStart.promise : undefined
+
       if (nativePlayback.isPrepared() || rebuildInProgress || preparedBackendDisposePromise || pendingPreview) {
         const resumePlayback = isPlaying()
         const seekIntentToken = transportIntentToken
         const seekReconciliationToken = nativeLifecycleToken
         const seekPlayPhaseToken = playAttemptPhase?.token
+
         const reconcileSupersededSeek = () => {
           if (!mounted || seekSequence !== nativeSeekSequence || seekIntentToken !== transportIntentToken) return true
+
           // A native Play that reached its start after this seek starts from the playhead the seek published and owns
           // the graph from there.
           if (playAttemptPhase?.backend === 'native' && playAttemptPhase.token !== seekPlayPhaseToken) return true
+
           if (!rebuildInProgress && !preparedBackendDisposePromise) {
             if (seekReconciliationToken === nativeLifecycleToken) return false
+
             // The lifecycle this seek targeted ended and only a preview start owns the next one: it prepares at the
             // playhead this seek published, so a rebuild would prepare it again. A preview carries no resume intent.
             if (!resumePlayback && nativePlayback.getPendingStart()?.mode === "preview") return true
           }
+
           void restartTimelineSchedule(tracks, {
             rebuildBackend: true,
             resumePlayback,
@@ -1067,13 +1299,17 @@ export function useTimelinePlayback(
                 : 'The native playback graph could not be rebuilt after a structural change.',
             )
           })
+
           return true
         }
+
         // A rebuild may already own this lifecycle token. Update its transport
         // intent instead of seeking the graph it is about to retire.
         if (reconcileSupersededSeek()) return
+
         const seek = () => void nativePlayback.seekPrepared(sec).then((result) => {
           if (reconcileSupersededSeek()) return
+
           if (result !== "started") {
             reportNativeStopped("The native playback graph could not seek.")
             setActiveBackend("idle")
@@ -1089,14 +1325,17 @@ export function useTimelinePlayback(
           )
           setActiveBackend("idle")
         })
+
         // A preview that has not committed has no graph to seek yet. Its own owner reports a failed start.
         if (!pendingPreview) seek()
         else void pendingPreview.then((result) => {
           if (result === "started" && !reconcileSupersededSeek()) seek()
         }, () => undefined)
       }
+
       return
     }
+
     if (isPlaying() && portableBrowserPlayback.isActive()) {
       // The live session moves in place; an edit that landed meanwhile is adopted by the follow after the locate.
       const { isActive, start, end } = getLoopParams()
@@ -1105,6 +1344,7 @@ export function useTimelinePlayback(
           // A session that refused the locate without failing was not touched: rebuild at the target, as every locate did.
           if (result !== "rebuild" || seekSequence !== nativeSeekSequence) return
           console.warn("[portable-playback] locate refused by the live session; rebuilding at the target")
+
           return restartTimelineSchedule(tracks, {
             rebuildBackend: true,
             resumePlayback: true,
@@ -1119,24 +1359,31 @@ export function useTimelinePlayback(
           portableBrowserOptions?.reportFault?.(cause instanceof Error ? cause.message : 'Playback could not seek while active.')
         })
         .finally(followPortableEdits)
+
       return
     }
+
     if (!isPlaying()) {
       audioEngine.cancelAutomationSchedules()
       audioEngine.onTransportSeek(sec, SCHED_AHEAD_SEC)
       audioEngine.applyAutomationAtTimelineSec(sec)
+
       // A kept paused session follows a paused locate, so a warm start and its schedule begin at the playhead.
       if (portableBrowserPlayback.isPrepared()) void ensureLivePortableSession().catch(() => undefined)
+
       return
     }
+
     if (nativePlayback.isPrepared() || portableBrowserPlayback.isPrepared()) {
       setIsPlaying(false)
       cancelRaf()
       void disposePreparedBackends(undefined, "playhead-changed").catch(reportNativeStateCaptureFailure)
       disposePortableBrowserPlayback()
       setActiveBackend('idle')
+
       return
     }
+
     // IMPORTANT: Update transport epoch BEFORE scheduling, so MIDI events use the correct mapping
     audioEngine.cancelAutomationSchedules()
     audioEngine.onTransportSeek(sec, SCHED_AHEAD_SEC)
@@ -1149,18 +1396,22 @@ export function useTimelinePlayback(
       tracks,
     })
   }
+
   const disposePreparedBackends = async (
     options?: { invalidateProjectArtifacts?: boolean; onStoppedPosition?: (seconds: number) => void },
     reason = "prepared-backend-dispose",
     invalidated = false,
   ) => {
     if (preparedBackendDisposePromise) return preparedBackendDisposePromise
+
     if (!invalidated) nativeLifecycleToken += 1
     preparedBackendDisposeHasPendingNativeStart = nativePlayback.getPendingStart() !== undefined
+
     const dispose = (async () => {
       const pendingStart = nativePlayback.cancelPendingStart()
       let captureError: unknown
       let disposalError: unknown
+
       try {
         await capturePreparedNativeVstStates()
       } catch (error) {
@@ -1169,20 +1420,28 @@ export function useTimelinePlayback(
         const disposal = requiresNativeAudio
           ? [nativePlayback.dispose(options, reason)]
           : [nativePlayback.dispose(options, reason), Promise.resolve(disposePortableBrowserPlayback())]
+
         const [nativeDisposal] = await Promise.allSettled([...disposal, pendingStart])
+
         if (options?.onStoppedPosition && nativeDisposal?.status === "rejected") disposalError = nativeDisposal.reason
       }
+
       if (!untrack(isPlaying)) setActiveBackend('idle')
+
       if (disposalError !== undefined) throw disposalError
+
       if (captureError !== undefined) throw captureError
     })()
+
     preparedBackendDisposePromise = dispose
     void dispose.finally(() => {
       if (preparedBackendDisposePromise === dispose) preparedBackendDisposePromise = undefined
       preparedBackendDisposeHasPendingNativeStart = false
     }).catch(() => undefined)
+
     return dispose
   }
+
   const {
     audioLifecycleState,
     audioLifecycleGeneration,
@@ -1221,10 +1480,12 @@ export function useTimelinePlayback(
       disposePreparedBackends,
     },
   })
+
   const restartTimelineSchedule = (
     tracks: Track[],
     options?: TimelineScheduleOptions,
   ): Promise<void> => requestTimelineSchedule(tracks, options, true)
+
   const applyTimelineSchedule = async (
     tracks: Track[],
     options?: TimelineScheduleOptions,
@@ -1248,20 +1509,25 @@ export function useTimelinePlayback(
         requestVersion,
         transportIntentToken,
       }
+
       if (playAttempt && playAttemptPhase?.token !== playAttempt.token) {
         playAttempt.waitingForRebuild = true
       }
+
       // A rebuild past its last request check takes no more: this request starts the next one.
       if (rebuildPromise && rebuildInProgress) return rebuildPromise
+
       const rebuild = (async () => {
         rebuildInProgress = true
         // Let synchronous rebuild requests settle before starting an
         // irreversible backend start so queued structural changes coalesce.
         await Promise.resolve()
+
         try {
           while (pendingRebuild) {
             const next = pendingRebuild
             pendingRebuild = undefined
+
             try {
               await rebuildTimelineBackend(next.tracks, next.intent, next.transportIntentToken, next.requestVersion)
             } catch (error: unknown) {
@@ -1277,12 +1543,15 @@ export function useTimelinePlayback(
           followPortableEdits()
         }
       })()
+
       rebuildPromise = rebuild
       void rebuild.finally(() => {
         if (rebuildPromise === rebuild) rebuildPromise = undefined
       }).catch(() => undefined)
+
       return rebuild
     }
+
     // A playing native or portable session is never replaced by an edit. An edit the session cannot adopt, such as one for a
     // stale project, is dropped.
     if (!isPlaying() || requiresNativeAudio || nativePlayback.isActive() || portableBrowserPlayback.isActive()) return
@@ -1300,6 +1569,7 @@ export function useTimelinePlayback(
       tracks,
     })
   }
+
   const rebuildTimelineBackend = async (
     tracks: Track[],
     requestedIntent: TimelinePlaybackRebuildIntent,
@@ -1313,23 +1583,29 @@ export function useTimelinePlayback(
         externalProcessor: requestedIntent.externalProcessor,
       }
       : undefined
+
     const isSuperseded = () => (
       requestedTransportIntentToken !== transportIntentToken
       || requestedRequestVersion !== rebuildRequestVersion
     )
+
     if (isSuperseded()) return
     lastNativeFault = undefined
     const currentProjectId = nativeOptions?.projectId?.()
+
     const currentProjectGeneration = nativeOptions?.projectGeneration?.()
       ?? portableBrowserOptions?.projectGeneration?.()
+
     if (
       requestedIntent.projectId !== undefined
       && requestedIntent.projectId !== currentProjectId
     ) return
+
     if (
       requestedIntent.projectGeneration !== undefined
       && requestedIntent.projectGeneration !== currentProjectGeneration
     ) return
+
     const isCurrentRequestedProject = () => (
       (requestedIntent.projectId === undefined
         || requestedIntent.projectId === (nativeOptions?.projectId?.()))
@@ -1339,7 +1615,9 @@ export function useTimelinePlayback(
           ?? portableBrowserOptions?.projectGeneration?.()
         ))
     )
+
     await awaitPendingPauseAndStop()
+
     if (isSuperseded()) return
     const pendingPlayWaitsForRebuild = playAttempt?.waitingForRebuild === true
     const pendingPlay = pendingPlayWaitsForRebuild ? undefined : playAttempt
@@ -1349,30 +1627,39 @@ export function useTimelinePlayback(
     // A cold device rebuild temporarily halts callbacks, not the user's Play
     // intent. Keep host/UI transport status playing until resume or cancellation.
     setIsRebuildingPlayback(isRebuildingPlayback() || isPlaying())
+
     const requestedOwner = requestedIntent.owner
       ?? (nativePlayback.isActive() || nativePlayback.isPrepared()
         ? 'native'
         : portableBrowserPlayback.isActive() || portableBrowserPlayback.isPrepared()
           ? 'portable-browser'
           : undefined)
+
     const pendingPreview = nativePlayback.getPendingStart()
     const pendingPreviewIntent = !pendingPlayIntent && pendingPreview?.mode === "preview"
+
     if (pendingPlay) {
       invalidatePlayAttempt()
+
       if (isPlaying()) {
         setIsPlaying(false)
         cancelRaf()
       }
+
       await pendingPlay.promise.catch(() => undefined)
+
       if (isSuperseded()) return
       await disposePreparedBackends(undefined, "timeline-rebuild-retirement")
     } else if (pendingPreview) {
       await disposePreparedBackends(undefined, "preview-retirement")
       await pendingPreview.promise.catch(() => undefined)
     }
+
     if (resumeIntent) {
       const intentToken = transportIntentToken
+
       if (requestedIntent.resumePlayback) publishPlayhead(requestedIntent.playheadSec)
+
       if (
         !pendingPlay
         && !pendingPreview
@@ -1386,9 +1673,11 @@ export function useTimelinePlayback(
           },
         }, "timeline-rebuild-retirement")
       }
+
       rebuildStartingPlay = true
       await pendingNativeDispose
       await waitForLifecycleReady()
+
       if (
         isSuperseded()
         || intentToken !== transportIntentToken
@@ -1396,11 +1685,13 @@ export function useTimelinePlayback(
         || audioLifecycleState() === "suspended"
         || !isCurrentRequestedProject()
       ) return
+
       if (requestedOwner === 'native' && !nativePlayback.isPrepared()) {
         const nativePreview = await nativePlayback.ensureLivePreview(
           lastPublishedPlayheadSec,
           compileContext,
         )
+
         if (
           isSuperseded()
           || intentToken !== transportIntentToken
@@ -1408,43 +1699,56 @@ export function useTimelinePlayback(
           || !isCurrentRequestedProject()
         ) {
           await disposePreparedBackends(undefined, "timeline-rebuild-superseded")
+
           return
         }
+
         if (nativePreview !== 'started') {
           if (requiresNativeAudio) throw new Error("The native playback graph could not be prepared.")
+
           return
         }
       } else if (requestedOwner === 'portable-browser') {
         await disposePreparedBackends(undefined, "portable-backend-switch")
         await pendingNativeDispose
       }
+
       if (isSuperseded()) {
         await disposePreparedBackends(undefined, "timeline-rebuild-superseded")
+
         return
       }
+
       if (playAttempt?.waitingForRebuild) return
       await handlePlay(
         tracks,
         compileContext,
       )
+
       if (isSuperseded()) {
         await disposePreparedBackends(undefined, "timeline-rebuild-superseded")
+
         return
       }
+
       if (
         intentToken !== transportIntentToken
         || !mounted
         || audioLifecycleState() === "suspended"
         || !isCurrentRequestedProject()
       ) return
+
       if (!isPlaying()) {
         throw new Error(lastNativeFault
           ? `The active native playback graph could not be rebuilt after the insertion: ${lastNativeFault}`
           : "The active native playback graph could not be rebuilt after the insertion.")
       }
+
       return
     }
+
     const pausedIntentToken = transportIntentToken
+
     const isCurrentPausedIntent = () => (
       !isSuperseded()
       &&
@@ -1453,8 +1757,10 @@ export function useTimelinePlayback(
       && audioLifecycleState() !== "suspended"
       && isCurrentRequestedProject()
     )
+
     const sec = requestedIntent.playheadSec
     publishPlayhead(sec)
+
     const transport = {
       state: "paused" as const,
       playheadSec: sec,
@@ -1462,83 +1768,113 @@ export function useTimelinePlayback(
       loopStartSec: getLoopParams().start,
       loopEndSec: getLoopParams().end,
     }
+
     const preparePausedCompatibility = async () => {
       if (!isCurrentPausedIntent()) return
       const nativeLifecycleReady = !hasAudioLifecycle || audioLifecycleState() === "ready"
+
       if (nativeLifecycleReady && nativeOptions?.enabled?.()) {
         const result = await nativePlayback.ensureLivePreview(
           sec,
           compileContext,
         )
+
         if (!isCurrentPausedIntent()) {
           await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
+
           return
         }
+
         if (result === "started") {
           setActiveBackend("native")
+
           return
         }
+
         if (result === "blocked") {
           setActiveBackend("idle")
           throw new Error("The native playback graph could not be prepared.")
         }
       }
+
       prepareLegacyPaused()
     }
+
     const nativeDispose = pendingNativeDispose
     await nativeDispose
+
     if (nativeDispose !== pendingNativeDispose) await pendingNativeDispose
+
     if (isSuperseded() || !isCurrentPausedIntent()) return
+
     if ((requestedOwner === 'native' || nativePlayback.isPrepared()) && nativePlayback.isPrepared()) {
       await disposePreparedBackends(undefined, "paused-preview-rebuild")
       const result = await nativePlayback.ensureLivePreview(sec, compileContext)
+
       if (!isCurrentPausedIntent()) {
         await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
+
         return
       }
+
       if (result !== "started") {
         setActiveBackend("idle")
         throw new Error(lastNativeFault
           ? `The prepared native playback graph could not be rebuilt: ${lastNativeFault}`
           : "The prepared native playback graph could not be rebuilt.")
       }
+
       setActiveBackend("native")
     } else if (requestedOwner === 'native' || pendingPreviewIntent) {
       const result = await nativePlayback.ensureLivePreview(sec, compileContext)
+
       if (!isCurrentPausedIntent()) {
         await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
+
         return
       }
+
       if (result !== "started") {
         setActiveBackend("idle")
         throw new Error(lastNativeFault
           ? `The prepared native playback graph could not be rebuilt: ${lastNativeFault}`
           : "The prepared native playback graph could not be rebuilt.")
       }
+
       setActiveBackend("native")
     } else if (requiresNativeAudio) {
       const result = await nativePlayback.ensureLivePreview(sec, compileContext)
+
       if (!isCurrentPausedIntent()) {
         await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
+
         return
       }
+
       if (result !== "started") {
         setActiveBackend("idle")
         throw new Error("The native playback graph could not be prepared.")
       }
+
       setActiveBackend("native")
     } else if (!requiresNativeAudio && portableBrowserPlayback.isPrepared()) {
       audioEngine.ensureAudio({ applyCachedTrackGains: false })
       await audioEngine.resume()
+
       if (!isCurrentPausedIntent()) {
         await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
+
         return
       }
+
       const result = await portableBrowserPlayback.rebuildPrepared(transport, compileContext)
+
       if (!isCurrentPausedIntent()) {
         await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
+
         return
       }
+
       if (result !== "started") {
         disposePortableBrowserPlayback()
         await preparePausedCompatibility()
@@ -1547,15 +1883,21 @@ export function useTimelinePlayback(
     } else if (portableBrowserOptions) {
       audioEngine.ensureAudio({ applyCachedTrackGains: false })
       await audioEngine.resume()
+
       if (!isCurrentPausedIntent()) {
         await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
+
         return
       }
+
       const result = await portableBrowserPlayback.ensurePrepared(transport, compileContext)
+
       if (!isCurrentPausedIntent()) {
         await disposePreparedBackends(undefined, "paused-preview-rebuild-superseded")
+
         return
       }
+
       if (result !== "started") {
         disposePortableBrowserPlayback()
         await preparePausedCompatibility()
@@ -1563,6 +1905,7 @@ export function useTimelinePlayback(
       else setActiveBackend("portable-browser")
     }
   }
+
   const unsubscribeStretchRenderState = requiresNativeAudio
     ? () => undefined
     : audioEngine.subscribeStretchRenderState(() => {
@@ -1574,12 +1917,14 @@ export function useTimelinePlayback(
   let mountedProjectGeneration = nativeOptions?.projectGeneration?.()
     ?? portableBrowserOptions?.projectGeneration?.()
     ?? 0
+
   let mountedProjectId = nativeOptions?.projectId?.()
   let nativeLifecycleToken = 0
   let pendingNativeDispose: Promise<void> = Promise.resolve()
   let preparedBackendDisposeHasPendingNativeStart = false
   let nativePreviewRequested = false
   let nativePreviewTrackFingerprint: string | undefined
+
   const disposeNativePreview = (
     options?: { invalidateProjectArtifacts?: boolean },
     reason = "paused-preview-dispose",
@@ -1588,15 +1933,19 @@ export function useTimelinePlayback(
     // The request is the lifecycle boundary: the effect that asked for this
     // dispose prepares its replacement under the new token.
     nativeLifecycleToken += 1
+
     // A fresh edit can arrive after the UI pauses but before native finishes
     // its publication/transport handoff. Dispose only after that owner exits.
     const request = pendingNativeDispose
       .then(() => after
         ? after.then(() => disposePreparedBackends(options, reason, true))
         : disposePreparedBackends(options, reason, true))
+
     pendingNativeDispose = request.catch(() => undefined)
+
     return request
   }
+
   const {
     schedule,
     readDesiredScheduleFingerprint,
@@ -1626,6 +1975,7 @@ export function useTimelinePlayback(
       applyTimelineSchedule,
     },
   })
+
   createEffect(() => {
     if (!isPlaying() || activeBackend() !== "native") nativePlayback.dropAdoptionIntents()
   })
@@ -1634,7 +1984,9 @@ export function useTimelinePlayback(
     const nextGeneration = nativeOptions?.projectGeneration?.()
       ?? portableBrowserOptions?.projectGeneration?.()
       ?? 0
+
     const nextProjectId = nativeOptions?.projectId?.()
+
     if (
       nextGeneration === mountedProjectGeneration
       && nextProjectId === mountedProjectId
@@ -1642,12 +1994,14 @@ export function useTimelinePlayback(
     mountedProjectGeneration = nextGeneration
     const projectChanged = nextProjectId !== mountedProjectId
     mountedProjectId = nextProjectId
+
     if (projectChanged) {
       setIsRebuildingPlayback(false)
       transportIntentToken += 1
       pendingRebuild = undefined
       publishPlayhead(0)
     }
+
     invalidatePlayAttempt()
     setIsPlaying(false)
     cancelRaf()
@@ -1666,32 +2020,42 @@ export function useTimelinePlayback(
     const projectGeneration = nativeOptions?.projectGeneration?.() ?? 0
     const trackFingerprint = readDesiredScheduleFingerprint()
     const pendingAudioHydration = hasPendingAudioClipHydration()
+
     const tracksChanged = nativePreviewTrackFingerprint !== undefined
       && trackFingerprint !== nativePreviewTrackFingerprint
+
     nativePreviewTrackFingerprint = trackFingerprint
+
     // Paused-preview maintenance must not retire the active transport's graph.
     // Recording saves insert unhydrated clips before source release completes.
     if (rebuildInProgress) return
+
     if (isPlaying()) {
       followPortableEdits()
+
       return
     }
+
     const projectionChanged = tracksChanged
       || (schedule.previewProjectionBaseline !== undefined && trackFingerprint !== schedule.previewProjectionBaseline)
+
     // A pending browser Play keeps the portable session it starts from; followPortableEdits replaces it once committed.
     if (projectionChanged && nativePreviewRequested && (playAttempt === undefined || !portableBrowserOptions)) {
       // The kept native preview adopts the edit in place, tails included, once the clips it adds are hydrated: the
       // effect runs again when they are. One still preparing finishes first and adopts it after (the effect's tail).
       if (nativePlayback.isPrepared()) {
         if (!pendingAudioHydration) adoptPortableEdits()
+
         return
       }
+
       if (nativePlayback.getPendingStart()?.mode !== "preview" && !nativePlayback.hasLiveMidiTails()) {
         nativePreviewRequested = false
         void disposeNativePreview(undefined, "paused-preview-structural-change",
           tracksChanged ? pendingBackendPause?.promise : undefined)
       }
     }
+
     if (!enabled || (hasAudioLifecycle && audioLifecycleState() !== "ready")) {
       if (nativePreviewRequested) {
         nativePreviewRequested = false
@@ -1702,10 +2066,12 @@ export function useTimelinePlayback(
           // The kept paused session adopts the edit in place, once the clips it adds are hydrated: the effect runs again
           // when they are. What it cannot carry replaces it (requestTimelineSchedule).
           if (!pendingAudioHydration) adoptPortableEdits()
+
           return
         }
         // A session still preparing finishes first; the edit is adopted once it has.
       }
+
       const token = nativeLifecycleToken
       // Without a native preview, the portable session is the paused graph this hook keeps live.
       void pendingNativeDispose.then(ensureLivePortableSession).then(() => {
@@ -1715,8 +2081,10 @@ export function useTimelinePlayback(
           adoptEditsPastBaseline()
         }
       }).catch(() => undefined)
+
       return
     }
+
     if (pendingAudioHydration) return
     nativePreviewRequested = true
     const token = nativeLifecycleToken
@@ -1729,10 +2097,13 @@ export function useTimelinePlayback(
           || !nativeOptions?.enabled?.()
           || projectGeneration !== (nativeOptions?.projectGeneration?.() ?? 0)
         ) return
+
         // A Stop or locate can land while the dispose this waits for runs: prepare at the playhead as it is now.
         if (nativePlayback.getPendingStart() === undefined) schedule.nativePreviewCompiledFingerprint = trackFingerprint
+
         return nativePlayback.ensureLivePreview(untrack(playheadSec)).then((result) => {
           if (result !== "started") return ensureLivePortableSession()
+
           if (token !== nativeLifecycleToken || nativePlayback.isActive()) return
           schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint
           adoptEditsPastBaseline()
@@ -1747,10 +2118,12 @@ export function useTimelinePlayback(
   let sessionOutputDeviceId = untrack(() => nativeOptions?.outputDeviceId?.())
   createEffect(() => {
     const outputDeviceId = nativeOptions?.outputDeviceId?.()
+
     if (outputDeviceId === sessionOutputDeviceId || nativeOptions?.isRecording?.()) return
     sessionOutputDeviceId = outputDeviceId
     untrack(() => {
       if (!nativePlayback.isActive() && !nativePlayback.isPrepared() && nativePlayback.getPendingStart() === undefined) return
+
       // Not requestTimelineSchedule: an active native session adopts a request in place, and a device is bound only
       // when a session is configured.
       const move = {
@@ -1761,6 +2134,7 @@ export function useTimelinePlayback(
         projectId: nativeOptions?.projectId?.(),
         projectGeneration: nativeOptions?.projectGeneration?.(),
       } satisfies TimelineScheduleOptions
+
       const tracks = loopOptions?.getTracks?.() ?? []
       const rebuild = () => applyTimelineSchedule(tracks, move)
       void rebuild().catch((cause: unknown) => {
@@ -1768,6 +2142,7 @@ export function useTimelinePlayback(
         // The refused capture still disposed the old session. Tell the user, then move without it: the new session
         // starts from the last persisted plug-in state, at the transport the move was asked for.
         reportNativeStateCaptureFailure(cause)
+
         return untrack(rebuild)
       }).catch((cause: unknown) => {
         console.error('[native-playback] moving the session to the saved output device failed', cause)
@@ -1788,6 +2163,7 @@ export function useTimelinePlayback(
     const destroy = pendingNativeDispose.then(() => nativePlayback.destroy())
     pendingNativeDispose = destroy.catch(() => undefined)
     void destroy.catch(() => undefined)
+
     if (!requiresNativeAudio) disposePortableBrowserPlayback()
     setActiveBackend('idle')
   })
@@ -1807,13 +2183,17 @@ export function useTimelinePlayback(
       // Follow successor promises by completion, without timers or polling.
       const cancellation = Promise.withResolvers<void>()
       let cancelled = false
+
       const cancel = () => {
         cancelled = true
         cancellation.resolve()
       }
+
       playbackPreparationWaiters.add(cancel)
+
       try {
         let pending = rebuildPromise ?? playAttempt?.promise ?? nativePlayback.getPendingStart()?.promise
+
         while (pending && !cancelled) {
           await Promise.race([pending, cancellation.promise])
           pending = rebuildPromise ?? playAttempt?.promise ?? nativePlayback.getPendingStart()?.promise
@@ -1840,9 +2220,11 @@ export function useTimelinePlayback(
       if (nativePlayback.isPrepared()) {
         return nativePlayback.reenableProcessorAutomation(instanceId, parameterIds)
       }
+
       if (portableBrowserPlayback.isPrepared()) {
         return portableBrowserPlayback.reenableProcessorAutomation(instanceId, parameterIds)
       }
+
       return Promise.resolve(rejectedLiveProcessorControl("unavailable"))
     },
     isPortableBrowserPlayback: portableBrowserPlayback.isActive,

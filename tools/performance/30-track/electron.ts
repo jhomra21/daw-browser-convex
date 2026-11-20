@@ -105,27 +105,34 @@ export const descendantsOf = (
   rootPid: number,
 ): number[] => {
   const children = new Map<number, number[]>()
+
   for (const process of processes) {
     const current = children.get(process.parentPid) ?? []
     current.push(process.pid)
     children.set(process.parentPid, current)
   }
+
   const result: number[] = []
   const pending = [rootPid]
+
   while (pending.length > 0) {
     const parent = pending.shift()
+
     if (parent === undefined) continue
+
     for (const child of children.get(parent) ?? []) {
       result.push(child)
       pending.push(child)
     }
   }
+
   return result
 }
 
 export const createPrivateRunDirectory = async (temporaryRoot: string): Promise<string> => {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const directory = path.join(temporaryRoot, `daw-e-${randomBytes(12).toString("hex")}`)
+
     try {
       await mkdir(directory, { mode: 0o700 })
       await chmod(directory, 0o700)
@@ -134,22 +141,28 @@ export const createPrivateRunDirectory = async (temporaryRoot: string): Promise<
         pid: process.pid,
         createdAt: new Date().toISOString(),
       }))
+
       return directory
     } catch (error) {
       const code = error instanceof Error && "code" in error ? error.code : undefined
+
       if (code !== "EEXIST") throw error
     }
   }
+
   throw new Error("Could not create a private Electron benchmark directory.")
 }
 
 const directoryBytes = async (directory: string): Promise<number> => {
   let bytes = 0
+
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const entryPath = path.join(directory, entry.name)
+
     if (entry.isDirectory()) bytes += await directoryBytes(entryPath)
     else if (entry.isFile()) bytes += (await lstat(entryPath)).size
   }
+
   return bytes
 }
 
@@ -158,15 +171,19 @@ export const cleanupOwnedRunDirectory = async (
   processes: readonly ProcessIdentity[],
 ): Promise<OwnedRunDirectoryCleanup> => {
   const profile = path.join(directory, "profile")
+
   if (!runDirectoryPattern.test(path.basename(directory))) {
     return { directory, profile, removed: false, bytesRemoved: 0, error: "Runner directory name is not owned." }
   }
+
   if (processes.some((process) => commandContainsArgument(process.command, `--user-data-dir=${profile}`))) {
     return { directory, profile, removed: false, bytesRemoved: 0, error: "Runner profile is still in use." }
   }
+
   try {
     const bytesRemoved = await directoryBytes(directory)
     await rm(directory, { recursive: true })
+
     return { directory, profile, removed: true, bytesRemoved, error: null }
   } catch (error) {
     return {
@@ -186,15 +203,20 @@ const chicagoStartOfToday = (now = new Date()): Date => {
     month: "2-digit",
     day: "2-digit",
   }).format(now)
+
   const utcMidnight = new Date(`${date}T00:00:00Z`)
+
   const offsetName = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Chicago",
     timeZoneName: "longOffset",
   }).formatToParts(utcMidnight).find((part) => part.type === "timeZoneName")?.value
+
   const offset = /^GMT([+-]\d{2}):(\d{2})$/.exec(offsetName ?? "")
+
   if (!offset) throw new Error("Could not resolve America/Chicago offset.")
   const sign = offset[1].startsWith("-") ? -1 : 1
   const offsetMinutes = sign * (Number(offset[1].slice(1)) * 60 + Number(offset[2]))
+
   return new Date(utcMidnight.getTime() - offsetMinutes * 60_000)
 }
 
@@ -206,11 +228,13 @@ export const abandonedRunDirectories = async (
   const cutoff = chicagoStartOfToday(now).getTime()
   const entries = await readdir(temporaryRoot, { withFileTypes: true })
   const candidates: AbandonedRunDirectory[] = []
+
   for (const entry of entries) {
     if (!entry.isDirectory() || !runDirectoryPattern.test(entry.name)) continue
     const directory = path.join(temporaryRoot, entry.name)
     const profile = path.join(directory, "profile")
     const created = await lstat(directory)
+
     if (created.birthtimeMs >= cutoff) continue
     candidates.push({
       path: directory,
@@ -220,6 +244,7 @@ export const abandonedRunDirectories = async (
       active: processes.some((process) => commandContainsArgument(process.command, `--user-data-dir=${profile}`)),
     })
   }
+
   return candidates.sort((left, right) => left.createdAt.localeCompare(right.createdAt))
 }
 
@@ -229,6 +254,7 @@ export const writePrivateArtifact = async (filePath: string, contents: string): 
     constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
     0o600,
   )
+
   try {
     await file.writeFile(contents, "utf8")
     await file.chmod(0o600)
@@ -236,19 +262,25 @@ export const writePrivateArtifact = async (filePath: string, contents: string): 
     await file.close()
   }
 }
+
 export const desktopDiagnosticsBoundaryLines = (output: string): string[] => (
   output.split(/\r?\n/).flatMap((line) => {
     const marker = line.indexOf("[diagnostics-v2-boundary]")
+
     if (marker < 0) return []
     const value = line.slice(marker).trim()
+
     return /^\[diagnostics-v2-boundary\] operation=diagnostics\.snapshot\.v2 stage=[a-z-]+ elapsedMs=\d+$/.test(value) ? [value] : []
   }).slice(-64)
 )
+
 export const desktopDiagnosticsValidationLines = (output: string): string[] => (
   output.split(/\r?\n/).flatMap((line) => {
     const marker = line.indexOf("[diagnostics-v2-validation]")
+
     if (marker < 0) return []
     const value = line.slice(marker).trim()
+
     return /^\[diagnostics-v2-validation\] paths=(?:result|audio|recording|native|scheduler|counts|workerAutomation|sequence|transportEpoch|renderEpoch|lastRejectedCallback|lastRejectedRenderEpoch|tracks|other)(?:[.,](?:result|audio|recording|native|scheduler|counts|workerAutomation|sequence|transportEpoch|renderEpoch|lastRejectedCallback|lastRejectedRenderEpoch|tracks|other))*$/.test(value) ? [value] : []
   }).slice(-8)
 )
@@ -260,57 +292,81 @@ const commandContainsArgument = (command: string, argument: string): boolean => 
 export const verifyElectronLaunchIdentity = (input: LaunchIdentityInput): LaunchIdentityResult => {
   const root = input.processes.find((process) => process.pid === input.rootPid)
   input.observe?.("root-present", root !== undefined)
+
   if (!root) return { verified: false, reason: "Electron root process exited before attachment." }
   input.observe?.("root-owned-group", root.processGroupId === input.rootPid)
+
   if (root.processGroupId !== input.rootPid) {
     return { verified: false, reason: "Electron process group is not runner-owned." }
   }
+
   const executableBasename = path.basename(input.executablePath)
+
   const executableMatches = root.command.startsWith(input.executablePath)
     || root.command.startsWith(`${executableBasename} `) || root.command === executableBasename
+
   input.observe?.("root-executable", executableMatches)
+
   if (!executableMatches) {
     return { verified: false, reason: "Electron root executable identity does not match." }
   }
+
   const profileMatches = commandContainsArgument(root.command, `--user-data-dir=${input.profilePath}`)
   input.observe?.("root-profile", profileMatches)
+
   if (!profileMatches) {
     return { verified: false, reason: "Electron profile identity does not match." }
   }
+
   const debuggingMatches = commandContainsArgument(root.command, "--remote-debugging-port=0")
     && commandContainsArgument(root.command, "--remote-debugging-address=127.0.0.1")
+
   input.observe?.("root-debugging-arguments", debuggingMatches)
+
   if (!debuggingMatches) {
     return { verified: false, reason: "Electron debugging endpoint identity does not match." }
   }
+
   input.observe?.("listener-present", input.listenerPids.length > 0)
+
   if (input.listenerPids.length === 0) {
     return { verified: false, reason: "Electron debugging endpoint has no listener." }
   }
+
   const ownedPids = new Set([
     input.rootPid,
     ...descendantsOf(input.processes, input.rootPid),
   ])
+
   const listenersOwned = input.listenerPids.every((pid) => ownedPids.has(pid))
   input.observe?.("listeners-owned", listenersOwned)
+
   if (!listenersOwned) {
     return { verified: false, reason: "Electron debugging endpoint is owned by another process." }
   }
+
   let websocket: URL
+
   try {
     websocket = new URL(input.websocketUrl)
   } catch {
     input.observe?.("browser-target-url", false)
+
     return { verified: false, reason: "Electron debugging endpoint returned an invalid browser target." }
   }
+
   input.observe?.("browser-target-url", true)
+
   const capabilityValid = websocket.protocol === "ws:" && websocket.hostname === "127.0.0.1"
     && websocket.port === String(input.port)
     && /^\/devtools\/browser\/[a-zA-Z0-9-]{32,}$/.test(websocket.pathname)
+
   input.observe?.("browser-capability", capabilityValid)
+
   if (!capabilityValid) {
     return { verified: false, reason: "Electron browser target capability is invalid." }
   }
+
   return { verified: true, processGroupId: root.processGroupId }
 }
 
@@ -318,8 +374,10 @@ export const electronRendererTarget = (
   tabs: string,
 ): { readonly targetId: string; readonly url: string } | undefined => {
   const targets = [...tabs.matchAll(/\[(t[0-9]+)\][^\n]*\s(daw:\/\/app\/[^\s]*)/g)]
+
   if (targets.length !== 1 || !/^daw:\/\/app\/(?:\?dashboard=general)?$/.test(targets[0]?.[2] ?? "")) return undefined
   const targetId = targets[0]?.[1]
+
   return targetId ? { targetId, url: targets[0]![2]! } : undefined
 }
 
@@ -328,8 +386,10 @@ export const createCleanupPlan = (
   rootPid: number,
 ): CleanupPlan | undefined => {
   const root = processes.find((process) => process.pid === rootPid)
+
   if (!root || root.processGroupId !== rootPid) return undefined
   const ownedPids = new Set([rootPid, ...descendantsOf(processes, rootPid)])
+
   return {
     rootPid,
     processGroupId: root.processGroupId,
@@ -342,11 +402,10 @@ export const cleanupSurvivors = (
   processes: readonly ProcessIdentity[],
 ): number[] => {
   const recordedProcesses = new Map(plan.recordedProcesses.map((process) => [process.pid, process]))
-  return processes
-    .filter((process) => {
-      const recorded = recordedProcesses.get(process.pid)
-      return recorded !== undefined
-        && process.command === recorded.command
-    })
-    .map((process) => process.pid)
+
+  return processes.flatMap((process) => {
+    const recorded = recordedProcesses.get(process.pid)
+
+    return recorded !== undefined && process.command === recorded.command ? [process.pid] : []
+  })
 }

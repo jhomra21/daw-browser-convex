@@ -1,8 +1,10 @@
 type SenderFrame = { url: string }
+
 export type NativeSessionEvent = {
   sender: { id: number; mainFrame: SenderFrame }
   senderFrame: SenderFrame | null
 }
+
 // oxlint-disable-next-line anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- IPC input validation happens inside the registered handler.
 export type NativeSessionIpcHandler = (event: NativeSessionEvent, value: unknown) => unknown
 

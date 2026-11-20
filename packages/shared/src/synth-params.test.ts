@@ -63,6 +63,7 @@ describe('synth parameter contract', () => {
       attackMs: 20,
       releaseMs: 80,
     })
+
     expect(params).toMatchObject({
       version: SYNTH_STATE_VERSION,
       oscillators: [{ wave: 'sine', detuneCents: 0, level: 0.5 }, { wave: 'square', detuneCents: 0, level: 0.5 }],
@@ -74,12 +75,14 @@ describe('synth parameter contract', () => {
 
   test('merges deep updates without dropping sibling state', () => {
     const current = createDefaultSynthParams()
+
     const next = mergeSynthParams(current, {
       oscillators: [{ level: 0.2 }],
       filter: { envelope: { releaseSec: 2 } },
       lfo: { frequencyHz: 7 },
       noise: { enabled: true, level: 2 },
     })
+
     expect(next.oscillators[0].level).toBe(0.2)
     expect(next.oscillators[1]).toEqual(current.oscillators[1])
     expect(next.filter.envelope).toEqual({ ...current.filter.envelope, releaseSec: 2 })
@@ -89,6 +92,7 @@ describe('synth parameter contract', () => {
 
   test('defaults missing v2 oscillator enabled state and persists disabled oscillators', () => {
     const defaults = createDefaultSynthParams()
+
     const oldV2State = {
       ...defaults,
       oscillators: [
@@ -108,6 +112,7 @@ describe('synth parameter contract', () => {
         },
       ],
     }
+
     const normalized = parseStrictSynthParams(oldV2State)
     const next = mergeSynthParams(defaults, { oscillators: [{ enabled: false }] })
 

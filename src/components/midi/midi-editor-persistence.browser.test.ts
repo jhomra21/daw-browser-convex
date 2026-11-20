@@ -324,7 +324,9 @@ const buildFixture = async () => {
           : undefined,
       load: (id) => {
         if (id === `\0${fixtureId}.tsx`) return fixture
+
         if (id === '\0stub:convex.ts') return 'export const convexApi = {}; export const convexClient = {}'
+
         if (id === '\0stub:local-control-service.ts') return `
           import { createLocalControlService as createActual } from '${localControlService}?real'
           export { LocalControlServiceError } from '${localControlService}?real'
@@ -343,21 +345,27 @@ const buildFixture = async () => {
             }
           }
         `
+
         return undefined
       },
     }],
     resolve: { alias: { '~': `${repositoryRoot}src` } },
     build: { write: false, minify: false, lib: { entry: fixtureId, formats: ['iife'], name: 'midiPersistenceFixture' } },
   })
+
   const bundle = Array.isArray(output) ? output[0] : output
+
   if (!bundle || !('output' in bundle)) throw new Error('Expected a single MIDI fixture bundle.')
+
   const styles = bundle.output.flatMap((chunk) => (
     chunk.type === 'asset' && chunk.fileName.endsWith('.css') ? [String(chunk.source)] : []
   ))
+
   return `<!doctype html><head><meta charset="utf-8"><style>${styles.join('\n')}</style></head><body style="margin:0"><script>${bundle.output[0].code}</script>`
 }
 
 const pointSchema = z.object({ x: z.number(), y: z.number() })
+
 const midiSchema = z.object({
   notes: z.array(z.object({
     id: z.string(),
@@ -368,8 +376,10 @@ const midiSchema = z.object({
     channel: z.number().optional(),
   })),
 })
+
 const editorStateSchema = z.object({ noteCount: z.number(), selectedNoteCount: z.number(), retryVisible: z.boolean() })
 const panelSchema = z.object({ mode: z.string(), open: z.boolean(), audio: z.string().nullable(), midi: z.string().nullable() })
+
 const routingSchema = z.object({
   audioRouted: panelSchema,
   midiRouted: panelSchema,
@@ -378,6 +388,7 @@ const routingSchema = z.object({
   escapeWhenIdle: panelSchema,
   clearedSelection: panelSchema,
 })
+
 const failedReplaySchema = z.object({ attempts: z.number(), attemptsLater: z.number() })
 const keyboardCallsSchema = z.object({ delete: z.number(), space: z.number() })
 const writeCountsSchema = z.object({ commits: z.number(), edits: z.number() })
@@ -397,15 +408,20 @@ test('MIDI editor pointer-created notes persist in local IndexedDB and survive r
   const env = { ...process.env }
   delete env.AGENT_BROWSER_CDP
   delete env.AGENT_BROWSER_SESSION
+
   const run = async (...args: string[]) => {
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
     const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
+
     if (await child.exited !== 0) throw new Error(stderr || stdout)
+
     return stdout.trim()
   }
+
   const read = async <Schema extends z.ZodType>(schema: Schema, expression: string): Promise<z.infer<Schema>> => (
     schema.parse(JSON.parse(await run('eval', `(async () => JSON.stringify(await ${expression}))()`).then(JSON.parse)))
   )
+
   await run('open', `file://${directory}/index.html`)
   // Tall enough for the host, the bottom panel, and the full velocity lane including a 127 head.
   await run('set', 'viewport', '1000', '760')
@@ -453,6 +469,7 @@ test('MIDI editor pointer-created notes persist in local IndexedDB and survive r
   let afterFailedRedo: z.infer<typeof midiSchema> | undefined
   let redoAfterFailure: z.infer<typeof midiSchema> | undefined
   const trace: { step: string; detail: string }[] = []
+
   try {
     identity = await read(z.object({ projectId: z.string(), clipId: z.string(), trackId: z.string() }), 'midiFixture.setup()')
     trace.push({ step: 'fixture-created', detail: 'Production local project, instrument track, and empty MIDI clip created.' })
@@ -473,6 +490,7 @@ test('MIDI editor pointer-created notes persist in local IndexedDB and survive r
     trace.push({ step: 'pointer-insert-with-failure', detail: 'Chromium mouse click inserted second MIDI note while persistence was armed to fail.' })
 
     beforeRetry = await read(editorStateSchema, '(async () => { try { await midiFixture.flush() } catch {} return midiFixture.editorState() })()')
+
     if (!beforeRetry.retryVisible) throw new Error('Expected the production MIDI retry affordance after the injected write failure.')
     trace.push({ step: 'failure-visible', detail: 'Real editor retained both projected notes and displayed its retry affordance.' })
     await run('click', 'button[title*="Acceptance-injected local MIDI write failure"]')
@@ -482,10 +500,12 @@ test('MIDI editor pointer-created notes persist in local IndexedDB and survive r
     await read(z.object({ ok: z.literal(true) }), '(async () => { await midiFixture.reload(); return { ok: true } })()')
     reloaded = await read(midiSchema, 'midiFixture.read()')
     trace.push({ step: 'editor-remounted', detail: 'Real editor remounted from newly loaded production IndexedDB repository snapshot.' })
+
     const moveTo = async (column: number, row: number) => {
       const point = await read(pointSchema, `midiFixture.gridPoint(${column}, ${row})`)
       await run('mouse', 'move', String(Math.round(point.x)), String(Math.round(point.y)))
     }
+
     await moveTo(3, 2)
     await run('mouse', 'down')
     await run('mouse', 'up')
@@ -590,11 +610,13 @@ test('MIDI editor pointer-created notes persist in local IndexedDB and survive r
     // Chord: two notes at one start. Raising the later note to 127 puts its tall stem over the earlier head in DOM order,
     // so the earlier head must still be grabbable. Both heads land about 40px apart, so each center is clearly hittable.
     const chordStart = (await read(midiSchema, 'midiFixture.flush()')).notes.length
+
     for (const row of [8, 12]) {
       await moveTo(6, row)
       await run('mouse', 'down')
       await run('mouse', 'up')
     }
+
     const laterLane = await read(pointSchema, `midiFixture.velocityPoint(${chordStart + 1})`)
     await run('mouse', 'move', String(Math.round(laterLane.x)), String(Math.round(laterLane.y)))
     await run('mouse', 'down')
@@ -667,11 +689,13 @@ test('MIDI editor pointer-created notes persist in local IndexedDB and survive r
       failedReplay: { failedRedo, afterFailedRedo, redoAfterFailure },
       trace,
     }
+
     await Bun.write(`${directory}/journey.json`, JSON.stringify(result, null, 2))
     await Bun.write(`${retainedEvidenceDirectory}/journey.json`, JSON.stringify(result, null, 2))
     await run('eval', 'midiFixture.close()').catch(() => '')
     await run('close').catch(() => '')
   }
+
   expect(persisted?.notes).toHaveLength(2)
   expect(beforeRetry).toEqual({ noteCount: 2, selectedNoteCount: 0, retryVisible: true })
   expect(reloaded?.notes).toEqual(persisted?.notes)
@@ -727,7 +751,7 @@ test('MIDI editor pointer-created notes persist in local IndexedDB and survive r
   expect(duplicateCopies).toHaveLength(1)
   expect(new Set(duplicateCopies.map((note) => note.id)).size).toBe(1)
   expect(duplicateCopies.map(({ beat, length, pitch, velocity, channel }) => ({ beat, length, pitch, velocity, channel })))
-    .toEqual(duplicateSources.filter((note) => note.beat + 2 < 8).map(({ beat, length, pitch, velocity, channel }) => ({ beat: beat + 2, length, pitch, velocity, channel })))
+    .toEqual(duplicateSources.flatMap(({ beat, length, pitch, velocity, channel }) => beat + 2 < 8 ? [{ beat: beat + 2, length, pitch, velocity, channel }] : []))
   expect(duplicateUndo?.notes).toHaveLength(5)
   expect(duplicateRedo?.notes).toHaveLength(6)
   expect(selectedBeforeDelete?.selectedNoteCount).toBe(2)

@@ -17,8 +17,10 @@ export const loopFramesForTransport = (
   if (!transport.loopEnabled) return undefined
   const startFrame = Math.round(transport.loopStartSec * sampleRateHz)
   const endFrame = Math.round(transport.loopEndSec * sampleRateHz)
+
   if (!Number.isSafeInteger(startFrame) || !Number.isSafeInteger(endFrame)
     || startFrame < 0 || endFrame <= startFrame) return undefined
+
   return { startFrame, endFrame, lengthFrames: endFrame - startFrame }
 }
 
@@ -30,6 +32,7 @@ export const effectiveLoopForStart = <T extends LoopTransport>(
   sampleRateHz: number,
 ): Omit<T, 'loopEnabled'> & { loopEnabled: boolean } => {
   const loop = loopFramesForTransport(configured, sampleRateHz)
+
   return loop && startFrame < loop.endFrame
     ? configured
     : { ...configured, loopEnabled: false }
@@ -40,6 +43,7 @@ export const arrangementFrameForLoop = (
   loop: LoopFrames | undefined,
 ) => {
   if (!loop || frame < loop.endFrame) return frame
+
   return loop.startFrame + ((frame - loop.startFrame) % loop.lengthFrames + loop.lengthFrames) % loop.lengthFrames
 }
 
@@ -65,12 +69,15 @@ export const splitLoopScheduleRange = (
   }]
   const slices: LoopScheduleSlice[] = []
   let cursor = startFrame
+
   while (cursor < endFrame) {
     const beforeLoop = cursor < loop.startFrame
     const arrangementStartFrame = beforeLoop ? cursor : arrangementFrameForLoop(cursor, loop)
+
     const boundary = beforeLoop
       ? loop.startFrame
       : cursor + loop.endFrame - arrangementStartFrame
+
     const nativeEndFrame = Math.min(endFrame, boundary)
     slices.push({
       nativeStartFrame: cursor,
@@ -81,5 +88,6 @@ export const splitLoopScheduleRange = (
     })
     cursor = nativeEndFrame
   }
+
   return slices
 }

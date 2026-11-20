@@ -1,5 +1,7 @@
 type EventListenerLike = EventListenerOrEventListenerObject
+
 const originalFetch = globalThis.fetch
+
 const relevantDatabase = (name: string) => (
   name === 'daw-browser-projects' || name.startsWith('daw-browser-project-')
 )
@@ -30,6 +32,7 @@ const hasDatabaseEnumeration = (
 
 export const installHermeticWindow = <Value extends object>(value: Value): (() => void) => {
   const listeners = new Map<string, Set<EventListenerLike>>()
+
   const browserWindow = Object.assign(value, {
     addEventListener: (
       type: string,
@@ -45,12 +48,14 @@ export const installHermeticWindow = <Value extends object>(value: Value): (() =
     ) => {
       const typeListeners = listeners.get(type)
       typeListeners?.delete(listener)
+
       if (typeListeners?.size === 0) listeners.delete(type)
     },
     clearEventListeners: () => {
       listeners.clear()
     },
   }) satisfies HermeticWindow
+
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
@@ -59,6 +64,7 @@ export const installHermeticWindow = <Value extends object>(value: Value): (() =
 
   return () => {
     browserWindow.clearEventListeners()
+
     if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow)
     else Reflect.deleteProperty(globalThis, 'window')
   }
@@ -76,24 +82,30 @@ const clearDatabase = (name: string): Promise<void> => new Promise((resolve, rej
   request.onsuccess = () => {
     const db = request.result
     const storeNames = Array.from(db.objectStoreNames)
+
     if (storeNames.length === 0) {
       db.close()
       resolve()
+
       return
     }
+
     const transaction = db.transaction(storeNames, 'readwrite')
     transaction.onerror = () => {
       db.close()
       reject(transaction.error)
     }
+
     transaction.onabort = () => {
       db.close()
       reject(transaction.error)
     }
+
     transaction.oncomplete = () => {
       db.close()
       resolve()
     }
+
     for (const storeName of storeNames) {
       transaction.objectStore(storeName).clear()
     }
@@ -104,6 +116,7 @@ export const resetHermeticBrowserEnvironment = async (): Promise<void> => {
   globalThis.fetch = originalFetch
   clearStorage(globalThis.localStorage)
   clearStorage(globalThis.sessionStorage)
+
   if (!hasDatabaseEnumeration(indexedDB)) return
   const databases = await indexedDB.databases()
   await Promise.all(databases.flatMap((database) => (

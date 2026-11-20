@@ -52,6 +52,7 @@ const cloudIdMappingRows = (
   updatedAt = now(),
 ): LocalProjectSyncStateRow[] => {
   const rows: LocalProjectSyncStateRow[] = []
+
   for (const mapping of mappings) {
     rows.push({
       key: keyFor(kind, mapping.localId),
@@ -64,6 +65,7 @@ const cloudIdMappingRows = (
       updatedAt,
     })
   }
+
   return rows
 }
 
@@ -78,7 +80,9 @@ export const assetCloudIdMappingRows = (
 
 const isMapping = (value: LocalProjectStoredValue | undefined): value is CloudIdMapping => {
   const parsed = parseJsonValue(value)
+
   if (!isJsonObject(parsed)) return false
+
   return (
     isCloudMappedEntityKind(parsed.kind)
     && isJsonString(parsed.localId)
@@ -106,10 +110,12 @@ export const saveCloudIdMapping = async (
   historyRef = localId,
 ): Promise<CloudIdMapping> => {
   const db = await openLocalProjectDb(projectId)
+
   const [existingMappingRow, existingIndexRow] = await Promise.all([
     db.get('syncState', keyFor(kind, localId)),
     db.get('syncState', indexKeyFor(kind, cloudId)),
   ])
+
   if (
     isMapping(existingMappingRow?.value)
     && existingMappingRow.value.kind === kind
@@ -120,22 +126,29 @@ export const saveCloudIdMapping = async (
   ) {
     return existingMappingRow.value
   }
+
   const updatedAt = now()
+
   const mapping = createCloudIdMapping(kind, {
     localId,
     cloudId,
     historyRef,
   }, updatedAt)
+
   const tx = db.transaction('syncState', 'readwrite')
+
   const writes: Promise<unknown>[] = cloudIdMappingRows(
     kind,
     [{ localId, cloudId, historyRef }],
     updatedAt,
   ).map((row) => tx.store.put(row))
+
   if (isMapping(existingMappingRow?.value) && existingMappingRow.value.cloudId !== cloudId) {
     writes.push(tx.store.delete(indexKeyFor(kind, existingMappingRow.value.cloudId)))
   }
+
   await Promise.all([...writes, tx.done])
+
   return mapping
 }
 
@@ -146,6 +159,7 @@ export const getCloudIdMapping = async (
 ): Promise<CloudIdMapping | undefined> => {
   const db = await openLocalProjectDb(projectId)
   const row = await db.get('syncState', keyFor(kind, localId))
+
   return isMapping(row?.value) ? row.value : undefined
 }
 
@@ -157,5 +171,6 @@ export const getLocalIdForCloudId = async (
   const db = await openLocalProjectDb(projectId)
   const row = await db.get('syncState', indexKeyFor(kind, cloudId))
   const value = parseJsonValue(row?.value)
+
   return isJsonString(value) ? value : undefined
 }

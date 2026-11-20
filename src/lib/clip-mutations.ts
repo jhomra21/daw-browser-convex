@@ -28,6 +28,7 @@ export async function persistClipTiming(
   input: PersistClipTimingInput,
 ) {
   const timing = normalizeClipTimingPatch(input)
+
   const result = await convexClient.mutation(convexApi.clips.setTiming, {
     clipId: toCloudClipId(input.clipId),
     startSec: timing.startSec,
@@ -37,6 +38,7 @@ export async function persistClipTiming(
     midiOffsetBeats: timing.midiOffsetBeats,
     fades: input.fades,
   })
+
   return result?.status === 'applied'
 }
 
@@ -49,6 +51,7 @@ export async function persistClipAudioWarp(
     clipId: toCloudClipId(input.clipId),
     audioWarp: input.audioWarp,
   })
+
   return result?.status === 'applied'
 }
 
@@ -58,6 +61,7 @@ export async function persistClipTimingAndAudioWarp(
   input: PersistClipTimingAndAudioWarpInput,
 ) {
   const timing = normalizeClipTimingPatch(input)
+
   const result = await convexClient.mutation(convexApi.clips.setTimingAndAudioWarp, {
     clipId: toCloudClipId(input.clipId),
     startSec: timing.startSec,
@@ -68,5 +72,6 @@ export async function persistClipTimingAndAudioWarp(
     audioWarp: input.audioWarp,
     fades: input.fades,
   })
+
   return result?.status === 'applied'
 }

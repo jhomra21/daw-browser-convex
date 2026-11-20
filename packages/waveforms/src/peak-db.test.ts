@@ -18,6 +18,7 @@ describe('waveform persistence contracts', () => {
       sampleRate: 48_000,
       channelCount: 2,
     }, 'db-contract')
+
     await storePeakAssetRecord(record)
     const loaded = await loadPeakAssetRecord(record.assetKey)
     expect(loaded?.formatVersion).toBe(record.formatVersion)

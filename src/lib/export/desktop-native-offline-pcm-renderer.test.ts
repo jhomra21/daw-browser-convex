@@ -40,6 +40,7 @@ const fakeSession = (
   append: append ?? (async (value) => { state.appended.push(value.startFrame) }),
   finalize: async (): Promise<NativeOfflinePcmSpoolDescriptor> => {
     state.finalized += 1
+
     return {
       sessionId: 'test',
       sampleRate: 48_000,
@@ -58,18 +59,22 @@ test('disk-backed native renderer has no 512 MiB AudioBuffer admission limit', a
   let started = false
   let created = false
   const state: FakeSpoolState = { appended: [], finalized: 0, aborted: 0 }
+
   const renderer = createDesktopNativeOfflinePcmRenderer({
     start: async () => {
       started = true
+
       return { ok: false, error: 'test stop' }
     },
     cancel: async () => ({ accepted: true }),
   }, {
     createSession: async () => {
       created = true
+
       return fakeSession(state)
     },
   })
+
   const totalFrames = 8 * 1024 * 1024 * 1024
     / (2 * Float32Array.BYTES_PER_ELEMENT) + 1
 
@@ -84,15 +89,19 @@ test('native bridge waits for each spool append before advancing', async () => {
   const firstWrite = Promise.withResolvers<void>()
   const state: FakeSpoolState = { appended: [], finalized: 0, aborted: 0 }
   let reachedAfterFirst = false
+
   const session = fakeSession(state, async (value) => {
     state.appended.push(value.startFrame)
+
     if (value.startFrame === 0) await firstWrite.promise
   })
+
   const renderer = createDesktopNativeOfflinePcmRenderer({
     start: async (_jobId, _plan, onChunk) => {
       await onChunk(chunk(0, [0.25, -0.25]))
       reachedAfterFirst = true
       await onChunk(chunk(2, [0.5, -0.5]))
+
       return { ok: true }
     },
     cancel: async () => ({ accepted: true }),
@@ -116,13 +125,16 @@ test('native bridge waits for each spool append before advancing', async () => {
 test('spool append failure cancels native work and removes partial output', async () => {
   const state: FakeSpoolState = { appended: [], finalized: 0, aborted: 0 }
   let cancellations = 0
+
   const renderer = createDesktopNativeOfflinePcmRenderer({
     start: async (_jobId, _plan, onChunk) => {
       await onChunk(chunk(0, [0.25, -0.25]))
+
       return { ok: true }
     },
     cancel: async () => {
       cancellations += 1
+
       return { accepted: true }
     },
   }, {

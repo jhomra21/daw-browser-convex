@@ -51,6 +51,7 @@ export type ProcessorDeliveryOutcome =
 
 // Opaque to callers: witnesses and the drain use it to read receipts that are still unanswered.
 export type ReceiptHandle = { key: string; serial: number }
+
 export type DeliveryRegistration = { receipt: ReceiptHandle; settled: Promise<ProcessorDeliveryOutcome> }
 
 // `holds`: a preview inside an open gesture; not `holds`: this delivery ends the gesture (a flush or a rollback).

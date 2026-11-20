@@ -1,5 +1,6 @@
 const GRAPH_ENVELOPE_VERSION = 3
 const GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY = 4
+
 // DAW_AUDIO_GRAPH_INPUT_BUS_DISCONNECTED. Sources play their sample sources; the
 // live input carries the recording microphone, which only monitoring may hear.
 const DISCONNECTED_INPUT_BUS = 0xffffffff
@@ -9,28 +10,38 @@ const instrumentKind = (kind) => kind === 'synth' ? 1 : kind === 'sampler' ? 2 :
 
 export const stableId = (value) => {
   let hash = 0xcbf29ce484222325n
+
   for (let index = 0; index < value.length; index += 1) {
     hash ^= BigInt(value.charCodeAt(index))
     hash = BigInt.asUintN(64, hash * 0x100000001b3n)
   }
+
   return hash === 0n ? 1n : hash
 }
 
 export const writeId = (view, offset, id) => view.setBigUint64(offset, stableId(id), true)
 const writeOptionalProcessorId = (view, offset, id) => view.setBigUint64(offset, id ? stableId(id) : 0n, true)
+
 const processorStateUint32 = (state, offset) => state.byteLength >= offset + 4
   ? new DataView(state.buffer, state.byteOffset, state.byteLength).getUint32(offset, true)
   : 0
+
 const processorStateFloat32 = (state, offset) => state.byteLength >= offset + 4
   ? new DataView(state.buffer, state.byteOffset, state.byteLength).getFloat32(offset, true)
   : 0
+
 const processorOutputLayout = (processor, inputLayout) => {
   if (processor.bypassed || processorStateUint32(processor.state, 0) === 0) return inputLayout
+
   if (processor.kind === 'eq' && processorStateUint32(processor.state, 4) === 1) return 'mono'
+
   if (processor.kind === 'delay' && processorStateUint32(processor.state, 16) === 1) return 'stereo'
+
   if (processor.kind === 'reverb' && processorStateFloat32(processor.state, 68) > 0) return 'stereo'
+
   if (processor.kind === 'chorus' || processor.kind === 'flanger' || processor.kind === 'phaser'
     || processor.kind === 'autopan' || processor.kind === 'ensemble') return 'stereo'
+
   return inputLayout
 }
 
@@ -40,6 +51,7 @@ export const graphEnvelope = (snapshot) => {
   const nodeBytes = hasExtendedNode ? 136 : 132
   const processors = snapshot.nodes.flatMap((node) => node.processorOrder.map((processor) => ({ node, processor })))
   let bytes = 24 + snapshot.nodes.length * nodeBytes + snapshot.edges.length * 48
+
   for (const { processor } of processors) bytes += 48 + processor.state.byteLength + processor.parameterTargets.length * 4
   const output = new Uint8Array(bytes)
   const view = new DataView(output.buffer)
@@ -49,6 +61,7 @@ export const graphEnvelope = (snapshot) => {
   view.setUint32(12, snapshot.edges.length, true)
   view.setUint32(16, processors.length, true)
   let offset = 24
+
   for (const node of snapshot.nodes) {
     writeId(view, offset, node.id)
     view.setUint32(offset + 8, graphNodeKind(node.kind), true)
@@ -56,6 +69,7 @@ export const graphEnvelope = (snapshot) => {
     view.setUint32(offset + 16, node.outputLayout === 'mono' ? 1 : 2, true)
     view.setUint32(offset + 20, node.kind === 'source' ? DISCONNECTED_INPUT_BUS : 0, true)
     view.setUint32(offset + 24, node.latencyFrames, true)
+
     if (hasExtendedNode) view.setUint32(offset + 28, node.externalLatencyFrames || 0, true)
     const instrument = node.kind === 'instrument' ? node.instrument : null
     const instrumentOffset = hasExtendedNode ? offset + 32 : offset + 28
@@ -63,9 +77,11 @@ export const graphEnvelope = (snapshot) => {
     view.setUint32(instrumentOffset + 4, instrument ? instrument.version : 0, true)
     view.setUint32(instrumentOffset + 8, instrument ? instrument.voiceCapacity : 0, true)
     view.setUint32(instrumentOffset + 12, instrument && instrument.kind === 'synth' ? instrument.parameterTargets.length : 0, true)
+
     for (let target = 0; target < 16; target += 1) {
       view.setUint32(instrumentOffset + 16 + target * 4, instrument && instrument.kind === 'synth' && target < instrument.parameterTargets.length ? instrument.parameterTargets[target].target : 0, true)
     }
+
     const mixer = node.mixer
     const mixerOffset = instrumentOffset + 80
     view.setBigUint64(mixerOffset, BigInt(mixer ? mixer.instanceId : 0), true)
@@ -75,6 +91,7 @@ export const graphEnvelope = (snapshot) => {
     view.setUint32(mixerOffset + 20, mixer && mixer.soloed ? 1 : 0, true)
     offset += nodeBytes
   }
+
   for (const edge of snapshot.edges) {
     writeId(view, offset, edge.id)
     writeId(view, offset + 8, edge.fromNodeId)
@@ -86,15 +103,19 @@ export const graphEnvelope = (snapshot) => {
     view.setUint32(offset + 44, edge.pdcDelayFrames, true)
     offset += 48
   }
+
   const processorLayouts = new Map()
+
   for (const node of snapshot.nodes) {
     let layout = node.inputLayout
+
     for (const processor of node.processorOrder) {
       const output = processorOutputLayout(processor, layout)
       processorLayouts.set(processor.instanceId, { input: layout, output })
       layout = output
     }
   }
+
   for (const { node, processor } of processors) {
     const layout = processorLayouts.get(processor.instanceId)
     writeId(view, offset, node.id)
@@ -110,10 +131,12 @@ export const graphEnvelope = (snapshot) => {
     view.setUint32(offset + 44, processor.tailKind === 'unbounded' ? 0xffffffff : processor.tailFrames, true)
     output.set(processor.state, offset + 48)
     offset += 48 + processor.state.byteLength
+
     for (const target of processor.parameterTargets) {
       view.setUint32(offset, target.target, true)
       offset += 4
     }
   }
+
   return output
 }

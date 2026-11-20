@@ -11,17 +11,21 @@ export const resolveDesktopRendererApiBaseUrl = (
   mode: string,
 ) => {
   const trimmed = configuredBaseUrl?.trim()
+
   if (trimmed) return trimmed
+
   return mode === "production" ? desktopRendererProductionApiBaseUrl : undefined
 }
 
 export default defineConfig(({ mode }) => {
   const root = path.resolve(import.meta.dirname, "../..")
   const environment = loadEnv(mode, root, "VITE_")
+
   const apiBaseUrl = resolveDesktopRendererApiBaseUrl(
     environment.VITE_API_BASE_URL,
     mode,
   )
+
   return {
     root,
     plugins: [tanstackRouter({ target: "solid", autoCodeSplitting: false }), solidPlugin(), tailwindcss()],

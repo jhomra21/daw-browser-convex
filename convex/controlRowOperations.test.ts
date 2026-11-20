@@ -16,12 +16,14 @@ test("track row helpers leave revision advancement to authenticated wrappers", a
   const owner = "owner-1";
   const projectId = "project-1";
   await t.withIdentity({ subject: owner }).mutation(api.projects.createOwnedRoom, { projectId });
+
   const trackId = await t.run(async (ctx) => {
     const id = await ctx.db.insert("tracks", {
       projectId,
       name: "Track 1",
       index: 0,
     });
+
     await ctx.db.insert("mixerChannels", {
       projectId,
       trackId: id,
@@ -34,6 +36,7 @@ test("track row helpers leave revision advancement to authenticated wrappers", a
       ownerUserId: owner,
       trackId: id,
     });
+
     return id;
   });
 

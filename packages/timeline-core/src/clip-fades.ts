@@ -10,6 +10,7 @@ export type ClipFades = {
 }
 
 export type ClipFadeSide = 'fadeIn' | 'fadeOut'
+
 export type NormalizedClipFades = Required<ClipFades>
 
 const finite = (value: number | undefined, fallback = 0) => (
@@ -30,6 +31,7 @@ export const normalizeClipFades = (
   let fadeInSec = clamp(finite(fades?.fadeInSec), fadeInStartSec, maxDuration)
   let fadeOutEndSec = clamp(finite(fades?.fadeOutEndSec), 0, maxDuration)
   let fadeOutSec = clamp(finite(fades?.fadeOutSec), fadeOutEndSec, maxDuration)
+
   if (fadeInSec + fadeOutSec > maxDuration) {
     if (editedSide === 'fadeIn') {
       fadeInSec = Math.max(0, maxDuration - fadeOutSec)
@@ -42,6 +44,7 @@ export const normalizeClipFades = (
       fadeOutEndSec = Math.min(fadeOutEndSec, fadeOutSec)
     }
   }
+
   return {
     fadeInStartSec,
     fadeInSec,
@@ -61,6 +64,7 @@ export const clipFadesEqual = (
 ) => {
   const normalizedLeft = normalizeClipFades(left, duration)
   const normalizedRight = normalizeClipFades(right, duration)
+
   return normalizedLeft.fadeInStartSec === normalizedRight.fadeInStartSec
     && normalizedLeft.fadeInSec === normalizedRight.fadeInSec
     && normalizedLeft.fadeOutSec === normalizedRight.fadeOutSec
@@ -75,6 +79,7 @@ export type FadePoint = { x: number; y: number }
 
 const quadraticPoint = (start: FadePoint, control: FadePoint, end: FadePoint, t: number): FadePoint => {
   const inverse = 1 - t
+
   return {
     x: inverse * inverse * start.x + 2 * inverse * t * control.x + t * t * end.x,
     y: inverse * inverse * start.y + 2 * inverse * t * control.y + t * t * end.y,
@@ -87,6 +92,7 @@ export const getClipFadeBezierControlPoint = (
   side: ClipFadeSide,
 ): FadePoint => {
   const normalized = normalizeClipFades(fades, duration)
+
   return getNormalizedClipFadeBezierControlPoint(normalized, duration, side)
 }
 
@@ -98,19 +104,25 @@ export const getNormalizedClipFadeBezierControlPoint = (
   const fadeStart = side === 'fadeIn'
     ? normalized.fadeInStartSec
     : Math.max(0, finite(duration)) - normalized.fadeOutSec
+
   const fadeEnd = side === 'fadeIn'
     ? normalized.fadeInSec
     : Math.max(0, finite(duration)) - normalized.fadeOutEndSec
+
   const startGain = side === 'fadeIn' ? 0 : 1
   const endGain = side === 'fadeIn' ? 1 : 0
+
   const position = side === 'fadeIn'
     ? normalized.fadeInCurvePosition
     : normalized.fadeOutCurvePosition
+
   const curve = side === 'fadeIn' ? normalized.fadeInCurve : normalized.fadeOutCurve
   const linearGain = startGain + (endGain - startGain) * position
+
   const gain = curve >= 0
     ? linearGain + (1 - linearGain) * curve
     : linearGain + linearGain * curve
+
   return {
     x: fadeStart + (fadeEnd - fadeStart) * position,
     y: clamp(gain, 0, 1),
@@ -126,27 +138,37 @@ const fadeGainForSideAtClipTime = (
   const start = side === 'fadeIn'
     ? normalized.fadeInStartSec
     : duration - normalized.fadeOutSec
+
   const end = side === 'fadeIn'
     ? normalized.fadeInSec
     : duration - normalized.fadeOutEndSec
+
   const startGain = side === 'fadeIn' ? 0 : 1
   const endGain = side === 'fadeIn' ? 1 : 0
+
   if (end <= start) {
     if (side === 'fadeIn') return time < end ? 0 : 1
+
     return time < start ? 1 : 0
   }
+
   if (time <= start) return startGain
+
   if (time >= end) return endGain
   const curve = side === 'fadeIn' ? normalized.fadeInCurve : normalized.fadeOutCurve
+
   if (curve === 0) return startGain + (endGain - startGain) * ((time - start) / (end - start))
   const control = getNormalizedClipFadeBezierControlPoint(normalized, duration, side)
   let low = 0
   let high = 1
+
   for (let iteration = 0; iteration < 20; iteration += 1) {
     const mid = (low + high) / 2
+
     if (quadraticPoint({ x: start, y: startGain }, control, { x: end, y: endGain }, mid).x < time) low = mid
     else high = mid
   }
+
   return quadraticPoint({ x: start, y: startGain }, control, { x: end, y: endGain }, (low + high) / 2).y
 }
 
@@ -156,6 +178,7 @@ export const fadeGainAtClipTime = (
   clipTimeSec: number,
 ) => {
   const normalized = normalizeClipFades(fades, duration)
+
   return normalizedFadeGainAtClipTime(normalized, duration, clipTimeSec)
 }
 
@@ -166,6 +189,7 @@ export const normalizedFadeGainAtClipTime = (
 ) => {
   const normalizedDuration = Math.max(0, finite(duration))
   const time = clamp(finite(clipTimeSec), 0, normalizedDuration)
+
   return fadeGainForSideAtClipTime(normalized, normalizedDuration, time, 'fadeIn')
     * fadeGainForSideAtClipTime(normalized, normalizedDuration, time, 'fadeOut')
 }
@@ -177,6 +201,7 @@ export const transformClipFadesForDuration = (
   leftTrimSec = 0,
 ): ClipFades => {
   const normalized = normalizeClipFades(fades, previousDuration)
+
   return normalizeClipFades({
     ...normalized,
     fadeInStartSec: Math.max(0, normalized.fadeInStartSec - Math.max(0, finite(leftTrimSec))),
@@ -192,6 +217,7 @@ export const clipFadesForFragment = (
   endsInsideSource: boolean,
 ): ClipFades => {
   const normalized = normalizeClipFades(fades, sourceDuration)
+
   return normalizeClipFades({
     ...normalized,
     fadeInStartSec: startsInsideSource ? 0 : normalized.fadeInStartSec,

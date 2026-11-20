@@ -4,9 +4,11 @@ import { analyzeCalibrationCapture, createCalibrationStimulus } from './calibrat
 const delayed = (delay: number, gain = 1, noise = 0): Float32Array => {
   const stimulus = createCalibrationStimulus(48_000)
   const capture = new Float32Array(delay + stimulus.length + 256)
+
   for (let index = 0; index < stimulus.length; index += 1) {
     capture[delay + index] = (stimulus[index] ?? 0) * gain + Math.sin(index * 1.71) * noise
   }
+
   return capture
 }
 
@@ -27,6 +29,7 @@ describe('recording calibration analysis', () => {
     const stimulus = createCalibrationStimulus(48_000)
     const ambiguous = new Float32Array(first.length + 6_000)
     ambiguous.set(first)
+
     for (let index = 0; index < stimulus.length; index += 1) ambiguous[5_300 + index] += stimulus[index] ?? 0
     expect(analyzeCalibrationCapture(ambiguous, 48_000)).toMatchObject({ accepted: false, reason: 'ambiguous' })
   })

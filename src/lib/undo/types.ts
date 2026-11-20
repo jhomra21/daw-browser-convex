@@ -6,8 +6,11 @@ import type { MidiEditorNote } from '~/lib/midi-editor-grid'
 import type { LiveProcessorEditIdentity } from '~/lib/live-processor-control'
 
 export type TrackRef = string
+
 export type ClipRef = string
+
 export type MidiNoteHistoryChange = { id: string; before?: MidiEditorNote; after?: MidiEditorNote }
+
 export type HistoryScope = 'shared' | 'local'
 
 export type ClipTiming = {
@@ -90,6 +93,7 @@ export type TrackSnapshot = {
 }
 
 export type TrackEffect = AudioEffectKind | 'synth' | 'instrument' | 'arp'
+
 export type EffectType = TrackEffect | `master-${AudioEffectKind}`
 
 export type EffectParamsByEffect = {

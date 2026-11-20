@@ -30,13 +30,18 @@ export const createNativeVst3HostEventHandlers = (outputs: NativeVst3HostEventOu
   onNotification: (notification: NativeWorkerNotification) => {
     if (notification.kind === "fault" || notification.kind === "miss" || notification.kind === "restart") logWorkerIncident(notification)
     const instanceEvent = nativeVst3InstanceEvent(notification, outputs.reportDefect)
+
     if (instanceEvent) outputs.sendInstanceEvent(instanceEvent)
     const projectId = outputs.projectFor(notification.instanceId)
+
     if (!projectId) return
+
     if (notification.kind === "editor-state") {
       outputs.sendEditorState({ projectId, instanceId: notification.instanceId, open: notification.value === 1 })
+
       return
     }
+
     if (notification.kind !== "parameter-edit") return
     outputs.sendParameterEdit({
       projectId,

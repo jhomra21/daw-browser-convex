@@ -16,6 +16,7 @@ export const waveformCanvasSize = (input: {
   const requestedBackingWidthPx = Math.max(1, Math.ceil(cssWidthPx * dpr))
   const maxBackingWidthPx = Math.max(1, Math.floor(MAX_WAVEFORM_BACKING_PIXELS / backingHeightPx))
   const backingWidthPx = Math.min(requestedBackingWidthPx, maxBackingWidthPx)
+
   return {
     cssWidthPx,
     cssHeightPx,

@@ -13,6 +13,7 @@ export function readOptimisticGrantScope(input: {
   userId: string | null | undefined
 }) {
   if (!input.projectId || !input.userId) return null
+
   return {
     projectId: input.projectId,
     userId: input.userId,

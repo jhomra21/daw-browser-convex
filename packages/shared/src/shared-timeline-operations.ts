@@ -257,18 +257,25 @@ type OperationDescriptor = {
 const emptyTargets = (): SharedTimelineOperationTargets => ({ trackIds: new Set(), clipIds: new Set() })
 const trackTargets = (trackId: string): SharedTimelineOperationTargets => ({ trackIds: new Set([trackId]), clipIds: new Set() })
 const clipTargets = (clipIds: string[]): SharedTimelineOperationTargets => ({ trackIds: new Set(), clipIds: new Set(clipIds) })
+
 const readClipIdTargets = (payload: JsonValue): SharedTimelineOperationTargets => (
   isJsonObject(payload) && isJsonString(payload.clipId) ? clipTargets([payload.clipId]) : emptyTargets()
 )
+
 const readReorderAndGroupTargets = (payload: JsonValue): SharedTimelineOperationTargets => {
   if (!isJsonObject(payload) || !Array.isArray(payload.updates)) return emptyTargets()
   const trackIds = new Set<string>()
+
   for (const update of payload.updates) {
     if (!isJsonObject(update)) continue
+
     if (isJsonString(update.trackId)) trackIds.add(update.trackId)
+
     if (isJsonString(update.groupId)) trackIds.add(update.groupId)
+
     if (isJsonString(update.outputTargetId)) trackIds.add(update.outputTargetId)
   }
+
   return { trackIds, clipIds: new Set() }
 }
 
@@ -281,12 +288,14 @@ const readAudioWarp = (value: JsonValue) => normalizeAudioWarp(value)
 
 const readClipFades = (value: JsonValue) => {
   if (!isJsonObject(value)) return undefined
+
   if (
     !isJsonNumber(value.fadeInSec)
     || !isJsonNumber(value.fadeOutSec)
     || !isJsonNumber(value.fadeInCurve)
     || !isJsonNumber(value.fadeOutCurve)
   ) return undefined
+
   return {
     fadeInStartSec: isJsonNumber(value.fadeInStartSec) ? value.fadeInStartSec : 0,
     fadeInSec: value.fadeInSec,
@@ -307,13 +316,16 @@ const readAudioEffectOrder = (value: JsonValue): AudioEffectOrderItem[] | null =
   if (!Array.isArray(value)) return null
   const order: AudioEffectOrderItem[] = []
   const seen = new Set<string>()
+
   for (const entry of value) {
     if (!isAudioEffectKind(entry) && !isAudioEffectInstance(entry)) return null
     const id = isJsonString(entry) ? entry : entry.id
+
     if (seen.has(id)) continue
     seen.add(id)
     order.push(entry)
   }
+
   return order
 }
 
@@ -326,6 +338,7 @@ const readProcessorEnvelope = (
   value: JsonValue,
 ): UtilityParamsEnvelope | GateParamsEnvelope | LimiterParamsEnvelope | null => {
   if (!isJsonObject(value) || value.version !== 1 || !isJsonObject(value.state)) return null
+
   return kind === 'utility'
     ? AUDIO_EFFECT_CONTRACTS.utility.normalizeParams({ version: 1, state: value.state })
     : kind === 'gate'
@@ -335,15 +348,25 @@ const readProcessorEnvelope = (
 
 const readModulationEnvelope = (effect: JsonValue, value: JsonValue): SharedModulationEffectEnvelope | null => {
   if (!isJsonObject(value) || value.version !== 1 || !isJsonObject(value.state)) return null
+
   if (effect === 'autofilter') return { effect, params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(value) }
+
   if (effect === 'chorus') return { effect, params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(value) }
+
   if (effect === 'flanger') return { effect, params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(value) }
+
   if (effect === 'phaser') return { effect, params: AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(value) }
+
   if (effect === 'tremolo') return { effect, params: AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(value) }
+
   if (effect === 'autopan') return { effect, params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(value) }
+
   if (effect === 'ensemble') return { effect, params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(value) }
+
   if (effect === 'lofi') return { effect, params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(value) }
+
   if (effect === 'spectrum') return { effect, params: AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(value) }
+
   return null
 }
 
@@ -352,6 +375,7 @@ const effectPayload = <Params>(
   payload: { instanceId?: JsonValue },
 ): { params: Params; instanceId: string } | null => {
   const instanceId = readRequiredInstanceId(payload.instanceId)
+
   return instanceId ? { params, instanceId } : null
 }
 
@@ -385,8 +409,10 @@ export const readSharedTimelineClipCreatePayload = (
   options?: { requireAudioSampleUrl?: boolean; durable?: boolean },
 ): SharedTimelineClipCreatePayload | null => {
   if (!isJsonObject(value) || !isJsonString(value.trackId) || !isJsonNumber(value.startSec) || !isJsonNumber(value.duration)) return null
+
   if (value.midi !== undefined && !isJsonObject(value.midi)) return null
   let midi: MidiClip | LegacyMidiClip | undefined
+
   try {
     midi = value.midi === undefined
       ? undefined
@@ -394,7 +420,9 @@ export const readSharedTimelineClipCreatePayload = (
   } catch {
     return null
   }
+
   const isMidiClip = Boolean(midi) || value.clipKind === 'midi'
+
   if (!isMidiClip && (
     (options?.requireAudioSampleUrl !== false && !isJsonString(value.sampleUrl))
     || !isJsonString(value.assetKey)
@@ -403,6 +431,7 @@ export const readSharedTimelineClipCreatePayload = (
     || !isJsonNumber(value.sampleRate)
     || !isJsonNumber(value.channelCount)
   )) return null
+
   return {
     trackId: value.trackId,
     startSec: value.startSec,
@@ -429,6 +458,7 @@ export const readSharedTimelineClipCreatePayload = (
 
 const readEqParams = (value: JsonValue): EqParams | null => {
   if (!isJsonObject(value) || !isJsonBoolean(value.enabled) || !Array.isArray(value.bands)) return null
+
   const bands = value.bands.flatMap((band) => {
     if (
       !isJsonObject(band)
@@ -438,15 +468,18 @@ const readEqParams = (value: JsonValue): EqParams | null => {
       || !isJsonNumber(band.q)
       || !isJsonBoolean(band.enabled)
     ) return []
+
     return isEqBandType(band.type)
       ? [{ id: band.id, type: band.type, frequency: band.frequency, gainDb: band.gainDb, q: band.q, enabled: band.enabled }]
       : []
   })
+
   return bands.length === value.bands.length ? normalizeEqParams({ enabled: value.enabled, channelMode: value.channelMode, bands }) : null
 }
 
 const readReverbParams = (value: JsonValue): SharedReverbParams | null => {
   if (!isJsonObject(value) || !isJsonBoolean(value.enabled)) return null
+
   const params: ReverbParamsInput = {
     enabled: value.enabled,
     wet: readOptionalNumber(value.wet),
@@ -467,7 +500,9 @@ const readReverbParams = (value: JsonValue): SharedReverbParams | null => {
     diffusionHighCutHz: readOptionalNumber(value.diffusionHighCutHz),
     stereoWidth: readOptionalNumber(value.stereoWidth),
   }
+
   if (params.wet === undefined || params.decaySec === undefined || params.preDelayMs === undefined) return null
+
   return {
     ...params,
     enabled: value.enabled,
@@ -479,6 +514,7 @@ const readReverbParams = (value: JsonValue): SharedReverbParams | null => {
 
 const readCompressorParams = (value: JsonValue): CompressorParams | null => {
   if (!isJsonObject(value) || !isJsonBoolean(value.enabled)) return null
+
   if (
     !isJsonNumber(value.thresholdDb)
     || !isJsonNumber(value.ratio)
@@ -499,6 +535,7 @@ const readCompressorParams = (value: JsonValue): CompressorParams | null => {
     || !isJsonNumber(value.sidechain.frequencyHz)
     || !isJsonNumber(value.sidechain.q)
   ) return null
+
   const params: CompressorParamsInput = {
     enabled: value.enabled,
     thresholdDb: value.thresholdDb,
@@ -521,11 +558,13 @@ const readCompressorParams = (value: JsonValue): CompressorParams | null => {
       q: value.sidechain.q,
     },
   }
+
   return normalizeCompressorParams(params)
 }
 
 const readSaturatorParams = (value: JsonValue): SaturatorParams | null => {
   if (!isJsonObject(value) || !isJsonBoolean(value.enabled)) return null
+
   if (
     !isJsonNumber(value.driveDb)
     || !isSaturatorCurve(value.curve)
@@ -535,6 +574,7 @@ const readSaturatorParams = (value: JsonValue): SaturatorParams | null => {
     || !isJsonNumber(value.outputDb)
     || !isJsonNumber(value.dryWet)
   ) return null
+
   const params: SaturatorParamsInput = {
     enabled: value.enabled,
     driveDb: value.driveDb,
@@ -545,11 +585,13 @@ const readSaturatorParams = (value: JsonValue): SaturatorParams | null => {
     outputDb: value.outputDb,
     dryWet: value.dryWet,
   }
+
   return normalizeSaturatorParams(params)
 }
 
 const readDelayParams = (value: JsonValue): DelayParams | null => {
   if (!isJsonObject(value) || !isJsonBoolean(value.enabled)) return null
+
   if (
     !isDelayMode(value.mode)
     || !isJsonNumber(value.timeMs)
@@ -561,6 +603,7 @@ const readDelayParams = (value: JsonValue): DelayParams | null => {
     || !isJsonNumber(value.lowCutHz)
     || !isJsonNumber(value.highCutHz)
   ) return null
+
   const params: DelayParamsInput = {
     enabled: value.enabled,
     mode: value.mode,
@@ -573,6 +616,7 @@ const readDelayParams = (value: JsonValue): DelayParams | null => {
     lowCutHz: value.lowCutHz,
     highCutHz: value.highCutHz,
   }
+
   return normalizeDelayParams(params)
 }
 
@@ -590,7 +634,9 @@ const readArpeggiatorParams = (value: JsonValue): ArpeggiatorParams | null => {
   if (!isJsonObject(value)) return null
   const pattern = readArpPattern(value.pattern)
   const rate = readArpRate(value.rate)
+
   if (!pattern || !rate || !isJsonBoolean(value.enabled) || !isJsonNumber(value.octaves) || !isJsonNumber(value.gate) || !isJsonBoolean(value.hold)) return null
+
   return { enabled: value.enabled, pattern, rate, octaves: value.octaves, gate: value.gate, hold: value.hold }
 }
 
@@ -601,21 +647,28 @@ const readTrackIdTargets = (payload: JsonValue) => isJsonObject(payload) && isJs
 const readRoutingTargets = (payload: JsonValue) => {
   if (!isJsonObject(payload) || !isJsonString(payload.trackId) || !isJsonObject(payload.routing)) return emptyTargets()
   const targets = trackTargets(payload.trackId)
+
   if (isJsonString(payload.routing.outputTargetId)) targets.trackIds.add(payload.routing.outputTargetId)
+
   for (const send of readSends(payload.routing.sends) ?? []) targets.trackIds.add(send.targetId)
+
   return targets
 }
 
 const readTrackGroupTargets = (payload: JsonValue) => {
   if (!isJsonObject(payload) || !isJsonString(payload.trackId)) return emptyTargets()
   const targets = trackTargets(payload.trackId)
+
   if (isJsonString(payload.groupId)) targets.trackIds.add(payload.groupId)
+
   return targets
 }
 
 const parseTrackCreate = (payload: JsonObject): SharedTimelineOperation | null => {
   const color = normalizeTrackColor(readOptionalString(payload.color))
+
   if (payload.color !== undefined && !color) return null
+
   return {
     kind: 'tracks.create',
     payload: {
@@ -640,30 +693,39 @@ const parseTrackUnlock = (payload: JsonObject): SharedTimelineOperation | null =
 
 const parseClipCreate = (payload: JsonObject): SharedTimelineOperation | null => {
   const clipPayload = readSharedTimelineClipCreatePayload(payload)
+
   return clipPayload ? { kind: 'clips.create', payload: clipPayload } : null
 }
 
 const parseDurableClipCreate = (payload: JsonObject): SharedTimelineOperation | null => {
   const clipPayload = readSharedTimelineClipCreatePayload(payload, { durable: true })
+
   return clipPayload ? { kind: 'clips.create', payload: clipPayload } : null
 }
 
 const parseClipCreateMany = (payload: JsonObject): SharedTimelineOperation | null => {
   if (!Array.isArray(payload.items)) return null
+
   const items = payload.items.flatMap((item) => {
     const clipPayload = readSharedTimelineClipCreatePayload(item)
+
     return clipPayload ? [clipPayload] : []
   })
+
   return items.length === payload.items.length
     ? { kind: 'clips.createMany', payload: { items, operationId: readOptionalString(payload.operationId) } }
     : null
 }
+
 const parseDurableClipCreateMany = (payload: JsonObject): SharedTimelineOperation | null => {
   if (!Array.isArray(payload.items)) return null
+
   const items = payload.items.flatMap((item) => {
     const clipPayload = readSharedTimelineClipCreatePayload(item, { durable: true })
+
     return clipPayload ? [clipPayload] : []
   })
+
   return items.length === payload.items.length
     ? { kind: 'clips.createMany', payload: { items, operationId: readOptionalString(payload.operationId) } }
     : null
@@ -672,6 +734,7 @@ const parseDurableClipCreateMany = (payload: JsonObject): SharedTimelineOperatio
 const parseClipRemoveMany = (payload: JsonObject): SharedTimelineOperation | null => {
   const clipIds = readStringArray(payload.clipIds)
   const operationId = readOptionalString(payload.operationId)
+
   return clipIds.length > 0 && operationId
     ? { kind: 'clips.removeMany', payload: { clipIds, operationId } }
     : null
@@ -679,6 +742,7 @@ const parseClipRemoveMany = (payload: JsonObject): SharedTimelineOperation | nul
 
 const parseClipMoveMany = (payload: JsonObject): SharedTimelineOperation | null => {
   const moves = readMoves(payload.moves)
+
   return moves.length > 0 ? { kind: 'clips.moveMany', payload: { moves } } : null
 }
 
@@ -688,6 +752,7 @@ const readClipTimingPayload = (payload: JsonObject) => {
     || !isJsonNumber(payload.startSec)
     || !isJsonNumber(payload.duration)
   ) return null
+
   return {
     clipId: payload.clipId,
     ...normalizeClipTimingPatch({
@@ -703,13 +768,16 @@ const readClipTimingPayload = (payload: JsonObject) => {
 
 const parseClipTiming = (payload: JsonObject): SharedTimelineOperation | null => {
   const timing = readClipTimingPayload(payload)
+
   return timing ? { kind: 'clips.setTiming', payload: timing } : null
 }
 
 const parseClipTimingAndAudioWarp = (payload: JsonObject): SharedTimelineOperation | null => {
   const timing = readClipTimingPayload(payload)
+
   if (!timing) return null
   const audioWarp = readAudioWarp(payload.audioWarp)
+
   return {
     kind: 'clips.setTimingAndAudioWarp',
     payload: audioWarp ? { ...timing, audioWarp } : timing,
@@ -718,6 +786,7 @@ const parseClipTimingAndAudioWarp = (payload: JsonObject): SharedTimelineOperati
 
 const parseClipAudioWarp = (payload: JsonObject): SharedTimelineOperation | null => {
   const audioWarp = readAudioWarp(payload.audioWarp)
+
   return isJsonString(payload.clipId) && audioWarp
     ? { kind: 'clips.setAudioWarp', payload: { clipId: payload.clipId, audioWarp } }
     : null
@@ -731,6 +800,7 @@ const parseClipGain = (payload: JsonObject): SharedTimelineOperation | null => (
 
 const parseClipFades = (payload: JsonObject): SharedTimelineOperation | null => {
   const fades = readClipFades(payload.fades)
+
   return isJsonString(payload.clipId) && fades
     ? { kind: 'clips.setFades', payload: { clipId: payload.clipId, fades } }
     : null
@@ -738,6 +808,7 @@ const parseClipFades = (payload: JsonObject): SharedTimelineOperation | null => 
 
 const parseClipColor = (payload: JsonObject): SharedTimelineOperation | null => {
   const color = normalizeClipColor(readOptionalString(payload.color))
+
   return isJsonString(payload.clipId) && color
     ? { kind: 'clips.setColor', payload: { clipId: payload.clipId, color } }
     : null
@@ -752,11 +823,13 @@ const parseClipMidi = (payload: JsonObject): SharedTimelineOperation | null => {
     || Object.keys(payload).some((key) => key !== 'clipId' && key !== 'midi' && key !== 'operationId')
   ) return null
   let midi: MidiClip
+
   try {
     midi = normalizeMidiClip(payload.midi)
   } catch {
     return null
   }
+
   return {
     kind: 'clips.setMidi',
     payload: {
@@ -777,6 +850,7 @@ const parseClipMidiAndTiming = (payload: JsonObject): SharedTimelineOperation | 
     || !isJsonObject(payload.midi)
     || Object.keys(payload).some((key) => !['clipId', 'startSec', 'duration', 'midi', 'operationId'].includes(key))
   ) return null
+
   try {
     return {
       kind: 'clips.setMidiAndTiming',
@@ -795,6 +869,7 @@ const parseClipMidiAndTiming = (payload: JsonObject): SharedTimelineOperation | 
 
 const parseTrackRouting = (payload: JsonObject): SharedTimelineOperation | null => {
   if (!isJsonString(payload.trackId) || !isJsonObject(payload.routing)) return null
+
   return {
     kind: 'tracks.setRouting',
     payload: {
@@ -842,8 +917,10 @@ const parseTrackGroup = (payload: JsonObject): SharedTimelineOperation | null =>
 
 const parseTrackReorderAndGroup = (payload: JsonObject): SharedTimelineOperation | null => {
   if (!Array.isArray(payload.updates)) return null
+
   const updates = payload.updates.flatMap((update) => {
     if (!isJsonObject(update) || !isJsonString(update.trackId) || !isJsonNumber(update.index)) return []
+
     return [{
       trackId: update.trackId,
       index: update.index,
@@ -851,6 +928,7 @@ const parseTrackReorderAndGroup = (payload: JsonObject): SharedTimelineOperation
       outputTargetId: isJsonString(update.outputTargetId) || update.outputTargetId === null ? update.outputTargetId : undefined,
     }]
   })
+
   return updates.length === payload.updates.length
     ? { kind: 'tracks.reorderAndGroup', payload: { updates } }
     : null
@@ -865,8 +943,10 @@ const isUngroupRestoreEffectType = (value: JsonValue): value is SharedUngroupRes
 
 const readAutomationPoints = (parameterId: string, value: JsonValue): AutomationPoint[] | null => {
   const descriptor = getAutomationParameterDescriptor(parameterId)
+
   if (!descriptor || !Array.isArray(value)) return null
   const points: AutomationPoint[] = []
+
   for (const point of value) {
     if (
       isJsonObject(point)
@@ -882,6 +962,7 @@ const readAutomationPoints = (parameterId: string, value: JsonValue): Automation
       })
     }
   }
+
   return normalizeAutomationPoints(points, descriptor)
 }
 
@@ -889,13 +970,18 @@ export const normalizeSharedUngroupRestoreEffects = (value: JsonValue): SharedUn
   if (!Array.isArray(value)) return null
   const effects: SharedUngroupRestoreEffect[] = []
   const effectKeys = new Set<string>()
+
   for (const effect of value) {
     if (!isJsonObject(effect) || !isUngroupRestoreEffectType(effect.type) || !('params' in effect)) return null
+
     if (effect.instanceId !== undefined && (!isJsonString(effect.instanceId) || effect.instanceId.length === 0)) return null
+
     if (effect.index !== undefined && (!isJsonNumber(effect.index) || !Number.isInteger(effect.index) || effect.index < 0)) return null
     const instanceId = isJsonString(effect.instanceId) ? effect.instanceId : undefined
     const index = isJsonNumber(effect.index) ? effect.index : undefined
+
     if (!isAudioEffectKind(effect.type) && (instanceId !== undefined || index !== undefined)) return null
+
     const params = (() => {
       switch (effect.type) {
         case 'utility':
@@ -934,8 +1020,10 @@ export const normalizeSharedUngroupRestoreEffects = (value: JsonValue): SharedUn
           return readArpeggiatorParams(effect.params)
       }
     })()
+
     if (!params) return null
     const effectKey = `${effect.type}:${instanceId ?? ''}`
+
     if (effectKeys.has(effectKey)) return null
     effectKeys.add(effectKey)
     effects.push({
@@ -945,6 +1033,7 @@ export const normalizeSharedUngroupRestoreEffects = (value: JsonValue): SharedUn
       params,
     })
   }
+
   return effects
 }
 
@@ -952,18 +1041,24 @@ export const normalizeSharedUngroupRestoreAutomation = (value: JsonValue): Share
   if (!Array.isArray(value)) return null
   const automation: SharedUngroupRestoreAutomation[] = []
   const targetKeys = new Set<string>()
+
   for (const envelope of value) {
     if (!isJsonObject(envelope) || !isJsonString(envelope.parameterId) || !isJsonBoolean(envelope.enabled) || !isJsonNumber(envelope.updatedAt) || !Array.isArray(envelope.points)) return null
+
     if (!isAutomationParameterSupportedForTarget(envelope.parameterId, 'track')) return null
+
     if (envelope.effectInstanceId !== undefined && (!isJsonString(envelope.effectInstanceId) || envelope.effectInstanceId.length === 0)) return null
     const points = readAutomationPoints(envelope.parameterId, envelope.points)
+
     if (!points) return null
     const effectInstanceId = isJsonString(envelope.effectInstanceId) ? envelope.effectInstanceId : undefined
     const targetKey = automationTargetKey({ kind: 'track', trackId: 'restore-group', effectInstanceId }, envelope.parameterId)
+
     if (targetKeys.has(targetKey)) return null
     targetKeys.add(targetKey)
     automation.push({ effectInstanceId, parameterId: envelope.parameterId, enabled: envelope.enabled, points, updatedAt: envelope.updatedAt })
   }
+
   return automation
 }
 
@@ -976,33 +1071,49 @@ const parseTrackUngroup = (payload: JsonObject): SharedTimelineOperation | null 
 const parseTrackRestoreUngroup = (payload: JsonObject): SharedTimelineOperation | null => {
   if (!isJsonObject(payload.group) || !Array.isArray(payload.children)) return null
   const group = payload.group
+
   if (!isJsonNumber(group.index) || !isJsonNumber(group.volume) || !Array.isArray(group.sends)) return null
+
   if (group.kind !== undefined && !isJsonString(group.kind)) return null
+
   if (group.name !== undefined && !isJsonString(group.name)) return null
+
   if (group.historyRef !== undefined && !isJsonString(group.historyRef)) return null
+
   if (group.parentGroupId !== undefined && !isJsonString(group.parentGroupId)) return null
+
   if (group.collapsed !== undefined && !isJsonBoolean(group.collapsed)) return null
+
   if (group.color !== undefined && (!isJsonString(group.color) || !normalizeTrackColor(group.color))) return null
+
   if (group.muted !== undefined && !isJsonBoolean(group.muted)) return null
+
   if (group.soloed !== undefined && !isJsonBoolean(group.soloed)) return null
+
   if (group.outputTargetId !== undefined && !isJsonString(group.outputTargetId)) return null
+
   const sends = group.sends.flatMap((send) => (
     isJsonObject(send) && isJsonString(send.targetId) && isJsonNumber(send.amount)
       && (send.tap === undefined || send.tap === 'pre-fx' || send.tap === 'pre-fader' || send.tap === 'post-fader')
       ? [{ targetId: send.targetId, amount: send.amount, tap: send.tap }]
       : []
   ))
+
   if (sends.length !== group.sends.length) return null
+
   const children = payload.children.flatMap((child) => (
     isJsonObject(child) && isJsonString(child.trackId) && isJsonBoolean(child.outputToGroup) && (child.outputTargetId === undefined || isJsonString(child.outputTargetId))
       ? [{ trackId: child.trackId, outputTargetId: isJsonString(child.outputTargetId) ? child.outputTargetId : undefined, outputToGroup: child.outputToGroup }]
       : []
   ))
+
   if (children.length !== payload.children.length) return null
   const effects = normalizeSharedUngroupRestoreEffects(payload.effects)
   const automation = normalizeSharedUngroupRestoreAutomation(payload.automation)
+
   if (!effects || !automation || (payload.sidechainRoutes !== undefined && !Array.isArray(payload.sidechainRoutes))) return null
   const sidechainRouteInput = Array.isArray(payload.sidechainRoutes) ? payload.sidechainRoutes : []
+
   const sidechainRoutes = sidechainRouteInput.flatMap((route) => (
     isJsonObject(route)
     && (route.sourceTrackId === undefined || isJsonString(route.sourceTrackId))
@@ -1016,7 +1127,9 @@ const parseTrackRestoreUngroup = (payload: JsonObject): SharedTimelineOperation 
         }]
       : []
   ))
+
   if (sidechainRoutes.length !== sidechainRouteInput.length) return null
+
   return {
     kind: 'tracks.restoreUngroup',
     payload: {
@@ -1072,17 +1185,20 @@ const parseTrackColorCascade = (payload: JsonObject): SharedTimelineOperation | 
 
 const parseTrackColorBatch = (payload: JsonObject): SharedTimelineOperation | null => {
   if (!Array.isArray(payload.trackUpdates) || !Array.isArray(payload.clipUpdates)) return null
+
   const trackUpdates = payload.trackUpdates.flatMap((update) => (
     isJsonObject(update) && isJsonString(update.trackId)
       && (update.color === null || update.color === undefined || normalizeTrackColor(readOptionalString(update.color)))
       ? [{ trackId: update.trackId, color: update.color === null ? null : normalizeTrackColor(readOptionalString(update.color)) }]
       : []
   ))
+
   const clipUpdates = payload.clipUpdates.flatMap((update) => (
     isJsonObject(update) && isJsonString(update.clipId) && isJsonString(update.color) && normalizeClipColor(update.color)
       ? [{ clipId: update.clipId, color: update.color }]
       : []
   ))
+
   return trackUpdates.length === payload.trackUpdates.length && clipUpdates.length === payload.clipUpdates.length
     ? { kind: 'tracks.applyColorBatch', payload: { trackUpdates, clipUpdates } }
     : null
@@ -1116,6 +1232,7 @@ const parseMasterVolume = (payload: JsonObject): SharedTimelineOperation | null 
 const parseTrackEq = (payload: JsonObject): SharedTimelineOperation | null => {
   const params = readEqParams(payload.params)
   const identity = params ? effectPayload(params, payload) : null
+
   return isJsonString(payload.trackId) && identity ? { kind: 'effects.setEqParams', payload: { trackId: payload.trackId, ...identity } } : null
 }
 
@@ -1126,7 +1243,9 @@ const parseTrackProcessor = (
 ): SharedTimelineOperation | null => {
   const params = readProcessorEnvelope(kind, payload.params)
   const instanceId = readRequiredInstanceId(payload.instanceId)
+
   if (!isJsonString(payload.trackId) || !params || !instanceId) return null
+
   return operationKind === 'effects.setUtilityParams'
     ? { kind: operationKind, payload: { trackId: payload.trackId, instanceId, params: AUDIO_EFFECT_CONTRACTS.utility.normalizeParams(params) } }
     : operationKind === 'effects.setGateParams'
@@ -1140,59 +1259,81 @@ const parseModulationEffect = (
 ): SharedTimelineOperation | null => {
   const instanceId = readRequiredInstanceId(payload.instanceId)
   const envelope = readModulationEnvelope(payload.effect, payload.params)
+
   if (!instanceId || !envelope) return null
+
   if (target === 'track') {
     if (!isJsonString(payload.trackId)) return null
+
     if (envelope.effect === 'autofilter') return { kind: 'effects.setModulationParams', payload: { ...envelope, instanceId, trackId: payload.trackId } }
+
     if (envelope.effect === 'chorus') return { kind: 'effects.setModulationParams', payload: { ...envelope, instanceId, trackId: payload.trackId } }
+
     if (envelope.effect === 'flanger') return { kind: 'effects.setModulationParams', payload: { ...envelope, instanceId, trackId: payload.trackId } }
+
     if (envelope.effect === 'phaser') return { kind: 'effects.setModulationParams', payload: { ...envelope, instanceId, trackId: payload.trackId } }
+
     if (envelope.effect === 'tremolo') return { kind: 'effects.setModulationParams', payload: { ...envelope, instanceId, trackId: payload.trackId } }
+
     if (envelope.effect === 'autopan') return { kind: 'effects.setModulationParams', payload: { ...envelope, instanceId, trackId: payload.trackId } }
+
     return { kind: 'effects.setModulationParams', payload: { ...envelope, instanceId, trackId: payload.trackId } }
   }
+
   if (envelope.effect === 'autofilter') return { kind: 'effects.setMasterModulationParams', payload: { ...envelope, instanceId } }
+
   if (envelope.effect === 'chorus') return { kind: 'effects.setMasterModulationParams', payload: { ...envelope, instanceId } }
+
   if (envelope.effect === 'flanger') return { kind: 'effects.setMasterModulationParams', payload: { ...envelope, instanceId } }
+
   if (envelope.effect === 'phaser') return { kind: 'effects.setMasterModulationParams', payload: { ...envelope, instanceId } }
+
   if (envelope.effect === 'tremolo') return { kind: 'effects.setMasterModulationParams', payload: { ...envelope, instanceId } }
+
   if (envelope.effect === 'autopan') return { kind: 'effects.setMasterModulationParams', payload: { ...envelope, instanceId } }
+
   return { kind: 'effects.setMasterModulationParams', payload: { ...envelope, instanceId } }
 }
 
 const parseTrackReverb = (payload: JsonObject): SharedTimelineOperation | null => {
   const params = readReverbParams(payload.params)
   const identity = params ? effectPayload(params, payload) : null
+
   return isJsonString(payload.trackId) && identity ? { kind: 'effects.setReverbParams', payload: { trackId: payload.trackId, ...identity } } : null
 }
 
 const parseTrackCompressor = (payload: JsonObject): SharedTimelineOperation | null => {
   const params = readCompressorParams(payload.params)
   const identity = params ? effectPayload(params, payload) : null
+
   return isJsonString(payload.trackId) && identity ? { kind: 'effects.setCompressorParams', payload: { trackId: payload.trackId, ...identity } } : null
 }
 
 const parseTrackSaturator = (payload: JsonObject): SharedTimelineOperation | null => {
   const params = readSaturatorParams(payload.params)
   const identity = params ? effectPayload(params, payload) : null
+
   return isJsonString(payload.trackId) && identity ? { kind: 'effects.setSaturatorParams', payload: { trackId: payload.trackId, ...identity } } : null
 }
 
 const parseTrackDelay = (payload: JsonObject): SharedTimelineOperation | null => {
   const params = readDelayParams(payload.params)
   const identity = params ? effectPayload(params, payload) : null
+
   return isJsonString(payload.trackId) && identity ? { kind: 'effects.setDelayParams', payload: { trackId: payload.trackId, ...identity } } : null
 }
 
 const parseSpectralParams = (value: JsonValue): SpectralParamsEnvelope | null => {
   if (!isJsonObject(value)) return null
   const normalized = normalizeSpectralParamsEnvelope(value)
+
   return value.version === 1 && isJsonObject(value.state) ? normalized : null
 }
 
 const parseTrackSpectral = (payload: JsonObject): SharedTimelineOperation | null => {
   const params = parseSpectralParams(payload.params)
   const instanceId = readRequiredInstanceId(payload.instanceId)
+
   return isJsonString(payload.trackId) && params && instanceId
     ? { kind: 'effects.setSpectralParams', payload: { trackId: payload.trackId, params, instanceId } }
     : null
@@ -1200,24 +1341,31 @@ const parseTrackSpectral = (payload: JsonObject): SharedTimelineOperation | null
 
 const parseTrackAudioChainReorder = (payload: JsonObject): SharedTimelineOperation | null => {
   const order = readAudioEffectOrder(payload.order)
+
   return isJsonString(payload.trackId) && order ? { kind: 'effects.reorderAudioChain', payload: { trackId: payload.trackId, order } } : null
 }
 
 const parseRestoreEffectChain = (payload: JsonObject): SharedTimelineOperation | null => {
   if (!isJsonString(payload.trackId) || !isJsonString(payload.operationId) || payload.operationId.length === 0 || !Array.isArray(payload.audioEffects)) return null
+
   const restored = normalizeSharedUngroupRestoreEffects(payload.audioEffects.map((effect) => (
     isJsonObject(effect) ? { type: effect.kind, instanceId: effect.id, params: effect.params } : effect
   )))
+
   if (!restored || restored.length !== payload.audioEffects.length) return null
+
   const audioEffects = restored.flatMap((effect) => (
     isAudioEffectKind(effect.type) && effect.instanceId
       ? [{ id: effect.instanceId, kind: effect.type, params: effect.params }]
       : []
   ))
+
   if (audioEffects.length !== restored.length) return null
   const instrument = payload.instrument === undefined ? undefined : readTrackInstrumentParams(payload.instrument)
   const arpeggiator = payload.arpeggiator === undefined ? undefined : readArpeggiatorParams(payload.arpeggiator)
+
   if ((payload.instrument !== undefined && !instrument) || (payload.arpeggiator !== undefined && !arpeggiator)) return null
+
   return {
     kind: 'effects.restoreChain',
     payload: {
@@ -1233,19 +1381,24 @@ const parseRestoreEffectChain = (payload: JsonObject): SharedTimelineOperation |
 const parseRemoveAudioEffect = (payload: JsonObject): SharedTimelineOperation | null => {
   if (!isAudioEffectKind(payload.effect)) return null
   const instanceId = readRequiredInstanceId(payload.instanceId)
+
   if (!instanceId) return null
+
   if (payload.targetType === 'master') {
     return { kind: 'effects.removeAudioEffect', payload: { targetType: 'master', effect: payload.effect, instanceId } }
   }
+
   if (payload.targetType === 'track' && isJsonString(payload.trackId)) {
     return { kind: 'effects.removeAudioEffect', payload: { targetType: 'track', trackId: payload.trackId, effect: payload.effect, instanceId } }
   }
+
   return null
 }
 
 const parseTrackSynth = (payload: JsonObject): SharedTimelineOperation | null => {
   const params = readSynthParams(payload.params)
   const instanceId = readRequiredInstanceId(payload.instanceId)
+
   return isJsonString(payload.trackId) && params && instanceId
     ? { kind: 'effects.setSynthParams', payload: { trackId: payload.trackId, params, instanceId } }
     : null
@@ -1259,13 +1412,16 @@ const readTrackInstrumentParams = (value: JsonValue): TrackInstrumentParams | nu
     && value.instanceId
   ) {
     const params = readSynthParams(value.params)
+
     return params ? { kind: 'synth', instanceId: value.instanceId, params } : null
   }
+
   return normalizeTrackInstrumentParams(value) ?? null
 }
 
 const parseTrackInstrument = (payload: JsonObject): SharedTimelineOperation | null => {
   const instrument = readTrackInstrumentParams(payload.instrument)
+
   return isJsonString(payload.trackId) && instrument
     ? { kind: 'instruments.setTrackInstrument', payload: { trackId: payload.trackId, instrument } }
     : null
@@ -1285,12 +1441,14 @@ const parseTrackDeviceRemoval = (
 
 const parseTrackArpeggiator = (payload: JsonObject): SharedTimelineOperation | null => {
   const params = readArpeggiatorParams(payload.params)
+
   return isJsonString(payload.trackId) && params ? { kind: 'effects.setArpeggiatorParams', payload: { trackId: payload.trackId, params } } : null
 }
 
 const parseMasterEq = (payload: JsonObject): SharedTimelineOperation | null => {
   const params = readEqParams(payload.params)
   const identity = params ? effectPayload(params, payload) : null
+
   return identity ? { kind: 'effects.setMasterEqParams', payload: identity } : null
 }
 
@@ -1301,7 +1459,9 @@ const parseMasterProcessor = (
 ): SharedTimelineOperation | null => {
   const params = readProcessorEnvelope(kind, payload.params)
   const instanceId = readRequiredInstanceId(payload.instanceId)
+
   if (!params || !instanceId) return null
+
   return operationKind === 'effects.setMasterUtilityParams'
     ? { kind: operationKind, payload: { instanceId, params: AUDIO_EFFECT_CONTRACTS.utility.normalizeParams(params) } }
     : operationKind === 'effects.setMasterGateParams'
@@ -1312,30 +1472,35 @@ const parseMasterProcessor = (
 const parseMasterReverb = (payload: JsonObject): SharedTimelineOperation | null => {
   const params = readReverbParams(payload.params)
   const identity = params ? effectPayload(params, payload) : null
+
   return identity ? { kind: 'effects.setMasterReverbParams', payload: identity } : null
 }
 
 const parseMasterCompressor = (payload: JsonObject): SharedTimelineOperation | null => {
   const params = readCompressorParams(payload.params)
   const identity = params ? effectPayload(params, payload) : null
+
   return identity ? { kind: 'effects.setMasterCompressorParams', payload: identity } : null
 }
 
 const parseMasterSaturator = (payload: JsonObject): SharedTimelineOperation | null => {
   const params = readSaturatorParams(payload.params)
   const identity = params ? effectPayload(params, payload) : null
+
   return identity ? { kind: 'effects.setMasterSaturatorParams', payload: identity } : null
 }
 
 const parseMasterDelay = (payload: JsonObject): SharedTimelineOperation | null => {
   const params = readDelayParams(payload.params)
   const identity = params ? effectPayload(params, payload) : null
+
   return identity ? { kind: 'effects.setMasterDelayParams', payload: identity } : null
 }
 
 const parseMasterSpectral = (payload: JsonObject): SharedTimelineOperation | null => {
   const params = parseSpectralParams(payload.params)
   const instanceId = readRequiredInstanceId(payload.instanceId)
+
   return params && instanceId
     ? { kind: 'effects.setMasterSpectralParams', payload: { params, instanceId } }
     : null
@@ -1343,6 +1508,7 @@ const parseMasterSpectral = (payload: JsonObject): SharedTimelineOperation | nul
 
 const parseMasterAudioChainReorder = (payload: JsonObject): SharedTimelineOperation | null => {
   const order = readAudioEffectOrder(payload.order)
+
   return order ? { kind: 'effects.reorderMasterAudioChain', payload: { order } } : null
 }
 
@@ -1352,12 +1518,16 @@ const readAutomationTargetKind = (value: JsonValue): 'track' | 'master' | null =
 
 const parseAutomationSetEnvelope = (payload: JsonObject): SharedTimelineOperation | null => {
   const targetKind = readAutomationTargetKind(payload.targetKind)
+
   if (!targetKind || !isJsonString(payload.parameterId) || !isJsonBoolean(payload.enabled) || !isJsonNumber(payload.updatedAt)) return null
+
   if (targetKind === 'track' && !isJsonString(payload.trackId)) return null
   const trackId = targetKind === 'track' && isJsonString(payload.trackId) ? payload.trackId : undefined
   const effectInstanceId = isJsonString(payload.effectInstanceId) ? payload.effectInstanceId : undefined
+
   if (!isAutomationParameterSupportedForTarget(payload.parameterId, targetKind)) return null
   const points = readAutomationPoints(payload.parameterId, payload.points)
+
   return points ? {
     kind: 'automation.setEnvelope',
     payload: {
@@ -1374,11 +1544,15 @@ const parseAutomationSetEnvelope = (payload: JsonObject): SharedTimelineOperatio
 
 const parseAutomationDeleteEnvelope = (payload: JsonObject): SharedTimelineOperation | null => {
   const targetKind = readAutomationTargetKind(payload.targetKind)
+
   if (!targetKind || !isJsonString(payload.parameterId)) return null
+
   if (targetKind === 'track' && !isJsonString(payload.trackId)) return null
   const trackId = targetKind === 'track' && isJsonString(payload.trackId) ? payload.trackId : undefined
   const effectInstanceId = isJsonString(payload.effectInstanceId) ? payload.effectInstanceId : undefined
+
   if (!isAutomationParameterSupportedForTarget(payload.parameterId, targetKind)) return null
+
   return {
     kind: 'automation.deleteEnvelope',
     payload: {
@@ -1401,9 +1575,11 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
     targets: (payload) => {
       if (!isJsonObject(payload) || !Array.isArray(payload.items)) return emptyTargets()
       const targets = emptyTargets()
+
       for (const item of payload.items) {
         if (isJsonObject(item) && isJsonString(item.trackId)) targets.trackIds.add(item.trackId)
       }
+
       return targets
     },
     durableQueue: true,
@@ -1420,10 +1596,12 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
     targets: (payload) => {
       if (!isJsonObject(payload)) return emptyTargets()
       const targets = emptyTargets()
+
       for (const move of readMoves(payload.moves)) {
         targets.trackIds.add(move.trackId)
         targets.clipIds.add(move.clipId)
       }
+
       return targets
     },
     durableQueue: true,
@@ -1468,8 +1646,11 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
     targets: (payload) => {
       if (!isJsonObject(payload)) return emptyTargets()
       const trackIds = new Set<string>()
+
       if (isJsonString(payload.sourceTrackId)) trackIds.add(payload.sourceTrackId)
+
       if (isJsonString(payload.targetTrackId)) trackIds.add(payload.targetTrackId)
+
       return { trackIds, clipIds: new Set() }
     },
     durableQueue: true,
@@ -1479,6 +1660,7 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
     parse: parseSidechainRemoval,
     targets: (payload) => {
       if (!isJsonObject(payload) || !isJsonString(payload.targetTrackId)) return emptyTargets()
+
       return { trackIds: new Set([payload.targetTrackId]), clipIds: new Set() }
     },
     durableQueue: true,
@@ -1490,19 +1672,29 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
     if (!isJsonObject(payload) || !isJsonObject(payload.group) || !Array.isArray(payload.children)) return emptyTargets()
     const targets = emptyTargets()
     const group = payload.group
+
     if (isJsonString(group.parentGroupId)) targets.trackIds.add(group.parentGroupId)
+
     if (isJsonString(group.outputTargetId)) targets.trackIds.add(group.outputTargetId)
+
     if (Array.isArray(group.sends)) for (const send of group.sends) if (isJsonObject(send) && isJsonString(send.targetId)) targets.trackIds.add(send.targetId)
+
     for (const child of payload.children) {
       if (!isJsonObject(child)) continue
+
       if (isJsonString(child.trackId)) targets.trackIds.add(child.trackId)
+
       if (isJsonString(child.outputTargetId)) targets.trackIds.add(child.outputTargetId)
     }
+
     if (Array.isArray(payload.sidechainRoutes)) for (const route of payload.sidechainRoutes) {
       if (!isJsonObject(route)) continue
+
       if (isJsonString(route.sourceTrackId)) targets.trackIds.add(route.sourceTrackId)
+
       if (isJsonString(route.targetTrackId)) targets.trackIds.add(route.targetTrackId)
     }
+
     return targets
   }, durableQueue: true },
   { kind: 'tracks.setCollapsed', parse: parseTrackCollapsed, targets: readTrackIdTargets, durableQueue: true },
@@ -1511,8 +1703,11 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   { kind: 'tracks.applyColorBatch', parse: parseTrackColorBatch, targets: (payload) => {
     if (!isJsonObject(payload) || !Array.isArray(payload.trackUpdates) || !Array.isArray(payload.clipUpdates)) return emptyTargets()
     const targets = emptyTargets()
+
     for (const update of payload.trackUpdates) if (isJsonObject(update) && isJsonString(update.trackId)) targets.trackIds.add(update.trackId)
+
     for (const update of payload.clipUpdates) if (isJsonObject(update) && isJsonString(update.clipId)) targets.clipIds.add(update.clipId)
+
     return targets
   }, durableQueue: true },
   { kind: 'tracks.setVolume', parse: parseTrackVolume, targets: readTrackIdTargets, durableQueue: true },
@@ -1578,13 +1773,17 @@ export const readSharedTimelineOperationTargets = (operation: SharedTimelineOper
 
 export const parseSharedTimelineOperation = (value: JsonValue): SharedTimelineOperation | null => {
   if (!isJsonObject(value) || !isJsonObject(value.payload)) return null
+
   return findSharedTimelineOperationDescriptor(value.kind)?.parse(value.payload) ?? null
 }
 
 /** Parses only operations loaded from the durable local outbox. */
 export const parseDurableSharedTimelineOperation = (value: JsonValue): SharedTimelineOperation | null => {
   if (!isJsonObject(value) || !isJsonObject(value.payload)) return null
+
   if (value.kind === 'clips.create') return parseDurableClipCreate(value.payload)
+
   if (value.kind === 'clips.createMany') return parseDurableClipCreateMany(value.payload)
+
   return findSharedTimelineOperationDescriptor(value.kind)?.parse(value.payload) ?? null
 }

@@ -2,6 +2,7 @@ import { clamp } from './numeric'
 import { isJsonBoolean, isJsonNumber, isJsonObject, type JsonObject, type JsonValue } from './json-value'
 
 export const SYNTH_STATE_VERSION = 2
+
 export const SYNTH_PARAMETER_LIMITS = {
   envelopeSeconds: { min: 0, max: 60 },
   sustain: { min: 0, max: 1 },
@@ -25,6 +26,7 @@ export const SYNTH_PARAMETER_LIMITS = {
 }
 
 export type SynthWave = 'sine' | 'square' | 'sawtooth' | 'triangle'
+
 export type SynthFilterMode = 'lowpass' | 'highpass' | 'bandpass' | 'notch'
 
 export type SynthOscillatorParams = {
@@ -112,10 +114,13 @@ const finiteNumber = (value: JsonValue | undefined) => (
 
 const integer = (value: JsonValue | undefined, fallback: number, min: number, max: number) => {
   const number = finiteNumber(value)
+
   return number === undefined ? fallback : clamp(Math.round(number), min, max)
 }
+
 const number = (value: JsonValue | undefined, fallback: number, min: number, max: number) => {
   const input = finiteNumber(value)
+
   return input === undefined ? fallback : clamp(input, min, max)
 }
 
@@ -157,6 +162,7 @@ export const createDefaultSynthParams = (): SynthParams => ({
 
 const normalizeEnvelope = (input: JsonValue | undefined, defaults: SynthEnvelopeParams): SynthEnvelopeParams => {
   const value = isJsonObject(input) ? input : {}
+
   return {
     attackSec: number(value.attackSec, defaults.attackSec, SYNTH_PARAMETER_LIMITS.envelopeSeconds.min, SYNTH_PARAMETER_LIMITS.envelopeSeconds.max),
     decaySec: number(value.decaySec, defaults.decaySec, SYNTH_PARAMETER_LIMITS.envelopeSeconds.min, SYNTH_PARAMETER_LIMITS.envelopeSeconds.max),
@@ -167,6 +173,7 @@ const normalizeEnvelope = (input: JsonValue | undefined, defaults: SynthEnvelope
 
 const normalizeOscillator = (input: JsonValue | undefined, defaults: SynthOscillatorParams): SynthOscillatorParams => {
   const value = isJsonObject(input) ? input : {}
+
   return {
     enabled: isJsonBoolean(value.enabled) ? value.enabled : defaults.enabled,
     wave: isSynthWave(value.wave) ? value.wave : defaults.wave,
@@ -183,6 +190,7 @@ const normalizeV2SynthParams = (input: JsonObject): SynthParams => {
   const filterInput = isJsonObject(input.filter) ? input.filter : {}
   const lfoInput = isJsonObject(input.lfo) ? input.lfo : {}
   const noiseInput = isJsonObject(input.noise) ? input.noise : {}
+
   return {
     version: SYNTH_STATE_VERSION,
     oscillators: [
@@ -293,6 +301,7 @@ export const parseStrictSynthParams = (input: JsonValue): SynthParams | undefine
 
 export const migrateLegacySynthParams = (legacy: LegacySynthParams): SynthParams => {
   const defaults = createDefaultSynthParams()
+
   return normalizeV2SynthParams({
     ...defaults,
     oscillators: [
@@ -312,6 +321,7 @@ export const migrateLegacySynthParams = (legacy: LegacySynthParams): SynthParams
 
 export const normalizeSynthParams = (input: SynthParamsInput): SynthParams => {
   if (!isJsonObject(input)) return createDefaultSynthParams()
+
   if (isLegacySynthParams(input)) {
     return migrateLegacySynthParams({
       wave1: isSynthWave(input.wave1) ? input.wave1 : undefined,
@@ -321,11 +331,13 @@ export const normalizeSynthParams = (input: SynthParamsInput): SynthParams => {
       releaseMs: finiteNumber(input.releaseMs),
     })
   }
+
   return normalizeV2SynthParams(input)
 }
 
 export const mergeSynthParams = (current: SynthParams, update: SynthParamsUpdate): SynthParams => {
   const base = normalizeSynthParams(current)
+
   return normalizeV2SynthParams({
     ...base,
     oscillators: [

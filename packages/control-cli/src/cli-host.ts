@@ -23,15 +23,18 @@ export { DesktopControlError, DesktopHostError, HostTargetUnavailableError } fro
 
 const audioExtension = (value: string) => [".wav", ".mp3", ".ogg", ".flac", ".m4a", ".webm"].includes(path.extname(value).toLowerCase())
 const absoluteAudioPath = (value: string) => path.isAbsolute(value) && path.normalize(value) === value && audioExtension(value)
+
 const validateHostExportInput = (input: Parameters<typeof desktopHostExportRunInputSchemaV1.parse>[0]) => {
   const parsed = desktopHostExportRunInputSchemaV1.parse(input)
   const destination = parsed.destination
+
   if ((destination.kind === "file" || destination.kind === "directory")
     && (!path.isAbsolute(destination.path)
       || path.normalize(destination.path) !== destination.path
       || (destination.kind === "file" && !audioExtension(destination.path)))) {
     throw new Error("Invalid host export media path.")
   }
+
   return parsed
 }
 
@@ -41,6 +44,7 @@ export const requestHostControl = async <Operation extends DesktopControlOperati
 ) => {
   try {
     const client = await createAvailableDesktopHostClient(cliDesktopControlOptions())
+
     try {
       return await client.request(operation, JSON.parse(JSON.stringify(input)))
     } finally {
@@ -58,6 +62,7 @@ export const requestHostControlV2 = async <Operation extends "control.capabiliti
 ) => {
   try {
     const client = await createAvailableDesktopHostClient(cliDesktopControlOptions())
+
     try {
       return await client.requestV2(operation, JSON.parse(JSON.stringify(input)))
     } finally {
@@ -71,52 +76,72 @@ export const requestHostControlV2 = async <Operation extends "control.capabiliti
 
 export const runHostCommand = async (arguments_: string[], io: CliIo) => {
   const [action, value, ...extra] = arguments_
+
   if (!action) throw new Error("Invalid host command.")
+
   if (action === "vst-instances" || action === "vst-parameters") {
     if ((action === "vst-instances" && arguments_.length !== 2)
       || (action === "vst-parameters" && arguments_.length !== 3)) throw new Error("Invalid host VST read command.")
+
     const input = action === "vst-instances"
       ? desktopHostVstInstancesInputSchemaV1.parse({ projectId: value })
       : desktopHostVstParametersInputSchemaV1.parse({ projectId: value, instanceId: extra[0] })
+
     const client = await createAvailableDesktopHostClient(cliDesktopControlOptions())
+
     try {
       const data = action === "vst-instances"
         ? await client.request("host.vst.instances", input)
         : await client.request("host.vst.parameters", input)
+
       io.stdout(canonicalJson({ version: "v1", ok: true, command: `host ${action}`, data }))
+
       return 0
     } finally { client.close() }
   }
+
   if (action === "import") {
     const pathValue = option(arguments_.slice(1), "--path")
     const picker = arguments_.length === 2 && arguments_[1] === "--picker"
+
     if ((!pathValue && !picker) || (pathValue && arguments_.length !== 3) || (picker && arguments_.length !== 2)) throw new Error("host import requires exactly one of --path <absolute-path> or --picker.")
+
     if (pathValue && !absoluteAudioPath(pathValue)) throw new Error("host import requires an absolute supported audio path.")
+
     const input = desktopHostImportInputSchemaV1.parse({
       source: picker ? { kind: "picker" } : { kind: "path", path: pathValue },
     })
+
     const client = await createAvailableDesktopHostClient(cliDesktopControlOptions())
+
     try {
       const data = await client.request("host.import.audio", JSON.parse(JSON.stringify(input)))
       io.stdout(canonicalJson({ version: "v1", ok: true, command: "host import", data }))
+
       return 0
     } finally { client.close() }
   }
+
   if (action === "export") {
     const source = option(arguments_.slice(1), "--request")
+
     if (!source || arguments_.length !== 3 || arguments_[1] !== "--request") throw new Error("host export requires --request <file|->.")
     const requestInput = await jsonRequest(source, io)
     const input = validateHostExportInput(requestInput)
     const client = await createAvailableDesktopHostClient(cliDesktopControlOptions())
+
     try {
       const data = await client.request("host.export.run", input)
       io.stdout(canonicalJson({ version: "v1", ok: true, command: "host export", data }))
+
       return 0
     } finally { client.close() }
   }
+
   if (action === "export-status" || action === "export-cancel") {
     if ((action === "export-status" && arguments_.length !== 1) || (action === "export-cancel" && arguments_.length !== 2)) throw new Error("Invalid host export command.")
     const operation = action === "export-status" ? "host.export.status" : "host.export.cancel"
+
     const input = desktopRequestSchemaV1.parse({
       version: desktopProtocolVersion,
       type: "request",
@@ -124,16 +149,21 @@ export const runHostCommand = async (arguments_: string[], io: CliIo) => {
       operation,
       input: action === "export-status" ? {} : { jobId: value },
     }).input
+
     const client = await createAvailableDesktopHostClient(cliDesktopControlOptions())
+
     try {
       const data = await client.request(operation, input)
       io.stdout(canonicalJson({ version: "v1", ok: true, command: `host ${action}`, data }))
+
       return 0
     } finally { client.close() }
   }
+
   if (action === "import-status" || action === "import-cancel") {
     if ((action === "import-status" && arguments_.length !== 1) || (action === "import-cancel" && arguments_.length !== 2)) throw new Error("Invalid host import command.")
     const operation = action === "import-status" ? "host.import.status" : "host.import.cancel"
+
     const input = desktopRequestSchemaV1.parse({
       version: desktopProtocolVersion,
       type: "request",
@@ -141,26 +171,34 @@ export const runHostCommand = async (arguments_: string[], io: CliIo) => {
       operation,
       input: action === "import-status" ? {} : desktopHostImportCancelInputSchemaV1.parse({ jobId: value }),
     }).input
+
     const client = await createAvailableDesktopHostClient(cliDesktopControlOptions())
+
     try {
       const data = await client.request(operation, input)
       desktopHostImportStatusSchemaV1.parse(data)
       io.stdout(canonicalJson({ version: "v1", ok: true, command: `host ${action}`, data }))
+
       return 0
     } finally { client.close() }
   }
+
   if (action === "diagnostics-v2") {
     if (extra.length !== 0 || value !== undefined) throw new Error("Invalid host diagnostics-v2 command.")
     const client = await createAvailableDesktopHostClient(cliDesktopControlOptions())
+
     try {
       const data = desktopDiagnosticsSchemaV2.parse(await client.request("diagnostics.snapshot.v2", {}))
       io.stdout(canonicalJson({ version: "v1", ok: true, command: "host diagnostics-v2", data }))
+
       return 0
     } finally {
       client.close()
     }
   }
+
   if (extra.length !== 0 || (action !== "seek" && value !== undefined)) throw new Error("Invalid host command.")
+
   const operation = action === "status" ? "host.status"
     : action === "transport-status" ? "transport.status"
       : action === "play" ? "transport.play"
@@ -168,17 +206,23 @@ export const runHostCommand = async (arguments_: string[], io: CliIo) => {
           : action === "stop" ? "transport.stop"
             : action === "diagnostics" ? "diagnostics.snapshot"
               : action === "seek" ? "transport.seek" : undefined
+
   if (!operation) throw new Error("Invalid host command.")
   const input = action === "seek" ? { seconds: Number(value) } : {}
+
   if (action === "seek" && !Number.isFinite(input.seconds)) throw new Error("host seek requires a finite number of seconds.")
+
   const validation = desktopRequestSchemaV1.safeParse({
     version: desktopProtocolVersion, type: "request", id: "cli-validation", operation, input,
   })
+
   if (!validation.success) throw new Error("Invalid host command.")
   const client = await createAvailableDesktopHostClient(cliDesktopControlOptions())
+
   try {
     const data = await client.request(operation, validation.data.input)
     io.stdout(canonicalJson({ version: "v1", ok: true, command: `host ${action}`, data }))
+
     return 0
   } finally {
     client.close()

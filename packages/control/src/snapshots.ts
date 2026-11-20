@@ -22,6 +22,7 @@ const persistedProcessorTargetSchema = z.union([
   z.object({ trackId: stableIdSchema }).strict(),
   z.object({ master: z.literal(true) }).strict(),
 ])
+
 const externalProcessorSnapshotSchema = z.object({
   kind: z.literal('external-vst3'),
   params: z.object({
@@ -39,8 +40,10 @@ const externalProcessorSnapshotSchema = z.object({
       if (Object.keys(overrides).length > 16_384) {
         context.addIssue({ code: 'custom', message: 'External plugin parameter override limit exceeded.' })
       }
+
       for (const key of Object.keys(overrides)) {
         const id = Number(key)
+
         if (!Number.isSafeInteger(id) || id > 0xffff_ffff) {
           context.addIssue({ code: 'custom', message: 'External plugin parameter IDs must be unsigned 32-bit integers.' })
         }
@@ -51,16 +54,19 @@ const externalProcessorSnapshotSchema = z.object({
       readOnly: z.boolean(),
     }).strict()).max(16_384).superRefine((parameters, context) => {
       const ids = parameters.map((parameter) => parameter.id)
+
       if (new Set(ids).size !== ids.length) {
         context.addIssue({ code: 'custom', message: 'External plugin parameter IDs must be unique.' })
       }
     }),
   }).strict(),
 }).strict()
+
 const controlProcessorSnapshotSchema = z.union([
   persistedProcessorSnapshotSchema,
   externalProcessorSnapshotSchema,
 ])
+
 const snapshotTrackSchema = z.object({
   id: stableIdSchema,
   name: nameSchema,
@@ -76,6 +82,7 @@ const snapshotTrackSchema = z.object({
   collapsed: z.boolean(),
   color: clipColorSchema.optional(),
 }).strict()
+
 export const assetMimeTypeSchema = z.enum([
   "audio/mpeg",
   "audio/wav",
@@ -86,13 +93,16 @@ export const assetMimeTypeSchema = z.enum([
   "audio/aac",
   "audio/webm",
 ])
+
 export const assetSourceKindSchema = z.enum(["upload", "url", "recording"])
+
 export const assetFolderSchemaV1 = z.object({
   id: stableIdSchema,
   name: nameSchema,
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
 }).strict()
+
 export const assetSnapshotSchemaV1 = z.object({
   id: stableIdSchema,
   name: nameSchema,
@@ -107,17 +117,21 @@ export const assetSnapshotSchemaV1 = z.object({
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
 }).strict()
+
 export const assetSnapshotSchemaV2 = assetSnapshotSchemaV1.extend({
   sizeBytes: z.number().int().positive().safe(),
 }).strict()
+
 export const assetUploadResultSchemaV1 = z.object({
   asset: assetSnapshotSchemaV1,
   idempotencyReplay: z.boolean(),
 }).strict()
+
 export const assetFolderResultSchemaV1 = z.object({
   folder: assetFolderSchemaV1,
   applied: z.boolean(),
 }).strict()
+
 const snapshotMidiSchemaV1 = z.object({
   wave: z.string(),
   gain: finiteNumberSchema.optional(),
@@ -128,6 +142,7 @@ const snapshotMidiSchemaV1 = z.object({
     velocity: finiteNumberSchema.optional(),
   }).strict()),
 }).strict()
+
 const snapshotClipSchemaV1 = z.object({
   id: stableIdSchema, trackId: stableIdSchema, name: nameSchema, startSec: secondsSchema,
   duration: finiteNumberSchema.positive(), gain: finiteNumberSchema.optional(),
@@ -146,6 +161,7 @@ const snapshotClipSchemaV1 = z.object({
   }).strict().optional(),
   midi: snapshotMidiSchemaV1.optional(),
 }).strict()
+
 export const projectSnapshotSchemaV1 = z.object({
   version: z.literal(CONTROL_API_VERSION_V1),
   project: z.object({
@@ -182,9 +198,11 @@ export const projectSnapshotSchemaV1 = z.object({
   assets: z.array(assetSnapshotSchemaV1).max(controlLimitsV1.maxAssetsPerSnapshot),
   assetFolders: z.array(assetFolderSchemaV1).max(controlLimitsV1.maxAssetFoldersPerSnapshot),
 }).strict()
+
 const snapshotClipSchemaV2 = snapshotClipSchemaV1.extend({
   midi: midiClipReadSchema.optional(),
 }).strict()
+
 export const projectSnapshotSchemaV2 = projectSnapshotSchemaV1.extend({
   version: z.literal(CONTROL_API_VERSION_V2),
   clips: z.array(snapshotClipSchemaV2),
@@ -222,10 +240,17 @@ export const projectCanonicalProjectSnapshotV2 = (
 })
 
 export type ProjectSnapshotV1 = z.infer<typeof projectSnapshotSchemaV1>
+
 export type ProjectSnapshotV2 = z.infer<typeof projectSnapshotSchemaV2>
+
 export type AssetSnapshotV1 = z.infer<typeof assetSnapshotSchemaV1>
+
 export type AssetSnapshotV2 = z.infer<typeof assetSnapshotSchemaV2>
+
 export type AssetFolderV1 = z.infer<typeof assetFolderSchemaV1>
+
 export type AssetUploadResultV1 = z.infer<typeof assetUploadResultSchemaV1>
+
 export type CanonicalProjectSnapshot = ProjectSnapshotV2
+
 export type ProjectSnapshot = CanonicalProjectSnapshot

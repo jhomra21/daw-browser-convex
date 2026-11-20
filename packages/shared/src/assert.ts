@@ -7,6 +7,7 @@ export function assertDefined<T>(
   message = "Expected value to be defined",
 ): NonNullable<T> {
   assert(value !== null && value !== undefined, message)
+
   return value
 }
 

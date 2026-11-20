@@ -67,12 +67,14 @@ describe('Return track policy', () => {
     ]
 
     const firstCreation = canonicalTrackCreation(tracks, 'return', 0)
+
     const firstReturn = {
       id: 'return-new',
       index: firstCreation.creationIndex,
       channelRole: 'return',
       collapsed: false,
     }
+
     const secondCreation = canonicalTrackCreation(
       [...firstCreation.existingTracks, firstReturn],
       'return',

@@ -36,19 +36,24 @@ export type DesktopControlConnectionOptions = {
 }
 
 const defaultClientName = "daw-control-sdk"
+
 const deadline = (value: number | undefined, name: string) => {
   const resolved = value ?? (name === "handshakeDeadlineMs" ? 5_000 : 10_000)
+
   if (!Number.isInteger(resolved) || resolved <= 0 || resolved > maxDeadlineMs) {
     throw new Error(`${name} must be a positive integer no greater than ${maxDeadlineMs}.`)
   }
+
   return resolved
 }
 
 const clientName = (value: string | undefined) => {
   const resolved = value ?? defaultClientName
+
   if (resolved.length < 1 || resolved.length > 128) {
     throw new Error("clientName must contain between 1 and 128 characters.")
   }
+
   return resolved
 }
 
@@ -65,17 +70,21 @@ export const connectDesktopControl = async (
 ): Promise<{ invoker: ControlInvoker<"desktop">; close: () => void }> => {
   const host = await createAvailableDesktopHostClient(rawOptions(options))
   let closed = false
+
   try {
     const status = async () => host.request("host.status", {})
+
     const handlers: ControlOperationHandlers<"desktop"> = {
       "project.list": async () => {
         const result = desktopHostStatusSchemaV1.parse(await status())
+
         return projectListResultSchema.parse({
           projects: result.project ? [{ projectId: result.project.id }] : [],
         })
       },
       "project.current": async () => {
         const result = desktopHostStatusSchemaV1.parse(await status())
+
         return projectCurrentResultSchema.parse(result.project
           ? { status: "present", project: { projectId: result.project.id } }
           : { status: "absent" })
@@ -106,15 +115,18 @@ export const connectDesktopControl = async (
         await host.request("control.recoveries", controlRecoveriesQuerySchemaV1.parse(input)),
       ),
     }
+
     const invoker = createDirectControlInvoker({
       handlers,
       context: { target: "desktop", principal: { subject: "daw-control" } },
     })
+
     const close = () => {
       if (closed) return
       closed = true
       host.close()
     }
+
     return { invoker, close }
   } catch (error) {
     host.close()

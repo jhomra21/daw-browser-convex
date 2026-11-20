@@ -32,12 +32,15 @@ const forbiddenInProcess = (name: string) => () => { throw new Error(`${name} us
 // With `allocations`, the script's own constructors are counted and its console and timers throw.
 const loadProcessor = (sampleRateHz: number, allocations?: string[]): GranularProcessorClass => {
   let registered: GranularProcessorClass | undefined
+
   const counted = (name: string, constructor: CountedConstructor) => new Proxy(constructor, {
     construct(target, args, newTarget) {
       allocations?.push(name)
+
       return Reflect.construct(target, args, newTarget)
     },
   })
+
   const shadows = allocations ? {
     Float32Array: counted('Float32Array', Float32Array),
     Float64Array: counted('Float64Array', Float64Array),
@@ -51,13 +54,16 @@ const loadProcessor = (sampleRateHz: number, allocations?: string[]): GranularPr
     setTimeout: forbiddenInProcess('setTimeout'),
     setInterval: forbiddenInProcess('setInterval'),
   } : {}
+
   new Function('AudioWorkletProcessor', 'registerProcessor', 'sampleRate', ...Object.keys(shadows), source)(
     FakeAudioWorkletProcessor,
     (_name: string, processor: GranularProcessorClass) => { registered = processor },
     sampleRateHz,
     ...Object.values(shadows),
   )
+
   if (!registered) throw new Error('Granular processor was not registered.')
+
   return registered
 }
 
@@ -87,12 +93,15 @@ describe('granular worklet source', () => {
     install(processor, [new Float32Array(20_000).fill(1)], 8_000)
     const params = parameters({ grainSizeMs: Float32Array.of(1_000) })
     let peak = 0
+
     for (let block = 0; block < 64; block += 1) {
       const left = new Float32Array(125)
       const right = new Float32Array(125)
       processor.process([[]], [[left, right]], params)
+
       for (const sample of left) peak = Math.max(peak, sample)
     }
+
     const overlap = peak / Math.SQRT1_2
     expect(overlap).toBeGreaterThan(64)
     expect(overlap).toBeLessThanOrEqual(128)
@@ -132,17 +141,25 @@ describe('granular worklet source', () => {
     install(processor, [new Float32Array(4_096).fill(1)], 48_000)
     const copies: string[] = []
     const original = { map: Array.prototype.map, slice: Array.prototype.slice, filter: Array.prototype.filter }
-    Reflect.set(Array.prototype, 'map', () => { copies.push('map'); return [] })
-    Reflect.set(Array.prototype, 'slice', () => { copies.push('slice'); return [] })
-    Reflect.set(Array.prototype, 'filter', () => { copies.push('filter'); return [] })
+    Reflect.set(Array.prototype, 'map', () => { copies.push('map');
+
+ return [] })
+    Reflect.set(Array.prototype, 'slice', () => { copies.push('slice');
+
+ return [] })
+    Reflect.set(Array.prototype, 'filter', () => { copies.push('filter');
+
+ return [] })
     const outputs = [[new Float32Array(128), new Float32Array(128)]]
     const params = parameters()
     allocations.length = 0
+
     try {
       for (let block = 0; block < 8; block += 1) processor.process([[]], outputs, params)
     } finally {
       Object.assign(Array.prototype, original)
     }
+
     expect(allocations).toEqual([])
     expect(copies).toEqual([])
     expect(outputs[0][0].some((sample) => sample !== 0)).toBe(true)

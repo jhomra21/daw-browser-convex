@@ -51,6 +51,7 @@ const normalizePersistedExportSettings = (value: JsonValue): PersistedExportSett
   const sampleRate = render?.sampleRate
   const numberOfChannels = render?.numberOfChannels
   const bitrateByFormat: Partial<Record<LossyExportAudioFormat, number>> = {}
+
   if (isJsonObject(encoding?.bitrateByFormat)) {
     for (const [format, bitrate] of Object.entries(encoding.bitrateByFormat)) {
       if (
@@ -63,6 +64,7 @@ const normalizePersistedExportSettings = (value: JsonValue): PersistedExportSett
       }
     }
   }
+
   return {
     render: {
       sampleRate: sampleRate === 48000 || sampleRate === 96000 ? sampleRate : 44100,
@@ -83,8 +85,10 @@ const EXPORT_SETTINGS_STORAGE_KEY = 'daw:export-settings:v2'
 
 export const loadPersistedExportSettings = (): PersistedExportSettings => {
   if (!globalThis.localStorage) return defaultExportSettings
+
   try {
     const raw = globalThis.localStorage.getItem(EXPORT_SETTINGS_STORAGE_KEY)
+
     return raw ? normalizePersistedExportSettings(JSON.parse(raw)) : defaultExportSettings
   } catch {
     return defaultExportSettings
@@ -99,6 +103,7 @@ export const savePersistedExportSettings = (settings: PersistedExportSettings): 
 export const createCustomExportRange = (startSec: number, lengthSec: number): ExportRange => {
   const start = Math.max(0, Number.isFinite(startSec) ? startSec : 0)
   const length = Math.max(0.001, Number.isFinite(lengthSec) ? lengthSec : 0.001)
+
   return { mode: 'custom', startSec: start, endSec: start + length }
 }
 
@@ -114,17 +119,21 @@ export const deriveSelectedExportTrackIds = (input: {
   primaryTrackId?: string
 }): string[] => {
   let candidateIds: readonly string[]
+
   if (input.rangeSelection?.trackIds.length) {
     candidateIds = input.rangeSelection.trackIds
   } else if (input.selectedClipIds.size > 0) {
-    candidateIds = [...input.selectedClipIds]
-      .map((clipId) => input.clipTrackIdById.get(clipId))
-      .filter((trackId): trackId is string => trackId !== undefined)
+    candidateIds = [...input.selectedClipIds].flatMap((clipId) => {
+      const trackId = input.clipTrackIdById.get(clipId)
+
+      return trackId === undefined ? [] : [trackId]
+    })
   } else {
     candidateIds = input.primaryTrackId ? [input.primaryTrackId] : []
   }
 
   const candidates = new Set(candidateIds)
+
   return input.tracks
     .filter((track) => candidates.has(track.id) && isRenderableExportTrack(track))
     .map((track) => track.id)

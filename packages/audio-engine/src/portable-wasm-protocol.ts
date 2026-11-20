@@ -147,6 +147,7 @@ export type PortableWasmInstrumentEvent = {
 }
 
 type ProtocolValue = null | boolean | number | string | readonly ProtocolValue[] | ProtocolObject | Float32Array | Uint8Array
+
 type ProtocolObject = { [key: string]: ProtocolValue }
 
 const isProtocolString = <Value>(value: Value): value is Value & string => typeof value === 'string'
@@ -164,6 +165,7 @@ const isBoundedFinite = <Value>(value: Value, minimum: number, maximum: number):
 
 const isAudioAssetRef = <Value>(value: Value): value is Value & AudioAssetRef => {
   if (!isRecord(value)) return false
+
   return value.version === audioCoreContractVersion
     && isProtocolString(value.assetId)
     && value.assetId.length > 0
@@ -191,6 +193,7 @@ const isPagedPage = <Value>(value: Value): value is Value & readonly Float32Arra
 
 const isUtilityState = <Value>(value: Value): value is Value & UtilityProcessorState => {
   if (!isRecord(value)) return false
+
   return isProtocolBoolean(value.enabled)
     && isProtocolNumber(value.gainDb)
     && (value.polarity === 'normal' || value.polarity === 'invert')
@@ -269,6 +272,7 @@ const isSourceTable = <Value>(value: Value): value is Value & PortableWasmSource
     || value.ordinary.length + value.prepared.length > portableWasmMaxPendingEvents
     || !value.ordinary.every(isSampleSourceEvent) || !value.prepared.every(isPreparedSourceEvent)) return false
   const events = [...value.ordinary, ...value.prepared].sort((left, right) => left.sequence - right.sequence)
+
   return events.every((event, index) => event.epoch === value.epoch && event.sequence > (events[index - 1]?.sequence ?? 0))
 }
 
@@ -311,9 +315,11 @@ export const readPortableWasmRecordingStatusMessage = (
   if (!isRecord(value) || value.version !== portableWasmProtocolVersion || !isProtocolString(value.type)
     || !isProtocolNumber(value.generation) || !Number.isSafeInteger(value.generation) || value.generation < 0
     || !isProtocolNumber(value.sessionId) || !Number.isSafeInteger(value.sessionId) || value.sessionId < 0) return null
+
   if (value.type === 'recording-capture-available') {
     return { version: portableWasmProtocolVersion, type: 'recording-capture-available', generation: value.generation, sessionId: value.sessionId }
   }
+
   if (value.type === 'recording-capture-applied'
     && (value.action === 'configured' || value.action === 'finalized' || value.action === 'cancelled')
     && isProtocolNumber(value.frame) && Number.isSafeInteger(value.frame) && value.frame >= 0) {
@@ -326,6 +332,7 @@ export const readPortableWasmRecordingStatusMessage = (
       frame: value.frame,
     }
   }
+
   if (value.type === 'recording-capture-block'
     && isProtocolNumber(value.sequence) && Number.isSafeInteger(value.sequence) && value.sequence >= 0
     && isProtocolNumber(value.frameCount) && Number.isSafeInteger(value.frameCount) && value.frameCount > 0
@@ -347,6 +354,7 @@ export const readPortableWasmRecordingStatusMessage = (
       peak: value.peak,
     }
   }
+
   if (value.type === 'recording-capture-diagnostics'
     && isProtocolNumber(value.capturedFrames) && Number.isSafeInteger(value.capturedFrames) && value.capturedFrames >= 0
     && isProtocolNumber(value.droppedFrames) && Number.isSafeInteger(value.droppedFrames) && value.droppedFrames >= 0
@@ -372,6 +380,7 @@ export const readPortableWasmRecordingStatusMessage = (
       active: value.active,
     }
   }
+
   return null
 }
 
@@ -381,6 +390,7 @@ export const readPortableWasmGraphContinuityMessage = (
   if (!isRecord(value) || value.version !== portableWasmProtocolVersion || value.type !== 'graph-continuity'
     || !isProtocolNumber(value.revision) || !Number.isSafeInteger(value.revision) || value.revision < 1
     || (value.result !== 'accepted' && value.result !== 'fallback' && value.result !== 'rejected' && value.result !== 'capacity')) return null
+
   return {
     version: portableWasmProtocolVersion,
     type: 'graph-continuity',
@@ -398,6 +408,7 @@ export const readPortableWasmTransportPositionMessage = (
     || !isProtocolNumber(value.sequence) || !Number.isSafeInteger(value.sequence) || value.sequence < 1
     || !isProtocolBoolean(value.running)
     || !isProtocolNumber(value.frame) || !Number.isSafeInteger(value.frame) || value.frame < 0) return null
+
   return {
     version: portableWasmProtocolVersion,
     type: 'transport-position',
@@ -421,14 +432,17 @@ const isPortableGraphSnapshot = <Value>(value: Value): value is Value & AudioCor
     || value.nodes.length > portableWasmMaxGraphNodes
     || value.edges.length > portableWasmMaxGraphEdges
     || value.assets.length > portableWasmMaxAssets) return false
+
   const processorCount = value.nodes.reduce((total, node) => (
     total + (isRecord(node) && Array.isArray(node.processorOrder) ? node.processorOrder.length : 0)
   ), 0)
+
   if (processorCount > audioCoreMaxGraphProcessors) return false
   const processorInstanceIds = new Set<number>()
   const processorIds = new Set<string>()
   const processorNodeIds = new Map<string, string>()
   const nodeIds = new Set<string>()
+
   const validNodes = value.nodes.every((node) => isRecord(node)
     && isProtocolString(node.id)
     && node.id.length > 0
@@ -448,11 +462,14 @@ const isPortableGraphSnapshot = <Value>(value: Value): value is Value & AudioCor
       processorInstanceIds.add(processor.instanceId)
       processorIds.add(processor.id)
       processorNodeIds.set(processor.id, isProtocolString(node.id) ? node.id : '')
+
       return true
     })
   )
+
   if (!validNodes || !nodeIds.has(value.masterNodeId)) return false
   const edgeIds = new Set<string>()
+
   return value.edges.every((edge) => isRecord(edge)
     && edge.version === audioCoreContractVersion
     && isProtocolString(edge.id)
@@ -480,12 +497,17 @@ const isPortableGraphSnapshot = <Value>(value: Value): value is Value & AudioCor
 
 export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWasmControlMessage | null => {
   if (!isRecord(value) || value.version !== portableWasmProtocolVersion || !isProtocolString(value.type)) return null
+
   if (value.type === 'dispose' || value.type === 'diagnostics' || value.type === 'recording-capture-cancel' || value.type === 'recording-capture-drain') {
     if (value.type === 'dispose') return { version: portableWasmProtocolVersion, type: 'dispose' }
+
     if (value.type === 'diagnostics') return { version: portableWasmProtocolVersion, type: 'diagnostics' }
+
     if (value.type === 'recording-capture-cancel') return { version: portableWasmProtocolVersion, type: 'recording-capture-cancel' }
+
     return { version: portableWasmProtocolVersion, type: 'recording-capture-drain' }
   }
+
   if (isRecordingCaptureConfigure(value)) {
     return {
       version: portableWasmProtocolVersion,
@@ -501,10 +523,12 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
       punchEndFrame: value.punchEndFrame,
     }
   }
+
   if (value.type === 'recording-capture-finalize'
     && (value.stopFrame === null || (isProtocolNumber(value.stopFrame) && Number.isSafeInteger(value.stopFrame) && value.stopFrame >= 0))) {
     return { version: portableWasmProtocolVersion, type: 'recording-capture-finalize', stopFrame: value.stopFrame }
   }
+
   if (value.type === 'publish-graph' && isPositiveInteger(value.requestId) && isPositiveInteger(value.revision)
     && (value.requireContinuity === undefined || value.requireContinuity === true)
     && (value.publicationFrame === undefined
@@ -515,14 +539,17 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
       ...(value.publicationFrame !== undefined && { publicationFrame: value.publicationFrame }),
       ...(isSourceTable(value.sources) && { sources: value.sources }) }
   }
+
   if (value.type === 'cancel-publication' && isPositiveInteger(value.revision)) {
     return { version: portableWasmProtocolVersion, type: 'cancel-publication', revision: value.revision }
   }
+
   if (value.type === 'prepare-graph' && isPositiveInteger(value.requestId) && isPortableGraphSnapshot(value.snapshot)
     && (value.envelope === undefined || value.envelope instanceof Uint8Array)) {
     return { version: portableWasmProtocolVersion, type: 'prepare-graph', requestId: value.requestId, snapshot: value.snapshot,
       ...(value.envelope instanceof Uint8Array && { envelope: value.envelope }) }
   }
+
   if (value.type === 'processor-state' && isPositiveInteger(value.revision) && value.envelope instanceof Uint8Array) {
     try {
       return {
@@ -535,20 +562,24 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
       return null
     }
   }
+
   if (value.type === 'parameter-blocks' && isPositiveInteger(value.revision) && Array.isArray(value.blocks)
     && value.blocks.length <= 512 && value.blocks.every(isParameterBlock)) {
     return { version: portableWasmProtocolVersion, type: 'parameter-blocks', revision: value.revision, blocks: value.blocks }
   }
+
   if (value.type === 'processor-events' && isPositiveInteger(value.revision) && Array.isArray(value.events)
     && value.events.length <= portableWasmMaxPendingEvents && value.events.every(isProcessorEvent)
     && isPositiveInteger(value.requestId)
     && isPositiveInteger(value.epoch)
     && isPositiveInteger(value.sequence)) {
     let previousOffset = -1
+
     for (const event of value.events) {
       if (event.frameOffset < previousOffset) return null
       previousOffset = event.frameOffset
     }
+
     return {
       version: portableWasmProtocolVersion,
       type: 'processor-events',
@@ -559,6 +590,7 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
       events: value.events,
     }
   }
+
   if (value.type === 'reenable-processor-automation'
     && isPositiveInteger(value.requestId)
     && isPositiveInteger(value.revision)
@@ -578,34 +610,43 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
       parameterTargets: value.parameterTargets,
     }
   }
+
   if (value.type === 'utility-state' && isPositiveInteger(value.revision) && isUtilityState(value.state)) {
     return { version: portableWasmProtocolVersion, type: 'utility-state', revision: value.revision, state: value.state }
   }
+
   if (value.type === 'instrument-state' && isPositiveInteger(value.revision) && isProtocolString(value.nodeId)
     && value.nodeId.length > 0 && isAudioCoreInstrumentState(value.state)) {
     return { version: portableWasmProtocolVersion, type: 'instrument-state', revision: value.revision, nodeId: value.nodeId, state: value.state }
   }
+
   if (value.type === 'transport' && isPositiveInteger(value.requestId) && isPositiveInteger(value.epoch) && isProtocolBoolean(value.running)
     && isProtocolNumber(value.frame) && Number.isSafeInteger(value.frame) && value.frame >= 0) {
     return { version: portableWasmProtocolVersion, type: 'transport', requestId: value.requestId, epoch: value.epoch, running: value.running, frame: value.frame }
   }
+
   if ((value.type === 'instrument-events' || value.type === 'instrument-parameters') && isPositiveInteger(value.epoch) && Array.isArray(value.events)
     && value.events.length <= portableWasmMaxInstrumentEvents && value.events.every(isInstrumentEvent)) {
     let previousOffset = -1
     let previousSequence = 0
+
     for (const event of value.events) {
       if (event.frameOffset < previousOffset || event.sequence <= previousSequence) return null
       previousOffset = event.frameOffset
       previousSequence = event.sequence
     }
+
     if (value.type === 'instrument-parameters') {
       if (!isPositiveInteger(value.requestId) || !isPositiveInteger(value.revision) || !isPositiveInteger(value.sequence)
         || value.events.some(event => event.type !== 'parameter' || event.frameOffset !== 0)) return null
+
       return { version: portableWasmProtocolVersion, type: 'instrument-parameters', requestId: value.requestId,
         revision: value.revision, epoch: value.epoch, sequence: value.sequence, events: value.events }
     }
+
     return { version: portableWasmProtocolVersion, type: 'instrument-events', epoch: value.epoch, events: value.events }
   }
+
   if (value.type === 'install-schedule' && isPositiveInteger(value.requestId)
     && isRecord(value.schedule)
     && Array.isArray(value.schedule.events)
@@ -613,16 +654,20 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
     && isPortableFrameSchedule(value.schedule)) {
     return { version: portableWasmProtocolVersion, type: 'install-schedule', requestId: value.requestId, schedule: value.schedule }
   }
+
   if (value.type === 'schedule-sources' && isPositiveInteger(value.requestId) && isPositiveInteger(value.revision)
     && isPositiveInteger(value.epoch) && Array.isArray(value.events) && value.events.length <= portableWasmMaxPendingEvents
     && value.events.every(isSampleSourceEvent)) {
     let previousSequence = 0
+
     for (const event of value.events) {
       if (event.epoch !== value.epoch || event.sequence <= previousSequence) return null
       previousSequence = event.sequence
     }
+
     return { version: portableWasmProtocolVersion, type: 'schedule-sources', requestId: value.requestId, revision: value.revision, epoch: value.epoch, events: value.events }
   }
+
   if (value.type === 'replace-sources' && isPositiveInteger(value.requestId) && isPositiveInteger(value.revision)
     && isSourceTable(value)) {
     return {
@@ -635,6 +680,7 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
       prepared: value.prepared,
     }
   }
+
   if (value.type === 'reset-sources'
     && isPositiveInteger(value.requestId)
     && isPositiveInteger(value.revision)
@@ -647,6 +693,7 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
       epoch: value.epoch,
     }
   }
+
   if (value.type === 'register-paged-asset'
     && isPositiveInteger(value.requestId)
     && isPositiveInteger(value.generation)
@@ -659,6 +706,7 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
       asset: value.asset,
     }
   }
+
   if (value.type === 'write-asset-page'
     && isPositiveInteger(value.requestId)
     && isPositiveInteger(value.generation)
@@ -668,7 +716,9 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
     && value.validFrames > 0 && value.validFrames <= portableWasmPagedPageFrames
     && isPagedPage(value.planes)) {
     const planes = value.planes
+
     if (!planes.every((plane) => plane instanceof Float32Array && plane.length === value.validFrames)) return null
+
     return {
       version: portableWasmProtocolVersion,
       type: 'write-asset-page',
@@ -680,6 +730,7 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
       planes,
     }
   }
+
   if (value.type === 'prepare-asset-range'
     && isPositiveInteger(value.requestId)
     && isPositiveInteger(value.generation)
@@ -699,6 +750,7 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
       interpolationGuardFrames: value.interpolationGuardFrames,
     }
   }
+
   if (value.type === 'schedule-prepared-sources'
     && isPositiveInteger(value.requestId)
     && isPositiveInteger(value.revision)
@@ -707,10 +759,12 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
     && value.events.length <= portableWasmMaxPendingEvents
     && value.events.every(isPreparedSourceEvent)) {
     let previousSequence = 0
+
     for (const event of value.events) {
       if (event.epoch !== value.epoch || event.sequence <= previousSequence) return null
       previousSequence = event.sequence
     }
+
     return {
       version: portableWasmProtocolVersion,
       type: 'schedule-prepared-sources',
@@ -720,6 +774,7 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
       events: value.events,
     }
   }
+
   if (value.type === 'release-asset-preparation'
     && isPositiveInteger(value.requestId)
     && isPositiveInteger(value.generation)
@@ -732,6 +787,7 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
       preparationId: value.preparationId,
     }
   }
+
   if (value.type === 'trim-asset-pages'
     && isPositiveInteger(value.requestId)
     && isPositiveInteger(value.generation)
@@ -748,6 +804,7 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
       pageCount: value.pageCount,
     }
   }
+
   if (value.type === 'register-asset'
     && isPositiveInteger(value.requestId)
     && isPositiveInteger(value.generation)
@@ -762,6 +819,7 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
       planes: value.planes,
     }
   }
+
   if (value.type === 'release-asset'
     && isPositiveInteger(value.requestId)
     && isPositiveInteger(value.generation)
@@ -775,9 +833,11 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
       assetId: value.assetId,
     }
   }
+
   if (value.type === 'retire-assets' && isPositiveInteger(value.generation)) {
     return { version: portableWasmProtocolVersion, type: 'retire-assets', generation: value.generation }
   }
+
   if (value.type === 'initialize'
     && isPositiveInteger(value.abiVersion)
     && isProtocolString(value.contractHash)
@@ -792,6 +852,7 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
       maxFramesPerBlock: value.maxFramesPerBlock,
     }
   }
+
   return null
 }
 

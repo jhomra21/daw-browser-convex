@@ -1,5 +1,5 @@
-import { app, BrowserWindow, contentTracing, dialog, ipcMain, Menu, powerMonitor, protocol } from "electron"
-import { createHash, randomUUID } from "node:crypto"
+import { app, BrowserWindow, contentTracing, dialog, ipcMain, Menu, protocol } from "electron"
+import { createHash } from "node:crypto"
 import path from "node:path"
 import { z } from "zod"
 import { nativeEditorCommandSchema, nativeSessionEnvelopeSchema } from "./native-session-schemas"
@@ -18,8 +18,6 @@ import {
   hostResponseChannel,
   lifecycleChannel,
   listDevicesChannel,
-  lossChannel,
-  meterBatchChannel,
   offlineCancelChannel,
   offlineMappedPageRequestChannel,
   offlineMappedPageResponseChannel,
@@ -35,7 +33,6 @@ import {
   recoveryRetryChannel,
   resolveInputDeviceChannel,
   resolveOutputDeviceChannel,
-  scheduleProgressChannel,
   sessionBeginTransactionChannel,
   sessionCancelRecordingChannel,
   sessionCommitTransactionChannel,
@@ -52,11 +49,7 @@ import {
   sessionStartChannel,
   sessionStopChannel,
   sessionTeardownChannel,
-  spectrumFrameChannel,
-  vstEditorCapturedStateChannel,
   vstEditorStateChannel,
-  vstInstanceEventChannel,
-  vstParameterEditChannel,
 } from "@daw-browser/desktop-protocol/ipc-channels"
 
 import { initializeRecordingSpoolRegistry, recordingSpoolReleaseSchema } from "./recording-spool"
@@ -77,14 +70,12 @@ import { createPluginCatalogOwner } from "./plugin-catalog-owner"
 import { registerPluginCatalogIpc } from "./plugin-catalog-ipc"
 import {
   coordinateNativeVst3Attachments,
-  createNativeVst3SessionLedger,
   nativeVst3CoordinationFailureReply,
   resolveNativeVst3AttachmentPlan,
 } from "./native-vst3-coordinator"
-import { createNativeVst3HostEventHandlers } from "./native-vst3-host-events"
+
 import {
   nativeHostConfigurationIdentityFor,
-  createNativeAudioHostSupervisor,
   renderNativeOffline,
   nativeProcessorPatchReply,
   nativeSessionFailure,
@@ -92,21 +83,18 @@ import {
   type NativeVstEditorAnchor,
   type NativeVstEditorCommand,
 } from "./audio-host"
-import { createNativeVst3EditorSessionManager } from "./native-vst3-editor-session"
+
 /* oxlint-disable eslint/no-restricted-imports -- desktop-audio-lifecycle needs the bridge types, which stay in src/types until the batch that owns the certification-pinned playback files moves it */
 import {
   completeDesktopAudioRecovery,
-  type DesktopAudioLifecycle,
 } from "../../src/lib/desktop-audio-lifecycle"
 /* oxlint-enable eslint/no-restricted-imports */
-import { resolveNativeArtifacts, type NativeReleaseArtifactVerification } from "./native-artifacts"
+import { resolveNativeArtifacts } from "./native-artifacts"
 import type {
   NativeAudioDevice,
   NativeHostDeviceConfiguration,
   NativeHostPcmAsset,
   NativeHostMappedAssetPage,
-  NativeHostMeterBatch,
-  NativeScheduleProgress,
   NativeOfflineRenderPlan,
 } from "@daw-browser/audio-engine/native-host-wire"
 import { stampGraphRevision } from "@daw-browser/audio-engine/native-host-wire"
@@ -119,25 +107,24 @@ import {
   nativeAudioHostMaximumMappedAssetPageBytes,
   nativeAudioHostMaximumPayloadBytes,
   nativeAudioHostMaximumSerializedPlanBytes,
-  nativeAudioHostScheduleProgressBytes,
   nativeOfflineRenderPlanSchema,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import {
   createTrustedDesktopOriginPolicy,
 } from "./permission-policy"
 
-import { createNativeVstProjectBindings } from "./native-vst-project-bindings"
 import { createApplicationMenuController } from "./application-menu"
 import { createAe08Evidence, ae08StartTrace, ae08StopTrace } from "./ae08-evidence"
 import { ae08RendererMarkChannel, ae08RendererMarkSchema } from "@daw-browser/desktop-protocol/acceptance-marks"
 import { createOfflinePcmAckTracker } from "./offline-pcm-ack"
 import { createMainWindow } from "./main-window"
 import { installRendererContent } from "./renderer-content"
+import { createNativeAudioSession } from "./native-audio-session"
+import { sanitizeNativeVst3DiagnosticError } from "./native-vst3-diagnostic-error"
 import { createControlSocket } from "./control-socket"
 import { createRequestScopes } from "./request-scopes"
 import { createRendererSession } from "./renderer-session"
 import {
-  createBenchmarkRecordingTelemetry,
   createBenchmarkStartupReporter,
   installBenchmarkHeartbeat,
 } from "./benchmark-runtime"
@@ -223,12 +210,6 @@ const diagnosticsTraceMessageSchema = z.object({
 
 const appName = "daw-browser"
 
-const sanitizeNativeVst3DiagnosticError = (error: Error | undefined) => {
-  const message = error?.message ?? "The native VST editor session is unavailable."
-
-  return message.replace(/(?:[A-Za-z]:[\\/]|\/)[^\s]*/g, "<path>").slice(0, 256)
-}
-
 const sameAppOrigin = createTrustedDesktopOriginPolicy(MAIN_WINDOW_VITE_DEV_SERVER_URL)
 
 let quitCleanupStarted = false
@@ -255,8 +236,6 @@ const applicationMenuController = createApplicationMenuController<Menu>({
 
 const preparationRegistry = createPreparationRegistry()
 let nativeMediaAvailable = false
-let audioHostPath: string | undefined
-let audioHostSupervisor: ReturnType<typeof createNativeAudioHostSupervisor> | undefined
 
 let offlineRenderJob: {
   jobId: string
@@ -281,22 +260,6 @@ const abortOfflineRenderJobs = () => {
   offlineRenderJob?.controller.abort()
 }
 
-let nativeVst3EditorSessionManager: ReturnType<typeof createNativeVst3EditorSessionManager> | undefined
-let audioLifecycle: DesktopAudioLifecycle = { state: "ready", powerGeneration: 0 }
-let audioSuspendPromise: Promise<void> | undefined
-let audioRecoveryGeneration: number | undefined
-
-let nativeReleaseArtifactVerification: NativeReleaseArtifactVerification = { status: "disabled" }
-
-let removeAudioHostLossListener: (() => void) | undefined
-let removeAudioHostRecordingStatusListener: (() => void) | undefined
-let removeAudioHostMeterBatchListener: (() => void) | undefined
-let removeAudioHostSpectrumListener: (() => void) | undefined
-let removeAudioHostScheduleProgressListener: (() => void) | undefined
-let removeAudioHostWorkerNotificationListener: (() => void) | undefined
-const activeEditorProjectBindings = createNativeVstProjectBindings()
-const attachmentLedger = createNativeVst3SessionLedger()
-const activeRendererTransactions = new Map<string, { generation: number; senderId: number }>()
 const nativeFileCapabilityHelper = createNativeFileCapabilityHelper()
 
 const recordingSessionOwner = createRecordingSessionOwner({
@@ -320,6 +283,8 @@ const fileCapabilities = createFileCapabilityManager({
   privateTempDirectory: () => path.join(app.getPath("userData"), "output-temp"),
 })
 
+const audio = createNativeAudioSession({ rendererSession, recordingSessionOwner, ae08Evidence, ae08WorkerEnvironment })
+
 const scopes = createRequestScopes(fileCapabilities)
 
 const controlSocket = createControlSocket({
@@ -331,34 +296,6 @@ const controlSocket = createControlSocket({
   ae08Evidence,
   availableOperations: () => desktopOperations(nativeMediaAvailable),
 })
-
-const publishAudioLifecycle = () => {
-  rendererSession.send(lifecycleChannel, audioLifecycle)
-}
-
-const recoverAudioHost = (recoveryGeneration: number) => {
-  if (audioRecoveryGeneration === recoveryGeneration) return
-  audioRecoveryGeneration = recoveryGeneration
-  void (async () => {
-    try {
-      await audioSuspendPromise
-
-      if (audioLifecycle.state !== "suspended" || audioLifecycle.powerGeneration !== recoveryGeneration) return
-      await audioHostSupervisor?.resume()
-      await audioHostSupervisor?.start()
-
-      if (audioLifecycle.state !== "suspended" || audioLifecycle.powerGeneration !== recoveryGeneration) return
-      audioLifecycle = { state: "recovering", powerGeneration: recoveryGeneration }
-      publishAudioLifecycle()
-    } catch {
-      if (audioLifecycle.state !== "suspended" || audioLifecycle.powerGeneration !== recoveryGeneration) return
-      audioLifecycle = { state: "failed", powerGeneration: recoveryGeneration }
-      publishAudioLifecycle()
-    } finally {
-      if (audioRecoveryGeneration === recoveryGeneration) audioRecoveryGeneration = undefined
-    }
-  })()
-}
 
 const invalidateRendererGeneration = (message: string) => {
   const invalidation = rendererSession.lifecycle.invalidateActiveDocument()
@@ -381,19 +318,19 @@ const applyRendererInvalidation = (
   preparationRegistry.abortAll()
   scopes.settleCapabilityRevocation(fileCapabilities.revokeRendererGeneration(previousGeneration))
 
-  for (const [token, transaction] of activeRendererTransactions) {
+  for (const [token, transaction] of audio.transactions) {
     if (transaction.generation !== previousGeneration) continue
-    activeRendererTransactions.delete(token)
+    audio.transactions.delete(token)
 
     try {
-      activeEditorProjectBindings.rollback(token)
+      audio.bindings.rollback(token)
     } catch {
       // A newer staged transaction owns the binding registry.
     }
   }
 
   rendererSession.rejectAllPending(message)
-  scopes.settleCapabilityRevocation(audioHostSupervisor?.invalidateManualTransaction() ?? Promise.resolve())
+  scopes.settleCapabilityRevocation(audio.supervisor?.invalidateManualTransaction() ?? Promise.resolve())
 }
 
 const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>) => {
@@ -423,9 +360,9 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
     },
   })
   ipcMain.handle(lifecycleChannel, (event) => {
-    if (!audioHostAllowed(event)) return { state: "failed" as const, powerGeneration: audioLifecycle.powerGeneration }
+    if (!audioHostAllowed(event)) return { state: "failed" as const, powerGeneration: audio.lifecycle.powerGeneration }
 
-    return audioLifecycle
+    return audio.lifecycle
   })
   ipcMain.handle(recoveryCompleteChannel, (event, value) => {
     if (!audioHostAllowed(event)) return { accepted: false }
@@ -434,24 +371,24 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
     if (!completionRequest.success) return { accepted: false }
 
     const completion = completeDesktopAudioRecovery(
-      audioLifecycle,
+      audio.lifecycle,
       completionRequest.data.powerGeneration,
       completionRequest.data.result,
     )
 
     if (!completion.accepted) return { accepted: false }
-    audioLifecycle = completion.lifecycle
-    publishAudioLifecycle()
+    audio.setLifecycle(completion.lifecycle)
+    audio.publishLifecycle()
 
     return { accepted: true }
   })
   ipcMain.handle(recoveryRetryChannel, (event) => {
-    if (!audioHostAllowed(event) || audioLifecycle.state !== "failed") return { accepted: false }
-    audioLifecycle = {
+    if (!audioHostAllowed(event) || audio.lifecycle.state !== "failed") return { accepted: false }
+    audio.setLifecycle({
       state: "suspended",
-      powerGeneration: audioLifecycle.powerGeneration + 1,
-    }
-    recoverAudioHost(audioLifecycle.powerGeneration)
+      powerGeneration: audio.lifecycle.powerGeneration + 1,
+    })
+    audio.recoverHost(audio.lifecycle.powerGeneration)
 
     return { accepted: true }
   })
@@ -576,7 +513,7 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
   }
 
   ipcMain.handle(offlineRenderChannel, async (event, value) => {
-    if (!audioHostAllowed(event) || !audioHostPath) {
+    if (!audioHostAllowed(event) || !audio.hostPath) {
       return { ok: false as const, error: "The native offline renderer is unavailable." }
     }
 
@@ -643,7 +580,7 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
       }
 
       await renderNativeOffline({
-        hostPath: audioHostPath,
+        hostPath: audio.hostPath,
         jobId,
         plan,
         vstAttachments,
@@ -737,18 +674,18 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
   }
 
   ipcMain.handle(diagnosticsChannel, async (event) => {
-    if (!audioHostAllowed(event) || !audioHostSupervisor) {
+    if (!audioHostAllowed(event) || !audio.supervisor) {
       return {
         ok: false,
         error: "The native audio host is unavailable.",
-        artifactVerification: nativeReleaseArtifactVerification,
+        artifactVerification: audio.artifactVerification,
       }
     }
 
     try {
-      const hello = await audioHostSupervisor.start()
-      const diagnostics = await audioHostSupervisor.diagnostics()
-      const status = audioHostSupervisor.status()
+      const hello = await audio.supervisor.start()
+      const diagnostics = await audio.supervisor.diagnostics()
+      const status = audio.supervisor.status()
       const configurationGeneration = configurationGenerationFor(status)
 
       if (configurationGeneration === undefined) throw new Error("The native audio host identity is unavailable.")
@@ -759,18 +696,18 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
         status,
         configurationGeneration,
         diagnostics,
-        artifactVerification: nativeReleaseArtifactVerification,
+        artifactVerification: audio.artifactVerification,
       }
     } catch {
       return {
         ok: false,
         error: "The native audio host is unavailable.",
-        artifactVerification: nativeReleaseArtifactVerification,
+        artifactVerification: audio.artifactVerification,
       }
     }
   })
   ipcMain.handle(resolveOutputDeviceChannel, async (event, value) => {
-    if (!audioHostAllowed(event) || !audioHostSupervisor) {
+    if (!audioHostAllowed(event) || !audio.supervisor) {
       return { ok: false as const, error: "The native audio host is unavailable." }
     }
 
@@ -781,13 +718,13 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
     }
 
     try {
-      return { ok: true as const, device: await audioHostSupervisor.resolveOutputDevice(deviceId.data) }
+      return { ok: true as const, device: await audio.supervisor.resolveOutputDevice(deviceId.data) }
     } catch {
       return { ok: false as const, error: "The native audio host is unavailable." }
     }
   })
   ipcMain.handle(resolveInputDeviceChannel, async (event, value) => {
-    if (!audioHostAllowed(event) || !audioHostSupervisor) {
+    if (!audioHostAllowed(event) || !audio.supervisor) {
       return { ok: false as const, error: "The native audio host is unavailable." }
     }
 
@@ -798,31 +735,31 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
     }
 
     try {
-      return { ok: true as const, device: await audioHostSupervisor.resolveInputDevice(deviceId.data) }
+      return { ok: true as const, device: await audio.supervisor.resolveInputDevice(deviceId.data) }
     } catch {
       return { ok: false as const, error: "The native audio host is unavailable." }
     }
   })
   ipcMain.handle(listDevicesChannel, async (event): Promise<{ ok: true; devices: NativeAudioDevice[] } | { ok: false; error: string }> => {
-    if (!audioHostAllowed(event) || !audioHostSupervisor) {
+    if (!audioHostAllowed(event) || !audio.supervisor) {
       return { ok: false, error: "The native audio host is unavailable." }
     }
 
     try {
-      return { ok: true, devices: await audioHostSupervisor.listDevices() }
+      return { ok: true, devices: await audio.supervisor.listDevices() }
     } catch {
       return { ok: false, error: "The native audio host is unavailable." }
     }
   })
 
   const sessionSupervisorFor = (event: Electron.IpcMainInvokeEvent) => (
-    audioHostAllowed(event) ? audioHostSupervisor : undefined
+    audioHostAllowed(event) ? audio.supervisor : undefined
   )
 
   // One handler shape for the envelope operations: authorize the sender, parse the request, run, reply ok or the failure.
   const registerNativeSessionOperation = <Value>(
     operation: { channel: string; request: z.ZodType<{ value: Value; transactionToken?: string | undefined }> },
-    run: (supervisor: NonNullable<typeof audioHostSupervisor>, value: Value, transactionToken?: string) => Promise<void>,
+    run: (supervisor: NonNullable<typeof audio.supervisor>, value: Value, transactionToken?: string) => Promise<void>,
   ) => ipcMain.handle(operation.channel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = operation.request.safeParse(value)
@@ -934,7 +871,7 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
   registerNativeSessionOperation(nativeSessionOperations.releaseMappedAsset, (supervisor, sessionAssetId, token) => supervisor.releaseMappedAsset(sessionAssetId, token))
   registerNativeSessionOperation(nativeSessionOperations.detachVst, async (supervisor, instanceId, token) => {
     await supervisor.detachVst(instanceId, token)
-    activeEditorProjectBindings.remove(instanceId, token)
+    audio.bindings.remove(instanceId, token)
   })
   ipcMain.handle(sessionGetVstStateChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
@@ -950,7 +887,7 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
         || !sha256HexPattern.test(state.sha256)
         || createHash("sha256").update(state.bytes).digest("hex") !== state.sha256
       ) return { ok: false as const, error: "The native VST state response is invalid." }
-      attachmentLedger.capturedFromLive(instanceId.data, state.sha256)
+      audio.ledger.capturedFromLive(instanceId.data, state.sha256)
 
       return { ok: true as const, bytes: state.bytes, sha256: state.sha256 }
     } catch (error) {
@@ -961,11 +898,11 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
     const envelope = nativeEditorEnvelopeSchema.safeParse(rawValue)
     const allowed = audioHostAllowed(event)
 
-    const activeHostCandidate = allowed && audioHostSupervisor?.status().running
-      ? audioHostSupervisor
+    const activeHostCandidate = allowed && audio.supervisor?.status().running
+      ? audio.supervisor
       : undefined
 
-    const manager = allowed ? nativeVst3EditorSessionManager : undefined
+    const manager = allowed ? audio.editorSessions : undefined
 
     if ((!manager && !activeHostCandidate) || !envelope.success) {
       return { ok: false as const, error: "The native VST editor command is invalid." }
@@ -1014,7 +951,7 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
             throw new Error("The native audio host transaction token is required.")
           }
 
-          const boundProjectId = activeEditorProjectBindings.projectFor(command.instanceId)
+          const boundProjectId = audio.bindings.projectFor(command.instanceId)
 
           if (boundProjectId !== undefined && boundProjectId !== projectId) {
             throw new Error("The active native VST editor project binding changed.")
@@ -1099,7 +1036,7 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
     const hostHello = supervisor.status().hello
 
     if (!hostHello) return nativeSessionFailure()
-    const ledger = attachmentLedger.forHost(supervisor, hostHello)
+    const ledger = audio.ledger.forHost(supervisor, hostHello)
 
     try {
       result = await coordinateNativeVst3Attachments({
@@ -1118,13 +1055,13 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
         workerEnvironment: ae08WorkerEnvironment,
       })
     } catch (error) {
-      activeEditorProjectBindings.rollback(envelope.data.transactionToken)
+      audio.bindings.rollback(envelope.data.transactionToken)
 
       return nativeSessionFailure(error)
     }
 
     if (!result.ok) {
-      activeEditorProjectBindings.rollback(envelope.data.transactionToken)
+      audio.bindings.rollback(envelope.data.transactionToken)
 
       return nativeVst3CoordinationFailureReply(result)
     }
@@ -1132,18 +1069,18 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
     try {
       const plan = decodeNativeExternalAttachmentPlan(sessionValue.serializedPlan)
       const projectId = projectIdSchemaV1.parse(sessionValue.projectId)
-      activeEditorProjectBindings.stage(
+      audio.bindings.stage(
         plan.attachments.map((attachment) => attachment.instanceId),
         projectId,
         envelope.data.transactionToken,
       )
 
       // A live plan has no transaction to commit it: the project owns these instances from now.
-      if (envelope.data.transactionToken === undefined) activeEditorProjectBindings.commit()
+      if (envelope.data.transactionToken === undefined) audio.bindings.commit()
 
       return { ok: true as const }
     } catch {
-      activeEditorProjectBindings.rollback(envelope.data.transactionToken)
+      audio.bindings.rollback(envelope.data.transactionToken)
 
       return nativeSessionFailure()
     }
@@ -1175,7 +1112,7 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
     if (!audioHostAllowed(event) || event.senderFrame !== event.sender.mainFrame) return false
 
     if (revisionProjectOwner?.projectId !== projectId || revisionProjectOwner.rendererGeneration !== rendererSession.generation()
-      || revisionProjectOwner.hostGeneration !== audioHostSupervisor?.status().generation) return false
+      || revisionProjectOwner.hostGeneration !== audio.supervisor?.status().generation) return false
 
     try { return new URL(event.senderFrame.url).searchParams.get("projectId") === projectId }
     catch { return false }
@@ -1212,9 +1149,9 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
             : await supervisor.retireGraphRevision(revision)
         }
 
-        if (result.status === "published") attachmentLedger.published()
+        if (result.status === "published") audio.ledger.published()
 
-        if (operation === "rollback") attachmentLedger.rolledBack()
+        if (operation === "rollback") audio.ledger.rolledBack()
         const current = supervisor.status()
 
         if (rendererSession.generation() !== rendererGeneration || current.generation !== owner.generation
@@ -1254,16 +1191,16 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
   registerNativeSessionTransportIpc({
     ipcMain,
     allowed: audioHostAllowed,
-    supervisor: () => audioHostSupervisor,
+    supervisor: () => audio.supervisor,
     fail: nativeSessionFailure,
   })
   registerNativeSessionRecordingIpc({
     ipcMain,
     allowed: audioHostAllowed,
-    supervisor: () => audioHostSupervisor,
+    supervisor: () => audio.supervisor,
     owner: recordingSessionOwner,
     rendererGeneration: () => rendererSession.generation(),
-    hostGeneration: () => audioLifecycle.powerGeneration,
+    hostGeneration: () => audio.lifecycle.powerGeneration,
     fail: nativeSessionFailure,
   })
   const spoolScopeSchema = z.object({ projectId: projectIdSchemaV1, projectGeneration: unsigned32Schema }).strict()
@@ -1299,7 +1236,7 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
 
   const registerNativeSessionControl = (
     channel: string,
-    operation: (supervisor: NonNullable<typeof audioHostSupervisor>) => Promise<void>,
+    operation: (supervisor: NonNullable<typeof audio.supervisor>) => Promise<void>,
   ) => ipcMain.handle(channel, async (event) => {
     const supervisor = sessionSupervisorFor(event)
 
@@ -1323,7 +1260,7 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
 
     try {
       const transactionToken = await supervisor.beginTransaction()
-      attachmentLedger.begin()
+      audio.ledger.begin()
 
       if (
         rendererSession.generation() !== requestGeneration
@@ -1335,8 +1272,8 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
         return nativeSessionFailure()
       }
 
-      activeEditorProjectBindings.stageEmpty(transactionToken)
-      activeRendererTransactions.set(transactionToken, { generation: requestGeneration, senderId })
+      audio.bindings.stageEmpty(transactionToken)
+      audio.transactions.set(transactionToken, { generation: requestGeneration, senderId })
 
       return { ok: true as const, transactionToken }
     } catch (error) {
@@ -1348,7 +1285,7 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
     const envelope = nativeUndefinedEnvelopeSchema.safeParse(value)
 
     if (!supervisor || !envelope.success || !envelope.data.transactionToken) return nativeSessionFailure()
-    const transaction = activeRendererTransactions.get(envelope.data.transactionToken)
+    const transaction = audio.transactions.get(envelope.data.transactionToken)
 
     if (
       !transaction
@@ -1359,14 +1296,14 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
 
     try {
       await supervisor.commitTransaction(envelope.data.transactionToken)
-      activeRendererTransactions.delete(envelope.data.transactionToken)
-      activeEditorProjectBindings.commit(envelope.data.transactionToken)
-      attachmentLedger.published()
+      audio.transactions.delete(envelope.data.transactionToken)
+      audio.bindings.commit(envelope.data.transactionToken)
+      audio.ledger.published()
 
       return { ok: true as const }
     } catch (error) {
-      activeRendererTransactions.delete(envelope.data.transactionToken)
-      activeEditorProjectBindings.rollback(envelope.data.transactionToken)
+      audio.transactions.delete(envelope.data.transactionToken)
+      audio.bindings.rollback(envelope.data.transactionToken)
 
       return nativeSessionFailure(error)
     }
@@ -1376,7 +1313,7 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
     const envelope = nativeUndefinedEnvelopeSchema.safeParse(value)
 
     if (!supervisor || !envelope.success || !envelope.data.transactionToken) return nativeSessionFailure()
-    const transaction = activeRendererTransactions.get(envelope.data.transactionToken)
+    const transaction = audio.transactions.get(envelope.data.transactionToken)
 
     if (
       !transaction
@@ -1387,14 +1324,14 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
 
     try {
       await supervisor.rollbackTransaction(envelope.data.transactionToken)
-      attachmentLedger.rolledBack()
+      audio.ledger.rolledBack()
 
       return { ok: true as const }
     } catch (error) {
       return nativeSessionFailure(error)
     } finally {
-      activeRendererTransactions.delete(envelope.data.transactionToken)
-      activeEditorProjectBindings.rollback(envelope.data.transactionToken)
+      audio.transactions.delete(envelope.data.transactionToken)
+      audio.bindings.rollback(envelope.data.transactionToken)
     }
   })
   registerNativeSessionControl(sessionStartChannel, (supervisor) => supervisor.startAudio())
@@ -1434,11 +1371,11 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
         generation: supervisor.status().generation,
       }))
       await supervisor.teardownSession()
-      activeEditorProjectBindings.clear()
+      audio.bindings.clear()
 
       return { ok: true as const }
     } catch (error) {
-      activeEditorProjectBindings.clear()
+      audio.bindings.clear()
 
       return nativeSessionFailure(error)
     }
@@ -1449,8 +1386,8 @@ const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>)
     senderAllowed,
     audioHostAllowed,
     getWindow: rendererSession.window,
-    hostPath: audioHostPath,
-    attachmentLedger,
+    hostPath: audio.hostPath,
+    attachmentLedger: audio.ledger,
     ae08Evidence,
     ae08WorkerEnvironment,
   })
@@ -1471,12 +1408,12 @@ const prepareQuit = async () => {
   if (quitCleanupPrepared) return
   // Resolve the persistence barrier before renderer invalidation or app exit.
   // A failed barrier is not swallowed and must keep the application alive.
-  await audioHostSupervisor?.waitForRecordingFinish()
+  await audio.supervisor?.waitForRecordingFinish()
   // Native Complete releases writer ownership; main's durable identity proof
   // must also finish before normal process exit invalidates renderer recovery.
   await recordingSessionOwner.waitForSettlement()
-  await audioHostSupervisor?.teardown()
-  await nativeVst3EditorSessionManager?.teardownAll()
+  await audio.supervisor?.teardown()
+  await audio.editorSessions?.teardownAll()
   await controlSocket.close()
   await fileCapabilities.revokeAll()
   await ae08StopTrace().catch(() => console.error("[ae08] trace could not be saved"))
@@ -1493,15 +1430,8 @@ const finishQuit = async () => {
   preparationRegistry.abortAll()
   invalidateRendererGeneration("Application is closing.")
   rendererSession.rejectAllPending("Application is closing.")
-  activeEditorProjectBindings.clear()
-  powerMonitor.removeAllListeners("suspend")
-  powerMonitor.removeAllListeners("resume")
-  removeAudioHostLossListener?.()
-  removeAudioHostRecordingStatusListener?.()
-  removeAudioHostMeterBatchListener?.()
-  removeAudioHostSpectrumListener?.()
-  removeAudioHostScheduleProgressListener?.()
-  removeAudioHostWorkerNotificationListener?.()
+  audio.bindings.clear()
+  audio.dispose()
   app.exit()
 }
 
@@ -1525,8 +1455,6 @@ else {
     nativeMediaAvailable = await nativeFileCapabilityHelper.selfTest()
     stage("after-native-helper")
     const artifacts = await resolveNativeArtifacts()
-    audioHostPath = artifacts.audioHostPath
-    nativeReleaseArtifactVerification = artifacts.verification
 
     const pluginCatalog = createPluginCatalogOwner({
       userData: app.getPath("userData"),
@@ -1555,130 +1483,7 @@ else {
     if (recordingStartup.registry) recordingOrderEvidence?.ready()
 
     if (recordingStartup.error) console.error("[recording-spool] recording storage unavailable; DAW startup continues", recordingStartup.error)
-    audioHostSupervisor = audioHostPath ? createNativeAudioHostSupervisor(audioHostPath, undefined, {
-      evidence: ae08Evidence,
-      hostEnvironment: ae08WorkerEnvironment,
-    }) : undefined
-
-    // Only a lost host ends the native session. One plug-in's fault, miss or restart is that instance's business.
-    const publishNativeSessionLoss = (error: string) => {
-      activeEditorProjectBindings.clear()
-      rendererSession.send(lossChannel, error)
-    }
-
-    const sendVstParameterEdit = (input: {
-      projectId: string
-      source: "active-playback" | "editor-session"
-      instanceId: string
-      parameterId: number
-      normalizedValue: number
-    }) => {
-      rendererSession.send(vstParameterEditChannel, input)
-    }
-
-    const hostEvents = createNativeVst3HostEventHandlers({
-      sendInstanceEvent: (event) => { rendererSession.send(vstInstanceEventChannel, event) },
-      sendParameterEdit: (input) => sendVstParameterEdit({ ...input, source: "active-playback" }),
-      sendEditorState: (input) => { rendererSession.send(vstEditorStateChannel, input) },
-      projectFor: (instanceId) => activeEditorProjectBindings.projectFor(instanceId),
-      endSession: (error) => publishNativeSessionLoss(sanitizeNativeVst3DiagnosticError(error)),
-    })
-
-    removeAudioHostWorkerNotificationListener = audioHostSupervisor?.onWorkerNotification(hostEvents.onNotification)
-    const editorHostPath = audioHostPath
-    nativeVst3EditorSessionManager = editorHostPath && pluginCatalog.workerPath
-      ? createNativeVst3EditorSessionManager({
-        workerPath: pluginCatalog.workerPath,
-        catalogStore: pluginCatalog.store,
-        createSupervisor: () => createNativeAudioHostSupervisor(editorHostPath, undefined, {
-          evidence: ae08Evidence,
-          hostEnvironment: ae08WorkerEnvironment,
-        }),
-        playbackOwns: (instanceId) => activeEditorProjectBindings.projectFor(instanceId) !== undefined,
-        onEditorInteraction: () => {
-          const target = rendererSession.window()
-
-          if (!target || target.isDestroyed() || rendererSession.finishingQuit()) return
-          target.show()
-          app.focus({ steal: true })
-          target.focus()
-        },
-        onEditorOpenState: (input) => {
-          rendererSession.send(vstEditorStateChannel, input)
-        },
-        onCapturedState: (input) => new Promise<void>((resolve, reject) => {
-          const requestId = randomUUID()
-
-          const timeout = setTimeout(() => {
-            if (!rendererSession.editorStateAcks.delete(requestId)) return
-            reject(new Error("Renderer editor state persistence timed out."))
-          }, 10_000)
-
-          rendererSession.editorStateAcks.set(requestId, {
-            resolve: () => {
-              clearTimeout(timeout)
-              resolve()
-            },
-            reject: (error) => {
-              clearTimeout(timeout)
-              reject(error)
-            },
-          })
-
-          if (!rendererSession.send(vstEditorCapturedStateChannel, { ...input, requestId })) {
-            rendererSession.editorStateAcks.delete(requestId)
-            clearTimeout(timeout)
-            reject(new Error("Renderer unavailable."))
-          }
-        }),
-        onParameterEdit: (input) => sendVstParameterEdit({
-          projectId: input.projectId,
-          source: "editor-session",
-          instanceId: input.instanceId,
-          parameterId: input.parameterId,
-          normalizedValue: input.normalizedValue,
-        }),
-      })
-      : undefined
-
-    const handleSuspend = () => {
-      if (rendererSession.finishingQuit() || (audioLifecycle.state === "suspended" && audioRecoveryGeneration === undefined)) return
-      audioRecoveryGeneration = undefined
-      audioLifecycle = { state: "suspended", powerGeneration: audioLifecycle.powerGeneration + 1 }
-      publishAudioLifecycle()
-      audioSuspendPromise = Promise.allSettled([
-        audioHostSupervisor?.suspend(),
-        nativeVst3EditorSessionManager?.suspendAll(),
-      ]).then(() => undefined)
-    }
-
-    const handleResume = () => {
-      if (rendererSession.finishingQuit() || audioLifecycle.state !== "suspended") return
-      audioLifecycle = { state: "suspended", powerGeneration: audioLifecycle.powerGeneration + 1 }
-      const recoveryGeneration = audioLifecycle.powerGeneration
-      recoverAudioHost(recoveryGeneration)
-    }
-
-    powerMonitor.on("suspend", handleSuspend)
-    powerMonitor.on("resume", handleResume)
-    removeAudioHostLossListener = audioHostSupervisor?.onLoss(hostEvents.onLoss)
-    const recordingBenchmark = createBenchmarkRecordingTelemetry()
-    removeAudioHostRecordingStatusListener = audioHostSupervisor?.onRecordingStatus((status) => {
-      recordingBenchmark.recordStatus(status)
-      recordingSessionOwner.onStatus(status)
-    })
-    removeAudioHostMeterBatchListener = audioHostSupervisor?.onMeterBatch((batch: NativeHostMeterBatch) => {
-      recordingBenchmark.recordTraffic("meter-batch", 32 + batch.entries.length * 24)
-      rendererSession.send(meterBatchChannel, batch)
-    })
-    removeAudioHostSpectrumListener = audioHostSupervisor?.onSpectrumFrame((frame) => {
-      recordingBenchmark.recordTraffic("spectrum-frame", 48 + frame.data.byteLength)
-      rendererSession.send(spectrumFrameChannel, frame)
-    })
-    removeAudioHostScheduleProgressListener = audioHostSupervisor?.onScheduleProgress((progress: NativeScheduleProgress) => {
-      recordingBenchmark.recordTraffic("schedule-progress", 16 + nativeAudioHostScheduleProgressBytes)
-      rendererSession.send(scheduleProgressChannel, progress)
-    })
+    audio.start({ hostPath: artifacts.audioHostPath, verification: artifacts.verification, pluginCatalog })
     installRendererContent(rendererSession, sameAppOrigin)
     registerIpc(pluginCatalog)
     applicationMenuController.install({
@@ -1693,8 +1498,8 @@ else {
       sameAppOrigin,
       invalidateRendererGeneration,
       applyRendererInvalidation,
-      audioHost: () => audioHostSupervisor,
-      editorSessions: () => nativeVst3EditorSessionManager,
+      audioHost: () => audio.supervisor,
+      editorSessions: () => audio.editorSessions,
       prepareQuit,
       finishQuit,
     })

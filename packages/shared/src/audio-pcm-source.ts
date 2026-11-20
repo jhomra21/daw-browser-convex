@@ -78,7 +78,7 @@ export const validateAudioPcmSourceMetadata = (metadata: Pick<
   }
 }
 
-export const clampPcmRange = (startFrame: number, endFrame: number, frameCount: number) => {
+const clampPcmRange = (startFrame: number, endFrame: number, frameCount: number) => {
   const start = Math.max(0, startFrame)
   const end = Math.min(frameCount, endFrame)
 

@@ -7,14 +7,14 @@ import type {
 
 const DEFAULT_MAX_HEIGHT = 0.9
 const DEFAULT_FILL_STYLE = 'rgba(255,255,255,0.55)'
-export const MINIMUM_WAVEFORM_BACKING_THICKNESS_PX = 2
+const MINIMUM_WAVEFORM_BACKING_THICKNESS_PX = 2
 
 export const minimumWaveformThicknessCssPx = (backingScaleY: number) => (
   MINIMUM_WAVEFORM_BACKING_THICKNESS_PX
     / (Number.isFinite(backingScaleY) && backingScaleY > 0 ? backingScaleY : 1)
 )
 
-export const waveformSampleY = (input: {
+const waveformSampleY = (input: {
   readonly sample: number
   readonly topY: number
   readonly contentH: number

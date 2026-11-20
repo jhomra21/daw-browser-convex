@@ -730,7 +730,7 @@ export const deleteClipRow = async (
   return { changed: true, recoveryId }
 }
 
-export const createOwnedClip = async (
+const createOwnedClip = async (
   ctx: MutationCtx,
   item: ClipCreateInput,
 ): Promise<Id<'clips'> | null> => {
@@ -1101,33 +1101,6 @@ export const serverMoveMany = mutation({
   },
 })
 
-export const remove = mutation({
-  args: { clipId: v.id('clips') },
-  handler: async (ctx, { clipId }) => {
-    const userId = await requireAuthenticatedUserId(ctx)
-    const access = await getClipWriteAccess(ctx, clipId, userId)
-
-    if (!access) return
-
-    await pruneClipDeletionRecoveries(ctx, {
-      projectId: access.clip.projectId,
-      actorUserId: userId,
-      reserve: 1,
-    })
-
-    const result = await deleteClipRow(ctx, {
-      projectId: access.clip.projectId,
-      clipId,
-      ownershipId: access.owner._id,
-      recovery: { actorUserId: userId, deleteOperationId: `clip:${String(clipId)}` },
-    })
-
-    await advanceProjectRevision(ctx, access.clip.projectId)
-
-    return result.recoveryId ?? null
-  },
-})
-
 export const setName = mutation({
   args: { clipId: v.id('clips'), name: v.string() },
   handler: async (ctx, { clipId, name }) => {
@@ -1144,30 +1117,6 @@ export const setName = mutation({
 
     if (!result.changed) return
     await advanceProjectRevision(ctx, access.clip.projectId)
-  },
-})
-
-export const serverSetName = mutation({
-  args: { clipId: v.string(), name: v.string() },
-  handler: async (ctx, { clipId, name }) => {
-    const userId = await requireAuthenticatedUserId(ctx)
-    const normalizedClipId = ctx.db.normalizeId('clips', clipId)
-
-    if (!normalizedClipId) return { status: 'rejected' as const }
-    const access = await getClipWriteAccess(ctx, normalizedClipId, userId)
-
-    if (!access) return { status: 'rejected' as const }
-
-    const result = await setClipNameRow(ctx, {
-      projectId: access.clip.projectId,
-      clipId: normalizedClipId,
-      name,
-    })
-
-    if (!result.changed) return { status: 'noop' as const }
-    await advanceProjectRevision(ctx, access.clip.projectId)
-
-    return { status: 'applied' as const }
   },
 })
 
@@ -1210,30 +1159,6 @@ export const setAudioWarp = mutation({
       projectId: access.clip.projectId,
       clipId,
       audioWarp,
-    })
-
-    if (!result.changed) return { status: 'noop' as const }
-    await advanceProjectRevision(ctx, access.clip.projectId)
-
-    return { status: 'applied' as const }
-  },
-})
-
-export const setFades = mutation({
-  args: { clipId: v.id('clips'), fades: clipFadesValidator },
-  handler: async (ctx, { clipId, fades }) => {
-    const userId = await requireAuthenticatedUserId(ctx)
-    const access = await getClipWriteAccess(ctx, clipId, userId)
-
-    if (!access || access.clip.midi) return { status: 'rejected' as const }
-
-    if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
-    const nextFades = normalizeClipFades(fades, access.clip.duration)
-
-    const result = await setClipFadesRow(ctx, {
-      projectId: access.clip.projectId,
-      clipId,
-      fades: nextFades,
     })
 
     if (!result.changed) return { status: 'noop' as const }

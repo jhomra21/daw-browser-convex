@@ -1,4 +1,4 @@
-export type ResumableUploadLimitsV1 = Readonly<{
+type ResumableUploadLimitsV1 = Readonly<{
   version: 'v1'
   partSizeBytes: number
   maxPartCount: number

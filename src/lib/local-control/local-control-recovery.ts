@@ -50,7 +50,7 @@ export const maxLocalRecoveryExternalArtifactBytes = 2 * maxVst3WorkerStateBytes
 export const maxLocalProjectExternalRecoveryBytes = 16 * maxVst3WorkerStateBytes
 const jsonValueSchema = z.json()
 
-export const collectLocalDeletedTrackIds = (
+const collectLocalDeletedTrackIds = (
   tracks: readonly ProjectSnapshotV2['tracks'][number][],
   rootTrackId: string,
 ) => collectDeletedTrackIdsV1(

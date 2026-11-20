@@ -45,7 +45,7 @@ export const planStructuralTransition = (entry: HistoryEntry, direction: Directi
 // The structural operations a history entry applies, by history ref and in execution order. Undo execution and the
 // recording guard's projection both interpret this one list; each resolves refs to ids its own way. A patch carries only
 // the fields it touches: an absent key leaves the field alone, an undefined value clears it.
-export type StructuralOp =
+type StructuralOp =
   | { kind: 'remove-track'; trackRef: TrackRef | undefined; currentId: string | undefined }
   | {
     kind: 'add-track'

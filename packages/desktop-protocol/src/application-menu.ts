@@ -52,7 +52,7 @@ export const desktopApplicationMenuExtensionCommandSchema = z.object({
   commandId: z.string().min(1).max(128).regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)+$/),
 }).strict()
 
-export const desktopApplicationMenuCommandSchema = z.enum(desktopApplicationMenuCommands)
+const desktopApplicationMenuCommandSchema = z.enum(desktopApplicationMenuCommands)
 
 export type DesktopApplicationMenuCommand = z.infer<typeof desktopApplicationMenuCommandSchema>
 
@@ -63,7 +63,7 @@ export const desktopApplicationMenuMessageSchema = z.union([
 
 export type DesktopApplicationMenuMessage = z.infer<typeof desktopApplicationMenuMessageSchema>
 
-export const desktopApplicationMenuExtensionContributionSchema = z.object({
+const desktopApplicationMenuExtensionContributionSchema = z.object({
   id: z.string().min(1).max(128).regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)+$/),
   commandId: z.string().min(1).max(128).regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)+$/),
   title: z.string().min(1).max(200),
@@ -72,7 +72,7 @@ export const desktopApplicationMenuExtensionContributionSchema = z.object({
   checked: z.boolean().optional(),
 }).strict()
 
-export const desktopApplicationMenuExtensionContributionsSchema = z.array(
+const desktopApplicationMenuExtensionContributionsSchema = z.array(
   desktopApplicationMenuExtensionContributionSchema,
 ).max(16).refine((items) => new Set(items.map((item) => item.id)).size === items.length)
 

@@ -1,4 +1,4 @@
-export type NativeEditorAnchor = { x: number; y: number }
+type NativeEditorAnchor = { x: number; y: number }
 
 export const nativeEditorAnchorFromRect = (rect: {
   left: number

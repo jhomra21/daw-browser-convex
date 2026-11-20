@@ -1,9 +1,9 @@
-export type RendererLifecycleInvalidation = {
+type RendererLifecycleInvalidation = {
   previousGeneration: number
   generation: number
 }
 
-export type RendererLifecycleOwner = {
+type RendererLifecycleOwner = {
   generation(): number
   invalidateActiveDocument(): RendererLifecycleInvalidation | undefined
   beginMainFrameNavigation(identity: string): RendererLifecycleInvalidation | undefined

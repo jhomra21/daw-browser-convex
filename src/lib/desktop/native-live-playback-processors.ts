@@ -1,6 +1,6 @@
 import type { ExternalProcessor } from "@daw-browser/external-plugins"
 
-export type NativeLiveProcessorSeed = {
+type NativeLiveProcessorSeed = {
   projectId: string
   processor: ExternalProcessor
 }

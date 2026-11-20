@@ -29,7 +29,7 @@ const expectedFormats = new Map([
   ['audio/webm', WEBM],
 ])
 
-export type TrustedAudioMetadata = {
+type TrustedAudioMetadata = {
   durationSec: number
   sampleRate: number
   channelCount: number

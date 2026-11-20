@@ -74,7 +74,6 @@ export * from './granular-params'
 
 export * from './granular-automation'
 
-export * from './shared-timeline-operation-schema'
 
 export * from './shared-timeline-operations'
 

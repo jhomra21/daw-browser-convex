@@ -131,11 +131,6 @@ export const sampledInstrumentRegionIdentity = (
   ].map(encodedIdentityField).join(':')
 }
 
-export const sampledInstrumentBufferIdentity = (
-  sample: SampledInstrumentSample,
-  region: SampledInstrumentRegion,
-) => sampledInstrumentRegionIdentity(sample, region)
-
 export const localizeSampledInstrumentFrame = (
   sourceFrame: number,
   region: SampledInstrumentRegion,

@@ -30,7 +30,7 @@ type AudioWaveformLayout = {
   segments?: AudioWaveformLayoutSegment[]
 }
 
-export type { AudioWaveformLayout, AudioWaveformLayoutSegment }
+export type { AudioWaveformLayoutSegment }
 
 export type CroppedWaveformData = {
   data: WaveformSourceData

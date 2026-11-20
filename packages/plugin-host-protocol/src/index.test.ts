@@ -26,10 +26,8 @@ import {
   type NativeVst3PreflightRequest,
   type NativeVst3PreflightResult,
   type NativeVst3WorkerHello,
-  parsePluginHostControlFrame,
   parseVst3WorkerControlRequestV2,
   parseVst3ScannerResponseV2,
-  pluginHostProtocolCompatibility,
   pluginParameterDescriptorSchema,
   vst3WorkerProtocolVersion,
 } from './index'
@@ -68,57 +66,6 @@ describe('plugin host control protocol', () => {
       readOnly: false,
       hidden: false,
     }).success).toBe(false)
-  })
-
-  test('rejects oversized control frames before parsing them', () => {
-    expect(() => parsePluginHostControlFrame('x'.repeat(maxPluginHostControlFrameBytes + 1))).toThrow(
-      'Plugin host control frame exceeds the maximum size.',
-    )
-  })
-
-  test('accepts only bounded state metadata controls', () => {
-    const request = {
-      version: 1,
-      compatibility: pluginHostProtocolCompatibility,
-      requestId: 'state-1',
-      type: 'state',
-      instanceId: 'a7a0b9ac-7884-492c-8b68-80f15802442c',
-      action: 'load',
-      metadata: {
-        artifactId: 'a7a0b9ac-7884-492c-8b68-80f15802442c',
-        sha256: 'a'.repeat(64),
-        byteLength: 8,
-        artifactKind: 'plugin-state',
-        ownerId: 'user-1',
-        acl: 'owner',
-        bucket: 'local',
-        location: 'plugin-artifacts/a7a0b9ac-7884-492c-8b68-80f15802442c',
-      },
-    }
-
-    expect(parsePluginHostControlFrame(JSON.stringify(request))).toMatchObject({
-      type: 'state',
-      action: 'load',
-    })
-    expect(() => parsePluginHostControlFrame(JSON.stringify({ ...request, metadata: undefined }))).toThrow()
-  })
-
-  test('rejects envelopes whose compatibility does not contain or support their version', () => {
-    const request = {
-      version: 1,
-      compatibility: { minimum: 2, maximum: 2 },
-      requestId: 'scan-1',
-      type: 'scan',
-      paths: ['/Plugins'],
-    }
-
-    expect(() => parsePluginHostControlFrame(JSON.stringify(request))).toThrow(
-      'incompatible protocol compatibility',
-    )
-    expect(() => parsePluginHostControlFrame(JSON.stringify({
-      ...request,
-      compatibility: { minimum: 2, maximum: 3 },
-    }))).toThrow('incompatible protocol compatibility')
   })
 })
 

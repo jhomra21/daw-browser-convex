@@ -1,6 +1,6 @@
 export const MAX_PIXELS_PER_SECOND = 480_000
 
-export type TimelineViewportGeometry = {
+type TimelineViewportGeometry = {
   visibleStartSec: number
   viewportWidthPx: number
   pixelsPerSecond: number
@@ -12,17 +12,17 @@ export type TimelineViewportRange = {
   endSec: number
 }
 
-export type TimelineViewportIntersection = TimelineViewportRange & {
+type TimelineViewportIntersection = TimelineViewportRange & {
   startPx: number
   endPx: number
 }
 
-export type TimelineViewportProjection = {
+type TimelineViewportProjection = {
   leftPx: number
   widthPx: number
 }
 
-export type TimelineClipViewportSlice = {
+type TimelineClipViewportSlice = {
   startSec: number
   endSec: number
   startPx: number

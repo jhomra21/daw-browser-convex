@@ -12,12 +12,12 @@ export const isLocalTimelineKeyboardTarget = (target: EventTarget | null) => (
 
 // Kobalte dialog content is portalled and has role="dialog", without aria-modal.
 // Inspect event ancestry, never unrelated dialogs elsewhere in the document.
-export const isDialogKeyboardTarget = (target: EventTarget | null) => (
+const isDialogKeyboardTarget = (target: EventTarget | null) => (
   target instanceof Element
   && target.closest('[role="dialog"], [role="alertdialog"], dialog') !== null
 )
 
-export const isMenuKeyboardTarget = (target: EventTarget | null) => (
+const isMenuKeyboardTarget = (target: EventTarget | null) => (
   target instanceof Element
   && target.closest('[role="menu"], [role="menubar"]') !== null
 )

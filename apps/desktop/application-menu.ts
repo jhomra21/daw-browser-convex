@@ -3,7 +3,7 @@ import type {
   DesktopApplicationMenuState,
 } from "@daw-browser/desktop-protocol/application-menu"
 
-export type DesktopApplicationMenuPlatform = "darwin" | "win32" | "linux"
+type DesktopApplicationMenuPlatform = "darwin" | "win32" | "linux"
 
 type ApplicationMenuRole =
   | "services"

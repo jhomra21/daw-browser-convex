@@ -28,7 +28,7 @@ export type SetTrackInstrumentInput =
   | { instrument: Extract<TrackInstrumentParams, { kind: 'sampler' }>; buffers?: SamplerResolvedBuffers }
   | { instrument: Extract<TrackInstrumentParams, { kind: 'granular' }>; installedBuffer?: GranularInstalledBuffer }
 
-export type InstrumentRuntimeListeners = {
+type InstrumentRuntimeListeners = {
   onNoteMiss?: (miss: SamplerNoteMiss) => void
   onAssetUse?: (use: SamplerRegionUse) => void
   onDrumRackAssetUse?: (use: DrumRackRegionUse) => void
@@ -147,11 +147,6 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
     return synthRuntime.setTrackSynth(trackId, params, instanceId)
   }
 
-  const clearTrackSynth = (trackId: string) => {
-    if (activeKinds.get(trackId) === 'synth') activeKinds.delete(trackId)
-    synthRuntime.disposeTrack(trackId)
-  }
-
   const clearTrackInstrument = (trackId: string) => {
     activeKinds.delete(trackId)
     synthRuntime.disposeTrack(trackId)
@@ -194,7 +189,6 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
     },
     clearTrackInstrument,
     setTrackSynth,
-    clearTrackSynth,
     setTrackDrumRack: (trackId: string, params: Extract<TrackInstrumentParams, { kind: 'drum-rack' }>['params'], buffers?: DrumRackResolvedBuffers): EngineDisposition => {
       disposeGranular(trackId)
       synthRuntime.disposeTrack(trackId)

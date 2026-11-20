@@ -54,7 +54,7 @@ export type AutomationEnvelopeRow = {
   updatedAt: number
 }
 
-export const AUTOMATION_TARGET_KEY_V2_PREFIX = 'automation:v2:'
+const AUTOMATION_TARGET_KEY_V2_PREFIX = 'automation:v2:'
 
 export const automationTargetKey = (target: AutomationTarget, parameterId: string): string => (
   `${AUTOMATION_TARGET_KEY_V2_PREFIX}${JSON.stringify([

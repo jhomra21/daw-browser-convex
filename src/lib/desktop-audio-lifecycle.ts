@@ -7,7 +7,7 @@ type DesktopAudioHostBridge = Pick<
 
 export type { DesktopAudioLifecycle }
 
-export type DesktopAudioRecoveryResult = "ready" | "failed"
+type DesktopAudioRecoveryResult = "ready" | "failed"
 
 type DesktopAudioRecoveryCompletion = {
   accepted: boolean

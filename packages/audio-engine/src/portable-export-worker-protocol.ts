@@ -2,13 +2,10 @@ import type { AudioCoreGraphSnapshot, AudioCoreSampleSourceEventDto, PlanarPcm }
 import type { PortableExportAsset } from './portable-export-snapshot'
 
 export const portableExportWorkerProtocolVersion = 2
-export const portableExportWorkerMaxFramesPerBlock = 8_192
 export const portableExportWorkerMaxAssets = 64
 export const portableExportWorkerMaxEvents = 256
 export const portableExportWorkerMaxGraphNodes = 64
 export const portableExportWorkerMaxGraphEdges = 256
-export const portableExportWorkerMaxResidentPages = 128
-export const portableExportWorkerPageFrames = 16_384
 
 export type PortableExportWorkerSnapshot = {
   graph: AudioCoreGraphSnapshot

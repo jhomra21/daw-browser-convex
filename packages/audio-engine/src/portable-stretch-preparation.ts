@@ -252,10 +252,6 @@ export const validatePortablePreparedStretchAsset = (
   return undefined
 }
 
-export const validatePortablePreparedStretchPcm = (
-  prepared: PortablePreparedStretchAsset,
-): PortableStretchDiagnostic | undefined => validatePortablePreparedStretchAsset(prepared)
-
 const fingerprintPcm = (
   planes: readonly Float32Array[],
   sampleRateHz: number,

@@ -12,7 +12,7 @@ import { peakChunkKey } from './peak-db'
 
 export { getPeakChunkRecord } from './peak-db'
 
-export const SILENCE_BYTE = 128
+const SILENCE_BYTE = 128
 
 export const encodePeakByte = (value: number) => {
   const clipped = Number.isFinite(value) ? Math.max(-1, Math.min(1, value)) : 0
@@ -40,7 +40,7 @@ const createGenerationId = () => {
   return `${Date.now().toString(36)}-${generationSequence.toString(36)}`
 }
 
-export const finestFramesPerInterval = (sampleRate: number) => {
+const finestFramesPerInterval = (sampleRate: number) => {
   if (!positiveInteger(sampleRate)) throw new Error('Waveform sample rate is invalid.')
   let span = 1
   const target = sampleRate / 400
@@ -75,7 +75,7 @@ export const createPeakLevels = (frameCount: number, sampleRate: number): PeakLe
   return levels
 }
 
-export const createWaveformTierFrames = (frameCount: number, sampleRate: number) => (
+const createWaveformTierFrames = (frameCount: number, sampleRate: number) => (
   createPeakLevels(frameCount, sampleRate).map((level) => level.framesPerInterval)
 )
 

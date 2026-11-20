@@ -132,7 +132,7 @@ const clearPersistedSession = (projectId: string, idempotencyKey: string) => {
   storage.removeItem(sessionStorageKey(projectId, idempotencyKey))
 }
 
-export type ResumableAudioUploadResult = {
+type ResumableAudioUploadResult = {
   assetKey: string
   url: string
 }

@@ -6,7 +6,7 @@ import {
   type AutomationEnvelope,
 } from '@daw-browser/shared'
 
-export type NativeVstAutomationProjectionInput = Readonly<{
+type NativeVstAutomationProjectionInput = Readonly<{
   automationEnvelopes: readonly AutomationEnvelope[]
   externalAttachments?: NativeExternalAttachmentPlan
   sampleRateHz: number
@@ -16,22 +16,6 @@ export type NativeVstAutomationProjectionInput = Readonly<{
 }>
 
 const clampNormalized = (value: number) => Math.min(1, Math.max(0, value))
-
-export const isExternalVstAutomationEnvelope = (
-  envelope: AutomationEnvelope,
-  externalAttachments: NativeExternalAttachmentPlan | undefined,
-) => {
-  const parsed = parseExternalAutomationParameterId(envelope.parameterId)
-
-  if (!parsed || !externalAttachments) return false
-  const attachment = externalAttachments.attachments.find((entry) => entry.instanceId === parsed.instanceId)
-
-  if (!attachment) return false
-
-  return envelope.target.kind === 'master'
-    ? attachment.graphNodeId === 'master'
-    : attachment.graphNodeId === envelope.target.trackId
-}
 
 export const projectNativeVstAutomationSegments = (
   input: NativeVstAutomationProjectionInput,

@@ -81,56 +81,6 @@ export type LiveNativeCapabilityMatrix = {
   externalPlugins: false
 }
 
-export const liveNativeCapabilityMatrix = {
-  version: 1,
-  decodedRawSources: true,
-  routing: true,
-  midi: true,
-  instruments: true,
-  effects: false,
-  automation: true,
-  externalPlugins: false,
-} satisfies LiveNativeCapabilityMatrix
-
-export const countLiveNativeInstalledAssetKeys = (
-  tracks: readonly Track<AudioBuffer | null>[],
-  fx?: ExportFx,
-) => {
-  const keys = new Set<string>()
-
-  for (const track of tracks) {
-    for (const clip of track.clips) {
-      if (!clip.midi
-        && clip.sourceAssetKey
-        && !(clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')) {
-        keys.add(clip.sourceAssetKey)
-      }
-    }
-  }
-
-  for (const entry of Object.values(fx?.trackFx ?? {})) {
-    if (entry.instrument?.kind === 'sampler') {
-      for (const zone of entry.instrument.params.zones) {
-        if (entry.samplerBuffers?.has(zone.id)) keys.add(zone.sample.assetKey)
-      }
-    }
-
-    if (entry.instrument?.kind === 'drum-rack') {
-      for (const pad of entry.instrument.params.pads) {
-        if (pad.sample && entry.drumRackBuffers?.has(pad.id)) keys.add(pad.sample.assetKey)
-      }
-    }
-
-    if (entry.instrument?.kind === 'granular'
-      && entry.instrument.params.zone
-      && entry.granularBuffer) {
-      keys.add(entry.instrument.params.zone.sample.assetKey)
-    }
-  }
-
-  return keys.size
-}
-
 const nativeProcessorIsEnabled = (instance: AudioEffectRuntimeInstance) => {
   if (instance.kind === 'delay') return normalizeDelayParams(instance.params).enabled
 

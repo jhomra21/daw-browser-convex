@@ -286,31 +286,6 @@ const createRollingEnergies = (
 }
 
 /* Kept independent from the streaming implementation for equation-derived test fixtures. */
-export const applyBs1770BiquadReference = (
-  input: Float32Array<ArrayBufferLike> | Float64Array<ArrayBufferLike>,
-  coefficients: BiquadCoefficients,
-) => {
-  const output = new Float64Array(input.length)
-  let x1 = 0
-  let x2 = 0
-  let y1 = 0
-  let y2 = 0
-
-  for (let index = 0; index < input.length; index += 1) {
-    const x = Number.isFinite(input[index]) ? input[index] : 0
-
-    const y = coefficients.b0 * x + coefficients.b1 * x1 + coefficients.b2 * x2
-      - coefficients.a1 * y1 - coefficients.a2 * y2
-
-    output[index] = y
-    x2 = x1
-    x1 = x
-    y2 = y1
-    y1 = y
-  }
-
-  return output
-}
 
 export function analyzeLoudness(buffer: LoudnessBuffer, signal?: AbortSignal): LoudnessAnalysis {
   signal?.throwIfAborted()

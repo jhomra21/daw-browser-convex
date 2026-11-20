@@ -73,24 +73,6 @@ export const accept = mutation({
   },
 });
 
-export const revoke = mutation({
-  args: { token: v.string() },
-  handler: async (ctx, { token }) => {
-    const userId = await requireAuthenticatedUserId(ctx);
-
-    const invite = await ctx.db
-      .query("shareInvites")
-      .withIndex("by_token", (q) => q.eq("token", token))
-      .first();
-
-    if (!invite) return null;
-    await requireProjectRole(ctx, invite.projectId, userId, ["owner"]);
-    await ctx.db.patch(invite._id, { revokedAt: Date.now() });
-
-    return null;
-  },
-});
-
 export const listAcceptedAccess = query({
   args: { projectId: v.string() },
   returns: v.array(v.object({

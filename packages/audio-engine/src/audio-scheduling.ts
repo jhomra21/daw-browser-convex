@@ -20,7 +20,7 @@ type ScheduledMidiEvent = {
   velocity?: number
 }
 
-export const isPlayableLegacyMidiNote = (note: MidiNote): boolean => (
+const isPlayableLegacyMidiNote = (note: MidiNote): boolean => (
   Number.isFinite(note.beat)
   && Number.isFinite(note.length)
   && note.length > 0
@@ -190,7 +190,7 @@ export const getClipFadeSchedulePlan = (input: {
   fades: normalizeClipFades(input.fades, input.clipDurationSec),
 })
 
-export const getNormalizedClipFadeSchedulePlan = (input: {
+const getNormalizedClipFadeSchedulePlan = (input: {
   fades: NormalizedClipFades
   clipStartSec: number
   clipDurationSec: number

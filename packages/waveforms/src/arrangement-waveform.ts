@@ -3,12 +3,12 @@ import { loadWaveformSourceData } from './select-waveform-window'
 import type { WaveformSourceData, WaveformSourceIdentity } from './types'
 
 export const ARRANGEMENT_PCM_TILE_FRAMES = 16_384
-export const ARRANGEMENT_PCM_TILE_INTERVALS = 128
-export const ARRANGEMENT_PCM_MAX_CONCURRENT = 2
-export const ARRANGEMENT_PCM_MAX_QUEUE = 64
-export const ARRANGEMENT_PCM_MAX_CACHE_BYTES = 32 * 1024 * 1024
-export const ARRANGEMENT_PCM_MAX_CACHE_ENTRY_BYTES = 8 * 1024 * 1024
-export const ARRANGEMENT_PCM_MAX_CACHE_ENTRIES = 128
+const ARRANGEMENT_PCM_TILE_INTERVALS = 128
+const ARRANGEMENT_PCM_MAX_CONCURRENT = 2
+const ARRANGEMENT_PCM_MAX_QUEUE = 64
+const ARRANGEMENT_PCM_MAX_CACHE_BYTES = 32 * 1024 * 1024
+const ARRANGEMENT_PCM_MAX_CACHE_ENTRY_BYTES = 8 * 1024 * 1024
+const ARRANGEMENT_PCM_MAX_CACHE_ENTRIES = 128
 
 const tileSpanFor = (framesPerInterval: number) => {
   const minimumFrames = Math.max(

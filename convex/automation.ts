@@ -1,4 +1,4 @@
-import { mutation, query, type MutationCtx } from "./_generated/server";
+import { mutation, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import {
@@ -251,16 +251,6 @@ export const deleteAutomationEnvelopeRow = async (
 
   return { changed: true, status: "deleted", envelopeId: existing._id };
 };
-
-export const listByProject = query({
-  args: { projectId: v.string() },
-  handler: async (ctx, { projectId }) => {
-    const userId = await requireAuthenticatedUserId(ctx);
-    await requireProjectRole(ctx, projectId, userId, ["owner", "editor", "viewer"]);
-
-    return await ctx.db.query("automationEnvelopes").withIndex("by_project", (q) => q.eq("projectId", projectId)).collect();
-  },
-});
 
 export const serverSetEnvelope = mutation({
   args: {

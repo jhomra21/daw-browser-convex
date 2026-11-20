@@ -1,6 +1,6 @@
 export const MAX_WAVEFORM_BACKING_PIXELS = 2_000_000
 
-export const normalizedWaveformDevicePixelRatio = (value: number) => (
+const normalizedWaveformDevicePixelRatio = (value: number) => (
   Number.isFinite(value) ? Math.min(3, Math.max(1, value)) : 1
 )
 

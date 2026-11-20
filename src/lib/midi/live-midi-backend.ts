@@ -1,4 +1,4 @@
-export type NativeLiveMidiAvailability = {
+type NativeLiveMidiAvailability = {
   isActive: () => boolean
   isAvailable: () => boolean
 }

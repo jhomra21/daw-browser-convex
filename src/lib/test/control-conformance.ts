@@ -12,7 +12,7 @@ import {
   type ControlPreviewRequestV1,
 } from '@daw-browser/control'
 
-export type ControlConformanceInvoker = (
+type ControlConformanceInvoker = (
   operation: ControlOperationIdInput,
   input: ControlOperationInput,
   target: ControlOperationTarget,

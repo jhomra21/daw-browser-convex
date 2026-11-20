@@ -173,7 +173,7 @@ export const validateAudioStretchMaterialization = (
   validateAudioStretchMaterializationBytes(plan.frameCount, source.channelCount, policy)
 }
 
-export const validateAudioStretchMaterializationBytes = (
+const validateAudioStretchMaterializationBytes = (
   frameCount: number,
   channelCount: number,
   policy: AudioStretchMaterializationPolicy,

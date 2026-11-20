@@ -1,4 +1,4 @@
-export type NativeVstProjectBindings = {
+type NativeVstProjectBindings = {
   stage(instanceIds: readonly string[], projectId: string, transactionToken?: string): void
   stageEmpty(transactionToken?: string): void
   commit(transactionToken?: string): void

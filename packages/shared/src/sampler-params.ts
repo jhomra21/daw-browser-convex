@@ -1,7 +1,7 @@
 import { isJsonBoolean, isJsonNumber, isJsonObject, isJsonString, type JsonObject, type JsonValue } from './json-value'
 import type { DrumRackPadSample } from './drum-rack-params'
 
-export const SAMPLER_STATE_VERSION = 1
+const SAMPLER_STATE_VERSION = 1
 export const MAX_SAMPLED_INSTRUMENT_VOICES = 32
 
 export type SamplerPlaybackMode = 'one-shot' | 'forward-loop' | 'crossfade-loop'

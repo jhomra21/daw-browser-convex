@@ -36,7 +36,7 @@ export const normalizeClientSession = <Value>(value: Value): ClientSession => {
 }
 
 // Fetcher used by both the route guard and components
-export async function fetchSession(): Promise<ClientSession> {
+async function fetchSession(): Promise<ClientSession> {
   const res = await authClient.getSession()
 
   return normalizeClientSession(serializeJsonValue(res?.data))

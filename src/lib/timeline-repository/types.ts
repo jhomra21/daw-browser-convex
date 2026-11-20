@@ -3,8 +3,6 @@ import type { AutomationEnvelope, MidiClip } from '@daw-browser/shared'
 import type { AudioWarp, ExternalSidechainRoute, TrackChannelRole, TrackId } from '@daw-browser/timeline-core/types'
 import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 
-export type TimelineEntityKind = 'track' | 'clip' | 'effect' | 'mixerChannel'
-
 export type TimelineTrackId = TrackId
 
 export type TimelineClipId = string

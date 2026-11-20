@@ -19,7 +19,7 @@ import type { LocalAssetBytesResult } from '~/lib/local-assets'
 
 const LOCAL_ASSET_PREFIX = 'local-asset:'
 
-export type SampledInstrumentRegionLoadInput = {
+type SampledInstrumentRegionLoadInput = {
   assetKey: string
   url: string
   sourceKind: 'upload' | 'url' | 'recording'

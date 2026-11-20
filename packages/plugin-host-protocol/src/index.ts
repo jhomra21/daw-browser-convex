@@ -1,12 +1,10 @@
 import { z } from 'zod'
 
-export const pluginHostProtocolVersion = 2
 export const pluginHostProtocolCompatibility = { minimum: 1, maximum: 2 }
 export const maxPluginHostControlFrameBytes = 1_048_576
-export const maxPluginHostLogEntries = 128
 export const vst3WorkerProtocolVersion = 2
 export const maxVst3WorkerStateBytes = 512 * 1024
-export const maxVst3WorkerTransportSlots = 8
+const maxVst3WorkerTransportSlots = 8
 export const maxVst3WorkerChannels = 64
 export const maxVst3WorkerFrames = 8_192
 export const maxVst3WorkerEventsPerBlock = 2_048
@@ -93,7 +91,7 @@ export const pluginManifestSchema = z.object({
 
 export type PluginManifest = z.infer<typeof pluginManifestSchema>
 
-export const vst3ScannerClassResultSchema = z.object({
+const vst3ScannerClassResultSchema = z.object({
   classId: scannerText,
   vendor: scannerText,
   name: scannerText,
@@ -111,14 +109,14 @@ const scannerEnvelopeSchemaV2 = z.object({
   requestId: requestIdSchema,
 }).strict()
 
-export const vst3ScannerRequestSchemaV2 = scannerEnvelopeSchemaV2.extend({
+const vst3ScannerRequestSchemaV2 = scannerEnvelopeSchemaV2.extend({
   type: z.literal('scan'),
   bundlePath: scannerPath,
 }).strict()
 
 export type Vst3ScannerRequestV2 = z.infer<typeof vst3ScannerRequestSchemaV2>
 
-export const vst3ScannerResponseSchemaV2 = z.discriminatedUnion('type', [
+const vst3ScannerResponseSchemaV2 = z.discriminatedUnion('type', [
   scannerEnvelopeSchemaV2.extend({
     type: z.literal('result'),
     bundlePath: scannerPath,
@@ -134,14 +132,6 @@ export const vst3ScannerResponseSchemaV2 = z.discriminatedUnion('type', [
 ])
 
 export type Vst3ScannerResponseV2 = z.infer<typeof vst3ScannerResponseSchemaV2>
-
-export const parseVst3ScannerRequestV2 = (raw: string): Vst3ScannerRequestV2 => {
-  if (new TextEncoder().encode(raw).byteLength > maxPluginHostControlFrameBytes) {
-    throw new Error('Plugin host control frame exceeds the maximum size.')
-  }
-
-  return vst3ScannerRequestSchemaV2.parse(JSON.parse(raw))
-}
 
 export const parseVst3ScannerResponseV2 = (raw: string): Vst3ScannerResponseV2 => {
   if (new TextEncoder().encode(raw).byteLength > maxPluginHostControlFrameBytes) {
@@ -171,62 +161,6 @@ export const pluginHealthSchema = z.object({
 }).strict()
 
 export type PluginHealth = z.infer<typeof pluginHealthSchema>
-
-const controlEnvelopeSchema = z.object({
-  version: z.literal(1),
-  compatibility: compatibilitySchema,
-  requestId: requestIdSchema,
-}).strict()
-
-const instanceReferenceSchema = z.object({
-  instanceId: uuidSchema,
-  identity: pluginIdentitySchema,
-}).strict()
-
-export const pluginHostRequestSchema = z.discriminatedUnion('type', [
-  controlEnvelopeSchema.extend({ type: z.literal('scan'), paths: z.array(z.string().min(1).max(4096)).max(16) }).strict(),
-  controlEnvelopeSchema.extend({ type: z.literal('instantiate'), instance: instanceReferenceSchema }).strict(),
-  controlEnvelopeSchema.extend({ type: z.literal('dispose'), instanceId: uuidSchema }).strict(),
-  controlEnvelopeSchema.extend({ type: z.literal('set-parameters'), instanceId: uuidSchema, values: z.array(z.object({ id: z.number().int().nonnegative().max(0xffff_ffff), value: finiteNumber }).strict()).min(1).max(512) }).strict(),
-  controlEnvelopeSchema.extend({ type: z.literal('editor'), instanceId: uuidSchema, action: z.enum(['open', 'close', 'focus']) }).strict(),
-  controlEnvelopeSchema.extend({ type: z.literal('state'), instanceId: uuidSchema, action: z.enum(['save', 'load']), metadata: opaquePluginStateMetadataSchema.optional() }).strict().superRefine((value, context) => {
-    if (value.action === 'load' && !value.metadata) context.addIssue({ code: 'custom', message: 'Loading state requires metadata, not state bytes.' })
-  }),
-])
-
-export type PluginHostRequest = z.infer<typeof pluginHostRequestSchema>
-
-export const pluginHostResponseSchema = z.discriminatedUnion('type', [
-  controlEnvelopeSchema.extend({ type: z.literal('ok'), instanceId: uuidSchema.optional(), manifest: pluginManifestSchema.optional(), state: opaquePluginStateMetadataSchema.optional() }).strict(),
-  controlEnvelopeSchema.extend({ type: z.literal('error'), code: z.enum(['invalid-request', 'unsupported', 'not-found', 'timeout', 'faulted', 'unavailable']), message: z.string().min(1).max(512) }).strict(),
-])
-
-export type PluginHostResponse = z.infer<typeof pluginHostResponseSchema>
-
-export const parsePluginHostControlFrame = (raw: string): PluginHostRequest => {
-  if (new TextEncoder().encode(raw).byteLength > maxPluginHostControlFrameBytes) {
-    throw new Error('Plugin host control frame exceeds the maximum size.')
-  }
-
-  const request = pluginHostRequestSchema.parse(JSON.parse(raw))
-  const compatibility = request.compatibility
-
-  if (
-    request.version < compatibility.minimum
-    || request.version > compatibility.maximum
-    || compatibility.maximum < pluginHostProtocolCompatibility.minimum
-    || compatibility.minimum > pluginHostProtocolCompatibility.maximum
-  ) {
-    throw new Error('Plugin host control frame has incompatible protocol compatibility.')
-  }
-
-  return request
-}
-
-export const isPluginHostProtocolCompatible = (version: number) => (
-  version >= pluginHostProtocolCompatibility.minimum
-  && version <= pluginHostProtocolCompatibility.maximum
-)
 
 export const nativeVst3WorkerFaultOrigins = Object.freeze({
   unknown: 0,
@@ -289,7 +223,7 @@ const workerSetupSchema = z.object({
   outputChannels: z.number().int().min(1).max(maxVst3WorkerChannels),
 }).strict()
 
-export const vst3WorkerTransportDescriptorSchema = z.object({
+const vst3WorkerTransportDescriptorSchema = z.object({
   name: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/),
   byteLength: z.number().int().positive().max(128 * 1024 * 1024),
   slotCount: z.number().int().min(2).max(maxVst3WorkerTransportSlots),
@@ -320,7 +254,7 @@ const nativeVst3WorkerArtifactIdentitySchema = z.object({
 
 export type NativeVst3WorkerArtifactIdentity = z.infer<typeof nativeVst3WorkerArtifactIdentitySchema>
 
-export const nativeVst3WorkerManifestSchema = z.object({
+const nativeVst3WorkerManifestSchema = z.object({
   version: z.literal(nativeVst3WorkerManifestVersion),
   artifact: nativeVst3WorkerArtifactIdentitySchema,
   startupProtocolVersion: z.literal(nativeVst3WorkerStartupProtocolVersion),
@@ -366,7 +300,7 @@ export const nativeVst3WorkerManifestSchema = z.object({
 
 export type NativeVst3WorkerManifest = z.infer<typeof nativeVst3WorkerManifestSchema>
 
-export const nativeVst3WorkerHelloSchema = z.object({
+const nativeVst3WorkerHelloSchema = z.object({
   version: z.literal(1),
   type: z.literal('hello'),
   instanceId: uuidSchema,
@@ -397,7 +331,7 @@ const nativeVst3PreflightRequirementsSchema = z.object({
   architecture: z.literal('arm64'),
 }).strict()
 
-export const nativeVst3PreflightRequestSchema = z.object({
+const nativeVst3PreflightRequestSchema = z.object({
   version: z.literal(nativeVst3PreflightProtocolVersion),
   type: z.literal('preflight'),
   requestId: requestIdSchema,
@@ -413,7 +347,7 @@ const nativeVst3PreflightResultEnvelopeSchema = z.object({
   requirements: nativeVst3PreflightRequirementsSchema,
 }).strict()
 
-export const nativeVst3PreflightResultSchema = z.discriminatedUnion('status', [
+const nativeVst3PreflightResultSchema = z.discriminatedUnion('status', [
   nativeVst3PreflightResultEnvelopeSchema.extend({
     status: z.literal('available'),
     hello: nativeVst3WorkerHelloSchema,
@@ -451,7 +385,7 @@ export const decodeNativeVst3PreflightResult = (raw: string): NativeVst3Prefligh
   return nativeVst3PreflightResultSchema.parse(JSON.parse(raw))
 }
 
-export const nativeVst3CatalogReferenceSchema = z.object({
+const nativeVst3CatalogReferenceSchema = z.object({
   version: z.literal(1),
   classId: scannerText,
   vendorId: scannerText,
@@ -470,7 +404,7 @@ export const nativeVst3InsertionPreflightRequestSchema = z.object({
 
 export type NativeVst3InsertionPreflightRequest = z.infer<typeof nativeVst3InsertionPreflightRequestSchema>
 
-export const nativeVst3InsertionFailureCodeSchema = z.enum([
+const nativeVst3InsertionFailureCodeSchema = z.enum([
   'browser',
   'project-unavailable',
   'untrusted-catalog',
@@ -498,7 +432,7 @@ const nativeVst3InsertionManifestSchema = z.object({
   supportsState: z.boolean(),
 }).strict()
 
-export const nativeVst3InsertionPreflightResultSchema = z.discriminatedUnion('ok', [
+const nativeVst3InsertionPreflightResultSchema = z.discriminatedUnion('ok', [
   z.object({
     ok: z.literal(true),
     manifest: nativeVst3InsertionManifestSchema,
@@ -517,7 +451,7 @@ export type NativeVst3InsertionPreflightResult = z.infer<typeof nativeVst3Insert
  * audio graph snapshots. Catalog resolution adds local paths only after this
  * path-free contract crosses the renderer boundary.
  */
-export const nativeExternalAttachmentPlanProtocolVersion = 2
+const nativeExternalAttachmentPlanProtocolVersion = 2
 export const maxNativeExternalAttachments = 64
 
 const nativeExternalCatalogIdentitySchema = z.object({
@@ -725,7 +659,7 @@ const workerEventSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('midi'), data: z.tuple([z.number().int().min(0).max(255), z.number().int().min(0).max(255), z.number().int().min(0).max(255)]), sampleOffset: z.number().int().nonnegative().max(maxVst3WorkerFrames - 1) }).strict(),
 ])
 
-export const vst3WorkerControlRequestSchemaV2 = z.discriminatedUnion('type', [
+const vst3WorkerControlRequestSchemaV2 = z.discriminatedUnion('type', [
   workerEnvelopeSchemaV2.extend({ type: z.literal('lifecycle'), action: z.enum(['hello', 'shutdown', 'restart']) }).strict(),
   workerEnvelopeSchemaV2.extend({ type: z.literal('instantiate'), instance: workerInstanceSchema }).strict(),
   workerEnvelopeSchemaV2.extend({ type: z.literal('setup'), instanceId: uuidSchema, setup: workerSetupSchema }).strict(),
@@ -738,7 +672,7 @@ export const vst3WorkerControlRequestSchemaV2 = z.discriminatedUnion('type', [
 
 export type Vst3WorkerControlRequestV2 = z.infer<typeof vst3WorkerControlRequestSchemaV2>
 
-export const vst3WorkerNotificationSchemaV2 = z.discriminatedUnion('type', [
+const vst3WorkerNotificationSchemaV2 = z.discriminatedUnion('type', [
   workerEnvelopeSchemaV2.extend({ type: z.literal('ready'), instanceId: uuidSchema.optional() }).strict(),
   workerEnvelopeSchemaV2.extend({ type: z.literal('restart'), instanceId: uuidSchema, reason: z.string().min(1).max(512) }).strict(),
   workerEnvelopeSchemaV2.extend({ type: z.literal('latency'), instanceId: uuidSchema, frames: z.number().int().nonnegative().max(10_000_000) }).strict(),

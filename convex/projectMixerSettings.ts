@@ -1,7 +1,7 @@
 import { DEFAULT_MASTER_VOLUME, normalizeMasterVolume } from "@daw-browser/shared";
-import { mutation, query, type DatabaseReader, type MutationCtx } from "./_generated/server";
+import { mutation, type DatabaseReader, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProjectAccess } from "./projectAccess";
+import { requireAuthenticatedUserId, requireMasterBusWriteAccess } from "./projectAccess";
 import { advanceProjectRevision } from "./projectRows";
 
 type ProjectMixerSettingsReadCtx = { db: DatabaseReader };
@@ -14,7 +14,7 @@ type ProjectMasterVolumeRowResult =
   | { changed: false; value: ProjectMixerSettings & { status: "noop" } }
   | { changed: true; value: ProjectMixerSettings & { status: "applied" } };
 
-export const effectiveProjectMasterVolume = (value: number | undefined) => (
+const effectiveProjectMasterVolume = (value: number | undefined) => (
   value === undefined ? DEFAULT_MASTER_VOLUME : normalizeMasterVolume(value)
 );
 
@@ -67,16 +67,6 @@ export async function setProjectMasterVolumeRow(
 
   return { changed: true, value: { ...state, status: "applied" } };
 }
-
-export const get = query({
-  args: { projectId: v.string() },
-  handler: async (ctx, { projectId }) => {
-    const userId = await requireAuthenticatedUserId(ctx);
-    await requireProjectAccess(ctx, projectId, userId);
-
-    return await getProjectMixerSettings(ctx, projectId);
-  },
-});
 
 export const setMasterVolume = mutation({
   args: { projectId: v.string(), volume: v.number() },

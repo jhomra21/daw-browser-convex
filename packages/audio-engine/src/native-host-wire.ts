@@ -1020,13 +1020,6 @@ export const mapNativeSessionAssets = (assets: readonly AudioAssetRef[]): readon
   return sorted.map(([, asset], index) => ({ asset, sessionAssetId: index + 1 }))
 }
 
-export const nativeAssetIdentity = (asset: AudioAssetRef): NativeAssetIdentity => ({
-  assetId: asset.assetId,
-  frameCount: asset.frameCount,
-  sampleRateHz: asset.sampleRateHz,
-  channelCount: asset.channelCount,
-})
-
 export type NativeSourceEvent = Pick<AudioCoreSampleSourceEventDto,
   "epoch" | "sequence" | "sourceNodeId" | "assetId" | "startFrame" | "stopFrame" | "sourceOffsetFrame" | "sourceOffsetFraction" | "sourceFrameCount" | "gain" | "fadeInStartFrame" | "fadeInEndFrame" | "fadeOutStartFrame" | "fadeOutEndFrame" | "fadeInCurve" | "fadeInCurvePosition" | "fadeOutCurve" | "fadeOutCurvePosition">
 

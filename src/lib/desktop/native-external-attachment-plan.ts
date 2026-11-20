@@ -53,22 +53,22 @@ type NativeExternalAttachmentCompilation =
   | { supported: true; attachment: NativeExternalAttachmentProjection }
   | { supported: false; reason: string }
 
-export type NativeExternalAttachmentSnapshotInput = {
+type NativeExternalAttachmentSnapshotInput = {
   target: "native" | "browser"
   graph: ResolvedMixerGraph
   processors: readonly ExternalProcessor[]
   workerTransport: NativeExternalWorkerTransport
 }
 
-export type NativeExternalAttachmentSnapshotCompilation =
+type NativeExternalAttachmentSnapshotCompilation =
   | { supported: true; attachments: readonly NativeExternalAttachmentProjection[] }
   | { supported: false; reasons: readonly string[] }
 
-export type NativeExternalAttachmentPlanCompilation =
+type NativeExternalAttachmentPlanCompilation =
   | { supported: true; plan: NativeExternalAttachmentPlan }
   | { supported: false; reasons: readonly string[] }
 
-export type NativeExternalEditorPlanCompilation = NativeExternalAttachmentPlanCompilation
+type NativeExternalEditorPlanCompilation = NativeExternalAttachmentPlanCompilation
 
 const stateRevision = (updatedAt: number) => updatedAt % 0x8000_0000
 

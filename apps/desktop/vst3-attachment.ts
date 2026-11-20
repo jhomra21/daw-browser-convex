@@ -6,7 +6,7 @@ import {
   type Vst3CatalogEntry,
 } from "./plugin-catalog"
 
-export type ResolvedVst3Eligibility = {
+type ResolvedVst3Eligibility = {
   classId: string
   vendorId: string
   role: "effect" | "instrument"
@@ -17,7 +17,7 @@ export type ResolvedVst3Eligibility = {
   scannerProtocolVersion: 2
 }
 
-export type Vst3CatalogView = Omit<PluginCatalogData, "entries"> & {
+type Vst3CatalogView = Omit<PluginCatalogData, "entries"> & {
   entries: Array<Omit<Vst3CatalogEntry, "bundlePath" | "configuredDirectory" | "launchEligibility" | "hasTrustedScan"> & {
     catalogReference?: {
       version: 1

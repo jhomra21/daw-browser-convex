@@ -264,30 +264,6 @@ export const markDeleted = mutation({
   },
 });
 
-export const markDeletedKeys = mutation({
-  args: {
-    projectId: v.string(),
-    claims: v.array(v.object({ r2Key: v.string(), claimToken: v.string() })),
-  },
-  handler: async (ctx, { projectId, claims }) => {
-    await requireWorkerQueueAccess(ctx);
-
-    for (const { r2Key, claimToken } of claims) {
-      const row = await ctx.db
-        .query("r2DeleteQueue")
-        .withIndex("by_key", (q) => q.eq("r2Key", r2Key))
-        .first();
-
-      if (row?.projectId === projectId && row.status === "claimed" && row.claimToken === claimToken) {
-        const now = Date.now();
-        await ctx.db.patch(row._id, { status: "deleted", deletedAt: now, claimedAt: undefined, claimToken: undefined, nextAttemptAt: now, updatedAt: now });
-      }
-    }
-
-    return { ok: true };
-  },
-});
-
 export const markFailed = mutation({
   args: {
     projectId: v.string(),

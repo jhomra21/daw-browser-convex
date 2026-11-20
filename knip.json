@@ -29,13 +29,6 @@
     "public/audio-worklets/*.js",
     "public/audio-workers/daw-portable-capability-metadata-v1.d.ts",
     "public/audio-worklets/daw-portable-graph-envelope-v3.d.ts",
-    "src/components/nav-user.tsx",
-    "src/components/ui/avatar.tsx",
-    "src/components/ui/badge.tsx",
-    "src/components/ui/separator.tsx",
-    "src/components/ui/sheet.tsx",
-    "src/components/ui/sidebar.tsx",
-    "src/components/ui/skeleton.tsx",
     "apps/desktop/no-pwa.ts",
     "apps/desktop/vite.main.config.ts",
     "apps/desktop/vite.preload.config.ts"
@@ -50,63 +43,6 @@
   "ignoreBinaries": [
     "ps"
   ],
-  "ignoreIssues": {
-    "src/lib/local-cloud-id-map.ts": [
-      "files",
-      "exports",
-      "types"
-    ],
-    "packages/audio-engine/src/effects/dsp.ts": [
-      "exports"
-    ],
-    "src/lib/local-assets.ts": [
-      "exports"
-    ],
-    "src/lib/local-ids.ts": [
-      "exports",
-      "types"
-    ],
-    "src/lib/local-project-db.ts": [
-      "exports",
-      "types"
-    ],
-    "src/lib/external-plugins.ts": [
-      "exports"
-    ],
-    "src/lib/session.ts": [
-      "exports"
-    ],
-    "src/lib/timeline-storage.ts": [
-      "exports"
-    ],
-    "packages/audio-engine/src/audio-engine.ts": [
-      "types"
-    ],
-    "packages/audio-engine/src/audio-stretch-cache.ts": [
-      "exports"
-    ],
-    "packages/control-cli/src/mcp.ts": [
-      "files"
-    ],
-    "packages/audio-engine/src/clip-scheduler.ts": [
-      "exports"
-    ],
-    "src/lib/timeline-repository/types.ts": [
-      "types"
-    ],
-    "api/control-oauth.ts": [
-      "exports",
-      "types"
-    ],
-    "apps/desktop/plugin-catalog.ts": [
-      "files",
-      "exports"
-    ],
-    "src/components/ui/**/*.tsx": [
-      "exports",
-      "types"
-    ]
-  },
   "tags": [
     "-lintignore"
   ]

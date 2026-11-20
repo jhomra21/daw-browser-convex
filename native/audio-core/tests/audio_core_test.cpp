@@ -3,6 +3,7 @@
 #include "daw/audio_core_native.h"
 #include "daw/audio_core_instrument_wire.h"
 #include "graph_fixture.h"
+#include "processor_kind_generated.h"
 #if defined(DAW_AUDIO_CORE_TEST_SPECTRAL_INTERNALS)
 
 // The one contract that reads private voice state; see the CMake target that builds this variant.
@@ -26,6 +27,13 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+// The kind enum is written by hand; every processor in the contract must keep the id the contract gives it.
+#define DAW_ASSERT_PROCESSOR_KIND_ID(name, id) \
+  static_assert(static_cast<unsigned>(DAW_AUDIO_PROCESSOR_KIND_##name) == id, \
+    "DAW_AUDIO_PROCESSOR_KIND_" #name " must equal its processor contract id");
+DAW_AUDIO_CORE_PROCESSOR_KIND_LIST(DAW_ASSERT_PROCESSOR_KIND_ID)
+#undef DAW_ASSERT_PROCESSOR_KIND_ID
 
 static_assert(DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS == 24u);
 static_assert(sizeof(daw_audio_synth_state) == daw::audio_core_wire::kSynthStateBytes);

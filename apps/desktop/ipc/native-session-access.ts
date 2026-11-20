@@ -1,9 +1,6 @@
-type SenderFrame = { url: string }
+import { rendererSenderAllowed, type RendererSenderEvent } from "./renderer-sender"
 
-export type NativeSessionEvent = {
-  sender: { id: number; mainFrame: SenderFrame }
-  senderFrame: SenderFrame | null
-}
+export type NativeSessionEvent = RendererSenderEvent
 
 // oxlint-disable-next-line anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- IPC input validation happens inside the registered handler.
 export type NativeSessionIpcHandler = (event: NativeSessionEvent, value: unknown) => unknown
@@ -18,9 +15,10 @@ export const nativeSessionRequestAllowed = (input: {
 }) => (
   input.platform === "darwin"
   && input.architecture === "arm64"
-  && input.rendererId !== undefined
-  && input.acceptsPrivilegedRequests
-  && input.event.sender.id === input.rendererId
-  && input.event.senderFrame !== null
-  && input.sameAppOrigin(input.event.senderFrame.url)
+  && rendererSenderAllowed(input.event, {
+    rendererId: input.rendererId,
+    sameAppOrigin: input.sameAppOrigin,
+    privileged: { required: true, accepted: input.acceptsPrivilegedRequests },
+    mainFrameOnly: false,
+  })
 )

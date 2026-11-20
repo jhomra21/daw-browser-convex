@@ -116,6 +116,7 @@ import { registerVstEditorStateAckIpc } from "./ipc/vst-editor-state-ack-ipc"
 import { registerNativeSessionTransportIpc } from "./ipc/native-session-transport-ipc"
 import { registerNativeSessionRecordingIpc } from "./ipc/native-session-recording-ipc"
 import { nativeSessionRequestAllowed, type NativeSessionEvent } from "./ipc/native-session-access"
+import { rendererSenderAllowed, type RendererSenderEvent } from "./ipc/renderer-sender"
 import { createNativeFileCapabilityHelper } from "./native-file-capability-helper"
 import { createRequestCorrelation } from "./request-correlation"
 import { createPreparationRegistry } from "./preparation-registry"
@@ -1141,14 +1142,14 @@ const handleSocket = (socket: Socket) => {
 }
 
 const registerIpc = () => {
-  const applicationMenuStateAllowed = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => (
-    window_ !== undefined
-    && rendererLifecycle.acceptsPrivilegedRequests()
-    && event.sender.id === window_.webContents.id
-    && event.senderFrame !== null
-    && event.senderFrame === event.sender.mainFrame
-    && sameAppOrigin(event.senderFrame.url)
-  )
+  const senderAllowed = (event: RendererSenderEvent, options: { privileged: boolean; mainFrameOnly: boolean }) => rendererSenderAllowed(event, {
+    rendererId: window_?.webContents.id,
+    sameAppOrigin,
+    privileged: { required: options.privileged, accepted: rendererLifecycle.acceptsPrivilegedRequests() },
+    mainFrameOnly: options.mainFrameOnly,
+  })
+
+  const applicationMenuStateAllowed = (event: RendererSenderEvent) => senderAllowed(event, { privileged: true, mainFrameOnly: true })
 
   registerApplicationMenuIpc({
     ipcMain,
@@ -1200,7 +1201,7 @@ const registerIpc = () => {
     return { accepted: true }
   })
   ipcMain.on(hostResponseChannel, (event, message) => {
-    if (!window_ || event.sender.id !== window_.webContents.id || !event.senderFrame || !sameAppOrigin(event.senderFrame.url)) return
+    if (!senderAllowed(event, { privileged: false, mainFrameOnly: false })) return
     const parsed = rendererMessageSchema.safeParse(message)
 
     if (!parsed.success || parsed.data.generation !== generation) return
@@ -1239,7 +1240,7 @@ const registerIpc = () => {
     pending.resolve(parsed.data.frame)
   })
   ipcMain.on(diagnosticsV2TraceChannel, (event, message) => {
-    if (!diagnosticsTraceEnabled || !window_ || event.sender.id !== window_.webContents.id || !event.senderFrame || !sameAppOrigin(event.senderFrame.url)) return
+    if (!diagnosticsTraceEnabled || !senderAllowed(event, { privileged: false, mainFrameOnly: false })) return
     const parsed = diagnosticsTraceMessageSchema.safeParse(message)
 
     if (parsed.success) {
@@ -1248,14 +1249,7 @@ const registerIpc = () => {
     }
   })
 
-  const scopeAllowed = (event: Electron.IpcMainInvokeEvent) => (
-    window_ !== undefined
-    && rendererLifecycle.acceptsPrivilegedRequests()
-    && event.sender.id === window_.webContents.id
-    && event.senderFrame !== null
-    && event.senderFrame === event.sender.mainFrame
-    && sameAppOrigin(event.senderFrame.url)
-  )
+  const scopeAllowed = applicationMenuStateAllowed
 
   const scopeFor = (event: Electron.IpcMainInvokeEvent, requestId: string) => (
     scopeAllowed(event) ? { requestId, rendererGeneration: generation } : undefined
@@ -1263,11 +1257,7 @@ const registerIpc = () => {
 
   const catalogAllowed = (event: Electron.IpcMainInvokeEvent) => (
     process.platform === "darwin"
-    && window_ !== undefined
-    && rendererLifecycle.acceptsPrivilegedRequests()
-    && event.sender.id === window_.webContents.id
-    && event.senderFrame !== null
-    && sameAppOrigin(event.senderFrame.url)
+    && senderAllowed(event, { privileged: true, mainFrameOnly: false })
     && pluginCatalogStore !== undefined
   )
 

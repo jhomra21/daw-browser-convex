@@ -8,10 +8,8 @@ import {
   assert,
   isDurableSharedTimelineOperationKind,
   parseDurableSharedTimelineOperation,
-  readSharedTimelineClipCreatePayload,
   sanitizeLegacyMidiClipForCreate,
   type JsonValue,
-  type SharedTimelineClipCreatePayload,
 } from '@daw-browser/shared'
 import {
   publishSharedTimelineOperation,
@@ -20,23 +18,13 @@ import {
   type SharedTimelineOperation,
 } from '~/lib/shared-timeline-operations-api'
 import { z } from 'zod'
-import { finiteNumberSchema, sharedOutboxCompletionSchema } from '~/lib/shared-outbox-completion-schema'
+import { sharedOutboxCompletionSchema } from '~/lib/shared-outbox-completion-schema'
 import type { SharedOutboxCompletion, SharedOutboxEntry, SharedOutboxKind } from '~/lib/shared-outbox-entry'
-import { ResumableAudioUploadHttpError, uploadAudioFile } from './resumable-audio-uploader'
+import { ResumableAudioUploadHttpError } from './resumable-audio-uploader'
 import { isCapabilityFile } from '~/lib/capability-file'
-import { materializeLocalRetryFile, readLocalRetryFile, removeLocalRetryFile } from '~/lib/local-assets'
+import { materializeLocalRetryFile, removeLocalRetryFile } from '~/lib/local-assets'
 import { completeUngroup, attachQueuedClipDeletionRecoveries } from '~/lib/shared-outbox-history'
-
-type UploadedAudioClipPayload = {
-  projectId: string
-  assetKey: string
-  file: File
-  materializedPath?: string
-  fileName?: string
-  mimeType?: string
-  duration?: number
-  clipPayload: SharedTimelineClipCreatePayload
-}
+import { type UploadedAudioClipPayload, uploadedAudioClipPayloadSchema, readUploadedAudioClipPayload, uploadSharedAudioClipAsset } from '~/lib/shared-outbox-uploaded-audio'
 
 type SharedOutboxSummary = {
   pending: number
@@ -201,24 +189,6 @@ const outboxSequenceSchema = z.number().int().positive().max(Number.MAX_SAFE_INT
 const outboxSequence = (value: LocalProjectStoredValue) => (
   outboxSequenceSchema.safeParse(value).data
 )
-
-const uploadedAudioClipPayloadSchema = z.object({
-  projectId: z.string(),
-  assetKey: z.string(),
-  file: z.instanceof(File).optional(),
-  materializedPath: z.string().min(1).max(256).optional(),
-  fileName: z.string().min(1).max(256).optional(),
-  mimeType: z.string().min(1).max(128).optional(),
-  duration: finiteNumberSchema.optional(),
-  clipPayload: z.custom<SharedTimelineClipCreatePayload>((value) => (
-    (() => {
-      const parsed = z.json().safeParse(value)
-
-      return parsed.success
-        && readSharedTimelineClipCreatePayload(parsed.data, { requireAudioSampleUrl: false, durable: true }) !== null
-    })()
-  )),
-}).refine((value) => value.file !== undefined || value.materializedPath !== undefined)
 
 const sharedOutboxKindSchema = z.custom<SharedOutboxKind>((value) => (
   value === 'clips.createUploadedAudio'
@@ -386,62 +356,6 @@ const ensureOutboxSequences = async (projectId: string) => {
   }
 
   await tx.done
-}
-
-const readUploadedAudioClipPayload = async (
-  value: SharedOutboxEntry['payload'],
-): Promise<UploadedAudioClipPayload | null> => {
-  const parsed = uploadedAudioClipPayloadSchema.safeParse(value)
-
-  if (!parsed.success) return null
-  const parsedClipPayload = z.json().safeParse(parsed.data.clipPayload)
-
-  if (!parsedClipPayload.success) return null
-
-  const clipPayload = readSharedTimelineClipCreatePayload(
-    parsedClipPayload.data,
-    { requireAudioSampleUrl: false, durable: true },
-  )
-
-  if (!clipPayload) return null
-
-  const file = parsed.data.materializedPath
-    ? await readLocalRetryFile(
-      parsed.data.projectId,
-      parsed.data.materializedPath,
-      parsed.data.fileName,
-      parsed.data.mimeType,
-    ) ?? parsed.data.file
-    : parsed.data.file
-
-  if (!file) return null
-
-  return {
-    projectId: parsed.data.projectId,
-    assetKey: parsed.data.assetKey,
-    file,
-    materializedPath: parsed.data.materializedPath,
-    duration: parsed.data.duration,
-    clipPayload,
-  }
-}
-
-const uploadSharedAudioClipAsset = async (payload: UploadedAudioClipPayload, idempotencyKey: string) => {
-  try {
-    return await uploadAudioFile({
-      projectId: payload.projectId,
-      idempotencyKey,
-      assetKey: payload.assetKey,
-      file: payload.file,
-      durationSec: payload.duration,
-    })
-  } catch (error) {
-    if (error instanceof ResumableAudioUploadHttpError) {
-      throw new SharedTimelineOperationHttpError(error.status, error.message)
-    }
-
-    throw new SharedTimelineOperationHttpError(500, error instanceof Error ? error.message : undefined)
-  }
 }
 
 export const readSharedOutboxSummary = async (projectId: string, userId: string): Promise<SharedOutboxSummary> => {

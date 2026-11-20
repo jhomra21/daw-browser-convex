@@ -16,6 +16,7 @@
     "./export-fidelity": "./src/export-fidelity.ts",
     "./export-range": "./src/export-range.ts",
     "./export-mixdown": "./src/export-mixdown.ts",
+    "./export-stem-plan": "./src/export-stem-plan.ts",
     "./loudness-analyzer": "./src/loudness-analyzer.ts",
     "./streaming-export-fidelity": "./src/streaming-export-fidelity.ts",
     "./streaming-loudness-analyzer": "./src/streaming-loudness-analyzer.ts",

@@ -11,7 +11,7 @@ import ExportProgressStatus from '~/components/export/ExportProgressStatus'
 import { createCustomExportRange, type ExportSampleRate, loadPersistedExportSettings, savePersistedExportSettings } from '~/lib/export/export-settings'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import type { WavEncodingSettings } from '@daw-browser/audio-engine/export-fidelity'
-import type { StemMode } from '@daw-browser/audio-engine/export-mixdown'
+import type { StemMode } from '@daw-browser/audio-engine/export-stem-plan'
 import { isDesktopRenderer } from '~/lib/runtime'
 
 type ExportSource = 'mixdown' | 'all-stems' | 'selected-stems'

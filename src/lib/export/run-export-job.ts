@@ -1,4 +1,5 @@
-import type { ExportFx, StemMode, StemRecombinationMetadata } from '@daw-browser/audio-engine/export-mixdown'
+import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
+import { createSourceAutomationScope, createStemRenderPlan, type StemMode, type StemRecombinationMetadata } from "@daw-browser/audio-engine/export-stem-plan"
 import { getExportRangeBounds, type ExportRange } from '@daw-browser/audio-engine/export-range'
 import { getExportTailMaximumSec, type ExportAnalysisReport } from '@daw-browser/audio-engine/export-fidelity'
 import { type AudioPcmSourceDescriptor, type AutomationEnvelope, automationEnvelopeFromRow, type ExportAudioFormat, formatExportFileTimestamp, getExportAudioFormatMetadata, isLocalId, isLossyExportAudioFormat } from '@daw-browser/shared'
@@ -1230,7 +1231,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
     const preloadTrackIds = new Set<string>()
 
     for (const track of preloadStemTracks) {
-      const plan = exportMixdown.createStemRenderPlan(
+      const plan = createStemRenderPlan(
         graph,
         { id: track.id, name: track.name, mode: input.stemMode, targetTrackId: track.id },
         input.sidechainRoutes,
@@ -1240,7 +1241,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
 
       for (const id of plan.detectorOnlyTrackIds) preloadTrackIds.add(id)
 
-      const scope = exportMixdown.createSourceAutomationScope(plan.graph, {
+      const scope = createSourceAutomationScope(plan.graph, {
         sourceTrackIds: plan.sourceTrackIds,
         includeMasterFx: input.stemMode === 'full-master-contribution',
       })
@@ -1293,7 +1294,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
         totalStems: stemTracks.length,
       })
 
-      const plan = exportMixdown.createStemRenderPlan(
+      const plan = createStemRenderPlan(
         graph,
         { id: track.id, name: track.name, mode: input.stemMode, targetTrackId: track.id },
         input.sidechainRoutes,

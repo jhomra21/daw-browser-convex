@@ -1,6 +1,6 @@
 import { isLocalId, resolveClipSampleUrl, type AudioPcmSourceDescriptor, type ExportAudioFormat } from "@daw-browser/shared"
 import type { ExportRange } from "@daw-browser/audio-engine/export-range"
-import type { StemMode } from "@daw-browser/audio-engine/export-mixdown"
+import type { StemMode } from "@daw-browser/audio-engine/export-stem-plan"
 import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types"
 import type { RuntimeClip, RuntimeTrack } from "~/lib/timeline-runtime-types"
 import type { ExportEncodingSettings, ExportRenderSettings } from "~/lib/export/export-settings"

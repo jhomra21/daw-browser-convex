@@ -80,7 +80,7 @@ if (!resolvesCommit(baseCommit)) {
   console.error(`--base-commit ${baseCommit} is not a commit`)
   process.exit(2)
 }
-const drifted = [...watched].filter(([file, base]) => startHashes.get(file) !== base).map(([file]) => file)
+const drifted = [...watched].flatMap(([file, base]) => startHashes.get(file) === base ? [] : [file])
 // --changed-only simulates a change on a tree that is dirty: git is not asked, only --changed and the overlay count.
 const changed = [...new Set([...drifted, ...(args.includes("--changed-only") ? [] : changedSince(baseCommit)), ...simulated])].sort()
 const touches = (files: string[]) => files.some((file) => changed.some((entry) => entry === file || entry.startsWith(`${file}/`)))
@@ -803,7 +803,7 @@ const summary = [
   `freeze: ${freeze.filesUnchanged && freeze.gitStatusUnchanged ? `held (${freeze.startDigest.slice(0, 16)}…)` : `BROKEN (files ${freeze.filesUnchanged}, git status ${freeze.gitStatusUnchanged})`}`,
   `tier: ${everything ? "all" : tier} (${everything ? "--full or --only" : tierWhy}); base commit ${baseCommit}`,
   `failing (${failing.length}):`, ...failing.map((outcome) => `  ${outcome.id}: ${outcome.reasons.join("; ")}`),
-  `notes:`, ...outcomes.filter((outcome) => outcome.notes.length > 0).map((outcome) => `  ${outcome.id}: ${outcome.notes.join("; ")}`),
+  `notes:`, ...outcomes.flatMap((outcome) => outcome.notes.length > 0 ? [`  ${outcome.id}: ${outcome.notes.join("; ")}`] : []),
   `per-group wall times:`, ...groupLines,
   `slowest jobs:`, ...[...outcomes].sort((x, y) => y.seconds - x.seconds).slice(0, 20).map((outcome) => `  ${outcome.seconds.toFixed(1).padStart(7)} s  ${outcome.id}`),
 ].join("\n")

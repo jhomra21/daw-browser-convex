@@ -97,7 +97,10 @@ export const testsReaching = (changed: string[]) => {
   const reached = new Set(changed.map((file) => path.join(repoRoot, file)))
   for (const file of reached) for (const importer of importers.get(file) ?? []) reached.add(importer)
   const scanned = new Set(files)
-  const tests = new Set([...reached].map((file) => path.relative(repoRoot, file)).filter((file) => /\.test\.tsx?$/.test(file) && scanned.has(file)))
+  const tests = new Set([...reached].flatMap((absolute) => {
+    const file = path.relative(repoRoot, absolute)
+    return /\.test\.tsx?$/.test(file) && scanned.has(file) ? [file] : []
+  }))
   if (changed.some((file) => tierOfFile(file, new Set()) !== "T0")) for (const file of pinned) tests.add(file)
   return { tests: [...tests].sort(), scanned: files.length, unresolved }
 }

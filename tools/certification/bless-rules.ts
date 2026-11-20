@@ -253,15 +253,15 @@ const provenanceFields: (keyof Provenance)[] = ["scope", "head", "gitStatusSha25
 // B4: a measurement stands only for the scope, bytes, overlay and expectations it was taken on.
 export const provenanceProblems = (label: string, measured: Measurement, want: Provenance, reverting: boolean, current: (file: string) => string | null) => [
   ...(measured.reverting === reverting ? [] : [`the ${label} measurement is ${measured.reverting ? "" : "not "}a reverted run`]),
-  ...provenanceFields.filter((key) => !sameJson(measured.provenance[key], want[key])).map((key) => `the ${label} measurement was taken on another ${key}`),
-  ...Object.entries(measured.hashes).filter(([file, hash]) => current(file) !== hash).map(([file]) => `the ${label} measurement was taken on other bytes of ${file}`),
+  ...provenanceFields.flatMap((key) => sameJson(measured.provenance[key], want[key]) ? [] : [`the ${label} measurement was taken on another ${key}`]),
+  ...Object.entries(measured.hashes).flatMap(([file, hash]) => current(file) === hash ? [] : [`the ${label} measurement was taken on other bytes of ${file}`]),
 ]
 type Observed = { job: string; path: string[] }
 const key = (entry: Observed) => `${entry.job}\t${entry.path.join(" / ")}`
 // Every live observation needs a reverted one at the same job and path; an absent one is not a reproduction.
 export const unpaired = (live: Observed[], reverted: Observed[]) => {
   const paired = new Set(reverted.map(key))
-  return live.filter((entry) => !paired.has(key(entry))).map(key)
+  return live.flatMap((entry) => paired.has(key(entry)) ? [] : [key(entry)])
 }
 
 if (import.meta.main) {

@@ -59,9 +59,7 @@ window.recordingScenarios = async () => {
     ensureAudio: () => {},
     resume: async () => {},
     getAudioContext: () => ({ sampleRate: 48000, currentTime: 0 }),
-    subscribeRecordingStatus: () => () => {},
-    cancelRecordingCapture: () => calls.push('capture-cancel'),
-    stopRecordingCapture: async () => {},
+    recording: { subscribe: () => () => {}, cancel: () => calls.push('capture-cancel'), stop: async () => {} },
   }
   const portableController = {
     start: async () => {
@@ -1894,8 +1892,7 @@ window.lockScenarios = async () => {
   const audioEngine = {
     ensureAudio: () => {}, resume: async () => {},
     getAudioContext: () => ({ sampleRate: 48000, currentTime: 0 }),
-    subscribeRecordingStatus: () => () => {},
-    cancelRecordingCapture: () => {}, stopRecordingCapture: async () => {},
+    recording: { subscribe: () => () => {}, cancel: () => {}, stop: async () => {} },
   }
   const audioHook = (native) => {
     const calls = []

@@ -192,7 +192,7 @@ export function useTimelineMidiOverlay(
 
       return {
         trackId,
-        params: trackId ? options.audioEngine.getTrackArpeggiator(trackId) : undefined,
+        params: trackId ? options.audioEngine.instruments.getTrackArpeggiator(trackId) : undefined,
         bpm: options.bpm(),
       }
     },
@@ -267,11 +267,11 @@ export function useTimelineMidiOverlay(
   const previewInstrumentNote = (trackId: string, pitch: number, velocity: number) => {
     const instrumentKind = options.audioEngine.getTrackInstrumentKind(trackId)
 
-    if (instrumentKind === 'drum-rack') return options.audioEngine.previewDrumRackNote(trackId, pitch, velocity)
+    if (instrumentKind === 'drum-rack') return options.audioEngine.instruments.previewDrumRackNote(trackId, pitch, velocity)
 
-    if (instrumentKind === 'sampler') return options.audioEngine.previewSamplerNote(trackId, pitch, velocity)
+    if (instrumentKind === 'sampler') return options.audioEngine.instruments.previewSamplerNote(trackId, pitch, velocity)
 
-    if (instrumentKind === 'synth') return options.audioEngine.previewSynthNote(trackId, pitch, velocity) !== undefined
+    if (instrumentKind === 'synth') return options.audioEngine.instruments.previewSynthNote(trackId, pitch, velocity) !== undefined
 
     return false
   }
@@ -283,7 +283,7 @@ export function useTimelineMidiOverlay(
       const auditionArpeggiator = createLiveMidiArpeggiator<LiveBackendHandle>({
         getConfig: () => ({
           trackId,
-          params: options.audioEngine.getTrackArpeggiator(trackId),
+          params: options.audioEngine.instruments.getTrackArpeggiator(trackId),
           bpm: options.bpm(),
         }),
         start: (note) => {
@@ -355,7 +355,7 @@ export function useTimelineMidiOverlay(
       }
 
       if (options.audioEngine.getTrackInstrumentKind(trackId) === 'synth') {
-        options.audioEngine.previewSynthNote(trackId, pitch, velocity, durSec)
+        options.audioEngine.instruments.previewSynthNote(trackId, pitch, velocity, durSec)
 
         return
       }

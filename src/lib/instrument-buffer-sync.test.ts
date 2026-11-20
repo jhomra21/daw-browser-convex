@@ -103,14 +103,45 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
+type Instruments = AudioEngine["instruments"];
+
 class TestAudioEngine extends AudioEngine {
-  private samplerRuntimeListeners: Parameters<AudioEngine["setSamplerRuntimeListeners"]>[0] = {};
+  private samplerRuntimeListeners: Parameters<Instruments["setSamplerRuntimeListeners"]>[0] = {};
   private readonly samplerBuffers = new Map<string, ReadonlyMap<string, SampledInstrumentBuffer>>();
   private readonly drumRackBuffers = new Map<string, ReadonlyMap<string, SampledInstrumentBuffer>>();
-  private readonly granularBuffers = new Map<string, Parameters<AudioEngine["setTrackGranular"]>[2]>();
+  private readonly granularBuffers = new Map<string, Parameters<Instruments["setTrackGranular"]>[2]>();
 
   constructor(private readonly buffer: AudioBuffer) {
     super();
+    Object.assign(this.instruments, {
+      setTrackSampler: (trackId: string, _params: SamplerParams, buffers?: ReadonlyMap<string, SampledInstrumentBuffer>) => {
+        this.samplerInstalls += 1;
+        this.samplerBuffers.set(trackId, buffers ?? new Map());
+      },
+      setTrackDrumRack: (trackId: string, _params: DrumRackParams, buffers?: ReadonlyMap<string, SampledInstrumentBuffer>): ReturnType<Instruments["setTrackDrumRack"]> => {
+        this.drumRackBuffers.set(trackId, buffers ?? new Map());
+
+        return "applied";
+      },
+      setTrackGranular: (trackId: string, _params: GranularParams, installedBuffer?: Parameters<Instruments["setTrackGranular"]>[2]): ReturnType<Instruments["setTrackGranular"]> => {
+        this.granularBuffers.set(trackId, installedBuffer);
+
+        return Promise.resolve("applied");
+      },
+      setSamplerRuntimeListeners: (listeners: Parameters<Instruments["setSamplerRuntimeListeners"]>[0]) => {
+        this.samplerRuntimeListeners = listeners;
+      },
+      addSamplerRuntimeListeners: (listeners: Parameters<Instruments["addSamplerRuntimeListeners"]>[0]) => {
+        const previous = this.samplerRuntimeListeners;
+        this.samplerRuntimeListeners = { ...previous, ...listeners };
+
+        return () => {
+          this.samplerRuntimeListeners = previous;
+
+          return true;
+        };
+      },
+    });
   }
 
   override decodeAudioData() {
@@ -119,44 +150,16 @@ class TestAudioEngine extends AudioEngine {
 
   samplerInstalls = 0;
 
-  override setTrackSampler(trackId: string, _params: SamplerParams, buffers?: ReadonlyMap<string, SampledInstrumentBuffer>) {
-    this.samplerInstalls += 1;
-    this.samplerBuffers.set(trackId, buffers ?? new Map());
-  }
   override getTrackInstrumentKind(trackId: string) {
     return this.samplerBuffers.has(trackId) ? "sampler" : undefined;
   }
   override clearTrackInstrument(trackId: string) {
     this.samplerBuffers.delete(trackId);
   }
-  override setTrackDrumRack(trackId: string, _params: DrumRackParams, buffers?: ReadonlyMap<string, SampledInstrumentBuffer>): ReturnType<AudioEngine["setTrackDrumRack"]> {
-    this.drumRackBuffers.set(trackId, buffers ?? new Map());
-
-    return "applied";
-  }
-  override setTrackGranular(trackId: string, _params: GranularParams, installedBuffer?: Parameters<AudioEngine["setTrackGranular"]>[2]): ReturnType<AudioEngine["setTrackGranular"]> {
-    this.granularBuffers.set(trackId, installedBuffer);
-
-    return Promise.resolve("applied");
-  }
-  override setSamplerRuntimeListeners(listeners: Parameters<AudioEngine["setSamplerRuntimeListeners"]>[0]) {
-    this.samplerRuntimeListeners = listeners;
-  }
-  override addSamplerRuntimeListeners(listeners: Parameters<AudioEngine["addSamplerRuntimeListeners"]>[0]) {
-    const previous = this.samplerRuntimeListeners;
-    this.samplerRuntimeListeners = { ...previous, ...listeners };
-
-    return () => {
-      this.samplerRuntimeListeners = previous;
-
-      return true;
-    };
-  }
-
-  emitSamplerRegionUse(use: Parameters<NonNullable<Parameters<AudioEngine["setSamplerRuntimeListeners"]>[0]["onAssetUse"]>>[0]) {
+  emitSamplerRegionUse(use: Parameters<NonNullable<Parameters<Instruments["setSamplerRuntimeListeners"]>[0]["onAssetUse"]>>[0]) {
     this.samplerRuntimeListeners.onAssetUse?.(use);
   }
-  emitDrumRackRegionUse(use: Parameters<NonNullable<Parameters<AudioEngine["setSamplerRuntimeListeners"]>[0]["onDrumRackAssetUse"]>>[0]) {
+  emitDrumRackRegionUse(use: Parameters<NonNullable<Parameters<Instruments["setSamplerRuntimeListeners"]>[0]["onDrumRackAssetUse"]>>[0]) {
     this.samplerRuntimeListeners.onDrumRackAssetUse?.(use);
   }
 
@@ -172,7 +175,7 @@ class TestAudioEngine extends AudioEngine {
     return this.granularBuffers.get(trackId);
   }
 
-  emitSamplerNoteMiss(miss: Parameters<NonNullable<Parameters<AudioEngine["setSamplerRuntimeListeners"]>[0]["onNoteMiss"]>>[0]) {
+  emitSamplerNoteMiss(miss: Parameters<NonNullable<Parameters<Instruments["setSamplerRuntimeListeners"]>[0]["onNoteMiss"]>>[0]) {
     this.samplerRuntimeListeners.onNoteMiss?.(miss);
   }
 }
@@ -239,9 +242,16 @@ test("B5c sampled to synth clears the old cache, local track, closed and unselec
   const calls: { family: string; disposition?: string }[] = [];
 
   class InstrumentEngine extends AudioEngine {
-    override setTrackSampler(...args: Parameters<AudioEngine["setTrackSampler"]>) {
-      calls.push({ family: "sampler", disposition: "applied" });
-      runtime.setTrackSampler(...args);
+    constructor() {
+      super();
+      Object.assign(this.instruments, {
+        setTrackSampler: (...args: Parameters<Instruments["setTrackSampler"]>) => {
+          calls.push({ family: "sampler", disposition: "applied" });
+          runtime.setTrackSampler(...args);
+        },
+        clearTrackDrumRack: (id: string) => { runtime.clearTrackDrumRack(id); },
+        addSamplerRuntimeListeners: (...args: Parameters<Instruments["addSamplerRuntimeListeners"]>) => runtime.addSamplerRuntimeListeners(...args),
+      });
     }
     override setTrackInstrument(...args: Parameters<AudioEngine["setTrackInstrument"]>) {
       const disposition = runtime.setTrackInstrument(...args);
@@ -251,10 +261,6 @@ test("B5c sampled to synth clears the old cache, local track, closed and unselec
     }
     override getTrackInstrumentKind(id: string) { return runtime.getTrackInstrumentKind(id); }
     override clearTrackInstrument(id: string) { runtime.clearTrackInstrument(id); }
-    override clearTrackDrumRack(id: string) { runtime.clearTrackDrumRack(id); }
-    override addSamplerRuntimeListeners(...args: Parameters<AudioEngine["addSamplerRuntimeListeners"]>) {
-      return runtime.addSamplerRuntimeListeners(...args);
-    }
     override setTrackFxInstances(): ReturnType<AudioEngine["setTrackFxInstances"]> { return Promise.resolve("skipped"); }
     override setMasterFxInstances(): ReturnType<AudioEngine["setMasterFxInstances"]> { return Promise.resolve("skipped"); }
   }
@@ -534,21 +540,28 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
   const calls: { family: string; disposition?: string }[] = [];
 
   class InstrumentEngine extends AudioEngine {
-    override setTrackSampler(...args: Parameters<AudioEngine["setTrackSampler"]>) {
-      runtime.setTrackSampler(...args);
-      calls.push({ family: "sampler", disposition: "applied" });
-    }
-    override setTrackDrumRack(...args: Parameters<AudioEngine["setTrackDrumRack"]>) {
-      const disposition = runtime.setTrackDrumRack(...args);
-      calls.push({ family: "drum-rack", disposition });
+    constructor() {
+      super();
+      Object.assign(this.instruments, {
+        setTrackSampler: (...args: Parameters<Instruments["setTrackSampler"]>) => {
+          runtime.setTrackSampler(...args);
+          calls.push({ family: "sampler", disposition: "applied" });
+        },
+        setTrackDrumRack: (...args: Parameters<Instruments["setTrackDrumRack"]>) => {
+          const disposition = runtime.setTrackDrumRack(...args);
+          calls.push({ family: "drum-rack", disposition });
 
-      return disposition;
-    }
-    override async setTrackGranular(...args: Parameters<AudioEngine["setTrackGranular"]>) {
-      const disposition = await runtime.setTrackGranular(...args);
-      calls.push({ family: "granular", disposition });
+          return disposition;
+        },
+        setTrackGranular: async (...args: Parameters<Instruments["setTrackGranular"]>) => {
+          const disposition = await runtime.setTrackGranular(...args);
+          calls.push({ family: "granular", disposition });
 
-      return disposition;
+          return disposition;
+        },
+        clearTrackDrumRack: (id: string) => { runtime.clearTrackDrumRack(id); },
+        addSamplerRuntimeListeners: (...args: Parameters<Instruments["addSamplerRuntimeListeners"]>) => runtime.addSamplerRuntimeListeners(...args),
+      });
     }
     override setTrackInstrument(...args: Parameters<AudioEngine["setTrackInstrument"]>) {
       const disposition = runtime.setTrackInstrument(...args);
@@ -558,7 +571,6 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
     }
     override getTrackInstrumentKind(id: string) { return runtime.getTrackInstrumentKind(id); }
     override clearTrackInstrument(id: string) { runtime.clearTrackInstrument(id); calls.push({ family: "clear" }); }
-    override clearTrackDrumRack(id: string) { runtime.clearTrackDrumRack(id); }
     override setTrackArpeggiator(id: string, params: ArpeggiatorParams): ReturnType<AudioEngine["setTrackArpeggiator"]> {
       runtime.setTrackArpeggiator(id, params);
       calls.push({ family: "arp", disposition: "applied" });
@@ -569,7 +581,6 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
       runtime.clearTrackArpeggiator(id);
       calls.push({ family: "arp-clear" });
     }
-    override addSamplerRuntimeListeners(...args: Parameters<AudioEngine["addSamplerRuntimeListeners"]>) { return runtime.addSamplerRuntimeListeners(...args); }
     override setTrackFxInstances(): ReturnType<AudioEngine["setTrackFxInstances"]> { return Promise.resolve("skipped"); }
     override setMasterFxInstances(): ReturnType<AudioEngine["setMasterFxInstances"]> { return Promise.resolve("skipped"); }
   }
@@ -1039,7 +1050,10 @@ for (const local of [true, false]) {
     const f = await createB5c2Fixture(local, instrument, false, undefined, false, false, true);
 
     class Replacement extends AudioEngine {
-      override setTrackSampler() {}
+      constructor() {
+        super();
+        Object.assign(this.instruments, { setTrackSampler: () => {} });
+      }
       override setTrackFxInstances() { return Promise.resolve<"skipped">("skipped"); }
       override setMasterFxInstances() { return Promise.resolve<"skipped">("skipped"); }
     }
@@ -1101,7 +1115,10 @@ for (const local of [true, false]) {
     const installed: string[] = [];
 
     class Replacement extends AudioEngine {
-      override setTrackSampler() { installed.push("sampler"); }
+      constructor() {
+        super();
+        Object.assign(this.instruments, { setTrackSampler: () => { installed.push("sampler"); } });
+      }
       override setTrackArpeggiator(): ReturnType<AudioEngine["setTrackArpeggiator"]> { installed.push("arp");
 
  return "applied"; }
@@ -2305,7 +2322,10 @@ test.each(["readiness", "runtime"])("3B1 r4 Drum Rack Retry preserves %s during 
 
   class Engine extends TestAudioEngine {
     clears = 0;
-    override clearTrackDrumRack() { this.clears++; }
+    constructor(buffer: AudioBuffer) {
+      super(buffer);
+      Object.assign(this.instruments, { clearTrackDrumRack: () => { this.clears++; } });
+    }
   }
 
   const engine = new Engine(buffer), projectId = `project:r4-retry-${crypto.randomUUID()}`;
@@ -2527,9 +2547,14 @@ test("3B1 r3 granular processorerror settles the tracked readiness drain truthfu
   });
 
   class Engine extends TestAudioEngine {
-    override setTrackGranular(_id: string, _params: GranularParams,
-      buffer?: Parameters<AudioEngine["setTrackGranular"]>[2]): ReturnType<AudioEngine["setTrackGranular"]> {
-      return buffer ? runtime.installSample(buffer) : Promise.resolve("applied");
+    constructor(buffer: AudioBuffer) {
+      super(buffer);
+      Object.assign(this.instruments, {
+        setTrackGranular: (_id: string, _params: GranularParams,
+          installed?: Parameters<Instruments["setTrackGranular"]>[2]): ReturnType<Instruments["setTrackGranular"]> => (
+          installed ? runtime.installSample(installed) : Promise.resolve("applied")
+        ),
+      });
     }
   }
 
@@ -3212,10 +3237,15 @@ test("isolates sampled instrument buffers by project identity", async () => {
     override decodeAudioData(data: ArrayBuffer) {
       return Promise.resolve(new Uint8Array(data)[0] === 1 ? projectABuffer : projectBBuffer);
     }
-    override setTrackSampler() {}
-    override setTrackDrumRack(): ReturnType<AudioEngine["setTrackDrumRack"]> { return "applied"; }
-    override setTrackGranular(): ReturnType<AudioEngine["setTrackGranular"]> { return Promise.resolve("applied"); }
-    override setSamplerRuntimeListeners() {}
+    constructor() {
+      super();
+      Object.assign(this.instruments, {
+        setTrackSampler: () => {},
+        setTrackDrumRack: (): ReturnType<Instruments["setTrackDrumRack"]> => "applied",
+        setTrackGranular: (): ReturnType<Instruments["setTrackGranular"]> => Promise.resolve("applied"),
+        setSamplerRuntimeListeners: () => {},
+      });
+    }
   }
 
   const engine = new ProjectAudioEngine();
@@ -3925,14 +3955,16 @@ test("forwards Drum Rack equality skips and drops work outside its project", asy
   const buffer = new TestAudioBuffer();
 
   class SkippedDrumEngine extends TestAudioEngine {
-    override setTrackDrumRack(
-      trackId: string,
-      params: DrumRackParams,
-      buffers?: ReadonlyMap<string, SampledInstrumentBuffer>,
-    ): ReturnType<AudioEngine["setTrackDrumRack"]> {
-      super.setTrackDrumRack(trackId, params, buffers);
+    constructor(buffer: AudioBuffer) {
+      super(buffer);
+      const install = this.instruments.setTrackDrumRack;
+      Object.assign(this.instruments, {
+        setTrackDrumRack: (...args: Parameters<Instruments["setTrackDrumRack"]>): ReturnType<Instruments["setTrackDrumRack"]> => {
+          install(...args);
 
-      return "skipped";
+          return "skipped";
+        },
+      });
     }
   }
 

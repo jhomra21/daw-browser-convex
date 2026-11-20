@@ -28,8 +28,8 @@ export default function Limiter(props: LimiterProps) {
     if (!props.audioEngine) return
 
     const unsubscribe = props.targetId === 'master'
-      ? props.audioEngine.subscribeMasterGateMeter(props.effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
-      : props.audioEngine.subscribeTrackGateMeter(props.targetId, props.effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
+      ? props.audioEngine.masterFx.subscribeGateMeter(props.effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
+      : props.audioEngine.mixer.subscribeTrackGateMeter(props.targetId, props.effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
 
     onCleanup(unsubscribe)
   })

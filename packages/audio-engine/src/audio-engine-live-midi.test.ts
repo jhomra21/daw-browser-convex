@@ -19,7 +19,7 @@ const installGranularRuntime = (engine: AudioEngine, stopped: string[], schedule
     clear: () => {},
   }
 
-  Reflect.set(engine, 'instrumentRuntime', instrumentRuntime)
+  Reflect.set(engine, 'instruments', instrumentRuntime)
   Reflect.set(engine, 'audioCtx', Object.assign(new EventTarget(), { currentTime: 10 }))
 }
 
@@ -27,7 +27,7 @@ describe('AudioEngine granular live MIDI ownership', () => {
   test('reports the arpeggiator equality skip and applied update', () => {
     const engine = new AudioEngine()
     let current = createDefaultArpeggiatorParams()
-    Reflect.set(engine, 'instrumentRuntime', {
+    Reflect.set(engine, 'instruments', {
       getTrackArpeggiator: () => current,
       setTrackArpeggiator: (_trackId: string, params: typeof current) => {
         current = params
@@ -126,7 +126,7 @@ describe('AudioEngine granular live MIDI ownership', () => {
     const samplerEngine = new AudioEngine()
     const samplerStops: number[] = []
     let samplerEnded: (() => void) | undefined
-    Reflect.set(samplerEngine, 'instrumentRuntime', {
+    Reflect.set(samplerEngine, 'instruments', {
       getTrackInstrumentKind: (): 'sampler' => 'sampler',
       startLiveSamplerNote: (_trackId: string, _pitch: number, _velocity: number, _durationSec: number | undefined, onEnded: () => void) => {
         samplerEnded = onEnded
@@ -145,7 +145,7 @@ describe('AudioEngine granular live MIDI ownership', () => {
     const drumEngine = new AudioEngine()
     const drumStops: number[] = []
     let drumEnded: (() => void) | undefined
-    Reflect.set(drumEngine, 'instrumentRuntime', {
+    Reflect.set(drumEngine, 'instruments', {
       getTrackInstrumentKind: (): 'drum-rack' => 'drum-rack',
       startLiveDrumRackNote: (_trackId: string, _pitch: number, _velocity: number, onEnded: () => void) => {
         drumEnded = onEnded
@@ -166,7 +166,7 @@ describe('AudioEngine granular live MIDI ownership', () => {
     const engine = new AudioEngine()
     const releases: Array<{ voiceId: number; generation: number | undefined }> = []
     let generation = 1
-    Reflect.set(engine, 'instrumentRuntime', {
+    Reflect.set(engine, 'instruments', {
       getTrackInstrumentKind: (): 'synth' => 'synth',
       triggerSynthNote: () => 1,
       getSynthLiveVoiceGeneration: () => generation,
@@ -192,7 +192,7 @@ describe('AudioEngine tempo', () => {
   test('a failed track tempo write still sends the tempo to the master delays, then reports the failure', () => {
     const engine = new AudioEngine()
     const masterBpms: number[] = []
-    Reflect.set(engine, 'mixerRuntime', { setBpm: () => { throw new Error('Audio parameter write failed.') } })
+    Reflect.set(engine, 'mixer', { setBpm: () => { throw new Error('Audio parameter write failed.') } })
     Reflect.set(engine, 'masterFx', { setBpm: (bpm: number) => { masterBpms.push(bpm) } })
     expect(() => engine.setBpm(60)).toThrow('Audio parameter write failed.')
     expect(masterBpms).toEqual([60])
@@ -202,7 +202,7 @@ describe('AudioEngine tempo', () => {
     const engine = new AudioEngine()
     const trackFailure = new Error('track failed first')
     const masterBpms: number[] = []
-    Reflect.set(engine, 'mixerRuntime', { setBpm: () => { throw trackFailure } })
+    Reflect.set(engine, 'mixer', { setBpm: () => { throw trackFailure } })
     Reflect.set(engine, 'masterFx', { setBpm: (bpm: number) => { masterBpms.push(bpm); throw new Error('master failed second') } })
     let reported: unknown
 

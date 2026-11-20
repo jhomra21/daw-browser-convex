@@ -3040,7 +3040,7 @@ const Timeline: Component<TimelineProps> = (props) => {
             automation.overrideTarget(
               automationTargetKey({ kind: "track", trackId }, "volume"),
             );
-            audioEngine.previewTrackVolume(trackId, volume, muted);
+            audioEngine.mixer.previewTrackVolume(trackId, volume, muted);
           },
           onVolumeChange: (trackId, volume) => {
             automation.overrideTarget(

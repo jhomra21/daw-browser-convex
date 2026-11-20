@@ -211,7 +211,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       if (!source || !targetInstance) continue
       const compressor = instanceCompressorChains.get(route.targetTrackId)?.get(route.effectInstanceId)?.chain()
       const owned = instanceStaticWorkletChains.get(route.targetTrackId)?.get(route.effectInstanceId)
-      const targetNode = compressor?.workletNode ?? (owned?.kind === 'gate' || owned?.kind === 'spectral' ? owned.node : undefined)
+      const targetNode = compressor?.workletNode ?? (owned && isSidechainCapableKind(owned.kind) ? owned.node : undefined)
 
       if (!targetNode) continue
       const edgeId = `sidechain:${sidechainRouteIdentity(route.targetTrackId, route.effectInstanceId)}`

@@ -1,4 +1,4 @@
-import { assertDefined, getAutomationParameterDescriptor, isOwnedProcessorKind, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeSaturatorParams, type CompressorParamsLite } from '@daw-browser/shared'
+import { assertDefined, getAutomationParameterDescriptor, isOwnedProcessorKind, isSidechainCapableKind, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeSaturatorParams, type CompressorParamsLite } from '@daw-browser/shared'
 import { createEqNodes } from '../effects/dsp'
 import { connectFxChain, createCompressorNodeChain, createDelayNodeChain, createReverbNodeChain, createSaturatorNodeChain, disconnectCompressorChain, type CompressorNodeChain, type DelayNodeChain, type ReverbNodeChain, type SaturatorNodeChain } from '../effects/chain'
 import type { ResolvedMixerGraph } from './types'
@@ -299,7 +299,7 @@ export async function createOfflineMixerNodes(
       const owned = target.fx.staticWorkletByInstanceId.get(route.effectInstanceId)
 
       const targetNode = assertDefined(
-        compressor?.workletNode ?? (owned?.kind === 'gate' || owned?.kind === 'spectral' ? owned.node : undefined),
+        compressor?.workletNode ?? (owned && isSidechainCapableKind(owned.kind) ? owned.node : undefined),
         `Invalid offline sidechain route for effect ${route.effectInstanceId}`,
       )
 

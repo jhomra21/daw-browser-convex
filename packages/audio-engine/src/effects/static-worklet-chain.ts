@@ -4,6 +4,7 @@ import {
   isJsonObject,
   isJsonString,
   isModulationGroupKind,
+  isSidechainCapableKind,
   OWNED_PROCESSOR_PARAMETER_IDS,
   type JsonValue,
   type OwnedProcessorKind,
@@ -57,7 +58,7 @@ export async function createStaticWorkletNodeChain(
   const overlap = spectralState?.overlap
 
   const node = new AudioWorkletNode(ctx, asset.processorName, {
-    numberOfInputs: kind === 'gate' || kind === 'spectral' ? 2 : 1,
+    numberOfInputs: isSidechainCapableKind(kind) ? 2 : 1,
     numberOfOutputs: 1,
     outputChannelCount: [2],
     channelCount: 2,

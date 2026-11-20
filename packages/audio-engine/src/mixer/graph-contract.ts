@@ -32,6 +32,7 @@ import {
   normalizeLoFiParamsEnvelope,
   normalizeReverbParams,
   normalizeSynthParams,
+  isSidechainCapableKind,
   type SynthParamsInput,
 } from '@daw-browser/shared'
 import { getEffectChainTiming, getEffectTiming } from '../effects/timing'
@@ -608,7 +609,7 @@ export const createPortableGraphSnapshot = ({
       .find((entry) => entry.channel.id === route.targetTrackId)
       ?.fx?.instances.find((instance) => instance.id === route.effectInstanceId)
 
-    if (target?.kind !== 'compressor' && target?.kind !== 'gate' && target?.kind !== 'spectral') {
+    if (!target || !isSidechainCapableKind(target.kind)) {
       throw new Error(`Portable sidechain target "${route.effectInstanceId}" is not a supported detector processor.`)
     }
 

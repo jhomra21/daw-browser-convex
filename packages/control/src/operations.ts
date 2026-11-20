@@ -77,6 +77,12 @@ export type ProjectCurrentResult = z.infer<typeof projectCurrentResultSchema>
 
 type ControlOperationSchema = z.ZodTypeAny
 
+export type ControlOperationSurfaces = {
+  readonly sdk: { readonly group: 'projects' | 'control'; readonly method: string }
+  readonly cli: readonly string[]
+  readonly mcp: string
+}
+
 export type ControlOperationDescriptor<
   Id extends string = string,
   InputSchema extends ControlOperationSchema = ControlOperationSchema,
@@ -89,10 +95,11 @@ export type ControlOperationDescriptor<
   readonly idempotency: ControlOperationIdempotency
   readonly targets: readonly ControlOperationTarget[]
   readonly approval: ControlOperationApproval
+  readonly surfaces: ControlOperationSurfaces
 }
 
 const defineControlOperationCatalog = <
-  Catalog extends Record<string, ControlOperationDescriptor>,
+  const Catalog extends Record<string, ControlOperationDescriptor>,
 >(catalog: Catalog): Readonly<Catalog> => {
   for (const [operationId, descriptor] of Object.entries(catalog)) {
     if (operationId !== descriptor.id) {
@@ -115,6 +122,7 @@ export const controlOperationCatalog = defineControlOperationCatalog({
     idempotency: 'safe',
     targets: ['cloud', 'desktop'],
     approval: 'never',
+    surfaces: { sdk: { group: 'projects', method: 'list' }, cli: [], mcp: 'project_list' },
   },
   'project.current': {
     id: 'project.current',
@@ -124,6 +132,7 @@ export const controlOperationCatalog = defineControlOperationCatalog({
     idempotency: 'safe',
     targets: ['desktop'],
     approval: 'never',
+    surfaces: { sdk: { group: 'projects', method: 'current' }, cli: [], mcp: 'project_current' },
   },
   'control.capabilities': {
     id: 'control.capabilities',
@@ -133,6 +142,7 @@ export const controlOperationCatalog = defineControlOperationCatalog({
     idempotency: 'safe',
     targets: ['cloud', 'desktop'],
     approval: 'never',
+    surfaces: { sdk: { group: 'control', method: 'capabilities' }, cli: ['capabilities', 'capabilities-v2'], mcp: 'control_capabilities_v2' },
   },
   'control.snapshot': {
     id: 'control.snapshot',
@@ -142,6 +152,7 @@ export const controlOperationCatalog = defineControlOperationCatalog({
     idempotency: 'safe',
     targets: ['cloud', 'desktop'],
     approval: 'never',
+    surfaces: { sdk: { group: 'control', method: 'snapshot' }, cli: ['snapshot', 'snapshot-v2'], mcp: 'control_snapshot_v2' },
   },
   'control.preview': {
     id: 'control.preview',
@@ -151,6 +162,7 @@ export const controlOperationCatalog = defineControlOperationCatalog({
     idempotency: 'safe',
     targets: ['cloud', 'desktop'],
     approval: 'never',
+    surfaces: { sdk: { group: 'control', method: 'preview' }, cli: ['preview'], mcp: 'control_preview' },
   },
   'control.requestApproval': {
     id: 'control.requestApproval',
@@ -160,6 +172,7 @@ export const controlOperationCatalog = defineControlOperationCatalog({
     idempotency: 'none',
     targets: ['cloud', 'desktop'],
     approval: 'never',
+    surfaces: { sdk: { group: 'control', method: 'requestApproval' }, cli: ['approval'], mcp: 'control_request_approval' },
   },
   'control.commit': {
     id: 'control.commit',
@@ -169,6 +182,7 @@ export const controlOperationCatalog = defineControlOperationCatalog({
     idempotency: 'keyed',
     targets: ['cloud', 'desktop'],
     approval: 'conditional',
+    surfaces: { sdk: { group: 'control', method: 'commit' }, cli: ['commit'], mcp: 'control_commit' },
   },
   'control.history': {
     id: 'control.history',
@@ -178,6 +192,7 @@ export const controlOperationCatalog = defineControlOperationCatalog({
     idempotency: 'safe',
     targets: ['cloud', 'desktop'],
     approval: 'never',
+    surfaces: { sdk: { group: 'control', method: 'history' }, cli: ['history'], mcp: 'control_history' },
   },
   'control.recoveries': {
     id: 'control.recoveries',
@@ -187,6 +202,7 @@ export const controlOperationCatalog = defineControlOperationCatalog({
     idempotency: 'safe',
     targets: ['cloud', 'desktop'],
     approval: 'never',
+    surfaces: { sdk: { group: 'control', method: 'recoveries' }, cli: ['recoveries'], mcp: 'control_recoveries' },
   },
 })
 
@@ -197,6 +213,46 @@ export type ControlOperationMap = {
     input: z.output<typeof controlOperationCatalog[Id]['input']>
     output: z.output<typeof controlOperationCatalog[Id]['output']>
   }
+}
+
+type ControlOperationCatalog = typeof controlOperationCatalog
+
+export type ControlSdkGroup = ControlOperationSurfaces['sdk']['group']
+
+export type ControlSdkOperations<Group extends ControlSdkGroup> = {
+  readonly [Id in ControlOperationId as ControlOperationCatalog[Id]['surfaces']['sdk']['group'] extends Group
+    ? ControlOperationCatalog[Id]['surfaces']['sdk']['method']
+    : never]: Id
+}
+
+export type ControlCliCommand = {
+  [Id in ControlOperationId]: ControlOperationCatalog[Id]['surfaces']['cli'][number]
+}[ControlOperationId]
+
+export type ControlCliOperations = {
+  readonly [Command in ControlCliCommand]: {
+    [Id in ControlOperationId]: Command extends ControlOperationCatalog[Id]['surfaces']['cli'][number] ? Id : never
+  }[ControlOperationId]
+}
+
+/** Operation ids of one SDK group, keyed by SDK method name, in catalog order. */
+export function controlSdkOperations<Group extends ControlSdkGroup>(group: Group): ControlSdkOperations<Group>
+export function controlSdkOperations(group: ControlSdkGroup): Record<string, ControlOperationId> {
+  return Object.fromEntries(
+    Object.values(controlOperationCatalog)
+      .filter((descriptor) => descriptor.surfaces.sdk.group === group)
+      .map((descriptor) => [descriptor.surfaces.sdk.method, descriptor.id]),
+  )
+}
+
+/** Operation id behind each CLI control command, in catalog order. */
+export function controlCliOperations(): ControlCliOperations
+export function controlCliOperations(): Record<string, ControlOperationId> {
+  return Object.fromEntries(
+    Object.values(controlOperationCatalog).flatMap((descriptor) => (
+      descriptor.surfaces.cli.map((command) => [command, descriptor.id])
+    )),
+  )
 }
 
 export type ControlInput<Id extends ControlOperationId> = ControlOperationMap[Id]['input']

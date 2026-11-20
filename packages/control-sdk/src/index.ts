@@ -1,5 +1,6 @@
 import {
   canonicalJson,
+  controlSdkOperations,
   controlCapabilitiesSchemaV1,
   controlCapabilitiesSchemaV2,
   controlCommitRequestSchemaV1,
@@ -45,33 +46,8 @@ import {
 } from "@daw-browser/control"
 
 export const canonicalControlClientOperationMap = {
-  projects: {
-    list: "project.list",
-    current: "project.current",
-  },
-  control: {
-    capabilities: "control.capabilities",
-    snapshot: "control.snapshot",
-    preview: "control.preview",
-    requestApproval: "control.requestApproval",
-    commit: "control.commit",
-    history: "control.history",
-    recoveries: "control.recoveries",
-  },
-} satisfies {
-  readonly projects: {
-    readonly list: "project.list"
-    readonly current: "project.current"
-  }
-  readonly control: {
-    readonly capabilities: "control.capabilities"
-    readonly snapshot: "control.snapshot"
-    readonly preview: "control.preview"
-    readonly requestApproval: "control.requestApproval"
-    readonly commit: "control.commit"
-    readonly history: "control.history"
-    readonly recoveries: "control.recoveries"
-  }
+  projects: controlSdkOperations("projects"),
+  control: controlSdkOperations("control"),
 }
 
 type CanonicalControlClientMethods<

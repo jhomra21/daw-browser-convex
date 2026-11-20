@@ -8,6 +8,7 @@ import { z } from "zod"
 import type { CanonicalControlClient } from "@daw-browser/control-sdk"
 import {
   canonicalJson,
+  controlOperationCatalog,
   controlLimitsV1,
   controlCapabilitiesQuerySchemaV1,
   controlCapabilitiesSchemaV1,
@@ -27,6 +28,7 @@ import {
   projectSnapshotSchemaV1,
   projectSnapshotSchemaV2,
   type ControlErrorV1,
+  type ControlOperationId,
   type ControlCapabilitiesV1,
   type ControlCapabilitiesV2,
   type ControlCommitRequestV1,
@@ -385,17 +387,26 @@ export const createControlMcpServer = (
     }
   }
 
-  const capabilities = (input: McpToolInput) => executeRouted(input, "control_capabilities", controlCapabilitiesQuerySchemaV1.parse, (service_) => service_.capabilities(), controlCapabilitiesSchemaV1.parse, false)
-  const capabilitiesV2 = (input: McpToolInput) => executeRouted(input, "control_capabilities_v2", controlCapabilitiesQuerySchemaV1.parse, (service_) => service_.capabilitiesV2(), controlCapabilitiesSchemaV2.parse, false)
-  const snapshot = (input: McpToolInput) => executeRouted(input, "control_snapshot", controlSnapshotQuerySchemaV1.parse, (service_, value) => service_.snapshot(value), projectSnapshotSchemaV1.parse, false)
-  const snapshotV2 = (input: McpToolInput) => executeRouted(input, "control_snapshot_v2", controlSnapshotQuerySchemaV1.parse, (service_, value) => service_.snapshotV2(value), projectSnapshotSchemaV2.parse, false)
-  const preview = (input: McpToolInput) => executeRouted(input, "control_preview", controlPreviewRequestSchemaV1.parse, (service_, value) => service_.preview(value), controlPreviewResultSchemaV1.parse, true)
-  const commit = (input: McpToolInput) => executeRouted(input, "control_commit", controlCommitRequestSchemaV1.parse, (service_, value) => service_.commit(value), controlCommitResultSchemaV1.parse, true)
-  const requestApproval = (input: McpToolInput) => executeRouted(input, "control_request_approval", controlApprovalRequestSchemaV1.parse, (service_, value) => service_.requestApproval(value), controlApprovalResultSchemaV1.parse, true)
-  const history = (input: McpToolInput) => executeRouted(input, "control_history", controlHistoryQuerySchemaV1.parse, (service_, value) => service_.history(value), controlHistoryResultSchemaV1.parse, false)
-  const recoveries = (input: McpToolInput) => executeRouted(input, "control_recoveries", controlRecoveriesQuerySchemaV1.parse, (service_, value) => service_.recoveries(value), controlRecoveriesResultSchemaV1.parse, false)
+  const toolName = (operationId: ControlOperationId) => controlOperationCatalog[operationId].surfaces.mcp
 
-  const projectsList = (input: McpToolInput) => executeRouted(input, "project_list", (value) => projectDiscoveryInputSchema.parse(value), (service_) => {
+  const controlToolHandlers = new Map<string, (input: McpToolInput) => Promise<CallToolResult>>()
+  const controlTool = <Handler extends (input: McpToolInput) => Promise<CallToolResult>>(name: string, handler: Handler): Handler => {
+    controlToolHandlers.set(name, handler)
+
+    return handler
+  }
+
+  const capabilities = (input: McpToolInput) => executeRouted(input, "control_capabilities", controlCapabilitiesQuerySchemaV1.parse, (service_) => service_.capabilities(), controlCapabilitiesSchemaV1.parse, false)
+  const capabilitiesV2 = (input: McpToolInput) => executeRouted(input, toolName("control.capabilities"), controlCapabilitiesQuerySchemaV1.parse, (service_) => service_.capabilitiesV2(), controlCapabilitiesSchemaV2.parse, false)
+  const snapshot = (input: McpToolInput) => executeRouted(input, "control_snapshot", controlSnapshotQuerySchemaV1.parse, (service_, value) => service_.snapshot(value), projectSnapshotSchemaV1.parse, false)
+  const snapshotV2 = (input: McpToolInput) => executeRouted(input, toolName("control.snapshot"), controlSnapshotQuerySchemaV1.parse, (service_, value) => service_.snapshotV2(value), projectSnapshotSchemaV2.parse, false)
+  const preview = (input: McpToolInput) => executeRouted(input, toolName("control.preview"), controlPreviewRequestSchemaV1.parse, (service_, value) => service_.preview(value), controlPreviewResultSchemaV1.parse, true)
+  const commit = (input: McpToolInput) => executeRouted(input, toolName("control.commit"), controlCommitRequestSchemaV1.parse, (service_, value) => service_.commit(value), controlCommitResultSchemaV1.parse, true)
+  const requestApproval = (input: McpToolInput) => executeRouted(input, toolName("control.requestApproval"), controlApprovalRequestSchemaV1.parse, (service_, value) => service_.requestApproval(value), controlApprovalResultSchemaV1.parse, true)
+  const history = (input: McpToolInput) => executeRouted(input, toolName("control.history"), controlHistoryQuerySchemaV1.parse, (service_, value) => service_.history(value), controlHistoryResultSchemaV1.parse, false)
+  const recoveries = (input: McpToolInput) => executeRouted(input, toolName("control.recoveries"), controlRecoveriesQuerySchemaV1.parse, (service_, value) => service_.recoveries(value), controlRecoveriesResultSchemaV1.parse, false)
+
+  const projectsList = (input: McpToolInput) => executeRouted(input, toolName("project.list"), (value) => projectDiscoveryInputSchema.parse(value), (service_) => {
     if (!service_.projects) throw new Error("Project discovery is unavailable.")
 
     return service_.projects.list()
@@ -414,115 +425,97 @@ export const createControlMcpServer = (
         }))
       }
     } catch (error) {
-      return Promise.resolve(failure(invalidInputFor("project_current", error)))
+      return Promise.resolve(failure(invalidInputFor(toolName("project.current"), error)))
     }
 
-    return executeRouted(input, "project_current", (value) => projectDiscoveryInputSchema.parse(value), (service_) => {
+    return executeRouted(input, toolName("project.current"), (value) => projectDiscoveryInputSchema.parse(value), (service_) => {
       if (!service_.projects?.current) throw new Error("Current project discovery is unavailable.")
 
       return service_.projects.current()
     }, projectCurrentResultSchema.parse, false)
   }
 
-  server.registerTool("project_list", {
+  server.registerTool(toolName("project.list"), {
     description: "List projects accessible through the selected control target.",
     inputSchema: withTarget(projectDiscoveryInputSchema),
     outputSchema: projectListResultSchema,
     annotations: annotations.read,
-  }, projectsList)
-  server.registerTool("project_current", {
+  }, controlTool(toolName("project.list"), projectsList))
+  server.registerTool(toolName("project.current"), {
     description: "Return the currently mounted local project. This is host-only.",
     inputSchema: withTarget(projectDiscoveryInputSchema),
     outputSchema: projectCurrentResultSchema,
     annotations: annotations.read,
-  }, projectCurrent)
+  }, controlTool(toolName("project.current"), projectCurrent))
 
   server.registerTool("control_capabilities", {
     description: "Legacy V1 compatibility: return supported DAW control capabilities. New integrations should use canonical/preferred control_capabilities_v2.",
     inputSchema: withTarget(controlCapabilitiesQuerySchemaV1),
     outputSchema: controlCapabilitiesSchemaV1,
     annotations: annotations.read,
-  }, capabilities)
+  }, controlTool("control_capabilities", capabilities))
 
   server.registerTool("control_snapshot", {
     description: "Legacy V1 compatibility: return a V1 DAW project snapshot. New integrations should use canonical/preferred control_snapshot_v2.",
     inputSchema: withTarget(controlSnapshotQuerySchemaV1),
     outputSchema: projectSnapshotSchemaV1,
     annotations: annotations.read,
-  }, snapshot)
-  server.registerTool("control_capabilities_v2", {
+  }, controlTool("control_snapshot", snapshot))
+  server.registerTool(toolName("control.capabilities"), {
     description: "Canonical/preferred capabilities for new integrations. Return supported DAW control API V2 capabilities.",
     inputSchema: withTarget(controlCapabilitiesQuerySchemaV1),
     outputSchema: controlCapabilitiesSchemaV2,
     annotations: annotations.read,
-  }, capabilitiesV2)
-  server.registerTool("control_snapshot_v2", {
+  }, controlTool(toolName("control.capabilities"), capabilitiesV2))
+  server.registerTool(toolName("control.snapshot"), {
     description: "Canonical/preferred V2 project snapshot for new integrations. Use its project revision and entity IDs to construct control requests.",
     inputSchema: withTarget(controlSnapshotQuerySchemaV1),
     outputSchema: projectSnapshotSchemaV2,
     annotations: annotations.read,
-  }, snapshotV2)
+  }, controlTool(toolName("control.snapshot"), snapshotV2))
 
-  server.registerTool("control_preview", {
+  server.registerTool(toolName("control.preview"), {
     description: "Validate and preview without committing. Example: {version:\"v1\",projectId:\"project-1\",expectedRevision:7,actions:[{kind:\"track.rename\",track:{source:\"persisted\",id:\"track-1\"},name:\"Drums\"}]}. Use target:\"cloud\" by default or target:\"host\" only for an attached host; commit the exact previewed request.",
     inputSchema: withTarget(controlPreviewRequestSchemaV1),
     outputSchema: controlPreviewResultSchemaV1,
     annotations: annotations.preview,
-  }, preview)
+  }, controlTool(toolName("control.preview"), preview))
 
-  server.registerTool("control_commit", {
+  server.registerTool(toolName("control.commit"), {
     description: "Commit the exact previewed request. Include a stable idempotencyKey for retries and approvalToken from control_request_approval when preview.approval.required is true. Example: {version:\"v1\",projectId:\"project-1\",expectedRevision:7,idempotencyKey:\"rename-track-1\",approvalToken:\"<token when required>\",actions:[{kind:\"track.rename\",track:{source:\"persisted\",id:\"track-1\"},name:\"Drums\"}]}. Routes with target:\"cloud\" by default or target:\"host\" for an attached host.",
     inputSchema: withTarget(controlCommitRequestSchemaV1),
     outputSchema: controlCommitResultSchemaV1,
     annotations: annotations.commit,
-  }, commit)
+  }, controlTool(toolName("control.commit"), commit))
 
-  server.registerTool("control_request_approval", {
+  server.registerTool(toolName("control.requestApproval"), {
     description: "Request a one-time approval token for a previewed destructive request. Example: {version:\"v1\",projectId:\"project-1\",expectedRevision:7,actions:[{kind:\"track.delete\",track:{source:\"persisted\",id:\"track-1\"}}]}. Reuse the exact request in control_commit and pass the returned approvalToken; route with target:\"cloud\" by default or target:\"host\" for an attached host.",
     inputSchema: withTarget(controlApprovalRequestSchemaV1),
     outputSchema: controlApprovalResultSchemaV1,
     annotations: annotations.approval,
-  }, requestApproval)
+  }, controlTool(toolName("control.requestApproval"), requestApproval))
 
-  server.registerTool("control_history", {
+  server.registerTool(toolName("control.history"), {
     description: "Return bounded DAW control history for a project.",
     inputSchema: withTarget(controlHistoryQuerySchemaV1),
     outputSchema: controlHistoryResultSchemaV1,
     annotations: annotations.read,
-  }, history)
-  server.registerTool("control_recoveries", {
+  }, controlTool(toolName("control.history"), history))
+  server.registerTool(toolName("control.recoveries"), {
     description: "Return active recovery descriptors for a DAW project.",
     inputSchema: withTarget(controlRecoveriesQuerySchemaV1),
     outputSchema: controlRecoveriesResultSchemaV1,
     annotations: annotations.read,
-  }, recoveries)
+  }, controlTool(toolName("control.recoveries"), recoveries))
 
   if (options.hostTools) registerHostTools(server, options.hostTools)
   server.server.removeRequestHandler("tools/call")
   server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const input = request.params.arguments
 
-    if (request.params.name === "control_capabilities") return capabilities(input)
+    const handler = controlToolHandlers.get(request.params.name)
 
-    if (request.params.name === "control_snapshot") return snapshot(input)
-
-    if (request.params.name === "control_capabilities_v2") return capabilitiesV2(input)
-
-    if (request.params.name === "control_snapshot_v2") return snapshotV2(input)
-
-    if (request.params.name === "control_preview") return preview(input)
-
-    if (request.params.name === "control_commit") return commit(input)
-
-    if (request.params.name === "control_request_approval") return requestApproval(input)
-
-    if (request.params.name === "control_history") return history(input)
-
-    if (request.params.name === "control_recoveries") return recoveries(input)
-
-    if (request.params.name === "project_list") return projectsList(input)
-
-    if (request.params.name === "project_current") return projectCurrent(input)
+    if (handler) return handler(input)
 
     if (options.hostTools) {
       return executeHostTool(request.params.name, input, options.hostTools)

@@ -4647,10 +4647,10 @@ bool AudioHost::InstallAsset(
   const std::uint64_t content_hash_prefix,
   const std::span<const float> samples
 ) {
-  impl_->asset_operation_error = "invalid-asset";
+  impl_->asset_operation_error = kAssetRefusalInvalidAsset;
   const daw_audio_core_handle active_core = impl_->active_core.load(std::memory_order_acquire);
   if (impl_->publication_in_flight != 0) {
-    impl_->asset_operation_error = "asset-publication-pending"; return false;
+    impl_->asset_operation_error = kAssetRefusalPublicationPending; return false;
   }
   if (active_core == 0
     || asset_id == 0 || frame_count == 0 || frame_count > kMaximumAssetFrames
@@ -4662,7 +4662,7 @@ bool AudioHost::InstallAsset(
     if (asset.mapped || asset.frame_count != frame_count || asset.sample_rate_hz != sample_rate_hz
       || asset.channel_count != channel_count || asset.content_hash_prefix != content_hash_prefix
       || !std::equal(samples.begin(), samples.end(), asset.samples.begin(), asset.samples.end())) {
-      impl_->asset_operation_error = "asset-identity-conflict"; return false;
+      impl_->asset_operation_error = kAssetRefusalIdentityConflict; return false;
     }
     impl_->ReuseAsset(asset);
     impl_->asset_operation_error = {};
@@ -4670,7 +4670,7 @@ bool AudioHost::InstallAsset(
   }
   impl_->ReclaimAssets();
   if (impl_->assets.size() >= kMaximumInstalledAssets) {
-    impl_->asset_operation_error = "asset-capacity-exceeded"; return false;
+    impl_->asset_operation_error = kAssetRefusalCapacityExceeded; return false;
   }
   Impl::InstalledAsset asset{
     .samples = {samples.begin(), samples.end()},
@@ -4712,10 +4712,10 @@ bool AudioHost::CreateMappedAsset(
   const std::uint32_t channel_count,
   const std::uint64_t content_hash_prefix
 ) {
-  impl_->asset_operation_error = "invalid-asset";
+  impl_->asset_operation_error = kAssetRefusalInvalidAsset;
   const daw_audio_core_handle active_core = impl_->active_core.load(std::memory_order_acquire);
   if (impl_->publication_in_flight != 0) {
-    impl_->asset_operation_error = "asset-publication-pending"; return false;
+    impl_->asset_operation_error = kAssetRefusalPublicationPending; return false;
   }
   if (active_core == 0
     || asset_id == 0 || frame_count == 0 || sample_rate_hz == 0
@@ -4726,7 +4726,7 @@ bool AudioHost::CreateMappedAsset(
     auto& asset = found->second;
     if (!asset.mapped || asset.frame_count != frame_count || asset.sample_rate_hz != sample_rate_hz
       || asset.channel_count != channel_count || asset.content_hash_prefix != content_hash_prefix) {
-      impl_->asset_operation_error = "asset-identity-conflict"; return false;
+      impl_->asset_operation_error = kAssetRefusalIdentityConflict; return false;
     }
     impl_->ReuseAsset(asset);
     impl_->asset_operation_error = {};
@@ -4734,7 +4734,7 @@ bool AudioHost::CreateMappedAsset(
   }
   impl_->ReclaimAssets();
   if (impl_->assets.size() >= kMaximumInstalledAssets) {
-    impl_->asset_operation_error = "asset-capacity-exceeded"; return false;
+    impl_->asset_operation_error = kAssetRefusalCapacityExceeded; return false;
   }
   const std::size_t byte_length = static_cast<std::size_t>(frame_count)
     * channel_count * sizeof(float);
@@ -4799,9 +4799,9 @@ bool AudioHost::WriteMappedAssetPage(
   const std::uint32_t frame_count,
   const std::span<const float> samples
 ) {
-  impl_->asset_operation_error = "invalid-asset-page";
+  impl_->asset_operation_error = kAssetRefusalInvalidAssetPage;
   if (impl_->publication_in_flight != 0) {
-    impl_->asset_operation_error = "asset-publication-pending"; return false;
+    impl_->asset_operation_error = kAssetRefusalPublicationPending; return false;
   }
   const auto asset_iterator = impl_->assets.find(asset_id);
   if (asset_iterator == impl_->assets.end() || !asset_iterator->second.mapped
@@ -4824,7 +4824,7 @@ bool AudioHost::WriteMappedAssetPage(
       if (!std::equal(samples.begin() + static_cast<std::size_t>(channel) * frame_count,
         samples.begin() + static_cast<std::size_t>(channel + 1) * frame_count,
         source + static_cast<std::size_t>(channel) * asset.frame_count + start_frame)) {
-        impl_->asset_operation_error = "asset-page-identity-conflict";
+        impl_->asset_operation_error = kAssetRefusalPageIdentityConflict;
         return false;
       }
     }
@@ -4853,7 +4853,7 @@ bool AudioHost::WriteMappedAssetPage(
   }
   if (!inserted) merged.emplace_back(merged_start, merged_end);
   if (merged.size() > kMaximumMappedAssetWrittenRanges) {
-    impl_->asset_operation_error = "asset-page-capacity-exceeded";
+    impl_->asset_operation_error = kAssetRefusalPageCapacityExceeded;
     return false;
   }
   auto* destination = static_cast<float*>(asset.mapped->address) + static_cast<std::size_t>(start_frame);

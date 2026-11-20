@@ -96,7 +96,7 @@ bool IsValidWorkerManifest(const WorkerManifest& manifest) {
     || manifest.transport.maximumEventsPerBlock > kMaximumWorkerEvents || manifest.latencyFrames > kMaximumGraphLatencyFrames
     || (manifest.tailFrames && !IsValidFiniteWorkerTailFrames(*manifest.tailFrames))
     || manifest.stateRevision > 0x7fff'ffffU
-    || manifest.parameters.size() > 16'384) {
+    || manifest.parameters.size() > kMaximumPluginParameters) {
     return false;
   }
   std::unordered_set<std::uint32_t> parameterIds;

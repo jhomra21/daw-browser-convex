@@ -8,9 +8,14 @@ import {
 import * as host from "../src/native-audio-host"
 import {
   maxPluginHostControlFrameBytes,
+  maxVst3EditorDimension,
+  maxVst3PluginParameters,
+  maxVst3WorkerChannels,
+  maxVst3WorkerEventsPerBlock,
   maxVst3WorkerFrames,
   maxVst3WorkerSampleRateHz,
   maxVst3WorkerStateBytes,
+  maxVst3WorkerTransportSlots,
   nativeVst3PluginFaultOrigins,
   nativeVst3WorkerArtifactId,
   nativeVst3WorkerArtifactVersion,
@@ -60,6 +65,11 @@ constexpr std::string_view kWorkerArtifactVersion = "${nativeVst3WorkerArtifactV
 constexpr std::size_t kMaximumControlFrameBytes = ${maxPluginHostControlFrameBytes};
 constexpr std::size_t kMaximumWorkerStateBytes = ${maxVst3WorkerStateBytes};
 constexpr std::size_t kMaximumWorkerFrames = ${maxVst3WorkerFrames};
+constexpr std::size_t kMaximumWorkerSlots = ${maxVst3WorkerTransportSlots};
+constexpr std::size_t kMaximumWorkerChannels = ${maxVst3WorkerChannels};
+constexpr std::size_t kMaximumWorkerEvents = ${maxVst3WorkerEventsPerBlock};
+constexpr std::size_t kMaximumPluginParameters = ${maxVst3PluginParameters};
+constexpr std::uint32_t kMaximumEditorDimension = ${maxVst3EditorDimension};
 constexpr double kMaximumWorkerSampleRateHz = ${maxVst3WorkerSampleRateHz}.0;
 
 // Fault-only values in the existing diagnostic value field; non-fault values keep their meanings.
@@ -137,6 +147,8 @@ ${constant("std::size_t", "kMaximumScheduleInstanceIdBytes", host.nativeAudioHos
 ${constant("std::size_t", "kScheduleProgressBytes", host.nativeAudioHostScheduleProgressBytes)}
 ${constant("std::size_t", "kProcessorPatchStatusBytes", host.nativeAudioHostProcessorPatchStatusBytes)}
 
+${Object.entries(host.nativeAudioHostAssetRefusals).map(([name, value]) => `constexpr std::string_view kAssetRefusal${enumerator(name).slice(1)} = "${value}";`).join("\n")}
+
 ${enumClass("ControlType", host.nativeAudioHostControlTypes)}
 ${enumClass("ControlAckStatus", host.nativeAudioHostAckStatus, "The status word of a ControlType::kAck; the ACK text is for people and is never classified.")}
 ${enumClass("LifecycleState", host.nativeAudioHostLifecycleStates)}
@@ -147,6 +159,7 @@ ${enumClass("GraphRevisionContinuity", host.nativeAudioHostRevisionContinuities)
 ${enumClass("WorkerNotificationKind", host.nativeAudioHostNotificationKinds)}
 ${enumClass("ProcessorPatchOutcome", host.nativeAudioHostPatchOutcomes)}
 ${enumClass("ProcessorPatchRefusal", host.nativeAudioHostPatchRefusals)}
+${enumClass("NativeVstEditorCommand", host.nativeAudioHostVstEditorCommands)}
 }
 `
 

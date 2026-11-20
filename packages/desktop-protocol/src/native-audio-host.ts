@@ -29,6 +29,7 @@ export const nativeAudioHostMaximumSpectrumBins = 1024
 export const nativeAudioHostNativeGraphFrameHeaderBytes = 12
 export const nativeAudioHostMaximumSerializedPlanBytes = nativeAudioHostMaximumPayloadBytes
 export const nativeAudioHostRequiredCapabilities = 0x000003ff
+
 // The host's virtual-memory page on Apple Silicon: mapped asset arenas round up to it.
 export const nativeAudioHostPageBytes = 16_384
 
@@ -106,6 +107,33 @@ export const nativeAudioHostPatchRefusals = {
   "not-claimed": 7,
   "apply-failed": 8,
 } as const
+
+export const nativeAudioHostVstEditorCommands = { open: 1, close: 2, focus: 3, resize: 4, status: 5 } as const
+
+/** The ACK text of a refused asset request. A renderer reads it to tell a full arena (retryable after releasing assets) from a bad request. */
+export const nativeAudioHostAssetRefusals = {
+  invalidAsset: "invalid-asset",
+  invalidAssetPage: "invalid-asset-page",
+  publicationPending: "asset-publication-pending",
+  identityConflict: "asset-identity-conflict",
+  pageIdentityConflict: "asset-page-identity-conflict",
+  capacityExceeded: "asset-capacity-exceeded",
+  pageCapacityExceeded: "asset-page-capacity-exceeded",
+} as const
+
+const nativeHostLossMarkers = [
+  "native audio host is unavailable",
+  "native audio host stopped",
+  "host connection was lost",
+  "host connection closed",
+]
+
+/** The single place that says which error text means the host connection is gone. */
+export const indicatesNativeHostLoss = (message: string) => {
+  const normalized = message.toLowerCase()
+
+  return nativeHostLossMarkers.some((marker) => normalized.includes(marker))
+}
 
 export const nativeAudioHostSpoolStates = { preparing: 0, ready: 1, complete: 2, failed: 3, cancelled: 4 } as const
 
@@ -189,11 +217,12 @@ export const nativeAudioHostMaximumAssetFrames = 262_144
 export const nativeAudioHostMaximumInstalledAssets = 64
 export const nativeAudioHostMappedAssetPageHeaderBytes = 16
 export const nativeAudioHostMaximumMappedAssetRanges = 256
+export const nativeAudioHostMaximumMappedAssetPageBytes = nativeAudioHostMaximumPayloadBytes - nativeAudioHostMappedAssetPageHeaderBytes
 
 export const nativeAudioHostMaximumMappedAssetPageFramesForChannels = (channelCount: number) => (
   Number.isSafeInteger(channelCount) && channelCount > 0
     ? Math.floor(
-      (nativeAudioHostMaximumPayloadBytes - nativeAudioHostMappedAssetPageHeaderBytes)
+      nativeAudioHostMaximumMappedAssetPageBytes
         / (Float32Array.BYTES_PER_ELEMENT * channelCount),
     )
     : 0

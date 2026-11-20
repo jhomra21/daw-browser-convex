@@ -106,14 +106,6 @@ struct NativeVstWorkerTransportConfig {
   std::uint32_t maximum_events_per_block = 0;
 };
 
-enum class NativeVstEditorCommand : std::uint32_t {
-  kOpen = 1,
-  kClose = 2,
-  kFocus = 3,
-  kResize = 4,
-  kStatus = 5,
-};
-
 struct NativeVstEditorStatus {
   bool success = false;
   bool owned = false;

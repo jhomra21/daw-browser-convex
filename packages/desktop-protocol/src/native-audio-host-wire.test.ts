@@ -71,15 +71,40 @@ test("the host protocol constants keep their wire values", () => {
 
 test("the host status tables keep their wire codes", () => {
   expect(host.nativeAudioHostLifecycleStates).toEqual({ idle: 0, configured: 1, running: 2, faulted: 3 })
-  expect(Object.values(host.nativeAudioHostReadinessReasons)).toEqual([0, 1, 2, 3])
-  expect(Object.values(host.nativeAudioHostRejectedBlockReasons)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
-  expect(Object.values(host.nativeAudioHostRevisionStatusCodes)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
-  expect(Object.values(host.nativeAudioHostRevisionContinuities)).toEqual([0, 1, 2, 3])
-  expect(Object.values(host.nativeAudioHostNotificationKinds)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+  expect(Object.values<number>(host.nativeAudioHostReadinessReasons)).toEqual([0, 1, 2, 3])
+  expect(Object.values<number>(host.nativeAudioHostRejectedBlockReasons)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+  expect(Object.values<number>(host.nativeAudioHostRevisionStatusCodes)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
+  expect(Object.values<number>(host.nativeAudioHostRevisionContinuities)).toEqual([0, 1, 2, 3])
+  expect(Object.values<number>(host.nativeAudioHostNotificationKinds)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
   expect(host.nativeAudioHostPatchOutcomes).toEqual({ applied: 1, refused: 2, claimed: 3 })
-  expect(Object.values(host.nativeAudioHostPatchRefusals)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8])
+  expect(Object.values<number>(host.nativeAudioHostPatchRefusals)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8])
   expect(host.nativeAudioHostSpoolStates).toEqual({ preparing: 0, ready: 1, complete: 2, failed: 3, cancelled: 4 })
-  expect(Object.values(host.nativeAudioHostControlTypes)).toEqual(Array.from({ length: 63 }, (_, index) => index + 1))
+  expect(Object.values<number>(host.nativeAudioHostControlTypes)).toEqual(Array.from({ length: 63 }, (_, index) => index + 1))
+})
+
+test("the asset refusals keep the text the renderer matches", () => {
+  expect(Object.values<string>(host.nativeAudioHostAssetRefusals).toSorted()).toEqual([
+    "asset-capacity-exceeded",
+    "asset-identity-conflict",
+    "asset-page-capacity-exceeded",
+    "asset-page-identity-conflict",
+    "asset-publication-pending",
+    "invalid-asset",
+    "invalid-asset-page",
+  ])
+})
+
+test("every message the host-loss producers write still classifies as a lost host", () => {
+  for (const message of [
+    "The native audio host is unavailable.",
+    "The native audio host stopped.",
+    "The native audio host stopped during diagnostics.",
+    "Native playback host connection was lost.",
+    "Native recording host connection was lost.",
+    "Desktop host connection closed.",
+  ]) expect(host.indicatesNativeHostLoss(message)).toBe(true)
+
+  expect(host.indicatesNativeHostLoss("The native audio session rejected request 5.")).toBe(false)
 })
 
 test("a wire code resolves to its table name and unknown codes resolve to nothing", () => {

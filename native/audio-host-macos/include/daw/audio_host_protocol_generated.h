@@ -37,6 +37,14 @@ constexpr std::size_t kMaximumScheduleInstanceIdBytes = 256;
 constexpr std::size_t kScheduleProgressBytes = 112;
 constexpr std::size_t kProcessorPatchStatusBytes = 20;
 
+constexpr std::string_view kAssetRefusalInvalidAsset = "invalid-asset";
+constexpr std::string_view kAssetRefusalInvalidAssetPage = "invalid-asset-page";
+constexpr std::string_view kAssetRefusalPublicationPending = "asset-publication-pending";
+constexpr std::string_view kAssetRefusalIdentityConflict = "asset-identity-conflict";
+constexpr std::string_view kAssetRefusalPageIdentityConflict = "asset-page-identity-conflict";
+constexpr std::string_view kAssetRefusalCapacityExceeded = "asset-capacity-exceeded";
+constexpr std::string_view kAssetRefusalPageCapacityExceeded = "asset-page-capacity-exceeded";
+
 enum class ControlType : std::uint32_t {
   kHostHello = 1,
   kHostCapabilities = 2,
@@ -188,6 +196,14 @@ enum class ProcessorPatchRefusal : std::uint32_t {
   kStageFailed = 6,
   kNotClaimed = 7,
   kApplyFailed = 8,
+};
+
+enum class NativeVstEditorCommand : std::uint32_t {
+  kOpen = 1,
+  kClose = 2,
+  kFocus = 3,
+  kResize = 4,
+  kStatus = 5,
 };
 
 }

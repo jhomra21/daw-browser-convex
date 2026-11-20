@@ -5,6 +5,7 @@ import { ensureCompressorWorklet, postCompressorParams } from './compressor-work
 import { compressorWorklet, reverbWorklet, resolveWorkletModuleUrl } from '../worklet-manifest'
 import type { StaticWorkletNodeChain } from './static-worklet-chain'
 import { loadWorkletModule } from '../worklet-loader'
+import { safeDisconnect } from '../safe-disconnect'
 
 export type ReverbNodeChain = {
   enabled: boolean
@@ -186,9 +187,7 @@ export type FxChainStageConfig = {
 
 export function disconnectAudioNodes(nodes: Array<AudioNode | null | undefined>) {
   for (const node of nodes) {
-    if (!node) continue
-
-    try { node.disconnect() } catch {}
+    safeDisconnect(node)
   }
 }
 

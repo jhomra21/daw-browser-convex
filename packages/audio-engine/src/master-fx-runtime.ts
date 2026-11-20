@@ -18,6 +18,7 @@ import { countStaticWorklets, type LiveWorkletBudget } from './effects/live-work
 import { getEffectChainTiming } from './effects/timing'
 import { createChainAdmission } from './chain-admission'
 import { closeResources, createEffectChainTransaction, type EffectChainOutcome, type InstanceResources } from './effect-chain-transaction'
+import { safeDisconnect } from './safe-disconnect'
 
 type MasterFxRuntimeOptions = {
   getFaultGeneration: () => number
@@ -187,7 +188,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     }
 
     if (analyserConnected && analyser) {
-      try { masterGain.disconnect(analyser) } catch {}
+      safeDisconnect(masterGain, analyser)
     }
 
     analyserConnected = false

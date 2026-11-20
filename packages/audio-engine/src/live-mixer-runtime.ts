@@ -7,7 +7,7 @@ import type { CompressorMeterListener } from './effects/compressor-worklet'
 import type { DelayChainState } from './effects/delay-chain-state'
 import type { ReverbChainState } from './effects/reverb-chain-state'
 import type { SaturatorChainState } from './effects/saturator-chain-state'
-import { applyLiveMixerGraph, clearLiveMixerEdges, removeLiveMixerEdgesForNodes, type LiveMixerEdgeRuntime } from './mixer/apply-live-routing'
+import { applyLiveMixerGraph, clearLiveMixerEdges, disconnectEdgeNodes, removeLiveMixerEdgesForNodes, type LiveMixerEdgeRuntime } from './mixer/apply-live-routing'
 import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
 import { resolveMixerTiming } from './mixer/resolve-timing'
@@ -25,6 +25,7 @@ import { getEffectChainTiming } from './effects/timing'
 import { createChainAdmission } from './chain-admission'
 import type { EngineDisposition } from './engine-disposition'
 import { closeResources, createEffectChainTransaction, type ChainCommit, type InstanceResources } from './effect-chain-transaction'
+import { safeDisconnect } from './safe-disconnect'
 
 export const sidechainRouteIdentity = (targetTrackId: string, effectInstanceId: string) => (
   JSON.stringify([targetTrackId, effectInstanceId])
@@ -183,18 +184,6 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     options.onGraphLatencyChange?.(resolveMixerTiming(graph, ctx.sampleRate, currentBpm).graphLatencyFrames)
   }
 
-  const disconnectRuntimeEdge = (edge: LiveMixerEdgeRuntime) => {
-    try { edge.source.disconnect(edge.gain ?? edge.delay) } catch {}
-
-    try { edge.gain?.disconnect(edge.delay) } catch {}
-
-    try { edge.delay.disconnect(edge.target) } catch {}
-
-    try { edge.gain?.disconnect() } catch {}
-
-    try { edge.delay.disconnect() } catch {}
-  }
-
   const applyAuxiliaryRoutes = () => {
     const ctx = options.getAudioContext()
 
@@ -221,7 +210,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
 
       if (existing?.source === source && existing.target === targetNode) continue
 
-      if (existing) disconnectRuntimeEdge(existing)
+      if (existing) disconnectEdgeNodes(existing)
       const delay = ctx.createDelay()
       source.connect(delay)
       delay.connect(targetNode, 0, 1)
@@ -230,7 +219,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
 
     for (const [edgeId, edge] of sidechainEdges) {
       if (activeSidechains.has(edgeId)) continue
-      disconnectRuntimeEdge(edge)
+      disconnectEdgeNodes(edge)
       sidechainEdges.delete(edgeId)
     }
 
@@ -258,7 +247,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
 
     for (const [edgeId, edge] of cueEdges) {
       if (activeCues.has(edgeId)) continue
-      disconnectRuntimeEdge(edge)
+      disconnectEdgeNodes(edge)
       cueEdges.delete(edgeId)
     }
 
@@ -647,9 +636,9 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     for (const trackId of Array.from(inputs.keys())) disposeTrack(trackId)
     clearLiveMixerEdges(edgeRuntimes)
 
-    for (const edge of sidechainEdges.values()) disconnectRuntimeEdge(edge)
+    for (const edge of sidechainEdges.values()) disconnectEdgeNodes(edge)
 
-    for (const edge of cueEdges.values()) disconnectRuntimeEdge(edge)
+    for (const edge of cueEdges.values()) disconnectEdgeNodes(edge)
     sidechainEdges.clear()
     cueEdges.clear()
     cueBus?.disconnect()
@@ -766,7 +755,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       source.connect(input)
 
       return () => {
-        try { source.disconnect(input) } catch {}
+        safeDisconnect(source, input)
       }
     },
     getTrackOutput: (trackId: string) => outputs.get(trackId),
@@ -818,7 +807,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
 
       if (cueDestination === destination) return
 
-      for (const edge of cueEdges.values()) disconnectRuntimeEdge(edge)
+      for (const edge of cueEdges.values()) disconnectEdgeNodes(edge)
       cueEdges.clear()
       cueBus?.disconnect()
       cueBus = null

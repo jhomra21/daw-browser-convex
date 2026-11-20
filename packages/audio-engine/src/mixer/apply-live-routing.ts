@@ -3,6 +3,7 @@ import type { ResolvedMixerGraph } from './types'
 import { createMixerRoutingPlan } from './graph-contract'
 import { MASTER_ROUTE_TARGET, mixerRouteKey, resolveMixerTiming } from './resolve-timing'
 import { LIVE_GAIN_RAMP_SEC, rampAudioParam, setAudioParamValue } from '../audio-param-ramp'
+import { safeDisconnect } from '../safe-disconnect'
 
 type LiveTrackNodes = {
   input: GainNode
@@ -56,18 +57,17 @@ const cancelEdgeRetirement = (edge: LiveMixerEdgeRuntime) => {
   source.disconnect()
 }
 
+export const disconnectEdgeNodes = (edge: LiveMixerEdgeRuntime) => {
+  safeDisconnect(edge.source, edge.gain ?? edge.delay)
+  safeDisconnect(edge.gain, edge.delay)
+  safeDisconnect(edge.delay, edge.target)
+  safeDisconnect(edge.gain)
+  safeDisconnect(edge.delay)
+}
+
 const disconnectEdge = (edge: LiveMixerEdgeRuntime) => {
   cancelEdgeRetirement(edge)
-
-  try { edge.source.disconnect(edge.gain ?? edge.delay) } catch {}
-
-  try { edge.gain?.disconnect(edge.delay) } catch {}
-
-  try { edge.delay.disconnect(edge.target) } catch {}
-
-  try { edge.gain?.disconnect() } catch {}
-
-  try { edge.delay.disconnect() } catch {}
+  disconnectEdgeNodes(edge)
 
   for (const release of edge.releaseResources ?? []) release()
   edge.releaseResources = []

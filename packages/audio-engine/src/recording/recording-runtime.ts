@@ -7,6 +7,7 @@ import {
   type RecorderReturnMessage,
 } from './recording-protocol'
 import { observeResource, type ResourceObserver } from '../runtime-diagnostics'
+import { safeDisconnect } from '../safe-disconnect'
 
 export type RecordingMonitorMode = 'off' | 'auto' | 'on'
 
@@ -169,11 +170,9 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
     session.transport?.terminate()
     session.disconnectMonitor?.()
 
-    try { session.monitorGain?.disconnect() } catch {}
-
-    try { session.source.disconnect() } catch {}
-
-    try { session.worklet.disconnect() } catch {}
+    safeDisconnect(session.monitorGain)
+    safeDisconnect(session.source)
+    safeDisconnect(session.worklet)
 
     session.releaseResources()
   }
@@ -498,11 +497,9 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
 
       try { disconnectMonitor?.() } catch {}
 
-      try { monitorGain?.disconnect() } catch {}
-
-      try { source?.disconnect() } catch {}
-
-      try { worklet?.disconnect() } catch {}
+      safeDisconnect(monitorGain)
+      safeDisconnect(source)
+      safeDisconnect(worklet)
 
       releaseResources()
 

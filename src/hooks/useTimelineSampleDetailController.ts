@@ -3,7 +3,7 @@ import type { AudioWarp, Clip } from "@daw-browser/timeline-core/types";
 import { normalizeClipGain } from "@daw-browser/shared";
 import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapter";
 import { buildClipTimingHistoryEntry } from "~/lib/undo/builders";
-import type { TimelineSelectionController } from "~/hooks/useTimelineSelectionState";
+import type { TimelineSelectionController } from "~/lib/timeline-selection";
 import type { TimelineBottomPanelMode } from "~/hooks/useTimelineBottomPanelState";
 import type { TimelineTrackIndex } from "@daw-browser/timeline-core/track-index";
 import type { HistoryEntry } from "~/lib/undo/types";

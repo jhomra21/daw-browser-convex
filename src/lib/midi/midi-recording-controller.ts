@@ -18,14 +18,14 @@ import {
 } from '~/lib/track-recording-session'
 import { finalizeAutoCreatedTrackFailure, keptOnNewTrackNotice, type RecordingTargetLock } from '~/lib/track-recording-target'
 import type { convexApi, convexClient } from '~/lib/convex'
-import type { MidiAccessContextValue } from '~/context/midi-access'
+import type { MidiAccessContextValue } from '~/lib/midi/midi-access'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { buildTrackClipCreateHistoryEntry } from '~/lib/undo/builders'
 import type { HistoryEntry } from '~/lib/undo/types'
 import { z } from 'zod'
 
-import type { TimelineSelectionController } from '~/hooks/useTimelineSelectionState'
+import type { TimelineSelectionController } from '~/lib/timeline-selection'
 
 export type MidiTrackRecordingControllerOptions = {
   audioEngine: Pick<AudioEngine, 'midiEventTimes'>

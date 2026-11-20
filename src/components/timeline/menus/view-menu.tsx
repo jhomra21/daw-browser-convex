@@ -4,7 +4,7 @@ import { timelineBrowserTabLabels, timelineBrowserTabs } from "~/lib/timeline-le
 import { cn } from "~/lib/utils";
 import { gridDenominators } from "../grid-options";
 import { NativeMenuTrigger } from "../toolbar-context";
-import type { TransportControlsProps } from "../transport-types";
+import type { TransportControlsProps } from "~/hooks/transport-types";
 import { MenuCheckMark } from "./menu-check-mark";
 import { nativeMenuItemClass } from "./menu-action-types";
 

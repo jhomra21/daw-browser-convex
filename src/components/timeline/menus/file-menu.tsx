@@ -2,7 +2,7 @@ import { isLocalId } from "@daw-browser/shared";
 import { type Component, Show, createMemo } from "solid-js";
 import { MenubarContent, MenubarItem, MenubarMenu, MenubarSeparator } from "~/components/ui/menubar";
 import { NativeMenuTrigger } from "../toolbar-context";
-import type { TransportControlsProps } from "../transport-types";
+import type { TransportControlsProps } from "~/hooks/transport-types";
 import { nativeMenuItemClass } from "./menu-action-types";
 
 export const FileMenu: Component<{ toolbar: TransportControlsProps }> = (props) => {

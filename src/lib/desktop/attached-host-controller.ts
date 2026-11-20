@@ -48,7 +48,7 @@ import { serializeNativeDiagnostics } from "~/lib/desktop/native-diagnostics-ser
 import type { NativeVstParameterQueueResult } from "~/lib/desktop/native-vst-parameter-queue"
 import type { ExportQueue } from "~/lib/export/export-queue"
 import { createImportJobQueue, type ImportJobQueue } from "~/lib/desktop/import-job-queue"
-import type { ImportProjectBinding, ImportSummary } from "~/hooks/useTimelineClipImport"
+import type { ImportProjectBinding, ImportSummary } from "~/lib/import-summary"
 
 export type {
   DesktopPluginCatalog,

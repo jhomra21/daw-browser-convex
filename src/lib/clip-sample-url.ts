@@ -1,4 +1,4 @@
-import type { UploadToR2 } from '~/hooks/useClipBuffers'
+import type { UploadToR2 } from '~/lib/clip-media-types'
 
 type UploadClipSampleUrlOptions = {
   projectId: string

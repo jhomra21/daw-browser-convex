@@ -8,7 +8,7 @@ import type { ExportOutputTargetFactory } from "~/lib/export/export-output-targe
 import { createExportRenderStateSnapshot, NATIVE_EXPORT_UNAVAILABLE_MESSAGE, runStemExport, runTimelineExport, type ExportOutcome, type ExportProgress } from "~/lib/export/run-export-job"
 import { cloneExportEffectsProjection, snapshotCloudRenderRows, type ExportAutomationPatch, type ExportCloudRenderRowsSnapshot, type ExportRenderStateSnapshot } from "~/lib/desired-playback-state"
 import type { ExportQueue } from "~/lib/export/export-queue"
-import type { CapturedClipBufferLoadResult, CapturedClipMediaReference } from "~/hooks/useClipBuffers"
+import type { CapturedClipBufferLoadResult, CapturedClipMediaReference } from "~/lib/clip-media-types"
 import type { EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller"
 import { flushMidiProjectWrites, projectMidiProjectTracks } from "~/lib/midi/editor-persistence"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"

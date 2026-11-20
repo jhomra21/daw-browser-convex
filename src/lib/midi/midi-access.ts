@@ -5,6 +5,16 @@ import {
   type MidiSourceReset,
 } from "./midi-input"
 
+export type MidiAccessContextValue = {
+  status: () => MidiAccessStatus
+  inputs: () => readonly MidiInputDescriptor[]
+  requestAccess: () => Promise<void>
+  setInputSelected: (id: string, selected: boolean) => void
+  subscribe: (subscriber: (event: MidiInputEvent) => void) => () => void
+  subscribeSourceReset: (subscriber: (event: MidiSourceReset) => void) => () => void
+  panic: () => void
+}
+
 export type MidiAccessStatus = "unsupported" | "idle" | "requesting" | "denied" | "ready" | "error"
 
 export type MidiInputDescriptor = {

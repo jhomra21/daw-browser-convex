@@ -139,10 +139,8 @@ import CloudBackupDialog from "./timeline/cloud-backup-dialog";
 import DeleteTrackDialog from "./timeline/delete-track-dialog";
 import TimelineWorkspace from "./timeline/timeline-workspace";
 import { Dashboard } from "~/components/dashboard/dashboard";
-import type {
-  DashboardTimelineModel,
-  DashboardView,
-} from "~/components/dashboard/types";
+import type { DashboardTimelineModel } from "~/components/dashboard/types";
+import type { DashboardView } from "~/lib/dashboard-view";
 import {
   buildTimelineTrackLayout,
   buildTrackTree,

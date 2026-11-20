@@ -8,7 +8,7 @@ import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
 import type { HistoryEntry } from '~/lib/undo/types'
 
-import type { TimelineSelectionController } from './useTimelineSelectionState'
+import type { TimelineSelectionController } from '~/lib/timeline-selection'
 
 type Options = Omit<
   MidiTrackRecordingControllerOptions,

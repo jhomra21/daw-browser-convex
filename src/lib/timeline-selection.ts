@@ -1,7 +1,26 @@
-import { batch, type Setter } from 'solid-js'
+import { batch, type Accessor, type Setter } from 'solid-js'
 
 import type { SelectedClip, Track } from '@daw-browser/timeline-core/types'
 import { isTimelineRangeSelectionEqual, type TimelineRangeSelection } from '~/lib/timeline-range-selection'
+
+export type TimelineSelectionController = {
+  selectedTrackId: Accessor<Track['id'] | ''>
+  selectedClip: Accessor<SelectedClip>
+  selectedClipIds: Accessor<Set<string>>
+  selectedFXTarget: Accessor<Track['id'] | 'master'>
+  rangeSelection: Accessor<TimelineRangeSelection | null>
+  selectPrimaryClip: (input: { trackId: Track['id']; clipId: string }, options?: { preserveClipIds?: boolean }) => void
+  appendClipToSelection: (input: { trackId: Track['id']; clipId: string }) => void
+  selectClipGroup: (input: { trackId: Track['id']; clipIds: string[]; primaryClipId?: string }) => void
+  selectTrackTarget: (trackId: Track['id'], options?: { clearClipSelection?: boolean; clearPrimaryClip?: boolean }) => void
+  selectMasterTarget: () => void
+  selectTimeRange: (selection: TimelineRangeSelection) => void
+  clearTimeRange: () => void
+  setSelectedClipIds: (value: Set<string> | ((current: Set<string>) => Set<string>)) => void
+  setSelectedClip: (value: SelectedClip | ((current: SelectedClip) => SelectedClip)) => void
+  setSelectedTrackId: (value: Track['id'] | '' | ((current: Track['id'] | '') => Track['id'] | '')) => void
+  setSelectedFXTarget: (value: Track['id'] | 'master' | ((current: Track['id'] | 'master') => Track['id'] | 'master')) => void
+}
 
 type TimelineSelectionSetters = {
   setSelectedTrackId: Setter<Track['id'] | ''>

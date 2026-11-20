@@ -51,7 +51,7 @@ import { buildTrackClipCreateHistoryEntry } from '~/lib/undo/builders'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { convexApi, convexClient } from '~/lib/convex'
-import type { UploadToR2 } from '~/hooks/useClipBuffers'
+import type { UploadToR2 } from '~/lib/clip-media-types'
 
 const isString = (cause: unknown): cause is string => typeof cause === 'string'
 
@@ -63,7 +63,7 @@ import type { PortableRecordingDiagnostics } from '~/lib/portable-browser-playba
 import type { NativeRecordingDiagnostics } from '~/lib/desktop/native-recording-session'
 
 import type { NativeRecordingImportedTake } from '~/types/desktop-bridge'
-import type { TimelineSelectionController } from './useTimelineSelectionState'
+import type { TimelineSelectionController } from '~/lib/timeline-selection'
 
 type ConvexClientType = typeof convexClient
 

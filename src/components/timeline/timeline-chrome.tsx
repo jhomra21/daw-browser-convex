@@ -2,7 +2,7 @@ import { type Component, type JSX, Show } from "solid-js";
 import TransportControls from "./TransportControls";
 import LocalSaveFailureBanner from "./local-save-failure-banner";
 import TimelinePanels, { type TimelinePanelsProps } from "./timeline-panels";
-import type { TransportControlsProps } from "./transport-types";
+import type { TransportControlsProps } from "~/hooks/transport-types";
 
 type TimelineChromeProps = {
   fileInputRef: (el: HTMLInputElement) => void;

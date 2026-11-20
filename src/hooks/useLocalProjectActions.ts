@@ -12,7 +12,7 @@ import { isLocalId } from "@daw-browser/shared";
 import { chooseLocalExportFile, createLocalExportWritable, downloadBlob } from "~/lib/local-export";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import { flushSharedOutbox, readSharedOutboxSummary } from "~/lib/shared-outbox";
-import type { CloudBackupDialogState } from "~/components/timeline/cloud-backup-dialog";
+import type { CloudBackupStatus } from "~/lib/project-save-status";
 
 type Input = {
   projectId: Accessor<string>;
@@ -21,7 +21,10 @@ type Input = {
   notify: (title: string, message: string) => void;
 };
 
-export type CloudBackupStatus = "idle" | "backing-up" | "backed-up" | "failed";
+export type CloudBackupDialogState =
+  | { type: "conflict"; message: string }
+  | { type: "restore" }
+  | { type: "message"; title: string; message: string };
 
 export const useLocalProjectActions = (input: Input) => {
   // Persistence producers report failures without a success signal, so each project's

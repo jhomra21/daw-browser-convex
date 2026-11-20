@@ -1,6 +1,7 @@
 import { isLocalId } from "@daw-browser/shared";
-import type { CloudBackupStatus } from "~/hooks/useLocalProjectActions";
 import type { LocalProjectMode } from "~/lib/local-project-db";
+
+export type CloudBackupStatus = "idle" | "backing-up" | "backed-up" | "failed";
 
 type SharedOutboxSummary = {
   pending: number;

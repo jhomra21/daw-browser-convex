@@ -32,7 +32,7 @@ import {
   TIMELINE_HEADER_HEIGHT,
 } from "~/lib/timeline-utils";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
-import type { TimelineSelectionController } from "~/hooks/useTimelineSelectionState";
+import type { TimelineSelectionController } from "~/lib/timeline-selection";
 import type {
   Track,
   TrackId,

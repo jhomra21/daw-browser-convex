@@ -1,9 +1,9 @@
 import type { Accessor } from "solid-js";
 import type { InsertSampleInput } from "~/hooks/useTimelineClipImport";
 import type { ProjectMutationOutcome, TimelineProject } from "~/hooks/useTimelineData";
-import type { CloudBackupStatus } from "~/hooks/useLocalProjectActions";
+import type { CloudBackupStatus } from "~/lib/project-save-status";
 import type { Track } from "@daw-browser/timeline-core/types";
-import type { DashboardView } from "~/components/dashboard/types";
+import type { DashboardView } from "~/lib/dashboard-view";
 import type { TimelineBrowserTab } from "~/lib/timeline-browser/browser-types";
 
 export type TimelineProjectMenuModel = {

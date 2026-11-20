@@ -17,8 +17,9 @@ import { isAbortError } from '~/lib/dom-errors'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
-import type { TimelineSelectionController } from './useTimelineSelectionState'
-import type { UploadToR2 } from './useClipBuffers'
+import type { TimelineSelectionController } from '~/lib/timeline-selection'
+import type { UploadToR2 } from '~/lib/clip-media-types'
+import type { ImportFileOutcome, ImportProjectBinding, ImportSummary } from '~/lib/import-summary'
 
 export type InsertSampleInput = SampleDragData
 
@@ -56,30 +57,12 @@ type TimelineClipImportOptions = {
   onDecodedClipCreated?: (clip: Clip<AudioBuffer>) => void
 }
 
-export type ImportProjectBinding = {
-  projectId: string
-  mountedProjectGeneration: number
-}
-
 type TimelineClipImportHandlers = {
   handleDrop: (event: DragEvent) => Promise<void>
   handleFiles: (files: FileList | null) => Promise<void>
   importFiles: (files: readonly File[], signal?: AbortSignal, binding?: ImportProjectBinding) => Promise<ImportSummary>
   handleAddAudio: () => Promise<void>
   handleInsertSample: (input: InsertSampleInput) => Promise<void>
-}
-
-export type ImportFileOutcome = {
-  fileName: string
-  status: 'created' | 'queued' | 'skipped' | 'local-save-failed' | 'failed' | 'canceled'
-  message?: string
-  assetId?: string
-  clipId?: string
-  operationId?: string
-}
-
-export type ImportSummary = {
-  outcomes: readonly ImportFileOutcome[]
 }
 
 type TargetAudioTrack = {

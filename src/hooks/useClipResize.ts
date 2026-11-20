@@ -13,7 +13,7 @@ import { clipFadesEqual, transformClipFadesForDuration, type ClipFades } from '@
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { HistoryEntry } from '~/lib/undo/types'
 
-import type { TimelineSelectionController } from './useTimelineSelectionState'
+import type { TimelineSelectionController } from '~/lib/timeline-selection'
 
 const MIN_CLIP_SEC = 0.05
 

@@ -1,0 +1,459 @@
+{
+ "name": "untangle-kinds",
+ "sequence": 90,
+ "createdAt": "2026-11-20T18:32:35.295Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "native/audio-core/tests/audio_core_test.cpp",
+   "from": "ab8c89cf2c153e9de24ff87e7e4f8e53aa8e28fc9fd2042cd485a9d820639995",
+   "to": "045e21beaafeba54cfac3974a3c0c20293cecc505cc9fb3812545236284a8a17"
+  },
+  {
+   "file": "packages/audio-engine/src/native-host-wire.ts",
+   "from": "38d7c6f68799e5102f942702c53ee54eac51ef5971b563997939e19a0a5ad6c4",
+   "to": "9bc4e20db021dae7b7b49edb06bd70bd0a8f0f7c979f518eccf3c3c07c53d7e0"
+  },
+  {
+   "file": "src/components/Timeline.tsx",
+   "from": "e419ba0ae5bf34f15b8cf303d57242f4ed62521eda4d10e5b22d94910092a168",
+   "to": "67d0d212dbe5c1d92b674bc00484a947c3f8813edb305ab7b89017e962293e4d"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-audio-effects-state.ts",
+   "from": "59c6579ce275695a5bffcc1864bbdd1609ae3efef82ed80914790d2a7f1e3acc",
+   "to": "cc638ec4a61dda8e81336b026fe05b299fa9b528ad507acae424a3f508c3c448"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-controller.ts",
+   "from": "290898ea2d41a846c6ea314f8b027492c75a435f50494a0cf5fc5af0c28b364e",
+   "to": "6fd114550a811a4ce2dd65ab00a4bbde9afcb5f7957b4744c9a8ea56855e99ab"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-state.ts",
+   "from": "fa6d257f038e92ddb6a49b259bc4b9fa30cb0dc8ff5c09f614849653f2a1b72b",
+   "to": "16781450318ed8e5a409200a8ab83d85fec2f2a4acc3d2091d0a4947a14bc8dc"
+  },
+  {
+   "file": "src/lib/desktop/native-built-in-parameter-mapper.ts",
+   "from": "c6495060c9fb65af0da4091ffb53e395457335314622501c967e195f2868d824",
+   "to": "3cad9a47b30b0b4138366bf79ace341028ff48cada7e81a0329d29522ebb6dd2"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-lifecycle.browser.test.ts",
+   "from": "25ef1a31c33eac64c6c688b73937ca44e75a04d1b82c9a493750014d7792ccae",
+   "to": "d1e59232db2fb6e8abba87edcf70b44d6833285228775c9a57d66d586306db69"
+  },
+  {
+   "file": "src/lib/local-effects.ts",
+   "from": "9b067fc06d36e33460bcc6d55b649b5c17b5922cab2e110f8c434dac75eee47b",
+   "to": "5dce520684fed00e5624190f3d1b0ad5c290f2e0535063e7fd4877a1ea19cba2"
+  },
+  {
+   "file": "src/lib/portable-browser-playback-controller.ts",
+   "from": "a8afe0b480e0c8aaa1aa33e2ac1833038d9d5ee91de9efd348f4542877e2a317",
+   "to": "717a95b30b2d3b625caea79cf72c89c2bf6582b90665b78035e156bf6a1b3128"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:382:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 800,
+   "new": 818
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:424:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 800,
+   "new": 818
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:383:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 800,
+   "new": 818
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:385:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 800,
+   "new": 818
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 800,
+   "new": 818
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:424:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 799,
+   "new": 817
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:383:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 799,
+   "new": 817
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:0:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 800,
+   "new": 818
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:385:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 799,
+   "new": 817
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 799,
+   "new": 817
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:405:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 800,
+   "new": 818
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:411:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 800,
+   "new": 818
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:0:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 799,
+   "new": 817
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:412:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 800,
+   "new": 818
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:382:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 798,
+   "new": 816
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:405:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 799,
+   "new": 817
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:411:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 799,
+   "new": 817
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:412:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 799,
+   "new": 817
+  },
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "21c7461e9bd7452cd5971189722f9904ec5f81f7d52e72c05bdb9a234897dd50",
+   "new": "70d3f54d273c9216c54ea01c9539a8f4c647cc2d99ab07258dcf1bb0045f755a"
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-g-controller",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 732,
+   "new": 750
+  },
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "cd3188f77acec0fba3f710f060cf2a316f5c4089bbc072c53e75de11c574f1fe",
+   "new": "99647875fc97321e7dc8eb7aa29f0c63d554b07440c2c68ab776c462de9f39c2"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 800,
+   "new": 818
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 799,
+   "new": 817
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-i4-consumers",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 414,
+   "new": 432
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-backends",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 13,
+   "new": 16
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/export-mixdown.test.ts",
+    "pass"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/mixer/channel-layout.test.ts",
+    "pass"
+   ],
+   "old": 7,
+   "new": 8
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/backends/processor-registry-contract.test.ts"
+   ],
+   "old": null,
+   "new": {
+    "pass": 3,
+    "skip": 0,
+    "fail": 0
+   }
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/export-mixdown.test.ts",
+    "pass"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/mixer/channel-layout.test.ts",
+    "pass"
+   ],
+   "old": 7,
+   "new": 8
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/backends/processor-registry-contract.test.ts"
+   ],
+   "old": null,
+   "new": {
+    "pass": 3,
+    "skip": 0,
+    "fail": 0
+   }
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "f176d90c2c7e96eef8706e222ce0f95542edcfdf",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "4629c5ed9796e4ad727de5c7872f9fc3a1ec0c0585de9b76f6f69e2bdd28b0c5",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "4629c5ed9796e4ad727de5c7872f9fc3a1ec0c0585de9b76f6f69e2bdd28b0c5",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b3-bless/live",
+   "resultSha256": "fb1eecbb511973997a41b4500cef5058ef2c0525722f8aaf18aa1b7523465dba",
+   "seconds": 1263.261164792,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

@@ -14,7 +14,7 @@ import type {
   SaturatorParamsInput,
   UtilityParamsEnvelope,
 } from './effects-params'
-import { isAudioEffectKind, isModulationOperationKind, type AudioEffectKind, type ModulationOperationKind } from './audio-effect-registry'
+import { isAudioEffectKind, isModulationOperationKind, type AudioEffectKind, type ModulationOperationKind, type ProcessorOperationKind } from './audio-effect-registry'
 import { normalizeAudioEffectRow, type NormalizedAudioEffectRow } from './audio-effect-normalization'
 import { buildEffectParamsOperation } from './effect-params-operation'
 import { parseStrictSynthParams, type SynthParams } from './synth-params'
@@ -304,8 +304,11 @@ const readRequiredInstanceId = (value: JsonValue | undefined): string | null => 
   isJsonString(value) && value.length > 0 ? value : null
 )
 
+// Processor-operation kinds with a shared parse path; spectral has its own envelope parser.
+type ProcessorEnvelopeKind = Exclude<ProcessorOperationKind, 'spectral'>
+
 const readProcessorEnvelope = (
-  kind: 'utility' | 'gate' | 'limiter',
+  kind: ProcessorEnvelopeKind,
   value: JsonValue,
 ): UtilityParamsEnvelope | GateParamsEnvelope | LimiterParamsEnvelope | null => {
   if (!isJsonObject(value) || value.version !== 1 || !isJsonObject(value.state)) return null
@@ -1178,7 +1181,7 @@ const parseTrackEq = (payload: JsonObject): SharedTimelineOperation | null => {
 }
 
 const parseTrackProcessor = (
-  kind: 'utility' | 'gate' | 'limiter',
+  kind: ProcessorEnvelopeKind,
   payload: JsonObject,
 ): SharedTimelineOperation | null => {
   const params = readProcessorEnvelope(kind, payload.params)
@@ -1361,7 +1364,7 @@ const parseMasterEq = (payload: JsonObject): SharedTimelineOperation | null => {
 }
 
 const parseMasterProcessor = (
-  kind: 'utility' | 'gate' | 'limiter',
+  kind: ProcessorEnvelopeKind,
   payload: JsonObject,
 ): SharedTimelineOperation | null => {
   const params = readProcessorEnvelope(kind, payload.params)

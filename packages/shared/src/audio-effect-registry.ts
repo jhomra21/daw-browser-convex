@@ -59,6 +59,8 @@ export type GainReductionMeterKind = KindsWhere<{ gainReductionMeter: true }>
 
 export type ModulationOperationKind = KindsWhere<{ operation: 'modulation' }>
 
+export type ProcessorOperationKind = KindsWhere<{ operation: 'processor' }>
+
 export const isAudioEffectKind = (value: unknown): value is AudioEffectKind =>
   typeof value === 'string' && Object.hasOwn(AUDIO_EFFECTS, value)
 

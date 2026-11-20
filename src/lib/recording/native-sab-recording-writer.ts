@@ -175,7 +175,7 @@ export const createNativeSabRecordingWriter = (input: NativeSabRecordingWriterIn
   }
 }
 
-export const createBrowserWorker = (injected?: Worker, onTerminate?: () => void): WorkerEndpoint => {
+const createBrowserWorker = (injected?: Worker, onTerminate?: () => void): WorkerEndpoint => {
   const worker = injected ?? new Worker(new URL('../../workers/recording-writer-worker.ts', import.meta.url), { type: 'module' })
 
   return {

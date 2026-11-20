@@ -345,12 +345,6 @@
     box-shadow: inset 0 -1px 0 rgb(38 38 38);
   }
 
-  .track-row-selected-wash {
-    box-shadow:
-      inset 0 0 0 9999px rgb(0 0 0 / 12%),
-      inset 0 -1px 0 rgb(38 38 38);
-  }
-
   .track-expanded-row-grid {
     grid-template-columns: minmax(72px, 96px) minmax(96px, 1fr) 101px;
   }

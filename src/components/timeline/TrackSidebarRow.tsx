@@ -173,7 +173,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
     isGroupTrack ? defaultGroupColor() : defaultTrackColor();
   const customDefaultColor = () => parseHexColor(configuredDefaultColor(), "");
   const explicitTrackColor = () => parseHexColor(track.color, "");
-  const rowBackgroundColor = () =>
+  const trackColor = () =>
     explicitTrackColor() || customDefaultColor() || undefined;
   const isSelected = () =>
     sidebar().selectedTrackId === track.id ||
@@ -373,17 +373,9 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
     <div
       class={cn(
         "track-row-divider relative",
-        isSelected() && rowBackgroundColor() && "track-row-selected-wash",
-        isGroupTrack && rowBackgroundColor()
-          ? "text-black"
-          : isSelected()
-            ? "bg-timeline-surface-muted"
-            : "bg-timeline-surface",
+        isSelected() ? "bg-timeline-surface-muted" : "bg-timeline-surface",
       )}
-      style={{
-        height: `${rowHeightPx()}px`,
-        background: rowBackgroundColor() ? rowBackgroundColor() : undefined,
-      }}
+      style={{ height: `${rowHeightPx()}px` }}
       onClick={() => {
         if (suppressTrackClickId() === track.id) {
           setSuppressTrackClickId(undefined);
@@ -463,7 +455,15 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
             "minmax(76px, 1fr) minmax(96px, 1.2fr) 101px",
         }}
       >
-        <div class="flex min-w-0 items-start gap-1 overflow-hidden">
+        {/* Like Ableton's track headers, only the name cell carries the track color; the controls stay on the neutral row. */}
+        <div
+          class="flex min-w-0 items-start gap-1 self-stretch overflow-hidden pr-1"
+          style={{
+            background: trackColor()
+              ? `color-mix(in srgb, ${trackColor()} ${isSelected() ? 55 : 35}%, transparent)`
+              : undefined,
+          }}
+        >
           <button
             class={cn(
               "flex w-4 shrink-0 items-center justify-center text-xs text-muted-foreground hover:text-foreground",

@@ -3,12 +3,13 @@ import type { App } from '../app-types'
 import { createR2ObjectResponse } from '../r2-object-response'
 import { fetchFallbackDefaultSample, listDefaultSamples } from '../default-samples'
 import { hashFile } from '../hash-file'
+import { sha256Hex } from '../http'
 import { requireProjectRoleContextForApi } from '../project-access'
 import {
   AudioUploadValidationError,
   inspectControlUploadAudioMetadata,
 } from '../control-upload-audio-metadata'
-import { controlErrorSchemaV1, controlLimitsV1 } from '@daw-browser/control'
+import { controlLimitsV1, readControlErrorV1 } from '@daw-browser/control'
 import { z } from 'zod'
 
 const trustedDesktopSampleOrigins = new Set([
@@ -28,30 +29,12 @@ type PublicSampleRouteDependencies = {
   listDefaultSamples?: typeof listDefaultSamples
 }
 
-const browserIdempotencyKey = async (assetKey: string) => {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(assetKey))
-  const suffix = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+const browserIdempotencyKey = async (assetKey: string) => `browser-${await sha256Hex(assetKey)}`
 
-  return `browser-${suffix}`
-}
-
-const uploadErrorEnvelopeSchema = z.object({
-  data: z.json().optional(),
-  errorData: z.json().optional(),
-}).passthrough()
-
-const sampleUploadErrorStatus = (error: Error | z.infer<typeof uploadErrorEnvelopeSchema>) => {
+const sampleUploadErrorStatus = <Failure>(error: Failure) => {
   if (error instanceof AudioUploadValidationError) return 422
-  const envelope = uploadErrorEnvelopeSchema.safeParse(error)
-  const candidates = [error, envelope.success ? envelope.data.data : undefined, envelope.success ? envelope.data.errorData : undefined]
 
-  for (const candidate of candidates) {
-    const parsed = controlErrorSchemaV1.safeParse(candidate)
-
-    if (parsed.success && parsed.data.code === 'idempotency-conflict') return 409
-  }
-
-  return 500
+  return readControlErrorV1(error)?.code === 'idempotency-conflict' ? 409 : 500
 }
 
 const getTrustedDesktopSampleOrigin = (origin: string | undefined) => (
@@ -222,10 +205,7 @@ export function registerSampleRoutes(app: App, dependencies: SampleRouteDependen
         url: `/api/samples/${encodeURIComponent(projectId)}/${encodeURIComponent(result.asset.id)}`,
       }, 201)
     } catch (error) {
-      const parsedError = z.union([z.instanceof(Error), uploadErrorEnvelopeSchema]).safeParse(error)
-      const uploadError = parsedError.success ? parsedError.data : new Error('Sample upload failed')
-
-      return c.json({ error: uploadError instanceof Error ? uploadError.message : 'Sample upload failed' }, sampleUploadErrorStatus(uploadError))
+      return c.json({ error: error instanceof Error ? error.message : 'Sample upload failed' }, sampleUploadErrorStatus(error))
     }
   })
 

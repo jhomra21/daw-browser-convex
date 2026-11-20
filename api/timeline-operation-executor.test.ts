@@ -135,14 +135,13 @@ test('forwards a parsed durable MIDI operation to the server mutation', () => {
   })
 })
 
-test('classifies wrapped lock and access errors as terminal forbidden responses', () => {
+test('classifies typed forbidden and validation errors, including wrapped ones', () => {
+  const forbidden = { version: 'v1', code: 'forbidden', message: 'Actor cannot delete clips on a locked track.' }
   const wrapped = new Error('Convex request failed')
-  wrapped.cause = {
-    code: 'track-locked',
-    message: 'Request failed: Actor cannot delete clips on a locked track.',
-  }
-  expect(classifyBulkClipDeleteError(wrapped)).toMatchObject({ status: 403 })
-  expect(classifyBulkClipDeleteError(new Error('[CONVEX] Actor cannot delete one or more clips.'))).toMatchObject({
-    status: 403,
+  wrapped.cause = { data: forbidden }
+  expect(classifyBulkClipDeleteError(wrapped)).toMatchObject({ status: 403, message: forbidden.message })
+  expect(classifyBulkClipDeleteError({ data: { ...forbidden, code: 'validation', message: 'Clip deletion requires at least one clip.' } })).toMatchObject({
+    status: 400,
   })
+  expect(classifyBulkClipDeleteError(new Error('Actor cannot delete one or more clips.'))).toBeUndefined()
 })

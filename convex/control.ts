@@ -1,7 +1,6 @@
 import {
   controlCommitResultSchemaV1,
   controlApprovalResultSchemaV1,
-  controlErrorSchemaV1,
   controlHistoryEntrySchemaV1,
   controlHistoryResultSchemaV1,
   controlRecoveriesResultSchemaV1,
@@ -33,13 +32,15 @@ import {
 } from "@daw-browser/control-core";
 import { isJsonObject, type JsonValue } from "@daw-browser/shared";
 import { z } from "zod";
-import { ConvexError, v } from "convex/values";
+import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { executeControlPlanV1 } from "./controlExecution";
+import { fail } from "./errors";
 import { ControlDomainError, preflightControlRequestV1 } from "./controlPreflight";
 import { readProjectControlSnapshotV1, readProjectControlSnapshotV2 } from "./controlSnapshot";
-import { getProjectRole, requireAuthenticatedIdentity, requireProjectAccess } from "./projectAccess";
+import { getProjectRole, requireProjectAccess } from "./projectAccess";
+import { requireAuthenticatedIdentity } from "./identity";
 import { withProjectEdit } from "./projectRows";
 import { captureRecoveryPayload, isRecoverableAction, loadRecovery } from "./controlRecovery";
 import { listProjectTracksWithMixerChannels } from "./mixerChannels";
@@ -101,33 +102,18 @@ const pruneControlCommits = async (
   }
 }
 
-const failure = (
-  code: "invalid-request" | "validation" | "revision-conflict" | "idempotency-conflict" | "forbidden" | "authorization" | "not-found" | "limit-exceeded" | "approval-required" | "internal",
-  message: string,
-  actionIndex?: number,
-  details?: Record<string, string>,
-): never => {
-  throw new ConvexError(controlErrorSchemaV1.parse({
-    version: "v1",
-    code,
-    message,
-    actionIndex,
-    details,
-  }))
-}
-
 const parsePreview = (input: JsonValue) => {
   let parsed: ReturnType<typeof parseControlPreviewRequestV1>
 
   try {
     parsed = parseControlPreviewRequestV1(input)
   } catch {
-    return failure("invalid-request", "Invalid control preview request.")
+    return fail("invalid-request", "Invalid control preview request.")
   }
 
   const duplicate = findDuplicateRecoveryActionIndexV1(parsed.actions)
 
-  if (duplicate !== undefined) failure("validation", "A recovery can only be restored once per request.", duplicate)
+  if (duplicate !== undefined) fail("validation", "A recovery can only be restored once per request.", duplicate)
 
   return parsed
 }
@@ -138,12 +124,12 @@ const parseCommit = (input: JsonValue) => {
   try {
     parsed = parseControlCommitRequestV1(input)
   } catch {
-    return failure("invalid-request", "Invalid control commit request.")
+    return fail("invalid-request", "Invalid control commit request.")
   }
 
   const duplicate = findDuplicateRecoveryActionIndexV1(parsed.actions)
 
-  if (duplicate !== undefined) failure("validation", "A recovery can only be restored once per request.", duplicate)
+  if (duplicate !== undefined) fail("validation", "A recovery can only be restored once per request.", duplicate)
 
   return parsed
 }
@@ -154,12 +140,12 @@ const parseApproval = (input: JsonValue) => {
   try {
     parsed = parseControlApprovalRequestV1(input)
   } catch {
-    return failure("invalid-request", "Invalid control approval request.")
+    return fail("invalid-request", "Invalid control approval request.")
   }
 
   const duplicate = findDuplicateRecoveryActionIndexV1(parsed.actions)
 
-  if (duplicate !== undefined) failure("validation", "A recovery can only be restored once per request.", duplicate)
+  if (duplicate !== undefined) fail("validation", "A recovery can only be restored once per request.", duplicate)
 
   return parsed
 }
@@ -177,7 +163,7 @@ const approvalToken = () => {
 }
 
 const approvalError = (requirement: ReturnType<typeof controlApprovalRequirementV1>) => (
-  failure("approval-required", "A valid approval token is required for destructive actions.", undefined, {
+  fail("approval-required", "A valid approval token is required for destructive actions.", undefined, {
     actionIndexes: requirement.actionIndexes.join(","),
     actionKinds: requirement.actionKinds.join(","),
     baseRevision: String(requirement.baseRevision),
@@ -209,7 +195,7 @@ const pruneApprovals = async (ctx: any, projectId: string, actorSubject: string)
     .order("asc")
     .take(maxActiveApprovalsPerActorProject)
 
-  if (actorRows.length >= maxActiveApprovalsPerActorProject) failure("limit-exceeded", "Too many active destructive approvals.")
+  if (actorRows.length >= maxActiveApprovalsPerActorProject) fail("limit-exceeded", "Too many active destructive approvals.")
 
   const activeRows = await ctx.db.query("controlApprovals")
     .withIndex("by_project_createdAt", (query: any) => query.eq("projectId", projectId))
@@ -217,7 +203,7 @@ const pruneApprovals = async (ctx: any, projectId: string, actorSubject: string)
     .take(maxActiveApprovalsPerProject)
 
   if (activeRows.length >= maxActiveApprovalsPerProject) {
-    failure("limit-exceeded", "Project destructive approval retention is full.")
+    fail("limit-exceeded", "Project destructive approval retention is full.")
   }
 }
 
@@ -225,7 +211,7 @@ const parseSnapshotQuery = (input: JsonValue) => {
   try {
     return parseControlSnapshotQueryV1(input)
   } catch {
-    return failure("invalid-request", "Invalid control snapshot request.")
+    return fail("invalid-request", "Invalid control snapshot request.")
   }
 }
 
@@ -233,7 +219,7 @@ const parseHistoryQuery = (input: JsonValue) => {
   try {
     return parseControlHistoryQueryV1(input)
   } catch {
-    return failure("invalid-request", "Invalid control history request.")
+    return fail("invalid-request", "Invalid control history request.")
   }
 }
 
@@ -241,7 +227,7 @@ const parseRecoveriesQuery = (input: JsonValue) => {
   try {
     return parseControlRecoveriesQueryV1(input)
   } catch {
-    return failure("invalid-request", "Invalid recovery list request.")
+    return fail("invalid-request", "Invalid recovery list request.")
   }
 }
 
@@ -259,7 +245,7 @@ const paginateControlHistory = async (
   try {
     return await query.paginate({ numItems: limit, cursor: cursor ?? null })
   } catch {
-    return failure("invalid-request", "Invalid control history cursor.")
+    return fail("invalid-request", "Invalid control history cursor.")
   }
 }
 
@@ -270,14 +256,14 @@ const paginateRecoveries = async (ctx: any, projectId: string, limit: number, cu
       .order("desc")
       .paginate({ numItems: limit, cursor: cursor ?? null })
   } catch {
-    return failure("invalid-request", "Invalid recovery list cursor.")
+    return fail("invalid-request", "Invalid recovery list cursor.")
   }
 }
 
 const boundedActorClaim = (value: string) => {
   if (value.length > 0 && value.length <= 256) return value
 
-  return failure("authorization", "Authenticated identity claims are invalid.")
+  return fail("authorization", "Authenticated identity claims are invalid.")
 }
 
 const controlActor = (identity: Awaited<ReturnType<typeof requireAuthenticatedIdentity>>) => ({
@@ -309,14 +295,14 @@ const plan = <Snapshot extends PlanningSnapshot>(
     const parsedError = controlPlanErrorSchema.safeParse(error);
 
     if (parsedError.success) {
-      return failure(
+      return fail(
         parsedError.data.code,
         parsedError.data.message.slice(0, 512),
         parsedError.data.actionIndex,
       );
     }
 
-    return failure("internal", "Control planning failed.")
+    return fail("internal", "Control planning failed.")
   }
 }
 
@@ -513,23 +499,23 @@ export const previewV1 = query({
     try {
       userId = (await requireAuthenticatedIdentity(ctx)).subject
     } catch {
-      return failure("authorization", "Authentication is required.")
+      return fail("authorization", "Authentication is required.")
     }
 
     try {
       await preflightControlRequestV1(ctx, { projectId: parsed.projectId, actorId: userId, actions: parsed.actions })
     } catch (error) {
       if (error instanceof ControlDomainError) {
-        return failure(error.code, error.message, error.actionIndex, error.details)
+        return fail(error.code, error.message, error.actionIndex, error.details)
       }
 
-      return failure("internal", "Control preflight failed.")
+      return fail("internal", "Control preflight failed.")
     }
 
     const snapshot = await readProjectControlSnapshotV2(ctx, parsed.projectId)
 
     if (parsed.expectedRevision !== undefined && parsed.expectedRevision !== snapshot.project.revision) {
-      failure("revision-conflict", "Project revision does not match the expected revision.")
+      fail("revision-conflict", "Project revision does not match the expected revision.")
     }
 
     const requestDigest = await controlRequestDigestV1(parsed)
@@ -539,9 +525,9 @@ export const previewV1 = query({
       recoveries = await requestedRecoveries(ctx, parsed)
       await preflightRecoveryLocks(ctx, { projectId: parsed.projectId, actorId: userId, actions: parsed.actions, recoveries })
     } catch (error) {
-      if (error instanceof ControlDomainError) return failure(error.code, error.message, error.actionIndex, error.details)
+      if (error instanceof ControlDomainError) return fail(error.code, error.message, error.actionIndex, error.details)
 
-      return failure("not-found", "Recovery is unavailable.")
+      return fail("not-found", "Recovery is unavailable.")
     }
 
     const controlPlan = plan(snapshot, parsed, recoveries)
@@ -570,21 +556,21 @@ export const requestApprovalV1 = mutation({
     try {
       actor = controlActor(await requireAuthenticatedIdentity(ctx))
     } catch {
-      return failure("authorization", "Authentication is required.")
+      return fail("authorization", "Authentication is required.")
     }
 
     try {
       await preflightControlRequestV1(ctx, { projectId: parsed.projectId, actorId: actor.subject, actions: parsed.actions })
     } catch (error) {
-      if (error instanceof ControlDomainError) return failure(error.code, error.message, error.actionIndex, error.details)
+      if (error instanceof ControlDomainError) return fail(error.code, error.message, error.actionIndex, error.details)
 
-      return failure("internal", "Control preflight failed.")
+      return fail("internal", "Control preflight failed.")
     }
 
     const snapshot = await readProjectControlSnapshotV2(ctx, parsed.projectId)
 
     if (parsed.expectedRevision !== undefined && parsed.expectedRevision !== snapshot.project.revision) {
-      return failure("revision-conflict", "Project revision does not match the expected revision.")
+      return fail("revision-conflict", "Project revision does not match the expected revision.")
     }
 
     const requestDigest = await controlRequestDigestV1(parsed)
@@ -592,7 +578,7 @@ export const requestApprovalV1 = mutation({
     try {
       await validateRecoveryDrafts(ctx, { projectId: parsed.projectId, actions: parsed.actions })
     } catch {
-      return failure("limit-exceeded", "Recovery payload exceeds recovery limits.")
+      return fail("limit-exceeded", "Recovery payload exceeds recovery limits.")
     }
 
     let recoveries: Map<string, LoadedRecovery>
@@ -601,15 +587,15 @@ export const requestApprovalV1 = mutation({
       recoveries = await requestedRecoveries(ctx, parsed)
       await preflightRecoveryLocks(ctx, { projectId: parsed.projectId, actorId: actor.subject, actions: parsed.actions, recoveries })
     } catch (error) {
-      if (error instanceof ControlDomainError) return failure(error.code, error.message, error.actionIndex, error.details)
+      if (error instanceof ControlDomainError) return fail(error.code, error.message, error.actionIndex, error.details)
 
-      return failure("not-found", "Recovery is unavailable.")
+      return fail("not-found", "Recovery is unavailable.")
     }
 
     const controlPlan = plan(snapshot, parsed, recoveries)
     const requirement = controlApprovalRequirementV1(controlPlan, requestDigest)
 
-    if (!requirement.required) return failure("validation", "Approval requires a material destructive action.")
+    if (!requirement.required) return fail("validation", "Approval requires a material destructive action.")
     await pruneApprovals(ctx, parsed.projectId, actor.subject)
     const token = approvalToken()
     const now = Date.now()
@@ -645,7 +631,7 @@ export const commitV1 = mutation({
     try {
       actor = controlActor(await requireAuthenticatedIdentity(ctx))
     } catch {
-      return failure("authorization", "Authentication is required.")
+      return fail("authorization", "Authentication is required.")
     }
 
     const userId = actor.subject
@@ -665,10 +651,10 @@ export const commitV1 = mutation({
         const role = await getProjectRole(ctx, parsed.projectId, userId)
 
         if (role !== "owner" && role !== "editor") {
-          failure("forbidden", "You do not have write access to this project.")
+          fail("forbidden", "You do not have write access to this project.")
         }
 
-        if (existing.requestDigest !== requestDigest) failure("idempotency-conflict", "Idempotency key was already used with a different request.")
+        if (existing.requestDigest !== requestDigest) fail("idempotency-conflict", "Idempotency key was already used with a different request.")
 
         return controlCommitResultSchemaV1.parse({
           ...existing.result,
@@ -691,16 +677,16 @@ export const commitV1 = mutation({
       writerRole = preflight.role
     } catch (error) {
       if (error instanceof ControlDomainError) {
-        return failure(error.code, error.message, error.actionIndex, error.details)
+        return fail(error.code, error.message, error.actionIndex, error.details)
       }
 
-      return failure("internal", "Control preflight failed.")
+      return fail("internal", "Control preflight failed.")
     }
 
     const snapshot = await readProjectControlSnapshotV2(ctx, parsed.projectId)
 
     if (parsed.expectedRevision !== undefined && parsed.expectedRevision !== snapshot.project.revision) {
-      failure("revision-conflict", "Project revision does not match the expected revision.")
+      fail("revision-conflict", "Project revision does not match the expected revision.")
     }
 
     let recoveries: Map<string, LoadedRecovery>
@@ -709,9 +695,9 @@ export const commitV1 = mutation({
       recoveries = await requestedRecoveries(ctx, parsed)
       await preflightRecoveryLocks(ctx, { projectId: parsed.projectId, actorId: userId, actions: parsed.actions, recoveries })
     } catch (error) {
-      if (error instanceof ControlDomainError) return failure(error.code, error.message, error.actionIndex, error.details)
+      if (error instanceof ControlDomainError) return fail(error.code, error.message, error.actionIndex, error.details)
 
-      return failure("not-found", "Recovery is unavailable.")
+      return fail("not-found", "Recovery is unavailable.")
     }
 
     const controlPlan = plan(snapshot, parsed, recoveries)
@@ -747,13 +733,13 @@ export const commitV1 = mutation({
         return await executeControlPlanV1(ctx, edit, { projectId: parsed.projectId, actorId: userId, plan: controlPlan, recoveries })
       })
 
-      if (execution.changed !== controlPlan.applied) failure("internal", "Control execution changed-state mismatch.")
+      if (execution.changed !== controlPlan.applied) fail("internal", "Control execution changed-state mismatch.")
     } catch (error) {
       if (error instanceof ControlDomainError) {
-        execution = failure(error.code, error.message, error.actionIndex, error.details)
+        execution = fail(error.code, error.message, error.actionIndex, error.details)
       }
 
-      execution = failure("internal", "Control execution failed.")
+      execution = fail("internal", "Control execution failed.")
     }
 
     const committed = result(
@@ -796,7 +782,7 @@ export const commitV1 = mutation({
     try {
       await pruneControlCommits(ctx, parsed.projectId, commitId)
     } catch {
-      failure("limit-exceeded", "Control commit retention could not be bounded safely.")
+      fail("limit-exceeded", "Control commit retention could not be bounded safely.")
     }
 
     return committed
@@ -813,13 +799,13 @@ export const snapshotV1 = query({
     try {
       userId = (await requireAuthenticatedIdentity(ctx)).subject
     } catch {
-      return failure("authorization", "Authentication is required.")
+      return fail("authorization", "Authentication is required.")
     }
 
     try {
       await requireProjectAccess(ctx, parsed.projectId, userId)
     } catch {
-      return failure("forbidden", "You do not have read access to this project.")
+      return fail("forbidden", "You do not have read access to this project.")
     }
 
     return projectSnapshotSchemaV1.parse(await readProjectControlSnapshotV1(ctx, parsed.projectId))
@@ -836,13 +822,13 @@ export const snapshotV2 = query({
     try {
       userId = (await requireAuthenticatedIdentity(ctx)).subject
     } catch {
-      return failure("authorization", "Authentication is required.")
+      return fail("authorization", "Authentication is required.")
     }
 
     try {
       await requireProjectAccess(ctx, parsed.projectId, userId)
     } catch {
-      return failure("forbidden", "You do not have read access to this project.")
+      return fail("forbidden", "You do not have read access to this project.")
     }
 
     return projectSnapshotSchemaV2.parse(await readProjectControlSnapshotV2(ctx, parsed.projectId))
@@ -863,13 +849,13 @@ export const historyV1 = query({
     try {
       userId = (await requireAuthenticatedIdentity(ctx)).subject
     } catch {
-      return failure("authorization", "Authentication is required.")
+      return fail("authorization", "Authentication is required.")
     }
 
     try {
       await requireProjectAccess(ctx, parsed.projectId, userId)
     } catch {
-      return failure("forbidden", "You do not have read access to this project.")
+      return fail("forbidden", "You do not have read access to this project.")
     }
 
     const page = await paginateControlHistory(ctx, parsed.projectId, parsed.limit, parsed.cursor)
@@ -908,7 +894,7 @@ export const recoveriesV1 = query({
       userId = (await requireAuthenticatedIdentity(ctx)).subject
       await requireProjectAccess(ctx, parsed.projectId, userId)
     } catch {
-      return failure("forbidden", "You do not have read access to this project.")
+      return fail("forbidden", "You do not have read access to this project.")
     }
 
     const page = await paginateRecoveries(ctx, parsed.projectId, parsed.limit, parsed.cursor)

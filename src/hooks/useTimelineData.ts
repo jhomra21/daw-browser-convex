@@ -3,6 +3,7 @@ import type { FunctionReturnType } from 'convex/server'
 import type { UseQueryResult } from '@tanstack/solid-query'
 
 import { useConvexQuery, convexClient, convexApi } from '~/lib/convex'
+import { readControlErrorV1 } from '@daw-browser/control'
 import { isLocalId, isProjectRole, type ProjectRole } from '@daw-browser/shared'
 import {
   createLocalProject,
@@ -123,6 +124,8 @@ const isProjectPayload = (cause: unknown): cause is ProjectPayload => (
 )
 
 const isString = (cause: unknown): cause is string => typeof cause === 'string'
+
+const isProjectAccessLost = <Failure>(error: Failure) => readControlErrorV1(error)?.code === 'forbidden'
 
 const normalizeProjects = (cause: unknown): TimelineProject[] => {
   if (!Array.isArray(cause)) return []
@@ -399,11 +402,7 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     try {
       await flushMidiProjectWrites(targetProjectId)
     } catch (error) {
-      const message = error instanceof Error ? error.message.toLowerCase() : ''
-
-      if (!message.includes('access') && !message.includes('permission') && !message.includes('authorization')) {
-        throw error
-      }
+      if (!isProjectAccessLost(error)) throw error
 
       discardMidiProjectWrites(targetProjectId)
     }
@@ -428,11 +427,8 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     const currentProjectId = projectId()
 
     if (!currentProjectId || isLocalId('project', currentProjectId)) return
-    const error = fullView.error
-    const message = error instanceof Error ? error.message : ''
-    const lowerMessage = message.toLowerCase()
 
-    if (!lowerMessage.includes('access') && !lowerMessage.includes('permission')) return
+    if (!isProjectAccessLost(fullView.error)) return
     void navigateAfterAccessLoss(currentProjectId).catch(() => {
       input.notify('Project access changed', 'Pending MIDI changes could not be saved.')
     })

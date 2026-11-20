@@ -230,7 +230,7 @@ export function createEffectsPanelInstrumentDevice(
     return publishEffects(projectId, userId, operation);
   }
 
-  function persistArpeggiator(trackId: Track["id"], params: FunctionArgs<typeof convexApi.effects.setArpeggiatorParams>["params"], persistContext: { projectId?: string; userId?: string }) {
+  function persistArpeggiator(trackId: Track["id"], params: FunctionArgs<typeof convexApi.effects.serverSetArpeggiatorParams>["params"], persistContext: { projectId?: string; userId?: string }) {
     const projectId = persistContext.projectId;
     const userId = persistContext.userId;
 

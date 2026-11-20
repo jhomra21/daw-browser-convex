@@ -1,9 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import { audioWarpValidator } from "./audioWarpValidator";
-import { clipFadesValidator } from "./clipFadesValidator";
-import { projectManifestValidator } from "./projectManifestValidator";
-import { midiValidator } from "./midiValidator";
+import { audioWarpValidator, automationPointValidator, clipFadesValidator, midiValidator, projectManifestValidator, sendTapValidator } from "./validators";
 
 // Shared collaboration model scoped by a stable projectId.
 export default defineSchema({
@@ -33,7 +30,7 @@ export default defineSchema({
     sends: v.array(v.object({
       targetId: v.id("tracks"),
       amount: v.number(),
-      tap: v.optional(v.union(v.literal("pre-fx"), v.literal("pre-fader"), v.literal("post-fader"))),
+      tap: v.optional(sendTapValidator),
     })),
   })
     .index("by_room", ["projectId"])
@@ -420,12 +417,7 @@ export default defineSchema({
     targetKey: v.string(),
     parameterId: v.string(),
     enabled: v.boolean(),
-    points: v.array(v.object({
-      id: v.string(),
-      timeSec: v.number(),
-      value: v.number(),
-      interpolation: v.union(v.literal("linear"), v.literal("hold")),
-    })),
+    points: v.array(automationPointValidator),
     updatedAt: v.number(),
   })
     .index("by_project", ["projectId"])

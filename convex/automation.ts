@@ -11,8 +11,10 @@ import {
   parseGranularAutomationKey,
   parseSynthAutomationKey,
 } from "@daw-browser/shared";
-import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
-import { advanceProjectRevision } from "./projectRows";
+import { requireProjectRole } from "./projectAccess";
+import { requireAuthenticatedUserId } from "./identity";
+import { editProject } from "./projectRows";
+import { automationPointValidator } from "./validators";
 
 type InstrumentEffectRow = {
   type: string;
@@ -46,13 +48,6 @@ export const readAutomationTrackInstrument = (rows: readonly InstrumentEffectRow
       })
     : undefined;
 };
-
-const automationPointValidator = v.object({
-  id: v.string(),
-  timeSec: v.number(),
-  value: v.number(),
-  interpolation: v.union(v.literal("linear"), v.literal("hold")),
-});
 
 const targetKindValidator = v.union(v.literal("track"), v.literal("master"));
 
@@ -271,9 +266,7 @@ export const serverSetEnvelope = mutation({
       ? await resolveAutomationTrackId(ctx, input.projectId, input.trackId)
       : undefined;
 
-    const result = await setAutomationEnvelopeRow(ctx, { ...input, trackId });
-
-    if (result.changed) await advanceProjectRevision(ctx, input.projectId);
+    const result = await editProject(ctx, input.projectId, () => setAutomationEnvelopeRow(ctx, { ...input, trackId }));
 
     return result.envelopeId;
   },
@@ -295,9 +288,7 @@ export const serverDeleteEnvelope = mutation({
       ? await resolveAutomationTrackId(ctx, input.projectId, input.trackId)
       : undefined;
 
-    const result = await deleteAutomationEnvelopeRow(ctx, { ...input, trackId });
-
-    if (result.changed) await advanceProjectRevision(ctx, input.projectId);
+    const result = await editProject(ctx, input.projectId, () => deleteAutomationEnvelopeRow(ctx, { ...input, trackId }));
 
     return result.envelopeId ?? null;
   },

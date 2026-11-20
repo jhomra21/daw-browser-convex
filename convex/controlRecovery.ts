@@ -41,10 +41,9 @@ import { ControlDomainError } from "./controlPreflight";
 import type { ProjectEdit } from "./projectRows";
 import { readProjectControlSnapshotV2 } from "./controlSnapshot";
 import { findSampleRow } from "./sampleRows";
+import { recoveryRetention } from "./retention";
 
-const recoveryLifetimeMs = 7 * 24 * 60 * 60 * 1000;
-const maxRecoveriesPerProject = 1000;
-const maxRecoveriesPerActorProject = 128;
+const { lifetimeMs: recoveryLifetimeMs, maxPerProject: maxRecoveriesPerProject, maxPerActorProject: maxRecoveriesPerActorProject } = recoveryRetention;
 
 const recoveryKinds = new Set([
   "clip.delete", "effect.remove", "instrument.remove", "arpeggiator.remove",

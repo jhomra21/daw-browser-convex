@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { isJsonObject, isJsonString, type JsonValue } from "@daw-browser/shared";
 import { z } from "zod";
 import type { ApiBindings } from "./app-types";
+import { readBearerToken, sha256Hex } from "./http";
 
 export type ControlOAuthScope = "control:read" | "control:write" | "offline_access";
 
@@ -85,13 +86,6 @@ export type ControlBearer = {
 };
 
 
-const sha256 = async (value: string) => {
-  const bytes = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-};
-
 const unixSeconds = () => Math.floor(Date.now() / 1000);
 
 const parseScopes = (value: string) => value.split(" ").filter((scope) => scope.length > 0);
@@ -111,8 +105,6 @@ export const getControlOAuthOrigin = (baseUrl: string | undefined, requestUrl: s
 
 export const getControlOAuthResource = (baseUrl: string | undefined, requestUrl: string) => `${getControlOAuthOrigin(baseUrl, requestUrl)}/api`;
 
-export const controlBearerChallenge = (origin: string) => `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource/api"`;
-
 const oauthError = (error: string, description: string, status = 400) => Response.json(
   { error, error_description: description },
   { status, headers: { "Cache-Control": "no-store", Pragma: "no-cache" } },
@@ -121,7 +113,7 @@ const oauthError = (error: string, description: string, status = 400) => Respons
 const requestIpHash = async (request: Request) => {
   const ip = request.headers.get("cf-connecting-ip");
 
-  return ip && ip.length <= 128 ? sha256(ip) : null;
+  return ip && ip.length <= 128 ? sha256Hex(ip) : null;
 };
 
 export const registrationRateWindow = (now: number) => Math.floor(now / DCR_WINDOW_SECONDS) * DCR_WINDOW_SECONDS;
@@ -368,8 +360,8 @@ const createBindingStatements = async (
 
   const id = crypto.randomUUID();
   const resolvedFamilyId = familyId ?? id;
-  const accessTokenHash = await sha256(token.access_token);
-  const refreshTokenHash = token.refresh_token ? await sha256(token.refresh_token) : null;
+  const accessTokenHash = await sha256Hex(token.access_token);
+  const refreshTokenHash = token.refresh_token ? await sha256Hex(token.refresh_token) : null;
   const now = unixSeconds();
 
   const statement = db(env).prepare(
@@ -450,14 +442,11 @@ export async function resolveControlBearer(
   env: ApiBindings["Bindings"],
   requiredScope: ControlOAuthScope,
 ): Promise<ControlBearer | null> {
-  const authorization = request.headers.get("authorization");
+  const token = readBearerToken(request.headers.get("authorization"));
 
-  if (!authorization) return null;
-  const [scheme, token, extra] = authorization.split(" ");
+  if (!token) return null;
 
-  if (scheme !== "Bearer" || !token || extra) return null;
-
-  const binding = await getBindingByHash(env, await sha256(token));
+  const binding = await getBindingByHash(env, await sha256Hex(token));
   const origin = getControlOAuthOrigin(env.BETTER_AUTH_URL, request.url);
   const resource = getControlOAuthResource(env.BETTER_AUTH_URL, request.url);
 
@@ -600,7 +589,7 @@ export const registerControlOAuthRoutes = (app: { get: Function; post: Function 
       const refresh = body.get("refresh_token");
 
       if (!refresh) return oauthError("invalid_request", "refresh_token is required");
-      const refreshHash = await sha256(refresh);
+      const refreshHash = await sha256Hex(refresh);
       prior = await db(c.env).prepare(
         "SELECT * FROM controlOAuthTokenBinding WHERE refreshTokenHash = ?",
       ).bind(refreshHash).first<BindingRow>() ?? null;
@@ -675,8 +664,8 @@ export const registerControlOAuthRoutes = (app: { get: Function; post: Function 
           )`,
         ).bind(
           binding.id,
-          await sha256(token.access_token),
-          token.refresh_token ? await sha256(token.refresh_token) : null,
+          await sha256Hex(token.access_token),
+          token.refresh_token ? await sha256Hex(token.refresh_token) : null,
           prior.familyId,
           binding.claims.userId,
           binding.claims.clientId,
@@ -727,7 +716,7 @@ export const registerControlOAuthRoutes = (app: { get: Function; post: Function 
     const token = body?.get("token");
 
     if (body && clientId && token && !body.get("client_secret") && !request.headers.has("authorization")) {
-      const tokenHash = await sha256(token);
+      const tokenHash = await sha256Hex(token);
 
       const binding = await db(c.env).prepare(
         "SELECT * FROM controlOAuthTokenBinding WHERE (accessTokenHash = ? OR refreshTokenHash = ?) AND clientId = ?",

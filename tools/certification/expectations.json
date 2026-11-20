@@ -38,7 +38,7 @@
    "src/lib/instrument-buffer-sync.test.ts": "270e996541078b90fb0b4867fdbe635e28d33ac63292018671b71da5838023b1",
    "src/components/timeline/parameter-gesture-owner.ts": "6b6ee1ed625da949a06f55df690d7a50ca3f2cb6b81b47facf230e0d0abce049",
    "src/components/timeline/create-persisted-effect-state.ts": "3331f5f47be4e672820d8a08e6d9dd71147d382b00eab3c8186b74410d945b49",
-   "src/components/timeline/create-effects-panel-state.ts": "16781450318ed8e5a409200a8ab83d85fec2f2a4acc3d2091d0a4947a14bc8dc",
+   "src/components/timeline/create-effects-panel-state.ts": "aa4a50c8388d8adb19a7799dcb4ac4d9a8073421ac0f61b54c94bd2be10fcc42",
    "src/components/timeline/create-effects-panel-controller.ts": "6fd114550a811a4ce2dd65ab00a4bbde9afcb5f7957b4744c9a8ea56855e99ab",
    "src/lib/portable-browser-playback-controller.ts": "717a95b30b2d3b625caea79cf72c89c2bf6582b90665b78035e156bf6a1b3128",
    "src/components/effects/Sampler.tsx": "2572d8391dab1389f6ea2224270c0299700ae2f7350055068dc0204cba30476f",

@@ -11,7 +11,7 @@ export function buildTrackCreateMutationInput(input: {
   kind?: TrackKind
   channelRole?: TrackChannelRole
   collapsed?: boolean
-}): FunctionArgs<typeof convexApi.tracks.create> {
+}): FunctionArgs<typeof convexApi.tracks.serverCreate> {
   return {
     projectId: input.projectId,
     name: input.name,

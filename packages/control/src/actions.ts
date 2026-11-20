@@ -616,6 +616,41 @@ export const controlErrorSchemaV1 = z.object({
     .optional(),
 }).strict()
 
+const controlErrorEnvelopeSchemaV1 = z.object({
+  data: z.unknown().optional(),
+  errorData: z.unknown().optional(),
+  cause: z.unknown().optional(),
+}).passthrough()
+
+/**
+ * Reads the typed control error out of a thrown value: the value itself, a ConvexError's `data`, an
+ * HTTP client's `errorData`, or any of those on the `cause` chain.
+ */
+export const readControlErrorV1 = <Failure>(error: Failure): ControlErrorV1 | undefined => {
+  const visited = new Set<unknown>()
+  let current: unknown = error
+
+  while (current !== undefined && !visited.has(current)) {
+    visited.add(current)
+    const direct = controlErrorSchemaV1.safeParse(current)
+
+    if (direct.success) return direct.data
+    const envelope = controlErrorEnvelopeSchemaV1.safeParse(current)
+
+    if (!envelope.success) return undefined
+
+    for (const candidate of [envelope.data.data, envelope.data.errorData]) {
+      const parsed = controlErrorSchemaV1.safeParse(candidate)
+
+      if (parsed.success) return parsed.data
+    }
+
+    current = envelope.data.cause
+  }
+
+  return undefined
+}
+
 export const controlPreviewRequestSchemaV1 = z.object(requestBaseFields)
   .strict()
   .superRefine(addAggregateIssues)

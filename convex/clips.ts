@@ -5,22 +5,23 @@ import { z } from 'zod'
 
 import { getClipOwnership, getClipWriteAccess } from './clipWrites'
 import { getMergedTrack } from './mixerChannels'
-import { canWriteProject, getProjectRole, requireAuthenticatedUserId, requireProjectAccess } from './projectAccess'
+import { canWriteProject, getProjectRole, requireProjectAccess } from './projectAccess'
+import { requireAuthenticatedUserId } from './identity'
 import { isClipKindCompatibleWithTrack } from './trackRouting'
 import { getTrackWriteAccess } from './trackWrites'
 import { findSampleRow } from './sampleRows'
 import { audioWarpEqual, type ClipKind, buildClipAudioSourceFields, isJsonString, normalizeAudioSourceMetadataPatch, normalizeAudioWarp, normalizeClipColor, normalizeClipGain, normalizeClipStartSec, normalizeClipTimingPatch, normalizeLegacyMidiClip, normalizeMidiClip, sanitizeAudioSourceKind, type AudioSourceKind, type AudioWarpPayload, type LegacyMidiClip } from '@daw-browser/shared'
 import { runSharedOperationOnce } from './sharedOperationResults'
-import { advanceProjectRevision } from './projectRows'
+import { editProject, editProjectIf, withProjectEdit } from './projectRows'
 import {
   controlMidiEqual,
   effectiveControlClipName,
   effectiveControlTimingOffset,
 } from './controlEffectiveValues'
-import { audioWarpValidator } from './audioWarpValidator'
-import { clipFadesValidator } from './clipFadesValidator'
+import { fail } from './errors'
+import { audioWarpValidator, clipFadesValidator, midiValidator } from './validators'
+import { recoveryRetention } from './retention'
 import { normalizeClipFades, type ClipFades } from '@daw-browser/timeline-core/clip-fades'
-import { midiValidator } from './midiValidator'
 import { hashCanonicalJsonSyncV1 } from '@daw-browser/control'
 
 type ClipMidiInput = LegacyMidiClip
@@ -79,9 +80,12 @@ const clipRestoreResult = v.union(
   v.object({ status: v.literal('rejected'), reason: v.optional(v.string()) }),
 )
 
-const clipDeletionRecoveryLifetimeMs = 7 * 24 * 60 * 60 * 1000
-const maxClipDeletionRecoveriesPerProject = 1000
-const maxClipDeletionRecoveriesPerActorProject = 128
+const {
+  lifetimeMs: clipDeletionRecoveryLifetimeMs,
+  maxPerProject: maxClipDeletionRecoveriesPerProject,
+  maxPerActorProject: maxClipDeletionRecoveriesPerActorProject,
+} = recoveryRetention
+
 const clipDeletionRecoveryReceiptLifetimeMs = 24 * 60 * 60 * 1000
 const maxClipDeletionRecoveryReceiptsPerProject = 1000
 const maxClipDeletionRecoveryReceiptsPerActorProject = 128
@@ -296,15 +300,13 @@ const applyClipTimingPatch = async (
 
   if (input.audioWarp !== undefined) patch.audioWarp = normalizeAudioWarp(input.audioWarp)
 
-  const result = await setClipTimingRow(ctx, {
+  const result = await editProjectIf(ctx, access.clip.projectId, () => setClipTimingRow(ctx, {
     projectId: access.clip.projectId,
     clipId,
     patch,
-  })
+  }), (written) => written.snapshotChanged)
 
   if (!result.changed) return { status: 'noop' as const }
-
-  if (result.snapshotChanged) await advanceProjectRevision(ctx, access.clip.projectId)
 
   return { status: 'applied' as const }
 }
@@ -650,7 +652,7 @@ const pruneClipDeletionRecoveries = async (
     activeProject.length + input.reserve > maxClipDeletionRecoveriesPerProject
     || activeActor.length + input.reserve > maxClipDeletionRecoveriesPerActorProject
   ) {
-    throw new Error('Clip deletion recovery limit exceeded.')
+    fail('limit-exceeded', 'Clip deletion recovery limit exceeded.')
   }
 }
 
@@ -832,10 +834,12 @@ export const restoreLegacyHistory = mutation({
           normalizeLegacyMidiClip,
         )
 
-        const clipId = await insertOwnedClipRow(ctx, patch, userId)
-        await advanceProjectRevision(ctx, args.projectId)
+        return await withProjectEdit(ctx, args.projectId, async (edit) => {
+          const clipId = await insertOwnedClipRow(ctx, patch, userId)
+          edit.stamp()
 
-        return String(clipId)
+          return String(clipId)
+        })
       },
     })
   },
@@ -851,49 +855,6 @@ export const listByRoom = query({
       .query('clips')
       .withIndex('by_room', q => q.eq('projectId', projectId))
       .collect()
-  },
-})
-
-export const create = mutation({
-  args: {
-    projectId: v.string(),
-    trackId: v.id('tracks'),
-    startSec: v.number(),
-    duration: v.number(),
-    name: v.optional(v.string()),
-    sampleUrl: v.optional(v.string()),
-    assetKey: v.optional(v.string()),
-    sourceKind: v.optional(v.string()),
-    durationSec: v.optional(v.number()),
-    sampleRate: v.optional(v.number()),
-    channelCount: v.optional(v.number()),
-    leftPadSec: v.optional(v.number()),
-    bufferOffsetSec: v.optional(v.number()),
-    audioWarp: v.optional(audioWarpValidator),
-    gain: v.optional(v.number()),
-    fades: v.optional(clipFadesValidator),
-    midiOffsetBeats: v.optional(v.number()),
-    color: v.optional(v.string()),
-    midi: v.optional(midiValidator),
-    clipKind: v.optional(v.string()),
-    operationId: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const userId = await requireAuthenticatedUserId(ctx)
-
-    return await runSharedOperationOnce(ctx, {
-      projectId: args.projectId,
-      userId,
-      operationId: args.operationId,
-      isResult: (value): value is string | null => typeof value === 'string' || value === null,
-      run: async () => {
-        const clipId = await createOwnedClip(ctx, { ...args, userId })
-
-        if (clipId) await advanceProjectRevision(ctx, args.projectId)
-
-        return clipId
-      },
-    })
   },
 })
 
@@ -933,11 +894,14 @@ export const serverCreate = mutation({
         const trackId = ctx.db.normalizeId('tracks', args.trackId)
 
         if (!trackId) return null
-        const clipId = await createOwnedClip(ctx, { ...args, trackId, userId })
 
-        if (clipId) await advanceProjectRevision(ctx, args.projectId)
+        return await withProjectEdit(ctx, args.projectId, async (edit) => {
+          const clipId = await createOwnedClip(ctx, { ...args, trackId, userId })
 
-        return clipId
+          if (clipId) edit.stamp()
+
+          return clipId
+        })
       },
     })
   },
@@ -973,15 +937,14 @@ export const move = mutation({
       if (isMergedTrackLockedByOther(targetTrack, userId)) return { status: 'rejected' as const }
     }
 
-    const result = await moveClipRow(ctx, {
+    const result = await editProject(ctx, clip.projectId, () => moveClipRow(ctx, {
       projectId: clip.projectId,
       clipId,
       startSec: nextStartSec,
       trackId: nextTrackId,
-    })
+    }))
 
     if (!result.changed) return { status: 'noop' as const }
-    await advanceProjectRevision(ctx, clip.projectId)
 
     return { status: 'applied' as const }
   },
@@ -1040,16 +1003,18 @@ const moveManyForUser = async (
 
     if (!projectId) return { status: 'rejected' as const }
 
-    for (const patch of patches) {
-      await moveClipRow(ctx, {
-        projectId,
-        clipId: patch.clipId,
-        startSec: patch.startSec,
-        trackId: patch.trackId,
-      })
-    }
+    await withProjectEdit(ctx, projectId, async (edit) => {
+      for (const patch of patches) {
+        await moveClipRow(ctx, {
+          projectId,
+          clipId: patch.clipId,
+          startSec: patch.startSec,
+          trackId: patch.trackId,
+        })
+      }
 
-    await advanceProjectRevision(ctx, projectId)
+      edit.stamp()
+    })
 
     return { status: 'applied' as const }
 }
@@ -1107,14 +1072,13 @@ export const setName = mutation({
 
     if (!access) return
 
-    const result = await setClipNameRow(ctx, {
+    const result = await editProject(ctx, access.clip.projectId, () => setClipNameRow(ctx, {
       projectId: access.clip.projectId,
       clipId,
       name,
-    })
+    }))
 
     if (!result.changed) return
-    await advanceProjectRevision(ctx, access.clip.projectId)
   },
 })
 
@@ -1140,30 +1104,35 @@ export const setTiming = mutation({
   },
 })
 
+const setClipAudioWarpForUser = async (
+  ctx: MutationCtx,
+  userId: string,
+  clipId: Id<'clips'>,
+  audioWarp: AudioWarpPayload,
+) => {
+  const access = await getClipWriteAccess(ctx, clipId, userId)
+
+  if (!access) return { status: 'rejected' as const }
+
+  if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
+
+  const result = await editProject(ctx, access.clip.projectId, () => setClipAudioWarpRow(ctx, {
+    projectId: access.clip.projectId,
+    clipId,
+    audioWarp,
+  }))
+
+  if (!result.changed) return { status: 'noop' as const }
+
+  return { status: 'applied' as const }
+}
+
 export const setAudioWarp = mutation({
   args: {
     clipId: v.id('clips'),
     audioWarp: audioWarpValidator,
   },
-  handler: async (ctx, { clipId, audioWarp }) => {
-    const userId = await requireAuthenticatedUserId(ctx)
-    const access = await getClipWriteAccess(ctx, clipId, userId)
-
-    if (!access) return { status: 'rejected' as const }
-
-    if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
-
-    const result = await setClipAudioWarpRow(ctx, {
-      projectId: access.clip.projectId,
-      clipId,
-      audioWarp,
-    })
-
-    if (!result.changed) return { status: 'noop' as const }
-    await advanceProjectRevision(ctx, access.clip.projectId)
-
-    return { status: 'applied' as const }
-  },
+  handler: async (ctx, { clipId, audioWarp }) => await setClipAudioWarpForUser(ctx, await requireAuthenticatedUserId(ctx), clipId, audioWarp),
 })
 
 export const setTimingAndAudioWarp = mutation({
@@ -1200,22 +1169,8 @@ export const serverSetAudioWarp = mutation({
     const normalizedClipId = ctx.db.normalizeId('clips', clipId)
 
     if (!normalizedClipId) return { status: 'rejected' as const }
-    const access = await getClipWriteAccess(ctx, normalizedClipId, userId)
 
-    if (!access) return { status: 'rejected' as const }
-
-    if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
-
-    const result = await setClipAudioWarpRow(ctx, {
-      projectId: access.clip.projectId,
-      clipId: normalizedClipId,
-      audioWarp,
-    })
-
-    if (!result.changed) return { status: 'noop' as const }
-    await advanceProjectRevision(ctx, access.clip.projectId)
-
-    return { status: 'applied' as const }
+    return await setClipAudioWarpForUser(ctx, userId, normalizedClipId, audioWarp)
   },
 })
 
@@ -1236,14 +1191,13 @@ export const serverSetGain = mutation({
     if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
     const nextGain = normalizeClipGain(gain)
 
-    const result = await setClipGainRow(ctx, {
+    const result = await editProject(ctx, access.clip.projectId, () => setClipGainRow(ctx, {
       projectId: access.clip.projectId,
       clipId: normalizedClipId,
       gain: nextGain,
-    })
+    }))
 
     if (!result.changed) return { status: 'noop' as const }
-    await advanceProjectRevision(ctx, access.clip.projectId)
 
     return { status: 'applied' as const }
   },
@@ -1263,14 +1217,13 @@ export const serverSetFades = mutation({
     if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
     const nextFades = normalizeClipFades(fades, access.clip.duration)
 
-    const result = await setClipFadesRow(ctx, {
+    const result = await editProject(ctx, access.clip.projectId, () => setClipFadesRow(ctx, {
       projectId: access.clip.projectId,
       clipId: normalizedClipId,
       fades: nextFades,
-    })
+    }))
 
     if (!result.changed) return { status: 'noop' as const }
-    await advanceProjectRevision(ctx, access.clip.projectId)
 
     return { status: 'applied' as const }
   },
@@ -1296,8 +1249,10 @@ export const serverSetColor = mutation({
     if (!normalizedColor) return { status: 'rejected' as const }
 
     if (access.clip.color === normalizedColor) return { status: 'noop' as const }
-    await ctx.db.patch(normalizedClipId, { color: normalizedColor })
-    await advanceProjectRevision(ctx, access.clip.projectId)
+    await withProjectEdit(ctx, access.clip.projectId, async (edit) => {
+      await ctx.db.patch(normalizedClipId, { color: normalizedColor })
+      edit.stamp()
+    })
 
     return { status: 'applied' as const }
   },
@@ -1357,32 +1312,6 @@ export const serverSetTimingAndAudioWarp = mutation({
   },
 })
 
-export const setMidi = mutation({
-  args: {
-    clipId: v.id('clips'),
-    midi: midiValidator,
-  },
-  handler: async (ctx, { clipId, midi }) => {
-    const userId = await requireAuthenticatedUserId(ctx)
-    const access = await getClipWriteAccess(ctx, clipId, userId)
-
-    if (!access) return
-
-    const track = await getMergedTrack(ctx, access.clip.trackId)
-
-    if (!track || !isClipKindCompatibleWithTrack(track, 'midi')) return
-
-    const result = await setClipMidiRow(ctx, {
-      projectId: access.clip.projectId,
-      clipId,
-      midi,
-    })
-
-    if (!result.changed) return
-    await advanceProjectRevision(ctx, access.clip.projectId)
-  },
-})
-
 export const serverSetMidi = mutation({
   args: {
     projectId: v.string(),
@@ -1406,10 +1335,9 @@ export const serverSetMidi = mutation({
         const access = await getClipWriteAccess(ctx, normalizedClipId, userId)
 
         if (!access || access.clip.projectId !== projectId || !access.clip.midi || await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: "rejected" as const }
-        const result = await setClipMidiRow(ctx, { projectId, clipId: normalizedClipId, midi })
+        const result = await editProject(ctx, projectId, () => setClipMidiRow(ctx, { projectId, clipId: normalizedClipId, midi }))
 
         if (!result.changed) return { status: "noop" as const }
-        await advanceProjectRevision(ctx, projectId)
 
         return { status: "applied" as const }
       },
@@ -1456,61 +1384,12 @@ export const serverSetMidiAndTiming = mutation({
         const midiChanged = !controlMidiEqual(access.clip.midi, normalizedMidi)
 
         if (!timingChanged && !midiChanged) return { status: 'noop' as const }
-        await ctx.db.patch(normalizedClipId, { ...timing, midi: normalizedMidi })
-        await advanceProjectRevision(ctx, projectId)
+        await withProjectEdit(ctx, projectId, async (edit) => {
+          await ctx.db.patch(normalizedClipId, { ...timing, midi: normalizedMidi })
+          edit.stamp()
+        })
 
         return { status: 'applied' as const }
-      },
-    })
-  },
-})
-
-export const createMany = mutation({
-  args: {
-    items: v.array(v.object({
-      projectId: v.string(),
-      trackId: v.id('tracks'),
-      startSec: v.number(),
-      duration: v.number(),
-      name: v.optional(v.string()),
-      sampleUrl: v.optional(v.string()),
-      assetKey: v.optional(v.string()),
-      sourceKind: v.optional(v.string()),
-      durationSec: v.optional(v.number()),
-      sampleRate: v.optional(v.number()),
-      channelCount: v.optional(v.number()),
-      leftPadSec: v.optional(v.number()),
-      midi: v.optional(midiValidator),
-      bufferOffsetSec: v.optional(v.number()),
-      audioWarp: v.optional(audioWarpValidator),
-      gain: v.optional(v.number()),
-      fades: v.optional(clipFadesValidator),
-      midiOffsetBeats: v.optional(v.number()),
-      color: v.optional(v.string()),
-      clipKind: v.optional(v.string()),
-    })),
-    operationId: v.optional(v.string()),
-  },
-  handler: async (ctx, { items, operationId }) => {
-    const userId = await requireAuthenticatedUserId(ctx)
-    const projectId = requireSingleProjectId(items)
-
-    return await runSharedOperationOnce(ctx, {
-      projectId,
-      userId,
-      operationId,
-      isResult: (value): value is Array<Id<'clips'> | null> => Array.isArray(value),
-      run: async () => {
-        const createdIds: Array<Id<'clips'> | null> = []
-
-        for (const item of items) {
-          const clipId = await createOwnedClip(ctx, { ...item, userId })
-          createdIds.push(clipId ?? null)
-        }
-
-        if (createdIds.some(Boolean) && projectId) await advanceProjectRevision(ctx, projectId)
-
-        return createdIds
       },
     })
   },
@@ -1552,23 +1431,27 @@ export const serverCreateMany = mutation({
       operationId,
       isResult: (value): value is Array<Id<'clips'> | null> => Array.isArray(value),
       run: async () => {
-        const createdIds: Array<Id<'clips'> | null> = []
+        if (!projectId) return []
 
-        for (const item of items) {
-          const trackId = ctx.db.normalizeId('tracks', item.trackId)
+        return await withProjectEdit(ctx, projectId, async (edit) => {
+          const createdIds: Array<Id<'clips'> | null> = []
 
-          if (!trackId) {
-            createdIds.push(null)
-            continue
+          for (const item of items) {
+            const trackId = ctx.db.normalizeId('tracks', item.trackId)
+
+            if (!trackId) {
+              createdIds.push(null)
+              continue
+            }
+
+            const clipId = await createOwnedClip(ctx, { ...item, trackId, userId })
+            createdIds.push(clipId ?? null)
           }
 
-          const clipId = await createOwnedClip(ctx, { ...item, trackId, userId })
-          createdIds.push(clipId ?? null)
-        }
+          if (createdIds.some(Boolean)) edit.stamp()
 
-        if (createdIds.some(Boolean) && projectId) await advanceProjectRevision(ctx, projectId)
-
-        return createdIds
+          return createdIds
+        })
       },
     })
   },
@@ -1581,13 +1464,13 @@ const removeManyForUser = async (
   projectId: string,
   deleteOperationId: string,
 ) => {
-  if (clipIds.length === 0) throw new Error('Clip deletion requires at least one clip.')
+  if (clipIds.length === 0) fail('validation', 'Clip deletion requires at least one clip.')
   const clipIdTexts = new Set<string>()
 
   for (const clipId of clipIds) {
     const clipIdText = String(clipId)
 
-    if (clipIdTexts.has(clipIdText)) throw new Error('Clip deletion cannot contain duplicate clip IDs.')
+    if (clipIdTexts.has(clipIdText)) fail('validation', 'Clip deletion cannot contain duplicate clip IDs.')
     clipIdTexts.add(clipIdText)
   }
 
@@ -1601,11 +1484,11 @@ const removeManyForUser = async (
 
   for (const { clipId, ownership } of ownerships) {
     if (!ownership) {
-      throw new Error(`Clip deletion target was not found: ${String(clipId)}.`)
+      fail('not-found', `Clip deletion target was not found: ${String(clipId)}.`)
     }
 
     if (ownership.clip.projectId !== projectId) {
-      throw new Error('Clip deletion targets must belong to the requested project.')
+      fail('validation', 'Clip deletion targets must belong to the requested project.')
     }
 
     if (ownership.owner.ownerUserId !== userId) {
@@ -1617,7 +1500,7 @@ const removeManyForUser = async (
       }
 
       if (!canWrite) {
-        throw new Error('Actor cannot delete one or more clips.')
+        fail('forbidden', 'Actor cannot delete one or more clips.')
       }
     }
 
@@ -1626,7 +1509,7 @@ const removeManyForUser = async (
 
   for (const { ownership } of deletable) {
     if (await isTrackLockedByOther(ctx, ownership.clip.trackId, userId)) {
-      throw new Error('Actor cannot delete clips on a locked track.')
+      fail('forbidden', 'Actor cannot delete clips on a locked track.')
     }
   }
 
@@ -1646,20 +1529,22 @@ const removeManyForUser = async (
   const removedClipIds: Id<'clips'>[] = []
   const recoveries: Array<{ sourceClipId: Id<'clips'>; recoveryId: Id<'clipDeletionRecoveries'> }> = []
 
-  for (const { clipId, ownership } of deletable) {
-    const deleted = await deleteClipRow(ctx, {
-      projectId: ownership.clip.projectId,
-      clipId,
-      ownershipId: ownership.owner._id,
-      recovery: { actorUserId: userId, deleteOperationId },
-    })
+  await withProjectEdit(ctx, projectId, async (edit) => {
+    for (const { clipId, ownership } of deletable) {
+      const deleted = await deleteClipRow(ctx, {
+        projectId: ownership.clip.projectId,
+        clipId,
+        ownershipId: ownership.owner._id,
+        recovery: { actorUserId: userId, deleteOperationId },
+      })
 
-    if (!deleted.changed || !deleted.recoveryId) throw new Error('Clip deletion target changed during deletion.')
-    recoveries.push({ sourceClipId: clipId, recoveryId: deleted.recoveryId })
-    removedClipIds.push(clipId)
-  }
+      if (!deleted.changed || !deleted.recoveryId) fail('validation', 'Clip deletion target changed during deletion.')
+      recoveries.push({ sourceClipId: clipId, recoveryId: deleted.recoveryId })
+      removedClipIds.push(clipId)
+    }
 
-  await advanceProjectRevision(ctx, projectId)
+    edit.stamp()
+  })
 
   return {
     removedClipIds,
@@ -1697,13 +1582,13 @@ export const serverRemoveMany = mutation({
       operationId,
       isResult: (value): value is ClipDeleteResult => clipDeleteResultSchema.safeParse(value).success,
       run: async () => {
-        if (clipIds.length === 0) throw new Error('Clip deletion requires at least one clip.')
+        if (clipIds.length === 0) fail('validation', 'Clip deletion requires at least one clip.')
         const normalizedClipIds: Id<'clips'>[] = []
 
         for (const clipId of clipIds) {
           const normalized = ctx.db.normalizeId('clips', clipId)
 
-          if (!normalized) throw new Error(`Invalid clip deletion ID: ${clipId}.`)
+          if (!normalized) fail('validation', `Invalid clip deletion ID: ${clipId}.`)
           normalizedClipIds.push(normalized)
         }
 
@@ -1852,8 +1737,10 @@ export const restoreDeleted = mutation({
       createdAt,
       expiresAt: createdAt + clipDeletionRecoveryReceiptLifetimeMs,
     })
-    await ctx.db.delete(recoveryId)
-    await advanceProjectRevision(ctx, recovery.projectId)
+    await withProjectEdit(ctx, recovery.projectId, async (edit) => {
+      await ctx.db.delete(recoveryId)
+      edit.stamp()
+    })
 
     return { status: 'applied' as const, clipId: String(restoredId) }
   },

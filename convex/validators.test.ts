@@ -3,7 +3,7 @@ import {
   AUDIO_EFFECT_KINDS,
   audioEffectKindsWithOperation,
 } from "@daw-browser/shared";
-import { literalUnion } from "./effectKindValidators";
+import { literalUnion } from "./validators";
 
 const literals = (validator: ReturnType<typeof literalUnion>) => validator.members.map((member) => member.value);
 

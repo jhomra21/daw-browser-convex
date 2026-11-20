@@ -90,3 +90,5 @@ export * from './track-kinds'
 export * from './track-routing-core'
 
 export * from './track-tree'
+
+export * from './worker-identity'

@@ -29,6 +29,7 @@ import type * as mixerChannels from "../mixerChannels.js";
 import type * as ownerships from "../ownerships.js";
 import type * as projectAccess from "../projectAccess.js";
 import type * as projectMembership from "../projectMembership.js";
+import type * as projectCascade from "../projectCascade.js";
 import type * as projectMixerSettings from "../projectMixerSettings.js";
 import type * as projectRows from "../projectRows.js";
 import type * as projects from "../projects.js";
@@ -74,6 +75,7 @@ declare const fullApi: ApiFromModules<{
   ownerships: typeof ownerships;
   projectAccess: typeof projectAccess;
   projectMembership: typeof projectMembership;
+  projectCascade: typeof projectCascade;
   projectMixerSettings: typeof projectMixerSettings;
   projectRows: typeof projectRows;
   projects: typeof projects;

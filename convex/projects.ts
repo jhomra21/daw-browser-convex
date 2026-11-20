@@ -4,6 +4,7 @@ import { projectR2DeletePrefixes } from "@daw-browser/shared";
 import { listAccessibleProjects, requireProjectRole } from "./projectAccess";
 import { requireAuthenticatedUserId } from "./identity";
 import { removeProjectMemberAccessAndTransferEntities } from "./projectMembership";
+import { deleteProjectRows } from "./projectCascade";
 import { enqueueMultipartAbortRows, enqueueR2DeleteRows } from "./r2Deletes";
 import { editProject, ensureOwnedProjectRow, getProjectRow, requireProjectRow } from "./projectRows";
 
@@ -41,55 +42,6 @@ const appliedRowOperation = <State extends object>(state: State): RowOperationRe
 
 const statusResult = <Status extends string>(status: Status) => ({ status });
 
-async function deleteRoomDataRows(ctx: MutationCtx, projectId: string) {
-  await Promise.all([
-    ctx.db.query("samples").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("assetFolders").withIndex("by_project", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("assetUploadReceipts").withIndex("by_project_status_updatedAt", (q) => q.eq("projectId", projectId))
-      .collect().then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("assetUploadSessions").withIndex("by_project_status", (q) => q.eq("projectId", projectId))
-      .collect().then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("assetUploadParts").withIndex("by_upload", (q) => q.eq("projectId", projectId))
-      .collect().then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("exports").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("effects").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("projectMessages").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("shareInvites").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("cloudBackups").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("mixerChannels").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("clips").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("projectMixerSettings").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("automationEnvelopes").withIndex("by_project", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("sidechainRoutes").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("controlCommits").withIndex("by_project_createdAt", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("controlApprovals").withIndex("by_project", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("controlRecoveries").withIndex("by_project_createdAt", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("sharedOperationResults").withIndex("by_room_user_operation", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("clipDeletionRecoveries").withIndex("by_project_expiresAt", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("clipDeletionRecoveryReceipts").withIndex("by_project_createdAt", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-  ]);
-}
-
 async function retainProjectMultipartAborts(ctx: MutationCtx, projectId: string, storageNamespace: string) {
   const sessions = (await ctx.db.query("assetUploadSessions")
     .withIndex("by_project_status", (q) => q.eq("projectId", projectId))
@@ -106,22 +58,6 @@ async function retainProjectMultipartAborts(ctx: MutationCtx, projectId: string,
       multipartUploadId: session.multipartUploadId,
     })),
   });
-}
-
-async function deleteRoomAuthRows(ctx: MutationCtx, projectId: string) {
-  await Promise.all([
-    ctx.db.query("ownerships").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-    ctx.db.query("projects").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
-      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
-  ]);
-}
-
-async function deleteRoomRows(ctx: MutationCtx, projectId: string) {
-  await Promise.all([
-    deleteRoomDataRows(ctx, projectId),
-    deleteRoomAuthRows(ctx, projectId),
-  ]);
 }
 
 async function findOwnedProject(ctx: { db: DatabaseReader }, projectId: string, userId: string) {
@@ -296,7 +232,7 @@ export const finalizeCloudRoomDeleteAsOwner = mutation({
     }
 
     await retainProjectMultipartAborts(ctx, projectId, ownerProject.storageNamespace);
-    await deleteRoomRows(ctx, projectId);
+    await deleteProjectRows(ctx, projectId);
     await enqueueR2DeleteRows(ctx, {
       projectId, storageNamespace: ownerProject.storageNamespace,
       keys: [...projectR2DeletePrefixes(projectId, ownerProject.storageNamespace)], kind: "project-prefix",

@@ -29,7 +29,7 @@ export const GRANULAR_AUTOMATION_DESCRIPTORS = {
   unit: 'milliseconds' | 'hz' | 'ratio' | 'semitones'
 }>>
 
-export const isGranularAutomationParameterId = (value: string): value is GranularAutomationParameterId => (
+const isGranularAutomationParameterId = (value: string): value is GranularAutomationParameterId => (
   Object.hasOwn(GRANULAR_AUTOMATION_DESCRIPTORS, value)
 )
 

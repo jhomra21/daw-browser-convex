@@ -510,10 +510,10 @@ export const COMPRESSOR_KNEE_DB_MIN = 0
 export const COMPRESSOR_KNEE_DB_MAX = 24
 export const COMPRESSOR_LOOKAHEAD_MS_MIN = 0
 export const COMPRESSOR_LOOKAHEAD_MS_MAX = 10
-export const COMPRESSOR_SIDECHAIN_FREQUENCY_HZ_MIN = 20
-export const COMPRESSOR_SIDECHAIN_FREQUENCY_HZ_MAX = 20000
-export const COMPRESSOR_SIDECHAIN_Q_MIN = 0.1
-export const COMPRESSOR_SIDECHAIN_Q_MAX = 18
+const COMPRESSOR_SIDECHAIN_FREQUENCY_HZ_MIN = 20
+const COMPRESSOR_SIDECHAIN_FREQUENCY_HZ_MAX = 20000
+const COMPRESSOR_SIDECHAIN_Q_MIN = 0.1
+const COMPRESSOR_SIDECHAIN_Q_MAX = 18
 
 const DEFAULT_COMPRESSOR_SIDECHAIN_PARAMS: CompressorSidechainParams = {
   enabled: false,
@@ -706,13 +706,7 @@ export function normalizeUtilityParams(input: UtilityParamsInput = {}): UtilityP
   }
 }
 
-export const normalizeUtilityParamsForUpdate = (input: UtilityParamsInput, existing?: UtilityParamsInput) => {
-  const base = existing === undefined ? {} : normalizeUtilityParams(existing)
-
-  return normalizeUtilityParams({ ...base, ...input })
-}
-
-export const serializeUtilityParams = (params: UtilityParams) => JSON.stringify({ version: 1, state: normalizeUtilityParams(params) })
+const serializeUtilityParams = (params: UtilityParams) => JSON.stringify({ version: 1, state: normalizeUtilityParams(params) })
 
 export const normalizeUtilityParamsEnvelope = (value: JsonValue): UtilityParamsEnvelope => {
   const envelope = readObject(value)
@@ -798,13 +792,7 @@ export function normalizeGateParams(input: GateParamsInput = {}): GateParams {
   }
 }
 
-export const normalizeGateParamsForUpdate = (input: GateParamsInput, existing?: GateParamsInput) => {
-  const base = existing === undefined ? {} : normalizeGateParams(existing)
-
-  return normalizeGateParams({ ...base, ...input, sidechain: { ...existing?.sidechain, ...input.sidechain } })
-}
-
-export const serializeGateParams = (params: GateParams) => JSON.stringify({ version: 1, state: normalizeGateParams(params) })
+const serializeGateParams = (params: GateParams) => JSON.stringify({ version: 1, state: normalizeGateParams(params) })
 
 export const normalizeGateParamsEnvelope = (value: JsonValue): GateParamsEnvelope => {
   const envelope = readObject(value)
@@ -871,7 +859,7 @@ export function normalizeLimiterParams(input: LimiterParamsInput = {}): LimiterP
   }
 }
 
-export const serializeLimiterParams = (params: LimiterParams) => JSON.stringify({ version: 1, state: normalizeLimiterParams(params) })
+const serializeLimiterParams = (params: LimiterParams) => JSON.stringify({ version: 1, state: normalizeLimiterParams(params) })
 
 export const normalizeLimiterParamsEnvelope = (value: JsonValue): LimiterParamsEnvelope => {
   const envelope = readObject(value)
@@ -963,7 +951,7 @@ export function normalizeAutoFilterParams(input: AutoFilterParamsInput = {}): Au
   }
 }
 
-export const serializeAutoFilterParams = (params: AutoFilterParams) => JSON.stringify({ version: 1, state: normalizeAutoFilterParams(params) })
+const serializeAutoFilterParams = (params: AutoFilterParams) => JSON.stringify({ version: 1, state: normalizeAutoFilterParams(params) })
 
 export const normalizeAutoFilterParamsEnvelope = (value: JsonValue): AutoFilterParamsEnvelope => {
   const envelope = readObject(value)

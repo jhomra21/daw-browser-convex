@@ -299,7 +299,7 @@ export const parseStrictSynthParams = (input: JsonValue): SynthParams | undefine
     : undefined
 }
 
-export const migrateLegacySynthParams = (legacy: LegacySynthParams): SynthParams => {
+const migrateLegacySynthParams = (legacy: LegacySynthParams): SynthParams => {
   const defaults = createDefaultSynthParams()
 
   return normalizeV2SynthParams({

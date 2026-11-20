@@ -4,7 +4,6 @@ import {
   pluginHealthSchema,
   pluginIdentitySchema,
   pluginManifestSchema,
-  type PluginHealth,
 } from '@daw-browser/plugin-host-protocol'
 
 const uuidSchema = z.string().uuid()
@@ -22,7 +21,7 @@ export type ExternalPluginJsonValue =
 
 const fingerprint = z.string().regex(/^[a-f0-9]{64}$/)
 
-export const vstLaunchReferenceSchema = z.object({
+const vstLaunchReferenceSchema = z.object({
   version: z.literal(1),
   classId: z.string().min(1).max(128),
   vendorId: z.string().min(1).max(256),
@@ -118,53 +117,20 @@ export const parseExternalProcessorValue = (value: ExternalPluginJsonValue): Ext
   return { success: true, data, migrated: true }
 }
 
-export const externalInstrumentSchema = externalProcessorSchema.extend({
+const externalInstrumentSchema = externalProcessorSchema.extend({
   manifest: pluginManifestSchema.refine((manifest) => manifest.role === 'instrument', 'External instrument requires an instrument manifest.'),
 })
 
 export type ExternalInstrument = z.infer<typeof externalInstrumentSchema>
 
-export const externalPluginDegradedPlaceholder = (
-  processor: ExternalProcessor,
-  health: PluginHealth,
-): ExternalProcessor => ({
-  ...processor,
-  bypassed: true,
-  health,
-})
-
 export type ExternalPluginRuntime =
   | { kind: 'unavailable'; processor: ExternalProcessor; reason: string }
   | { kind: 'degraded'; processor: ExternalProcessor; reason: string }
-
-export const resolveExternalPluginRuntime = (
-  processor: ExternalProcessor,
-  bridge: BridgeFeasibilityResult,
-): ExternalPluginRuntime => {
-  if (bridge.status !== 'unsupported') {
-    return { kind: 'unavailable', processor, reason: 'A supported native audio bridge has not been integrated.' }
-  }
-
-  return {
-    kind: 'degraded',
-    processor: externalPluginDegradedPlaceholder(processor, {
-      state: 'degraded',
-      reason: bridge.reason,
-      updatedAt: Date.now(),
-    }),
-    reason: bridge.reason,
-  }
-}
 
 export type ExternalEffectTiming = {
   latencyFrames: number
   tail: { kind: 'finite'; frames: number } | { kind: 'unbounded' }
 }
-
-export const getExternalEffectTiming = (processor: Pick<ExternalProcessor, 'latencyFrames' | 'tailFrames'>): ExternalEffectTiming => ({
-  latencyFrames: processor.latencyFrames,
-  tail: processor.tailFrames === null ? { kind: 'unbounded' } : { kind: 'finite', frames: processor.tailFrames },
-})
 
 export type BridgeCandidate = 'direct-native-mapping' | 'bounded-copy-transport' | 'browser-only-fallback'
 
@@ -218,12 +184,6 @@ export const evaluateBridgeFeasibility = (input: {
       : 'Browser-only fallback preserves the dry route without SharedArrayBuffer.',
     measuredAt: input.measuredAt,
   }
-}
-
-export const M0_BRIDGE_DECISION = {
-  decision: 'rejected',
-  rationale: 'The browser AudioEngine owns the live graph and exposes no native audio bridge. Its SPSC SharedArrayBuffer ring is browser-only.',
-  requiredEvidence: ['A measured browser-to-native bridge integration point', 'Realtime underrun and latency measurements', 'Desktop custom-scheme COOP/COEP compatibility tests'],
 }
 
 export type ScheduledPluginParameter = {
@@ -299,7 +259,7 @@ export const assertBrowserExportHasNoLiveExternalPlugins = (
   }
 }
 
-export const hybridFreezeJobSchema = z.object({
+const hybridFreezeJobSchema = z.object({
   id: uuidSchema,
   processor: pluginIdentitySchema,
   state: opaquePluginStateMetadataSchema,

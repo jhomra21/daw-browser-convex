@@ -20,8 +20,6 @@ export const nativeAudioHostFrameHeaderBytes = 16
 export const nativeAudioHostMaximumPayloadBytes = 1_048_576
 export const nativeAudioHostMaximumMeterEntries = 64
 export const nativeAudioHostMaximumSpectrumBins = 1024
-export const nativeAudioHostMaximumSpectrumPayloadBytes = 8_192
-export const nativeAudioHostMaximumProcessorStatePatchBytes = 512
 
 export const nativeAudioHostControlTypes = {
   hostHello: 1,
@@ -126,7 +124,6 @@ export const nativeAudioHostMaximumProcessorEvents = 256
 export const nativeAudioHostMaximumInstrumentEvents = 256
 export const nativeAudioHostMaximumSourceEvents = 256
 export const nativeAudioHostMaximumScheduleInstanceIdBytes = 256
-export const nativeAudioHostScheduleWindowHeaderBytes = 72
 export const nativeAudioHostScheduleProgressBytes = 112
 export const nativeAudioHostProcessorPatchStatusBytes = 20
 
@@ -135,20 +132,10 @@ export const nativeAudioHostProcessorPatchStatusBytes = 20
  * says no audio session or core existed to take the request. ACK text is for people and is never classified.
  */
 export const nativeAudioHostAckStatus = { refused: 0, accepted: 1, unavailable: 2 } as const
-export const nativeAudioHostMaximumSampleRateHz = 384_000
-export const nativeAudioHostMaximumFramesPerBlock = 8_192
+const nativeAudioHostMaximumSampleRateHz = 384_000
+const nativeAudioHostMaximumFramesPerBlock = 8_192
 
-/**
- * Prepared Stretch assets remain eagerly materialized before native export.
- * Keep their bounded working set separate from the duration-independent
- * mapped-source path.
- */
-export const nativeAudioHostMaximumStretchPreparationBytes = 512 * 1024 * 1024
-export const nativeAudioHostMaximumCapturedVstStateBytes = 512 * 1024
-
-export const nativeOfflineRenderPcmBytes = (totalFrames: number, channelCount: number) => (
-  totalFrames * channelCount * Float32Array.BYTES_PER_ELEMENT
-)
+const nativeAudioHostMaximumCapturedVstStateBytes = 512 * 1024
 
 const nativeOfflinePcmAssetSchema = z.object({
   sessionAssetId: z.number().int().positive().max(0xffff_ffff),

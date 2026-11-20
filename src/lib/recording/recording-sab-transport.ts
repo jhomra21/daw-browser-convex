@@ -10,6 +10,7 @@ import {
   type WriterOutboundMessage,
 } from '../../../packages/audio-engine/src/recording/recording-protocol'
 import type { RecordingCaptureTransport, RecordingMessageEndpoint } from '../../../packages/audio-engine/src/recording/recording-runtime'
+import { createBrowserRecordingWriter, deferred, type Deferred } from './recording-worker-session'
 
 type SabNotifyMessage = {
   type: 'sab-notify'
@@ -35,24 +36,6 @@ type RecordingSabTransportOptions = {
   worklet: WorkletEndpoint
   buffers?: RecorderSabRingBuffers
   worker?: WorkerEndpoint
-}
-
-type Deferred<T> = {
-  promise: Promise<T>
-  resolve: (value: T) => void
-  reject: (error: Error) => void
-}
-
-const deferred = <T>(): Deferred<T> => {
-  let resolve = (_value: T) => {}
-  let reject = (_error: Error) => {}
-
-  const promise = new Promise<T>((onResolve, onReject) => {
-    resolve = onResolve
-    reject = onReject
-  })
-
-  return { promise, resolve, reject }
 }
 
 export const createRecordingSabTransport = (
@@ -233,17 +216,5 @@ export const createRecordingSabTransport = (
       if (state === 'closed' || state === 'failed') return
       fail('Recording transport terminated.')
     },
-  }
-}
-
-const createBrowserRecordingWriter = (): WorkerEndpoint => {
-  const worker = new Worker(new URL('../../workers/recording-writer-worker.ts', import.meta.url), { type: 'module' })
-
-  return {
-    postMessage: (message) => worker.postMessage(message),
-    setMessageHandler: (handler) => {
-      worker.onmessage = (event: MessageEvent<unknown>) => handler(readWriterOutboundMessage(event.data))
-    },
-    terminate: () => worker.terminate(),
   }
 }

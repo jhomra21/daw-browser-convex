@@ -4,7 +4,8 @@ import {
 } from "@daw-browser/desktop-protocol/ipc-channels"
 import type { NativeHostTransport } from "@daw-browser/audio-engine/native-host-wire"
 import { z } from "zod"
-import { nativeSessionEnvelopeSchema, unsigned32Schema } from "../native-session-schemas"
+import { nativeSessionEnvelopeSchema } from "../native-session-schemas"
+import { unsigned32Schema, unsigned64Max } from "@daw-browser/desktop-protocol/wire-patterns"
 import type { NativeSessionEvent, NativeSessionIpcHandler } from "./native-session-access"
 import type { nativeSessionFailure } from "../audio-host"
 
@@ -20,7 +21,7 @@ const transportSchema = z.object({
   cycleActive: z.boolean().optional(),
   cycleStartSec: z.number().finite().min(0).optional(),
   cycleEndSec: z.number().finite().min(0).optional(),
-  transitionId: z.bigint().positive().max(0xffff_ffff_ffff_ffffn).optional(),
+  transitionId: z.bigint().positive().max(unsigned64Max).optional(),
 }).passthrough().refine((value) => (
   (value.cycleStartSec === undefined && value.cycleEndSec === undefined)
   || (

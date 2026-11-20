@@ -7,7 +7,8 @@ import { nativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol
 import type { NativeHostRecordingConfiguration } from "@daw-browser/audio-engine/native-host-wire"
 import { projectIdSchemaV1 } from "@daw-browser/desktop-protocol"
 import { z } from "zod"
-import { nativeSessionEnvelopeSchema, unsigned32Schema } from "../native-session-schemas"
+import { nativeSessionEnvelopeSchema } from "../native-session-schemas"
+import { unsigned32Schema, unsigned64Max } from "@daw-browser/desktop-protocol/wire-patterns"
 import type {
   RecordingConfigureRequest,
   RecordingStartRequest,
@@ -36,7 +37,7 @@ const recordingConfigurationSchema = z.object({
   punchStartFrame: z.number().int().safe().min(0),
   punchEndFrame: z.number().int().safe().min(0).nullable(),
   monitoring: z.boolean(),
-  targetNodeId: z.bigint().positive().max(0xffff_ffff_ffff_ffffn),
+  targetNodeId: z.bigint().positive().max(unsigned64Max),
 }).strict().refine((value) => (
   value.inputChannels.length === value.channelCount
   && (value.punchEndFrame === null || value.punchEndFrame >= value.punchStartFrame)

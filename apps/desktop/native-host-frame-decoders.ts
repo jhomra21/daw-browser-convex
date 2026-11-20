@@ -2,7 +2,11 @@ import { maxVst3WorkerEventsPerBlock } from "@daw-browser/plugin-host-protocol"
 import {
   nativeAudioHostFrameHeaderBytes as headerBytes,
   nativeAudioHostMaximumMeterEntries as maximumMeterEntries,
+  nativeAudioHostCodeName,
+  nativeAudioHostLifecycleStates,
   nativeAudioHostMaximumSpectrumBins as maximumSpectrumBins,
+  nativeAudioHostRevisionContinuities,
+  nativeAudioHostRevisionStatusCodes,
   nativeAudioHostScheduleProgressBytes,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
@@ -17,9 +21,9 @@ import type { NativeVstEditorStatus } from "./native-request-broker"
 
 export const decodeDiagnostics = (frame: Buffer): NativeHostDiagnostics | undefined => {
   if (frame.byteLength < headerBytes + 256 || frame.byteLength > headerBytes + 512) return undefined
-  const state = frame.readUInt32BE(headerBytes)
+  const state = nativeAudioHostCodeName(nativeAudioHostLifecycleStates, frame.readUInt32BE(headerBytes))
 
-  if (state !== 0 && state !== 1 && state !== 2 && state !== 3) return undefined
+  if (!state) return undefined
   const present = frame.readUInt32BE(headerBytes + 88)
 
   if (present > 1) return undefined
@@ -65,7 +69,7 @@ export const decodeDiagnostics = (frame: Buffer): NativeHostDiagnostics | undefi
       faults: frame.readBigUInt64BE(performanceOffset + 124),
       restarts: frame.readBigUInt64BE(performanceOffset + 132),
     },
-    state: state === 0 ? "idle" : state === 1 ? "configured" : state === 2 ? "running" : "faulted",
+    state,
     activeRevision: frame.readUInt32BE(headerBytes + 4),
     preparedRevision: frame.readUInt32BE(headerBytes + 8),
     retiredRevision: frame.readUInt32BE(headerBytes + 12),
@@ -92,25 +96,8 @@ export const decodeGraphRevisionStatus = (frame: Buffer): NativeGraphRevisionSta
   const code = frame.readUInt32BE(headerBytes)
   const continuityCode = frame.readUInt32BE(headerBytes + 4)
 
-  const continuity = continuityCode === 1 ? "accepted"
-    : continuityCode === 2 ? "fallback"
-    : continuityCode === 3 ? "rejected"
-    : "not-evaluated"
-
-  const status = code === 1 ? "prepared"
-    : code === 2 ? "published"
-    : code === 3 ? "retired"
-    : code === 4 ? "rolled-back"
-    : code === 5 ? "stale-revision"
-    : code === 6 ? "invalid-revision"
-    : code === 7 ? "prepare-failed"
-    : code === 8 ? "publish-failed"
-    : code === 9 ? "retirement-not-safe"
-    : code === 10 ? "retirement-capacity-exceeded"
-    : code === 11 ? "publish-pending"
-    : code === 12 ? "rebase-required"
-    : code === 13 ? "capture-target-locked"
-    : undefined
+  const continuity = nativeAudioHostCodeName(nativeAudioHostRevisionContinuities, continuityCode) ?? "not-evaluated"
+  const status = nativeAudioHostCodeName(nativeAudioHostRevisionStatusCodes, code)
 
   if (!status) return undefined
 

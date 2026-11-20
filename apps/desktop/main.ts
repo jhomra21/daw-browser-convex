@@ -7,7 +7,8 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { z } from "zod"
-import { nativeEditorCommandSchema, nativeSessionEnvelopeSchema, unsigned32Schema, uuidSchema } from "./native-session-schemas"
+import { nativeEditorCommandSchema, nativeSessionEnvelopeSchema } from "./native-session-schemas"
+import { requestIdSchema, sha256HexPattern, sha256HexSchema, unsigned32Schema, unsigned64Max, uuidSchema } from "@daw-browser/desktop-protocol/wire-patterns"
 import {
   desktopFrameSchemaV1,
   desktopHelloSchemaV1,
@@ -28,6 +29,7 @@ import {
   hostErrorSchemaV1,
   hostErrorV2,
   isDesktopControlOperation,
+  recordingSpoolMaximumReadBytes,
   type DesktopFrameV1,
   type DesktopOperationV1,
   type DesktopProtocolVersion,
@@ -168,11 +170,14 @@ import { stampGraphRevision } from "@daw-browser/audio-engine/native-host-wire"
 import {
   decodeNativeExternalAttachmentPlan,
   maxVst3WorkerFrames,
+  maxVst3WorkerSampleRateHz,
+  maxVst3WorkerStateBytes,
   nativeVst3InsertionPreflightRequestSchema,
 } from "@daw-browser/plugin-host-protocol"
 import {
-  nativeAudioHostMappedAssetPageHeaderBytes,
+  nativeAudioHostMaximumMappedAssetPageBytes,
   nativeAudioHostMaximumPayloadBytes,
+  nativeAudioHostMaximumSerializedPlanBytes,
   nativeAudioHostScheduleProgressBytes,
   nativeOfflineRenderPlanSchema,
 } from "@daw-browser/desktop-protocol/native-audio-host"
@@ -210,7 +215,6 @@ const recordingStartDiagnostic = createRecordingStartDiagnostic(
 )
 
 const positiveUnsigned32Schema = unsigned32Schema.min(1)
-const requestIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/)
 
 const recoveryCompletionSchema = z.object({
   powerGeneration: z.number().int().safe(),
@@ -236,7 +240,7 @@ const offlineMappedPageResponseSchema = z.object({
     frameCount: positiveUnsigned32Schema,
     planarPcm: z.instanceof(Uint8Array).refine((value) => (
       value.byteLength > 0
-      && value.byteLength <= nativeAudioHostMaximumPayloadBytes - nativeAudioHostMappedAssetPageHeaderBytes
+      && value.byteLength <= nativeAudioHostMaximumMappedAssetPageBytes
     )),
   }).strict().optional(),
   error: z.string().max(256).optional(),
@@ -263,13 +267,13 @@ const nativeSessionAssetSchema = z.object({
 
 const nativeAttachmentCoordinationSchema = z.object({
   projectId: projectIdSchemaV1,
-  serializedPlan: z.string().refine((value) => Buffer.byteLength(value, "utf8") <= 1_048_576),
-  sampleRateHz: z.number().finite().positive().max(384_000),
+  serializedPlan: z.string().refine((value) => Buffer.byteLength(value, "utf8") <= nativeAudioHostMaximumSerializedPlanBytes),
+  sampleRateHz: z.number().finite().positive().max(maxVst3WorkerSampleRateHz),
   requiredVstStateInstanceIds: z.array(uuidSchema).max(64).optional(),
   capturedVstStates: z.array(z.object({
     instanceId: uuidSchema,
-    bytes: z.instanceof(Uint8Array).refine((value) => value.byteLength <= 512 * 1024),
-    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    bytes: z.instanceof(Uint8Array).refine((value) => value.byteLength <= maxVst3WorkerStateBytes),
+    sha256: sha256HexSchema,
   }).strict()).max(64).optional(),
 }).passthrough()
 
@@ -286,7 +290,7 @@ const nativeMappedAssetEnvelopeSchema = nativeSessionEnvelopeSchema(z.object({
   frameCount: z.number().int().positive().safe(),
   sampleRateHz: positiveUnsigned32Schema,
   channelCount: positiveUnsigned32Schema.max(64),
-  contentHashPrefix: z.bigint().nonnegative().max(0xffff_ffff_ffff_ffffn).optional(),
+  contentHashPrefix: z.bigint().nonnegative().max(unsigned64Max).optional(),
   preparedStretchArtifactId: z.string().min(1).max(512).optional(),
 }).strict())
 
@@ -294,7 +298,7 @@ const nativeMappedAssetPageEnvelopeSchema = nativeSessionEnvelopeSchema(z.object
   sessionAssetId: positiveUnsigned32Schema,
   startFrame: z.number().int().nonnegative().safe(),
   frameCount: positiveUnsigned32Schema,
-  planarPcm: z.instanceof(Uint8Array).refine((value) => value.byteLength > 0 && value.byteLength <= 1_048_560),
+  planarPcm: z.instanceof(Uint8Array).refine((value) => value.byteLength > 0 && value.byteLength <= nativeAudioHostMaximumMappedAssetPageBytes),
 }).strict())
 
 const nativeInstanceEnvelopeSchema = nativeSessionEnvelopeSchema(uuidSchema)
@@ -1798,8 +1802,8 @@ const registerIpc = () => {
       const state = await supervisor.getVstState(instanceId.data)
 
       if (
-        state.bytes.byteLength > 512 * 1024
-        || !/^[a-f0-9]{64}$/.test(state.sha256)
+        state.bytes.byteLength > maxVst3WorkerStateBytes
+        || !sha256HexPattern.test(state.sha256)
         || createHash("sha256").update(state.bytes).digest("hex") !== state.sha256
       ) return { ok: false as const, error: "The native VST state response is invalid." }
       attachmentLedger.capturedFromLive(instanceId.data, state.sha256)
@@ -2037,7 +2041,7 @@ const registerIpc = () => {
   }).strict()
 
   const revisionPrepare = revisionBinding.extend({
-    bytes: z.instanceof(Uint8Array).refine((bytes) => bytes.byteLength >= 36 && bytes.byteLength <= 1_048_576),
+    bytes: z.instanceof(Uint8Array).refine((bytes) => bytes.byteLength >= 36 && bytes.byteLength <= nativeAudioHostMaximumPayloadBytes),
     projectRevision: z.number().int().nonnegative().safe(),
     requestedPublicationFrame: z.bigint().nonnegative().max(0x7fff_ffff_ffff_ffffn).optional(),
   }).strict()
@@ -2159,7 +2163,7 @@ const registerIpc = () => {
   })
   ipcMain.handle(recordingSpoolReadChannel, async (event, value) => {
     const request = z.object({ scope: spoolScopeSchema, takeId: spoolTakeIdSchema,
-      offset: z.number().int().nonnegative().safe(), length: z.number().int().min(1).max(1048576) }).strict().parse(value)
+      offset: z.number().int().nonnegative().safe(), length: z.number().int().min(1).max(recordingSpoolMaximumReadBytes) }).strict().parse(value)
 
     return spoolFor(event).read({ ...request.scope, rendererGeneration: generation }, request.takeId, request.offset, request.length)
   })

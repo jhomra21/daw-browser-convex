@@ -1,3 +1,5 @@
+import { nativeAudioHostSpoolStates } from "@daw-browser/desktop-protocol/native-audio-host"
+import { sha256HexSchema, unsigned64Max } from "@daw-browser/desktop-protocol/wire-patterns"
 import { randomBytes, randomUUID } from "node:crypto"
 import { constants, type BigIntStats } from "node:fs"
 import { link, lstat, mkdir, open, opendir, realpath, unlink } from "node:fs/promises"
@@ -5,6 +7,7 @@ import path from "node:path"
 import { z } from "zod"
 import {
   maximumRecordingSpoolBlockFrames,
+  recordingSpoolMaximumReadBytes,
   recordingSpoolBlockHeaderBytes,
   recordingSpoolSampleBytes,
 } from "@daw-browser/desktop-protocol"
@@ -48,18 +51,18 @@ const integer = z.number().int().nonnegative().safe()
 const decimal = z.string().regex(/^(0|[1-9][0-9]*)$/)
 
 const intentSchema = z.object({
-  version: z.literal(1), token: z.string().regex(/^[a-f0-9]{64}$/),
+  version: z.literal(1), token: sha256HexSchema,
   projectIntent: z.string().min(1).max(256).regex(/^[^\0\r\n]+$/),
   intentAuthority: z.literal("trusted-renderer-declared"), rendererGeneration: integer,
   hostGeneration: integer, projectGeneration: integer.optional(), generation: integer.min(1),
-  sessionId: decimal.refine((value) => BigInt(value) > 0n && BigInt(value) <= 0xffff_ffff_ffff_ffffn), channelCount: z.union([z.literal(1), z.literal(2)]),
+  sessionId: decimal.refine((value) => BigInt(value) > 0n && BigInt(value) <= unsigned64Max), channelCount: z.union([z.literal(1), z.literal(2)]),
   sampleRateHz: z.null(), stage: z.literal("configuring"),
 }).strict()
 
 const readySchema = intentSchema.extend({ sampleRateHz: integer.min(8000).max(384000), stage: z.literal("ready") })
 
 const proofSchema = z.object({
-  generation: integer.min(1), sessionId: decimal.refine((value) => BigInt(value) > 0n && BigInt(value) <= 0xffff_ffff_ffff_ffffn), channelCount: z.union([z.literal(1), z.literal(2)]),
+  generation: integer.min(1), sessionId: decimal.refine((value) => BigInt(value) > 0n && BigInt(value) <= unsigned64Max), channelCount: z.union([z.literal(1), z.literal(2)]),
   sampleRateHz: integer.min(8000).max(384000), frames: integer, bytes: integer, blocks: integer,
   fileDevice: decimal, fileInode: decimal, rootDevice: decimal, rootInode: decimal,
 }).strict()
@@ -214,7 +217,7 @@ const privateRoot = async (input: Pick<RecordingIntent, "userData" | "verifyDire
 export const prepareRecordingSpool = async (intent: RecordingIntent) => {
   const input = { ...intent }
 
-  if (input.sessionId < 1n || input.sessionId > 0xffff_ffff_ffff_ffffn) throw new Error("Invalid recording project intent.")
+  if (input.sessionId < 1n || input.sessionId > unsigned64Max) throw new Error("Invalid recording project intent.")
   const token = randomBytes(32).toString("hex")
 
   const parsed = intentSchema.safeParse({ version: 1, token, projectIntent: input.projectId,
@@ -507,7 +510,7 @@ export const createRecordingSpoolRegistry = (input: Pick<RecordingIntent, "userD
       const operation = (async () => {
         const spool = status.spool
 
-        if (!spool || spool.state !== 2 || !spool.published || spool.partialRetained || spool.error !== 0 || spool.systemError !== 0
+        if (!spool || spool.state !== nativeAudioHostSpoolStates.complete || !spool.published || spool.partialRetained || spool.error !== 0 || spool.systemError !== 0
           || status.active || status.fatal || status.queuedBlocks !== 0 || status.droppedFrames !== 0 || status.droppedBlocks !== 0
           || status.generation !== take.manifest.generation || status.sessionId.toString() !== take.manifest.sessionId
           || status.capturedFrames !== spool.writtenFrames) throw new Error("Recording Complete binding mismatch.")
@@ -543,7 +546,7 @@ export const createRecordingSpoolRegistry = (input: Pick<RecordingIntent, "userD
       const take = takes.get(takeId)
       const spool = status.spool
 
-      if (!take || !spool || (spool.state !== 3 && spool.state !== 4) || spool.published || spool.partialRetained
+      if (!take || !spool || (spool.state !== nativeAudioHostSpoolStates.failed && spool.state !== nativeAudioHostSpoolStates.cancelled) || spool.published || spool.partialRetained
         || status.active || status.generation !== take.manifest.generation || status.sessionId.toString() !== take.manifest.sessionId)
         throw new Error("Recording terminal ownership is unresolved; source retained.")
       await assertAbsentSources(take)
@@ -584,7 +587,7 @@ export const createRecordingSpoolRegistry = (input: Pick<RecordingIntent, "userD
     async read(scope: RecordingScope, takeId: string, offset: number, length: number) {
       const take = lookup(scope, takeId)
 
-      if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1 || length > 1048576
+      if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1 || length > recordingSpoolMaximumReadBytes
         || !take.proof || offset > take.proof.bytes || take.release) throw new Error("Recording read range is invalid.")
 
       const bytes = await withSource(take, async (handle) => {

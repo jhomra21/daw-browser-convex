@@ -1,3 +1,4 @@
+import { nativeAudioHostPageBytes } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeHostTransport } from "@daw-browser/audio-engine/native-host-wire"
 import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
 import type { LivePlaybackSnapshot, LivePlaybackTransport } from "~/lib/live-playback-snapshot"
@@ -111,7 +112,7 @@ export const nativeSnapshotSupportError = (snapshot: LivePlaybackSnapshot): stri
 }
 
 // The host locks sample memory in whole pages.
-export const pageRoundedBytes = (bytes: number) => Math.ceil(bytes / 16_384) * 16_384
+export const pageRoundedBytes = (bytes: number) => Math.ceil(bytes / nativeAudioHostPageBytes) * nativeAudioHostPageBytes
 
 export const validateInstrumentAssetBudget = (
   assets: readonly AudioCoreGraphSnapshot["assets"][number][],

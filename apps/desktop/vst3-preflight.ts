@@ -5,6 +5,7 @@ import path from "node:path"
 import {
   decodeNativeVst3WorkerHello,
   nativeVst3PreflightProtocolVersion,
+  maxVst3WorkerSampleRateHz,
   nativeVst3WorkerArtifactId,
   nativeVst3WorkerArtifactVersion,
   nativeVst3WorkerControlProtocolVersion,
@@ -79,7 +80,7 @@ export const preflightNativeVst3Worker = async (input: {
     return unavailable("worker-unavailable", "The packaged native VST3 worker is unavailable.")
   }
 
-  if (!Number.isFinite(input.sampleRateHz) || input.sampleRateHz <= 0 || input.sampleRateHz > 384_000) {
+  if (!Number.isFinite(input.sampleRateHz) || input.sampleRateHz <= 0 || input.sampleRateHz > maxVst3WorkerSampleRateHz) {
     return unavailable("worker-unavailable", "The native VST3 worker preflight sample rate is invalid.")
   }
 

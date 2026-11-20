@@ -355,7 +355,7 @@ const fileCapabilities = createFileCapabilityManager({
   privateTempDirectory: () => path.join(app.getPath("userData"), "output-temp"),
 })
 
-const scopes = createRequestScopes()
+const scopes = createRequestScopes(fileCapabilities)
 
 const controlSocket = createControlSocket({
   appName,
@@ -409,13 +409,7 @@ const applyRendererInvalidation = (
   const previousGeneration = invalidation.previousGeneration
   rendererSession.advanceGeneration(invalidation.generation)
   recordingSessionOwner.invalidateRenderer()
-
-  for (const scope of scopes.importScopes.values()) scopes.settleCapabilityRevocation(fileCapabilities.revokeRequest(scope))
-
-  for (const scope of scopes.importCandidates.values()) scopes.settleCapabilityRevocation(fileCapabilities.revokeRequest(scope))
-  scopes.importScopes.clear()
-  scopes.importCandidates.clear()
-  scopes.terminalImportsAwaitingScope.clear()
+  scopes.releaseImports()
   rendererSession.rejectEditorStateAcks(message)
   abortOfflineRenderJobs()
   applicationMenuController.reset()
@@ -503,25 +497,13 @@ const registerIpc = () => {
     if (!parsed.success || parsed.data.generation !== rendererSession.generation()) return
 
     if (parsed.data.frame.type === "export-terminal") {
-      const scope = scopes.exportScopes.get(parsed.data.frame.jobId)
-
-      if (scope) {
-        scopes.exportScopes.delete(parsed.data.frame.jobId)
-        scopes.settleCapabilityRevocation(fileCapabilities.revokeRequest(scope))
-      } else if (scopes.terminalExportsAwaitingScope.size < 1024) scopes.terminalExportsAwaitingScope.add(parsed.data.frame.jobId)
+      scopes.exportTerminal(parsed.data.frame.jobId)
 
       return
     }
 
     if (parsed.data.frame.type === "import-terminal") {
-      const scope = scopes.importScopes.get(parsed.data.frame.jobId)
-
-      if (scope) {
-        scopes.importScopes.delete(parsed.data.frame.jobId)
-        scopes.settleCapabilityRevocation(fileCapabilities.revokeRequest(scope))
-      } else if (scopes.terminalImportsAwaitingScope.size < 1024) {
-        scopes.terminalImportsAwaitingScope.add(parsed.data.frame.jobId)
-      }
+      scopes.importTerminal(parsed.data.frame.jobId)
 
       return
     }

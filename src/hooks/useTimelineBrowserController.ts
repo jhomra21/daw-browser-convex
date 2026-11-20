@@ -3,7 +3,7 @@ import { useProjectAssetFolders, useProjectSamples, type ProjectAssetFolder } fr
 import type { BrowserFolderRow, BrowserItem, BrowserItemSource, BrowserSection, BrowserTreeRow, TimelineLeftBrowserModel, TimelineLeftBrowserState } from "~/lib/timeline-browser/browser-types";
 import type { TimelineDeviceInsertActions } from "~/lib/timeline-device-insert-actions";
 import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData, type SampleDragData } from "~/lib/sample-drag-data";
-import { createBrowserDeviceDrag } from "~/components/timeline/browser/create-browser-device-drag";
+import { createBrowserDeviceDrag } from "~/hooks/create-browser-device-drag";
 import type { BrowserDragPayload, BrowserDropTarget } from "~/lib/timeline-browser/browser-drag-types";
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";

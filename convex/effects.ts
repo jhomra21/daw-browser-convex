@@ -185,10 +185,6 @@ const effectWriteOutcome = (result: EffectRowWriteResult): EffectWriteOutcome =>
   result.status === 'invalid' ? { status: 'invalid' } : { status: 'applied', effectId: result.effectId, revision: result.revision }
 )
 
-const legacyEffectWriteId = (result: EffectRowWriteResult): Id<'effects'> | undefined => (
-  result.status === 'invalid' ? undefined : result.effectId
-)
-
 const sanitizeArpParams = (params: {
   enabled: boolean
   pattern: 'up' | 'down' | 'updown' | 'random'
@@ -859,34 +855,7 @@ export const listByTrack = query({
 // Synth: set or create synth params for a track
 
 // Arpeggiator: set or create arpeggiator params for a track
-export const setArpeggiatorParams = mutation({
-  args: {
-    projectId: v.string(),
-    trackId: v.id('tracks'),
-    params: arpeggiatorParamsValidator,
-  },
-  handler: async (ctx, { projectId, trackId, params }) => {
-    const userId = await requireAuthenticatedUserId(ctx)
-
-    return legacyEffectWriteId(await setArpeggiatorForUser(ctx, { projectId, userId, trackId, params }))
-  },
-})
-
 // Set or create the Reverb params for a given track
-export const setReverbParams = mutation({
-  args: {
-    projectId: v.string(),
-    trackId: v.id("tracks"),
-    instanceId: v.optional(v.string()),
-    params: reverbParamsValidator,
-  },
-  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
-    const userId = await requireAuthenticatedUserId(ctx);
-
-    return legacyEffectWriteId(await upsertTrackEffectForUser(ctx, { projectId, userId, trackId, type: 'reverb', instanceId, params }));
-  },
-});
-
 // Master-level EQ (per room)
 
 // Reverb: get first reverb row for a track

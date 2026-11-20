@@ -9,6 +9,7 @@ import {
   normalizeMixerLockState,
   removeTrackRoutingReferences,
   removeTracksRoutingReferences,
+  type MixerSend,
 } from "./mixerChannels";
 import {
   sanitizeChannelRole,
@@ -785,15 +786,6 @@ const unlockTrackForUser = async (ctx: any, trackId: any, userId: string) => {
   return { ok: true };
 }
 
-export const create = mutation({
-  args: { projectId: v.string(), name: v.optional(v.string()), index: v.optional(v.number()), kind: v.optional(v.string()), channelRole: v.optional(v.string()), collapsed: v.optional(v.boolean()), color: v.optional(v.string()), operationId: v.optional(v.string()) },
-  handler: async (ctx, { projectId, name, index, kind, channelRole, collapsed, color, operationId }) => {
-    const userId = await requireAuthenticatedUserId(ctx);
-
-    return await createTrackForUser(ctx, { projectId, userId, name, index, kind, channelRole, collapsed, color, operationId });
-  },
-});
-
 export const serverCreate = mutation({
   args: {
     projectId: v.string(),
@@ -812,12 +804,15 @@ export const serverCreate = mutation({
   },
 });
 
+const setTrackVolumeForUser = async (ctx: MutationCtx, userId: string, trackId: Id<"tracks">, volume: number) => {
+  const { track } = await requireTrackOwnerForWrite(ctx, trackId, userId);
+  await editProject(ctx, track.projectId, () => setTrackVolumeRow(ctx, { projectId: track.projectId, trackId, volume }));
+};
+
 export const setVolume = mutation({
   args: { trackId: v.id("tracks"), volume: v.number() },
   handler: async (ctx, { trackId, volume }) => {
-    const userId = await requireAuthenticatedUserId(ctx);
-    const { track } = await requireTrackOwnerForWrite(ctx, trackId, userId);
-    await editProject(ctx, track.projectId, () => setTrackVolumeRow(ctx, { projectId: track.projectId, trackId, volume }));
+    await setTrackVolumeForUser(ctx, await requireAuthenticatedUserId(ctx), trackId, volume);
   },
 });
 
@@ -828,13 +823,7 @@ export const serverSetVolume = mutation({
     const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
 
     if (!normalizedTrackId) throw new Error("Track not found.");
-    const { track } = await requireTrackOwnerForWrite(ctx, normalizedTrackId, userId);
-
-    await editProject(ctx, track.projectId, () => setTrackVolumeRow(ctx, {
-      projectId: track.projectId,
-      trackId: normalizedTrackId,
-      volume,
-    }));
+    await setTrackVolumeForUser(ctx, userId, normalizedTrackId, volume);
   },
 });
 
@@ -885,6 +874,17 @@ export const serverSetMix = mutation({
   },
 });
 
+const setTrackRoutingForUser = async (
+  ctx: MutationCtx,
+  userId: string,
+  input: { trackId: Id<"tracks">; outputTargetId?: Id<"tracks"> | null; sends?: MixerSend[] },
+) => {
+  const { track } = await requireTrackOwnerForWrite(ctx, input.trackId, userId);
+  await requireTrackNotLockedByOther(ctx, track, userId);
+
+  await editProject(ctx, track.projectId, () => setTrackRoutingRow(ctx, { projectId: track.projectId, ...input }));
+};
+
 export const setRouting = mutation({
   args: {
     trackId: v.id("tracks"),
@@ -895,17 +895,8 @@ export const setRouting = mutation({
       tap: v.optional(sendTapValidator),
     }))),
   },
-  handler: async (ctx, { trackId, outputTargetId, sends }) => {
-    const userId = await requireAuthenticatedUserId(ctx);
-    const { track } = await requireTrackOwnerForWrite(ctx, trackId, userId);
-    await requireTrackNotLockedByOther(ctx, track, userId);
-
-    await editProject(ctx, track.projectId, () => setTrackRoutingRow(ctx, {
-      projectId: track.projectId,
-      trackId,
-      outputTargetId,
-      sends,
-    }));
+  handler: async (ctx, input) => {
+    await setTrackRoutingForUser(ctx, await requireAuthenticatedUserId(ctx), input);
   },
 });
 
@@ -943,15 +934,11 @@ export const serverSetRouting = mutation({
       throw new Error("Send target track not found.");
     }
 
-    const { track } = await requireTrackOwnerForWrite(ctx, normalizedTrackId, userId);
-    await requireTrackNotLockedByOther(ctx, track, userId);
-
-    await editProject(ctx, track.projectId, () => setTrackRoutingRow(ctx, {
-      projectId: track.projectId,
+    await setTrackRoutingForUser(ctx, userId, {
       trackId: normalizedTrackId,
       outputTargetId: normalizedOutputTargetId,
       sends: normalizedSends,
-    }));
+    });
   },
 });
 
@@ -1090,16 +1077,6 @@ export const serverRemoveSidechainRoute = mutation({
     if (!targetTrackId) throw new Error("Sidechain target track not found.");
     await requireProjectRole(ctx, input.projectId, userId, ["owner", "editor"]);
     await editProject(ctx, input.projectId, () => removeSidechainRouteRow(ctx, { ...input, targetTrackId }));
-  },
-});
-
-export const setGroup = mutation({
-  args: { trackId: v.id("tracks"), groupId: v.optional(v.union(v.id("tracks"), v.null())) },
-  handler: async (ctx, { trackId, groupId }) => {
-    const userId = await requireAuthenticatedUserId(ctx);
-    const { track } = await requireTrackOwnerForWrite(ctx, trackId, userId);
-    await requireTrackNotLockedByOther(ctx, track, userId);
-    await editProject(ctx, track.projectId, () => setTrackGroupRow(ctx, { projectId: track.projectId, trackId, groupId }));
   },
 });
 

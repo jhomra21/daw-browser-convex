@@ -399,23 +399,23 @@ test("direct create boundaries reject MIDI limits before writing", async () => {
     cc: [{ beat: 0, controller: 1, value: 0 }],
   };
 
-  await expect(t.withIdentity({ subject: owner }).mutation(api.clips.create, {
-    projectId: "project-1", trackId, startSec: 0, duration: 1, midi,
+  await expect(t.withIdentity({ subject: owner }).mutation(api.clips.serverCreate, {
+    projectId: "project-1", trackId: String(trackId), startSec: 0, duration: 1, midi,
   })).rejects.toThrow("performance events");
-  await expect(t.withIdentity({ subject: owner }).mutation(api.clips.createMany, {
-    items: [{ projectId: "project-1", trackId, startSec: 0, duration: 1, midi }],
+  await expect(t.withIdentity({ subject: owner }).mutation(api.clips.serverCreateMany, {
+    items: [{ projectId: "project-1", trackId: String(trackId), startSec: 0, duration: 1, midi }],
   })).rejects.toThrow("performance events");
 });
 
 test("direct create boundaries reject per-array and mapping MIDI limits", async () => {
   const t = newTest();
   const trackId = await seedWritableTrack(t);
-  const base = { projectId: "project-1", trackId, startSec: 0, duration: 1 };
-  await expect(t.withIdentity({ subject: owner }).mutation(api.clips.create, {
+  const base = { projectId: "project-1", trackId: String(trackId), startSec: 0, duration: 1 };
+  await expect(t.withIdentity({ subject: owner }).mutation(api.clips.serverCreate, {
     ...base,
     midi: { wave: "sine", notes: Array.from({ length: 501 }, (_, beat) => ({ beat, length: 1, pitch: 60 })) },
   })).rejects.toThrow("event arrays");
-  await expect(t.withIdentity({ subject: owner }).mutation(api.clips.createMany, {
+  await expect(t.withIdentity({ subject: owner }).mutation(api.clips.serverCreateMany, {
     items: [{
       ...base,
       midi: {
@@ -492,9 +492,9 @@ test("restores authenticated idempotent legacy history without relaxing ordinary
 
   expect(clip?.midi).toMatchObject({ wave: "custom-legacy", gain: 7 });
   expect(clip?.midi?.notes).toHaveLength(502);
-  await expect(t.withIdentity({ subject: owner }).mutation(api.clips.create, {
+  await expect(t.withIdentity({ subject: owner }).mutation(api.clips.serverCreate, {
     ...request,
-    trackId,
+    trackId: String(trackId),
     operationId: "ordinary-create-must-stay-strict",
   })).rejects.toThrow();
 });

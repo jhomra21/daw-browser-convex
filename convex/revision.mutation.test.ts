@@ -181,10 +181,10 @@ test("rejects mixed-project create and move batches without writes or revisions"
   const clipOne = await seedMidiClip(t, { projectId: "project-1", trackId: trackOne });
   const clipTwo = await seedMidiClip(t, { projectId: "project-2", trackId: trackTwo });
 
-  await expect(t.withIdentity({ subject: owner }).mutation(api.clips.createMany, {
+  await expect(t.withIdentity({ subject: owner }).mutation(api.clips.serverCreateMany, {
     items: [
-      { projectId: "project-1", trackId: trackOne, startSec: 1, duration: 1, midi: { wave: "sine", notes: [] } },
-      { projectId: "project-2", trackId: trackTwo, startSec: 1, duration: 1, midi: { wave: "sine", notes: [] } },
+      { projectId: "project-1", trackId: String(trackOne), startSec: 1, duration: 1, midi: { wave: "sine", notes: [] } },
+      { projectId: "project-2", trackId: String(trackTwo), startSec: 1, duration: 1, midi: { wave: "sine", notes: [] } },
     ],
   })).rejects.toThrow("Batch clip writes must target one project.");
   expect(await t.withIdentity({ subject: owner }).mutation(api.clips.moveMany, {
@@ -211,18 +211,21 @@ test("treats reordered MIDI notes as a no-op but versions material note changes"
     { beat: 1, length: 1, pitch: 64, velocity: 0.7 },
   ];
 
-  await t.withIdentity({ subject: owner }).mutation(api.clips.setMidi, {
-    clipId,
+  await t.withIdentity({ subject: owner }).mutation(api.clips.serverSetMidi, {
+    projectId: "project-1",
+    clipId: String(clipId),
     midi: { wave: "sine", notes: first },
   });
   expect(await projectRevision(t, "project-1")).toBe(1);
-  expect(await t.withIdentity({ subject: owner }).mutation(api.clips.setMidi, {
-    clipId,
+  expect(await t.withIdentity({ subject: owner }).mutation(api.clips.serverSetMidi, {
+    projectId: "project-1",
+    clipId: String(clipId),
     midi: { wave: "sine", notes: [...first].reverse() },
-  })).toBeNull();
+  })).toEqual({ status: "noop" });
   expect(await projectRevision(t, "project-1")).toBe(1);
-  await t.withIdentity({ subject: owner }).mutation(api.clips.setMidi, {
-    clipId,
+  await t.withIdentity({ subject: owner }).mutation(api.clips.serverSetMidi, {
+    projectId: "project-1",
+    clipId: String(clipId),
     midi: {
       wave: "sine",
       notes: [
@@ -483,29 +486,11 @@ test("param setters answer invalid for a missing or foreign target and write not
   expect(await effectRowsOf(t, foreignTrack)).toHaveLength(0);
 });
 
-test("direct setters keep their legacy ID result while server setters return revision provenance", async () => {
+test("server setters return revision provenance", async () => {
   const t = newTest();
   await createProject(t, "project-direct-contract");
-  await createProject(t, "project-direct-foreign");
   const trackId = await seedTrack(t, { projectId: "project-direct-contract", index: 0 });
-  const foreignTrackId = await seedTrack(t, { projectId: "project-direct-foreign", index: 0 });
   const user = t.withIdentity({ subject: owner });
-
-  const directResult = await user.mutation(api.effects.setReverbParams, {
-    projectId: "project-direct-contract",
-    trackId,
-    instanceId: "direct-reverb",
-    params: AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams(),
-  });
-
-  const directRow = (await effectRowsOf(t, trackId)).find((row) => row.instanceId === "direct-reverb");
-  expect(directResult).toBe(directRow?._id ?? null);
-  expect(await user.mutation(api.effects.setReverbParams, {
-    projectId: "project-direct-contract",
-    trackId: foreignTrackId,
-    instanceId: "foreign-reverb",
-    params: AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams(),
-  })).toBeNull();
 
   const serverResult = await user.mutation(api.effects.serverSetReverbParams, {
     projectId: "project-direct-contract",
@@ -514,7 +499,7 @@ test("direct setters keep their legacy ID result while server setters return rev
     params: AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams(),
   });
 
-  expect(serverResult).toMatchObject({ status: "applied", revision: 2 });
+  expect(serverResult).toMatchObject({ status: "applied", revision: 1 });
 });
 
 test("a master effect and a track instrument return their own stamped revisions", async () => {
@@ -626,7 +611,7 @@ test("instrument track creation stamps its default row with the single owner adv
   const t = newTest();
   await createProject(t, "project-create-owner-writer");
 
-  const trackId = await t.withIdentity({ subject: owner }).mutation(api.tracks.create, {
+  const trackId = await t.withIdentity({ subject: owner }).mutation(api.tracks.serverCreate, {
     projectId: "project-create-owner-writer",
     kind: "instrument",
   });

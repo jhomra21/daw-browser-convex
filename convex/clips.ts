@@ -852,51 +852,6 @@ export const listByRoom = query({
   },
 })
 
-export const create = mutation({
-  args: {
-    projectId: v.string(),
-    trackId: v.id('tracks'),
-    startSec: v.number(),
-    duration: v.number(),
-    name: v.optional(v.string()),
-    sampleUrl: v.optional(v.string()),
-    assetKey: v.optional(v.string()),
-    sourceKind: v.optional(v.string()),
-    durationSec: v.optional(v.number()),
-    sampleRate: v.optional(v.number()),
-    channelCount: v.optional(v.number()),
-    leftPadSec: v.optional(v.number()),
-    bufferOffsetSec: v.optional(v.number()),
-    audioWarp: v.optional(audioWarpValidator),
-    gain: v.optional(v.number()),
-    fades: v.optional(clipFadesValidator),
-    midiOffsetBeats: v.optional(v.number()),
-    color: v.optional(v.string()),
-    midi: v.optional(midiValidator),
-    clipKind: v.optional(v.string()),
-    operationId: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const userId = await requireAuthenticatedUserId(ctx)
-
-    return await runSharedOperationOnce(ctx, {
-      projectId: args.projectId,
-      userId,
-      operationId: args.operationId,
-      isResult: (value): value is string | null => typeof value === 'string' || value === null,
-      run: async () => {
-        return await withProjectEdit(ctx, args.projectId, async (edit) => {
-          const clipId = await createOwnedClip(ctx, { ...args, userId })
-
-          if (clipId) edit.stamp()
-
-          return clipId
-        })
-      },
-    })
-  },
-})
-
 export const serverCreate = mutation({
   args: {
     projectId: v.string(),
@@ -1143,29 +1098,35 @@ export const setTiming = mutation({
   },
 })
 
+const setClipAudioWarpForUser = async (
+  ctx: MutationCtx,
+  userId: string,
+  clipId: Id<'clips'>,
+  audioWarp: AudioWarpPayload,
+) => {
+  const access = await getClipWriteAccess(ctx, clipId, userId)
+
+  if (!access) return { status: 'rejected' as const }
+
+  if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
+
+  const result = await editProject(ctx, access.clip.projectId, () => setClipAudioWarpRow(ctx, {
+    projectId: access.clip.projectId,
+    clipId,
+    audioWarp,
+  }))
+
+  if (!result.changed) return { status: 'noop' as const }
+
+  return { status: 'applied' as const }
+}
+
 export const setAudioWarp = mutation({
   args: {
     clipId: v.id('clips'),
     audioWarp: audioWarpValidator,
   },
-  handler: async (ctx, { clipId, audioWarp }) => {
-    const userId = await requireAuthenticatedUserId(ctx)
-    const access = await getClipWriteAccess(ctx, clipId, userId)
-
-    if (!access) return { status: 'rejected' as const }
-
-    if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
-
-    const result = await editProject(ctx, access.clip.projectId, () => setClipAudioWarpRow(ctx, {
-      projectId: access.clip.projectId,
-      clipId,
-      audioWarp,
-    }))
-
-    if (!result.changed) return { status: 'noop' as const }
-
-    return { status: 'applied' as const }
-  },
+  handler: async (ctx, { clipId, audioWarp }) => await setClipAudioWarpForUser(ctx, await requireAuthenticatedUserId(ctx), clipId, audioWarp),
 })
 
 export const setTimingAndAudioWarp = mutation({
@@ -1202,21 +1163,8 @@ export const serverSetAudioWarp = mutation({
     const normalizedClipId = ctx.db.normalizeId('clips', clipId)
 
     if (!normalizedClipId) return { status: 'rejected' as const }
-    const access = await getClipWriteAccess(ctx, normalizedClipId, userId)
 
-    if (!access) return { status: 'rejected' as const }
-
-    if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
-
-    const result = await editProject(ctx, access.clip.projectId, () => setClipAudioWarpRow(ctx, {
-      projectId: access.clip.projectId,
-      clipId: normalizedClipId,
-      audioWarp,
-    }))
-
-    if (!result.changed) return { status: 'noop' as const }
-
-    return { status: 'applied' as const }
+    return await setClipAudioWarpForUser(ctx, userId, normalizedClipId, audioWarp)
   },
 })
 
@@ -1358,31 +1306,6 @@ export const serverSetTimingAndAudioWarp = mutation({
   },
 })
 
-export const setMidi = mutation({
-  args: {
-    clipId: v.id('clips'),
-    midi: midiValidator,
-  },
-  handler: async (ctx, { clipId, midi }) => {
-    const userId = await requireAuthenticatedUserId(ctx)
-    const access = await getClipWriteAccess(ctx, clipId, userId)
-
-    if (!access) return
-
-    const track = await getMergedTrack(ctx, access.clip.trackId)
-
-    if (!track || !isClipKindCompatibleWithTrack(track, 'midi')) return
-
-    const result = await editProject(ctx, access.clip.projectId, () => setClipMidiRow(ctx, {
-      projectId: access.clip.projectId,
-      clipId,
-      midi,
-    }))
-
-    if (!result.changed) return
-  },
-})
-
 export const serverSetMidi = mutation({
   args: {
     projectId: v.string(),
@@ -1461,61 +1384,6 @@ export const serverSetMidiAndTiming = mutation({
         })
 
         return { status: 'applied' as const }
-      },
-    })
-  },
-})
-
-export const createMany = mutation({
-  args: {
-    items: v.array(v.object({
-      projectId: v.string(),
-      trackId: v.id('tracks'),
-      startSec: v.number(),
-      duration: v.number(),
-      name: v.optional(v.string()),
-      sampleUrl: v.optional(v.string()),
-      assetKey: v.optional(v.string()),
-      sourceKind: v.optional(v.string()),
-      durationSec: v.optional(v.number()),
-      sampleRate: v.optional(v.number()),
-      channelCount: v.optional(v.number()),
-      leftPadSec: v.optional(v.number()),
-      midi: v.optional(midiValidator),
-      bufferOffsetSec: v.optional(v.number()),
-      audioWarp: v.optional(audioWarpValidator),
-      gain: v.optional(v.number()),
-      fades: v.optional(clipFadesValidator),
-      midiOffsetBeats: v.optional(v.number()),
-      color: v.optional(v.string()),
-      clipKind: v.optional(v.string()),
-    })),
-    operationId: v.optional(v.string()),
-  },
-  handler: async (ctx, { items, operationId }) => {
-    const userId = await requireAuthenticatedUserId(ctx)
-    const projectId = requireSingleProjectId(items)
-
-    return await runSharedOperationOnce(ctx, {
-      projectId,
-      userId,
-      operationId,
-      isResult: (value): value is Array<Id<'clips'> | null> => Array.isArray(value),
-      run: async () => {
-        if (!projectId) return []
-
-        return await withProjectEdit(ctx, projectId, async (edit) => {
-          const createdIds: Array<Id<'clips'> | null> = []
-
-          for (const item of items) {
-            const clipId = await createOwnedClip(ctx, { ...item, userId })
-            createdIds.push(clipId ?? null)
-          }
-
-          if (createdIds.some(Boolean)) edit.stamp()
-
-          return createdIds
-        })
       },
     })
   },

@@ -74,32 +74,9 @@ export const controlCapabilitiesSchemaV1 = z.object({
 
 export const controlCapabilitiesQuerySchemaV1 = z.object({}).strict()
 
-const controlCapabilityLimitFields = {
-  maxActions: z.number().int().positive(),
-  maxSerializedBodyBytes: z.number().int().positive(),
-  maxRecoveryEntities: z.number().int().positive(),
-  maxRecoveryMappings: z.number().int().positive(),
-  maxRecoveryMidiNotes: z.number().int().positive(),
-  maxRecoveryAutomationPoints: z.number().int().positive(),
-  maxRecoveryWarpMarkers: z.number().int().positive(),
-  maxRecoverySends: z.number().int().positive(),
-  maxAssetsPerSnapshot: z.number().int().positive(),
-  maxAssetFoldersPerSnapshot: z.number().int().positive(),
-  maxAssetUploadBytes: z.number().int().positive(),
-  maxAssetUploadRequestBytes: z.number().int().positive(),
-  maxMidiNotesPerCommit: z.number().int().positive(),
-  maxAutomationPointsPerCommit: z.number().int().positive(),
-  maxErrorDetails: z.number().int().positive(),
-  defaultHistoryPageSize: z.number().int().positive(),
-  maxHistoryPageSize: z.number().int().positive(),
-  defaultRecoveryPageSize: z.number().int().positive(),
-  maxRecoveryPageSize: z.number().int().positive(),
-}
-
 export const controlCapabilitiesSchemaV2 = controlCapabilitiesSchemaV1.extend({
   version: z.literal(CONTROL_API_VERSION_V2),
-  limits: z.object({
-    ...controlCapabilityLimitFields,
+  limits: controlCapabilitiesSchemaV1.shape.limits.extend({
     maxMidiPerformanceEventsPerCommit: z.number().int().positive(),
     maxMidiPerformanceEventsPerClip: z.number().int().positive(),
     maxMidiEventsPerArray: z.number().int().positive(),
@@ -164,7 +141,6 @@ export const localControlCapabilitiesV2 = {
   executionTarget: 'local-project',
 } satisfies z.input<typeof controlCapabilitiesSchemaV2>
 
-
 export const canonicalControlApiVersion = CONTROL_API_VERSION_V2
 export const canonicalControlLimits = controlLimitsV2
 export const canonicalControlCapabilitiesSchema = controlCapabilitiesSchemaV2
@@ -180,17 +156,7 @@ export const projectCanonicalControlCapabilitiesV1 = (
   limits: controlLimitsV1,
 })
 
-export const CONTROL_API_VERSION = canonicalControlApiVersion
-export const controlLimits = canonicalControlLimits
-export const controlCapabilitiesSchema = canonicalControlCapabilitiesSchema
-export const controlCapabilitiesQuerySchema = canonicalControlCapabilitiesQuerySchema
-export const controlCapabilities = canonicalControlCapabilities
-export const localControlCapabilities = canonicalLocalControlCapabilities
-
 export type ControlCapabilitiesV1 = z.infer<typeof controlCapabilitiesSchemaV1>
 
 export type ControlCapabilitiesV2 = z.infer<typeof controlCapabilitiesSchemaV2>
 
-export type CanonicalControlCapabilities = ControlCapabilitiesV2
-
-export type ControlCapabilities = CanonicalControlCapabilities

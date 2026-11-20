@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+  AUDIO_EFFECT_KINDS,
   audioEffectAddPayloadSchema,
   arpeggiatorParamsSchema,
   instrumentAddPayloadSchema,
@@ -334,7 +335,7 @@ const masterVolumeActionSchema = z.object({
   volume: finiteNumberSchema.min(0).max(2),
 }).strict()
 
-const audioEffectKindSchema = z.enum(['utility', 'eq', 'autofilter', 'gate', 'compressor', 'saturator', 'limiter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'delay', 'reverb', 'spectral', 'spectrum'])
+const audioEffectKindSchema = z.enum(AUDIO_EFFECT_KINDS)
 
 const effectUpsertActionSchema = z.object({
   kind: z.literal('effect.upsert'),

@@ -20,6 +20,7 @@ import {
   createInstrumentInstanceId,
   createLocalClipId,
   createLocalTrackId,
+  isAudioEffectKind,
   isJsonObject,
   isJsonString,
   type JsonValue,
@@ -313,13 +314,9 @@ const localEffectKind = (kind: string, master = false): LocalEffectKind | undefi
 
   if (kind === 'arpeggiator') return 'arp'
 
-  return kind === 'utility' || kind === 'eq' || kind === 'autofilter' || kind === 'gate'
-    || kind === 'compressor' || kind === 'saturator' || kind === 'limiter' || kind === 'lofi'
-    || kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo'
-    || kind === 'autopan' || kind === 'ensemble' || kind === 'delay' || kind === 'reverb'
-    || kind === 'spectral' || kind === 'spectrum'
-    ? master ? `master-${kind}` : kind
-    : undefined
+  if (!isAudioEffectKind(kind)) return undefined
+
+  return master ? `master-${kind}` : kind
 }
 
 const advancedSnapshot = (

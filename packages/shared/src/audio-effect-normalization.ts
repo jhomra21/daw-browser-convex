@@ -53,6 +53,36 @@ const NORMALIZERS: AudioEffectNormalizers = {
   spectrum: AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams,
 }
 
+type AudioEffectSerializers = {
+  [Kind in AudioEffectKind]: (params: AudioEffectParamsByKind[Kind]) => string
+}
+
+const SERIALIZERS: AudioEffectSerializers = {
+  utility: AUDIO_EFFECT_CONTRACTS.utility.serializeParams,
+  eq: AUDIO_EFFECT_CONTRACTS.eq.serializeParams,
+  autofilter: AUDIO_EFFECT_CONTRACTS.autofilter.serializeParams,
+  gate: AUDIO_EFFECT_CONTRACTS.gate.serializeParams,
+  compressor: AUDIO_EFFECT_CONTRACTS.compressor.serializeParams,
+  saturator: AUDIO_EFFECT_CONTRACTS.saturator.serializeParams,
+  limiter: AUDIO_EFFECT_CONTRACTS.limiter.serializeParams,
+  lofi: AUDIO_EFFECT_CONTRACTS.lofi.serializeParams,
+  chorus: AUDIO_EFFECT_CONTRACTS.chorus.serializeParams,
+  flanger: AUDIO_EFFECT_CONTRACTS.flanger.serializeParams,
+  phaser: AUDIO_EFFECT_CONTRACTS.phaser.serializeParams,
+  tremolo: AUDIO_EFFECT_CONTRACTS.tremolo.serializeParams,
+  autopan: AUDIO_EFFECT_CONTRACTS.autopan.serializeParams,
+  ensemble: AUDIO_EFFECT_CONTRACTS.ensemble.serializeParams,
+  delay: AUDIO_EFFECT_CONTRACTS.delay.serializeParams,
+  reverb: AUDIO_EFFECT_CONTRACTS.reverb.serializeParams,
+  spectral: AUDIO_EFFECT_CONTRACTS.spectral.serializeParams,
+  spectrum: AUDIO_EFFECT_CONTRACTS.spectrum.serializeParams,
+}
+
+// Two stored params are the same effect state when they serialize identically once normalized.
+export const areAudioEffectParamsEqual = <Kind extends AudioEffectKind>(kind: Kind, previous: JsonValue, next: JsonValue): boolean => (
+  SERIALIZERS[kind](NORMALIZERS[kind](previous)) === SERIALIZERS[kind](NORMALIZERS[kind](next))
+)
+
 export const normalizeAudioEffect = <Kind extends AudioEffectKind>(kind: Kind, params: JsonValue): NormalizedAudioEffect<Kind> => ({
   kind,
   params: NORMALIZERS[kind](params),

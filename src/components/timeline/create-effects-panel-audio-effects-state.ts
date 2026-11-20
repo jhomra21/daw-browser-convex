@@ -5,6 +5,10 @@ import type { AudioEffectRuntimeInstance, AudioEngine, EngineDisposition } from 
 import {
   AUDIO_EFFECT_CONTRACTS,
   AUDIO_EFFECT_KINDS,
+  areAudioEffectParamsEqual,
+  type AudioEffectParamsByKind,
+  normalizeAudioEffect,
+  normalizeAudioEffectRow,
   areAudioEffectInstanceOrdersEqual,
   normalizeAudioEffectInstanceOrder,
   normalizeCompressorParams,
@@ -159,7 +163,7 @@ type EffectsPanelAudioDevice = {
   snapshotExportRows: (targetIds: readonly string[]) => ExportEffectRow[];
   snapshotSidechainRoutes: () => ExternalSidechainRoute[];
   flushPending: () => Promise<ParameterDrain<{ targetId: string; instanceId: string; kind: AudioEffectKind }>>;
-  paramsForInstance: (instance: AudioEffectInstance) => UtilityParamsEnvelope | AutoFilterParamsEnvelope | EqParams | GateParamsEnvelope | LimiterParamsEnvelope | LoFiParamsEnvelope | CompressorParams | SaturatorParams | DelayParams | ReverbParams | SpectralParamsEnvelope | SpectrumParamsEnvelope | ChorusParamsEnvelope | FlangerParamsEnvelope | PhaserParamsEnvelope | TremoloParamsEnvelope | AutoPanParamsEnvelope | EnsembleParamsEnvelope | undefined;
+  paramsForInstance: (instance: AudioEffectInstance) => AudioEffectParamsByKind[AudioEffectKind] | undefined;
   orderedEffects: Accessor<AudioEffectInstance[]>;
   effectIndexForTarget: (targetId: string, instanceId: string) => number | undefined;
   removeAllFromTarget: (targetId: Track["id"] | "master") => Promise<boolean>;
@@ -218,28 +222,7 @@ export function createEffectsPanelAudioDevice(
     return publication;
   };
 
-  type AudioEffectParams = UtilityParamsEnvelope | AutoFilterParamsEnvelope | EqParams | GateParamsEnvelope | LimiterParamsEnvelope | LoFiParamsEnvelope | CompressorParams | SaturatorParams | DelayParams | ReverbParams | SpectralParamsEnvelope | SpectrumParamsEnvelope | ChorusParamsEnvelope | FlangerParamsEnvelope | PhaserParamsEnvelope | TremoloParamsEnvelope | AutoPanParamsEnvelope | EnsembleParamsEnvelope;
-
-  type AudioEffectParamsByKind = {
-    utility: UtilityParamsEnvelope;
-    autofilter: AutoFilterParamsEnvelope;
-    eq: EqParams;
-    gate: GateParamsEnvelope;
-    limiter: LimiterParamsEnvelope;
-    lofi: LoFiParamsEnvelope;
-    compressor: CompressorParams;
-    saturator: SaturatorParams;
-    delay: DelayParams;
-    reverb: ReverbParams;
-    spectral: SpectralParamsEnvelope;
-    chorus: ChorusParamsEnvelope;
-    flanger: FlangerParamsEnvelope;
-    phaser: PhaserParamsEnvelope;
-    tremolo: TremoloParamsEnvelope;
-    autopan: AutoPanParamsEnvelope;
-    ensemble: EnsembleParamsEnvelope;
-    spectrum: SpectrumParamsEnvelope;
-  };
+  type AudioEffectParams = AudioEffectParamsByKind[AudioEffectKind];
 
   type AudioEffectInstanceBindings = {
     [Kind in AudioEffectKind]: AudioEffectInstanceBinding<AudioEffectParamsByKind[Kind]>;
@@ -297,28 +280,7 @@ export function createEffectsPanelAudioDevice(
     return AUDIO_EFFECT_CONTRACTS[kind].createDefaultParams();
   };
 
-  const paramsEqualByKind = {
-    utility: (previous, next) => AUDIO_EFFECT_CONTRACTS.utility.serializeParams(normalizeUtilityParamsEnvelope(previous)) === AUDIO_EFFECT_CONTRACTS.utility.serializeParams(normalizeUtilityParamsEnvelope(next)),
-    autofilter: (previous, next) => AUDIO_EFFECT_CONTRACTS.autofilter.serializeParams(AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.autofilter.serializeParams(AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(next)),
-    limiter: (previous, next) => AUDIO_EFFECT_CONTRACTS.limiter.serializeParams(AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.limiter.serializeParams(AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(next)),
-    gate: (previous, next) => AUDIO_EFFECT_CONTRACTS.gate.serializeParams(normalizeGateParamsEnvelope(previous)) === AUDIO_EFFECT_CONTRACTS.gate.serializeParams(normalizeGateParamsEnvelope(next)),
-    eq: (previous, next) => AUDIO_EFFECT_CONTRACTS.eq.serializeParams(normalizeEqParams(objectParamInput(previous))) === AUDIO_EFFECT_CONTRACTS.eq.serializeParams(normalizeEqParams(objectParamInput(next))),
-    compressor: (previous, next) => AUDIO_EFFECT_CONTRACTS.compressor.serializeParams(normalizeCompressorParams(objectParamInput(previous))) === AUDIO_EFFECT_CONTRACTS.compressor.serializeParams(normalizeCompressorParams(objectParamInput(next))),
-    saturator: (previous, next) => AUDIO_EFFECT_CONTRACTS.saturator.serializeParams(normalizeSaturatorParams(objectParamInput(previous))) === AUDIO_EFFECT_CONTRACTS.saturator.serializeParams(normalizeSaturatorParams(objectParamInput(next))),
-    delay: (previous, next) => AUDIO_EFFECT_CONTRACTS.delay.serializeParams(normalizeDelayParams(objectParamInput(previous))) === AUDIO_EFFECT_CONTRACTS.delay.serializeParams(normalizeDelayParams(objectParamInput(next))),
-    reverb: (previous, next) => AUDIO_EFFECT_CONTRACTS.reverb.serializeParams(normalizeReverbParams(objectParamInput(previous))) === AUDIO_EFFECT_CONTRACTS.reverb.serializeParams(normalizeReverbParams(objectParamInput(next))),
-    spectral: (previous, next) => AUDIO_EFFECT_CONTRACTS.spectral.serializeParams(AUDIO_EFFECT_CONTRACTS.spectral.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.spectral.serializeParams(AUDIO_EFFECT_CONTRACTS.spectral.normalizeParams(next)),
-    chorus: (previous, next) => AUDIO_EFFECT_CONTRACTS.chorus.serializeParams(AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.chorus.serializeParams(AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(next)),
-    flanger: (previous, next) => AUDIO_EFFECT_CONTRACTS.flanger.serializeParams(AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.flanger.serializeParams(AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(next)),
-    phaser: (previous, next) => AUDIO_EFFECT_CONTRACTS.phaser.serializeParams(AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.phaser.serializeParams(AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(next)),
-    tremolo: (previous, next) => AUDIO_EFFECT_CONTRACTS.tremolo.serializeParams(AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.tremolo.serializeParams(AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(next)),
-    autopan: (previous, next) => AUDIO_EFFECT_CONTRACTS.autopan.serializeParams(AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.autopan.serializeParams(AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(next)),
-    lofi: (previous, next) => AUDIO_EFFECT_CONTRACTS.lofi.serializeParams(AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.lofi.serializeParams(AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(next)),
-    ensemble: (previous, next) => AUDIO_EFFECT_CONTRACTS.ensemble.serializeParams(AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.ensemble.serializeParams(AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(next)),
-    spectrum: (previous, next) => AUDIO_EFFECT_CONTRACTS.spectrum.serializeParams(AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.spectrum.serializeParams(AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(next)),
-  } satisfies Record<AudioEffectKind, (previous: AudioEffectParams, next: AudioEffectParams) => boolean>;
-
-  const areParamsForKindEqual = (kind: AudioEffectKind, previous: AudioEffectParams, next: AudioEffectParams) => paramsEqualByKind[kind](previous, next);
+  const areParamsForKindEqual = areAudioEffectParamsEqual;
 
   const normalizePresetStepParams = (step: AudioEffectChainPresetStep): AudioEffectParams => {
     return normalizeParamsForKind(step.kind, step.params);
@@ -573,43 +535,9 @@ export function createEffectsPanelAudioDevice(
   const effectiveParamsForInstance = (targetId: string, instance: AudioEffectInstance) => owner.effective(effectTarget(targetId, instance));
   const paramsForInstance = (instance: AudioEffectInstance) => effectiveParamsForInstance(currentTargetId(), instance);
 
-  const exportRowForRuntime = (targetId: string, instanceId: string, index: number, runtime: AudioEffectRuntimeInstance): ExportEffectRow => {
-    const extras = { targetId, instanceId, index };
-
-    if (runtime.kind === "utility") return { ...extras, effect: runtime.kind, params: runtime.params };
-
-    if (runtime.kind === "autofilter") return { ...extras, effect: runtime.kind, params: runtime.params };
-
-    if (runtime.kind === "eq") return { ...extras, effect: runtime.kind, params: runtime.params };
-
-    if (runtime.kind === "gate") return { ...extras, effect: runtime.kind, params: runtime.params };
-
-    if (runtime.kind === "compressor") return { ...extras, effect: runtime.kind, params: runtime.params };
-
-    if (runtime.kind === "saturator") return { ...extras, effect: runtime.kind, params: runtime.params };
-
-    if (runtime.kind === "limiter") return { ...extras, effect: runtime.kind, params: runtime.params };
-
-    if (runtime.kind === "lofi") return { ...extras, effect: runtime.kind, params: runtime.params };
-
-    if (runtime.kind === "delay") return { ...extras, effect: runtime.kind, params: runtime.params };
-
-    if (runtime.kind === "reverb") return { ...extras, effect: runtime.kind, params: runtime.params };
-
-    if (runtime.kind === "chorus") return { ...extras, effect: runtime.kind, params: runtime.params };
-
-    if (runtime.kind === "flanger") return { ...extras, effect: runtime.kind, params: runtime.params };
-
-    if (runtime.kind === "phaser") return { ...extras, effect: runtime.kind, params: runtime.params };
-
-    if (runtime.kind === "tremolo") return { ...extras, effect: runtime.kind, params: runtime.params };
-
-    if (runtime.kind === "autopan") return { ...extras, effect: runtime.kind, params: runtime.params };
-
-    if (runtime.kind === "ensemble") return { ...extras, effect: runtime.kind, params: runtime.params };
-
-    return { ...extras, effect: runtime.kind, params: runtime.params };
-  };
+  const exportRowForInstance = (targetId: string, instance: AudioEffectInstance & { kind: DspAudioEffectKind }, index: number, params: AudioEffectParams): ExportEffectRow => (
+    { targetId, instanceId: instance.id, index, ...normalizeAudioEffectRow(instance.kind, params) }
+  );
 
   const snapshotExportProjection = (): ExportEffectsProjection => {
     const ownedTargetIds = new Set([...optimisticOrdersByTarget.keys()].filter(targetId => optimisticOrderForTarget(targetId)));
@@ -624,7 +552,7 @@ export function createEffectsPanelAudioDevice(
         const params = effectiveParamsForInstance(targetId, instance);
 
         if (params === undefined) continue;
-        rows.push(exportRowForRuntime(targetId, instance.id, index, runtimeInstanceForParams(instance, params)));
+        rows.push(exportRowForInstance(targetId, instance, index, params));
       }
 
       replaceAudioEffectTargets.push({ targetId, rows });
@@ -662,41 +590,9 @@ export function createEffectsPanelAudioDevice(
   // The Spectrum device only observes: it never reaches the engine, the native graph or an export.
   const isDspInstance = (instance: AudioEffectInstance): instance is AudioEffectInstance & { kind: DspAudioEffectKind } => instance.kind !== "spectrum";
 
-  function runtimeInstanceForParams(instance: AudioEffectInstance & { kind: DspAudioEffectKind }, params: AudioEffectParams): AudioEffectRuntimeInstance {
-    if (instance.kind === "utility") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.utility.normalizeParams(params) };
-
-    if (instance.kind === "autofilter") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(params) };
-
-    if (instance.kind === "limiter") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(params) };
-
-    if (instance.kind === "gate") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.gate.normalizeParams(params) };
-
-    if (instance.kind === "eq") return { id: instance.id, kind: instance.kind, params: normalizeEqParams(objectParamInput(params)) };
-
-    if (instance.kind === "compressor") return { id: instance.id, kind: instance.kind, params: normalizeCompressorParams(objectParamInput(params)) };
-
-    if (instance.kind === "saturator") return { id: instance.id, kind: instance.kind, params: normalizeSaturatorParams(objectParamInput(params)) };
-
-    if (instance.kind === "delay") return { id: instance.id, kind: instance.kind, params: normalizeDelayParams(objectParamInput(params)) };
-
-    if (instance.kind === "reverb") return { id: instance.id, kind: instance.kind, params: normalizeReverbParams(objectParamInput(params)) };
-
-    if (instance.kind === "spectral") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.spectral.normalizeParams(params) };
-
-    if (instance.kind === "chorus") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(params) };
-
-    if (instance.kind === "flanger") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(params) };
-
-    if (instance.kind === "phaser") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(params) };
-
-    if (instance.kind === "tremolo") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(params) };
-
-    if (instance.kind === "autopan") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(params) };
-
-    if (instance.kind === "lofi") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(params) };
-
-    return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(params) };
-  }
+  const runtimeInstanceForParams = (instance: AudioEffectInstance & { kind: DspAudioEffectKind }, params: AudioEffectParams): AudioEffectRuntimeInstance => (
+    { id: instance.id, ...normalizeAudioEffect(instance.kind, params) }
+  );
 
   function buildRuntimeInstancesForTarget(targetId: string, order: AudioEffectInstance[]): AudioEffectRuntimeInstance[] {
     return order.filter(isDspInstance).flatMap((instance) => {
@@ -1327,7 +1223,7 @@ export function createEffectsPanelAudioDevice(
 
         if (params === undefined) return [];
 
-        return [exportRowForRuntime(targetId, instance.id, index, runtimeInstanceForParams(instance, params))];
+        return [exportRowForInstance(targetId, instance, index, params)];
       });
 
       return rows;

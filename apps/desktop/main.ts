@@ -26,11 +26,6 @@ import {
   offlinePcmAckChannel,
   offlinePcmChannel,
   offlineRenderChannel,
-  pluginCatalogChooseDirectoryChannel,
-  pluginCatalogPreflightInsertionChannel,
-  pluginCatalogReadChannel,
-  pluginCatalogRemoveDirectoryChannel,
-  pluginCatalogScanChannel,
   recordingFailureChannel,
   recordingSpoolListChannel,
   recordingSpoolReadChannel,
@@ -78,10 +73,8 @@ import { rendererSenderAllowed, type RendererSenderEvent } from "./ipc/renderer-
 import { createNativeFileCapabilityHelper } from "./native-file-capability-helper"
 import { createPreparationRegistry } from "./preparation-registry"
 import { desktopOperations } from "./desktop-operations"
-import { canonicalVst3SearchPaths, createPluginCatalogStore } from "./plugin-catalog"
-import { createVst3ScannerSupervisor } from "./vst3-scanner"
-import { catalogViewForRenderer } from "./vst3-attachment"
-import { preflightVst3Insertion } from "./vst3-insertion-preflight"
+import { createPluginCatalogOwner } from "./plugin-catalog-owner"
+import { registerPluginCatalogIpc } from "./plugin-catalog-ipc"
 import {
   coordinateNativeVst3Attachments,
   createNativeVst3SessionLedger,
@@ -93,7 +86,6 @@ import {
   nativeHostConfigurationIdentityFor,
   createNativeAudioHostSupervisor,
   renderNativeOffline,
-  probeNativeAudioOutputDevice,
   nativeProcessorPatchReply,
   nativeSessionFailure,
   nativeVstEditorOwnershipProbe,
@@ -120,10 +112,8 @@ import type {
 import { stampGraphRevision } from "@daw-browser/audio-engine/native-host-wire"
 import {
   decodeNativeExternalAttachmentPlan,
-  maxVst3WorkerFrames,
   maxVst3WorkerSampleRateHz,
   maxVst3WorkerStateBytes,
-  nativeVst3InsertionPreflightRequestSchema,
 } from "@daw-browser/plugin-host-protocol"
 import {
   nativeAudioHostMaximumMappedAssetPageBytes,
@@ -222,7 +212,7 @@ const nativeUndefinedEnvelopeSchema = nativeSessionEnvelopeSchema(z.undefined())
 const nativeEditorEnvelopeSchema = nativeSessionEnvelopeSchema(nativeEditorCommandSchema)
 const nativeAttachmentEnvelopeSchema = nativeSessionEnvelopeSchema(nativeAttachmentCoordinationSchema)
 const nativeConfigurationEnvelopeSchema = nativeSessionEnvelopeSchema(nativeSessionConfigurationSchema)
-const pluginDirectorySchema = z.object({ directory: z.string() }).passthrough()
+
 
 
 const diagnosticsTraceMessageSchema = z.object({
@@ -265,9 +255,7 @@ const applicationMenuController = createApplicationMenuController<Menu>({
 
 const preparationRegistry = createPreparationRegistry()
 let nativeMediaAvailable = false
-let pluginCatalogStore: ReturnType<typeof createPluginCatalogStore> | undefined
 let audioHostPath: string | undefined
-let vst3WorkerPath: string | undefined
 let audioHostSupervisor: ReturnType<typeof createNativeAudioHostSupervisor> | undefined
 
 let offlineRenderJob: {
@@ -297,7 +285,6 @@ let nativeVst3EditorSessionManager: ReturnType<typeof createNativeVst3EditorSess
 let audioLifecycle: DesktopAudioLifecycle = { state: "ready", powerGeneration: 0 }
 let audioSuspendPromise: Promise<void> | undefined
 let audioRecoveryGeneration: number | undefined
-let vst3ScannerSupervisor: ReturnType<typeof createVst3ScannerSupervisor> | undefined
 
 let nativeReleaseArtifactVerification: NativeReleaseArtifactVerification = { status: "disabled" }
 
@@ -409,7 +396,7 @@ const applyRendererInvalidation = (
   scopes.settleCapabilityRevocation(audioHostSupervisor?.invalidateManualTransaction() ?? Promise.resolve())
 }
 
-const registerIpc = () => {
+const registerIpc = (pluginCatalog: ReturnType<typeof createPluginCatalogOwner>) => {
   const senderAllowed = (event: RendererSenderEvent, options: { privileged: boolean; mainFrameOnly: boolean }) => rendererSenderAllowed(event, {
     rendererId: rendererSession.window()?.webContents.id,
     sameAppOrigin,
@@ -509,18 +496,6 @@ const registerIpc = () => {
 
   const scopeFor = (event: Electron.IpcMainInvokeEvent, requestId: string) => (
     scopeAllowed(event) ? { requestId, rendererGeneration: rendererSession.generation() } : undefined
-  )
-
-  const catalogAllowed = (event: Electron.IpcMainInvokeEvent) => (
-    process.platform === "darwin"
-    && senderAllowed(event, { privileged: true, mainFrameOnly: false })
-    && pluginCatalogStore !== undefined
-  )
-
-  const catalogFailure = (message: string) => ({ ok: false as const, error: message })
-
-  const catalogStoreFor = (event: Electron.IpcMainInvokeEvent) => (
-    catalogAllowed(event) ? pluginCatalogStore : undefined
   )
 
   const audioHostAllowed = (event: NativeSessionEvent) => (
@@ -651,15 +626,15 @@ const registerIpc = () => {
       let vstAttachments: Awaited<ReturnType<typeof resolveNativeVst3AttachmentPlan>> | undefined
 
       if (plan.externalAttachments) {
-        if (!pluginCatalogStore || !vst3WorkerPath) {
+        if (!pluginCatalog.workerPath) {
           throw new Error("The trusted native VST3 catalog or worker is unavailable.")
         }
 
         vstAttachments = await resolveNativeVst3AttachmentPlan({
           plan: plan.externalAttachments,
           sampleRateHz: plan.sampleRateHz,
-          workerPath: vst3WorkerPath,
-          catalogStore: pluginCatalogStore,
+          workerPath: pluginCatalog.workerPath,
+          catalogStore: pluginCatalog.store,
           capturedVstStates: new Map(
             (plan.capturedVstStates ?? []).map((state) => [state.instanceId, state]),
           ),
@@ -1112,11 +1087,10 @@ const registerIpc = () => {
   ipcMain.handle(sessionCoordinateVstAttachmentsChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeAttachmentEnvelopeSchema.safeParse(value)
-    const workerPath = vst3WorkerPath
+    const workerPath = pluginCatalog.workerPath
 
     if (
       !supervisor
-      || !pluginCatalogStore
       || !workerPath
       || !envelope.success
     ) return nativeSessionFailure()
@@ -1132,7 +1106,7 @@ const registerIpc = () => {
         serializedPlan: sessionValue.serializedPlan,
         sampleRateHz: sessionValue.sampleRateHz,
         workerPath,
-        catalogStore: pluginCatalogStore,
+        catalogStore: pluginCatalog.store,
         audioHost: supervisor,
         ledger,
         transactionToken: envelope.data.transactionToken,
@@ -1469,109 +1443,16 @@ const registerIpc = () => {
       return nativeSessionFailure(error)
     }
   })
-  ipcMain.handle(pluginCatalogReadChannel, async (event) => {
-    const store = catalogStoreFor(event)
-
-    if (!store) return catalogFailure("The desktop plug-in catalog is unavailable.")
-
-    try {
-      return { ok: true, catalog: catalogViewForRenderer(await store.load()) }
-    } catch {
-      return catalogFailure("The plug-in catalog could not be read.")
-    }
-  })
-  ipcMain.handle(pluginCatalogChooseDirectoryChannel, async (event) => {
-    const store = catalogStoreFor(event)
-    const currentWindow = rendererSession.window()
-
-    if (!store || !currentWindow) return catalogFailure("The desktop plug-in catalog is unavailable.")
-    const selection = await dialog.showOpenDialog(currentWindow, { properties: ["openDirectory", "createDirectory"] })
-
-    if (selection.canceled || selection.filePaths.length !== 1) return { ok: true, canceled: true }
-
-    try {
-      return { ok: true, canceled: false, catalog: catalogViewForRenderer(await store.addDirectory(selection.filePaths[0])) }
-    } catch {
-      return catalogFailure("The selected plug-in directory could not be added.")
-    }
-  })
-  ipcMain.handle(pluginCatalogRemoveDirectoryChannel, async (event, value) => {
-    const store = catalogStoreFor(event)
-
-    if (!store) return catalogFailure("The desktop plug-in catalog is unavailable.")
-    const request = pluginDirectorySchema.safeParse(value)
-
-    if (!request.success) return catalogFailure("A plug-in directory is required.")
-
-    try {
-      return { ok: true, catalog: catalogViewForRenderer(await store.removeDirectory(request.data.directory)) }
-    } catch {
-      return catalogFailure("The plug-in directory could not be removed.")
-    }
-  })
-  ipcMain.handle(pluginCatalogScanChannel, async (event) => {
-    const store = catalogStoreFor(event)
-    const scanner = vst3ScannerSupervisor
-
-    if (!store || !scanner) return catalogFailure("The desktop plug-in catalog is unavailable.")
-
-    try {
-      return { ok: true, catalog: catalogViewForRenderer(await store.scan((entry, directories) => scanner.scan(entry, directories))) }
-    } catch {
-      return catalogFailure("The plug-in catalog could not be scanned.")
-    }
-  })
-  ipcMain.handle(pluginCatalogPreflightInsertionChannel, async (event, value) => {
-    const store = catalogStoreFor(event)
-    const request = nativeVst3InsertionPreflightRequestSchema.safeParse(value)
-    const workerPath = vst3WorkerPath
-
-    if (!store || !request.success) {
-      return { ok: false as const, code: "untrusted-catalog" as const, message: "The native VST3 insertion request is invalid." }
-    }
-
-    if (!audioHostAllowed(event) || !audioHostPath || !workerPath) {
-      return { ok: false as const, code: "host-unavailable" as const, message: "The native VST3 host is unavailable." }
-    }
-
-    const scanner = vst3ScannerSupervisor
-
-    if (!scanner) {
-      return { ok: false as const, code: "host-unavailable" as const, message: "The native VST3 scanner is unavailable." }
-    }
-
-    try {
-      const device = await probeNativeAudioOutputDevice(audioHostPath)
-
-      if (!device?.available) {
-        return { ok: false as const, code: "host-unavailable" as const, message: "No native audio output device is available." }
-      }
-
-      const preflightInput: Parameters<typeof preflightVst3Insertion>[0] = {
-        request: request.data,
-        catalog: await store.load(),
-        workerPath,
-        sampleRateHz: device.nominalSampleRateHz,
-        maximumFramesPerBlock: Math.min(device.maximumFramesPerBlock, maxVst3WorkerFrames),
-        evidence: ae08Evidence,
-        workerEnvironment: ae08WorkerEnvironment,
-        rememberVerdict: (attachment, result) => {
-          attachmentLedger.rememberVerdict(attachment, device.nominalSampleRateHz, result)
-        },
-      }
-
-      const first = await preflightVst3Insertion(preflightInput)
-
-      if (first.ok || first.code !== "stale-catalog") return first
-      await store.revalidate((entry, directories) => scanner.scan(entry, directories))
-
-      return preflightVst3Insertion({
-        ...preflightInput,
-        catalog: await store.load(),
-      })
-    } catch {
-      return { ok: false as const, code: "host-unavailable" as const, message: "The native VST3 host preflight failed." }
-    }
+  registerPluginCatalogIpc({
+    ipcMain,
+    catalog: pluginCatalog,
+    senderAllowed,
+    audioHostAllowed,
+    getWindow: rendererSession.window,
+    hostPath: audioHostPath,
+    attachmentLedger,
+    ae08Evidence,
+    ae08WorkerEnvironment,
   })
   registerFileCapabilitiesIpc({
     ipcMain,
@@ -1644,29 +1525,17 @@ else {
     nativeMediaAvailable = await nativeFileCapabilityHelper.selfTest()
     stage("after-native-helper")
     const artifacts = await resolveNativeArtifacts()
-    const scannerPath = artifacts.scannerPath
-    vst3WorkerPath = artifacts.vst3WorkerPath
     audioHostPath = artifacts.audioHostPath
     nativeReleaseArtifactVerification = artifacts.verification
 
-    vst3ScannerSupervisor = scannerPath ? createVst3ScannerSupervisor({
-      platform: process.platform,
-      arch: process.arch,
-      scannerPath,
-    }) : undefined
-    pluginCatalogStore = createPluginCatalogStore({
-      filePath: path.join(app.getPath("userData"), "plugin-catalog-v1.json"),
+    const pluginCatalog = createPluginCatalogOwner({
+      userData: app.getPath("userData"),
+      home: app.getPath("home"),
+      scannerPath: artifacts.scannerPath,
+      workerPath: artifacts.vst3WorkerPath,
     })
 
-    if (process.platform === "darwin") {
-      const startupScanner = vst3ScannerSupervisor
-      await pluginCatalogStore.initialize(
-        canonicalVst3SearchPaths(app.getPath("home")),
-        startupScanner
-          ? (entry, directories) => startupScanner.scan(entry, directories)
-          : undefined,
-      )
-    }
+    await pluginCatalog.initialize()
 
     const recordingOrderEvidence = createRecordingSpoolOrderEvidence(
       desktopEnv.recordingSpoolOrderEvidence(),
@@ -1717,10 +1586,10 @@ else {
 
     removeAudioHostWorkerNotificationListener = audioHostSupervisor?.onWorkerNotification(hostEvents.onNotification)
     const editorHostPath = audioHostPath
-    nativeVst3EditorSessionManager = editorHostPath && vst3WorkerPath
+    nativeVst3EditorSessionManager = editorHostPath && pluginCatalog.workerPath
       ? createNativeVst3EditorSessionManager({
-        workerPath: vst3WorkerPath,
-        catalogStore: pluginCatalogStore,
+        workerPath: pluginCatalog.workerPath,
+        catalogStore: pluginCatalog.store,
         createSupervisor: () => createNativeAudioHostSupervisor(editorHostPath, undefined, {
           evidence: ae08Evidence,
           hostEnvironment: ae08WorkerEnvironment,
@@ -1811,7 +1680,7 @@ else {
       rendererSession.send(scheduleProgressChannel, progress)
     })
     installRendererContent(rendererSession, sameAppOrigin)
-    registerIpc()
+    registerIpc(pluginCatalog)
     applicationMenuController.install({
       buildFromTemplate: (template) => Menu.buildFromTemplate(template),
       setApplicationMenu: (menu) => Menu.setApplicationMenu(menu),

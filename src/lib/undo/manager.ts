@@ -1,4 +1,5 @@
-import type { EffectParamsHistoryEntry, HistoryEntry, MergeKey, PersistedHistory } from './types'
+import { mergeHistoryEntries } from './history-entry-format'
+import type { HistoryEntry, MergeKey, PersistedHistory } from './types'
 
 import { isJsonObject, type JsonValue } from '@daw-browser/shared'
 import { serializeJsonValue } from '~/lib/json'
@@ -46,51 +47,6 @@ const occurrenceIndexFromEnd = (entries: HistoryEntry[], entry: HistoryEntry, oc
   return undefined
 }
 
-function mergeEffectParamsEntry<Effect extends EffectParamsHistoryEntry['data']['effect']>(
-  prev: EffectParamsHistoryEntry<Effect>,
-  entry: EffectParamsHistoryEntry<Effect>,
-): EffectParamsHistoryEntry<Effect> {
-  return { ...entry, data: { ...entry.data, from: prev.data.from } }
-}
-
-function mergeEntry(prev: HistoryEntry, entry: HistoryEntry): HistoryEntry | undefined {
-  if (prev.type === 'clip-timing' && entry.type === 'clip-timing') {
-    return { ...entry, data: { ...entry.data, from: prev.data.from } }
-  }
-
-  if (prev.type === 'clip-fades' && entry.type === 'clip-fades') {
-    return { ...entry, data: { ...entry.data, from: prev.data.from } }
-  }
-
-  if (prev.type === 'track-volume' && entry.type === 'track-volume') {
-    return { ...entry, data: { ...entry.data, from: prev.data.from } }
-  }
-
-  if (prev.type === 'track-mute' && entry.type === 'track-mute') {
-    return { ...entry, data: { ...entry.data, from: prev.data.from } }
-  }
-
-  if (prev.type === 'track-solo' && entry.type === 'track-solo') {
-    return { ...entry, data: { ...entry.data, from: prev.data.from } }
-  }
-
-  if (prev.type === 'track-routing' && entry.type === 'track-routing') {
-    return { ...entry, data: { ...entry.data, from: prev.data.from } }
-  }
-
-  if (prev.type === 'effect-params' && entry.type === 'effect-params') {
-    if (
-      prev.data.effect !== entry.data.effect
-      || prev.data.trackRef !== entry.data.trackRef
-      || prev.data.instanceId !== entry.data.instanceId
-    ) return undefined
-
-    return mergeEffectParamsEntry(prev, entry)
-  }
-
-  return undefined
-}
-
 export function createUndoManager(options: { max?: number; onChange?: (state: PersistedHistory) => void }) {
   const max = options.max ?? 50
   let undo: HistoryEntry[] = []
@@ -125,7 +81,7 @@ export function createUndoManager(options: { max?: number; onChange?: (state: Pe
       const prev = undo.at(-1)
 
       if (prev && lastMerged && lastMerged.key === mergeKey && (now - lastMerged.ts) <= mergeWindowMs && prev.type === entry.type) {
-        const merged = mergeEntry(prev, entry)
+        const merged = mergeHistoryEntries(prev, entry)
 
         if (merged) {
           undo[undo.length - 1] = merged

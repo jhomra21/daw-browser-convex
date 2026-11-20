@@ -95,6 +95,9 @@ export function useTimelineMixerController(
   const pendingLocalVolumeHistoryVersion = new Map<Track['id'], number>()
   const pendingLocalMixHistory = new Map<Track['id'], PendingLocalTrackMixHistory>()
   const trackIndex = createMemo(() => createTimelineTrackIndex(options.tracks()))
+  // A local project's writes land later through its write queue, so history is pushed after the write and coalesced per
+  // track; a cloud project's history is pushed at once.
+  const isLocalProject = createMemo(() => isLocalId('project', options.projectId()))
 
   const retainedTrackIds = createMemo(() => {
     const next = new Set(options.tracks().map((track) => track.id))
@@ -395,7 +398,7 @@ export function useTimelineMixerController(
     }
 
     applyTrackRouting(trackId, normalized, false)
-    const localProject = isLocalId('project', projectId)
+    const localProject = isLocalProject()
     const from = localProject ? (pendingLocalRoutingHistoryFrom.get(trackId) ?? previous) : previous
     let historyVersion = 0
 
@@ -485,7 +488,7 @@ export function useTimelineMixerController(
     const track = getTrack(trackId)
     const canWriteSharedMix = options.canWriteTrack(trackId)
     const previousVolume = getTrackVolumeSnapshot(trackId) ?? volume
-    const localProject = isLocalId('project', projectId)
+    const localProject = isLocalProject()
     const from = localProject ? (pendingLocalVolumeHistoryFrom.get(trackId) ?? previousVolume) : previousVolume
     let historyVersion = 0
 
@@ -631,7 +634,7 @@ export function useTimelineMixerController(
 
     if (!changedMuted && !changedSoloed) return
 
-    const localProject = isLocalId('project', options.projectId())
+    const localProject = isLocalProject()
     let historyPrevious = currentMix
     let historyPatch = patch
     let historyVersion = 0
@@ -764,7 +767,7 @@ export function useTimelineMixerController(
   createEffect(() => {
     const projectId = options.projectId()
 
-    if (isLocalId('project', projectId)) localWrites.ensureLocalTimelineFlusher(projectId)
+    if (isLocalProject()) localWrites.ensureLocalTimelineFlusher(projectId)
     void flushAllTimers()
       .catch(() => undefined)
       .finally(() => {

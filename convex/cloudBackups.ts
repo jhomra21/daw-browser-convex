@@ -2,7 +2,7 @@ import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { isProjectDeletionPending, requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
-import { projectManifestValidator } from "./projectManifestValidator";
+import { projectManifestValidator } from "./validators";
 import {
   assertProjectManifestBaseIntegrity,
   assertProjectManifestPublishIntegrity,

@@ -1,11 +1,12 @@
 import type { Doc, Id } from "./_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "./_generated/server";
+import type { SendTap } from "./validators";
 import { assert, assertDefined } from "@daw-browser/shared";
 
 export type MixerSend = {
   targetId: Id<"tracks">;
   amount: number;
-  tap?: "pre-fx" | "pre-fader" | "post-fader";
+  tap?: SendTap;
 };
 
 export type MergedTrackDoc = Doc<"tracks"> & {

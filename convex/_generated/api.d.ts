@@ -10,9 +10,7 @@
 
 import type * as assetFolders from "../assetFolders.js";
 import type * as assets from "../assets.js";
-import type * as audioWarpValidator from "../audioWarpValidator.js";
 import type * as automation from "../automation.js";
-import type * as clipFadesValidator from "../clipFadesValidator.js";
 import type * as clipWrites from "../clipWrites.js";
 import type * as clips from "../clips.js";
 import type * as cloudBackups from "../cloudBackups.js";
@@ -25,11 +23,9 @@ import type * as controlRecovery from "../controlRecovery.js";
 import type * as controlSnapshot from "../controlSnapshot.js";
 import type * as effects from "../effects.js";
 import type * as exports from "../exports.js";
-import type * as midiValidator from "../midiValidator.js";
 import type * as mixerChannels from "../mixerChannels.js";
 import type * as ownerships from "../ownerships.js";
 import type * as projectAccess from "../projectAccess.js";
-import type * as projectManifestValidator from "../projectManifestValidator.js";
 import type * as projectMembership from "../projectMembership.js";
 import type * as projectMixerSettings from "../projectMixerSettings.js";
 import type * as projectRows from "../projectRows.js";
@@ -42,11 +38,11 @@ import type * as samples from "../samples.js";
 import type * as shareInvites from "../shareInvites.js";
 import type * as sharedChat from "../sharedChat.js";
 import type * as sharedOperationResults from "../sharedOperationResults.js";
-import type * as synthValidators from "../synthValidators.js";
 import type * as timeline from "../timeline.js";
 import type * as trackRouting from "../trackRouting.js";
 import type * as trackWrites from "../trackWrites.js";
 import type * as tracks from "../tracks.js";
+import type * as validators from "../validators.js";
 
 import type {
   ApiFromModules,
@@ -57,9 +53,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   assetFolders: typeof assetFolders;
   assets: typeof assets;
-  audioWarpValidator: typeof audioWarpValidator;
   automation: typeof automation;
-  clipFadesValidator: typeof clipFadesValidator;
   clipWrites: typeof clipWrites;
   clips: typeof clips;
   cloudBackups: typeof cloudBackups;
@@ -72,11 +66,9 @@ declare const fullApi: ApiFromModules<{
   controlSnapshot: typeof controlSnapshot;
   effects: typeof effects;
   exports: typeof exports;
-  midiValidator: typeof midiValidator;
   mixerChannels: typeof mixerChannels;
   ownerships: typeof ownerships;
   projectAccess: typeof projectAccess;
-  projectManifestValidator: typeof projectManifestValidator;
   projectMembership: typeof projectMembership;
   projectMixerSettings: typeof projectMixerSettings;
   projectRows: typeof projectRows;
@@ -89,11 +81,11 @@ declare const fullApi: ApiFromModules<{
   shareInvites: typeof shareInvites;
   sharedChat: typeof sharedChat;
   sharedOperationResults: typeof sharedOperationResults;
-  synthValidators: typeof synthValidators;
   timeline: typeof timeline;
   trackRouting: typeof trackRouting;
   trackWrites: typeof trackWrites;
   tracks: typeof tracks;
+  validators: typeof validators;
 }>;
 
 /**

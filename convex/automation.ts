@@ -13,6 +13,7 @@ import {
 } from "@daw-browser/shared";
 import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
 import { advanceProjectRevision } from "./projectRows";
+import { automationPointValidator } from "./validators";
 
 type InstrumentEffectRow = {
   type: string;
@@ -46,13 +47,6 @@ export const readAutomationTrackInstrument = (rows: readonly InstrumentEffectRow
       })
     : undefined;
 };
-
-const automationPointValidator = v.object({
-  id: v.string(),
-  timeSec: v.number(),
-  value: v.number(),
-  interpolation: v.union(v.literal("linear"), v.literal("hold")),
-});
 
 const targetKindValidator = v.union(v.literal("track"), v.literal("master"));
 

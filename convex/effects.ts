@@ -6,8 +6,7 @@ import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProject
 import { getTrackWriteAccess } from "./trackWrites";
 import { runSharedOperationOnce } from "./sharedOperationResults";
 import { withProjectEdit, type ProjectEdit } from "./projectRows";
-import { literalUnion } from "./effectKindValidators";
-import { legacySynthParamsValidator, synthParamsValidator, trackInstrumentValidator } from "./synthValidators";
+import { arpeggiatorParamsValidator, legacySynthParamsValidator, literalUnion, synthParamsValidator, trackInstrumentValidator } from "./validators";
 import {
   normalizeSynthParams,
   normalizeTrackInstrumentParams,
@@ -864,24 +863,7 @@ export const setArpeggiatorParams = mutation({
   args: {
     projectId: v.string(),
     trackId: v.id('tracks'),
-    params: v.object({
-      enabled: v.boolean(),
-      pattern: v.union(
-        v.literal('up'),
-        v.literal('down'),
-        v.literal('updown'),
-        v.literal('random'),
-      ),
-      rate: v.union(
-        v.literal('1/4'),
-        v.literal('1/8'),
-        v.literal('1/16'),
-        v.literal('1/32'),
-      ),
-      octaves: v.number(), // 1-4
-      gate: v.number(), // 0.1-1.0
-      hold: v.boolean(), // Keep arpeggiation looping until clip ends
-    }),
+    params: arpeggiatorParamsValidator,
   },
   handler: async (ctx, { projectId, trackId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
@@ -966,14 +948,7 @@ export const serverSetArpeggiatorParams = mutation({
   args: {
     projectId: v.string(),
     trackId: v.string(),
-    params: v.object({
-      enabled: v.boolean(),
-      pattern: v.union(v.literal('up'), v.literal('down'), v.literal('updown'), v.literal('random')),
-      rate: v.union(v.literal('1/4'), v.literal('1/8'), v.literal('1/16'), v.literal('1/32')),
-      octaves: v.number(),
-      gate: v.number(),
-      hold: v.boolean(),
-    }),
+    params: arpeggiatorParamsValidator,
   },
   handler: async (ctx, { projectId, trackId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
@@ -1185,14 +1160,7 @@ export const restoreChainArgsValidator = {
     params: v.any(),
   })),
   instrument: v.optional(trackInstrumentValidator),
-  arpeggiator: v.optional(v.object({
-    enabled: v.boolean(),
-    pattern: v.union(v.literal('up'), v.literal('down'), v.literal('updown'), v.literal('random')),
-    rate: v.union(v.literal('1/4'), v.literal('1/8'), v.literal('1/16'), v.literal('1/32')),
-    octaves: v.number(),
-    gate: v.number(),
-    hold: v.boolean(),
-  })),
+  arpeggiator: v.optional(arpeggiatorParamsValidator),
   operationId: v.string(),
 }
 

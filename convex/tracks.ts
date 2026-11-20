@@ -17,7 +17,7 @@ import {
 import { getTrackWriteAccess, requireTrackOwnerForWrite } from "./trackWrites";
 import { getClipWriteAccess } from "./clipWrites";
 import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
-import { literalUnion } from "./effectKindValidators";
+import { automationPointValidator, literalUnion, sendTapValidator, type SendTap } from "./validators";
 import { runSharedOperationOnce } from "./sharedOperationResults";
 import { advanceProjectRevision, withProjectEdit, type ProjectEdit } from "./projectRows";
 import { effectiveControlMixerBoolean } from "./controlEffectiveValues";
@@ -562,8 +562,8 @@ export const setTrackMixRow = async (
 }
 
 const mixerSendsEqual = (
-  left: Array<{ targetId: string; amount: number; tap?: "pre-fx" | "pre-fader" | "post-fader" }>,
-  right: Array<{ targetId: string; amount: number; tap?: "pre-fx" | "pre-fader" | "post-fader" }>,
+  left: Array<{ targetId: string; amount: number; tap?: SendTap }>,
+  right: Array<{ targetId: string; amount: number; tap?: SendTap }>,
 ) => (
   left.length === right.length
   && left.every((send, index) => (
@@ -579,7 +579,7 @@ export const setTrackRoutingRow = async (
     projectId: string
     trackId: Id<"tracks">
     outputTargetId?: Id<"tracks"> | null
-    sends?: Array<{ targetId: Id<"tracks">; amount: number; tap?: "pre-fx" | "pre-fader" | "post-fader" }>
+    sends?: Array<{ targetId: Id<"tracks">; amount: number; tap?: SendTap }>
   },
 ) => {
   const track = await ctx.db.get(input.trackId);
@@ -900,7 +900,7 @@ export const setRouting = mutation({
     sends: v.optional(v.array(v.object({
       targetId: v.id("tracks"),
       amount: v.number(),
-      tap: v.optional(v.union(v.literal("pre-fx"), v.literal("pre-fader"), v.literal("post-fader"))),
+      tap: v.optional(sendTapValidator),
     }))),
   },
   handler: async (ctx, { trackId, outputTargetId, sends }) => {
@@ -926,7 +926,7 @@ export const serverSetRouting = mutation({
     sends: v.optional(v.array(v.object({
       targetId: v.string(),
       amount: v.number(),
-      tap: v.optional(v.union(v.literal("pre-fx"), v.literal("pre-fader"), v.literal("post-fader"))),
+      tap: v.optional(sendTapValidator),
     }))),
   },
   handler: async (ctx, { trackId, outputTargetId, sends }) => {
@@ -1371,8 +1371,8 @@ const hasRoutingReferenceTo = (track: any, targetTrackId: string) => (
 const restoreGroupPlaceholderId = "restored-group";
 
 const routingMatches = (
-  left: { outputTargetId?: string; sends: Array<{ targetId: string; amount: number; tap?: "pre-fx" | "pre-fader" | "post-fader" }> },
-  right: { outputTargetId?: string; sends: Array<{ targetId: string; amount: number; tap?: "pre-fx" | "pre-fader" | "post-fader" }> },
+  left: { outputTargetId?: string; sends: Array<{ targetId: string; amount: number; tap?: SendTap }> },
+  right: { outputTargetId?: string; sends: Array<{ targetId: string; amount: number; tap?: SendTap }> },
 ) => (
   left.outputTargetId === right.outputTargetId
   && left.sends.length === right.sends.length
@@ -1444,7 +1444,7 @@ export const validateRestoreUngroupRouting = (
     if (!existingTrack || !projectedTrack) return false;
     const outputTargetId = child.outputToGroup ? restoreGroupPlaceholderId : child.outputTargetId;
 
-    const sends = existingTrack.sends.map((send: { targetId: any; amount: number; tap?: "pre-fx" | "pre-fader" | "post-fader" }) => ({
+    const sends = existingTrack.sends.map((send: { targetId: any; amount: number; tap?: SendTap }) => ({
       targetId: String(send.targetId),
       amount: send.amount,
       tap: send.tap,
@@ -1685,7 +1685,7 @@ const ungroupTrackForUser = async (ctx: any, userId: string, projectId: string, 
       muted: group.muted,
       soloed: group.soloed,
       outputTargetId: group.outputTargetId ? String(group.outputTargetId) : undefined,
-      sends: group.sends.map((send: { targetId: Id<"tracks">; amount: number; tap?: "pre-fx" | "pre-fader" | "post-fader" }) => ({
+      sends: group.sends.map((send: { targetId: Id<"tracks">; amount: number; tap?: SendTap }) => ({
         targetId: String(send.targetId),
         amount: send.amount,
         tap: send.tap,
@@ -1793,7 +1793,7 @@ export const serverRestoreUngroup = mutation({
       sends: v.array(v.object({
         targetId: v.string(),
         amount: v.number(),
-        tap: v.optional(v.union(v.literal("pre-fx"), v.literal("pre-fader"), v.literal("post-fader"))),
+        tap: v.optional(sendTapValidator),
       })),
     }),
     children: v.array(v.object({ trackId: v.string(), outputTargetId: v.optional(v.string()), outputToGroup: v.boolean() })),
@@ -1807,12 +1807,7 @@ export const serverRestoreUngroup = mutation({
       effectInstanceId: v.optional(v.string()),
       parameterId: v.string(),
       enabled: v.boolean(),
-      points: v.array(v.object({
-        id: v.string(),
-        timeSec: v.number(),
-        value: v.number(),
-        interpolation: v.union(v.literal("linear"), v.literal("hold")),
-      })),
+      points: v.array(automationPointValidator),
       updatedAt: v.number(),
     })),
     sidechainRoutes: v.optional(v.array(v.object({

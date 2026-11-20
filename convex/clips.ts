@@ -17,10 +17,8 @@ import {
   effectiveControlClipName,
   effectiveControlTimingOffset,
 } from './controlEffectiveValues'
-import { audioWarpValidator } from './audioWarpValidator'
-import { clipFadesValidator } from './clipFadesValidator'
+import { audioWarpValidator, clipFadesValidator, midiValidator } from './validators'
 import { normalizeClipFades, type ClipFades } from '@daw-browser/timeline-core/clip-fades'
-import { midiValidator } from './midiValidator'
 import { hashCanonicalJsonSyncV1 } from '@daw-browser/control'
 
 type ClipMidiInput = LegacyMidiClip

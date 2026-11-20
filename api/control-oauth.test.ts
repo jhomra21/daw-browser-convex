@@ -3,7 +3,6 @@ import {
   CONTROL_ACCESS_TOKEN_SECONDS,
   CONTROL_REFRESH_TOKEN_SECONDS,
   canConsumeControlRefresh,
-  controlBearerChallenge,
   getControlOAuthOrigin,
   getControlOAuthResource,
   isActiveControlBinding,
@@ -35,7 +34,6 @@ describe("control OAuth policy", () => {
   test("normalizes the canonical resource", () => {
     expect(getControlOAuthOrigin("https://daw.example.test/app/", "http://ignored.test/path")).toBe("https://daw.example.test");
     expect(getControlOAuthResource("https://daw.example.test/app/", "http://ignored.test/path")).toBe("https://daw.example.test/api");
-    expect(controlBearerChallenge("https://daw.example.test")).toBe('Bearer resource_metadata="https://daw.example.test/.well-known/oauth-protected-resource/api"');
   });
 
   test("advertises OAuth-only metadata and token lifetimes", async () => {

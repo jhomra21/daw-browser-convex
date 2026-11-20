@@ -2,8 +2,8 @@ import {
   createDirectControlInvoker,
   projectCanonicalControlCapabilitiesV1,
   projectCanonicalProjectSnapshotV1,
-  controlErrorSchemaV1,
   controlLimitsV1,
+  readControlErrorV1,
   assetFolderResultSchemaV1,
   assetUploadResultSchemaV1,
   parseControlCommitRequestV1,
@@ -37,6 +37,7 @@ import {
   inspectControlUploadAudioMetadata,
 } from "../control-upload-audio-metadata"
 import { hashFile } from "../hash-file"
+import { controlErrorStatus, readBoundedJson } from "../http"
 
 type ConvexGateway = ControlGateway
 
@@ -88,69 +89,24 @@ const controlError = (
   message: string,
 ): ControlErrorV1 => ({ version: "v1", code, message })
 
-const statusForError = (code: ReturnType<typeof controlError>["code"]) => {
-  if (code === "authorization") return 401
-
-  if (code === "forbidden" || code === "approval-required") return 403
-
-  if (code === "not-found") return 404
-
-  if (code === "revision-conflict" || code === "idempotency-conflict") return 409
-
-  if (code === "invalid-request") return 400
-
-  if (code === "validation" || code === "unsupported-action" || code === "limit-exceeded") return 422
-
-  return 500
-}
-
-const controlErrorEnvelopeSchema = z.object({
-  data: z.json().optional(),
-  errorData: z.json().optional(),
-}).passthrough()
-
-const readControlError = <Failure>(error: Failure) => {
-  const envelope = controlErrorEnvelopeSchema.safeParse(error)
-
-  const candidates = [
-    error,
-    envelope.success ? envelope.data.data : undefined,
-    envelope.success ? envelope.data.errorData : undefined,
-  ]
-
-  for (const candidate of candidates) {
-    const parsed = controlErrorSchemaV1.safeParse(candidate)
-
-    if (parsed.success) return parsed.data
-  }
-
-  return controlError("internal", "Control service failed.")
-}
+const readControlError = <Failure>(error: Failure) => (
+  readControlErrorV1(error) ?? controlError("internal", "Control service failed.")
+)
 
 const respondError = (context: ApiContext, error: ReturnType<typeof controlError>) => (
-  context.json(error, statusForError(error.code), noStore)
+  context.json(error, controlErrorStatus(error.code), noStore)
 )
 
 type JsonBody = { value: JsonValue } | { error: ControlErrorV1; status: 400 | 413 }
 
 const readJsonBody = async (context: ApiContext): Promise<JsonBody> => {
-  const contentLength = context.req.header("content-length")
+  const body = await readBoundedJson(context.req.raw)
 
-  if (contentLength && (!/^\d+$/.test(contentLength) || Number(contentLength) > controlLimitsV1.maxSerializedBodyBytes)) {
-    return { error: controlError("limit-exceeded", "Control body exceeds the serialized body limit."), status: 413 }
-  }
+  if ("value" in body) return body
 
-  const bytes = new Uint8Array(await context.req.raw.arrayBuffer())
-
-  if (bytes.byteLength > controlLimitsV1.maxSerializedBodyBytes) {
-    return { error: controlError("limit-exceeded", "Control body exceeds the serialized body limit."), status: 413 }
-  }
-
-  try {
-    return { value: z.json().parse(JSON.parse(new TextDecoder().decode(bytes))) }
-  } catch {
-    return { error: controlError("invalid-request", "Malformed control JSON body."), status: 400 }
-  }
+  return body.failure === "too-large"
+    ? { error: controlError("limit-exceeded", "Control body exceeds the serialized body limit."), status: 413 }
+    : { error: controlError("invalid-request", "Malformed control JSON body."), status: 400 }
 }
 
 const controlGateway = async (context: ApiContext, bearer: ControlBearer) => {

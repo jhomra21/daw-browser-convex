@@ -4,7 +4,7 @@ import { audioStretchCacheTestInternals, createAudioStretchCache } from './audio
 import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 import type { AudioStretchRuntimeClip } from './audio-stretch-rendering'
 import { createPreparedStretchArtifactSessionRepository } from './prepared-stretch-store'
-import { preparedStretchTestLockManager } from './prepared-stretch-test-lock-manager'
+import { preparedStretchTestLockManager } from '../test-support/prepared-stretch-test-lock-manager'
 
 const createTestBuffer = (values: number[]) => ({
   duration: values.length / 10,

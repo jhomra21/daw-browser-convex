@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { getAudioClipTimeMap, getMarkerWarpTimelineSegments } from '@daw-browser/timeline-core/audio-clip-time-map'
 import { renderStretchedAudioFromSource, renderStretchedAudioToArtifact } from './audio-stretch-rendering'
 import { createPreparedStretchArtifactRepository } from './prepared-stretch-store'
-import { preparedStretchTestLockManager } from './prepared-stretch-test-lock-manager'
+import { preparedStretchTestLockManager } from '../test-support/prepared-stretch-test-lock-manager'
 import { createAudioPcmSourceDescriptor } from './media-pages'
 import type { Clip } from '@daw-browser/timeline-core/types'
 

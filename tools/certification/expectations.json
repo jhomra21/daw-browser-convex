@@ -16169,9 +16169,9 @@
      "id": "273-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      const record = processorState.capturePublication(attempt,",
-       "to": "      const record = processorState.capturePublication(attempt,"
+       "file": "/src/lib/desktop/native-publication-executor.ts",
+       "from": "  const record = host.processorState.capturePublication(attempt,",
+       "to": "  const record = host.processorState.capturePublication(attempt,"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
@@ -53012,8 +53012,8 @@
      "changes": [
       {
        "file": "src/lib/desktop/native-schedule-publication.ts",
-       "from": "        host.preparedSnapshot = snapshot\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)",
-       "to": "        host.preparedSnapshot = { ...snapshot, revision: tx.binding.revision }\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)"
+       "from": "        host.preparedSnapshot = snapshot\n        host.preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)",
+       "to": "        host.preparedSnapshot = { ...snapshot, revision: tx.binding.revision }\n        host.preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)"
       }
      ]
     },
@@ -53130,8 +53130,8 @@
      "changes": [
       {
        "file": "src/lib/desktop/native-schedule-publication.ts",
-       "from": "        host.preparedSnapshot = snapshot\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)",
-       "to": "        host.preparedSnapshot = { ...snapshot, revision: tx.binding.revision }\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)"
+       "from": "        host.preparedSnapshot = snapshot\n        host.preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)",
+       "to": "        host.preparedSnapshot = { ...snapshot, revision: tx.binding.revision }\n        host.preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)"
       }
      ]
     },

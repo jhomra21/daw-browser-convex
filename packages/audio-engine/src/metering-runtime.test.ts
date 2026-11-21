@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { createMeteringRuntime, readTrackMeterFrame } from './metering-runtime'
+import { createMeteringRuntime, readTrackMeterFrame, readTrackStereoLevels } from './metering-runtime'
 import { createReliabilityResourceLedger } from './reliability-characterization'
 
 const originalAudioWorkletNode = globalThis.AudioWorkletNode
@@ -19,6 +19,13 @@ afterEach(() => {
 })
 
 describe('meter worklet messages', () => {
+  test('accepts only finite bounded level messages', () => {
+    expect(readTrackStereoLevels({ type: 'levels', left: 0.25, right: 1 })).toEqual({ left: 0.25, right: 1 })
+    expect(readTrackStereoLevels({ left: 0.25, right: 0.5 })).toBeNull()
+    expect(readTrackStereoLevels({ type: 'levels', left: -1, right: 0.5 })).toBeNull()
+    expect(readTrackStereoLevels({ type: 'levels', left: Number.POSITIVE_INFINITY, right: 0.5 })).toBeNull()
+  })
+
   test('accepts typed meter frames with DC, correlation, clipping, and true peak', () => {
     const frame = {
       type: 'meter-frame',

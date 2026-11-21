@@ -3,6 +3,7 @@ import {
   createSrcImpulseFixture,
   createSrcStereoIsolationFixture,
   createSrcToneFixture,
+  isSampleRateConversionResult,
   measureIsolationDb,
   measureSrcImpulse,
   measureStereoCorrelation,
@@ -33,6 +34,32 @@ describe('sample-rate conversion fixtures and metrics', () => {
 })
 
 describe('sample-rate conversion report schema', () => {
+  test('accepts machine-readable pass and unsupported results', () => {
+    expect(isSampleRateConversionResult({
+      sourceSampleRate: 48_000,
+      targetSampleRate: 44_100,
+      status: 'pass',
+      metrics: {
+        outputSampleRate: 44_100,
+        outputLength: 44_100,
+        passbandRippleDb: 0.1,
+        aliasLevelDb: -90,
+        elapsedMs: 12,
+      },
+    })).toBe(true)
+    expect(isSampleRateConversionResult({
+      sourceSampleRate: 96_000,
+      targetSampleRate: 48_000,
+      status: 'unsupported',
+      message: 'Unsupported sample rate.',
+    })).toBe(true)
+    expect(isSampleRateConversionResult({
+      sourceSampleRate: 96_000,
+      targetSampleRate: 48_000,
+      status: 'unknown',
+    })).toBe(false)
+  })
+
   test('reports absent candidate implementations without claiming benchmarks', () => {
     expect(sampleRateConversionCandidates).toHaveLength(3)
     expect(sampleRateConversionCandidates.every((candidate) =>

@@ -34,6 +34,31 @@ export type SampleRateConversionCandidate = {
   reason: string
 }
 
+type SampleRateConversionFields = {
+  sourceSampleRate?: unknown
+  targetSampleRate?: unknown
+  status?: unknown
+  metrics?: unknown
+}
+
+type SampleRateConversionMetricFields = {
+  outputSampleRate?: unknown
+  outputLength?: unknown
+  passbandRippleDb?: unknown
+  aliasLevelDb?: unknown
+  elapsedMs?: unknown
+}
+
+const isRecord = <Value>(value: Value): value is Value & object => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+
+const isConversionFields = <Value>(value: Value): value is Value & SampleRateConversionFields => isRecord(value)
+
+const isMetricFields = <Value>(value: Value): value is Value & SampleRateConversionMetricFields => isRecord(value)
+
+const isNumber = <Value>(value: Value): value is Value & number => typeof value === 'number'
+
 export const createSrcImpulseFixture = (length: number, peakFrame: number): Float32Array => {
   const samples = new Float32Array(length)
 
@@ -129,6 +154,23 @@ export const measureIsolationDb = (source: Float32Array, isolated: Float32Array)
   for (const sample of isolated) isolatedPeak = Math.max(isolatedPeak, Math.abs(sample))
 
   return dbFromLinear(isolatedPeak / sourcePeak)
+}
+
+export const isSampleRateConversionResult = <Value>(value: Value): value is Value & SampleRateConversionResult => {
+  if (!isConversionFields(value)) return false
+  const metrics = value.metrics
+
+  return isNumber(value.sourceSampleRate)
+    && isNumber(value.targetSampleRate)
+    && (value.status === 'pass' || value.status === 'fail' || value.status === 'unsupported')
+    && (metrics === undefined || (
+      isMetricFields(metrics)
+      && isNumber(metrics.outputSampleRate)
+      && isNumber(metrics.outputLength)
+      && isNumber(metrics.passbandRippleDb)
+      && (isNumber(metrics.aliasLevelDb) || metrics.aliasLevelDb === null)
+      && (isNumber(metrics.elapsedMs) || metrics.elapsedMs === null)
+    ))
 }
 
 export const sampleRateConversionCandidates: readonly SampleRateConversionCandidate[] = [

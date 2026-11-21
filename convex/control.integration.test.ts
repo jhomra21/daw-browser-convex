@@ -1558,7 +1558,7 @@ test("deletion rejects a locked surviving routing dependent", async () => {
 test("deletion rejects a locked index-only survivor without writes", async () => {
   const t = await setup();
   const deleted = await addTrack(t, { name: "Deleted", index: 0 });
-  const survivor = await addTrack(t, { name: "Locked survivor", index: 1, lockedBy: "other-user" });
+  await addTrack(t, { name: "Locked survivor", index: 1, lockedBy: "other-user" });
   const action = { kind: "track.delete", track: { source: "persisted", id: String(deleted) } };
 
   const before = await t.run(async (ctx) => ({
@@ -1583,7 +1583,6 @@ test("deletion rejects a locked index-only survivor without writes", async () =>
     revision: (await ctx.db.query("projects").withIndex("by_room", (q) => q.eq("projectId", projectId)).unique())?.revision,
     commits: await ctx.db.query("controlCommits").collect(),
   }))).toEqual(before);
-  expect(String(survivor)).toBeTruthy();
 });
 
 test("deletion rejects a locked surviving sidechain dependent without writes", async () => {
@@ -1672,7 +1671,7 @@ test("track recovery transition limits accept sixty-four survivors and reject si
 test("recovery locks appended tracks whose indices would shift before writes", async () => {
   const t = await setup();
   const deleted = await addTrack(t, { name: "Deleted", index: 0 });
-  const survivor = await addTrack(t, { name: "Survivor", index: 1 });
+  await addTrack(t, { name: "Survivor", index: 1 });
 
   const deletion = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [{ kind: "track.delete", track: { source: "persisted", id: String(deleted) } }], "recovery-lock-delete"),
@@ -1681,7 +1680,7 @@ test("recovery locks appended tracks whose indices would shift before writes", a
   const descriptor = deletion.recoveries[0];
 
   if (!descriptor) throw new Error("Expected recovery descriptor.");
-  const appended = await addTrack(t, { name: "Appended", index: 1, lockedBy: "other-user" });
+  await addTrack(t, { name: "Appended", index: 1, lockedBy: "other-user" });
 
   const action = {
     kind: "recovery.restore",
@@ -1710,17 +1709,15 @@ test("recovery locks appended tracks whose indices would shift before writes", a
     approvals: await ctx.db.query("controlApprovals").collect(),
     commits: await ctx.db.query("controlCommits").collect(),
   }))).toEqual(before);
-  expect(String(survivor)).toBeTruthy();
-  expect(String(appended)).toBeTruthy();
 });
 
 test("track recovery restores canonical contiguous order matching its preview", async () => {
   const t = await setup();
-  const leading = await addTrack(t, { name: "Leading", index: 0 });
+  await addTrack(t, { name: "Leading", index: 0 });
   const group = await addTrack(t, { name: "Group", index: 1, channelRole: "group" });
   const child = await addTrack(t, { name: "Child", index: 2, groupId: group });
-  const grandchild = await addTrack(t, { name: "Grandchild", index: 3, groupId: child });
-  const trailing = await addTrack(t, { name: "Trailing", index: 4 });
+  await addTrack(t, { name: "Grandchild", index: 3, groupId: child });
+  await addTrack(t, { name: "Trailing", index: 4 });
 
   const deletion = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: await approvedRequest(t, [{
@@ -1769,10 +1766,6 @@ test("track recovery restores canonical contiguous order matching its preview", 
 
   expect(actual.map((track) => track.index)).toEqual(Array.from({ length: actual.length }, (_, index) => index));
   expect(actual).toEqual(expected);
-  expect(String(leading)).toBeTruthy();
-  expect(String(child)).toBeTruthy();
-  expect(String(grandchild)).toBeTruthy();
-  expect(String(trailing)).toBeTruthy();
 });
 
 test("replay requires current write access without rerunning control preflight", async () => {

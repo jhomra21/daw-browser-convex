@@ -21,7 +21,7 @@ import type { HistoryEntry } from '~/lib/undo/types'
 import type { AutomationEnvelope } from '@daw-browser/shared'
 import type { ExternalSidechainRoute, Track, TrackChannelRole, TrackKind } from '@daw-browser/timeline-core/types'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
-import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
+import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox-publishers'
 import { buildCommittedSharedUngroupHistoryEntry, readSharedUngroupResult } from '~/lib/undo/shared-ungroup-history'
 
 import type { TimelineSelectionController } from '~/lib/timeline-selection'

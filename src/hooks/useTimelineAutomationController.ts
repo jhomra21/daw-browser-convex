@@ -34,7 +34,7 @@ import type { ExportAutomationPatch } from "~/lib/desired-playback-state";
 import { clampAutomationLaneHeight, DEFAULT_AUTOMATION_LANE_HEIGHT } from "~/lib/timeline-utils";
 import { sameData } from "~/lib/reuse-equal";
 import { loadLocalAutomationEnvelopes, setLocalAutomationEnvelope, deleteLocalAutomationEnvelope } from "~/lib/local-automation";
-import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
+import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox-publishers";
 import { buildAutomationEnvelopeHistoryEntry } from "~/lib/undo/builders";
 import type { HistoryEntry } from "~/lib/undo/types";
 import { useProjectPersistedState } from "~/hooks/useProjectPersistedState";

@@ -24,7 +24,7 @@ const endpoints = [
 ] as const
 
 describe("public control endpoint equivalence", () => {
-  test("keeps supported REST, SDK, CLI, and MCP control operations aligned", () => {
+  test("parses every control request schema and maps each endpoint to a CLI operation", () => {
     for (const endpoint of endpoints) {
       endpoint.parse()
       expect(canonicalControlOperations[endpoint.cli]).toBeDefined()

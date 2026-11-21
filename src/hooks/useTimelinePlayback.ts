@@ -103,6 +103,9 @@ export function useTimelinePlayback(
     }
   }
 
+  // The playhead follows the audio clock once per frame; cancelRaf is the matching stop.
+  const requestTick = () => setRafId(requestAnimationFrame(tick))
+
   const desktopAudioHostBridge = globalThis.window?.dawDesktop?.audioHost
 
   const audioHostBridge = desktopAudioHostBridge && supportsNativePlayback(desktopAudioHostBridge)
@@ -507,7 +510,7 @@ export function useTimelinePlayback(
         nowMs - lastPlayheadUiUpdateMs >= PLAYHEAD_UI_UPDATE_INTERVAL_MS
         || Math.abs(sec - lastPublishedPlayheadSec) >= PLAYHEAD_PUBLISH_JUMP_SEC
       ) publishPlayhead(sec)
-      setRafId(requestAnimationFrame(tick))
+      requestTick()
 
       return
     }
@@ -535,7 +538,7 @@ export function useTimelinePlayback(
       publishPlayhead(sec)
     }
 
-    setRafId(requestAnimationFrame(tick))
+    requestTick()
   }
 
   const reportNativePlaySkip = (reason: string) => {
@@ -741,7 +744,7 @@ export function useTimelinePlayback(
         lastPlayheadUiUpdateMs = 0
 
         if (backend === 'portable-browser') audioEngine.onTransportStart(playheadSec())
-        setRafId(requestAnimationFrame(tick))
+        requestTick()
 
         // A locate made before the start committed had no graph to seek: apply it to the running one.
         if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)
@@ -971,7 +974,7 @@ export function useTimelinePlayback(
         horizonSec: scheduledUntilSec - playheadSec(),
         tracks: readyTracks,
       })
-      setRafId(requestAnimationFrame(tick))
+      requestTick()
       playAttemptPhase = { token, backend: 'fallback', state: 'active' }
     })()
 

@@ -58,7 +58,7 @@ export const createNativeRetirement = (host: NativeRetirementHost) => {
           held.waitingControl = !reply.ok && reply.kind === "unavailable"
 
           // Native samples the reader check and reply epoch separately
-          // (audio-host.cpp:3174, 3194). The first crossing needs one more
+          // (RetireGraphRevision). The first crossing needs one more
           // frame-driven proof: only a serialized Retire dispatched after that
           // observation cannot be reader-blocked by the monotonic counter.
           // Then not-safe means latency pending; later transport epochs still wake.

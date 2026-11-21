@@ -64,8 +64,8 @@ const processorIndex = (graph: AudioCoreGraphSnapshot) => new Map(graph.nodes.fl
 // node's instrument again (a synth also when it replaces the instance): the
 // node then gets a fresh slot. Slots and generations are native-assigned and not
 // visible here: they follow continuity and, for an instrument node, an unchanged
-// configuration (core assign_prepared_node 7736-7772, re-run by
-// refresh_prepared_node 7776-7784), which Prepare reports as accepted.
+// configuration (core assign_prepared_node, re-run by
+// refresh_prepared_node), which Prepare reports as accepted.
 export const scheduledRetention = (
   previous: AudioCoreGraphSnapshot,
   next: AudioCoreGraphSnapshot,

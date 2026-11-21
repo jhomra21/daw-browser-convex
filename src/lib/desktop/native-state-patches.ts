@@ -38,7 +38,6 @@ export const createNativeStatePatches = (host: NativeStatePatchHost) => {
   const { processorState } = host
   let draining = false
 
-  // The typed reply of one patch send. The answer decides nothing here: the ledger's fence and policy do.
   const patchReplyOf = (reply: NativeProcessorPatchReply): PatchReply => {
     if (!reply.ok) return reply.kind === "refused" ? { kind: "refused", refusal: "native-refused", transient: false } : { kind: reply.kind }
 
@@ -57,7 +56,6 @@ export const createNativeStatePatches = (host: NativeStatePatchHost) => {
   }
 
   const runBuiltInStatePatch = async ({ execution, desired: materialized }: { execution: PatchExecution; desired: ProcessorDesired }) => {
-    // A patch that was never sent: its requests are answered and the ledger takes its desired back.
     const unsent = (outcome?: ProcessorDeliveryOutcome) => host.executeReconcile(processorState.abandon(execution, outcome))
     const bridge = host.bridge
     const { prepared, graph, snapshot } = host.session()
@@ -136,7 +134,7 @@ export const createNativeStatePatches = (host: NativeStatePatchHost) => {
     host.executeReconcile(processorState.patchReplied(execution, patchReplyOf(reply)))
   }
 
-  // Native refuses a patch while a core is prepared (audio-host.cpp:3150). The lane serializes this controller's own
+  // Native refuses a patch while a core is prepared (QueueProcessorStatePatch). The lane serializes this controller's own
   // prepare, publish and adoption with patches, so the one prepared core a patch can meet is a rolled-back
   // publication native still holds as publish-pending; every patch waits for its owner's terminal. One
   // that changes latency also waits while an adoption attempt runs: it folds the latest desired content into its own

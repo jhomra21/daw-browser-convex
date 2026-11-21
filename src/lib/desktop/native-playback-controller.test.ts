@@ -381,7 +381,7 @@ const step6Publication = async (releaseCompile = true, instrument: boolean | "ke
     close: async () => { await act({ kind: "loss" }); await act({ kind: "dispose" }); await advance() } }
 }
 
-// STEP7 failure inventory: STEP7-PLAN §7, frozen before product work. These
+// STEP7 failure inventory, frozen before product work. These
 // bounded loops execute named host events; they never poll time or render in
 // the control-only observation. A failed expectation is an ordinary red test.
 const step7BigInt = z.bigint()
@@ -2874,7 +2874,7 @@ describe("DV01 STEP6 public publication witnesses", () => {
  return fixture.revisionReply("publish-pending") }
 
       // Native's latency-not-admitted callback preserves the bank. A subsequent
-      // Inspect clears its in-flight flag and proves `prepared` (audio-host.cpp).
+      // Inspect clears its in-flight flag and proves `prepared` (InspectGraphRevision).
       // This boundary proof is not a modeled callback/resource-capacity claim.
       fixture.bridge.session.revisions.inspect = async () => fixture.revisionReply("prepared")
       fixture.bridge.session.revisions.rollback = async () => {
@@ -10734,7 +10734,7 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
 
       publishes++
 
-      // Native answers rebase-required to a Publish at a seam it has already reached (audio-host.cpp:3342-3348).
+      // Native answers rebase-required to a Publish at a seam it has already reached (PublishGraphRevision).
       if (scenario === "exhaustion" || ((scenario === "rebase" || scenario === "asset-add-rebase") && publishes === 1)
         || (scenario === "paged-concurrent-refill" && publishes === 1)
         || (scenario === "asset-add-slow-upload" && seam <= frame)) {
@@ -10750,7 +10750,7 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
         return defaultRevisionInspect(request)
       const inspection = reply()
 
-      // Inspect reports rebase-required once progress is past the requested seam (audio-host.cpp:3435-3439).
+      // Inspect reports rebase-required once progress is past the requested seam (InspectGraphRevision).
       if (scenario === "asset-add-slow-upload" && status === "prepared" && frame > seam && inspection.ok)
         return { ...inspection, revision: { ...inspection.revision, status: "rebase-required" } }
 
@@ -16178,7 +16178,7 @@ test("does not require a browser audio engine when the native bridge is absent",
   expect(await controller.start(input().transport)).toBe("unavailable")
 })
 
-// DV01 boundary (§6.1): a patch answer of a running host is a claim, a refusal or a loss as its typed reply says, and
+// DV01 boundary: a patch answer of a running host is a claim, a refusal or a loss as its typed reply says, and
 // a parameter failure is a refusal or a loss as its kind says. Written red at step 0, green with the ledger and the
 // controller delivery of milestone 2.
 describe("DV01 boundary witnesses", () => {
@@ -16287,7 +16287,7 @@ describe("DV01 boundary witnesses", () => {
   })
 })
 
-// DV01 boundary (§6.1): every controller witness the design lists beyond the four above. They drive the real
+// DV01 boundary: every controller witness beyond the four above. They drive the real
 // controller through the bridge fixture and assert sends, notices, prepares and what the old entries answer.
 describe("DV01 boundary witnesses, section 6.1 controller", () => {
   const turns = async () => { for (let turn = 0; turn < 60; turn += 1) await Promise.resolve() }
@@ -18599,7 +18599,7 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
   })
 })
 
-// DV01 boundary, round 2 (§1.2 rule 1, ruling M2-B decision b): a latency publication that fails is classified by the
+// DV01 boundary, round 2: a latency publication that fails is classified by the
 // typed status of its prepare, publish or inspect reply, never by text. Only a definite refusal is `refused`; a session
 // that is not available is `unavailable` (no incident); a lost or thrown reply is `unconfirmed`.
 describe("DV01 publication failure classification", () => {
@@ -18952,7 +18952,7 @@ for (const latencyPending of [false, true]) test(`STEP7B4 reader-check/reply rac
     if (!reply.ok) return reply
 
     // The callback completes between native's reader check and reply load
-    // (audio-host.cpp:3174, 3194), so the first crossing can still be reader-blocked.
+    // (RetireGraphRevision), so the first crossing can still be reader-blocked.
     return { ...reply, revision: { ...reply.revision,
       transportEpoch: fixture.transports.at(-1)?.epoch ?? 1,
       renderEpoch: attempts === 1 ? 10n : 11n,
@@ -19331,7 +19331,7 @@ describe("LAT1 late seam binding", () => {
 
   afterEach(() => restoreClock())
 
-  // A fake native that applies the rebase and seam rules of audio-host.cpp PublishGraphRevision.
+  // A fake native that applies the rebase and seam rules of the host's PublishGraphRevision.
   const lat1Host = (f: Lat1Fixture, blockFrames: bigint) => {
     const events: Lat1Event[] = []
 

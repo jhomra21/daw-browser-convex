@@ -116,7 +116,7 @@ type ProcessorEntry = {
 
 type ExecutionSettlement = "applied" | "cancelled"
 
-// One request for a target's content, answered once (design 1.3). `attempts` is the history of every carrier that
+// One request for a target's content, answered once. `attempts` is the history of every carrier that
 // tried to take it; the carriers' own settlement is bookkeeping and never answers a receipt.
 type Attempt = "pending" | "definite-refusal" | "uncertain" | "proved"
 
@@ -248,7 +248,7 @@ type TargetExecutions = {
   deferredFollowers?: true
   structural?: { lifetime: number }
   // The content whose policy ended and how it was answered: the same content is answered alike until an event offers
-  // it again (design 1.6: recovery comes from events only, never from asking again). A record answers every request
+  // it again (recovery comes from events only, never from asking again). A record answers every request
   // linked to it, whichever carrier it was escalated to.
   exhausted?: ReadonlyMap<string, ProcessorDeliveryOutcome>
 }
@@ -272,7 +272,7 @@ export type ExecutionRetention = (key: string, parameterIds: Iterable<string>) =
 // Desired content to dispatch, a dispatch to repeat on the current publication, or a patch the ledger queued.
 export type ProcessorReconcile = { desired: ProcessorDesired; values: ReadonlyMap<string, number> } | { resend: DispatchExecution } | { patch: PatchExecution }
 
-// The host-wide fence on the patch lane (design 2.4.6). Native holds at most one claim, and a patch or a prepare sent
+// The host-wide fence on the patch lane. Native holds at most one claim, and a patch or a prepare sent
 // meanwhile is refused, so nothing is sent for any target until the claim's resolution is reported.
 type PatchFence =
   | { kind: "open" }
@@ -616,7 +616,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
     return receipt.order < order || (receipt.order === order && receipt.serial < newest)
   }
 
-  // Rule c: newer, different content is dispatched or materialized, so what is older and still unanswered is superseded.
+  // Newer, different content is dispatched or materialized, so what is older and still unanswered is superseded.
   const supersedeOlder = (target: TargetExecutions, execution: Execution, order: number) => {
     if (order < 0) return
 
@@ -636,7 +636,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
       if (receipt.join) continue
 
       // Current equality is not a proof for a request ordered behind different pending content.
-      // Reuse rule 0: a joined carrier still owes its own proof, even if an older frame sounds equal.
+      // A joined carrier still owes its own proof, even if an older frame sounds equal.
       if (proves(target, receipt.spec)
         && (receipt.carrier === proof && proof !== undefined
           || coverage(target, receipt.spec, receipt.contentKey, proof?.epoch ?? receipt.carrier?.epoch ?? 0).kind === "proven"))
@@ -647,7 +647,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
     clearIncident(key)
   }
 
-  // Rule e: the policy ended for this record. Every attempt a definite refusal is a refusal; one that may have been
+  // The policy ended for this record. Every attempt a definite refusal is a refusal; one that may have been
   // taken makes it unconfirmed. The desired stays, and the target joins the session's incident.
   const endPolicy = (execution: Execution, noIncident = false) => {
     let uncertain = !!execution.uncertain
@@ -936,7 +936,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
     return resolved(target, id) !== value
   }
 
-  // Rule 0 (design 1.3): is the content already carried? Every field it names is either held by an in-flight carrier
+  // Is the content already carried? Every field it names is either held by an in-flight carrier
   // of the same value in this epoch (the request joins the newest), or proven in force with nothing different pending.
   const coverage = (target: TargetExecutions, spec: ContentSpec, contentKey: string, epoch: number, publicationProof = false):
     { kind: "joined"; carrier: Execution } | { kind: "proven" | "publication" | "dispatch" } => {
@@ -1624,7 +1624,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
       }
 
       const newer = entries.get(input.key)?.desired
-      // Only newer, different content supersedes (§1.2): an older request the newer desired also names still owns its carrier.
+      // Only newer, different content supersedes: an older request the newer desired also names still owns its carrier.
       const newerSpec = newer && processorContentSpec(newer.content)
 
       const replaced = !accepted && !(newerSpec && (spec.state === undefined || spec.state === newerSpec.state)
@@ -1745,7 +1745,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
 
       return undefined
     },
-    // The typed reply to a dispatched patch (design 2.4.6). Only a reply for the carrier the ledger still holds moves
+    // The typed reply to a dispatched patch. Only a reply for the carrier the ledger still holds moves
     // the fence: after `clear` a late reply for a disposed carrier changes nothing.
     patchReplied: (execution: PatchExecution, reply: PatchReply): ProcessorReconcile[] => {
       const target = targets.get(execution.key)
@@ -1858,9 +1858,9 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
 
       return settledReconciles()
     },
-    // A parameter or urgent dispatch was refused or lost (design 1.6). The completion that learned it acts on the
+    // A parameter or urgent dispatch was refused or lost. The completion that learned it acts on the
     // answer in the same turn: `retry` (the one retry), `ladder` (a patch of the current desired), `waiting` (a transient
-    // refusal: an adoption or a domain end offers it again) or `ended` (the policy is over: rule e).
+    // refusal: an adoption or a domain end offers it again) or `ended` (the policy is over, see endPolicy).
     refuse: (execution: Execution, kind: RefusalKind, reason: ProcessorRefusal = "native-refused"): RefusalAction => {
       const target = targets.get(execution.key)
 
@@ -2283,7 +2283,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
       const refused = reoffer()
       settlePatches(includedOrder, matchesPublished)
 
-      // Rule b: the publication's installed content decides every request; what is older than the floor and not
+      // The publication's installed content decides every request; what is older than the floor and not
       // held is superseded by it. A request at or above the floor stays: the reconcile below sends it.
       for (const [key, target] of targets) {
         for (const receipt of target.receipts) {

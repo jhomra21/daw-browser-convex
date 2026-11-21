@@ -3,7 +3,6 @@ type NativeVstStateCaptureInput = {
   report: (instanceId: string, error: Error) => void
 }
 
-// One capture runs per instance at a time; requests during each capture coalesce into a follow-up.
 export const createNativeVstStateCapture = (input: NativeVstStateCaptureInput) => {
   const running = new Map<string, { again: boolean }>()
 

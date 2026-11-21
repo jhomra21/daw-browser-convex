@@ -106,7 +106,6 @@ export type PublicationPass = { status: NativeRevisionReply; next: "wait" | "aga
 // What differs between publishing a latency change and a schedule revision. The runner owns the proof loop, the error
 // path and the order of both; a strategy owns what it prepares and sends.
 export type PublicationStrategy = {
-  // The message of the error raised when a published proof does not match what this strategy prepared.
   proofMismatch: string
   // Whether a reply the strategy waits on frees the transport lane, and whether a published reply to its own publish is proof enough.
   releasesLane: boolean

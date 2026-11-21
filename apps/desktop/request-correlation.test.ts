@@ -18,8 +18,11 @@ describe("desktop request correlation", () => {
     const secondClient = createRequestCorrelation()
     const externalId = "request-1"
 
-    expect(firstClient.create(externalId)).not.toBe(secondClient.create(externalId))
-    expect(firstClient.removeExternal(externalId)).toBeDefined()
-    expect(secondClient.getInternal(externalId)).toBeDefined()
+    const firstInternalId = firstClient.create(externalId)
+    const secondInternalId = secondClient.create(externalId)
+
+    expect(firstInternalId).not.toBe(secondInternalId)
+    expect(firstClient.removeExternal(externalId)).toBe(firstInternalId)
+    expect(secondClient.getInternal(externalId)).toBe(secondInternalId)
   })
 })

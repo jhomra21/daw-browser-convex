@@ -24,7 +24,7 @@ type UseEffectsPanelAudioSyncOptions = {
   tracks: Accessor<Track[]>;
   sidechainRoutes: Accessor<ExternalSidechainRoute[]>;
   audioEngine: Accessor<AudioEngine>;
-  usesLegacyAudioEngine?: Accessor<boolean>;
+  usesLegacyAudioEngine: Accessor<boolean>;
   roomEffects: Accessor<RoomEffectRow[] | undefined>;
   roomEffectsStatus: Accessor<"pending" | "error" | "success">;
   roomEffectsError: Accessor<unknown>;
@@ -321,7 +321,7 @@ export function useEffectsPanelAudioSync(
   createEffect(() => {
     const audioEngine = options.audioEngine();
 
-    if (options.usesLegacyAudioEngine && !options.usesLegacyAudioEngine()) return;
+    if (!options.usesLegacyAudioEngine()) return;
     const projectId = options.projectId();
 
     if (projectId) return;
@@ -333,7 +333,7 @@ export function useEffectsPanelAudioSync(
 
   createEffect(function reconcileEffectsRows() {
     const audioEngine = options.audioEngine();
-    const usesLegacyAudioEngine = options.usesLegacyAudioEngine?.() ?? true;
+    const usesLegacyAudioEngine = options.usesLegacyAudioEngine();
     const projectId = options.projectId();
 
     const effects: SyncedEffectRow[] | undefined = projectId && isLocalId("project", projectId)

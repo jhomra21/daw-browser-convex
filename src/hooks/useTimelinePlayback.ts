@@ -2,6 +2,7 @@ import { createEffect, createSignal, onCleanup, untrack } from 'solid-js'
 
 import { LIVE_SCHEDULE_HORIZON_SEC, type AudioEngine, type SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
+import { nativeControllerObserver } from '~/lib/desktop/acceptance-observer'
 import { createNativePlaybackController, nativePlaybackFaultText } from '~/lib/desktop/native-playback-controller'
 import { createPortableBrowserPlaybackController } from '~/lib/portable-browser-playback-controller'
 import type { LivePlaybackCompileContext } from '~/lib/live-playback-snapshot'
@@ -27,7 +28,15 @@ class NativeStateCaptureError extends Error {}
 const LOOP_EPS = 1e-3
 
 const PLAYHEAD_UI_UPDATE_INTERVAL_MS = 1000 / 30
+
+// A playhead jump this large is published at once instead of waiting for the next UI interval.
+const PLAYHEAD_PUBLISH_JUMP_SEC = 0.25
 const LIVE_SCHEDULE_REFRESH_MARGIN_SEC = 5
+
+// Schedule a little ahead to avoid past-time starts under scheduling jitter.
+// This keeps metronome ticks and clip audio locked to the same transport timestamp.
+// Unrelated to the engine's LIVE_SCHEDULE_HORIZON_SEC (30 s of live-schedule lookahead, not a transport start offset).
+const SCHED_AHEAD_SEC = 0.02
 
 const audioBackendRolloutPolicy = {
   version: 2,
@@ -74,9 +83,6 @@ export function useTimelinePlayback(
   let lastPlayheadUiUpdateMs = 0
   let lastPublishedPlayheadSec = 0
   let scheduledUntilSec = 0
-  // Schedule a little ahead to avoid past-time starts under scheduling jitter.
-  // This keeps metronome ticks and clip audio locked to the same transport timestamp.
-  const SCHED_AHEAD_SEC = 0.02
 
   // Centralize loop state (start/end/active) so timing logic stays in sync across handlers
   const getLoopParams = () => {
@@ -98,6 +104,9 @@ export function useTimelinePlayback(
     }
   }
 
+  // The playhead follows the audio clock once per frame; cancelRaf is the matching stop.
+  const requestTick = () => setRafId(requestAnimationFrame(tick))
+
   const desktopAudioHostBridge = globalThis.window?.dawDesktop?.audioHost
 
   const audioHostBridge = desktopAudioHostBridge && supportsNativePlayback(desktopAudioHostBridge)
@@ -105,8 +114,7 @@ export function useTimelinePlayback(
     : undefined
 
   const requiresNativeAudio = nativeOptions?.requiresNativeAudio === true
-  const acceptance = nativeOptions?.acceptance
-  const externalNativeSession = acceptance?.ownsNativeSession === false
+  const nativeObserver = nativeControllerObserver(nativeOptions?.acceptance)
 
   const hasAudioLifecycle = audioHostBridge !== undefined
     && audioHostBridge.onLifecycle !== undefined
@@ -186,11 +194,7 @@ export function useTimelinePlayback(
     getProcessorTarget: nativeOptions?.getProcessorTarget,
     resolveSource: nativeOptions?.resolveAudioSource,
     reportUnavailable: requiresNativeAudio,
-    observer: acceptance && {
-      adoption: acceptance.adoption,
-      mark: acceptance.mark,
-      externalSessionOwner: externalNativeSession,
-    },
+    observer: nativeObserver,
     instrumentBudget: nativeOptions?.instrumentBudget,
     onInstrumentPreparation: nativeOptions?.onInstrumentPreparation,
     fingerprintSnapshot: loopOptions?.getTracks ? (snapshot) => readScheduleSnapshotFingerprint(snapshot) : undefined,
@@ -500,9 +504,9 @@ export function useTimelinePlayback(
 
       if (
         nowMs - lastPlayheadUiUpdateMs >= PLAYHEAD_UI_UPDATE_INTERVAL_MS
-        || Math.abs(sec - lastPublishedPlayheadSec) >= 0.25
+        || Math.abs(sec - lastPublishedPlayheadSec) >= PLAYHEAD_PUBLISH_JUMP_SEC
       ) publishPlayhead(sec)
-      setRafId(requestAnimationFrame(tick))
+      requestTick()
 
       return
     }
@@ -525,12 +529,12 @@ export function useTimelinePlayback(
     if (
       looped ||
       nowMs - lastPlayheadUiUpdateMs >= PLAYHEAD_UI_UPDATE_INTERVAL_MS ||
-      Math.abs(sec - lastPublishedPlayheadSec) >= 0.25
+      Math.abs(sec - lastPublishedPlayheadSec) >= PLAYHEAD_PUBLISH_JUMP_SEC
     ) {
       publishPlayhead(sec)
     }
 
-    setRafId(requestAnimationFrame(tick))
+    requestTick()
   }
 
   const reportNativePlaySkip = (reason: string) => {
@@ -736,7 +740,7 @@ export function useTimelinePlayback(
         lastPlayheadUiUpdateMs = 0
 
         if (backend === 'portable-browser') audioEngine.onTransportStart(playheadSec())
-        setRafId(requestAnimationFrame(tick))
+        requestTick()
 
         // A locate made before the start committed had no graph to seek: apply it to the running one.
         if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)
@@ -966,7 +970,7 @@ export function useTimelinePlayback(
         horizonSec: scheduledUntilSec - playheadSec(),
         tracks: readyTracks,
       })
-      setRafId(requestAnimationFrame(tick))
+      requestTick()
       playAttemptPhase = { token, backend: 'fallback', state: 'active' }
     })()
 
@@ -1451,7 +1455,7 @@ export function useTimelinePlayback(
   } = createAudioLifecycle({
     audioHostBridge: hasAudioLifecycle ? audioHostBridge : undefined,
     requiresNativeAudio,
-    externalNativeSession,
+    externalNativeSession: nativeObserver?.externalSessionOwner === true,
     nativeOptions,
     portableBrowserOptions,
     audioEngine,

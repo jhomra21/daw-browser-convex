@@ -1,0 +1,59 @@
+{
+ "name": "untangle-hot-playback-hook",
+ "sequence": 101,
+ "createdAt": "2026-11-21T06:23:28.061Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "src/components/timeline/create-effects-panel-controller.ts",
+   "from": "6fd114550a811a4ce2dd65ab00a4bbde9afcb5f7957b4744c9a8ea56855e99ab",
+   "to": "8506a3a20c2171015bb4a1837fadbffacae7f3b6acb6441c1d92188f217116c9"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.ts",
+   "from": "f529c9683eb5db1eb34d3590b63bfbcf80d7dec778ac041284aaa84b44592d1f",
+   "to": "48739f65e4b2b1a5e8269ae0bb939d013c6831427a00457f0e1626e22255dda0"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "72a51788907d391f1946c0137f5181f7a684e1c2a1f0301640816fb4aa42b511",
+   "new": "6fef882088684c7524deb3a04fd332dc09baeaa67a7925d87e093112a60eae21"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "295d619c1555505cae0f354fa6c277ec5deb2789",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "e8fa9e131d68c5a8b8b14e61ecd006732f7b4a2a35d4a63ea856bb850c44d07e",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "e8fa9e131d68c5a8b8b14e61ecd006732f7b4a2a35d4a63ea856bb850c44d07e",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b11c-bless/live",
+   "resultSha256": "442963c2650a6a9c93bc06a5b5d530d1a146691fd63d1fb1eb2beef5fdb20ee1",
+   "seconds": 1269.83635225,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 
-const coreSourceUrl = new URL('../src/audio_core.cpp', import.meta.url)
+const coreHeaderUrl = new URL('../src/audio_core_internal.h', import.meta.url)
+const graphRenderSourceUrl = new URL('../src/audio_core_graph_render.cpp', import.meta.url)
 const cmakeUrl = new URL('../CMakeLists.txt', import.meta.url)
 const wasmBuildScriptUrl = new URL('../scripts/build-wasm.sh', import.meta.url)
 const publishWasmAssetsUrl = new URL('../scripts/publish-wasm-assets.sh', import.meta.url)
@@ -29,21 +30,22 @@ test('Wasm build validates a same-filesystem directory before publication', asyn
 })
 
 test('native graph stages cache built-in renderers outside the callback', async () => {
-  const source = await Bun.file(coreSourceUrl).text()
-  const nativeStageStart = source.indexOf('struct NativeGraphStage {')
-  const nativeStageEnd = source.indexOf('struct NativeGraphHooks {', nativeStageStart)
-  const callbackStart = source.indexOf('    const NativeGraphHooks &native_stages = *core.published_native_hooks;')
-  const callbackEnd = source.indexOf('#else', callbackStart)
+  const header = await Bun.file(coreHeaderUrl).text()
+  const renderSource = await Bun.file(graphRenderSourceUrl).text()
+  const nativeStageStart = header.indexOf('struct NativeGraphStage {')
+  const nativeStageEnd = header.indexOf('struct NativeGraphHooks {', nativeStageStart)
+  const callbackStart = renderSource.indexOf('    const NativeGraphHooks &native_stages = *core.published_native_hooks;')
+  const callbackEnd = renderSource.indexOf('#else', callbackStart)
 
   expect(nativeStageStart).toBeGreaterThanOrEqual(0)
   expect(nativeStageEnd).toBeGreaterThan(nativeStageStart)
-  expect(source.slice(nativeStageStart, nativeStageEnd)).toContain('ProcessorRenderer renderer = nullptr')
-  expect(source).toContain('static_assert(std::is_trivially_copyable_v<NativeGraphStage>)')
-  expect(source).toContain('const ProcessorRenderer renderer = find_processor_renderer(graph.processors[processor_index].kind)')
-  expect(source).toContain('if (renderer == nullptr) return false')
+  expect(header.slice(nativeStageStart, nativeStageEnd)).toContain('ProcessorRenderer renderer = nullptr')
+  expect(header).toContain('static_assert(std::is_trivially_copyable_v<NativeGraphStage>)')
+  expect(header).toContain('const ProcessorRenderer renderer = find_processor_renderer(graph.processors[processor_index].kind)')
+  expect(header).toContain('if (renderer == nullptr) return false')
   expect(callbackStart).toBeGreaterThanOrEqual(0)
   expect(callbackEnd).toBeGreaterThan(callbackStart)
-  expect(source.slice(callbackStart, callbackEnd)).not.toContain('find_processor_renderer')
+  expect(renderSource.slice(callbackStart, callbackEnd)).not.toContain('find_processor_renderer')
 })
 
 test('Wasm directory publication restores the old asset set when the replacement fails', async () => {

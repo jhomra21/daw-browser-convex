@@ -8,6 +8,32 @@
 
 // The one contract that reads private voice state; see the CMake target that builds this variant.
 #include "../src/audio_core.cpp"
+#include "../src/audio_core_assets.cpp"
+#include "../src/audio_core_graph_prepare.cpp"
+#include "../src/audio_core_graph_render.cpp"
+#include "../src/audio_core_instruments.cpp"
+#include "../src/audio_core_mixer.cpp"
+#include "../src/audio_core_native_hooks.cpp"
+#include "../src/audio_core_parameters.cpp"
+#include "../src/audio_core_prepare.cpp"
+#include "../src/audio_core_process.cpp"
+#include "../src/audio_core_publication.cpp"
+#include "../src/audio_core_recording.cpp"
+#include "../src/audio_core_slots.cpp"
+#include "../src/audio_core_sources.cpp"
+#include "../src/audio_core_validation.cpp"
+#include "../src/audio_core_wasm.cpp"
+#include "../src/processor_autofilter.cpp"
+#include "../src/processor_delay.cpp"
+#include "../src/processor_dynamics.cpp"
+#include "../src/processor_eq.cpp"
+#include "../src/processor_lofi.cpp"
+#include "../src/processor_modulation.cpp"
+#include "../src/processor_registry.cpp"
+#include "../src/processor_reverb.cpp"
+#include "../src/processor_saturator.cpp"
+#include "../src/processor_spectral.cpp"
+#include "../src/processor_utility.cpp"
 #endif
 
 #include <algorithm>

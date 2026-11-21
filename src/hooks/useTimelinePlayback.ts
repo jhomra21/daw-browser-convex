@@ -27,7 +27,15 @@ class NativeStateCaptureError extends Error {}
 const LOOP_EPS = 1e-3
 
 const PLAYHEAD_UI_UPDATE_INTERVAL_MS = 1000 / 30
+
+// A playhead jump this large is published at once instead of waiting for the next UI interval.
+const PLAYHEAD_PUBLISH_JUMP_SEC = 0.25
 const LIVE_SCHEDULE_REFRESH_MARGIN_SEC = 5
+
+// Schedule a little ahead to avoid past-time starts under scheduling jitter.
+// This keeps metronome ticks and clip audio locked to the same transport timestamp.
+// Unrelated to the engine's LIVE_SCHEDULE_HORIZON_SEC (30 s of live-schedule lookahead, not a transport start offset).
+const SCHED_AHEAD_SEC = 0.02
 
 const audioBackendRolloutPolicy = {
   version: 2,
@@ -74,9 +82,6 @@ export function useTimelinePlayback(
   let lastPlayheadUiUpdateMs = 0
   let lastPublishedPlayheadSec = 0
   let scheduledUntilSec = 0
-  // Schedule a little ahead to avoid past-time starts under scheduling jitter.
-  // This keeps metronome ticks and clip audio locked to the same transport timestamp.
-  const SCHED_AHEAD_SEC = 0.02
 
   // Centralize loop state (start/end/active) so timing logic stays in sync across handlers
   const getLoopParams = () => {
@@ -500,7 +505,7 @@ export function useTimelinePlayback(
 
       if (
         nowMs - lastPlayheadUiUpdateMs >= PLAYHEAD_UI_UPDATE_INTERVAL_MS
-        || Math.abs(sec - lastPublishedPlayheadSec) >= 0.25
+        || Math.abs(sec - lastPublishedPlayheadSec) >= PLAYHEAD_PUBLISH_JUMP_SEC
       ) publishPlayhead(sec)
       setRafId(requestAnimationFrame(tick))
 
@@ -525,7 +530,7 @@ export function useTimelinePlayback(
     if (
       looped ||
       nowMs - lastPlayheadUiUpdateMs >= PLAYHEAD_UI_UPDATE_INTERVAL_MS ||
-      Math.abs(sec - lastPublishedPlayheadSec) >= 0.25
+      Math.abs(sec - lastPublishedPlayheadSec) >= PLAYHEAD_PUBLISH_JUMP_SEC
     ) {
       publishPlayhead(sec)
     }

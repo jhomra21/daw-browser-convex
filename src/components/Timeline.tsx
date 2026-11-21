@@ -660,27 +660,11 @@ const Timeline: Component<TimelineProps> = (props) => {
       // Local adoption replaces the snapshot even for automation/effect-only commits.
       playbackInputs: nativePlaybackInputs,
       captureNativeVstStates: async ({ projectId: capturedProjectId, instanceIds }) => {
-        const bridge = desktopBridge()?.audioHost?.session
+        if (instanceIds.length === 0) return
 
-        if (!bridge || instanceIds.length === 0) return
-
-        if (!isLocalId("project", capturedProjectId)) return
-        const processors = await listLocalExternalProcessors(capturedProjectId)
-
-        for (const instanceId of instanceIds) {
-          const processor = processors.find((candidate) => candidate.instanceId === instanceId)
-
-          if (!processor?.manifest.supportsState) continue
-          const capture = await bridge.captureVstState(instanceId)
-
-          if (!capture.ok) throw new Error(`Native VST3 state capture failed for "${instanceId}": ${capture.error}`)
-          await persistLocalExternalProcessorState(
-            capturedProjectId,
-            instanceId,
-            capture,
-            localVstStateOwnerId(capturedProjectId, userId()),
-          )
-        }
+        await captureNativeVstStates(capturedProjectId, (processors) => instanceIds.flatMap(
+          (instanceId) => processors.find((candidate) => candidate.instanceId === instanceId) ?? [],
+        ))
       },
       instrumentBudget: sampledInstrumentSession.aggregateBudget,
       onInstrumentPreparation: sampledInstrumentSession.setNativePreparation,
@@ -2144,41 +2128,45 @@ const Timeline: Component<TimelineProps> = (props) => {
     clearClipBufferCaches: clipBuffers.clearClipBufferCaches,
   });
 
-  const captureNativeVstStates = async (capture?: { projectId: string; instanceIds: readonly string[] }) => {
+  // Captures and persists the state of the local processors that `select` picks, in the order it returns them,
+  // from those that can save state.
+  const captureNativeVstStates = async (
+    capturedProjectId: string,
+    select: (processors: ExternalProcessor[]) => readonly ExternalProcessor[],
+  ) => {
     const bridge = desktopBridge()?.audioHost?.session
 
-    if (!bridge || (capture === undefined && !isNativePlaybackPrepared())) return
-    const capturedProjectId = capture?.projectId ?? projectId()
-
-    if (!isLocalId("project", capturedProjectId)) return
+    if (!bridge || !isLocalId("project", capturedProjectId)) return
 
     const processors = (await listLocalExternalProcessors(capturedProjectId))
-      .filter((processor) => !processor.bypassed && processor.manifest.supportsState)
+      .filter((processor) => processor.manifest.supportsState)
 
-    const selected = capture === undefined
-      ? processors
-      : processors.filter((processor) => capture.instanceIds.includes(processor.instanceId))
+    for (const { instanceId } of select(processors)) {
+      const capture = await bridge.captureVstState(instanceId)
 
-    for (const processor of selected) {
-      const capture = await bridge.captureVstState(processor.instanceId)
-
-      if (!capture.ok) {
-        throw new Error(`Native VST3 state capture failed for "${processor.instanceId}": ${capture.error}`)
-      }
-
+      if (!capture.ok) throw new Error(`Native VST3 state capture failed for "${instanceId}": ${capture.error}`)
       await persistLocalExternalProcessorState(
         capturedProjectId,
-        processor.instanceId,
+        instanceId,
         capture,
         localVstStateOwnerId(capturedProjectId, userId()),
       )
     }
   }
 
+  // Without an argument: every active processor, and only while a native session is prepared.
+  const captureActiveNativeVstStates = async (capture?: { projectId: string; instanceIds: readonly string[] }) => {
+    if (capture === undefined && !isNativePlaybackPrepared()) return
+
+    await captureNativeVstStates(capture?.projectId ?? projectId(), (processors) => processors.filter(
+      (processor) => !processor.bypassed && (capture === undefined || capture.instanceIds.includes(processor.instanceId)),
+    ))
+  }
+
   // Only a live playback session can hold a parameter change the plug-in's saved state has not seen.
   const requestNativeVstStateCapture = createNativeVstStateCapture({
     capture: async (instanceId) => {
-      if (isNativePlaybackPrepared()) await captureNativeVstStates({ projectId: projectId(), instanceIds: [instanceId] })
+      if (isNativePlaybackPrepared()) await captureActiveNativeVstStates({ projectId: projectId(), instanceIds: [instanceId] })
     },
     report: (_instanceId, error) => notify("Plug-in state not saved", error.message),
   })
@@ -2216,7 +2204,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         if (isRecording()) await stopRecording();
       },
       refuseRecordingTargetChange: recordingTargetLock.refuseTransition,
-      captureNativeVstStates,
+      captureNativeVstStates: captureActiveNativeVstStates,
       requestNativeVstStateCapture,
       exportQueue,
       importQueue,

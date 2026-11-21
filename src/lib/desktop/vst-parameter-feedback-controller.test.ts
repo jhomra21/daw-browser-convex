@@ -9,6 +9,7 @@ import {
   setLocalExternalProcessor,
 } from '~/lib/external-plugins'
 import { createVstParameterFeedbackController } from './vst-parameter-feedback-controller'
+import { installGlobals } from '~/test-support/install-globals'
 
 const instanceId = '11111111-1111-4111-8111-111111111111'
 
@@ -82,7 +83,6 @@ const flushAsyncWork = async () => {
 }
 
 const installSubscription = () => {
-  const previousWindow = globalThis.window
   let listener: ((payload: DesktopVstParameterEditPayload) => void) | undefined
 
   const subscription = (next: (payload: DesktopVstParameterEditPayload) => void) => {
@@ -93,9 +93,8 @@ const installSubscription = () => {
     }
   }
 
-  Object.defineProperty(globalThis, 'window', {
-    configurable: true,
-    value: { dawDesktop: { audioHost: { session: { onVstParameterEdit: subscription } } } },
+  const restoreGlobals = installGlobals({
+    window: { dawDesktop: { audioHost: { session: { onVstParameterEdit: subscription } } } },
   })
 
   return {
@@ -105,9 +104,7 @@ const installSubscription = () => {
 
       return true
     },
-    restore() {
-      Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
-    },
+    restore: restoreGlobals,
   }
 }
 

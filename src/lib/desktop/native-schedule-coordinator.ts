@@ -230,18 +230,6 @@ type ScheduleLedgers = {
   sourceOrigins: Map<string, { signature: string; event: NativeSourceEvent }>
 }
 
-type NativeLoopFrames = LoopFrames
-
-export const nativeLoopFramesForSnapshot = (
-  snapshot: LivePlaybackSnapshot,
-  sampleRateHz: number,
-): NativeLoopFrames | undefined => loopFramesForTransport(snapshot.transport, sampleRateHz)
-
-export const arrangementFrameForNativeFrame = (
-  frame: number,
-  loop: NativeLoopFrames | undefined,
-) => arrangementFrameForLoop(frame, loop)
-
 type NativeScheduleSlice = {
   nativeStartFrame: number
   nativeEndFrame: number
@@ -254,7 +242,7 @@ type NativeScheduleSlice = {
 const splitNativeScheduleRange = (
   startFrame: number,
   endFrame: number,
-  loop: NativeLoopFrames | undefined,
+  loop: LoopFrames | undefined,
 ): NativeScheduleSlice[] => {
   if (!loop) return [{
     nativeStartFrame: startFrame,
@@ -272,7 +260,7 @@ const splitNativeScheduleRange = (
 
     const arrangementStartFrame = beforeLoop
       ? cursor
-      : arrangementFrameForNativeFrame(cursor, loop)
+      : arrangementFrameForLoop(cursor, loop)
 
     const nativeBoundary = beforeLoop
       ? loop.startFrame
@@ -369,7 +357,7 @@ export const scheduleEndFrameFor = (
   // Native schedule windows are end-exclusive. Keep one empty frame after the
   // last timeline boundary so a note-off exactly at a clip end can be emitted
   // in the final window without violating the native window contract.
-  return nativeLoopFramesForSnapshot(snapshot, sampleRateHz)
+  return loopFramesForTransport(snapshot.transport, sampleRateHz)
     ? Number.MAX_SAFE_INTEGER
     : contentEndFrame + Math.max(1, tailFramesFor(snapshot, graph, sampleRateHz))
 }
@@ -470,7 +458,7 @@ const buildNativeScheduleCoordinator = (input: {
 
   const acceptsLiveMidi = input.acceptsLiveMidi === true
   const ownedScheduleEndFrame = acceptsLiveMidi ? Number.MAX_SAFE_INTEGER : scheduleEndFrame
-  const loop = nativeLoopFramesForSnapshot(input.snapshot, input.sampleRateHz)
+  const loop = loopFramesForTransport(input.snapshot.transport, input.sampleRateHz)
   const arpeggiators = new Map(Object.entries(input.snapshot.mixer.fx.trackFx ?? {}).map(([trackId, fx]) => [trackId, fx.arp]))
 
   const compilePortableWindow = createPortableFrameScheduleWindowCompiler({

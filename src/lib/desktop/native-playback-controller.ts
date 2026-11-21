@@ -1,5 +1,5 @@
 import { compileLiveNativeProjection, resolveMixerTiming } from "@daw-browser/audio-engine/live-native-projection"
-import { effectiveLoopForStart } from "@daw-browser/audio-engine/loop-frame-schedule"
+import { arrangementFrameForLoop, effectiveLoopForStart, loopFramesForTransport } from "@daw-browser/audio-engine/loop-frame-schedule"
 import { NativePlaybackAbortError } from "./native-playback-abort"
 import type { PlaybackAcceptanceObserver } from "./acceptance-observer"
 import { nativeExternalLatencyFrames as nativeOfflineExternalLatencyFrames } from "~/lib/export/native-offline-render-plan"
@@ -68,9 +68,7 @@ import {
   type PublicationJoin,
 } from "~/lib/live-processor-control"
 import {
-  arrangementFrameForNativeFrame,
   createNativeScheduleCoordinator,
-  nativeLoopFramesForSnapshot,
   type NativeScheduleCoordinator,
 } from "./native-schedule-coordinator"
 import {
@@ -428,7 +426,7 @@ export const createNativePlaybackController = (input: {
       void statePatches.drain()
     },
     // One notice per incident: later failures join it, and a new one notifies only after it closed.
-    reportIncident: (category, targets) => reportFault(
+    reportIncident: (category, targets) => input.reportFault?.(
       { kind: category === "refused" ? "delivery-refused" : "delivery-unconfirmed", targets }, { retainPlayback: true }),
   })
 
@@ -851,12 +849,8 @@ export const createNativePlaybackController = (input: {
     unsubscribeVstInstanceEvents = undefined
   }
 
-  const reportFault = (fault: NativePlaybackFault, options?: { retainPlayback: true }) => {
-    input.reportFault?.(fault, options)
-  }
-
   const reportStopped = (message: string, options?: { retainPlayback: true }) =>
-    reportFault({ kind: "session-stopped", message }, options)
+    input.reportFault?.({ kind: "session-stopped", message }, options)
 
   // A live edit that fails to adopt is never shown: the old graph keeps playing, the edit stays in the project,
   // and the next submission retries it. The log is the only record.
@@ -1074,7 +1068,7 @@ export const createNativePlaybackController = (input: {
       const retiringEpoch = transportEpoch
 
       const stoppedLoop = preparedSnapshot && loopAppliesAtTransportPosition
-        ? nativeLoopFramesForSnapshot(preparedSnapshot, sampleRate)
+        ? loopFramesForTransport(preparedSnapshot.transport, sampleRate)
         : undefined
 
       instrumentMemoryScope = undefined
@@ -1127,7 +1121,7 @@ export const createNativePlaybackController = (input: {
           }
 
           options.onStoppedPosition?.(
-            arrangementFrameForNativeFrame(Number(reply.diagnostics.transportFrame), stoppedLoop) / stoppedSampleRate,
+            arrangementFrameForLoop(Number(reply.diagnostics.transportFrame), stoppedLoop) / stoppedSampleRate,
           )
         })
         : stopPromise
@@ -3799,10 +3793,10 @@ export const createNativePlaybackController = (input: {
     if (sampleRate <= 0) return undefined
 
     const loop = preparedSnapshot && loopAppliesAtTransportPosition
-      ? nativeLoopFramesForSnapshot(preparedSnapshot, sampleRate)
+      ? loopFramesForTransport(preparedSnapshot.transport, sampleRate)
       : undefined
 
-    return arrangementFrameForNativeFrame(transportFrame, loop) / sampleRate
+    return arrangementFrameForLoop(transportFrame, loop) / sampleRate
   }
 
   return {

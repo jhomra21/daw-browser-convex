@@ -6,8 +6,8 @@ import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import { createDefaultGranularParams, createDefaultReverbParams, createDefaultSynthParams, externalAutomationParameterId, type AutomationEnvelope } from "@daw-browser/shared"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
 import type { NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
+import { arrangementFrameForLoop } from "@daw-browser/audio-engine/loop-frame-schedule"
 import {
-  arrangementFrameForNativeFrame,
   createNativeScheduleCoordinator,
   nativeVstAutomationSegmentsForSnapshot,
   scheduleEndFrameFor,
@@ -1458,12 +1458,12 @@ test("projects repeated loop iterations onto monotonic native frames", async () 
 })
 
 test("wraps the public arrangement frame at the integer loop boundary", () => {
-  expect(arrangementFrameForNativeFrame(72_000, {
+  expect(arrangementFrameForLoop(72_000, {
     startFrame: 24_000,
     endFrame: 72_000,
     lengthFrames: 48_000,
   })).toBe(24_000)
-  expect(arrangementFrameForNativeFrame(96_000, {
+  expect(arrangementFrameForLoop(96_000, {
     startFrame: 24_000,
     endFrame: 72_000,
     lengthFrames: 48_000,

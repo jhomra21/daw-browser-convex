@@ -2,6 +2,7 @@ import { createEffect, createMemo, createSignal, on, onCleanup, onMount, type Ac
 import type { FunctionReturnType } from 'convex/server'
 import type { UseQueryResult } from '@tanstack/solid-query'
 
+import { acceptShareInvite, createCloudProject, deleteCloudProject, revokeCloudProjectAccess } from '~/lib/cloud-projects-api'
 import { useConvexQuery, convexClient, convexApi } from '~/lib/convex'
 import { readControlErrorV1 } from '@daw-browser/control'
 import { isLocalId, isProjectRole, type ProjectRole } from '@daw-browser/shared'
@@ -256,21 +257,12 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     const uid = userId()
 
     if (!token || !uid) return
-    void fetch('/api/share-invites/accept', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }),
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error('Share invite accept failed.')
-
-        return await response.json()
-      })
-      .then((result) => {
+    void acceptShareInvite(token)
+      .then((acceptedProjectId) => {
         setAcceptingShareToken(null)
         clearShareTokenFromLocation()
 
-        if (result?.projectId) void replaceRoom(result.projectId)
+        if (acceptedProjectId) void replaceRoom(acceptedProjectId)
       })
       .catch(() => {
         setAcceptingShareToken(null)
@@ -293,13 +285,7 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     pendingOwnedRoomKeys.add(key)
 
     try {
-      const response = await fetch('/api/cloud-projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: rid }),
-      })
-
-      if (!response.ok) throw new Error('Project create failed')
+      await createCloudProject(rid)
 
       return { status: 'created' }
     } catch {
@@ -358,9 +344,7 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
   ): Promise<DeleteOwnedRoomResult> => {
     try {
       await flushMidiProjectWrites(targetProjectId)
-      const response = await fetch(`/api/cloud-projects/${encodeURIComponent(targetProjectId)}`, { method: 'DELETE' })
-
-      if (!response.ok) throw new Error('Project delete failed.')
+      await deleteCloudProject(targetProjectId)
 
       return { status: 'deleted' as const }
     } catch {
@@ -381,11 +365,7 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
           if (targetProjectId === projectId()) await route.settleProjectTransition()
         },
         flushMidiWrites: async () => await flushMidiProjectWrites(targetProjectId),
-        revokeAccess: async () => {
-          const response = await fetch(`/api/cloud-projects/${encodeURIComponent(targetProjectId)}/access`, { method: 'DELETE' })
-
-          if (!response.ok) throw new Error('Project leave failed.')
-        },
+        revokeAccess: async () => await revokeCloudProjectAccess(targetProjectId),
         purgeCache: async () => await purgeLocalProjectCache(targetProjectId),
         reloadProjects: async () => await loadLocalProjects(),
       })

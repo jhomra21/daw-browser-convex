@@ -8,8 +8,7 @@ import type { BrowserDragPayload, BrowserDropTarget } from "~/lib/timeline-brows
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
 import { countBrowserTreeLeaves, createBrowserLeafRow, filterBrowserTreeRows } from "~/lib/timeline-browser/browser-tree";
-import { isLocalId } from "@daw-browser/shared";
-import { convexApi, convexClient } from "~/lib/convex";
+import { createAssetFolderBackend } from "~/lib/asset-folder-backend";
 import { BUILTIN_AUDIO_EFFECT_CHAIN_PRESETS, type AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";
 import { BUILTIN_INSTRUMENT_PRESETS, type InstrumentPreset } from "~/lib/instrument-presets";
 import {
@@ -19,12 +18,6 @@ import {
   BROWSER_MIDI_EFFECT_CATALOG,
   deviceCatalogSearchText,
 } from "~/lib/device-catalog";
-import {
-  createLocalAssetFolder,
-  deleteEmptyLocalAssetFolder,
-  moveLocalAssetToFolder,
-  renameLocalAssetFolder,
-} from "~/lib/local-asset-folders";
 import type { DesktopPluginCatalogEntry } from "~/lib/desktop/attached-host-controller";
 import {
   insertNativeVst3Effect,
@@ -681,6 +674,11 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     }
   });
 
+  const assetFolderBackend = (projectId: string) => createAssetFolderBackend(projectId, {
+    refreshFolders: assetFolders.refreshFolders,
+    refreshSamples: browserSamples.refreshSamples,
+  });
+
   const createAssetFolder = () => {
     const name = nextAssetFolderName();
     runAssetFolderAction("Folder creation failed", async () => {
@@ -688,14 +686,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
 
       if (!projectId) return;
 
-      if (isLocalId("project", projectId)) {
-        await createLocalAssetFolder(projectId, name);
-        assetFolders.refreshFolders();
-
-        return;
-      }
-
-      await convexClient.mutation(convexApi.assetFolders.create, { projectId, name });
+      await assetFolderBackend(projectId).create(name);
     });
   };
 
@@ -730,12 +721,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     setRenameFolderBusy(true);
     runAssetFolderAction("Folder rename failed", async () => {
       try {
-        if (isLocalId("project", projectId)) {
-          await renameLocalAssetFolder(projectId, draft.folderId, name);
-          assetFolders.refreshFolders();
-        } else {
-          await convexClient.mutation(convexApi.assetFolders.rename, { projectId, folderId: draft.folderId, name });
-        }
+        await assetFolderBackend(projectId).rename(draft.folderId, name);
 
         if (untrack(renameFolderId) === draft.folderId) clearRenameAssetFolder();
       } finally {
@@ -750,14 +736,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     runAssetFolderAction("Folder deletion failed", async () => {
       if (!projectId || folderHasSamples) return;
 
-      if (isLocalId("project", projectId)) {
-        await deleteEmptyLocalAssetFolder(projectId, folderId);
-        assetFolders.refreshFolders();
-
-        return;
-      }
-
-      await convexClient.mutation(convexApi.assetFolders.deleteEmpty, { projectId, folderId });
+      await assetFolderBackend(projectId).deleteEmpty(folderId);
     });
   };
 
@@ -772,18 +751,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
 
       if (!projectId || !item.assetKey) return;
 
-      if (isLocalId("project", projectId)) {
-        await moveLocalAssetToFolder(projectId, item.assetKey, folderId);
-        browserSamples.refreshSamples();
-
-        return;
-      }
-
-      await convexClient.mutation(convexApi.samples.moveToFolder, {
-        projectId,
-        assetKey: item.assetKey,
-        folderId,
-      });
+      await assetFolderBackend(projectId).moveSample(item.assetKey, folderId);
     });
   };
 

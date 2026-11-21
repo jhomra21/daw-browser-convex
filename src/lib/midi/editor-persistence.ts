@@ -4,7 +4,7 @@ import {
   type ControlActionV1,
   type ProjectSnapshotV2,
 } from '@daw-browser/control'
-import { isLocalId, normalizeLegacyMidiClip, type MidiMapping, type NormalizedLegacyMidiClip } from '@daw-browser/shared'
+import { isLocalId, normalizeLegacyMidiClip, type JsonValue, type MidiMapping, type NormalizedLegacyMidiClip } from '@daw-browser/shared'
 import { convexApi, convexClient } from '~/lib/convex'
 import { createLocalControlService } from '~/lib/local-control/local-control-service'
 import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
@@ -414,6 +414,26 @@ const clipMidi = (snapshot: ProjectSnapshotV2, clipId: string) => {
   return normalizeLegacyMidiClip(clip.midi)
 }
 
+const createMidiControlSurface = (projectId: string, local: boolean) => {
+  if (!local) {
+    return {
+      snapshotV2: () => convexClient.query(convexApi.control.snapshotV2, { projectId }),
+      commit: (request: JsonValue) => convexClient.mutation(convexApi.control.commitV1, { request }),
+    }
+  }
+
+  const service = createLocalControlService({
+    actor: localActor,
+    projectId,
+    excludePendingWriteKinds: ['midi'],
+  })
+
+  return {
+    snapshotV2: () => service.snapshotV2({ projectId }),
+    commit: (request: JsonValue) => service.commit(request),
+  }
+}
+
 export const createMidiEditorPersistence = (input: {
   projectId: string
   clipId: string
@@ -423,13 +443,9 @@ export const createMidiEditorPersistence = (input: {
 }) => {
   const local = isLocalId('project', input.projectId)
 
-  const service = local
-    ? createLocalControlService({
-      actor: localActor,
-      projectId: input.projectId,
-      excludePendingWriteKinds: ['midi'],
-    })
-    : undefined
+  // The control surface is chosen once: a local project runs the local control service in-process (its pending MIDI
+  // writes excluded, they are this adapter's own), a cloud project calls the Convex control functions.
+  const control = createMidiControlSurface(input.projectId, local)
 
   let revision: number | undefined
   let pending: MidiEditorOperation[] = []
@@ -478,11 +494,7 @@ export const createMidiEditorPersistence = (input: {
   }
 
   const snapshot = async () => {
-    const value = local
-      ? await service!.snapshotV2({ projectId: input.projectId })
-      : await convexClient.query(convexApi.control.snapshotV2, { projectId: input.projectId })
-
-    const parsed = projectSnapshotSchemaV2.parse(value)
+    const parsed = projectSnapshotSchemaV2.parse(await control.snapshotV2())
     revision = parsed.project.revision
 
     return parsed
@@ -505,11 +517,7 @@ export const createMidiEditorPersistence = (input: {
     }
 
     const commit = async () => {
-      const value = local
-        ? await service!.commit(serializeJsonValue(request))
-        : await convexClient.mutation(convexApi.control.commitV1, { request: serializeJsonValue(request) })
-
-      return controlCommitResultSchemaV1.parse(value)
+      return controlCommitResultSchemaV1.parse(await control.commit(serializeJsonValue(request)))
     }
 
     try {

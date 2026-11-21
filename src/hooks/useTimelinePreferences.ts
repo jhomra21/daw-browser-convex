@@ -12,7 +12,7 @@ import { TIMELINE_SIDEBAR_MIN_WIDTH } from '~/lib/timeline-layout'
 import { clampPixelsPerSecond, DEFAULT_PIXELS_PER_SECOND } from '~/lib/timeline-view'
 import { isLocalId } from '@daw-browser/shared'
 import { clampBpm as clampBpmValue, DEFAULT_BPM, DEFAULT_GRID, DEFAULT_LOOP } from '@daw-browser/timeline-core/project-defaults'
-import { loadLocalProjectState, saveLocalProjectState } from '~/lib/local-project-state'
+import { projectPreferenceStorage } from '~/lib/project-preference-storage'
 import { subscribeToLocalProjectChanges } from '~/lib/local-project-changes'
 
 import { useProjectPersistedState } from './useProjectPersistedState'
@@ -64,77 +64,42 @@ export function useTimelinePreferences(
 ): UseTimelinePreferencesReturn {
   const [sidebarWidth, setSidebarWidth] = createSignal(TIMELINE_SIDEBAR_MIN_WIDTH)
 
-  const loadLocalState = async <TValue,>(projectId: string, key: string) => (
-    isLocalId('project', projectId) ? await loadLocalProjectState<TValue>(projectId, key) : undefined
-  )
-
-  const saveLocalState = async <TValue,>(projectId: string, key: string, value: TValue) => {
-    if (isLocalId('project', projectId)) await saveLocalProjectState(projectId, key, value)
-  }
-
   const onLocalSaveError = (projectId: string, cause: unknown) => {
     options.onLocalSaveFailed?.(projectId, cause instanceof Error ? cause.message : 'Local project settings could not be saved.')
   }
 
   const syncMixState = useProjectPersistedState<boolean>({
     projectId: options.projectId,
-    createInitial: () => false,
-    load: (projectId) => isLocalId('project', projectId) ? false : loadMixSyncFlag(projectId),
-    loadAsync: (projectId) => loadLocalState<boolean>(projectId, 'syncMix'),
-    save: (projectId, value) => {
-      if (!isLocalId('project', projectId)) saveMixSyncFlag(projectId, value)
-    },
-    saveAsync: (projectId, value) => saveLocalState(projectId, 'syncMix', value),
+    ...projectPreferenceStorage('syncMix', () => false, { load: loadMixSyncFlag, save: saveMixSyncFlag }),
     onSaveAsyncError: onLocalSaveError,
   })
 
   const bpmState = useProjectPersistedState<number>({
     projectId: options.projectId,
-    createInitial: () => DEFAULT_BPM,
-    load: () => DEFAULT_BPM,
-    loadAsync: (projectId) => loadLocalState<number>(projectId, 'bpm'),
+    ...projectPreferenceStorage('bpm', () => DEFAULT_BPM),
     subscribeToChanges: subscribeToLocalProjectChanges,
-    save: () => undefined,
-    saveAsync: (projectId, value) => saveLocalState(projectId, 'bpm', value),
     onSaveAsyncError: onLocalSaveError,
   })
 
   const gridState = useProjectPersistedState<{ enabled: boolean; denominator: number }>({
     projectId: options.projectId,
-    createInitial: () => ({ ...DEFAULT_GRID }),
-    load: (projectId) => isLocalId('project', projectId) ? { ...DEFAULT_GRID } : loadGridSettings(projectId),
-    loadAsync: (projectId) => loadLocalState<{ enabled: boolean; denominator: number }>(projectId, 'grid'),
-    save: (projectId, value) => {
-      if (!isLocalId('project', projectId)) saveGridSettings(projectId, value.enabled, value.denominator)
-    },
-    saveAsync: (projectId, value) => saveLocalState(projectId, 'grid', value),
+    ...projectPreferenceStorage('grid', () => ({ ...DEFAULT_GRID }), {
+      load: loadGridSettings,
+      save: (projectId, value) => saveGridSettings(projectId, value.enabled, value.denominator),
+    }),
     onSaveAsyncError: onLocalSaveError,
   })
 
   const loopState = useProjectPersistedState<{ enabled: boolean; startSec: number; endSec: number }>({
     projectId: options.projectId,
-    createInitial: () => ({ ...DEFAULT_LOOP }),
-    load: () => ({ ...DEFAULT_LOOP }),
-    loadAsync: (projectId) => loadLocalState<{ enabled: boolean; startSec: number; endSec: number }>(projectId, 'loop'),
+    ...projectPreferenceStorage('loop', () => ({ ...DEFAULT_LOOP })),
     subscribeToChanges: subscribeToLocalProjectChanges,
-    save: () => undefined,
-    saveAsync: (projectId, value) => saveLocalState(projectId, 'loop', value),
     onSaveAsyncError: onLocalSaveError,
   })
 
   const scaleState = useProjectPersistedState<number>({
     projectId: options.projectId,
-    createInitial: () => DEFAULT_PIXELS_PER_SECOND,
-    load: (projectId) => {
-      if (isLocalId('project', projectId)) return DEFAULT_PIXELS_PER_SECOND
-
-      return loadTimelineScale(projectId)
-    },
-    loadAsync: (projectId) => loadLocalState<number>(projectId, 'timelineScale'),
-    save: (projectId, value) => {
-      if (!isLocalId('project', projectId)) saveTimelineScale(projectId, value)
-    },
-    saveAsync: (projectId, value) => saveLocalState(projectId, 'timelineScale', value),
+    ...projectPreferenceStorage('timelineScale', () => DEFAULT_PIXELS_PER_SECOND, { load: loadTimelineScale, save: saveTimelineScale }),
     onSaveAsyncError: onLocalSaveError,
   })
 

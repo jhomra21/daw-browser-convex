@@ -321,20 +321,6 @@ export const isActiveControlBinding = (
   && parseScopes(binding.scopes).includes(requiredScope)
 );
 
-export const canConsumeControlRefresh = (
-  binding: Pick<BindingRow, "clientId" | "resource" | "refreshConsumedAt" | "refreshExpiresAt" | "revokedAt">,
-  clientId: string,
-  resource: string,
-  now: number,
-) => (
-  binding.clientId === clientId
-  && binding.resource === resource
-  && binding.refreshConsumedAt === null
-  && binding.revokedAt === null
-  && binding.refreshExpiresAt !== null
-  && binding.refreshExpiresAt > now
-);
-
 const createBindingStatements = async (
   env: ApiBindings["Bindings"],
   token: TokenResponse,

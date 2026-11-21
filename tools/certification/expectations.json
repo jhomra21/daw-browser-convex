@@ -56,7 +56,7 @@
    "native/audio-core/include/daw/audio_core.h": "a3c9b1ed429bf9ca9c93f0b8dd9cefdc867d602c5941e575a877eb9abb3d4a44",
    "native/audio-core/tests/audio_core_test.cpp": "045e21beaafeba54cfac3974a3c0c20293cecc505cc9fb3812545236284a8a17",
    "native/audio-host-macos/tests/audio_host_test.cpp": "9fbacdbc3779fa40753ec1c50fc2d7409583413c5eecc0f4af9cf672d5369823",
-   "native/audio-host-macos/tests/realtime_callback_guard.test.ts": "c8ec2a93c4eb757eada36949d6bc4b38d999d018585b53d2ed2b568bcc827e77",
+   "native/audio-host-macos/tests/realtime_callback_guard.test.ts": "de262d58142afc5e94bd95cd1ab06de3478465434cc92455b74a024ea69ea075",
    "public/audio-core/daw-audio-core.wasm": "b59dc65870ab2cdb8ddb65021c21080ad101a87e9731360ea4879fe083365ff6",
    "public/audio-core/daw-audio-core.manifest.json": "5a787734b6762d48b8c2ecb0503f098202d1c4a0d724c602165ed5a25a155822",
    "public/audio-worklets/daw-portable-graph-envelope-v3.js": "12e03002e9d602d0da33fba4489b54cfd8cb9147616e6e3722a9ae5d43812741",
@@ -135,7 +135,7 @@
    "src/lib/live-playback-snapshot.ts": "3a3d721a6b275cf05a36c22cae25bc239638592178d2d5ca7cded60ecd527bf5",
    "packages/audio-engine/src/native-host-wire.ts": "9bc4e20db021dae7b7b49edb06bd70bd0a8f0f7c979f518eccf3c3c07c53d7e0",
    "apps/desktop/audio-host.ts": "4f5c0d7353606f6b939cac7913f6f0a655998aa058030039d332ee60b9590156",
-   "native/audio-host-macos/src/audio-host.cpp": "04d939e6825407da69c683f660a70658dc56987f2dc7f960e542d60f61dfd9bc",
+   "native/audio-host-macos/src/audio-host.cpp": "29ba6ac37fe96f017d230d749a4f4200b490c0548a1b7a2e3e88bb8de7112ad4",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "849ccfc235ee28b37c9cf5b4604d4910f402e6df03f4c292c27eb7ddfe776bdf",
    "tools/acceptance/ae-08-processor-state-fuzz-oracle.ts": "bee93fb827ac390ce4185a1010d3771d6b6566acf306fac8ee12c8eb10229a7b",
    "tools/acceptance/ae-08-processor-state-fuzz.ts": "c7e891e3b5ff53005f499a06fda991e35f0b07726d66f0934d54f0b0e0df062b",
@@ -4188,7 +4188,7 @@
  ],
  "traces": {
   "controller": {
-   "treeSha256": "389c3e698ca881b2a3cb291dd422be4f4ec760b585eb441189fae04b0f81de21",
+   "treeSha256": "7d4d785be98a01b12c7bdf3b2065a41a5b80217a8e3dd0bfafae63d2eab9eb07",
    "files": 701,
    "a": "trace-controller-a",
    "b": "trace-controller-b"

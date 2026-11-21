@@ -2,8 +2,22 @@ if(NOT APPLE)
   return()
 endif()
 
-add_library(daw-audio-host-macos-runtime STATIC
+set(DAW_AUDIO_HOST_SOURCES
   src/audio-host.cpp
+  src/audio-host-assets.cpp
+  src/audio-host-codec.cpp
+  src/audio-host-graph.cpp
+  src/audio-host-meters.cpp
+  src/audio-host-realtime.cpp
+  src/audio-host-recording.cpp
+  src/audio-host-schedule.cpp
+  src/audio-host-test-access.cpp
+  src/audio-host-transport.cpp
+  src/audio-host-vst.cpp
+)
+
+add_library(daw-audio-host-macos-runtime STATIC
+  ${DAW_AUDIO_HOST_SOURCES}
   src/coreaudio-hal.mm
   src/native-schedule-state.cpp
   src/recording-spool.cpp
@@ -41,7 +55,7 @@ if(BUILD_TESTING)
   add_test(NAME daw-host-recording-spool-test COMMAND daw-host-recording-spool-test)
   # A private core copy supplies indexed post-admission failures. The production
   # core/runtime (including BUILD_TESTING builds) never contains the hook.
-  add_executable(daw-audio-host-macos-test tests/audio_host_test.cpp ../audio-core/src/audio_core.cpp src/audio-host.cpp)
+  add_executable(daw-audio-host-macos-test tests/audio_host_test.cpp ../audio-core/src/audio_core.cpp ${DAW_AUDIO_HOST_SOURCES})
   target_compile_definitions(daw-audio-host-macos-test PRIVATE
     DAW_AUDIO_CORE_TEST_INSTRUMENT_REJECTION=1 DAW_AUDIO_HOST_TEST_MEMORY_LOCK=1
     DAW_AUDIO_HOST_TEST_PATCH_CLAIM=1)
@@ -51,7 +65,7 @@ if(BUILD_TESTING)
   # The patch-claim seam holds a callback-taken patch so a claimed reply can be produced.
   # It exists only in this private copy of the host and never in the runtime library, the
   # product executable, or any other target.
-  add_executable(daw-audio-host-macos-acceptance src/main.cpp src/audio-host.cpp)
+  add_executable(daw-audio-host-macos-acceptance src/main.cpp ${DAW_AUDIO_HOST_SOURCES})
   target_compile_definitions(daw-audio-host-macos-acceptance PRIVATE DAW_AUDIO_HOST_TEST_PATCH_CLAIM=2)
   target_link_libraries(daw-audio-host-macos-acceptance PRIVATE daw-audio-host-macos-runtime)
   target_compile_options(daw-audio-host-macos-acceptance PRIVATE -Wall -Wextra -Werror)

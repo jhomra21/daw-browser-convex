@@ -25,9 +25,10 @@ test('native policy matches the host fraction and accounts resident, renderer, e
 })
 
 test('keeps the co-shipped host admission backstop aligned with the native policy', async () => {
-  const host = await Bun.file(new URL('../../native/audio-host-macos/src/audio-host.cpp', import.meta.url)).text()
-  expect(host).toContain('bytes / 8 : 0')
-  expect(host).toContain('kInstrumentDeviceBytes = 1ULL << 30')
+  const budget = await Bun.file(new URL('../../native/audio-host-macos/src/audio-host-internal.h', import.meta.url)).text()
+  const graph = await Bun.file(new URL('../../native/audio-host-macos/src/audio-host-graph.cpp', import.meta.url)).text()
+  expect(budget).toContain('bytes / 8 : 0')
+  expect(graph).toContain('kInstrumentDeviceBytes = 1ULL << 30')
   expect(nativeInstrumentBudgetPolicy(16 * 1024 ** 3)).toEqual({
     deviceDecodedBytes: 1024 ** 3, aggregateBytes: 2 * 1024 ** 3,
   })

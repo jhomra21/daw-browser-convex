@@ -1,0 +1,78 @@
+{
+ "name": "untangle-hot-native-hashes",
+ "sequence": 100,
+ "createdAt": "2026-11-21T04:48:06.780Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "src/lib/desktop/native-playback-controller.ts",
+   "from": "0bc77835e26b7709e12593dad6ea34bc1734e1cbd5a4f5d930dc3d3337b61fc8",
+   "to": "c6d904cc672cd4a906dcf19a9d4d295df83fdedee9c87c4f0d1cbda1c2ded874"
+  },
+  {
+   "file": "src/lib/desktop/native-schedule-coordinator.ts",
+   "from": "059ef5ff7fc5c19c8fb2bcc367983e6d557769793cbdc98f1c21ffc476bcbfd7",
+   "to": "702e457db755553d65eccb93693f2482c00dab6c874f08adca05bf6021d472cf"
+  },
+  {
+   "file": "src/lib/desktop/native-schedule-publication.ts",
+   "from": "ecf3007be44126f403c30d6598ccf55d9b53c558d7c72736256fddc3bdf407eb",
+   "to": "60c068bb251fcd65a3ea2b83048ece885c72d0d3028f758f903a15fa962f065e"
+  },
+  {
+   "file": "src/lib/desktop/native-snapshot-support.ts",
+   "from": "6db54d56904edf15d36a3f52a2a70674f64cd25739213ccfacba2892c0a96347",
+   "to": "49e39dec1f0931a9089bafaa71e11b4c47048e1a3e1fa41d709f7d6ca1a5a731"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "0d9e938c1fe82f439b9494ba9947a4a0ebd6f14a974367c6c469528d9c94bf5e",
+   "new": "389c3e698ca881b2a3cb291dd422be4f4ec760b585eb441189fae04b0f81de21"
+  },
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "500f208ed67f9e9dfd31e6c38f1676dafa1df42fd8ff9c3c3c34684df0cb1223",
+   "new": "72a51788907d391f1946c0137f5181f7a684e1c2a1f0301640816fb4aa42b511"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "f38cee1480383423899f234a9a3a02edbd43c616",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "6f89ad4528a4c48c431a0b155422963d93c9a188afa2951b929c173159044088",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "6f89ad4528a4c48c431a0b155422963d93c9a188afa2951b929c173159044088",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b11b-bless/live",
+   "resultSha256": "fa11c84c5dfd6288dd6e1cff5edd9deb3d70a027a6e79068db48c8c1b6402903",
+   "seconds": 1242.7805619169999,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

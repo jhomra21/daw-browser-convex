@@ -1,6 +1,5 @@
 import type { LiveNativeProjection } from "@daw-browser/audio-engine/live-native-projection"
 import type {
-  NativeHostTransport,
   NativeScheduleProgress,
   NativeSessionAsset,
 } from "@daw-browser/audio-engine/native-host-wire"
@@ -21,7 +20,6 @@ import { NativePlaybackAbortError } from "./native-playback-abort"
 import type { NativeInstrumentPreparation } from "./native-instrument-budget-policy"
 import type {
   AdoptionAttempt,
-  ExecutionRetention,
   createNativeProcessorStateOwner,
   ProcessorReconcile,
 } from "./native-processor-state-owner"
@@ -33,7 +31,9 @@ import {
   type PublicationStrategy,
   type PublicationTransaction,
 } from "./native-publication-transaction"
+import { sampledInstrumentTrackIds, scheduledRetention, synthNodes, targetKinds } from "./native-graph-targets"
 import type { NativeScheduleCoordinator } from "./native-schedule-coordinator"
+import { attachmentsChanged, nativeTransportFor, planarBytes, sameBytes, validateInstrumentAssetBudget } from "./native-snapshot-support"
 import { nativeTimelinePageStagingBytes, type NativeTimelinePageManager, type NativeTimelineSource } from "./native-timeline-page-manager"
 import { markVstInstanceFailed } from "./vst-instance-failures"
 
@@ -165,25 +165,7 @@ export type ScheduleHost = {
   reportStopped: (message: string, options?: { retainPlayback: true }) => void
   executeReconcile: (reconcile: readonly ProcessorReconcile[]) => void
   reprimePausedAdoption: () => Promise<void>
-  sameBytes: (left: Uint8Array, right: Uint8Array) => boolean
   statePatchMatchesCurrentProcessor: (instanceId: string, state: Uint8Array) => boolean
-  synthNodes: (snapshot: LivePlaybackSnapshot | undefined) => Map<string, string>
-  targetKinds: (graph: AudioCoreGraphSnapshot, snapshot: LivePlaybackSnapshot | undefined) => Map<string, number>
-  sampledInstrumentTrackIds: (snapshot: LivePlaybackSnapshot) => readonly string[]
-  scheduledRetention: (
-    previous: AudioCoreGraphSnapshot,
-    next: AudioCoreGraphSnapshot,
-    synths: { before: LivePlaybackSnapshot | undefined; after: LivePlaybackSnapshot | undefined },
-    configuredNodes: ReadonlySet<string>,
-  ) => ExecutionRetention
-  nativeTransportFor: (snapshot: LivePlaybackSnapshot, epoch: number, running: boolean, frame: number, transitionId: bigint) => NativeHostTransport
-  planarBytes: (planes: readonly Float32Array[]) => Uint8Array
-  validateInstrumentAssetBudget: (
-    assets: readonly AudioAssetRef[],
-    instruments: readonly NonNullable<AudioCoreGraphSnapshot["nodes"][number]["instrument"]>[],
-    maximumBytes: number,
-  ) => void
-  attachmentsChanged: (previous: LivePlaybackSnapshot, snapshot: LivePlaybackSnapshot, maximumFrames: number) => boolean
 }
 
 export const createSchedulePublication = (tx: PublicationTransaction, facts: ScheduleFacts, host: ScheduleHost): PublicationStrategy => {
@@ -334,7 +316,7 @@ export const createSchedulePublication = (tx: PublicationTransaction, facts: Sch
       // A removed one goes in the same plan, with no instance left in it, and is detached once the graph is live.
       let stagedWorkers = false
 
-      if (host.attachmentsChanged(previous, snapshot, host.maximumFramesPerBlock)) {
+      if (attachmentsChanged(previous, snapshot, host.maximumFramesPerBlock)) {
         const emptied = previous.nativeExternalAttachmentPlan && { ...previous.nativeExternalAttachmentPlan, attachments: [] }
         const plan = snapshot.nativeExternalAttachmentPlan ?? emptied
         const coordinateVstAttachments = session.coordinateVstAttachments
@@ -511,7 +493,7 @@ export const createSchedulePublication = (tx: PublicationTransaction, facts: Sch
       if (!tx.binding) throw new Error("Native live prepare did not create the requested bank.")
       tx.preparedRevision = tx.binding.revision
       host.processorState.prepared(tx.binding.revision,
-        host.scheduledRetention(previousGraph, graph, { before: previous, after: snapshot },
+        scheduledRetention(previousGraph, graph, { before: previous, after: snapshot },
           new Set(addedInstruments.map(({ nodeId }) => nodeId))))
 
       // A paused edit takes its tempo from the transport command that re-primes the schedule.
@@ -522,7 +504,7 @@ export const createSchedulePublication = (tx: PublicationTransaction, facts: Sch
         // The existing transport command stages context against the prepared
         // bank when it reuses the running transition. Native applies it only
         // after successful publication on that exact callback seam.
-        assertReply(await awaitPreparation(session.setTransport(host.nativeTransportFor(snapshot,
+        assertReply(await awaitPreparation(session.setTransport(nativeTransportFor(snapshot,
           host.transportEpoch, true, 0, host.nextTransportTransitionId))))
       }
 
@@ -548,7 +530,7 @@ export const createSchedulePublication = (tx: PublicationTransaction, facts: Sch
           const policy = host.input.bridge?.instrumentBudgetPolicy
 
           if (!host.instrumentBudget || !policy) throw new Error("Native sample memory policy is unavailable.")
-          host.validateInstrumentAssetBudget(projection.graph.assets, addedInstruments.map(({ state }) => state),
+          validateInstrumentAssetBudget(projection.graph.assets, addedInstruments.map(({ state }) => state),
             policy.deviceDecodedBytes)
           tx.stagedMemoryScope = host.createInstrumentScope(`native-stage:${crypto.randomUUID()}`)
           tx.stagedMemoryScope.set("page-staging", nativeTimelinePageStagingBytes, () => undefined)
@@ -564,7 +546,7 @@ export const createSchedulePublication = (tx: PublicationTransaction, facts: Sch
           if (pcm) {
             tx.checked(await awaitPreparation(session.installAsset({ sessionAssetId: mapping.sessionAssetId,
               frameCount: asset.frameCount, sampleRateHz: asset.sampleRateHz, channelCount: asset.channelCount,
-              planarPcm: host.planarBytes(pcm.planes) })))
+              planarPcm: planarBytes(pcm.planes) })))
             continue
           }
 
@@ -687,7 +669,7 @@ export const createSchedulePublication = (tx: PublicationTransaction, facts: Sch
         host.structuralGraphGeneration++
         host.processorState.published(tx.binding.revision)
         host.scheduleCandidates.delete(candidate)
-        const synthInstances = new Map([...host.synthNodes(snapshot)].map(([instanceId, nodeId]) => [nodeId, instanceId]))
+        const synthInstances = new Map([...synthNodes(snapshot)].map(([instanceId, nodeId]) => [nodeId, instanceId]))
         // A configured-again instrument starts its synth from the graph's values. Its processors keep their
         // history slot, and so their applied overrides, unless their own structure changed (audio_core.cpp:8044-8072).
         const configuredNodes = new Set(addedInstruments.map(({ nodeId }) => nodeId))
@@ -705,11 +687,11 @@ export const createSchedulePublication = (tx: PublicationTransaction, facts: Sch
         const restatedTargets = new Set(graph.nodes.flatMap((node) => node.processorOrder.flatMap((processor) => {
           const was = previousStates.get(processor.id)
 
-          return was?.kindId === processor.kindId && !host.sameBytes(was.state, processor.state) ? [processor.id] : []
+          return was?.kindId === processor.kindId && !sameBytes(was.state, processor.state) ? [processor.id] : []
         })))
 
         const reconcile = host.processorState.adopted(
-          host.targetKinds(graph, snapshot),
+          targetKinds(graph, snapshot),
           reconfiguredTargets,
           restatedTargets,
           mergedSequence,
@@ -718,7 +700,7 @@ export const createSchedulePublication = (tx: PublicationTransaction, facts: Sch
         )
 
         host.preparedSnapshot = snapshot
-        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)
+        host.preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)
         const predecessorStretchLease = host.preparedStretchLeaseSession
         host.preparedStretchAssetsForSession = candidate.stretchAssets
         host.preparedStretchLeaseSession = candidate.dispose

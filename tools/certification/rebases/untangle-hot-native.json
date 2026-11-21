@@ -1,0 +1,105 @@
+{
+ "name": "untangle-hot-native",
+ "sequence": 99,
+ "createdAt": "2026-11-21T04:11:10.476Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:273:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-executor.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:273:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "      const record = processorState.capturePublication(attempt,",
+   "new": "  const record = host.processorState.capturePublication(attempt,"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:273:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "      const record = processorState.capturePublication(attempt,",
+   "new": "  const record = host.processorState.capturePublication(attempt,"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=c0:m511-mutant-ct",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        host.preparedSnapshot = snapshot\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)",
+   "new": "        host.preparedSnapshot = snapshot\n        host.preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=c0:m511-mutant-ct",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "        host.preparedSnapshot = { ...snapshot, revision: tx.binding.revision }\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)",
+   "new": "        host.preparedSnapshot = { ...snapshot, revision: tx.binding.revision }\n        host.preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=c0:m511-mutant-ht",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        host.preparedSnapshot = snapshot\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)",
+   "new": "        host.preparedSnapshot = snapshot\n        host.preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=c0:m511-mutant-ht",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "        host.preparedSnapshot = { ...snapshot, revision: tx.binding.revision }\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)",
+   "new": "        host.preparedSnapshot = { ...snapshot, revision: tx.binding.revision }\n        host.preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)"
+  }
+ ],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "B11 part B: the pure helpers left ScheduleHost (src/lib/desktop/native-schedule-publication.ts now calls sampledInstrumentTrackIds directly, no host. prefix), and executePublication moved from src/lib/desktop/native-playback-controller.ts to src/lib/desktop/native-publication-executor.ts (capturePublication line dedented by 4 and read through host.processorState).",
+  "expectationsSha256": "e5da8671bb00ce0c626c351d48cdaf542b2d2165ed000992e4bfe679734d680c"
+ }
+}

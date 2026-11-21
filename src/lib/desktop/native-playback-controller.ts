@@ -1,5 +1,5 @@
 import { compileLiveNativeProjection, resolveMixerTiming } from "@daw-browser/audio-engine/live-native-projection"
-import { effectiveLoopForStart } from "@daw-browser/audio-engine/loop-frame-schedule"
+import { arrangementFrameForLoop, effectiveLoopForStart, loopFramesForTransport } from "@daw-browser/audio-engine/loop-frame-schedule"
 import { NativePlaybackAbortError } from "./native-playback-abort"
 import type { PlaybackAcceptanceObserver } from "./acceptance-observer"
 import { nativeExternalLatencyFrames as nativeOfflineExternalLatencyFrames } from "~/lib/export/native-offline-render-plan"
@@ -18,7 +18,7 @@ import {
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
 import { compilePortableSynthState } from "@daw-browser/audio-engine/mixer/graph-contract"
 import { resolveLiveMixerGraph } from "@daw-browser/audio-engine/live-mixer-runtime"
-import type { NativeRevisionReply, NativeRevisionSession } from "@daw-browser/desktop-protocol/native-revision"
+import type { NativeRevisionReply } from "@daw-browser/desktop-protocol/native-revision"
 import { type AudioPcmSourceDescriptor, type TrackInstrumentParams, parseExternalAutomationParameterId, parseJsonValue } from "@daw-browser/shared"
 import { createAudioEffectParameterPayload } from "~/lib/audio-effect-parameter-payload"
 import { captureNativeBuiltInParameterValues, encodeNativeBuiltInStateCommit, nativeBuiltInPatchTiming } from "./native-built-in-parameter-mapper"
@@ -68,9 +68,7 @@ import {
   type PublicationJoin,
 } from "~/lib/live-processor-control"
 import {
-  arrangementFrameForNativeFrame,
   createNativeScheduleCoordinator,
-  nativeLoopFramesForSnapshot,
   type NativeScheduleCoordinator,
 } from "./native-schedule-coordinator"
 import {
@@ -92,9 +90,7 @@ import {
 } from "./native-processor-state-owner"
 import {
   assertReply,
-  createPublicationTransaction,
   PublicationFailure,
-  runPublication,
   type InstrumentAssetHold,
   type NativeSessionReply,
   type PublicationPass,
@@ -102,11 +98,11 @@ import {
   type PublicationTransaction,
 } from "./native-publication-transaction"
 import {
-  createSchedulePublication,
-  type ScheduleHost,
-  type ScheduleRevisionCandidate,
-  type ScheduleSession,
-} from "./native-schedule-publication"
+  type PublicationFacts,
+  type PublicationPayload,
+  createPublicationExecutor,
+} from "./native-publication-executor"
+import type { ScheduleHost, ScheduleRevisionCandidate } from "./native-schedule-publication"
 import {
   graphStructure,
   processorMembership,
@@ -117,7 +113,6 @@ import {
   targetKinds,
 } from "./native-graph-targets"
 import {
-  attachmentsChanged,
   hasEquivalentTransportScheduling,
   nativeSnapshotLimitations,
   nativeSnapshotSupportError,
@@ -126,6 +121,7 @@ import {
   pageRoundedBytes,
   planWithWorkerFrames,
   planarBytes,
+  sameBytes,
   validateInstrumentAssetBudget,
 } from "./native-snapshot-support"
 import {
@@ -428,7 +424,7 @@ export const createNativePlaybackController = (input: {
       void statePatches.drain()
     },
     // One notice per incident: later failures join it, and a new one notifies only after it closed.
-    reportIncident: (category, targets) => reportFault(
+    reportIncident: (category, targets) => input.reportFault?.(
       { kind: category === "refused" ? "delivery-refused" : "delivery-unconfirmed", targets }, { retainPlayback: true }),
   })
 
@@ -851,12 +847,8 @@ export const createNativePlaybackController = (input: {
     unsubscribeVstInstanceEvents = undefined
   }
 
-  const reportFault = (fault: NativePlaybackFault, options?: { retainPlayback: true }) => {
-    input.reportFault?.(fault, options)
-  }
-
   const reportStopped = (message: string, options?: { retainPlayback: true }) =>
-    reportFault({ kind: "session-stopped", message }, options)
+    input.reportFault?.({ kind: "session-stopped", message }, options)
 
   // A live edit that fails to adopt is never shown: the old graph keeps playing, the edit stays in the project,
   // and the next submission retries it. The log is the only record.
@@ -960,7 +952,7 @@ export const createNativePlaybackController = (input: {
       onRenderedFrame: (renderedFrame) => {
         if (renderedFrame >= transportFrame) transportFrame = renderedFrame
       },
-      onRefillDiagnostics: () => undefined,
+      collectRefillDiagnostics: true,
       onHostLoss: (error) => {
         if (sessionGeneration !== nativeSessionGeneration) return
         handleNativeHostLoss(error)
@@ -1074,7 +1066,7 @@ export const createNativePlaybackController = (input: {
       const retiringEpoch = transportEpoch
 
       const stoppedLoop = preparedSnapshot && loopAppliesAtTransportPosition
-        ? nativeLoopFramesForSnapshot(preparedSnapshot, sampleRate)
+        ? loopFramesForTransport(preparedSnapshot.transport, sampleRate)
         : undefined
 
       instrumentMemoryScope = undefined
@@ -1127,7 +1119,7 @@ export const createNativePlaybackController = (input: {
           }
 
           options.onStoppedPosition?.(
-            arrangementFrameForNativeFrame(Number(reply.diagnostics.transportFrame), stoppedLoop) / stoppedSampleRate,
+            arrangementFrameForLoop(Number(reply.diagnostics.transportFrame), stoppedLoop) / stoppedSampleRate,
           )
         })
         : stopPromise
@@ -3071,10 +3063,6 @@ export const createNativePlaybackController = (input: {
     }
   }
 
-  type PublicationPayload =
-    | { kind: "schedule"; candidate: ScheduleRevisionCandidate; intent: number; attempt: AdoptionAttempt }
-    | { kind: "latency" }
-
   // The queue admits one record, never its caller promise. Every native/event
   // wait belongs to that record, leaving transport free to supply its proof.
   const publishRevision = async (payload: PublicationPayload): Promise<{ record: NonNullable<ReturnType<typeof processorState.publication>> } | { outcome: AdoptionOutcome }> => {
@@ -3134,25 +3122,6 @@ export const createNativePlaybackController = (input: {
       return admitted.step
     }
   }
-
-  // What executePublication captured of the prepared session, which both kinds of publication start from.
-  type PublicationFacts = {
-    previous: NonNullable<typeof preparedSnapshot>
-    previousGraph: NonNullable<typeof preparedGraph>
-    projectId: string
-    coordinator: NativeScheduleCoordinator
-    revisions: NativeRevisionSession
-    publicationEpoch: number
-    snapshot: NonNullable<typeof preparedSnapshot>
-    graph: NonNullable<typeof preparedGraph>
-    keep: Set<string>
-    inputVersion: number
-  }
-
-  type NativeBridgeSession = NonNullable<NonNullable<typeof input.bridge>["session"]>
-
-  const stagesInstruments = (session: NativeBridgeSession): session is NativeBridgeSession & ScheduleSession =>
-    session.configureInstrumentStates !== undefined
 
   const createLatencyPublication = (tx: PublicationTransaction, facts: PublicationFacts): PublicationStrategy => {
     const { record, current, sessionAlive, retry, notify, waitForOpportunity, withoutLane, quietPublicationLane, finish, inspect, classifyPublication } = tx
@@ -3424,86 +3393,7 @@ export const createNativePlaybackController = (input: {
     reportStopped,
     executeReconcile,
     reprimePausedAdoption: () => reprimePausedAdoption(),
-    sameBytes: (left, right) => sameBytes(left, right),
     statePatchMatchesCurrentProcessor: (instanceId, state) => statePatchMatchesCurrentProcessor(instanceId, state),
-    synthNodes,
-    targetKinds,
-    sampledInstrumentTrackIds,
-    scheduledRetention,
-    nativeTransportFor,
-    planarBytes,
-    validateInstrumentAssetBudget,
-    attachmentsChanged,
-  }
-
-  const executePublication = async (payload: PublicationPayload,
-    relinquish: (record: NonNullable<ReturnType<typeof processorState.publication>>, register: (resume: () => void) => void) => Promise<void>,
-  ) => {
-      const candidate = payload.kind === "schedule" ? payload.candidate : undefined
-      const attempt = payload.kind === "schedule" ? payload.attempt : undefined
-      input.observer?.adoption?.(attempt?.intent.key)?.("lane-admitted")
-      const intent = payload.kind === "schedule" ? payload.intent : stagedTransportIntent
-
-      const abandonCandidate = async () => {
-        await candidate?.dispose()
-
-        return { outcome: { status: "superseded" } } satisfies { outcome: AdoptionOutcome }
-      }
-
-      // A candidate compiled against a session that has since moved takes no receipts: the adoption compiles again.
-      if (intent !== stagedTransportIntent || (candidate && !isScheduleCandidateValid(candidate))) return abandonCandidate()
-
-      if (!candidate && latencyInputsApplied()) return { outcome: { status: "unchanged" } } satisfies { outcome: AdoptionOutcome }
-      const session = input.bridge?.session
-      const revisions = session?.revisions
-      const coordinator = scheduleCoordinator
-      const previous = preparedSnapshot
-      const previousGraph = preparedGraph
-      const projectId = preparedProjectId
-
-      if (!prepared || !coordinator || !previous || !previousGraph || !projectId) return abandonCandidate()
-
-      if (!session || !revisions || !stagesInstruments(session)) return abandonCandidate()
-      // A stopped transport never reaches a seam frame, so a paused edit publishes with seam 0, which native applies at
-      // its next callback block. No window can be staged for an unpublished bank, so the schedule is primed afterwards.
-      const paused = candidate !== undefined && !active
-      const generation = lifecycleGeneration
-      const projectGeneration = resolveProjectGeneration()
-      const publicationEpoch = transportEpoch
-      const merged = candidate ? rebaseScheduleCandidate(candidate) : captureLatencyInputs()
-      const snapshot = candidate?.snapshot ?? previous
-      const graph = structuredClone(merged.graph)
-      const keep = new Set(desiredKeepLatencyNodeIds)
-
-      const record = processorState.capturePublication(attempt,
-        publicationContent(graph, snapshot, merged.ledger, candidate?.instrumentIncarnations))
-
-      const tx: PublicationTransaction = createPublicationTransaction({
-        record, attempt, candidate, revisions, coordinator, previousRevision: previousGraph.revision, paused, processorState,
-        current: () => generation === lifecycleGeneration && projectGeneration === resolveProjectGeneration()
-          && projectId === input.getProjectId?.() && coordinator === scheduleCoordinator && prepared,
-        // Epoch coordinators increment nativeSessionGeneration. Only lifecycle invalidation
-        // ends this session; renderer generation changes still owe proof for a sent bank.
-        owned: () => generation === lifecycleGeneration && prepared && !hostLoss.isLost()
-          && preparedProjectId === projectId,
-        transportEpoch: () => transportEpoch,
-        runNextStatePatch: statePatches.runNext,
-        queueTransition: queuePreparedTransportTransition,
-        releaseInstrumentScope,
-        logFailedAdoption,
-      }, relinquish)
-
-      return runPublication(tx, candidate
-        ? createSchedulePublication(tx, {
-          candidate, attempt, session, revisions, coordinator, previous, previousGraph, snapshot, graph, keep, projectId,
-          publicationEpoch, paused, mergedSequence: merged.sequence,
-          createMappedAsset: (asset, mapping, preparedStretchArtifactId, mark) =>
-            createMappedAsset(session, asset, mapping, preparedStretchArtifactId, undefined, mark),
-        }, scheduleHost)
-        : createLatencyPublication(tx, {
-          previous, previousGraph, projectId, coordinator, revisions, publicationEpoch, snapshot, graph, keep,
-          inputVersion: latencyInputVersion,
-        }))
   }
 
   type AdoptionRun = { outcome: AdoptionOutcome; content?: string; transport?: LivePlaybackTransport }
@@ -3687,9 +3577,6 @@ export const createNativePlaybackController = (input: {
     disposeKept(processorState.dropIntents())
   }
 
-  const sameBytes = (left: Uint8Array, right: Uint8Array) =>
-    left.length === right.length && left.every((byte, index) => byte === right[index])
-
   const statePatchMatchesCurrentProcessor = (instanceId: string, state: Uint8Array) => {
     const match = preparedGraph ? resolveGraphProcessor(preparedGraph, instanceId) : undefined
 
@@ -3737,6 +3624,36 @@ export const createNativePlaybackController = (input: {
     return sameBytes(serializeNativeGraph(capture.graph, capture.keep),
       serializeNativeGraph(preparedGraph, preparedKeepLatencyNodeIds))
   }
+
+  const executePublication = createPublicationExecutor({
+    input,
+    processorState,
+    scheduleHost,
+    get stagedTransportIntent() { return stagedTransportIntent },
+    get prepared() { return prepared },
+    get active() { return active },
+    get lifecycleGeneration() { return lifecycleGeneration },
+    get transportEpoch() { return transportEpoch },
+    get scheduleCoordinator() { return scheduleCoordinator },
+    get preparedSnapshot() { return preparedSnapshot },
+    get preparedGraph() { return preparedGraph },
+    get preparedProjectId() { return preparedProjectId },
+    get projectGeneration() { return resolveProjectGeneration() },
+    get hostLost() { return hostLoss.isLost() },
+    get desiredKeepLatencyNodeIds() { return desiredKeepLatencyNodeIds },
+    get latencyInputVersion() { return latencyInputVersion },
+    isScheduleCandidateValid,
+    latencyInputsApplied,
+    rebaseScheduleCandidate,
+    captureLatencyInputs,
+    publicationContent,
+    runNextStatePatch: statePatches.runNext,
+    queueTransition: queuePreparedTransportTransition,
+    releaseInstrumentScope,
+    logFailedAdoption,
+    createMappedAsset,
+    createLatencyPublication,
+  })
 
   const requestLatencyPublication = async (): Promise<NativePublicationResult> => {
     if (!prepared) return { handled: false, reason: "unprepared" }
@@ -3811,10 +3728,10 @@ export const createNativePlaybackController = (input: {
     if (sampleRate <= 0) return undefined
 
     const loop = preparedSnapshot && loopAppliesAtTransportPosition
-      ? nativeLoopFramesForSnapshot(preparedSnapshot, sampleRate)
+      ? loopFramesForTransport(preparedSnapshot.transport, sampleRate)
       : undefined
 
-    return arrangementFrameForNativeFrame(transportFrame, loop) / sampleRate
+    return arrangementFrameForLoop(transportFrame, loop) / sampleRate
   }
 
   return {

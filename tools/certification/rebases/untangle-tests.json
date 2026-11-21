@@ -1,0 +1,38 @@
+{
+ "name": "untangle-tests",
+ "sequence": 106,
+ "createdAt": "2026-11-21T18:53:11.551Z",
+ "revert": [],
+ "watched": [],
+ "changes": [],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "3b48702987e4ce4395330e7543b5b3291ad959d6",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "b47d5c463d3c41ccdb6cbd8f67c4d660662396cb115cd6ebfccde4f3fc97142d",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "b47d5c463d3c41ccdb6cbd8f67c4d660662396cb115cd6ebfccde4f3fc97142d",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b14-bless2/live",
+   "resultSha256": "12c1069fafc7d86d33d9eb39f1d20ca47c3545d6e6c78b80e54e131b085d0b0d",
+   "seconds": 1250.5076246249998,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

@@ -2197,7 +2197,7 @@ test('W-C9-warp-7 a warped clip swapped to the new-tempo artifact at the seam cr
 })
 
 // AE-08 phase 8 step 9e: tracks added and deleted at a seam. A deleted track's node becomes a ghost the core fades over
-// 5 ms (D-3, shared with native); the sources it played fade with it and end with it, and a voice held on it ends with it.
+// 5 ms (shared with native); the sources it played fade with it and end with it, and a voice held on it ends with it.
 // The tracks that remain are untouched. A track added plays its clip from the seam: W-C9-clip-3c.
 const ghostFrames = 240
 
@@ -2283,8 +2283,7 @@ test('W-C9-track-10 a track added or deleted where a latency-bearing node delays
 })
 
 // AE-08 phase 8 step 9f: effects inserted, removed and reordered at a seam on the built core (class 4a). Survivors keep
-// their history by instance id (CORE:7640-7654); a removed one is a ghost that fades over 5 ms (CORE:7806, 7929-7976;
-// D-3); a node whose stages were reordered dips for 5 ms (CORE:5452-5459, 8311-8335). The same shared core code renders on
+// their history by instance id; a removed one is a ghost that fades over 5 ms; a node whose stages were reordered dips for 5 ms. The same shared core code renders on
 // native (nothing in these ranges is under DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS).
 const fxProcessor = (id: string, instanceId: number, kind: string, kindId: number, state: Uint8Array, latencyFrames = 0) => ({
   id, instanceId, kind, kindId, stateVersion: 1, state, parameterTargets: [], bypassed: false, latencyFrames, tailFrames: 0,
@@ -2460,8 +2459,8 @@ test('W-C9-fx-9 a limiter removed at the seam is adopted and the other track kee
 })
 
 // The 6 removed effects of three nodes fade as ghosts (96 of the 128 the core holds); a second removal of 64 inside the same
-// 5 ms needs 160 and its prepare is refused (CORE:7958-7960). Native refuses it the same way (HOST:2968-2981). The UD 8
-// retry waits one position report, which is at least 2400 frames (WK:2462), against the 240 frame fade: it prepares.
+// 5 ms needs 160 and its prepare is refused. Native refuses it the same way (PrepareGraphRevision). The
+// retry waits one position report, which is at least 2400 frames, against the 240 frame fade: it prepares.
 test('W-C9-fx-7 a removal of more than 128 effects inside one ghost fade is refused at its prepare and the retry one position report later succeeds', async () => {
   const chains = (kept: readonly string[]) => Object.fromEntries(['a', 'b', 'c', 'd', 'e'].map((id, node) => [id,
     kept.includes(id) ? Array.from({ length: 32 }, (_, index) => fxUtility(`${id}-${index}`, 1_000 + node * 32 + index, -1)) : []]))
@@ -2480,8 +2479,8 @@ test('W-C9-fx-7 a removal of more than 128 effects inside one ghost fade is refu
 })
 
 // AE-08 phase 8 step 9g: instrument replacement, a non-live effect edit and a Granular sample change at a seam on the built
-// core (class 5). The replaced node's old slot keeps rendering and crossfades out (CORE:8162-8194, 8297-8305, 5385-5417);
-// the held note is released by the note-off at the seam and the spanning note-on starts the new instrument (D-5).
+// core (class 5). The replaced node's old slot keeps rendering and crossfades out;
+// the held note is released by the note-off at the seam and the spanning note-on starts the new instrument.
 const startInstrumentHost = async (first: AudioCoreInstrumentState, noteOnFrame: number) => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
@@ -2543,8 +2542,8 @@ test('W-C9-asset-7 a Granular cloud whose sample changes at the seam plays the n
     .toEqual({ adoption: adoptedAtSeam, audible: true, faster: true })
 })
 
-// A parameter the live path does not take replaces the effect's slot (CORE:7542-7609, 8713-8717): the history starts again,
-// as it does on native through the same core call. The bypass position is handed over (CORE:8276-8289), so the output has
+// A parameter the live path does not take replaces the effect's slot: the history starts again,
+// as it does on native through the same core call. The bypass position is handed over (hand_off_bypass), so the output has
 // no step at the seam, and it settles on what the edited effect plays from the start.
 test('W-C9-proc-3 a non-live EQ band type edit at the seam is continuous and settles on the edited chain', async () => {
   const before = fxEq('eq-a', 31)
@@ -2559,8 +2558,8 @@ test('W-C9-proc-3 a non-live EQ band type edit at the seam is continuous and set
     .toEqual({ adoption: adoptedAtSeam, untouchedBefore: true, differentChains: true, noStep: true, settledAfter: true })
 })
 
-// A node carries at most kMaximumNodeBlends = 8 unfinished replacements (CORE:64, 8297-8305). The instruments are configured
-// from the registry when the revision publishes (WK:1162-1182), which is where the ninth replacement is refused: the publish
+// A node carries at most kMaximumNodeBlends = 8 unfinished replacements. The instruments are configured
+// from the registry when the revision publishes, which is where the ninth replacement is refused: the publish
 // is rejected and the playing graph stays. Native configures through the same core call and fails the same way.
 test('W-C9-inst-5 a ninth replacement inside one blend window has its publish rejected and publishes once the blends have run', async () => {
   const { host, messages, graph } = await startInstrumentHost(heldSynth, noteSeam)

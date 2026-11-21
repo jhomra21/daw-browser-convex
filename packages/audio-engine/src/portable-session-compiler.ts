@@ -405,7 +405,6 @@ export const compilePortableGranularConfiguration = (
   }
 }
 
-/** Compiles the browser synth profile into the fixed portable synth ABI. */
 export const compilePortableSynthConfiguration = (
   nodeId: string,
   instanceId: string,

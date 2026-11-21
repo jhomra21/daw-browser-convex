@@ -340,7 +340,6 @@ export const createNativeVst3AttachmentLedger = (
 
       for (const oldest of [...parked.keys()].slice(0, Math.max(0, parked.size - parkingLimits.maximumParkedInstances))) parked.delete(oldest)
     },
-    // The revision is live: staged instances are active.
     published() {
       for (const [instanceId, entry] of staged) active.set(instanceId, entry)
       staged.clear()
@@ -370,7 +369,6 @@ export const createNativeVst3SessionLedger = () => {
       host: Pick<NativeAudioHostSupervisor, "detachVst">,
       parkingLimits: NativeAudioHostParkingLimits,
     ) => ledger ??= createNativeVst3AttachmentLedger(host, Date.now, verdicts, parkingLimits),
-    // An insertion's preflight is the verdict staging the plug-in would learn.
     rememberVerdict: (attachment: PreflightAttachment, sampleRateHz: number, result: AvailablePreflight) => {
       verdicts.set(verdictKey(attachment, sampleRateHz), result)
     },

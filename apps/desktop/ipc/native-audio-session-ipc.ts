@@ -513,7 +513,6 @@ export const registerNativeAudioSessionIpc = (options: {
         envelope.data.transactionToken,
       )
 
-      // A live plan has no transaction to commit it: the project owns these instances from now.
       if (envelope.data.transactionToken === undefined) audio.bindings.commit()
 
       return { ok: true as const }

@@ -33,7 +33,6 @@ type SynthLiveField = {
   update: (value: number) => SynthParamsUpdate;
 };
 
-// The eight synth fields the live events carry.
 export const SYNTH_LIVE_FIELDS: readonly SynthLiveField[] = [
   { parameterId: "synth.outputGain", nativeField: "outputGain", nativeDefault: 1, nativeScale: 1,
     read: (params) => params.gain, update: (gain) => ({ gain }) },

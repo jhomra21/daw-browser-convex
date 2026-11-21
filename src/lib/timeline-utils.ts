@@ -1,7 +1,6 @@
 import { calcNonOverlappingStart, willClipsOverlap } from '@daw-browser/timeline-core/clip-placement'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
-// Timeline constants
 export const ARRANGEMENT_OVERVIEW_HEIGHT = 24 // px
 export const RULER_HEIGHT = 32 // px
 export const TIMELINE_HEADER_HEIGHT = ARRANGEMENT_OVERVIEW_HEIGHT + RULER_HEIGHT
@@ -18,7 +17,6 @@ type TimelineTrackScrollElement = {
   getBoundingClientRect: () => Pick<DOMRect, 'top'>
 }
 
-// Shared Effects panel layout constants
 export const FX_PANEL_HEIGHT_PX = 360
 
 export const clampAutomationLaneHeight = (height: number) => (
@@ -52,7 +50,6 @@ export function calcNonOverlapStart(clips: Clip[], excludeId: string | null, des
   return calcNonOverlappingStart(clips, excludeId, desiredStart, duration)
 }
 
-// --- Grid / snapping helpers ---
 export function quantizeSecToGrid(
   sec: number,
   bpm: number,

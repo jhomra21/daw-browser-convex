@@ -40,7 +40,7 @@ export type ProcessorRefusal =
   | "invalid" | "stage-failed" | "apply-failed" | "not-claimed" | "claim-failed" | "native-refused" | "unsupported"
   | "preparing" | "stale-revision" | "claim-pending"
 
-// One vocabulary for every leg of a delivery (design 1.2). Only a proof produces `applied`; only a definite refusal of
+// One vocabulary for every leg of a delivery. Only a proof produces `applied`; only a definite refusal of
 // every attempt produces `refused`; a lost reply produces neither.
 export type ProcessorDeliveryOutcome =
   | { state: "applied" }

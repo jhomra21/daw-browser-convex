@@ -28,9 +28,7 @@ type MidiClipEditorProps = {
   clipId: string
   clipName: string
   bpm: number
-  // Align grid to timeline
   gridDenominator: number
-  // Clip window to size grid to
   clipDurationSec: number
   midi?: Clip['midi']
   userId?: string
@@ -298,7 +296,6 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
     }
   }
 
-  // Drag to move/resize notes
   const noteDragListenerOptions: AddEventListenerOptions = { capture: true }
 
   const cleanupNoteDragListeners = () => {
@@ -379,7 +376,6 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
     try { el.setPointerCapture(e.pointerId) } catch {}
 
     el.addEventListener('lostpointercapture', onNotePointerCancel)
-    // Audition on drag start
     const dur = Math.max(0.05, grid().noteDurationSeconds(n.length, 0.6))
 
     if (props.trackId) props.onAuditionNote?.(props.trackId, n.pitch, midiNoteVelocity(n), dur)

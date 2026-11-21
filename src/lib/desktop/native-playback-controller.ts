@@ -117,7 +117,6 @@ import {
   targetKinds,
 } from "./native-graph-targets"
 import {
-  attachmentsChanged,
   hasEquivalentTransportScheduling,
   nativeSnapshotLimitations,
   nativeSnapshotSupportError,
@@ -126,6 +125,7 @@ import {
   pageRoundedBytes,
   planWithWorkerFrames,
   planarBytes,
+  sameBytes,
   validateInstrumentAssetBudget,
 } from "./native-snapshot-support"
 import {
@@ -3424,16 +3424,7 @@ export const createNativePlaybackController = (input: {
     reportStopped,
     executeReconcile,
     reprimePausedAdoption: () => reprimePausedAdoption(),
-    sameBytes: (left, right) => sameBytes(left, right),
     statePatchMatchesCurrentProcessor: (instanceId, state) => statePatchMatchesCurrentProcessor(instanceId, state),
-    synthNodes,
-    targetKinds,
-    sampledInstrumentTrackIds,
-    scheduledRetention,
-    nativeTransportFor,
-    planarBytes,
-    validateInstrumentAssetBudget,
-    attachmentsChanged,
   }
 
   const executePublication = async (payload: PublicationPayload,
@@ -3686,9 +3677,6 @@ export const createNativePlaybackController = (input: {
     stagedTransportIntent++
     disposeKept(processorState.dropIntents())
   }
-
-  const sameBytes = (left: Uint8Array, right: Uint8Array) =>
-    left.length === right.length && left.every((byte, index) => byte === right[index])
 
   const statePatchMatchesCurrentProcessor = (instanceId: string, state: Uint8Array) => {
     const match = preparedGraph ? resolveGraphProcessor(preparedGraph, instanceId) : undefined

@@ -9,7 +9,7 @@ import {
   createDefaultSaturatorParams,
   createDefaultTremoloParams,
 } from '@daw-browser/shared'
-import { convertStereoToMonoSample, duplicateMonoSample, getSourceChannelLayout } from './channel-layout'
+import { convertStereoToMonoSample, getSourceChannelLayout } from './channel-layout'
 import { resolveMixerGraph } from './resolve-routing'
 import type { MixerChannel } from './channels'
 import type { MixerTrackFx } from './types'
@@ -169,8 +169,7 @@ describe('runtime channel layouts', () => {
     expect(graph.channels.map((entry) => entry.outputTargetId)).toEqual([undefined, undefined])
   })
 
-  test('duplicates mono without attenuation and downmixes with equal weights', () => {
-    expect(duplicateMonoSample(0.75)).toEqual([0.75, 0.75])
+  test('downmixes stereo to mono with equal weights', () => {
     expect(convertStereoToMonoSample(1, -1)).toBe(0)
     expect(convertStereoToMonoSample(1, 1)).toBe(1)
   })

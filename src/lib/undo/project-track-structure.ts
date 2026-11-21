@@ -168,6 +168,7 @@ export const planStructuralOps = (entry: HistoryEntry, direction: Direction): re
   }
 }
 
+// Ids a replay would mint are stood in for by their history ref.
 const applyStructuralOp = (tracks: readonly ClosureTrack[], op: StructuralOp): readonly ClosureTrack[] => {
   const idByRef = new Map(tracks.map((track) => [getTrackHistoryRef(track), track.id]))
   const resolve = (ref: TrackRef | undefined) => ref ? idByRef.get(ref) : undefined

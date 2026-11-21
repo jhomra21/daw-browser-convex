@@ -312,6 +312,7 @@ export async function loadInstrumentExportBuffers(
       }
     })
 
+    // Drain sibling decodes before their owning export scope may be released.
     if (loading.signal.aborted) throw loadError
     throwIfExportAborted(signal)
   } finally {

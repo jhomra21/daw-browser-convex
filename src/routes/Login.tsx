@@ -26,6 +26,8 @@ const Login: Component = () => {
     } catch (err) {
       console.error('Google sign-in error:', err);
       setSignInError('Failed to start Google sign-in. Please try again.');
+      // Better Auth client usually surfaces errors via returned object or callbacks.
+      // This is a safety net in case something throws.
       setLoadingGoogle(false);
     }
   }

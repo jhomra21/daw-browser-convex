@@ -1169,6 +1169,7 @@ export const createPortableBrowserPlaybackController = (input: {
       if (!current()) return "unavailable"
       const folded = withAcceptedLiveSynthValues(next, previous, activeSnapshot ?? previous)
 
+      // The schedule plays the arrangement from `arrangementAt` at raw frame `rawFrame`, with the loop as given.
       const compileFrom = (rawFrame: number, arrangementAt: number, scheduleLoop: AdoptionLoop, horizonFrames: number) => preparedSession(
         { ...folded, revision: revision + 1, transport: { ...folded.transport, ...scheduleLoop, playheadSec: arrangementAt / sampleRate } },
         sampleRate, epoch, projectGeneration, horizonFrames / sampleRate, 1, resources.preparedStretchAssets, undefined, resources.ordinaryDescriptors, rawFrame)
@@ -1274,6 +1275,7 @@ export const createPortableBrowserPlaybackController = (input: {
 
       if (!fitted) return failed(unsupported ? "unsupported" : "failed")
       const { candidate, adopted, paged } = fitted
+      // The commit keeps these preparations; a failed attempt leaves them to the resubmit.
       owned.preparations = paged.preparations
       const reusedIds = new Set(paged.preparations.map((preparation) => preparation.id))
       await releasePreparations(session, reusable.filter((preparation) => !reusedIds.has(preparation.id)), assetGeneration)

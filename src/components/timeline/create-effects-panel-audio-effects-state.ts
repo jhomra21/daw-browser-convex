@@ -531,6 +531,7 @@ export function createEffectsPanelAudioDevice(
   // does carry the preview: the native compile and the processor-edit registry must see the value the engine plays.
   const effectTarget = (targetId: string, instance: { id: string; kind: AudioEffectKind }): EffectTarget => ({ targetId, instanceId: instance.id, kind: instance.kind });
   const committedParamsForInstance = (targetId: string, instance: AudioEffectInstance) => owner.committed(effectTarget(targetId, instance));
+  // Effective state: what the panel shows and the engine plays.
   const effectiveParamsForInstance = (targetId: string, instance: AudioEffectInstance) => owner.effective(effectTarget(targetId, instance));
   const paramsForInstance = (instance: AudioEffectInstance) => effectiveParamsForInstance(currentTargetId(), instance);
 
@@ -928,26 +929,31 @@ export function createEffectsPanelAudioDevice(
 
   const addEq = () => {
     if (!context.canWriteCurrentTargetEffects()) return;
+    // Synchronous card action; addChainToTarget awaits application and handles persistence rollback.
     void addByKindToTarget(currentTargetId(), "eq");
   };
 
   const addReverb = () => {
     if (!context.canWriteCurrentTargetEffects()) return;
+    // Synchronous card action; addChainToTarget awaits application and handles persistence rollback.
     void addByKindToTarget(currentTargetId(), "reverb");
   };
 
   const addCompressor = () => {
     if (!context.canWriteCurrentTargetEffects()) return;
+    // Synchronous card action; addChainToTarget awaits application and handles persistence rollback.
     void addByKindToTarget(currentTargetId(), "compressor");
   };
 
   const addSaturator = () => {
     if (!context.canWriteCurrentTargetEffects()) return;
+    // Synchronous card action; addChainToTarget awaits application and handles persistence rollback.
     void addByKindToTarget(currentTargetId(), "saturator");
   };
 
   const addDelay = () => {
     if (!context.canWriteCurrentTargetEffects()) return;
+    // Synchronous card action; addChainToTarget awaits application and handles persistence rollback.
     void addByKindToTarget(currentTargetId(), "delay");
   };
 

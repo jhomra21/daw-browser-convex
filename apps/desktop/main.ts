@@ -295,6 +295,8 @@ const prepareQuit = async () => {
 
 const finishQuit = async () => {
   if (quitCleanupStarted) return
+  // Normal window close already performed every fallible async operation
+  // before destruction. Headless quit uses the same prerequisite.
   await prepareQuit()
   quitCleanupStarted = true
   rendererSession.beginQuit()

@@ -3,6 +3,7 @@ export type TrackTreeNode = {
   groupId?: string
 }
 
+/** Returns every descendant, excluding the supplied root track. */
 export const collectTrackDescendantIds = (
   tracks: readonly TrackTreeNode[],
   rootTrackId: string,

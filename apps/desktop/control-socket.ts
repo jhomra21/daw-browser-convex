@@ -50,6 +50,7 @@ export const createControlSocket = (options: {
   const operationFailure = (_operation: DesktopOperationV1, code: Parameters<typeof hostError>[0], message: string) => hostError(code, message)
   const operationFailureV2 = (_operation: DesktopOperationV1, code: Parameters<typeof hostError>[0], message: string) => hostErrorV2(code, message)
 
+  // A refusal the renderer gave while a request was being prepared; the client gets its code and message.
   class RendererRefusal extends Error {
     constructor(readonly code: Parameters<typeof hostError>[0], message: string) {
       super(message)

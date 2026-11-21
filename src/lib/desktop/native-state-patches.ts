@@ -38,6 +38,7 @@ export const createNativeStatePatches = (host: NativeStatePatchHost) => {
   const { processorState } = host
   let draining = false
 
+  // The typed reply of one patch send. The answer decides nothing here: the ledger's fence and policy do.
   const patchReplyOf = (reply: NativeProcessorPatchReply): PatchReply => {
     if (!reply.ok) return reply.kind === "refused" ? { kind: "refused", refusal: "native-refused", transient: false } : { kind: reply.kind }
 
@@ -56,6 +57,7 @@ export const createNativeStatePatches = (host: NativeStatePatchHost) => {
   }
 
   const runBuiltInStatePatch = async ({ execution, desired: materialized }: { execution: PatchExecution; desired: ProcessorDesired }) => {
+    // A patch that was never sent: its requests are answered and the ledger takes its desired back.
     const unsent = (outcome?: ProcessorDeliveryOutcome) => host.executeReconcile(processorState.abandon(execution, outcome))
     const bridge = host.bridge
     const { prepared, graph, snapshot } = host.session()

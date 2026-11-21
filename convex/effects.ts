@@ -863,7 +863,9 @@ export const serverSetSynthParams = mutation({
     instanceId: v.string(),
     params: v.union(synthParamsValidator, legacySynthParamsValidator),
   },
+// Set or create the EQ params for a given track. We enforce ownership based on the track owner.
   handler: async (ctx, { projectId, trackId, instanceId, params }) => {
+// Set or create the EQ params for the room master bus. We enforce that the user owns the project for this room.
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
 

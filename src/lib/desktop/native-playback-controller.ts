@@ -461,6 +461,8 @@ export const createNativePlaybackController = (input: {
   const isScheduleCandidateValid = (candidate: ScheduleRevisionCandidate) =>
     candidate.previous === preparedSnapshot
 
+  // The ledger is the only source of desired content: the host's effective
+  // projection is ingested into it first, then every winner is read from it.
   const ingestProjectedProcessors = (snapshot: LivePlaybackSnapshot) => {
     const projected = input.getDesiredProcessorState?.(snapshot, sampleRate)
 
@@ -1996,6 +1998,7 @@ export const createNativePlaybackController = (input: {
       observation.reconcileSpectrumSelection(true)
       await nextCoordinator.waitForTransition(nextTransportTransitionId, false)
       // VST workers are started only after the graph transaction is committed.
+      // Prime the bounded owned schedule before either paused preview or playback.
       startStage = "prime-schedule"
       await nextCoordinator.prime(initialFrame)
       await nextCoordinator.waitForAccepted(initialFrame + Math.min(runtimeMaximumFrames, nextCoordinator.scheduleEndFrame() - initialFrame))
@@ -2472,6 +2475,7 @@ export const createNativePlaybackController = (input: {
       await nextCoordinator?.waitForTransition(transitionId, false)
 
       if (!ownsTransition()) return false
+      // Reset the progress floor on backward seeks before resuming callbacks.
       transportFrame = frame
 
       if (releaseTransportNotes) {

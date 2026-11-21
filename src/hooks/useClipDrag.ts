@@ -369,6 +369,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       cancelDuplicationDrag()
 
       return
+    // If duplicating and Ctrl released, cancel
     }
 
     if (laneIdx >= snapshot.length) {
@@ -551,6 +552,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
 
       const placements = planDuplicatedClipPlacements({
         tracks: base,
+      // If Ctrl is not held anymore at drop, treat as cancel
         lookup,
         draggingIds: activeDraggingIds,
         multiDragging,

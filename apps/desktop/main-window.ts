@@ -57,6 +57,7 @@ export const createMainWindow = (options: {
   })
 
   rendererSession.setWindow(mainWindow)
+  // Maximize before the first paint; the minimum-size frame stays as the restore size.
   mainWindow.maximize()
   mainWindow.show()
   installBenchmarkWindowTelemetry({

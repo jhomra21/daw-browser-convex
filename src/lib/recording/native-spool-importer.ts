@@ -94,6 +94,8 @@ export const importNativeRecordingSpool = async (input: {
 
     if (partialBytes !== 0 || parsedFrames !== frames || parsedBlocks !== blocks)
       throw new Error("Recording source frame/block/byte totals mismatch.")
+    // EOF alone is not import success. Verify no extra source data, finalize via
+    // the canonical writer, reopen its descriptor and inspect the actual file.
     assertCurrent()
 
     if ((await input.bridge.read(input.scope, take.takeId, bytes, 1)).byteLength !== 0)
@@ -123,6 +125,7 @@ export const importNativeRecordingSpool = async (input: {
     // queued, so source ownership is handed to the per-take save path, not freed.
     return { ...canonical, nativeTake }
   } catch (error) {
+    // Abort removes only this writer's unfinalized OPFS destination.
     // Finalized staging and the authoritative native source survive import failure.
     await session.abort().catch(() => undefined)
     throw error

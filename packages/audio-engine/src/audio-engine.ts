@@ -1069,6 +1069,7 @@ export class AudioEngine {
     this.stopAllActiveNotes()
     // Snapshot currently active sources to avoid stopping newly scheduled ones
     const toStop = this.sources.snapshot()
+    // Reset tracking immediately so subsequent schedules are isolated
     this.sources.clear()
 
     // Quick master fade to avoid clicks
@@ -1138,6 +1139,7 @@ export class AudioEngine {
   }
 
   get outputLatencySec() {
+  // Sum of output and base latency (seconds) if available; used for A/V visual alignment
     return getOutputLatencySec(this.runtime)
   }
 

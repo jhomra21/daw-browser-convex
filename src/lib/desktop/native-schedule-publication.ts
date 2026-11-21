@@ -65,6 +65,7 @@ export type ScheduleSession = Pick<NativeSessionBridge,
   "installAsset" | "createMappedAsset" | "releaseAsset" | "setTransport" | "coordinateVstAttachments"
 > & Required<Pick<NativeSessionBridge, "configureInstrumentStates">>
 
+// What executePublication captured of the prepared session for one schedule publication.
 type ScheduleFacts = {
   candidate: ScheduleRevisionCandidate
   attempt: AdoptionAttempt | undefined

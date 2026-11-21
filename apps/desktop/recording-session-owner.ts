@@ -1,6 +1,7 @@
 import { nativeAudioHostSpoolStates, nativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeHostRecordingConfiguration } from "@daw-browser/audio-engine/native-host-wire"
-import { NativeAudioHostCommandError, NativeRecordingConfigureError, type nativeDeliveryFailureKind, type NativeAudioHostSupervisor, type NativeMainRecordingStatus } from "./audio-host"
+import { NativeAudioHostCommandError, NativeRecordingConfigureError, type nativeDeliveryFailureKind, type NativeAudioHostSupervisor } from "./audio-host"
+import type { NativeMainRecordingStatus } from "./native-host-frame-decoders"
 import { prepareRecordingSpool, type createRecordingSpoolRegistry } from "./recording-spool"
 import type { createRecordingStartDiagnostic } from "./recording-start-diagnostic"
 

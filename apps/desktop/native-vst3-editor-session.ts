@@ -1,10 +1,7 @@
 import { indicatesNativeHostLoss } from "@daw-browser/desktop-protocol/native-audio-host"
-import type {
-  NativeVstEditorAnchor,
-  NativeVstEditorCommand,
-  NativeAudioHostSupervisor,
-  NativeWorkerNotification,
-} from "./audio-host"
+import type { NativeAudioHostSupervisor } from "./audio-host"
+import type { NativeWorkerNotification } from "./native-host-frame-decoders"
+import type { NativeVstEditorAnchor, NativeVstEditorCommand } from "./native-host-frame-encoders"
 import type { NativeVstEditorStatus } from "./native-request-broker"
 import { coordinateNativeVst3Attachments } from "./native-vst3-coordinator"
 import type { PluginCatalogData } from "./plugin-catalog"

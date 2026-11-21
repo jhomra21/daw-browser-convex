@@ -11,7 +11,6 @@ import {
   nativeHostConfigurationIdentityFor,
   createNativeAudioHostSupervisor,
   NativeAudioHostCommandError,
-  decodeNativeProcessorPatchStatus,
   nativeDeliveryFailureKind,
   nativeProcessorPatchReply,
   nativeVstEditorOwnershipProbe,
@@ -22,8 +21,9 @@ import {
   createNativeOfflineStdoutPump,
   isNativeOfflineTelemetryFrame,
   type NativeAudioHostSupervisorOptions,
-  type ResolvedVst3Attachment,
 } from "./audio-host"
+import { decodeNativeProcessorPatchStatus } from "./native-host-frame-decoders"
+import type { ResolvedVst3Attachment } from "./native-host-frame-encoders"
 import {
   encodeNativeAudioHostControlFrame,
   NativeAudioHostNotSentError,

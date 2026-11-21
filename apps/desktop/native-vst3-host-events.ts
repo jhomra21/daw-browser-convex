@@ -1,5 +1,5 @@
 import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
-import type { NativeWorkerNotification } from "./audio-host"
+import type { NativeWorkerNotification } from "./native-host-frame-decoders"
 import {
   nativeVst3InstanceEvent,
   type NativeVst3Defect,

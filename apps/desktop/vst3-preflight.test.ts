@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import type { NativeVst3WorkerHello } from "@daw-browser/plugin-host-protocol"
-import type { ResolvedVst3Attachment } from "./audio-host"
+import type { ResolvedVst3Attachment } from "./native-host-frame-encoders"
 import { packagedVst3WorkerPath, preflightNativeVst3Worker } from "./vst3-preflight"
 
 const instanceId = "b0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f1"

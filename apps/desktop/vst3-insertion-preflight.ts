@@ -6,7 +6,7 @@ import type {
 import type { PluginCatalogData } from "./plugin-catalog"
 import { resolveVst3Attachment } from "./vst3-attachment"
 import { preflightNativeVst3Worker } from "./vst3-preflight"
-import type { ResolvedVst3Attachment } from "./audio-host"
+import type { ResolvedVst3Attachment } from "./native-host-frame-encoders"
 import type { HostEvidence } from "./ae08-evidence"
 
 const effectWorkerTransport = {

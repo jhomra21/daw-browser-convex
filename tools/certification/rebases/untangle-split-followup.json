@@ -1,0 +1,73 @@
+{
+ "name": "untangle-split-followup",
+ "sequence": 97,
+ "createdAt": "2026-11-21T02:00:04.771Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "apps/desktop/audio-host.ts",
+   "from": "4f903e5e2a888f14d244af645d94181f95d1b2a6a32f3aecfc55744251aa6909",
+   "to": "4f5c0d7353606f6b939cac7913f6f0a655998aa058030039d332ee60b9590156"
+  },
+  {
+   "file": "src/components/Timeline.tsx",
+   "from": "f8aeeac861c5d229dcfeff403e4f085bfaadf52b325a3d297f711e98acf88212",
+   "to": "3d3a72c76b0dae10e7faaafdedde93226a375047cc0e6d93ffeb51b60f81efef"
+  },
+  {
+   "file": "src/lib/local-effects.ts",
+   "from": "5dce520684fed00e5624190f3d1b0ad5c290f2e0535063e7fd4877a1ea19cba2",
+   "to": "22cf5a4841c321f6ed549344b16e91fa0f4b662aba6729345d6d6bad351e2f40"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "338aa8c734c454b5112dad71933cbbe2ffe8163419a9e7ccb5b48b434e2555d7",
+   "new": "0d9e938c1fe82f439b9494ba9947a4a0ebd6f14a974367c6c469528d9c94bf5e"
+  },
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "8813a14ae4ec8a477c3697ee38fff354fb7b52b7aa98cfbe4ca6df014486ea78",
+   "new": "e548a096b2c356d37df7356076e51d9767201cb212ea0907d5f53a7794f9c268"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "4f7fd1f34f5029e9bf8e7dc8fdf03fc7c151542e",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "d62e3fb2f2cfcc8cfd38a06f31c7db0eef757b90183db3cd13d2704901e84502",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "d62e3fb2f2cfcc8cfd38a06f31c7db0eef757b90183db3cd13d2704901e84502",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b10e-bless/live",
+   "resultSha256": "3657a475322960cec6305e8a7ffa7e106f5ce274fcba04cd74127e95804c02ad",
+   "seconds": 1249.7080924590002,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

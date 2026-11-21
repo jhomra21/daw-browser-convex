@@ -97,7 +97,6 @@ registerControlRoutes(app)
 
 registerControlMcpRoutes(app)
 
-// Session middleware - adds user and session to context
 app.use('*', async (c, next) => {
   // Skip auth middleware for auth routes to avoid circular calls
   if (c.req.path.startsWith('/api/auth/')) {
@@ -124,14 +123,12 @@ app.use('*', async (c, next) => {
   return next();
 });
 
-// Better Auth routes - use on() method as recommended
 app.on(['POST', 'GET'], '/api/auth/*', async (c) => {
   const auth = createAuth(c.env);
 
   return auth.handler(c.req.raw);
 });
 
-// Session endpoint to check current user
 app.get('/api/session', (c) => {
   const session = c.get('session');
   const user = c.get('user');
@@ -148,7 +145,6 @@ registerShareInviteRoutes(app)
 
 registerConvexAuthRoutes(app)
 
-// Protected route example
 app.get('/api/protected', (c) => {
   const user = c.get('user');
 

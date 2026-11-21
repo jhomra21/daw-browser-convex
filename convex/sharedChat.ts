@@ -3,7 +3,6 @@ import { v } from "convex/values";
 import { requireProjectAccess } from "./projectAccess";
 import { requireAuthenticatedUserId } from "./identity";
 
-// List the latest N messages for a room, ordered by createdAt ascending.
 export const listLatest = query({
   args: { projectId: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, { projectId, limit }) => {

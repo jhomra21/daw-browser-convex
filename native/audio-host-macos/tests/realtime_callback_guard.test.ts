@@ -2,7 +2,8 @@ import { expect, test } from 'bun:test'
 
 const realtimeSources = [
   new URL('../src/coreaudio-hal.mm', import.meta.url),
-  new URL('../src/audio-host.cpp', import.meta.url),
+  new URL('../src/audio-host-internal.h', import.meta.url),
+  new URL('../src/audio-host-realtime.cpp', import.meta.url),
   new URL('../src/acceptance-output-tap.h', import.meta.url),
   new URL('../../plugin-host/src/worker-control-service.cpp', import.meta.url),
 ]
@@ -55,7 +56,7 @@ test('CoreAudio callback paths contain no scheduler wake, wait, or lock operatio
     }
   }
 
-  const host = await Bun.file(new URL('../src/audio-host.cpp', import.meta.url)).text()
+  const host = await Bun.file(new URL('../src/audio-host-realtime.cpp', import.meta.url)).text()
 
   const callback = host.slice(host.indexOf('bool AudioHost::ProcessPlanar('),
     host.indexOf('bool AudioHost::ProcessRecordingPlanar('))

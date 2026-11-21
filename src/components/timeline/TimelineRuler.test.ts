@@ -1,7 +1,6 @@
 
 import { describe, expect, test } from 'bun:test'
 import { collectTimelineMarkerIndices } from './TimelineRuler'
-import { musicalBarLabelAtTime } from '~/lib/timeline-view'
 
 describe('TimelineRuler marker slots', () => {
   test('updates primitive marker slots when interval and visible length change', () => {
@@ -16,14 +15,10 @@ describe('TimelineRuler marker slots', () => {
     expect(initial.every(index => Number.isInteger(index))).toBe(true)
   })
 
-  test('derives positions and labels from the current slot interval', () => {
+  test('stops collecting markers past the viewport width', () => {
     const timeToX = (timeSec: number) => timeSec * 100
-    const indices = collectTimelineMarkerIndices(0, 4, 2, 450, timeToX)
-    const positions = indices.map(index => timeToX(index * 2))
-    const labels = indices.map(index => musicalBarLabelAtTime(index * 2, 120))
 
-    expect(indices).toEqual([0, 1, 2])
-    expect(positions).toEqual([0, 200, 400])
-    expect(labels).toEqual([1, 2, 3])
+    expect(collectTimelineMarkerIndices(0, 4, 2, 450, timeToX)).toEqual([0, 1, 2])
+    expect(collectTimelineMarkerIndices(0, 4, 2, 350, timeToX)).toEqual([0, 1])
   })
 })

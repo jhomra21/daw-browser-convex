@@ -952,7 +952,7 @@ export const createNativePlaybackController = (input: {
       onRenderedFrame: (renderedFrame) => {
         if (renderedFrame >= transportFrame) transportFrame = renderedFrame
       },
-      onRefillDiagnostics: () => undefined,
+      collectRefillDiagnostics: true,
       onHostLoss: (error) => {
         if (sessionGeneration !== nativeSessionGeneration) return
         handleNativeHostLoss(error)

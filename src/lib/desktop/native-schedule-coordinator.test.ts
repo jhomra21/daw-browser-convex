@@ -489,7 +489,6 @@ test("staged source hydration continues the retained cursor without a seam resta
 
 test("opt-in refill diagnostics aggregate progress and synchronous compilation per coordinator", async () => {
   const fixture = bridgeFor()
-  const reports: Array<{ progressCount: number; compileCount: number; compileTotalMs: number; compileMaxMs: number }> = []
 
   const coordinator = createNativeScheduleCoordinator({
     bridge: fixture.bridge,
@@ -499,7 +498,7 @@ test("opt-in refill diagnostics aggregate progress and synchronous compilation p
     capacity: { maximumFramesPerBlock: 128 },
     assets: [],
     startFrame: 0,
-    onRefillDiagnostics: (snapshot) => reports.push(snapshot),
+    collectRefillDiagnostics: true,
   })
 
   coordinator.install()
@@ -516,8 +515,6 @@ test("opt-in refill diagnostics aggregate progress and synchronous compilation p
   expect(snapshot.compileCount).toBeGreaterThan(0)
   expect(snapshot.compileTotalMs).toBeGreaterThanOrEqual(snapshot.compileMaxMs)
   expect(snapshot.compileMaxMs).toBeGreaterThanOrEqual(0)
-  expect(reports.length).toBeLessThan(1000)
-  expect(reports.at(-1)?.compileCount).toBeLessThanOrEqual(snapshot.compileCount)
 
   const other = createNativeScheduleCoordinator({
     bridge: bridgeFor().bridge,

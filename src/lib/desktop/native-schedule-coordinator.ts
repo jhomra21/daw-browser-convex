@@ -390,7 +390,8 @@ const buildNativeScheduleCoordinator = (input: {
   onFault?: (error: Error) => void
   onHostLoss?: (error?: string) => void
   onRenderedFrame?: (frame: number) => void
-  onRefillDiagnostics?: (snapshot: NativeRefillDiagnostics) => void
+  // Counts progress and times compilation for `refillDiagnostics()`; off, the refill path does no measuring.
+  collectRefillDiagnostics?: boolean
 }, onPreparedWindowRejected?: () => Promise<void>) => {
   let disposed = false
   let graphRevision = input.snapshot.revision
@@ -1178,7 +1179,7 @@ const buildNativeScheduleCoordinator = (input: {
   }
 
   const compileDiagnosedWindow = (start: number, end: number) => {
-    if (!input.onRefillDiagnostics) return compileWindow(start, end)
+    if (!input.collectRefillDiagnostics) return compileWindow(start, end)
     const started = performance.now()
 
     try {
@@ -1268,11 +1269,6 @@ const buildNativeScheduleCoordinator = (input: {
   }
 
   const finishRefill = (marker: Promise<void>, release: () => void) => {
-    // Diagnostics are observational; consumer failures must not alter refill behavior.
-    if (input.onRefillDiagnostics) {
-      try { input.onRefillDiagnostics(refillDiagnostics()) } catch {}
-    }
-
     if (refillInFlight !== marker) {
       release()
 
@@ -1296,7 +1292,7 @@ const buildNativeScheduleCoordinator = (input: {
 
     if (!force && progress.progressSequence <= (latestProgress?.progressSequence ?? 0n)) return
 
-    if (!force && input.onRefillDiagnostics) progressCount += 1
+    if (!force && input.collectRefillDiagnostics) progressCount += 1
     latestProgress = progress
 
     if (progress.scheduleComplete) {

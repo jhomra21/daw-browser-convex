@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test'
+import { installFetch } from '~/test-support/install-fetch'
+import { installGlobals } from '~/test-support/install-globals'
 import 'fake-indexeddb/auto'
 import { AUDIO_EFFECT_CONTRACTS, type JsonValue } from '@daw-browser/shared'
 import { z } from 'zod'
@@ -155,10 +157,10 @@ test('sanitizes legacy queued MIDI through the strict endpoint and continues wit
   })))
 
   const requests: Array<{ url: string; operation: unknown }> = []
-  const originalFetch = globalThis.fetch
+  let restoreFetch = () => {}
 
-  const replayFetch: typeof globalThis.fetch = Object.assign(
-    async (...arguments_: Parameters<typeof globalThis.fetch>) => {
+
+  restoreFetch = installFetch(async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [input, init] = arguments_
       requests.push({
         url: String(input),
@@ -166,16 +168,12 @@ test('sanitizes legacy queued MIDI through the strict endpoint and continues wit
       })
 
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
-    },
-    { preconnect: originalFetch.preconnect },
-  )
-
-  globalThis.fetch = replayFetch
+    })
 
   try {
     expect(await flushSharedOutbox(projectId, userId)).toEqual({ pending: 0, failed: 0 })
   } finally {
-    globalThis.fetch = originalFetch
+    restoreFetch()
   }
 
   expect(requests).toHaveLength(2)
@@ -241,11 +239,11 @@ test('migrates legacy queued clip deletion operation IDs before publishing and r
     return true
   })
 
-  const originalFetch = globalThis.fetch
+  let restoreFetch = () => {}
   let fail = true
 
-  const replayFetch: typeof globalThis.fetch = Object.assign(
-    async (...arguments_: Parameters<typeof globalThis.fetch>) => {
+
+  restoreFetch = installFetch(async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
       requests.push(parseRequestBody(init))
 
@@ -257,11 +255,7 @@ test('migrates legacy queued clip deletion operation IDs before publishing and r
         skippedClipIds: [],
         skipped: [],
       }), { status: 200 })
-    },
-    { preconnect: originalFetch.preconnect },
-  )
-
-  globalThis.fetch = replayFetch
+    })
 
   try {
     expect(await flushSharedOutbox(projectId, userId)).toEqual({ pending: 0, failed: 1 })
@@ -276,7 +270,7 @@ test('migrates legacy queued clip deletion operation IDs before publishing and r
     flushPendingSharedOutboxHistoryUpdates()
   } finally {
     unregisterHistory()
-    globalThis.fetch = originalFetch
+    restoreFetch()
   }
 
   expect(attachedRecoveryId).toBe('recovery-1')
@@ -308,19 +302,17 @@ test('migrates legacy queued track creation IDs before a response-loss retry', a
     updatedAt: timestamp,
   })
   const requests: unknown[] = []
-  const originalFetch = globalThis.fetch
+  let restoreFetch = () => {}
   let responseLost = true
-  globalThis.fetch = Object.assign(
-    async (...arguments_: Parameters<typeof globalThis.fetch>) => {
+
+  restoreFetch = installFetch(async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
       requests.push(parseRequestBody(init))
 
       return responseLost
         ? new Response('response lost', { status: 500 })
         : new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
-    },
-    { preconnect: originalFetch.preconnect },
-  )
+    })
 
   try {
     await flushSharedOutbox(projectId, userId)
@@ -330,7 +322,7 @@ test('migrates legacy queued track creation IDs before a response-loss retry', a
     responseLost = false
     await flushSharedOutbox(projectId, userId, { retryFailed: true })
   } finally {
-    globalThis.fetch = originalFetch
+    restoreFetch()
   }
 
   expect(requests).toEqual([
@@ -360,18 +352,16 @@ test('queues newer durable operations behind an existing backlog and replays the
     },
     updatedAt: timestamp,
   })
-  const originalFetch = globalThis.fetch
+  let restoreFetch = () => {}
   const volumes: number[] = []
-  globalThis.fetch = Object.assign(
-    async (...arguments_: Parameters<typeof globalThis.fetch>) => {
+
+  restoreFetch = installFetch(async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
       const operation = volumeOperationSchema.parse(parseRequestBody(init))
       volumes.push(operation.payload.volume)
 
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
-    },
-    { preconnect: originalFetch.preconnect },
-  )
+    })
 
   try {
     await publishDurableSharedTimelineOperation({
@@ -387,7 +377,7 @@ test('queues newer durable operations behind an existing backlog and replays the
     expect(volumes).toEqual([0.5, 0.8, 0.9])
     await flushSharedOutbox(projectId, userId)
   } finally {
-    globalThis.fetch = originalFetch
+    restoreFetch()
   }
 
   expect(volumes).toEqual([0.5, 0.8, 0.9])
@@ -414,10 +404,10 @@ test('dead-letters a rejected operation and continues with later FIFO rows', asy
     },
     updatedAt: timestamp,
   })
-  const originalFetch = globalThis.fetch
+  let restoreFetch = () => {}
   const volumes: number[] = []
-  globalThis.fetch = Object.assign(
-    async (...arguments_: Parameters<typeof globalThis.fetch>) => {
+
+  restoreFetch = installFetch(async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
       const operation = volumeOperationSchema.parse(parseRequestBody(init))
 
@@ -428,9 +418,7 @@ test('dead-letters a rejected operation and continues with later FIFO rows', asy
       volumes.push(operation.payload.volume)
 
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
-    },
-    { preconnect: originalFetch.preconnect },
-  )
+    })
   await db.put('syncState', {
     key: 'shared-outbox:later',
     value: {
@@ -451,7 +439,7 @@ test('dead-letters a rejected operation and continues with later FIFO rows', asy
   try {
     expect(await flushSharedOutbox(projectId, userId)).toEqual({ pending: 0, failed: 1 })
   } finally {
-    globalThis.fetch = originalFetch
+    restoreFetch()
   }
 
   expect((await db.get('syncState', 'shared-outbox:rejected'))?.value).toMatchObject({
@@ -482,22 +470,20 @@ test('serializes concurrent flushes for one project and user', async () => {
     },
     updatedAt: timestamp,
   })
-  const originalFetch = globalThis.fetch
+  let restoreFetch = () => {}
   let requests = 0
-  globalThis.fetch = Object.assign(
-    async () => {
+
+  restoreFetch = installFetch(async () => {
       requests += 1
       await Promise.resolve()
 
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
-    },
-    { preconnect: originalFetch.preconnect },
-  )
+    })
 
   try {
     await Promise.all([flushSharedOutbox(projectId, userId), flushSharedOutbox(projectId, userId)])
   } finally {
-    globalThis.fetch = originalFetch
+    restoreFetch()
   }
 
   expect(requests).toBe(1)
@@ -528,10 +514,10 @@ test('dead-letters HTTP 400 failures without blocking later rows', async () => {
     })
   }
 
-  const originalFetch = globalThis.fetch
+  let restoreFetch = () => {}
   const published: number[] = []
-  globalThis.fetch = Object.assign(
-    async (...arguments_: Parameters<typeof globalThis.fetch>) => {
+
+  restoreFetch = installFetch(async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
       const operation = volumeOperationSchema.parse(parseRequestBody(init))
 
@@ -539,14 +525,12 @@ test('dead-letters HTTP 400 failures without blocking later rows', async () => {
       published.push(operation.payload.volume)
 
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
-    },
-    { preconnect: originalFetch.preconnect },
-  )
+    })
 
   try {
     await flushSharedOutbox(projectId, userId)
   } finally {
-    globalThis.fetch = originalFetch
+    restoreFetch()
   }
 
   expect((await db.get('syncState', 'shared-outbox:invalid'))?.value).toMatchObject({
@@ -597,10 +581,10 @@ test('dead-letters uploaded audio clip creates with null results before completi
     updatedAt: timestamp,
   })
 
-  const originalFetch = globalThis.fetch
+  let restoreFetch = () => {}
   const uploadUrls: string[] = []
-  globalThis.fetch = Object.assign(
-    async (input: RequestInfo | URL) => {
+
+  restoreFetch = installFetch(async (input: RequestInfo | URL) => {
       const url = String(input)
 
       if (url.startsWith('/api/samples?projectId=')) {
@@ -610,14 +594,12 @@ test('dead-letters uploaded audio clip creates with null results before completi
       }
 
       return new Response(JSON.stringify(null), { status: 200 })
-    },
-    { preconnect: originalFetch.preconnect },
-  )
+    })
 
   try {
     await flushSharedOutbox(projectId, userId)
   } finally {
-    globalThis.fetch = originalFetch
+    restoreFetch()
   }
 
   expect((await db.get('syncState', `shared-outbox:${operationId}`))?.value).toMatchObject({
@@ -643,10 +625,10 @@ test('records uploaded clip completion before retry-file cleanup and retries cle
     value: uploadedAudioEntry(projectId, userId, 'uploaded-audio', timestamp),
     updatedAt: timestamp,
   })
-  const originalFetch = globalThis.fetch
+  let restoreFetch = () => {}
   let publicationRequests = 0
-  globalThis.fetch = Object.assign(
-    async (input: RequestInfo | URL) => {
+
+  restoreFetch = installFetch(async (input: RequestInfo | URL) => {
       publicationRequests += 1
 
       if (String(input).startsWith('/api/samples?')) {
@@ -654,9 +636,7 @@ test('records uploaded clip completion before retry-file cleanup and retries cle
       }
 
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
-    },
-    { preconnect: originalFetch.preconnect },
-  )
+    })
   storage.setFailRemoval(true)
 
   try {
@@ -675,7 +655,7 @@ test('records uploaded clip completion before retry-file cleanup and retries cle
     expect(await db.get('syncState', 'shared-outbox:uploaded-audio')).toBeUndefined()
     expect(storage.files.has('outbox-source.bin')).toBe(false)
   } finally {
-    globalThis.fetch = originalFetch
+    restoreFetch()
 
     if (originalStorage) Object.defineProperty(navigator, 'storage', originalStorage)
     else Reflect.deleteProperty(navigator, 'storage')
@@ -700,21 +680,19 @@ test('resumes completed uploaded clip cleanup after a crash without republishing
     },
     updatedAt: timestamp,
   })
-  const originalFetch = globalThis.fetch
+  let restoreFetch = () => {}
   let requests = 0
-  globalThis.fetch = Object.assign(
-    async () => {
+
+  restoreFetch = installFetch(async () => {
       requests += 1
 
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
-    },
-    { preconnect: originalFetch.preconnect },
-  )
+    })
 
   try {
     expect(await flushSharedOutbox(projectId, userId)).toEqual({ pending: 0, failed: 0 })
   } finally {
-    globalThis.fetch = originalFetch
+    restoreFetch()
 
     if (originalStorage) Object.defineProperty(navigator, 'storage', originalStorage)
     else Reflect.deleteProperty(navigator, 'storage')
@@ -729,12 +707,12 @@ test('assigns a durable FIFO sequence before publishing same-millisecond admissi
   const projectId = `outbox-sequence-${crypto.randomUUID()}`
   const userId = 'user-1'
   const db = await openLocalProjectDb(projectId)
-  const originalFetch = globalThis.fetch
+  let restoreFetch = () => {}
   let releaseFirst: (() => void) | undefined
 
   const firstStarted = new Promise<void>((resolve) => {
-    globalThis.fetch = Object.assign(
-      async (...arguments_: Parameters<typeof globalThis.fetch>) => {
+
+    restoreFetch = installFetch(async (...arguments_: Parameters<typeof globalThis.fetch>) => {
         const [, init] = arguments_
         const operation = volumeOperationSchema.parse(parseRequestBody(init))
 
@@ -744,9 +722,7 @@ test('assigns a durable FIFO sequence before publishing same-millisecond admissi
         }
 
         return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
-      },
-      { preconnect: originalFetch.preconnect },
-    )
+      })
   })
 
   const first = publishDurableSharedTimelineOperation({
@@ -777,7 +753,7 @@ test('assigns a durable FIFO sequence before publishing same-millisecond admissi
   expect(entries.map((entry) => entry.sequence)).toEqual([1, 2])
   releaseFirst?.()
   await Promise.all([first, second])
-  globalThis.fetch = originalFetch
+  restoreFetch()
 })
 
 test('requires explicit stale-claim recovery when Web Locks are unavailable', async () => {
@@ -805,37 +781,26 @@ test('requires explicit stale-claim recovery when Web Locks are unavailable', as
     },
     updatedAt: timestamp,
   })
-  const originalFetch = globalThis.fetch
-  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
-  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  let restoreFetch = () => {}
+  let restoreGlobals = () => {}
   let requests = 0
-  globalThis.fetch = Object.assign(
-    async () => {
+
+  restoreFetch = installFetch(async () => {
       requests += 1
 
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
-    },
-    { preconnect: originalFetch.preconnect },
-  )
+    })
 
   try {
-    Object.defineProperty(globalThis, 'window', { configurable: true, value: {} })
-    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks: undefined } })
+    restoreGlobals = installGlobals({ window: {}, navigator: { locks: undefined } })
     await expect(flushSharedOutbox(projectId, userId)).rejects.toBeInstanceOf(SharedOutboxUnavailableError)
     expect(requests).toBe(0)
     await recoverStaleSharedOutboxClaims(projectId, userId)
-    Object.defineProperty(globalThis, 'navigator', {
-      configurable: true,
-      value: { locks: { request: async <T>(_name: string, callback: () => Promise<T>) => await callback() } },
-    })
+    installGlobals({ navigator: { locks: { request: async <T>(_name: string, callback: () => Promise<T>) => await callback() } } })
     await flushSharedOutbox(projectId, userId)
   } finally {
-    if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator)
-    else Reflect.deleteProperty(globalThis, 'navigator')
-
-    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow)
-    else Reflect.deleteProperty(globalThis, 'window')
-    globalThis.fetch = originalFetch
+    restoreGlobals()
+    restoreFetch()
   }
 
   expect(requests).toBe(1)
@@ -868,7 +833,7 @@ test('uses the project-user Web Lock before recovering an expired publication cl
     updatedAt: timestamp,
   })
   const originalNavigator = globalThis.navigator
-  const originalFetch = globalThis.fetch
+  let restoreFetch = () => {}
   const lockNames: string[] = []
   Reflect.set(globalThis, 'navigator', {
     locks: {
@@ -879,16 +844,14 @@ test('uses the project-user Web Lock before recovering an expired publication cl
       },
     },
   })
-  globalThis.fetch = Object.assign(
-    async () => new Response(JSON.stringify({ status: 'applied' }), { status: 200 }),
-    { preconnect: originalFetch.preconnect },
-  )
+
+  restoreFetch = installFetch(async () => new Response(JSON.stringify({ status: 'applied' }), { status: 200 }))
 
   try {
     await flushSharedOutbox(projectId, userId)
   } finally {
     Reflect.set(globalThis, 'navigator', originalNavigator)
-    globalThis.fetch = originalFetch
+    restoreFetch()
   }
 
   expect(lockNames).toEqual([`daw-browser:shared-outbox:${projectId}:${userId}`])
@@ -912,11 +875,11 @@ test('retains authentication failures for reauthentication and preserves FIFO', 
     })
   }
 
-  const originalFetch = globalThis.fetch
+  let restoreFetch = () => {}
   const published: number[] = []
   let authenticated = false
-  globalThis.fetch = Object.assign(
-    async (...arguments_: Parameters<typeof globalThis.fetch>) => {
+
+  restoreFetch = installFetch(async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
       const operation = volumeOperationSchema.parse(parseRequestBody(init))
 
@@ -924,9 +887,7 @@ test('retains authentication failures for reauthentication and preserves FIFO', 
       published.push(operation.payload.volume)
 
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
-    },
-    { preconnect: originalFetch.preconnect },
-  )
+    })
 
   try {
     expect(await flushSharedOutbox(projectId, userId)).toEqual({ pending: 1, failed: 1 })
@@ -935,7 +896,7 @@ test('retains authentication failures for reauthentication and preserves FIFO', 
     authenticated = true
     expect(await flushSharedOutbox(projectId, userId, { retryFailed: true })).toEqual({ pending: 0, failed: 0 })
   } finally {
-    globalThis.fetch = originalFetch
+    restoreFetch()
   }
 
   expect(published).toEqual([0.5, 0.8])
@@ -967,19 +928,17 @@ test('renews an active lease before it expires', async () => {
     },
     updatedAt: 0,
   })
-  const originalFetch = globalThis.fetch
+  let restoreFetch = () => {}
   let release: (() => void) | undefined
   let started!: () => void
   const publishing = new Promise<void>((resolve) => { started = resolve })
-  globalThis.fetch = Object.assign(
-    async () => {
+
+  restoreFetch = installFetch(async () => {
       started()
       await new Promise<void>((resolve) => { release = resolve })
 
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
-    },
-    { preconnect: originalFetch.preconnect },
-  )
+    })
 
   try {
     const flushing = flushSharedOutbox(projectId, userId)
@@ -995,7 +954,7 @@ test('renews an active lease before it expires', async () => {
     await flushing
   } finally {
     setSharedOutboxRuntimeForTesting(undefined)
-    globalThis.fetch = originalFetch
+    restoreFetch()
   }
 })
 
@@ -1013,11 +972,9 @@ test('reads a persisted completion when a background drain consumed the target r
     },
     updatedAt: timestamp,
   })
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = Object.assign(
-    async () => new Response(JSON.stringify({ status: 'applied' }), { status: 200 }),
-    { preconnect: originalFetch.preconnect },
-  )
+  let restoreFetch = () => {}
+
+  restoreFetch = installFetch(async () => new Response(JSON.stringify({ status: 'applied' }), { status: 200 }))
 
   try {
     await flushSharedOutbox(projectId, userId)
@@ -1027,7 +984,7 @@ test('reads a persisted completion when a background drain consumed the target r
       completionOwner: 'background',
     })
   } finally {
-    globalThis.fetch = originalFetch
+    restoreFetch()
   }
 })
 
@@ -1076,13 +1033,13 @@ test('stops the current drain after lease ownership is lost', async () => {
     })
   }
 
-  const originalFetch = globalThis.fetch
+  let restoreFetch = () => {}
   let releaseFirst: (() => void) | undefined
   let requests = 0
 
   const firstStarted = new Promise<void>((resolve) => {
-    globalThis.fetch = Object.assign(
-      async (...arguments_: Parameters<typeof globalThis.fetch>) => {
+
+    restoreFetch = installFetch(async (...arguments_: Parameters<typeof globalThis.fetch>) => {
         requests += 1
         const [, init] = arguments_
         const operation = volumeOperationSchema.parse(parseRequestBody(init))
@@ -1093,9 +1050,7 @@ test('stops the current drain after lease ownership is lost', async () => {
         }
 
         return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
-      },
-      { preconnect: originalFetch.preconnect },
-    )
+      })
   })
 
   try {
@@ -1121,7 +1076,7 @@ test('stops the current drain after lease ownership is lost', async () => {
     await flushing
   } finally {
     setSharedOutboxRuntimeForTesting(undefined)
-    globalThis.fetch = originalFetch
+    restoreFetch()
   }
 
   expect((await db.get('syncState', 'shared-outbox:first'))?.value).toMatchObject({ claimOwner: 'other-context' })
@@ -1132,11 +1087,9 @@ test('stops the current drain after lease ownership is lost', async () => {
 test('returns a terminal rejection instead of pending for a targeted dead-letter', async () => {
   const projectId = `outbox-terminal-${crypto.randomUUID()}`
   const userId = 'user-1'
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = Object.assign(
-    async () => new Response('forbidden', { status: 403 }),
-    { preconnect: originalFetch.preconnect },
-  )
+  let restoreFetch = () => {}
+
+  restoreFetch = installFetch(async () => new Response('forbidden', { status: 403 }))
 
   try {
     await expect(publishDurableSharedTimelineOperation({
@@ -1145,7 +1098,7 @@ test('returns a terminal rejection instead of pending for a targeted dead-letter
       operation: { kind: 'tracks.setVolume', payload: { trackId: 'track-1', volume: 0.5 } },
     })).rejects.toThrow('Permanent failure: Shared timeline operation failed: 403 forbidden')
   } finally {
-    globalThis.fetch = originalFetch
+    restoreFetch()
   }
 })
 
@@ -1160,15 +1113,13 @@ test('caller-owned foreground completion does not publish background history', a
     return false
   })
 
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = Object.assign(
-    async () => new Response(JSON.stringify({
+  let restoreFetch = () => {}
+
+  restoreFetch = installFetch(async () => new Response(JSON.stringify({
       status: 'applied',
       group: { id: 'group-1', parentGroupId: undefined },
       children: [],
-    }), { status: 200 }),
-    { preconnect: originalFetch.preconnect },
-  )
+    }), { status: 200 }))
 
   try {
     await publishDurableSharedTimelineOperation({
@@ -1197,7 +1148,7 @@ test('caller-owned foreground completion does not publish background history', a
     })
   } finally {
     unregister()
-    globalThis.fetch = originalFetch
+    restoreFetch()
   }
 
   expect(historyUpdates).toBe(0)
@@ -1237,19 +1188,17 @@ const utilityOperation = (instanceId = 'utility-1'): SharedTimelineOperation => 
 })
 
 const stubFetch = (respond: (body: JsonValue) => Response | Promise<Response>) => {
-  const originalFetch = globalThis.fetch
+  let restoreFetch = () => {}
   const bodies: JsonValue[] = []
-  globalThis.fetch = Object.assign(
-    async (...arguments_: Parameters<typeof globalThis.fetch>) => {
+
+  restoreFetch = installFetch(async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const body = parseRequestBody(arguments_[1])
       bodies.push(body)
 
       return await respond(body)
-    },
-    { preconnect: originalFetch.preconnect },
-  )
+    })
 
-  return { bodies, restore: () => { globalThis.fetch = originalFetch } }
+  return { bodies, restore: () => { restoreFetch() } }
 }
 
 const typedResult = (revision: number) => ({ status: 'applied', effectId: 'effect-1', revision })
@@ -1393,16 +1342,17 @@ test('wakes the admitting owner when a dead letter settles behind a stalled outb
   const secondStarted = new Promise<void>((resolve) => { releaseSecondRequest = resolve })
   let wakes = 0
   const unsubscribe = subscribeToSharedOutboxSettlements(projectId, userId, () => { wakes += 1 })
-  const originalFetch = globalThis.fetch
+  let restoreFetch = () => {}
   let requests = 0
-  globalThis.fetch = Object.assign(async () => {
+
+  restoreFetch = installFetch(async () => {
     requests += 1
 
     if (requests === 1) return new Response('deleted', { status: 403 })
     releaseSecondRequest?.()
 
     return await new Promise<Response>((resolve) => { releaseTail = resolve })
-  }, { preconnect: originalFetch.preconnect })
+  })
 
   try {
     const draining = flushSharedOutbox(projectId, userId)
@@ -1413,7 +1363,7 @@ test('wakes the admitting owner when a dead letter settles behind a stalled outb
     await draining
   } finally {
     unsubscribe()
-    globalThis.fetch = originalFetch
+    restoreFetch()
   }
 })
 
@@ -1430,18 +1380,16 @@ test('broadcasts a terminal settlement to an idle foreign owner without a manual
   let foreignWake: (() => void) | undefined
   const observed = new Promise<void>((resolve) => { foreignWake = resolve })
   foreignChannel.addEventListener('message', () => foreignWake?.())
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = Object.assign(
-    async () => new Response('deleted', { status: 403 }),
-    { preconnect: originalFetch.preconnect },
-  )
+  let restoreFetch = () => {}
+
+  restoreFetch = installFetch(async () => new Response('deleted', { status: 403 }))
 
   try {
     await flushSharedOutbox(projectId, userId)
-    await observed;
+    await expect(observed).resolves.toBeUndefined()
   } finally {
     foreignChannel.close()
-    globalThis.fetch = originalFetch
+    restoreFetch()
   }
 })
 

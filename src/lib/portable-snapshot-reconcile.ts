@@ -5,6 +5,7 @@ import { isLiveEventOnlyInstrumentChange, isLiveParameterChange } from "~/lib/de
 /* oxlint-enable eslint/no-restricted-imports */
 import { mergeSynthParams, type TrackInstrumentParams } from "@daw-browser/shared"
 import type { AudioEffectRuntimeInstance } from "@daw-browser/audio-engine/audio-engine"
+import { runtimeInstanceKey } from "@daw-browser/audio-engine/effects/runtime-instance"
 import { createAudioEffectParameterPayload } from "~/lib/audio-effect-parameter-payload"
 import { movedSynthLiveFields } from "~/lib/processor-edit-semantics"
 
@@ -106,9 +107,9 @@ const withSeamClips = (next: readonly SnapshotClip[], installed: readonly Snapsh
 // (CORE:7542-7609, 8689-8717). A Spectral fftSize change is replaced instead: the old stage fades out as a ghost and a
 // fresh stage of the new size starts (`replaced_by_spectral_size_change`).
 const withInstalledEffectParams = (next: readonly AudioEffectRuntimeInstance[], installed: readonly AudioEffectRuntimeInstance[] = []): AudioEffectRuntimeInstance[] => {
-  const installedByKey = new Map(installed.map((instance) => [effectKey(instance), instance]))
+  const installedByKey = new Map(installed.map((instance) => [runtimeInstanceKey(instance), instance]))
 
-  return next.map((instance) => installedByKey.get(effectKey(instance)) ?? instance)
+  return next.map((instance) => installedByKey.get(runtimeInstanceKey(instance)) ?? instance)
 }
 
 // What a playing session adopts at a seam, beyond what it takes live: the tempo, the loop fields, the clips of tracks it
@@ -154,8 +155,6 @@ export const onSharedTracks = (snapshot: LivePlaybackSnapshot, other: LivePlayba
   return { ...snapshot, tracks: snapshot.tracks.filter((track) => shared.has(track.id)), mixer: { ...snapshot.mixer, fx: { ...snapshot.mixer.fx, trackFx } } }
 }
 
-const effectKey = (instance: AudioEffectRuntimeInstance) => `${instance.id}\0${instance.kind}`
-
 // `snapshot` with the effects an adoption carries taken out of the comparison: every one inserted, removed, replaced
 // (another kind under the same id) or moved leaves only what both sides keep, by id. The core keeps a survivor's history
 // by instance id, fades a removed one over its 5 ms ghost, dips a node whose stages were reordered and moves the read
@@ -168,9 +167,9 @@ export const onKeptEffects = (snapshot: LivePlaybackSnapshot, other: LivePlaybac
 
   const trackFx = Object.fromEntries(snapshot.tracks.map(({ id }) => {
     const entry = own[id]
-    const kept = new Set((theirs[id]?.instances ?? []).map(effectKey))
+    const kept = new Set((theirs[id]?.instances ?? []).map(runtimeInstanceKey))
 
-    return [id, { ...entry, instances: (entry?.instances ?? []).filter((instance) => kept.has(effectKey(instance))).sort((left, right) => left.id.localeCompare(right.id)) }]
+    return [id, { ...entry, instances: (entry?.instances ?? []).filter((instance) => kept.has(runtimeInstanceKey(instance))).sort((left, right) => left.id.localeCompare(right.id)) }]
   }))
 
   return { ...snapshot, mixer: { ...snapshot.mixer, fx: { ...snapshot.mixer.fx, trackFx } } }

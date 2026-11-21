@@ -1,4 +1,3 @@
-import { maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
 import {
   type Accessor,
   type Component,
@@ -60,6 +59,7 @@ import type { MidiEditorNote } from "~/lib/midi-editor-grid";
 import createTimelineEffectCommit from "~/components/timeline/create-timeline-effect-commit";
 import { createProcessorEditRegistry } from "~/components/timeline/create-processor-edit-registry";
 import { createPlaybackSnapshotCompiler } from "~/components/timeline/create-playback-snapshot-compiler";
+import { createNativeOfflineExternalAttachments } from "~/components/timeline/native-offline-external-attachments";
 import { pickNativePlaybackInputs } from "~/components/timeline/native-playback-inputs";
 import {
   createApplyPortableProcessor,
@@ -125,10 +125,8 @@ import {
   createLocalExternalProcessorCache,
   listLocalExternalProcessors,
   persistLocalExternalProcessorState,
-  readLocalExternalProcessorState,
 } from "~/lib/external-plugins";
 import { localVstStateOwnerId } from "~/lib/external-plugin-artifacts";
-import { compileNativeExternalAttachmentPlan } from "~/lib/desktop/native-external-attachment-plan";
 import TimelineChrome from "./timeline/timeline-chrome";
 import AppMessageDialog, {
   type AppMessageDialogState,
@@ -160,7 +158,7 @@ import { createImportJobQueue } from "~/lib/desktop/import-job-queue";
 import { createTimelineExportService } from "~/lib/export/timeline-export-service";
 import { resolveDesiredPlaybackFx, type ExportAutomationPatch } from "~/lib/desired-playback-state";
 import { createDesktopNativeOfflinePcmRenderer } from "~/lib/export/desktop-native-offline-pcm-renderer";
-import { compileDesiredNativeProcessorState, compileLivePlaybackSnapshot } from "~/lib/live-playback-snapshot";
+import { compileDesiredNativeProcessorState } from "~/lib/live-playback-snapshot";
 import { createTimelineExtensionHost } from "~/lib/extensions";
 import { createSampledInstrumentSession } from "~/lib/sampled-instrument-session";
 import { createAudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver";
@@ -546,79 +544,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     queue: exportQueue,
     nativeRendererRequired: requiresNativeAudio,
     nativeOfflinePcmRenderer,
-    getNativeOfflineExternalAttachments: async ({ projectId: capturedProjectId, localProject, tracks, renderState, bpm, timeSignature, sidechainRoutes }) => {
-      if (!capturedProjectId || !localProject) return undefined
-
-      const processors = (await listLocalExternalProcessors(capturedProjectId))
-        .filter((processor) => !processor.bypassed)
-
-      if (processors.length === 0) return undefined
-
-      const playback = compileLivePlaybackSnapshot({
-        revision: 1,
-        bpm,
-        timeSignature,
-        transport: {
-          state: "stopped",
-          playheadSec: 0,
-          loopEnabled: false,
-          loopStartSec: 0,
-          loopEndSec: 0,
-        },
-        tracks,
-        renderState,
-        sidechainRoutes,
-      })
-
-      if (!playback.supported) throw new Error(playback.reasons.join(" "))
-
-      const attachmentPlan = compileNativeExternalAttachmentPlan({
-        target: "native",
-        graph: playback.snapshot.mixer.graph,
-        processors,
-        workerTransport: {
-          slotCount: 2,
-          maximumFrames: maxVst3WorkerFrames,
-          maximumEventsPerBlock: 128,
-        },
-      })
-
-      if (!attachmentPlan.supported) throw new Error(attachmentPlan.reasons.join(" "))
-
-      const capturedVstStates = await Promise.all(attachmentPlan.plan.attachments
-        .filter((attachment) => !attachment.bypassed)
-        .map(async (attachment) => {
-          const processor = processors.find((candidate) => candidate.instanceId === attachment.instanceId)
-
-          if (!processor) throw new Error(`Native VST3 processor "${attachment.instanceId}" is missing.`)
-
-          if (!processor.manifest.supportsState) return undefined
-          const capture = await desktopBridge()?.audioHost?.session.captureVstState(attachment.instanceId)
-
-          if (capture?.ok) {
-            const persisted = await persistLocalExternalProcessorState(
-              capturedProjectId,
-              attachment.instanceId,
-              capture,
-              userId() ?? processor.state?.ownerId ?? processor.launchReference?.state?.ownerId ?? "",
-            )
-
-            if (!persisted) throw new Error(`Native VST3 processor "${attachment.instanceId}" was deleted during export.`)
-
-            return { instanceId: attachment.instanceId, bytes: capture.bytes, sha256: capture.sha256 }
-          }
-
-          const persisted = await readLocalExternalProcessorState(capturedProjectId, processor)
-
-          if (persisted) return { instanceId: attachment.instanceId, ...persisted }
-          throw new Error(`Native VST3 attachment "${attachment.instanceId}" live state capture failed${capture?.error ? `: ${capture.error}` : "."}`)
-        }))
-
-      return {
-        plan: attachmentPlan.plan,
-        capturedVstStates: capturedVstStates.filter((state): state is NonNullable<typeof state> => state !== undefined),
-      }
-    },
+    getNativeOfflineExternalAttachments: createNativeOfflineExternalAttachments(userId),
     getTracks: renderTracks,
     getProjectGeneration: mountedProjectGeneration,
     createBuffer: (channels, frames, sampleRate) => (

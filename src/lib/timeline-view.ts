@@ -41,28 +41,6 @@ export const normalizeTimelineRange = (
   return { startSec: clampedStart, endSec: Math.min(duration, clampedStart + rangeDuration) }
 }
 
-export const timelineViewportRange = (
-  scrollLeft: number,
-  viewportWidth: number,
-  pixelsPerSecond: number,
-  durationSec: number,
-) => normalizeTimelineRange({
-  startSec: pixelsToSeconds(scrollLeft, pixelsPerSecond),
-  endSec: pixelsToSeconds(Math.max(0, scrollLeft) + Math.max(0, viewportWidth), pixelsPerSecond),
-}, durationSec)
-
-export const scrollLeftForTimelineRange = (
-  range: TimelineRange,
-  viewportWidth: number,
-  pixelsPerSecond: number,
-  durationSec: number,
-) => {
-  const totalWidth = secondsToPixels(durationSec, pixelsPerSecond)
-  const maxScroll = Math.max(0, totalWidth - Math.max(0, viewportWidth))
-
-  return Math.min(maxScroll, Math.max(0, secondsToPixels(range.startSec, pixelsPerSecond)))
-}
-
 export const pixelsPerSecondForRange = (range: TimelineRange, viewportWidth: number) => (
   clampPixelsPerSecond(Math.max(0, viewportWidth) / Math.max(1e-6, range.endSec - range.startSec))
 )

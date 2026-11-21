@@ -54,27 +54,9 @@ export const isTimelineRangeSelectionEqual = (
   return left.trackIds.every((trackId, index) => trackId === right.trackIds[index])
 }
 
-const beatsToSeconds = (beats: number, bpm: number) => (
-  beats * 60 / Math.max(1e-6, bpm)
-)
-
 export const secondsToBeats = (seconds: number, bpm: number) => (
   seconds * Math.max(1e-6, bpm) / 60
 )
-
-const barDurationSec = (bpm: number) => beatsToSeconds(4, bpm)
-
-export const floorSecToBar = (timeSec: number, bpm: number) => {
-  const bar = barDurationSec(bpm)
-
-  return Math.floor(timeSec / bar) * bar
-}
-
-export const ceilSecToBar = (timeSec: number, bpm: number) => {
-  const bar = barDurationSec(bpm)
-
-  return Math.ceil(timeSec / bar) * bar
-}
 
 export const snapTimeRangeToGridColumns = (
   range: TimelineTimeRange,

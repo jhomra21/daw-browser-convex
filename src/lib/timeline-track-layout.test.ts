@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildGroupClipOverview, buildTimelineTrackLayout, buildTimelineTrackLayoutRows, buildTrackTree, computeDepthMap, flattenVisibleTracks, trackIdsInYRange, trackIndexAtY, trackLayoutRowAtY, reuseTimelineTrackLayout, wouldCreateCycle } from './timeline-track-layout'
+import { buildTimelineTrackLayout, buildTimelineTrackLayoutRows, buildTrackTree, computeDepthMap, flattenVisibleTracks, trackIdsInYRange, trackIndexAtY, trackLayoutRowAtY, reuseTimelineTrackLayout, wouldCreateCycle } from './timeline-track-layout'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { COLLAPSED_LANE_HEIGHT, LANE_HEIGHT } from '~/lib/timeline-utils'
 
@@ -165,12 +165,4 @@ describe('timeline track layout grouping', () => {
     expect(trackIndexAtY(rows, 336)).toBe(-1)
   })
 
-  test('buildGroupClipOverview merges descendant clip ranges', () => {
-    const child = track('a', 'g')
-    child.clips = [
-      { id: 'c1', name: 'c1', startSec: 0, duration: 2, color: 'clip-audio' },
-      { id: 'c2', name: 'c2', startSec: 1, duration: 2, color: 'clip-audio' },
-    ]
-    expect(buildGroupClipOverview('g', [track('g'), child])).toEqual([{ startSec: 0, endSec: 3, color: 'clip-audio' }])
-  })
 })

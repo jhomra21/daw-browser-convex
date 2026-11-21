@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test'
 import { withLocalProjectAssetLock } from './local-project-asset-lock'
+import { installGlobals } from '~/test-support/install-globals'
 
 test('fails closed in a browser without Web Locks', async () => {
-  const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  const restoreGlobals = installGlobals({ window: globalThis })
   const locksDescriptor = Object.getOwnPropertyDescriptor(navigator, 'locks')
-  Object.defineProperty(globalThis, 'window', { configurable: true, value: globalThis })
   Reflect.deleteProperty(navigator, 'locks')
 
   try {
@@ -14,8 +14,7 @@ test('fails closed in a browser without Web Locks', async () => {
     })).rejects.toThrow('Web Locks are required')
     expect(ran).toBe(false)
   } finally {
-    if (windowDescriptor) Object.defineProperty(globalThis, 'window', windowDescriptor)
-    else Reflect.deleteProperty(globalThis, 'window')
+    restoreGlobals()
 
     if (locksDescriptor) Object.defineProperty(navigator, 'locks', locksDescriptor)
     else Reflect.deleteProperty(navigator, 'locks')
@@ -23,8 +22,7 @@ test('fails closed in a browser without Web Locks', async () => {
 })
 
 test('serializes same-project work without a browser', async () => {
-  const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window')
-  Reflect.deleteProperty(globalThis, 'window')
+  const restoreGlobals = installGlobals({ window: undefined })
   const order: string[] = []
 
   try {
@@ -47,6 +45,6 @@ test('serializes same-project work without a browser', async () => {
     await Promise.all([first, second])
     expect(order).toEqual(['first-start', 'first-end', 'second'])
   } finally {
-    if (windowDescriptor) Object.defineProperty(globalThis, 'window', windowDescriptor)
+    restoreGlobals()
   }
 })

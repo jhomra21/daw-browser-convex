@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import { mkdir } from 'node:fs/promises'
 import { build } from 'vite'
 import { z } from 'zod'
+import { agentBrowser } from '~/test-support/agent-browser'
 
 const repositoryRoot = new URL('../../', import.meta.url).pathname
 const fixtureId = 'virtual:local-project-deletion'
@@ -155,18 +156,7 @@ window.deletionFixture = {
   // OPFS requires an HTTP secure context; serve only the built test artifact.
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response(html, { headers: { 'Content-Type': 'text/html' } }) })
   const session = `deletion-round2-${crypto.randomUUID()}`
-  const env = { ...process.env }
-  delete env.AGENT_BROWSER_CDP
-  delete env.AGENT_BROWSER_SESSION
-
-  const run = async (...args: string[]) => {
-    const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
-    const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
-
-    if (await child.exited !== 0) throw new Error(stderr || stdout)
-
-    return stdout.trim()
-  }
+  const run = agentBrowser(session)
 
   const read = async () => z.object({
     listed: z.boolean(), bytes: z.string().nullable(), jobs: z.number(),

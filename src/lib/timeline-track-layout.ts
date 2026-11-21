@@ -20,19 +20,6 @@ export type TimelineTrackLayout = {
   returnHeightPx: number
 }
 
-type TimelineTrackLaneHitRegion = 'clip' | 'automation'
-
-export const timelineTrackLaneHitRegion = (
-  row: Pick<TimelineTrackLayoutRow, 'heightPx' | 'clipLaneHeightPx' | 'automationHeightPx'>,
-  localY: number,
-): TimelineTrackLaneHitRegion => (
-  row.automationHeightPx > 0
-  && localY >= row.clipLaneHeightPx
-  && localY < row.heightPx
-    ? 'automation'
-    : 'clip'
-)
-
 type TrackTreeNode = {
   trackId: Track['id']
   children: TrackTreeNode[]
@@ -125,13 +112,6 @@ export const wouldCreateCycle = (
 }
 
 export type GroupClipOverviewSegment = { startSec: number; endSec: number; color: string }
-
-export const buildGroupClipOverview = (
-  groupId: Track['id'],
-  tracks: readonly Track[],
-): GroupClipOverviewSegment[] => {
-  return buildGroupClipOverviews(tracks, new Set([groupId])).get(groupId) ?? []
-}
 
 export const buildGroupClipOverviews = (
   tracks: readonly Track[],

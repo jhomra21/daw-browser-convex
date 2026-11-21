@@ -2,11 +2,9 @@ import { describe, expect, test } from 'bun:test'
 import {
   clampedVisibleStartSec,
   createTimelineViewport,
-  scaleViewportAtPointer,
   timeToViewportX,
   visibleDurationSec,
   visibleEndSec,
-  visibleIntersectionWithOverscan,
   visibleStartAfterScrollDelta,
   viewportXToTime,
 } from './timeline-viewport-geometry'
@@ -25,22 +23,6 @@ describe('timeline viewport geometry', () => {
     expect(visibleEndSec(viewport)).toBe(20)
     expect(timeToViewportX(viewport, 15)).toBe(500)
     expect(viewportXToTime(viewport, 500)).toBe(15)
-  })
-
-  test('intersects visible content with fixed-pixel overscan', () => {
-    expect(visibleIntersectionWithOverscan(viewport, { startSec: 0, endSec: 12 }, 100)).toEqual({
-      startSec: 10,
-      endSec: 13,
-      startPx: 0,
-      endPx: 300,
-    })
-    expect(visibleIntersectionWithOverscan(viewport, { startSec: 30, endSec: 40 }, 100)).toBeNull()
-  })
-
-  test('keeps a pointer time fixed while changing scale', () => {
-    const next = scaleViewportAtPointer(viewport, 250, 200)
-    expect(viewportXToTime(next, 250)).toBe(12.5)
-    expect(next.pixelsPerSecond).toBe(200)
   })
 
   test('projects a nonzero-origin viewport into screen coordinates', () => {

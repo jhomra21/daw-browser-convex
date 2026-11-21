@@ -11,10 +11,8 @@ import {
   normalizeWheelZoomFactor,
   pixelsPerSecondForRange,
   pixelsToSeconds,
-  scrollLeftForTimelineRange,
   secondsToPixels,
   selectTimelineGridIntervals,
-  timelineViewportRange,
   zoomRangeAtAnchor,
 } from './timeline-view'
 
@@ -35,11 +33,6 @@ describe('timeline view contracts', () => {
     const range = { startSec: 10, endSec: 30 }
     const next = zoomRangeAtAnchor(range, 0.25, 2, 120, 1)
     expect(next).toEqual({ startSec: 12.5, endSec: 22.5 })
-  })
-
-  test('clamps viewport scroll to the arrangement duration', () => {
-    expect(timelineViewportRange(50_000, 1000, 100, 20)).toEqual({ startSec: 10, endSec: 20 })
-    expect(scrollLeftForTimelineRange({ startSec: 19, endSec: 20 }, 1000, 100, 20)).toBe(1000)
   })
 
   test('derives a fit scale for narrow and zero-width ranges', () => {

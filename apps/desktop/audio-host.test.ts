@@ -1219,6 +1219,8 @@ test("cleans the offline completion watchdog on abort", async () => {
     await completionWatchdog.promise
     controller.abort()
     await expect(render).rejects.toMatchObject({ name: "AbortError" })
+
+    if (completionTimer === undefined) throw new Error("Expected the completion watchdog timer.")
     expect(canceled).toContain(completionTimer)
   } finally {
     await rm(directory, { recursive: true, force: true })

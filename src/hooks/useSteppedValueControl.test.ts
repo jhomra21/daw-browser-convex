@@ -3,6 +3,7 @@ import { createRoot } from 'solid-js'
 import { knobValueFromDrag } from '~/components/ui/knob'
 import { useDrag } from './useDrag'
 import { useSteppedValueControl } from './useSteppedValueControl'
+import { installGlobals } from '~/test-support/install-globals'
 
 type ListenerEntry = {
   listener: (event: PointerLifecycleEvent) => void
@@ -102,17 +103,16 @@ const pointerEvent = (clientY: number, shiftKey = false, pointerId = 1) => ({
 
 describe('useSteppedValueControl pointer lifecycle', () => {
   test('ignores a second pointer-down and keeps the original pointer in control', () => {
-    const previousWindow = globalThis.window
-    const previousDocument = globalThis.document
-    const previousHTMLElement = globalThis.HTMLElement
-    const previousPointerEvent = globalThis.PointerEvent
     const capturedWindow = new CapturedPointerWindow()
     const bodyClasses = new Set<string>()
-    Reflect.set(globalThis, 'window', capturedWindow)
-    Reflect.set(globalThis, 'HTMLElement', TestHTMLElement)
-    Reflect.set(globalThis, 'PointerEvent', TestPointerEvent)
-    Reflect.set(globalThis, 'document', {
-      body: { classList: { add: (name: string) => bodyClasses.add(name), remove: (name: string) => bodyClasses.delete(name) } },
+
+    const restoreGlobals = installGlobals({
+      window: capturedWindow,
+      HTMLElement: TestHTMLElement,
+      PointerEvent: TestPointerEvent,
+      document: {
+        body: { classList: { add: (name: string) => bodyClasses.add(name), remove: (name: string) => bodyClasses.delete(name) } },
+      },
     })
 
     try {
@@ -141,25 +141,21 @@ describe('useSteppedValueControl pointer lifecycle', () => {
         dispose()
       })
     } finally {
-      Reflect.set(globalThis, 'window', previousWindow)
-      Reflect.set(globalThis, 'document', previousDocument)
-      Reflect.set(globalThis, 'HTMLElement', previousHTMLElement)
-      Reflect.set(globalThis, 'PointerEvent', previousPointerEvent)
+      restoreGlobals()
     }
   })
 
   test.each(['Escape', 'blur'] as const)('%s cancellation releases the owned pointer capture once', (cause) => {
-    const previousWindow = globalThis.window
-    const previousDocument = globalThis.document
-    const previousHTMLElement = globalThis.HTMLElement
-    const previousPointerEvent = globalThis.PointerEvent
     const capturedWindow = new CapturedPointerWindow()
     const bodyClasses = new Set<string>()
-    Reflect.set(globalThis, 'window', capturedWindow)
-    Reflect.set(globalThis, 'HTMLElement', TestHTMLElement)
-    Reflect.set(globalThis, 'PointerEvent', TestPointerEvent)
-    Reflect.set(globalThis, 'document', {
-      body: { classList: { add: (name: string) => bodyClasses.add(name), remove: (name: string) => bodyClasses.delete(name) } },
+
+    const restoreGlobals = installGlobals({
+      window: capturedWindow,
+      HTMLElement: TestHTMLElement,
+      PointerEvent: TestPointerEvent,
+      document: {
+        body: { classList: { add: (name: string) => bodyClasses.add(name), remove: (name: string) => bodyClasses.delete(name) } },
+      },
     })
 
     try {
@@ -187,23 +183,19 @@ describe('useSteppedValueControl pointer lifecycle', () => {
         expect(cancellations).toBe(1)
       })
     } finally {
-      Reflect.set(globalThis, 'window', previousWindow)
-      Reflect.set(globalThis, 'document', previousDocument)
-      Reflect.set(globalThis, 'HTMLElement', previousHTMLElement)
-      Reflect.set(globalThis, 'PointerEvent', previousPointerEvent)
+      restoreGlobals()
     }
   })
 
   test('normal pointer-up does not release capture as cancellation or cancel twice', () => {
-    const previousWindow = globalThis.window
-    const previousDocument = globalThis.document
-    const previousHTMLElement = globalThis.HTMLElement
-    const previousPointerEvent = globalThis.PointerEvent
     const capturedWindow = new CapturedPointerWindow()
-    Reflect.set(globalThis, 'window', capturedWindow)
-    Reflect.set(globalThis, 'HTMLElement', TestHTMLElement)
-    Reflect.set(globalThis, 'PointerEvent', TestPointerEvent)
-    Reflect.set(globalThis, 'document', { body: { classList: { add: () => undefined, remove: () => undefined } } })
+
+    const restoreGlobals = installGlobals({
+      window: capturedWindow,
+      HTMLElement: TestHTMLElement,
+      PointerEvent: TestPointerEvent,
+      document: { body: { classList: { add: () => undefined, remove: () => undefined } } },
+    })
 
     try {
       createRoot((dispose) => {
@@ -231,21 +223,18 @@ describe('useSteppedValueControl pointer lifecycle', () => {
         expect(cancellations).toBe(0)
       })
     } finally {
-      Reflect.set(globalThis, 'window', previousWindow)
-      Reflect.set(globalThis, 'document', previousDocument)
-      Reflect.set(globalThis, 'HTMLElement', previousHTMLElement)
-      Reflect.set(globalThis, 'PointerEvent', previousPointerEvent)
+      restoreGlobals()
     }
   })
 
   test('does not start a disabled control interaction', () => {
-    const previousWindow = globalThis.window
-    const previousDocument = globalThis.document
-    const previousPointerEvent = globalThis.PointerEvent
     const capturedWindow = new CapturedPointerWindow()
-    Reflect.set(globalThis, 'window', capturedWindow)
-    Reflect.set(globalThis, 'PointerEvent', TestPointerEvent)
-    Reflect.set(globalThis, 'document', { body: { classList: { add: () => undefined, remove: () => undefined } } })
+
+    const restoreGlobals = installGlobals({
+      window: capturedWindow,
+      PointerEvent: TestPointerEvent,
+      document: { body: { classList: { add: () => undefined, remove: () => undefined } } },
+    })
 
     try {
       createRoot((dispose) => {
@@ -266,27 +255,24 @@ describe('useSteppedValueControl pointer lifecycle', () => {
         dispose()
       })
     } finally {
-      Reflect.set(globalThis, 'window', previousWindow)
-      Reflect.set(globalThis, 'document', previousDocument)
-      Reflect.set(globalThis, 'PointerEvent', previousPointerEvent)
+      restoreGlobals()
     }
   })
 
   test('continues emitting pointer moves while the parent value updates', () => {
-    const previousWindow = globalThis.window
-    const previousDocument = globalThis.document
-    const previousHTMLElement = globalThis.HTMLElement
-    const previousPointerEvent = globalThis.PointerEvent
     const capturedWindow = new CapturedPointerWindow()
     const bodyClasses = new Set<string>()
-    Reflect.set(globalThis, 'window', capturedWindow)
-    Reflect.set(globalThis, 'HTMLElement', TestHTMLElement)
-    Reflect.set(globalThis, 'PointerEvent', TestPointerEvent)
-    Reflect.set(globalThis, 'document', {
-      body: {
-        classList: {
-          add: (name: string) => bodyClasses.add(name),
-          remove: (name: string) => bodyClasses.delete(name),
+
+    const restoreGlobals = installGlobals({
+      window: capturedWindow,
+      HTMLElement: TestHTMLElement,
+      PointerEvent: TestPointerEvent,
+      document: {
+        body: {
+          classList: {
+            add: (name: string) => bodyClasses.add(name),
+            remove: (name: string) => bodyClasses.delete(name),
+          },
         },
       },
     })
@@ -344,27 +330,23 @@ describe('useSteppedValueControl pointer lifecycle', () => {
         disposeParent()
       })
     } finally {
-      Reflect.set(globalThis, 'window', previousWindow)
-      Reflect.set(globalThis, 'document', previousDocument)
-      Reflect.set(globalThis, 'HTMLElement', previousHTMLElement)
-      Reflect.set(globalThis, 'PointerEvent', previousPointerEvent)
+      restoreGlobals()
     }
   })
   test('cleans up listeners and body state when disposed during an active drag', () => {
-    const previousWindow = globalThis.window
-    const previousDocument = globalThis.document
-    const previousHTMLElement = globalThis.HTMLElement
-    const previousPointerEvent = globalThis.PointerEvent
     const capturedWindow = new CapturedPointerWindow()
     const bodyClasses = new Set<string>()
-    Reflect.set(globalThis, 'window', capturedWindow)
-    Reflect.set(globalThis, 'HTMLElement', TestHTMLElement)
-    Reflect.set(globalThis, 'PointerEvent', TestPointerEvent)
-    Reflect.set(globalThis, 'document', {
-      body: {
-        classList: {
-          add: (name: string) => bodyClasses.add(name),
-          remove: (name: string) => bodyClasses.delete(name),
+
+    const restoreGlobals = installGlobals({
+      window: capturedWindow,
+      HTMLElement: TestHTMLElement,
+      PointerEvent: TestPointerEvent,
+      document: {
+        body: {
+          classList: {
+            add: (name: string) => bodyClasses.add(name),
+            remove: (name: string) => bodyClasses.delete(name),
+          },
         },
       },
     })
@@ -409,28 +391,24 @@ describe('useSteppedValueControl pointer lifecycle', () => {
         expect(bodyClasses.has('select-none')).toBe(false)
       })
     } finally {
-      Reflect.set(globalThis, 'window', previousWindow)
-      Reflect.set(globalThis, 'document', previousDocument)
-      Reflect.set(globalThis, 'HTMLElement', previousHTMLElement)
-      Reflect.set(globalThis, 'PointerEvent', previousPointerEvent)
+      restoreGlobals()
     }
   })
 
   test('ignores unrelated pointer completion events during an active drag', () => {
-    const previousWindow = globalThis.window
-    const previousDocument = globalThis.document
-    const previousHTMLElement = globalThis.HTMLElement
-    const previousPointerEvent = globalThis.PointerEvent
     const capturedWindow = new CapturedPointerWindow()
     const bodyClasses = new Set<string>()
-    Reflect.set(globalThis, 'window', capturedWindow)
-    Reflect.set(globalThis, 'HTMLElement', TestHTMLElement)
-    Reflect.set(globalThis, 'PointerEvent', TestPointerEvent)
-    Reflect.set(globalThis, 'document', {
-      body: {
-        classList: {
-          add: (name: string) => bodyClasses.add(name),
-          remove: (name: string) => bodyClasses.delete(name),
+
+    const restoreGlobals = installGlobals({
+      window: capturedWindow,
+      HTMLElement: TestHTMLElement,
+      PointerEvent: TestPointerEvent,
+      document: {
+        body: {
+          classList: {
+            add: (name: string) => bodyClasses.add(name),
+            remove: (name: string) => bodyClasses.delete(name),
+          },
         },
       },
     })
@@ -460,10 +438,7 @@ describe('useSteppedValueControl pointer lifecycle', () => {
         dispose()
       })
     } finally {
-      Reflect.set(globalThis, 'window', previousWindow)
-      Reflect.set(globalThis, 'document', previousDocument)
-      Reflect.set(globalThis, 'HTMLElement', previousHTMLElement)
-      Reflect.set(globalThis, 'PointerEvent', previousPointerEvent)
+      restoreGlobals()
     }
   })
 })

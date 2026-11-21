@@ -219,7 +219,7 @@ test("captured media loading settles when its export signal aborts", async () =>
 
   const loading = loader.load(reference, controller.signal)
   controller.abort()
-  await expect(loading).rejects.toBeDefined()
+  await expect(loading).rejects.toMatchObject({ name: "AbortError" })
 })
 
 test("signal-bound sample loading settles when its fetch ignores abort", async () => {
@@ -231,7 +231,7 @@ test("signal-bound sample loading settles when its fetch ignores abort", async (
 
   const loading = loader.load("https://samples.example/stalled.wav", async () => new TestAudioBuffer(), controller.signal)
   controller.abort()
-  await expect(loading).rejects.toBeDefined()
+  await expect(loading).rejects.toMatchObject({ name: "AbortError" })
 })
 
 test("decoded captured media maps to a portable identity without a URL or AudioBuffer", () => {

@@ -1,34 +1,13 @@
 import { expect, test } from 'bun:test'
 import { mkdir, rm } from 'node:fs/promises'
 import { z } from 'zod'
+import { agentBrowser } from '~/test-support/agent-browser'
 
 test('isolates portalled dialogs and preserves arrangement and native keyboard behavior', async () => {
   const directory = `/tmp/daw-keyboard-${crypto.randomUUID()}`
   const session = `daw-keyboard-${crypto.randomUUID()}`
 
-  const browser = async (...args: string[]) => {
-    // Never inherit the attached desktop/CDP session for this isolated fixture.
-    const env = { ...process.env }
-    delete env.AGENT_BROWSER_CDP
-    delete env.AGENT_BROWSER_SESSION
-    const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
-    // Bound CLI stalls independently of the test timeout, including cleanup.
-    const timeout = setTimeout(() => child.kill(), 10_000)
-
-    try {
-      const [stdout, stderr, exitCode] = await Promise.all([
-        new Response(child.stdout).text(),
-        new Response(child.stderr).text(),
-        child.exited,
-      ])
-
-      if (exitCode !== 0) throw new Error(`agent-browser ${args[0]} failed: ${stderr || stdout}`)
-
-      return stdout.trim()
-    } finally {
-      clearTimeout(timeout)
-    }
-  }
+  const browser = agentBrowser(session)
 
   await mkdir(directory, { recursive: true })
 

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { mkdir } from 'node:fs/promises'
 import { z } from 'zod'
+import { agentBrowser } from '~/test-support/agent-browser'
 
 // Drives the real import, drop, and missing-media recovery hooks in Chromium
 // against real OPFS assets and IndexedDB timeline rows. Only the asset-create,
@@ -845,17 +846,7 @@ const runInChromium = async (name: string, entry: string) => {
   const directory = `/tmp/daw-${name}-${crypto.randomUUID()}`
   const session = `${name}-${crypto.randomUUID()}`
 
-  const browser = async (...args: string[]) => {
-    const env = { ...process.env }
-    delete env.AGENT_BROWSER_CDP
-    delete env.AGENT_BROWSER_SESSION
-    const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
-    const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
-
-    if (await child.exited !== 0) throw new Error(stderr || stdout)
-
-    return stdout.trim()
-  }
+  const browser = agentBrowser(session)
 
   await mkdir(directory, { recursive: true })
   await Bun.write(`${directory}/fixture.js`, fixture)

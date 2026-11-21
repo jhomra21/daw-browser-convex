@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { mkdir } from 'node:fs/promises'
 import { z } from 'zod'
+import { agentBrowser } from '~/test-support/agent-browser'
 
 // Gate the persistence and duplicate-creation boundaries, not pointer handlers:
 // actual window events, Solid cleanup, placement, draft teardown, and move
@@ -173,17 +174,7 @@ test('clip creation continuations belong to one gesture and project', async () =
   const directory = `/tmp/daw-clip-drag-${crypto.randomUUID()}`
   const session = `clip-drag-${crypto.randomUUID()}`
 
-  const browser = async (...args: string[]) => {
-    const env = { ...process.env }
-    delete env.AGENT_BROWSER_CDP
-    delete env.AGENT_BROWSER_SESSION
-    const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
-    const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
-
-    if (await child.exited !== 0) throw new Error(stderr || stdout)
-
-    return stdout.trim()
-  }
+  const browser = agentBrowser(session)
 
   await mkdir(directory, { recursive: true })
 

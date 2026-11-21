@@ -147,7 +147,7 @@ test('honors cancellation before media decoding starts', async () => {
   await expect(collectPages(dataUrl(wave()), {
     pageFrames: 2,
     signal: controller.signal,
-  })).rejects.toBeDefined()
+  })).rejects.toMatchObject({ name: 'AbortError' })
 })
 
 test('applies and validates page size for AudioBuffer sources', async () => {

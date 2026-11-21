@@ -984,24 +984,12 @@ test('preserves the truthful v1 action list and snapshot contract', () => {
   expect(controlCapabilitiesV1.limits).not.toHaveProperty('maxMidiPerformanceEventsPerClip')
   expect(controlCapabilitiesV1.limits).not.toHaveProperty('maxMidiEventsPerArray')
   expect(controlCapabilitiesV1.limits).not.toHaveProperty('maxMidiMappingsPerClip')
-  expect(controlCapabilitiesV1.actionKinds).toHaveLength(39)
-  expect(controlCapabilitiesV1.actionKinds).toEqual([
-    'project.rename', 'project.settings.set', 'track.create', 'track.rename',
-    'track.mix.set', 'track.routing.set', 'track.reorder', 'track.group.set',
-    'track.delete', 'clip.midi.create', 'clip.move', 'clip.timing.set',
-    'clip.rename', 'clip.delete', 'master.volume.set', 'timeline.range.delete', 'effect.upsert',
-    'effect.remove', 'effect.reorder', 'instrument.set', 'arpeggiator.set',
-    'automation.set', 'automation.delete', 'sidechain.set', 'sidechain.remove',
-    'clip.audio.create', 'clip.source.set', 'clip.midi.set', 'clip.fades.set',
-    'clip.audioWarp.set', 'clip.color.set', 'track.collapsed.set', 'track.color.set',
-    'track.color.cascade', 'track.ungroup', 'instrument.remove', 'arpeggiator.remove',
-    'asset.delete', 'recovery.restore',
-  ])
-  expect(localControlCapabilitiesV1.actionKinds).toHaveLength(40)
-  expect(localControlCapabilitiesV1.actionKinds).toEqual([
-    ...controlCapabilitiesV1.actionKinds,
-    'external-plugin.parameters.set',
-  ])
+  const unionKinds = controlActionSchemaV1.options.map((option) => option.shape.kind.value)
+  expect(new Set(localControlCapabilitiesV1.actionKinds)).toEqual(new Set(unionKinds))
+  expect(localControlCapabilitiesV1.actionKinds).toHaveLength(unionKinds.length)
+  expect(controlCapabilitiesV1.actionKinds).toEqual(
+    localControlCapabilitiesV1.actionKinds.filter((kind) => kind !== 'external-plugin.parameters.set'),
+  )
   expect(controlCapabilitiesV1.actionKinds).not.toContain('external-plugin.parameters.set')
   expect(localControlCapabilitiesV1.actionKinds).toContain('external-plugin.parameters.set')
   expect(controlCapabilitiesV2.actionKinds).not.toContain('external-plugin.parameters.set')

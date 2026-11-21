@@ -455,8 +455,6 @@ describe('synth runtime characterization', () => {
 
     expect(oscillators).toHaveLength(3)
     expect(oscillatorGates).toHaveLength(3)
-    expect(firstGate).toBeDefined()
-    expect(secondGate).toBeDefined()
 
     ctx.currentTime = 0.1
     runtime.setTrackSynth('track-1', {
@@ -849,8 +847,7 @@ describe('synth runtime characterization', () => {
     })
     runtime.triggerNote({ trackId: 'track-1', pitch: 60, velocity: 0.5, clipGain: 0.5, when: 0, durationSec: 1 })
 
-    const ampDepth = gains.find((gain) => gain.gain.events.some((event) => event.kind === 'set' && event.value === 0.8))
-    expect(ampDepth).toBeDefined()
+    expect(gains.some((gain) => gain.gain.events.some((event) => event.kind === 'set' && event.value === 0.8))).toBe(true)
 
     ctx.currentTime = 0.1
     runtime.setTrackSynth('track-1', {

@@ -10,7 +10,37 @@ import {
   decodeScheduleProgress,
   decodeSpectrumFrame,
   decodeVstEditorStatus,
+  decodeInputDevice,
+  decodeDeviceInventory,
+  decodeNativeProcessorPatchStatus,
+  decodeOutputDevice,
+  decodeRecordingStatus,
+  decodeWorkerNotification,
+  isCompatibleAudioHostHello,
+  readResponse,
+  type AudioHostHello,
+  type NativeMainRecordingStatus,
+  type NativeWorkerNotification,
 } from "./native-host-frame-decoders"
+import {
+  coreAudioDeviceId,
+  encodeOfflineConfigure,
+  encodeOfflineStart,
+  nativeBinaryPayload,
+  serializeAssetInstall,
+  serializeDeviceConfiguration,
+  serializeRecordingConfiguration,
+  serializeTransport,
+  serializeVstAttachment,
+  serializeVstEditor,
+  serializeVstInstanceId,
+  unsigned32,
+  writeUnsigned32,
+  type NativeRecordingSpoolConfiguration,
+  type NativeVstEditorAnchor,
+  type NativeVstEditorCommand,
+  type ResolvedVst3Attachment,
+} from "./native-host-frame-encoders"
 import type { HostEvidence } from "./ae08-evidence"
 import {
   NativeAudioHostNotSentError,
@@ -23,50 +53,20 @@ import {
   type QueuedRequest,
 } from "./native-request-broker"
 
-import { audioCoreWasmAbiVersion } from "@daw-browser/audio-core-wasm"
 import { defaultDecodedAudioPageFrames } from "@daw-browser/audio-engine/media-pages"
+import { maxVst3WorkerStateBytes } from "@daw-browser/plugin-host-protocol"
 import {
-  maxVst3EditorDimension,
-  maxVst3PluginParameters,
-  maxVst3WorkerChannels,
-  maxVst3WorkerEventsPerBlock,
-  maxVst3WorkerFrames,
-  maxVst3WorkerStateBytes,
-  maxVst3WorkerTransportSlots,
-} from "@daw-browser/plugin-host-protocol"
-import {
-  portableGraphContractHash,
-  processorContractHash,
-} from "@daw-browser/audio-core-contract/generated"
-import {
-  nativeAudioHostAssetInstallHeaderBytes as assetInstallHeaderBytes,
-  nativeAudioHostCodeName,
   nativeAudioHostControlTypes,
-  nativeAudioHostLifecycleStates,
-  nativeAudioHostNotificationKinds,
-  nativeAudioHostPatchOutcomes,
-  nativeAudioHostPatchRefusals,
-  nativeAudioHostReadinessReasons,
-  nativeAudioHostRequiredCapabilities,
   nativeAudioHostSpoolStates,
-  nativeAudioHostVstEditorCommands,
   nativeAudioHostFrameHeaderBytes as headerBytes,
   nativeAudioHostMagic as magic,
   nativeAudioHostMaximumAssetChannels as maximumAssetChannels,
-  nativeAudioHostMaximumAssetFrames as maximumAssetFrames,
-  nativeAudioHostMaximumAssetFramesForChannels as maximumAssetFramesForChannels,
-  nativeAudioHostMaximumDeviceIdBytes as maximumDeviceIdBytes,
   nativeAudioHostMaximumPayloadBytes as maximumPayloadBytes,
-  nativeAudioHostMaximumVstPathBytes as maximumVstPathBytes,
   nativeAudioHostMaximumVstStringBytes as maximumVstStringBytes,
   nativeAudioHostProtocolVersion as protocolVersion,
-  nativeAudioHostArtifactId,
-  nativeAudioHostProcessorPatchStatusBytes,
   nativeAudioHostAckStatus,
-  nativeAudioHostVstAttachFingerprintBytes as vstAttachFingerprintBytes,
   nativeOfflineRenderPlanSchema,
 } from "@daw-browser/desktop-protocol/native-audio-host"
-import type { NativeAudioHostParkingLimits } from "@daw-browser/desktop-protocol/native-audio-host"
 import type {
   NativeHostDeviceConfiguration,
   NativeHostDiagnostics,
@@ -175,390 +175,10 @@ export const isNativeOfflineTelemetryFrame = (frameType: number) => (
   || frameType === scheduleProgressType
 )
 
-const unsigned32 = (value: number) => Number.isSafeInteger(value) && value >= 0 && value <= unsigned32Max
-
-const writeUnsigned32 = (value: number) => {
-  const bytes = Buffer.alloc(4)
-  bytes.writeUInt32BE(value)
-
-  return bytes
-}
-
-const writeUnsigned64 = (value: bigint) => {
-  const bytes = Buffer.alloc(8)
-  bytes.writeBigUInt64BE(value)
-
-  return bytes
-}
-
-const serializeDeviceConfiguration = (input: NativeHostDeviceConfiguration) => {
-  const deviceId = Buffer.from(input.deviceId, "utf8")
-
-  if (
-    deviceId.byteLength === 0
-    || deviceId.byteLength > maximumDeviceIdBytes
-    || !coreAudioDeviceId(input.deviceId)
-    || !unsigned32(input.sampleRateHz) || input.sampleRateHz === 0
-    || !unsigned32(input.maxFramesPerBlock) || input.maxFramesPerBlock === 0
-    || !unsigned32(input.channelCount) || input.channelCount === 0
-    || !unsigned32(input.revision) || input.revision === 0
-  ) return undefined
-
-  return Buffer.concat([
-    writeUnsigned32(input.sampleRateHz),
-    writeUnsigned32(input.maxFramesPerBlock),
-    writeUnsigned32(input.channelCount),
-    writeUnsigned32(input.revision),
-    writeUnsigned32(deviceId.byteLength),
-    deviceId,
-  ])
-}
-
-const serializeTransport = (input: NativeHostTransport) => {
-  if (!unsigned32(input.epoch) || !Number.isSafeInteger(input.frame) || input.frame < 0
-    || (input.bpm !== undefined && (!Number.isFinite(input.bpm) || input.bpm <= 0))
-    || (input.timeSignatureNumerator !== undefined
-      && (!Number.isSafeInteger(input.timeSignatureNumerator)
-        || input.timeSignatureNumerator <= 0 || input.timeSignatureNumerator > 32))
-    || (input.timeSignatureDenominator !== undefined
-      && (!Number.isSafeInteger(input.timeSignatureDenominator)
-        || input.timeSignatureDenominator <= 0 || input.timeSignatureDenominator > 32))
-    || ((input.timeSignatureNumerator === undefined) !== (input.timeSignatureDenominator === undefined))
-    || (input.cycleStartSec !== undefined && (!Number.isFinite(input.cycleStartSec) || input.cycleStartSec < 0))
-    || (input.cycleEndSec !== undefined && (!Number.isFinite(input.cycleEndSec) || input.cycleEndSec < 0))
-    || ((input.cycleStartSec !== undefined || input.cycleEndSec !== undefined)
-      && (input.cycleStartSec === undefined || input.cycleEndSec === undefined
-        || input.cycleEndSec <= input.cycleStartSec))
-    || (input.transitionId !== undefined && (
-      input.transitionId <= 0n || input.transitionId > unsigned64Max
-    ))) return undefined
-  const output = Buffer.alloc(64)
-  output.writeUInt32BE(input.epoch)
-  output[4] = input.running ? 1 : 0
-  output.writeBigInt64BE(BigInt(input.frame), 8)
-  output.writeBigUInt64BE(input.transitionId ?? 1n, 16)
-  output.writeDoubleBE(input.bpm ?? 0, 24)
-  output.writeUInt32BE(input.cycleActive === true ? 1 : 0, 32)
-  output.writeUInt32BE(input.timeSignatureNumerator ?? 0, 36)
-  output.writeUInt32BE(input.timeSignatureDenominator ?? 0, 40)
-  output.writeDoubleBE(input.cycleStartSec ?? 0, 48)
-  output.writeDoubleBE(input.cycleEndSec ?? 0, 56)
-
-  return output
-}
-
-export type NativeRecordingSpoolConfiguration = {
-  rootPath: string
-  rootDevice: bigint
-  rootInode: bigint
-  token: string
-}
-
-export type NativeMainRecordingStatus = NativeHostRecordingStatus & { fileDevice: bigint; fileInode: bigint }
-
-// Mirrors kHeaderBytes in native/audio-host-macos/src/main.cpp: the fixed fields, then the device UID and the root path.
-const recordingConfigurationHeaderBytes = 152
-
-const serializeRecordingConfiguration = (input: NativeHostRecordingConfiguration, spool: NativeRecordingSpoolConfiguration) => {
-  if (!spool || !sha256HexPattern.test(spool.token) || !path.isAbsolute(spool.rootPath)
-    || spool.rootPath.includes("\0") || spool.rootDevice < 0n || spool.rootInode <= 0n
-    || spool.rootDevice > unsigned64Max || spool.rootInode > unsigned64Max) return undefined
-  const root = Buffer.from(spool.rootPath, "utf8")
-
-  if (root.byteLength > 4096) return undefined
-  const deviceUid = Buffer.from(input.deviceUid, "utf8")
-
-  if (
-    !unsigned32(input.generation) || input.generation === 0
-    || input.sessionId <= 0n || input.sessionId > unsigned64Max
-    || (input.channelCount !== 1 && input.channelCount !== 2)
-    || input.inputChannels.length !== input.channelCount
-    || input.inputChannels.some((channel) => !unsigned32(channel))
-    || !Number.isFinite(input.gain) || input.gain < 0
-    || (input.polarity !== 1 && input.polarity !== -1)
-    || !Number.isSafeInteger(input.punchStartFrame) || input.punchStartFrame < 0
-    || (input.punchEndFrame !== null && (
-      !Number.isSafeInteger(input.punchEndFrame) || input.punchEndFrame < input.punchStartFrame
-    ))
-    || !coreAudioDeviceId(input.deviceUid)
-    || deviceUid.byteLength === 0 || deviceUid.byteLength > 4096
-    || input.targetNodeId <= 0n || input.targetNodeId > unsigned64Max
-  ) return undefined
-  const output = Buffer.alloc(recordingConfigurationHeaderBytes + deviceUid.byteLength + root.byteLength)
-  output.writeUInt32BE(input.generation, 0)
-  output.writeBigUInt64BE(input.sessionId, 4)
-  output.writeUInt32BE(input.channelCount, 12)
-  output.writeUInt32BE(input.inputChannels[0] ?? 0, 16)
-  output.writeUInt32BE(input.inputChannels[1] ?? 0, 20)
-  output.writeFloatBE(input.gain, 24)
-  output.writeInt32BE(input.polarity, 28)
-  output.writeBigInt64BE(BigInt(input.punchStartFrame), 32)
-  output.writeBigInt64BE(BigInt(input.punchEndFrame ?? -1), 40)
-  output.writeUInt32BE(input.monitoring ? 1 : 0, 48)
-  output.writeUInt32BE(deviceUid.byteLength, 56)
-  output.writeBigUInt64BE(spool.rootDevice, 60)
-  output.writeBigUInt64BE(spool.rootInode, 68)
-  output.set(Buffer.from(spool.token, "ascii"), 76)
-  output.writeUInt32BE(root.byteLength, 140)
-  output.writeBigUInt64BE(input.targetNodeId, 144)
-  output.set(deviceUid, recordingConfigurationHeaderBytes)
-  output.set(root, recordingConfigurationHeaderBytes + deviceUid.byteLength)
-
-  return output
-}
-
-const nativeBinaryPayload = (payload: Uint8Array, minimumBytes: number) => (
-  payload.byteLength >= minimumBytes && payload.byteLength <= maximumPayloadBytes
-    ? Buffer.from(payload)
-    : undefined
-)
-
-const serializeAssetInstall = (input: NativeHostPcmAsset) => {
-  const hash = input.contentHashPrefix ?? new Uint8Array(8)
-  const expectedPcmBytes = input.frameCount * input.channelCount * 4
-
-  if (
-    !unsigned32(input.sessionAssetId) || input.sessionAssetId === 0
-    || !unsigned32(input.frameCount) || input.frameCount === 0 || input.frameCount > maximumAssetFrames
-    || !unsigned32(input.sampleRateHz) || input.sampleRateHz === 0
-    || !unsigned32(input.channelCount) || input.channelCount === 0 || input.channelCount > maximumAssetChannels
-    || !Number.isSafeInteger(expectedPcmBytes)
-    || input.frameCount > maximumAssetFramesForChannels(input.channelCount)
-    || input.planarPcm.byteLength !== expectedPcmBytes
-    || hash.byteLength !== 8
-  ) return undefined
-  const output = Buffer.alloc(assetInstallHeaderBytes + expectedPcmBytes)
-  output.writeUInt32BE(input.sessionAssetId, 0)
-  output.writeUInt32BE(input.frameCount, 4)
-  output.writeUInt32BE(input.sampleRateHz, 8)
-  output.writeUInt32BE(input.channelCount, 12)
-  output.set(hash, 16)
-  output.set(input.planarPcm, assetInstallHeaderBytes)
-
-  return output
-}
-
-export type ResolvedVst3Attachment = {
-  graphNodeId: bigint
-  stageIndex: number
-  sourceIndex?: number
-  instanceId: string
-  classId: string
-  vendorId: string
-  canonicalBundlePath: string
-  canonicalExecutablePath: string
-  bundleFingerprint: string
-  binaryFingerprint: string
-  scannerProtocolVersion: 2
-  role: "effect" | "instrument"
-  inputLayout: "none" | "mono" | "stereo"
-  outputLayout: "mono" | "stereo"
-  declaredLatencyFrames: number
-  declaredTailFrames?: number | null
-  transportLatencyFrames: number
-  workerTransport: {
-    slotCount: number
-    maximumFrames: number
-    inputChannels: number
-    outputChannels: number
-    maximumEventsPerBlock: number
-  }
-  parameterIds?: readonly number[]
-  initialParameterValues?: readonly { id: number; value: number }[]
-  initialState?: { bytes: Uint8Array; sha256: string }
-  renderEnabled?: boolean
-  workerEnabled?: boolean
-}
-
-const fingerprintBytes = (value: string) => sha256HexPattern.test(value) ? Buffer.from(value, "hex") : undefined
-
-const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
-  const strings = [input.instanceId, input.classId, input.vendorId]
-
-  if (
-    !strings.every((value) => Buffer.byteLength(value, "utf8") > 0 && Buffer.byteLength(value, "utf8") <= maximumVstStringBytes)
-    || !input.canonicalBundlePath || !input.canonicalExecutablePath
-    || Buffer.byteLength(input.canonicalBundlePath, "utf8") > maximumVstPathBytes
-    || Buffer.byteLength(input.canonicalExecutablePath, "utf8") > maximumVstPathBytes
-    || !input.canonicalExecutablePath.startsWith(`${input.canonicalBundlePath}/`)
-    || input.scannerProtocolVersion !== 2
-    || input.graphNodeId <= 0n
-    || !unsigned32(input.stageIndex) || input.stageIndex > 0x7fff_ffff
-    || (input.sourceIndex !== undefined && (!unsigned32(input.sourceIndex) || input.sourceIndex > 0x7fff_ffff))
-    || (input.role !== "effect" && input.role !== "instrument")
-    || (input.inputLayout !== "none" && input.inputLayout !== "mono" && input.inputLayout !== "stereo")
-    || (input.role === "instrument" && input.inputLayout !== "none")
-    || (input.role === "effect" && input.inputLayout === "none")
-    || (input.outputLayout !== "mono" && input.outputLayout !== "stereo")
-    || !unsigned32(input.declaredLatencyFrames)
-    || (input.declaredTailFrames !== undefined
-      && input.declaredTailFrames !== null
-      && (!unsigned32(input.declaredTailFrames) || input.declaredTailFrames > 100_000_000))
-    || !unsigned32(input.transportLatencyFrames)
-    || !unsigned32(input.workerTransport.slotCount) || input.workerTransport.slotCount === 0 || input.workerTransport.slotCount > maxVst3WorkerTransportSlots
-    || !unsigned32(input.workerTransport.maximumFrames) || input.workerTransport.maximumFrames === 0 || input.workerTransport.maximumFrames > maxVst3WorkerFrames
-    || !unsigned32(input.workerTransport.inputChannels) || input.workerTransport.inputChannels > maxVst3WorkerChannels
-    || (input.role === "instrument" && input.workerTransport.inputChannels !== 0)
-    || (input.role === "effect" && input.workerTransport.inputChannels === 0)
-    || !unsigned32(input.workerTransport.outputChannels) || input.workerTransport.outputChannels === 0 || input.workerTransport.outputChannels > maxVst3WorkerChannels
-    || !unsigned32(input.workerTransport.maximumEventsPerBlock)
-    || input.workerTransport.maximumEventsPerBlock === 0
-    || input.workerTransport.maximumEventsPerBlock > maxVst3WorkerEventsPerBlock
-    || (input.parameterIds?.length ?? 0) > maxVst3PluginParameters
-  ) return undefined
-  const bundleFingerprint = fingerprintBytes(input.bundleFingerprint)
-  const binaryFingerprint = fingerprintBytes(input.binaryFingerprint)
-
-  if (!bundleFingerprint || !binaryFingerprint || bundleFingerprint.byteLength !== vstAttachFingerprintBytes || binaryFingerprint.byteLength !== vstAttachFingerprintBytes) {
-    return undefined
-  }
-
-  const encodedStrings = [...strings, input.canonicalBundlePath, input.canonicalExecutablePath].map((value) => Buffer.from(value, "utf8"))
-  const stateBytes = input.initialState?.bytes ?? new Uint8Array()
-  const stateHash = input.initialState?.sha256 ?? ""
-
-  if (
-    stateBytes.byteLength > maxVst3WorkerStateBytes
-    || (stateBytes.byteLength === 0 && stateHash !== "" && !sha256HexPattern.test(stateHash))
-    || (stateBytes.byteLength > 0 && !sha256HexPattern.test(stateHash))
-    || (input.initialParameterValues?.length ?? 0) > 2_048
-  ) return undefined
-  const parameterBytes = Buffer.alloc((input.initialParameterValues?.length ?? 0) * 12)
-
-  for (const [index, parameter] of (input.initialParameterValues ?? []).entries()) {
-    if (!unsigned32(parameter.id) || !Number.isFinite(parameter.value) || parameter.value < 0 || parameter.value > 1) return undefined
-    parameterBytes.writeUInt32BE(parameter.id, index * 12)
-    parameterBytes.writeDoubleBE(parameter.value, index * 12 + 4)
-  }
-
-  const parameterIds = input.parameterIds ?? []
-
-  if (
-    new Set(parameterIds).size !== parameterIds.length
-    || parameterIds.some((parameterId) => !unsigned32(parameterId))
-  ) return undefined
-  const parameterIdBytes = Buffer.alloc(parameterIds.length * 4)
-
-  for (const [index, parameterId] of parameterIds.entries()) {
-    parameterIdBytes.writeUInt32BE(parameterId, index * 4)
-  }
-
-  return Buffer.concat([
-    ...encodedStrings.flatMap((value) => [writeUnsigned32(value.byteLength), value]),
-    writeUnsigned32(input.stageIndex),
-    writeUnsigned32(input.sourceIndex ?? unsigned32Max),
-    writeUnsigned64(input.graphNodeId),
-    Buffer.from([1]),
-    bundleFingerprint,
-    binaryFingerprint,
-    writeUnsigned32(input.scannerProtocolVersion),
-    Buffer.from([
-      input.role === "effect" ? 1 : 2,
-      input.inputLayout === "none" ? 0 : input.inputLayout === "mono" ? 1 : 2,
-      input.outputLayout === "mono" ? 1 : 2,
-      input.workerEnabled === true || input.renderEnabled === true ? 1 : 0,
-      input.renderEnabled === false ? 0 : 1,
-    ]),
-    writeUnsigned32(input.declaredLatencyFrames),
-    writeUnsigned32(input.declaredTailFrames ?? unsigned32Max),
-    writeUnsigned32(input.transportLatencyFrames),
-    writeUnsigned32(input.workerTransport.slotCount),
-    writeUnsigned32(input.workerTransport.maximumFrames),
-    writeUnsigned32(input.workerTransport.inputChannels),
-    writeUnsigned32(input.workerTransport.outputChannels),
-    writeUnsigned32(input.workerTransport.maximumEventsPerBlock),
-    writeUnsigned32(stateBytes.byteLength),
-    writeUnsigned32(Buffer.byteLength(stateHash)),
-    Buffer.from(stateBytes),
-    Buffer.from(stateHash),
-    writeUnsigned32(input.initialParameterValues?.length ?? 0),
-    parameterBytes,
-    writeUnsigned32(parameterIds.length),
-    parameterIdBytes,
-  ])
-}
-
-// The host reads the id of every request that names an existing attachment with ReadNativeInstanceId: a little-endian length.
-// Only the attach record, whose fields are all big-endian, carries its own id big-endian.
-const serializeVstInstanceId = (instanceId: string) => {
-  const value = Buffer.from(instanceId, "utf8")
-
-  if (value.byteLength === 0 || value.byteLength > maximumVstStringBytes) return undefined
-  const length = Buffer.alloc(4)
-  length.writeUInt32LE(value.byteLength)
-
-  return Buffer.concat([length, value])
-}
-
-const serializeVstEditor = (input: {
-  instanceId: string
-  command: NativeVstEditorCommand
-  width?: number
-  height?: number
-  anchor?: NativeVstEditorAnchor
-}) => {
-  const instanceIdBytes = Buffer.from(input.instanceId, "utf8")
-  const command = nativeAudioHostVstEditorCommands[input.command]
-  const width = input.width ?? 0
-  const height = input.height ?? 0
-  const anchor = input.anchor
-  const hasAnchor = anchor === undefined ? 0 : 1
-
-  if (
-    !command
-    || instanceIdBytes.byteLength === 0
-    || instanceIdBytes.byteLength > maximumVstStringBytes
-    || !unsigned32(width) || width > maxVst3EditorDimension
-    || !unsigned32(height) || height > maxVst3EditorDimension
-    || (anchor !== undefined && input.command !== "open" && input.command !== "focus")
-    || (anchor !== undefined && (
-      !Number.isSafeInteger(anchor.x) || anchor.x < -0x8000_0000 || anchor.x > 0x7fff_ffff
-      || !Number.isSafeInteger(anchor.y) || anchor.y < -0x8000_0000 || anchor.y > 0x7fff_ffff
-    ))
-  ) return undefined
-  const output = Buffer.alloc(28)
-  output.writeUInt32BE(command, 0)
-  output.writeUInt32BE(width, 4)
-  output.writeUInt32BE(height, 8)
-  output.writeUInt32BE(hasAnchor, 12)
-  output.writeInt32BE(anchor?.x ?? 0, 16)
-  output.writeInt32BE(anchor?.y ?? 0, 20)
-  output.writeUInt32LE(instanceIdBytes.byteLength, 24)
-
-  return Buffer.concat([output, instanceIdBytes])
-}
-
-export type AudioHostHello = NativeAudioHostParkingLimits & {
-  capabilities: number
-  abiVersion: number
-  processorContractHash: string
-  graphContractHash: string
-  artifactId: string
-  deviceState: "idle" | "configured" | "running" | "faulted"
-  readinessReason: "ready" | "device-not-configured" | "graph-not-prepared" | "transport-not-prepared"
-}
-
 export type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
 
 import type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
 import { bestEffort } from "@daw-browser/shared"
-
-type NativeWorkerNotificationBase = {
-  graphRevision: number
-  graphNodeId: bigint
-  instanceId: string
-}
-
-export type NativeWorkerNotification =
-  | (NativeWorkerNotificationBase & {
-    kind: "latency" | "buses" | "restart" | "fault" | "miss" | "tail" | "editor-interaction" | "editor-state"
-    value: number
-  })
-  | (NativeWorkerNotificationBase & {
-    kind: "parameter-edit"
-    parameterId: number
-    normalizedValue: number
-  })
 
 type NativeVstEditorOwnershipProbe = {
   instanceId: string
@@ -571,22 +191,10 @@ type NativeAudioHostTerminationTimers = {
   killObservation?: ReturnType<typeof setTimeout>
 }
 
-export type NativeVstEditorCommand = "open" | "close" | "focus" | "resize" | "status"
-
-export type NativeVstEditorAnchor = { x: number; y: number }
-
 export const nativeVstEditorOwnershipProbe = (instanceId: string): NativeVstEditorOwnershipProbe => ({
   instanceId,
   command: "status",
 })
-
-const coreAudioDeviceId = (value: string): value is `coreaudio:${string}` => (
-  value.startsWith("coreaudio:") && value.length > "coreaudio:".length
-)
-
-const nativeVstInstanceId = (value: string): boolean => (
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
-)
 
 export class NativeAudioHostCommandError extends Error {
   readonly requestType: number
@@ -643,25 +251,6 @@ class NativeOfflineRenderTimeoutError extends Error {
     this.name = "NativeOfflineRenderTimeoutError"
     this.stage = stage
   }
-}
-
-const encodeOfflineConfigure = (plan: NativeOfflineRenderPlan) => {
-  const output = Buffer.alloc(16)
-  output.writeUInt32BE(plan.sampleRateHz, 0)
-  output.writeUInt32BE(plan.blockFrames, 4)
-  output.writeUInt32BE(plan.channelCount, 8)
-  output.writeUInt32BE(1, 12)
-
-  return output
-}
-
-const encodeOfflineStart = (plan: NativeOfflineRenderPlan) => {
-  const output = Buffer.alloc(16)
-  output.writeBigUInt64BE(BigInt(plan.totalFrames), 0)
-  output.writeUInt32BE(plan.blockFrames, 8)
-  output.writeUInt32BE(plan.channelCount, 12)
-
-  return output
 }
 
 type NativeOfflineStdoutPumpInput = {
@@ -1212,87 +801,9 @@ export const renderNativeOffline = async (input: {
   }
 }
 
-const readResponse = (bytes: Buffer): AudioHostHello | undefined => {
-  if (!(bytes.byteLength >= headerBytes + 12
-  && bytes.readUInt32BE(0) === magic
-  && bytes.readUInt32BE(4) === protocolVersion
-  && bytes.readUInt32BE(8) === hostCapabilitiesType
-  && bytes.readUInt32BE(headerBytes) === protocolVersion)) return undefined
-  let offset = headerBytes + 12
-
-  const readString = () => {
-    if (offset + 4 > bytes.byteLength) return undefined
-    const length = bytes.readUInt32BE(offset)
-    offset += 4
-
-    if (length === 0 || offset + length > bytes.byteLength) return undefined
-    const value = bytes.subarray(offset, offset + length).toString("utf8")
-    offset += length
-
-    return value
-  }
-
-  const processorContractHash = readString()
-  const graphContractHash = readString()
-  const artifactId = readString()
-
-  if (!processorContractHash || !graphContractHash || !artifactId || offset + 16 !== bytes.byteLength) return undefined
-  const parsedDeviceState = nativeAudioHostCodeName(nativeAudioHostLifecycleStates, bytes.readUInt32BE(offset))
-  const parsedReadinessReason = nativeAudioHostCodeName(nativeAudioHostReadinessReasons, bytes.readUInt32BE(offset + 4))
-
-  if (!parsedDeviceState || !parsedReadinessReason) return undefined
-  const maximumParkedInstances = bytes.readUInt32BE(offset + 8)
-  const parkedAgeMs = bytes.readUInt32BE(offset + 12)
-
-  if (parkedAgeMs === 0) return undefined
-
-  return {
-    capabilities: bytes.readUInt32BE(headerBytes + 4),
-    abiVersion: bytes.readUInt32BE(headerBytes + 8),
-    processorContractHash,
-    graphContractHash,
-    artifactId,
-    deviceState: parsedDeviceState,
-    readinessReason: parsedReadinessReason,
-    maximumParkedInstances,
-    parkedAgeMs,
-  }
-}
-
-const isCompatibleAudioHostHello = (hello: AudioHostHello) => (
-  (hello.capabilities & nativeAudioHostRequiredCapabilities) === nativeAudioHostRequiredCapabilities
-  && hello.abiVersion === audioCoreWasmAbiVersion
-  && hello.processorContractHash === processorContractHash
-  && hello.graphContractHash === portableGraphContractHash
-  && hello.artifactId === nativeAudioHostArtifactId
-)
-
 export const packagedAudioHostPath = (resourcesPath: string, isPackaged: boolean, explicitPath?: string) => (
   isPackaged ? path.join(resourcesPath, "daw-audio-host-macos") : explicitPath
 )
-
-/** Anything but the three valid outcome/refusal/token/core combinations is a protocol error. */
-export const decodeNativeProcessorPatchStatus = (payload: Buffer): NativeProcessorPatchStatus | undefined => {
-  if (payload.byteLength !== nativeAudioHostProcessorPatchStatusBytes) return undefined
-  const outcome = payload.readUInt32BE(0)
-  const refusalName = nativeAudioHostCodeName(nativeAudioHostPatchRefusals, payload.readUInt32BE(4))
-  const refusalCode = payload.readUInt32BE(4)
-  const coreResult = payload.readUInt32BE(8)
-  const token = payload.readBigUInt64BE(12)
-
-  if (outcome === 1) return refusalCode === 0 && coreResult === 0 && token === 0n ? { outcome: "applied" } : undefined
-
-  if (outcome === 3) return refusalCode === 0 && coreResult === 0 && token !== 0n ? { outcome: "claimed", token } : undefined
-  const refusal = outcome === nativeAudioHostPatchOutcomes.refused && refusalName !== "none" ? refusalName : undefined
-
-  if (!refusal) return undefined
-
-  if ((token !== 0n) !== (refusal === "claim-pending")) return undefined
-
-  if (coreResult !== 0 && refusal !== "stage-failed" && refusal !== "apply-failed") return undefined
-
-  return token === 0n ? { outcome: "refused", refusal, coreResult } : { outcome: "refused", refusal, coreResult, token }
-}
 
 /**
  * `refused`: native answered and said no. `unavailable`: nothing was delivered. `unconfirmed`: the request may have
@@ -1566,206 +1077,6 @@ export const createNativeAudioHostSupervisor = (
       }, sigtermTerminationMs)
     }, gracefulTerminationMs)
   })
-
-  const decodeWorkerNotification = (frame: Buffer): NativeWorkerNotification | undefined => {
-    const payload = frame.subarray(headerBytes)
-
-    if (payload.byteLength < 24) return undefined
-    const kindValue = payload.readUInt32BE(0)
-
-    const kind = nativeAudioHostCodeName(nativeAudioHostNotificationKinds, kindValue)
-
-    if (kind === "parameter-edit") {
-      if (payload.byteLength < 32) return undefined
-      const parameterId = payload.readUInt32BE(16)
-      const normalizedValue = payload.readDoubleBE(20)
-      const instanceBytes = payload.readUInt32BE(28)
-      const instanceId = payload.subarray(32).toString("utf8")
-
-      if (parameterId > unsigned32Max
-        || !Number.isFinite(normalizedValue)
-        || normalizedValue < 0
-        || normalizedValue > 1
-        || instanceBytes === 0
-        || instanceBytes > maximumVstStringBytes
-        || payload.byteLength !== 32 + instanceBytes
-        || !nativeVstInstanceId(instanceId)) return undefined
-
-      return {
-        kind,
-        graphRevision: payload.readUInt32BE(4),
-        graphNodeId: payload.readBigUInt64BE(8),
-        parameterId,
-        normalizedValue,
-        instanceId,
-      }
-    }
-
-    const instanceBytes = payload.readUInt32BE(20)
-
-    if (!kind || instanceBytes === 0 || instanceBytes > maximumVstStringBytes
-      || payload.byteLength !== 24 + instanceBytes) return undefined
-
-    return {
-      kind,
-      graphRevision: payload.readUInt32BE(4),
-      graphNodeId: payload.readBigUInt64BE(8),
-      value: payload.readUInt32BE(16),
-      instanceId: payload.subarray(24).toString("utf8"),
-    }
-  }
-
-  const deviceStringReader = (payload: Buffer, start: number) => {
-    let offset = start
-
-    return {
-      offset: () => offset,
-      advance: (bytes: number) => { offset += bytes },
-      string: () => {
-        if (offset + 4 > payload.byteLength) return undefined
-        const length = payload.readUInt32BE(offset)
-        offset += 4
-
-        if (length === 0 || offset + length > payload.byteLength) return undefined
-        const value = payload.subarray(offset, offset + length).toString("utf8")
-        offset += length
-
-        return value
-      },
-    }
-  }
-
-  const decodeDeviceInventory = (frame: Buffer): NativeAudioDevice[] | undefined => {
-    const payload = frame.subarray(headerBytes)
-
-    if (payload.byteLength < 4) return undefined
-    const count = payload.readUInt32BE(0)
-    const reader = deviceStringReader(payload, 4)
-    const devices: NativeAudioDevice[] = []
-
-    for (let index = 0; index < count; index += 1) {
-      const deviceId = reader.string()
-      const name = reader.string()
-      const offset = reader.offset()
-
-      if (!deviceId || !coreAudioDeviceId(deviceId) || !name || offset + 16 > payload.byteLength) return undefined
-      const availability = payload.readUInt32BE(offset + 12)
-
-      if (availability !== 0 && availability !== 1) return undefined
-      devices.push({
-        deviceId,
-        name,
-        nominalSampleRateHz: payload.readUInt32BE(offset),
-        inputChannelCount: payload.readUInt32BE(offset + 4),
-        outputChannelCount: payload.readUInt32BE(offset + 8),
-        available: availability === 1,
-      })
-      reader.advance(16)
-    }
-
-    return reader.offset() === payload.byteLength ? devices : undefined
-  }
-
-  const decodeOutputDevice = (frame: Buffer): NativeOutputDevice | null | undefined => {
-    const payload = frame.subarray(headerBytes)
-
-    if (payload.byteLength === 4 && payload.readUInt32BE(0) === 0) return null
-
-    if (payload.byteLength < 4 || payload.readUInt32BE(0) !== 1) return undefined
-    const reader = deviceStringReader(payload, 4)
-    const deviceId = reader.string()
-    const name = reader.string()
-    const offset = reader.offset()
-
-    if (!deviceId || !coreAudioDeviceId(deviceId) || !name || offset + 16 !== payload.byteLength) return undefined
-    const nominalSampleRateHz = payload.readUInt32BE(offset)
-    const outputChannelCount = payload.readUInt32BE(offset + 4)
-    const maximumFramesPerBlock = payload.readUInt32BE(offset + 8)
-    const availability = payload.readUInt32BE(offset + 12)
-
-    if (availability !== 0 && availability !== 1) return undefined
-
-    return { deviceId, name, nominalSampleRateHz, outputChannelCount, maximumFramesPerBlock, available: availability === 1 }
-  }
-
-  const decodeInputDevice = (frame: Buffer): NativeInputDevice | null | undefined => {
-    const device = decodeOutputDevice(frame)
-
-    if (device === undefined || device === null) return device
-
-    return {
-      deviceId: device.deviceId,
-      name: device.name,
-      nominalSampleRateHz: device.nominalSampleRateHz,
-      inputChannelCount: device.outputChannelCount,
-      maximumFramesPerBlock: device.maximumFramesPerBlock,
-      available: device.available,
-    }
-  }
-
-  const safeUnsigned64 = (value: bigint) => value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : undefined
-
-  const decodeRecordingStatus = (frame: Buffer): NativeMainRecordingStatus | undefined => {
-    const payload = frame.subarray(headerBytes)
-
-    if (payload.byteLength !== 120) return undefined
-    const timelineFrame = payload.readBigInt64BE(12)
-    const capturedFrames = safeUnsigned64(payload.readBigUInt64BE(20))
-    const droppedFrames = safeUnsigned64(payload.readBigUInt64BE(28))
-    const flags = payload.readUInt32BE(56)
-    const rms = payload.readFloatBE(48)
-    const peak = payload.readFloatBE(52)
-    const availableBlocks = payload.readUInt32BE(40)
-    const queuedBlocks = payload.readUInt32BE(44)
-
-    if (
-      timelineFrame < 0 || timelineFrame > BigInt(Number.MAX_SAFE_INTEGER)
-      || capturedFrames === undefined || droppedFrames === undefined
-      || payload.readUInt32BE(0) === 0 || payload.readBigUInt64BE(4) === 0n
-      || !Number.isFinite(rms) || rms < 0 || !Number.isFinite(peak) || peak < 0
-      || availableBlocks > 32 || queuedBlocks > 32 || availableBlocks + queuedBlocks > 32
-      || (flags & ~31) !== 0
-    ) return undefined
-    const state = payload.readUInt32BE(60)
-    const error = payload.readUInt32BE(64)
-    const systemError = payload.readInt32BE(68)
-    const writtenFrames = safeUnsigned64(payload.readBigUInt64BE(72))
-    const writtenBytes = safeUnsigned64(payload.readBigUInt64BE(80))
-    const writtenBlocks = safeUnsigned64(payload.readBigUInt64BE(88))
-    const fileDevice = payload.readBigUInt64BE(96)
-    const fileInode = payload.readBigUInt64BE(104)
-    const sampleRateHz = payload.readUInt32BE(112)
-    const channelCount = payload.readUInt32BE(116)
-
-    if (state > 4 || error > 13 || systemError < 0 || writtenFrames === undefined || writtenBytes === undefined
-      || writtenBlocks === undefined || (channelCount !== 1 && channelCount !== 2)
-      || sampleRateHz > 384000 || (state === 1 && sampleRateHz === 0)) return undefined
-
-    if (state === 2 && (error !== 0 || systemError !== 0 || (flags & 8) === 0 || (flags & 19) !== 0
-      || queuedBlocks !== 0 || sampleRateHz === 0
-      || fileInode === 0n || writtenFrames !== capturedFrames || droppedFrames !== 0
-      || payload.readUInt32BE(36) !== 0 || writtenBytes !== 4 * writtenBlocks + 4 * writtenFrames * channelCount
-      || !Number.isSafeInteger(4 * writtenBlocks + 4 * writtenFrames * channelCount))) return undefined
-
-    return {
-      fileDevice, fileInode,
-      spool: { state, error, systemError, writtenFrames, writtenBytes, writtenBlocks,
-        published: (flags & 8) !== 0, partialRetained: (flags & 16) !== 0, sampleRateHz, channelCount },
-      generation: payload.readUInt32BE(0),
-      sessionId: payload.readBigUInt64BE(4),
-      timelineFrame: Number(timelineFrame),
-      capturedFrames,
-      droppedFrames,
-      droppedBlocks: payload.readUInt32BE(36),
-      availableBlocks,
-      queuedBlocks,
-      rms,
-      peak,
-      fatal: (flags & 1) !== 0,
-      active: (flags & 2) !== 0,
-      configured: (flags & 4) !== 0,
-    }
-  }
 
   const decode = (chunk: Buffer) => {
     buffer = Buffer.concat([buffer, chunk])

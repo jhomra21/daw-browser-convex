@@ -3,7 +3,7 @@ import {
   createNativeVst3EditorSessionManager,
   type NativeVst3EditorSessionManager,
 } from "./native-vst3-editor-session"
-import type { NativeWorkerNotification } from "./audio-host"
+import type { NativeWorkerNotification } from "./native-host-frame-decoders"
 import type { PluginCatalogData } from "./plugin-catalog"
 
 const firstInstance = "11111111-1111-4111-8111-111111111111"

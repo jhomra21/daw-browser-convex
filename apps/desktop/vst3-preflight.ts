@@ -14,7 +14,7 @@ import {
   type NativeVst3PreflightRequest,
   type NativeVst3PreflightResult,
 } from "@daw-browser/plugin-host-protocol"
-import type { ResolvedVst3Attachment } from "./audio-host"
+import type { ResolvedVst3Attachment } from "./native-host-frame-encoders"
 import type { HostEvidence } from "./ae08-evidence"
 
 const maximumWorkerHelloBytes = 16 * 1024

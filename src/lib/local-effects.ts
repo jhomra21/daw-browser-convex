@@ -1,5 +1,6 @@
 import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectEntityRow, type LocalProjectStoredValue } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
+import { AUTOMATION_ROW_KIND, EFFECT_ROW_KIND, SIDECHAIN_ROW_KIND } from '~/lib/local-project-rows'
 import { INSTRUMENT_CONTRACTS, audioEffectOrderItemId, audioEffectOrderItemKind, automationTargetMatchesEffectInstance, createAudioEffectInstanceId, createInstrumentInstanceId, isJsonObject, isJsonString, isSidechainCapableKind, type AudioEffectKind, type AudioEffectOrderItem, type JsonValue, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { readInstrumentParamsFromEffectRow } from '~/lib/effect-row-instrument-params'
 import { structuredCloneJsonValue } from '~/lib/structured-clone-json'
@@ -25,8 +26,6 @@ export type LocalEffectRow<TParams> = {
   updatedAt: number
 }
 
-const EFFECT_KIND = 'effect'
-const SIDECHAIN_KIND = 'sidechain-route'
 export const localSidechainRouteRowId = (targetTrackId: string, effectInstanceId: string) => `${targetTrackId}:sidechain:${effectInstanceId}`
 
 export const localEffectRowId = (
@@ -86,7 +85,7 @@ const getExactLocalEffect = async <TParams>(
   effect: LocalEffectKind,
 ): Promise<LocalEffectRow<TParams> | undefined> => {
   const db = await openLocalProjectDb(projectId)
-  const row = await db.get('entities', [EFFECT_KIND, localEffectRowId(targetId, effect)])
+  const row = await db.get('entities', [EFFECT_ROW_KIND, localEffectRowId(targetId, effect)])
 
   return isLocalEffectRow<TParams>(row?.value) ? row.value : undefined
 }
@@ -107,7 +106,7 @@ export async function getLocalEffect(
   effect: LocalEffectKind,
 ) {
   const db = await openLocalProjectDb(projectId)
-  const row = await db.get('entities', [EFFECT_KIND, localEffectRowId(targetId, effect)])
+  const row = await db.get('entities', [EFFECT_ROW_KIND, localEffectRowId(targetId, effect)])
 
   if (effect === 'instrument') {
     if (isLocalEffectRow(row?.value)) {
@@ -140,7 +139,7 @@ const readLegacySynthEffect = async (
   targetId: string,
   db: Awaited<ReturnType<typeof openLocalProjectDb>>,
 ): Promise<LocalEffectRow<TrackInstrumentParams> | undefined> => {
-  const synthRow = await db.get('entities', [EFFECT_KIND, localEffectRowId(targetId, 'synth')])
+  const synthRow = await db.get('entities', [EFFECT_ROW_KIND, localEffectRowId(targetId, 'synth')])
   const synth = synthRow?.value
 
   if (!isLocalEffectRow<SynthParamsInput>(synth)) return undefined
@@ -166,7 +165,7 @@ const readLegacySynthEffect = async (
 
 export const listLocalEffects = async (projectId: string): Promise<LocalEffectRow<JsonValue>[]> => {
   const db = await openLocalProjectDb(projectId)
-  const rows = await db.getAllFromIndex('entities', 'by-kind', EFFECT_KIND)
+  const rows = await db.getAllFromIndex('entities', 'by-kind', EFFECT_ROW_KIND)
 
   return rows.flatMap((row) => isLocalEffectRow(row.value) ? [row.value] : [])
 }
@@ -194,10 +193,10 @@ export const setLocalEffect = async <TParams>(
     }
 
     const tx = db.transaction('entities', 'readwrite')
-    await tx.store.put(createLocalProjectEntityRow(EFFECT_KIND, row.id, localEffectJsonValue(row), row.updatedAt))
+    await tx.store.put(createLocalProjectEntityRow(EFFECT_ROW_KIND, row.id, localEffectJsonValue(row), row.updatedAt))
 
     if (effect === 'instrument') {
-      await tx.store.delete([EFFECT_KIND, localEffectRowId(targetId, 'synth')])
+      await tx.store.delete([EFFECT_ROW_KIND, localEffectRowId(targetId, 'synth')])
     }
 
     await tx.done
@@ -220,7 +219,7 @@ export const setLocalEffectInstance = async <TParams>(
     const instanceId = input.instanceId
     const db = await openLocalProjectDb(projectId)
     const id = localEffectRowId(targetId, effect, instanceId)
-    const existing = await db.get('entities', [EFFECT_KIND, id])
+    const existing = await db.get('entities', [EFFECT_ROW_KIND, id])
     const existingRow = isLocalEffectRow<TParams>(existing?.value) ? existing.value : undefined
 
     const appendIndex = existingRow?.index === undefined && input.index === undefined
@@ -239,7 +238,7 @@ export const setLocalEffectInstance = async <TParams>(
       updatedAt: timestamp,
     }
 
-    await db.put('entities', createLocalProjectEntityRow(EFFECT_KIND, row.id, localEffectJsonValue(row), row.updatedAt))
+    await db.put('entities', createLocalProjectEntityRow(EFFECT_ROW_KIND, row.id, localEffectJsonValue(row), row.updatedAt))
 
     return { row, sequence: notifyLocalProjectChanged(projectId) }
   })
@@ -252,7 +251,7 @@ export const deleteLocalEffect = async (
 ): Promise<void> => {
   await withExternalProcessorProjectWriteLock(projectId, async () => {
     const db = await openLocalProjectDb(projectId)
-    const key: [string, string] = [EFFECT_KIND, localEffectRowId(targetId, effect)]
+    const key: [string, string] = [EFFECT_ROW_KIND, localEffectRowId(targetId, effect)]
     const row = await db.get('entities', key)
 
     if (!isLocalEffectRow(row?.value)) return
@@ -276,7 +275,7 @@ export const deleteLocalEffectInstance = async (
   await withExternalProcessorProjectWriteLock(projectId, async () => {
     const db = await openLocalProjectDb(projectId)
     const tx = db.transaction('entities', 'readwrite')
-    const key: [string, string] = [EFFECT_KIND, localEffectRowId(targetId, effect, instanceId)]
+    const key: [string, string] = [EFFECT_ROW_KIND, localEffectRowId(targetId, effect, instanceId)]
     const row = await tx.store.get(key)
 
     if (!isLocalEffectRow(row?.value)) {
@@ -285,10 +284,10 @@ export const deleteLocalEffectInstance = async (
       return
     }
 
-    const automationRows = await tx.store.index('by-kind').getAll('automation-envelope')
+    const automationRows = await tx.store.index('by-kind').getAll(AUTOMATION_ROW_KIND)
 
     const sidechainRows = isSidechainCapableKind(effect)
-      ? await tx.store.index('by-kind').getAll(SIDECHAIN_KIND)
+      ? await tx.store.index('by-kind').getAll(SIDECHAIN_ROW_KIND)
       : []
 
     await tx.store.delete(key)
@@ -301,7 +300,7 @@ export const deleteLocalEffectInstance = async (
         isJsonObject(value)
         && automationTargetMatchesEffectInstance(value.target, instanceId)
       ) {
-        await tx.store.delete(['automation-envelope', automationRow.id])
+        await tx.store.delete([AUTOMATION_ROW_KIND, automationRow.id])
       }
     }
 
@@ -310,7 +309,7 @@ export const deleteLocalEffectInstance = async (
       const value = parsed.success ? parsed.data : undefined
 
       if (isJsonObject(value) && value.effectInstanceId === instanceId && value.targetTrackId === targetId) {
-        await tx.store.delete([SIDECHAIN_KIND, sidechainRow.id])
+        await tx.store.delete([SIDECHAIN_ROW_KIND, sidechainRow.id])
       }
     }
 
@@ -410,7 +409,7 @@ export const reorderLocalMixedEffects = async (
     const rowByIdentity = new Map<string, typeof rows[number]>()
 
     for (const row of rows) {
-      if (row.kind === EFFECT_KIND && isLocalEffectRow(row.value)
+      if (row.kind === EFFECT_ROW_KIND && isLocalEffectRow(row.value)
         && row.value.targetId === targetId
         && row.value.instanceId
         && audioEffectKindFromLocalEffect(row.value.effect) !== undefined) {
@@ -485,7 +484,7 @@ export const reorderLocalMixedEffects = async (
         const value = z.json().parse(row.value)
 
         if (!isJsonObject(value)) throw new Error('Mixed effect row is corrupt.')
-        await tx.store.put(createLocalProjectEntityRow(EFFECT_KIND, row.id, {
+        await tx.store.put(createLocalProjectEntityRow(EFFECT_ROW_KIND, row.id, {
           ...value,
           index,
           updatedAt: timestamp,
@@ -537,13 +536,13 @@ export const restoreLocalTrackEffectChain = async (
   const db = await openLocalProjectDb(projectId)
   const tx = db.transaction('entities', 'readwrite')
   const timestamp = now()
-  const effectRows = await tx.store.index('by-kind').getAll(EFFECT_KIND)
+  const effectRows = await tx.store.index('by-kind').getAll(EFFECT_ROW_KIND)
 
   for (const entity of effectRows) {
     if (!isLocalEffectRow(entity.value) || entity.value.targetId !== targetId) continue
 
     if (audioEffectKindFromLocalEffect(entity.value.effect) || entity.value.effect === 'instrument' || entity.value.effect === 'synth' || entity.value.effect === 'arp') {
-      await tx.store.delete([EFFECT_KIND, entity.id])
+      await tx.store.delete([EFFECT_ROW_KIND, entity.id])
     }
   }
 
@@ -560,7 +559,7 @@ export const restoreLocalTrackEffectChain = async (
       updatedAt: timestamp,
     }
 
-    await tx.store.put(createLocalProjectEntityRow(EFFECT_KIND, row.id, localEffectJsonValue(row), timestamp))
+    await tx.store.put(createLocalProjectEntityRow(EFFECT_ROW_KIND, row.id, localEffectJsonValue(row), timestamp))
   }
 
   if (input.instrument) {
@@ -572,7 +571,7 @@ export const restoreLocalTrackEffectChain = async (
       updatedAt: timestamp,
     }
 
-    await tx.store.put(createLocalProjectEntityRow(EFFECT_KIND, row.id, localEffectJsonValue(row), timestamp))
+    await tx.store.put(createLocalProjectEntityRow(EFFECT_ROW_KIND, row.id, localEffectJsonValue(row), timestamp))
   }
 
   if (!input.instrument && input.synth) {
@@ -584,7 +583,7 @@ export const restoreLocalTrackEffectChain = async (
       updatedAt: timestamp,
     }
 
-    await tx.store.put(createLocalProjectEntityRow(EFFECT_KIND, row.id, localEffectJsonValue(row), timestamp))
+    await tx.store.put(createLocalProjectEntityRow(EFFECT_ROW_KIND, row.id, localEffectJsonValue(row), timestamp))
   }
 
   if (input.arp !== undefined) {
@@ -598,7 +597,7 @@ export const restoreLocalTrackEffectChain = async (
       updatedAt: timestamp,
     }
 
-    await tx.store.put(createLocalProjectEntityRow(EFFECT_KIND, row.id, localEffectJsonValue(row), timestamp))
+    await tx.store.put(createLocalProjectEntityRow(EFFECT_ROW_KIND, row.id, localEffectJsonValue(row), timestamp))
   }
 
   await tx.done

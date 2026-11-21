@@ -22,10 +22,10 @@ import { subscribeToSharedOutboxSettlements } from "../../src/lib/shared-outbox-
 import { z } from "zod"
 import {
   NativeAudioHostCommandError,
-  decodeNativeProcessorPatchStatus,
   nativeDeliveryFailureKind,
   nativeProcessorPatchReply,
 } from "../../apps/desktop/audio-host"
+import { decodeNativeProcessorPatchStatus } from "../../apps/desktop/native-host-frame-decoders"
 import { NativeAudioHostNotSentError } from "../../apps/desktop/native-request-broker"
 import {
   createNativeProcessorStateOwner,

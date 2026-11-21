@@ -10,7 +10,8 @@ import { recordingSpoolReleaseSchema } from "../recording-spool"
 import { registerNativeSessionTransportIpc } from "./native-session-transport-ipc"
 import { registerNativeSessionRecordingIpc } from "./native-session-recording-ipc"
 import { coordinateNativeVst3Attachments, nativeVst3CoordinationFailureReply } from "../native-vst3-coordinator"
-import { nativeHostConfigurationIdentityFor, nativeProcessorPatchReply, nativeSessionFailure, nativeVstEditorOwnershipProbe, type NativeVstEditorAnchor, type NativeVstEditorCommand } from "../audio-host"
+import { nativeHostConfigurationIdentityFor, nativeProcessorPatchReply, nativeSessionFailure, nativeVstEditorOwnershipProbe } from "../audio-host"
+import type { NativeVstEditorAnchor, NativeVstEditorCommand } from "../native-host-frame-encoders"
 /* oxlint-disable eslint/no-restricted-imports -- desktop-audio-lifecycle needs the bridge types, which stay in src/types until the batch that owns the certification-pinned playback files moves it */
 import { completeDesktopAudioRecovery } from "../../../src/lib/desktop-audio-lifecycle"
 /* oxlint-enable eslint/no-restricted-imports */

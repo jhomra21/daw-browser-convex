@@ -16,14 +16,6 @@ export const clampPixelsPerSecond = (value: number) => (
     : DEFAULT_PIXELS_PER_SECOND
 )
 
-export const secondsToPixels = (seconds: number, pixelsPerSecond: number) => (
-  Math.max(0, seconds) * clampPixelsPerSecond(pixelsPerSecond)
-)
-
-export const pixelsToSeconds = (pixels: number, pixelsPerSecond: number) => (
-  Math.max(0, pixels) / clampPixelsPerSecond(pixelsPerSecond)
-)
-
 export const normalizeTimelineRange = (
   range: TimelineRange,
   durationSec: number,

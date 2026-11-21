@@ -10,18 +10,11 @@ import {
   normalizeTimelineRange,
   normalizeWheelZoomFactor,
   pixelsPerSecondForRange,
-  pixelsToSeconds,
-  secondsToPixels,
   selectTimelineGridIntervals,
   zoomRangeAtAnchor,
 } from './timeline-view'
 
 describe('timeline view contracts', () => {
-  test('converts between time and pixels at the default scale', () => {
-    expect(secondsToPixels(2.5, DEFAULT_PIXELS_PER_SECOND)).toBe(250)
-    expect(pixelsToSeconds(250, DEFAULT_PIXELS_PER_SECOND)).toBe(2.5)
-  })
-
   test('normalizes invalid scales to bounded finite values', () => {
     expect(clampPixelsPerSecond(Number.NaN)).toBe(DEFAULT_PIXELS_PER_SECOND)
     expect(clampPixelsPerSecond(-1)).toBe(MIN_PIXELS_PER_SECOND)

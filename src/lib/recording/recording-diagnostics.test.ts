@@ -1,13 +1,15 @@
 import { describe, expect, test } from "bun:test"
-import { getRecordingDiagnostics, resetRecordingDiagnostics, updateRecordingDiagnostics, recordRecordingTermination, recordRecordingLifecycle, recordNativeBlockTiming, recordingDiagnosticsSubscriberCount, subscribeRecordingDiagnostics } from "./recording-diagnostics"
+import { getRecordingDiagnostics, resetRecordingDiagnostics, updateRecordingDiagnostics, recordRecordingTermination, recordRecordingLifecycle, subscribeRecordingDiagnostics } from "./recording-diagnostics"
 
 describe("recording diagnostics", () => {
-  test("tracks active diagnostic subscribers", () => {
-    const previous = recordingDiagnosticsSubscriberCount()
-    const unsubscribe = subscribeRecordingDiagnostics(() => undefined)
-    expect(recordingDiagnosticsSubscriberCount()).toBe(previous + 1)
+  test("notifies subscribers of updates until they unsubscribe", () => {
+    let notifications = 0
+    const unsubscribe = subscribeRecordingDiagnostics(() => { notifications += 1 })
+    updateRecordingDiagnostics({ queuedFrames: 1 })
+    expect(notifications).toBe(1)
     unsubscribe()
-    expect(recordingDiagnosticsSubscriberCount()).toBe(previous)
+    updateRecordingDiagnostics({ queuedFrames: 2 })
+    expect(notifications).toBe(1)
   })
   test("retains first terminal cause, sanitizes errors and bounds lifecycle history", () => {
     resetRecordingDiagnostics()
@@ -76,16 +78,6 @@ describe("recording diagnostics", () => {
     expect(getRecordingDiagnostics().peakSabWriterOccupancy).toBe(8)
     expect(getRecordingDiagnostics()).toMatchObject({
       peakWriterOutstandingBuffers: 8, writerOutstandingBuffers: 0, peakQueuedFrames: 34_816,
-    })
-  })
-
-  test("records native block arrival gaps and handler duration without retaining blocks", () => {
-    resetRecordingDiagnostics()
-    recordNativeBlockTiming(0, 0.2)
-    recordNativeBlockTiming(43, 0.3)
-    recordNativeBlockTiming(800, 2)
-    expect(getRecordingDiagnostics()).toMatchObject({
-      nativeReceivedBlocks: 3, nativeArrivalGapMaxMs: 757, nativeHandlerMaxMs: 2,
     })
   })
 })

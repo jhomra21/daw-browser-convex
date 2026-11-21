@@ -251,23 +251,6 @@ const buildRowsForOrderedTracks = (
   })
 }
 
-export const buildTimelineTrackLayoutRows = (input: {
-  tracks: readonly Pick<Track, 'id' | 'groupId' | 'channelRole' | 'collapsed'>[]
-  visibleTrackIds?: readonly Track['id'][]
-} & TrackLayoutRowOptions): TimelineTrackLayoutRow[] => {
-  const trackById = new Map(input.tracks.map((track) => [track.id, track]))
-
-  const orderedTracks = input.visibleTrackIds
-    ? input.visibleTrackIds.flatMap((trackId) => {
-        const track = trackById.get(trackId)
-
-        return track ? [track] : []
-      })
-    : input.tracks
-
-  return buildRowsForOrderedTracks(orderedTracks, input)
-}
-
 const layoutHeight = (rows: readonly TimelineTrackLayoutRow[]) => {
   const last = rows.at(-1)
 

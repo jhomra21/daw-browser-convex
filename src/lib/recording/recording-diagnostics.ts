@@ -78,23 +78,12 @@ const initialDiagnostics = (): RecordingDiagnostics => ({
 })
 
 let snapshot = initialDiagnostics()
-let lastNativeBlockAt: number | null = null
 const listeners = new Set<() => void>()
-export const recordingDiagnosticsSubscriberCount = () => listeners.size
 
 const boundedFrames = (value: number | null): number | null =>
   value === null ? null : Number.isSafeInteger(value) ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, value)) : null
 
 export const getRecordingDiagnostics = (): RecordingDiagnostics => snapshot
-
-export const recordNativeBlockTiming = (arrivalMs: number, handlerMs: number) => {
-  updateRecordingDiagnostics({
-    nativeReceivedBlocks: snapshot.nativeReceivedBlocks + 1,
-    nativeArrivalGapMaxMs: Math.max(snapshot.nativeArrivalGapMaxMs, lastNativeBlockAt === null ? 0 : Math.max(0, arrivalMs - lastNativeBlockAt)),
-    nativeHandlerMaxMs: Math.max(snapshot.nativeHandlerMaxMs, handlerMs),
-  })
-  lastNativeBlockAt = arrivalMs
-}
 
 const sanitizeError = (error: Error | string | undefined) =>
   error === undefined ? null : (error instanceof Error ? error.message : error)
@@ -144,7 +133,6 @@ export const updateRecordingDiagnostics = (update: Partial<RecordingDiagnostics>
 
 export const resetRecordingDiagnostics = () => {
   snapshot = initialDiagnostics()
-  lastNativeBlockAt = null
 
   for (const listener of listeners) listener()
 }

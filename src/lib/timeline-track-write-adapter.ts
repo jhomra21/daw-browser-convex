@@ -1,5 +1,5 @@
 import { isJsonObject, isLocalId, type JsonValue } from '@daw-browser/shared'
-import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
+import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox-publishers'
 import type { UpdateTrackInput } from '~/lib/timeline-repository/types'
 import type { TrackRouting } from '@daw-browser/timeline-core/types'
 import { z } from 'zod'

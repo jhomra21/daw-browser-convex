@@ -4,7 +4,7 @@ import { createEffect, createMemo, createSignal, untrack, type Accessor } from '
 import { isLocalId, normalizeMasterVolume, type ProjectRole } from '@daw-browser/shared'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { convexApi } from '~/lib/convex'
-import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
+import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox-publishers'
 import type { ProjectMixState } from '~/lib/project-mix-state'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>

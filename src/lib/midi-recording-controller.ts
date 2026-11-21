@@ -5,10 +5,8 @@ import { createMidiRecordingSession } from '~/lib/midi/recording-session'
 import { createMidiRecordingCheckpointController, type MidiRecordingCheckpointController } from '~/lib/midi/recording-checkpoint'
 import { isJsonString, isLocalId, isClipKindCompatibleWithTrack, type MidiClip, type SharedTimelineOperation } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
-import {
-  enqueueSharedTimelineOperationOnFailure,
-  isPermanentSharedOperationError,
-} from '~/lib/shared-outbox'
+import { isPermanentSharedOperationError } from '~/lib/shared-outbox'
+import { enqueueSharedTimelineOperationOnFailure } from '~/lib/shared-outbox-publishers'
 import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import {
   acquireTrackRecordingLock,

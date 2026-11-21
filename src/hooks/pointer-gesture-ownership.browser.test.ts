@@ -15,11 +15,14 @@ const fixtureId = 'virtual:pointer-gesture-fixture'
 
 // These fixtures use local projects. A durable call is a wiring error, not an invented admission or completion.
 const localOnlyOutboxStub = `
-export const publishDurableSharedTimelineOperation = async () => { throw new Error('Unexpected cloud operation in local fixture') }
-export const publishDurableEffectsOperation = async () => { throw new Error('Unexpected cloud operation in local fixture') }
 export const readSharedOutboxOperation = async () => { throw new Error('Unexpected admitted write in local fixture') }
 export const consumeSharedOutboxCompletion = async () => { throw new Error('Unexpected completion in local fixture') }
 export const subscribeToSharedOutboxSettlements = () => { throw new Error('Unexpected durable subscription in local fixture') }
+`
+
+const localOnlyPublishersStub = `
+export const publishDurableSharedTimelineOperation = async () => { throw new Error('Unexpected cloud operation in local fixture') }
+export const publishDurableEffectsOperation = async () => { throw new Error('Unexpected cloud operation in local fixture') }
 `
 
 const buildFixture = async (source: string, stubs: Record<string, string>) => {
@@ -467,6 +470,7 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
     'lib/local-project-changes': `export const subscribeToLocalProjectChanges = () => () => {}; export const notifyLocalProjectChanged = () => 0; export const localProjectChangeSequence = () => 0`,
     'lib/timeline-repository/local-timeline-repository': `export const createLocalTimelineRepository = () => ({}); export const flushLocalTimelineWrites = async () => {}`,
     'lib/shared-outbox': localOnlyOutboxStub,
+  'lib/shared-outbox-publishers': localOnlyPublishersStub,
     'context/app-preferences': `export const useAppPreferences = () => ({ appearance: { themeTokens: () => ({}) } })`,
   })
 
@@ -738,6 +742,7 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
 `,
   'lib/timeline-repository/local-timeline-repository': `export const createLocalTimelineRepository = () => ({}); export const flushLocalTimelineWrites = async () => {}`,
   'lib/shared-outbox': localOnlyOutboxStub,
+  'lib/shared-outbox-publishers': localOnlyPublishersStub,
 }
 
 const utilityResultSchema = z.object({
@@ -942,6 +947,7 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
     'lib/local-project-changes': `export const subscribeToLocalProjectChanges = (_projectId, listener) => { window.deviceStoreChanged = listener; return () => {} }; export const notifyLocalProjectChanged = () => 0; export const localProjectChangeSequence = () => 0`,
     'lib/timeline-repository/local-timeline-repository': `export const createLocalTimelineRepository = () => ({}); export const flushLocalTimelineWrites = async () => {}`,
     'lib/shared-outbox': localOnlyOutboxStub,
+  'lib/shared-outbox-publishers': localOnlyPublishersStub,
   })
 
 const resultSchema = z.object({ writes: z.array(z.number()), history: z.number(), historyEntries: z.array(z.unknown()), historyEntry: z.unknown().optional(), calls: z.array(z.number().nullable()), value: z.number(), frames: z.number(), previews: z.number(), flushes: z.number(), nativeValues: z.array(z.number()), overrides: z.array(z.string()) })
@@ -1570,6 +1576,7 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
 `,
     'lib/timeline-repository/local-timeline-repository': `export const createLocalTimelineRepository = () => ({}); export const flushLocalTimelineWrites = async () => {}`,
     'lib/shared-outbox': localOnlyOutboxStub,
+  'lib/shared-outbox-publishers': localOnlyPublishersStub,
     'context/app-preferences': `export const useAppPreferences = () => ({ appearance: { themeTokens: () => ({}) } })`,
   })
 
@@ -1955,6 +1962,7 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
 `,
     'lib/timeline-repository/local-timeline-repository': `export const createLocalTimelineRepository = () => ({}); export const flushLocalTimelineWrites = async () => {}`,
     'lib/shared-outbox': localOnlyOutboxStub,
+  'lib/shared-outbox-publishers': localOnlyPublishersStub,
     'context/app-preferences': `export const useAppPreferences = () => ({ appearance: { themeTokens: () => ({}) } })`,
   })
 
@@ -2241,6 +2249,7 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
 `,
   'lib/timeline-repository/local-timeline-repository': `export const createLocalTimelineRepository = () => ({}); export const flushLocalTimelineWrites = async () => {}`,
   'lib/shared-outbox': localOnlyOutboxStub,
+  'lib/shared-outbox-publishers': localOnlyPublishersStub,
 }
 
 const effectCommitResultSchema = z.object({

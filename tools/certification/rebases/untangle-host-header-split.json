@@ -1,0 +1,38 @@
+{
+ "name": "untangle-host-header-split",
+ "sequence": 108,
+ "createdAt": "2026-11-21T21:16:48.909Z",
+ "revert": [],
+ "watched": [],
+ "changes": [],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "8a7758624fb11862168e84f72ece3aa5283cdb3e",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "c9701862142767ed5516c8a782487631c0b344cd34ee0aad4252924aa13e290a",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "c9701862142767ed5516c8a782487631c0b344cd34ee0aad4252924aa13e290a",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b15-bless/live",
+   "resultSha256": "7375db7445ba485fd30bbca7381dedc262a43c54686cbaa4fe220c718cc1fe30",
+   "seconds": 1261.083800916,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

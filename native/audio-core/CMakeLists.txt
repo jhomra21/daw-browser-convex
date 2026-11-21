@@ -5,7 +5,38 @@ include(CTest)
 option(DAW_AUDIO_CORE_BUILD_WASM "Build the optimized production Emscripten audio core." OFF)
 option(DAW_AUDIO_CORE_BUILD_WASM_HARNESS "Build the Emscripten-compatible audio-core fixture harness." OFF)
 
-add_library(daw-audio-core STATIC src/audio_core.cpp)
+set(DAW_AUDIO_CORE_SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core_assets.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core_graph_prepare.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core_graph_render.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core_instruments.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core_mixer.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core_native_hooks.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core_parameters.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core_prepare.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core_process.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core_publication.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core_recording.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core_slots.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core_sources.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core_validation.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core_wasm.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_autofilter.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_delay.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_dynamics.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_eq.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_lofi.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_modulation.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_registry.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_reverb.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_saturator.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_spectral.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_utility.cpp
+)
+# The host test compiles the core with its own fault-injection definition instead of linking the library.
+set(DAW_AUDIO_CORE_SOURCES ${DAW_AUDIO_CORE_SOURCES} PARENT_SCOPE)
+add_library(daw-audio-core STATIC ${DAW_AUDIO_CORE_SOURCES})
 target_compile_features(daw-audio-core PUBLIC cxx_std_20)
 target_include_directories(daw-audio-core PUBLIC include generated)
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
@@ -41,7 +72,7 @@ if(BUILD_TESTING)
   add_test(NAME daw-phase6i-replacement-silences-the-voices-of-a-missing-zone
     COMMAND daw-audio-core-test --phase-6i-contract zones-gone-heard)
   # A voice that names a zone the instrument no longer has is cleared by the next render block, so no audio or public
-  # status shows it. Only this variant, which includes audio_core.cpp, can read the carried voices.
+  # status shows it. Only this variant, which includes the core sources, can read the carried voices.
   add_executable(daw-audio-core-voice-state-test tests/audio_core_test.cpp tests/utility_fixture.cpp tests/graph_fixture.cpp)
   target_compile_features(daw-audio-core-voice-state-test PRIVATE cxx_std_20)
   target_include_directories(daw-audio-core-voice-state-test PRIVATE include generated)

@@ -725,7 +725,7 @@ async function runSeed(seed: number, plant: Defect | undefined, trace?: SeedTrac
       await act({ kind: "check", mode: "parameter-dropped" })
     } else if (options.scenario === "future-epoch-drop") {
       // A callback begins at epoch E. Control then queues the seek's SetTransport(E+1) and a flush that
-      // native admits under E+1 (audio-host.cpp:3119). The callback still drains with E applied and drops
+      // native admits under E+1. The callback still drains with E applied and drops
       // the batch. A later flush in E+1 lifts the floor over its sequence, which must not read as applied.
       await act({ kind: "split-render", value: 1 })
       await act({ kind: "render-open" })
@@ -832,7 +832,7 @@ async function runSeed(seed: number, plant: Defect | undefined, trace?: SeedTrac
       await act({ kind: "check", mode: "rejection-classes" })
     } else if (options.scenario === "retained-override-instrument") {
       // The synth's configuration changes, but the Utility on the same node keeps its processor history
-      // slot and with it the applied override (audio_core.cpp:8044-8072). History then moves desired with
+      // slot and with it the applied override. History then moves desired with
       // no gesture: only the next adoption's reconcile can reach native, so it must still know the override.
       await act({ kind: "registry-gesture", value: -9 }); await drain()
       await act({ kind: "synth-params" })
@@ -993,7 +993,7 @@ async function runSeed(seed: number, plant: Defect | undefined, trace?: SeedTrac
         await executeNamed("patch"); await act({ kind: "render-block" })
         await act({ kind: "deliver-held-progress" }); await deliverNamed("patch")
       } else if (options.scenario === "patch-race-split") {
-        // Model-only, gates nothing: native claims and applies in one callback (audio-host.cpp:5139-5148), so a gesture
+        // Model-only, gates nothing: native claims and applies in one callback, so a gesture
         // cannot drain between the claim and the apply. Kept as a harder interleaving of the fake host.
         await behind("negative")
         await act({ kind: "render-block" }); await act({ kind: "deliver-progress" })
@@ -1412,7 +1412,7 @@ async function runSeed(seed: number, plant: Defect | undefined, trace?: SeedTrac
       await act({ kind: "check", mode: "deferred-outcome", value: rollbackLost ? 4 : 3 })
     } else if (options.scenario === "reclaim-held-by-retirement") {
       // A schedule publication removes a clip and the controller releases its asset. Native's ReclaimAssets does nothing
-      // while the published predecessor's plan is unretired (audio-host.cpp:1708), and only a Retire or the next Prepare
+      // while the published predecessor's plan is unretired, and only a Retire or the next Prepare
       // retires it: the schedule path sends neither, so the clip's capacity must still come back once the fair drain ends.
       await act({ kind: "sample", value: 1 }); await act({ kind: "prepare-candidate" }); await drain()
       await act({ kind: "publish-candidate" }); await drain()

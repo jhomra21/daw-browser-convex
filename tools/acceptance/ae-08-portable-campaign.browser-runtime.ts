@@ -461,7 +461,7 @@ const burst = async (row: string, from: string, to: string, count: number) => {
     events: run.events, faults: run.faults, sessions: run.sessions }
 }
 
-// ---- T:984: prepare, install and publish through the real worklet at the core's maximum graph ----
+// ---- Prepare, install and publish through the real worklet at the core's maximum graph ----
 // The R1 gate (adoption at 0.55 ms p50 and 1.40 ms max against a 2.9 ms block) was measured under Bun/JSC. The worklet has no
 // high-resolution clock (see workletClock), so a step is timed as the main thread sees it: from the post to the worklet's answer.
 // That is an upper bound on the render-thread cost (it adds the message's wait for the next quantum), and `floor` is the same

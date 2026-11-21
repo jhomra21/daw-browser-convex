@@ -1,5 +1,5 @@
 // AE-08 phase 9 portable campaign: the packaged matrix's bursts on the portable engine in Chromium (real worklet, WASM core and
-// portable controller; the DP stub never runs them, T:953). The page side is ae-08-portable-campaign.browser-runtime.ts.
+// portable controller; the DP stub never runs them). The page side is ae-08-portable-campaign.browser-runtime.ts.
 //
 //   bun tools/acceptance/ae-08-portable-campaign.ts --out <dir> [--rows gain,note,...] [--edits 20]
 //   bun tools/acceptance/ae-08-portable-campaign.ts --self-test

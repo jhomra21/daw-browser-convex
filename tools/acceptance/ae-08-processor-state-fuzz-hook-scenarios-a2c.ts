@@ -288,7 +288,7 @@ export default async function runA2cScenario(name: string, driver: A2cDriver) {
     await act({ kind: "mark", mode: "expected", value: -6 })
     await act({ kind: "check", mode: "cancel-other-save" })
   } else if (name === "pause-refused-pending") {
-    // The host refuses the panel's flush, so its record is held (design 1.6: a transient refusal waits for an adoption or
+    // The host refuses the panel's flush, so its record is held (a transient refusal waits for an adoption or
     // the domain's end, it is not sent again); the pause then ends the domain it was sent in.
     // The flush is answered without a restore, and the still-desired value reaches native once the host accepts again.
     // (A seek in the hook takes the dispose-and-rebuild path and re-executes the flush; the controller witnesses seek.)

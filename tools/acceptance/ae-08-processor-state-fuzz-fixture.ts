@@ -1463,7 +1463,7 @@ export default function createControllerFixture(
     if (convergence) {
       checked("I1"); checked("I4"); checked("I5")
 
-      // Native keeps a publication in flight until an Inspect settles it (audio-host.cpp:2978, 2994-3012); once the controller
+      // Native keeps a publication in flight until an Inspect settles it; once the controller
       // has nothing left to ask, one still in flight is a publication it lost track of, and its flush waiters never settle.
       if (h.publicationPending)
         fail("I5", `Native still holds revision ${h.publicationRevision} as an in-flight publication (${h.publicationAcknowledged ? "acknowledged" : h.publicationDeferred ? "deferred" : "unacknowledged"}) that no controller request will settle`, "live", "publication-left-in-flight")
@@ -2017,7 +2017,7 @@ export default function createControllerFixture(
 
       if (!flush?.settled) throw new Error("Drift witness flush did not settle")
 
-      // Native Prepare answers publish-pending while a graph control is queued (audio-host.cpp:2523), so a
+      // Native Prepare answers publish-pending while a graph control is queued, so a
       // queued batch is re-stamped at most once; a host model that allows a chain (R->S->T) needs its own witness.
       if ([...h.restampCounts.values()].some((count) => count > 1)) throw new Error("A queued batch was re-stamped twice")
       record({ witness: mode, receipt: flush.result, restamped: [...h.restampedSequences], appliedBatches: [...h.appliedBatches.keys()] })

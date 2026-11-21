@@ -82,11 +82,10 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
   let latencyReadyEpoch: bigint | undefined
   let seam = 0n
   let publicationFrame = 0n
-  // Native keeps publication ownership in two places. The control thread's `publication_in_flight` (audio-host.cpp:2978)
-  // is set by Publish and cleared only by an Inspect that settles it, a cancelling SetTransport or Stop (:2988, :3007, :3011,
-  // :4408, :5026, :5057): the callback's acknowledgement does not clear it. The callback's own atomics are the request
-  // (`publish_requested_revision`, consumed by the claim at :5225), the acknowledgement (`publish_acknowledged_revision`,
-  // :5318) and the deferral (`publish_deferred_revision`, :5253, :5284).
+  // Native keeps publication ownership in two places. The control thread's `publication_in_flight`
+  // is set by Publish and cleared only by an Inspect that settles it, a cancelling SetTransport or Stop: the callback's acknowledgement does not clear it. The callback's own atomics are the request
+  // (`publish_requested_revision`, consumed by the claim in the callback), the acknowledgement (`publish_acknowledged_revision`)
+  // and the deferral (`publish_deferred_revision`).
   let publicationInFlight = false
   let publicationRevision = 0
   let publicationClaimed = false
@@ -156,7 +155,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
   // audio-host.cpp:5139-5148), the reply unconfirmed or never sent. negative / lost split claim and apply across two
   // callbacks, which native cannot do: they are model-only and gate nothing.
   let patchMode = "normal"
-  // Admissions the host refuses for capacity after consuming their sequence (audio-host.cpp:3123-3129).
+  // Admissions the host refuses for capacity after consuming their sequence.
   let refuseParameters = 0
   // The processor floor when the last patch installed: a batch at or below it drained on the state that patch replaced.
   let patchFloor = 0
@@ -181,7 +180,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
   }
 
   // A callback split in two, so control work can run between its transport read and its lane drain
-  // (audio-host.cpp:5175-5176 and 5385). Only a scenario that asks for it enables the extra actions.
+  // (ProcessPlanar reads the transport, then drains the lane). Only a scenario that asks for it enables the extra actions.
   let splitRender = false
   let renderOpen = false
   let lost = false
@@ -189,7 +188,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
   let utilityIncarnation = 1
   // `released`: the controller's ReleaseAsset ran (the logical lease is released). `releaseRequested`: native's
   // `release_requested`, also set by Rollback for the assets its revision staged. `staged`: native's `staged_revision`,
-  // the prepared revision when the asset was installed, cleared when that revision's publication settles (:4119, :1699-1704).
+  // the prepared revision when the asset was installed, cleared when that revision's publication settles.
   const assets = new Map<number, { released: boolean; releaseRequested: boolean; staged: number; after?: bigint }>()
   const installedAsset = () => ({ released: false, releaseRequested: false, staged: prepared?.revision ?? 0 })
   // Independent logical ownership, not reconstructed from the mutable host
@@ -292,7 +291,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
     const allocated = name === "prepare" ? ++runtimeRevision : runtimeRevision
     // The supervisor queues a revision behind a pending control request like a processor patch (audio-host.ts
     // requestGraphRevision); only a lost session refuses it unsent (NotSent: unavailable). A request it sent whose
-    // reply never came is unconfirmed (design 1.2).
+    // reply never came is unconfirmed.
     const failure = (kind: "unavailable" | "unconfirmed"): NativeRevisionReply => ({ ok: false, error: "The native audio session is unavailable.", kind })
 
     if (lost) {
@@ -312,7 +311,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
     revision: { status: code, continuity: code === "prepare-failed" ? "rejected" : "accepted",
       requestedRevision: revision, activeRevision: active?.revision ?? 0, preparedRevision: prepared?.revision ?? 0,
       retiredRevision: retired?.revision ?? 0, publicationFrame, renderEpoch,
-      // SetTransport stores the epoch when it accepts the request, before any callback applies it (audio-host.cpp:4429).
+      // SetTransport stores the epoch when it accepts the request, before any callback applies it.
       requestedPublicationFrame: seam, progressFrame: frame, transportEpoch: lastTransport?.epoch ?? epoch },
   })
 
@@ -320,7 +319,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
     for (const asset of assets.values()) if (asset.staged === revision) asset.staged = 0
   }
 
-  // The control-thread settlement of an in-flight publication (audio-host.cpp:2984-3029). It is the only place an
+  // The control-thread settlement of an in-flight publication. It is the only place an
   // acknowledged publication stops being in flight, and the place a deferred one does.
   const inspectStatus = (revision: number): NativeGraphRevisionStatus["status"] => {
     reclaimAssets()
@@ -348,7 +347,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
           ? "publish-pending" : prepared?.revision === revision ? "prepared" : "stale-revision"
   }
 
-  // Rollback's resource effect (audio-host.cpp:3039-3058): the prepared revision's staged assets are marked for release.
+  // Rollback's resource effect: the prepared revision's staged assets are marked for release.
   // That is native's own release of them, so their logical lease ends here and a later ReleaseAsset is idempotent.
   const discardPrepared = () => {
     for (const [id, asset] of assets) {
@@ -364,7 +363,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
     prepared = undefined; preparedBank = undefined
   }
 
-  // InstallAsset / CreateMappedAsset (audio-host.cpp:4113-4121): a new asset is staged against the prepared revision.
+  // InstallAsset / CreateMappedAsset: a new asset is staged against the prepared revision.
   const stageAsset = (id: number) => { acquire(id); assets.set(id, installedAsset()) }
 
   const admitAsset = (id: number): Reply => {
@@ -410,9 +409,9 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
     // A removed target loses its runtime slot. Re-adding its public ID later
     // starts a fresh incarnation, never inherits its old override. The same holds for a target
     // whose node got a fresh slot.
-    // Written from native RetainsScheduledTarget (audio_core.cpp:6842-6859) and retained_scheduled_node
-    // (:6811-6818), never from the controller's predicate. A node keeps its slot only if its kind is
-    // unchanged and an instrument node's configuration is too (assign_prepared_node :7736-7772).
+    // Written from native RetainsScheduledTarget and retained_scheduled_node
+    // never from the controller's predicate. A node keeps its slot only if its kind is
+    // unchanged and an instrument node's configuration is too (assign_prepared_node).
     const instrumentNodeKind = 2
 
     const sameNodeKind = (id: bigint) => active?.nodes.has(id) === true && prepared?.nodes.has(id) === true
@@ -421,10 +420,10 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
     const retainedNode = (id: bigint) => sameNodeKind(id)
       && (active?.nodes.get(id) !== instrumentNodeKind || publishedConfigs.get(id) === preparedConfigs.get(id))
 
-    // An applied override lives in the processor's own history slot (audio_core.cpp:2145-2154), which survives while
-    // the processor stays compatible (:8044-8072). Reconfiguring the instrument on its node gives the node a fresh
+    // An applied override lives in the processor's own history slot, which survives while
+    // the processor stays compatible. Reconfiguring the instrument on its node gives the node a fresh
     // slot, which only matters to queued events (retainedNode), not to the processor's override.
-    // compatible_processor_history (audio_core.cpp:7122-7136): same kind and state size, and for a Utility the
+    // compatible_processor_history: same kind and state size, and for a Utility the
     // dc_block, input_mode, matrix and swap words of its state (bytes 36, 12, 28, 32). Otherwise the successor gets
     // a fresh history slot with no override.
     const utilityKind = 1
@@ -491,8 +490,8 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
     record({ event: "callback-publication", revision: active.revision, graph: fields(active), content: nativeFields(active) })
   }
 
-  // RetireGraphRevision's success path (audio-host.cpp:3079-3095), reached from an explicit Retire or Prepare's
-  // auto-retire (:2548). No other control wake retires a predecessor.
+  // RetireGraphRevision's success path, reached from an explicit Retire or Prepare's
+  // auto-retire. No other control wake retires a predecessor.
   const retirePredecessor = () => {
     if (!retired || renderEpoch < retirementEpoch || latencyReadyEpoch !== undefined) return false
     dropBank(retiredBank)
@@ -502,8 +501,8 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
     return true
   }
 
-  // ReclaimAssets (audio-host.cpp:1705-1750). Its callers are Inspect, a successful Retire, the asset commands and the
-  // callback's reader wake (:1911, :5460), which the fixture's `reclaim` action stands for. It does nothing while a
+  // ReclaimAssets. Its callers are Inspect, a successful Retire, the asset commands and the
+  // callback's reader wake, which the fixture's `reclaim` action stands for. It does nothing while a
   // publication is in flight, a revision is prepared or a predecessor plan is unretired.
   const reclaimBlocked = () => prepared !== undefined || retired !== undefined || publicationInFlight
 
@@ -529,7 +528,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
     }
   }
 
-  // Whether ReclaimAssets has work it can finish or start now: the asset-reader wake (audio-host.cpp:5460, :1911) is
+  // Whether ReclaimAssets has work it can finish or start now: the asset-reader wake is
   // signalled exactly while a released asset waits on a block the callback has not completed, so a fair scheduler
   // owes it one when this holds.
   const reclaimable = () => !reclaimBlocked() && [...assets].some(([id, asset]) =>
@@ -588,7 +587,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
         }
       }),
       queueInstrumentEvents: (bytes) => enqueue("instrument-events", (finish) => {
-        // Admission only, with no epoch or revision check (audio-host.cpp:3222-3262): native applies a
+        // Admission only, with no epoch or revision check: native applies a
         // live instrument event at its next render callback and drops it there if its epoch is not current.
         urgentQueue.push(bytes.slice())
         finish({ ok: true })
@@ -603,7 +602,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
           const view = viewOf(bytes)
           const sequence = view.getBigUint64(12, true)
 
-          // Admission checks the epoch of the last queued SetTransport (audio-host.cpp:3119–3121); only the
+          // Admission checks the epoch of the last queued SetTransport; only the
           // drain compares against the epoch the callback applied.
           if (view.getUint32(4, true) !== active?.revision || view.getUint32(8, true) !== (lastTransport?.epoch ?? epoch)
             || sequence <= lastQueuedSequence) { finish({ ok: false, error: "parameter-admission-rejected", kind: "refused" });
@@ -688,7 +687,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
           return
         }
 
-        // audio-host.cpp:4406-4413: cancel an unclaimed request, otherwise settle the publication with an internal
+        // SetTransport: cancel an unclaimed request, otherwise settle the publication with an internal
         // Inspect and refuse if it is still pending; then Rollback whatever stays prepared.
         if (publicationInFlight) {
           if (publicationRequested()) {
@@ -711,7 +710,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
       stop: () => simple("stop", () => {
         started = false; running = false
 
-        // audio-host.cpp:5024-5062. The device is quiescent first, so a callback that had claimed the request has
+        // Stop: the device is quiescent first, so a callback that had claimed the request has
         // already acknowledged it.
         if (publicationClaimed) acknowledgePublication()
 
@@ -727,7 +726,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
 
         if (hookLifetime) {
           // Native Teardown destroys all graphs and resets sequence admission
-          // and progress floors (audio-host.cpp:5062–5102). A1 freezes its
+          // and progress floors. A1 freezes its
           // single-install historical model; only the hook reinstalls here.
           domain++
           preparedBank = undefined; retiredBank = undefined
@@ -774,7 +773,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
  return
           }
 
-          // Prepare's auto-retire (audio-host.cpp:2548-2552): the predecessor plan is retired here or the admission
+          // Prepare's auto-retire: the predecessor plan is retired here or the admission
           // stays retryable.
           if (retired && !retirePredecessor()) {
             record({ event: "adoption-waiting", revision })
@@ -788,7 +787,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
           viewOf(rewritten).setUint32(16, revision, true)
           prepared = decodeGraph(rewritten); submittedGraphs.set(prepared.revision, rewritten); seam = requestedPublicationFrame; rebaseRequired = false
           preparedConfigs = new Map(publishedConfigs)
-          // Prepare settles the flag itself (audio-host.cpp SettlePreparedInstruments): ready when every instrument node holds a retained configuration.
+          // Prepare settles the flag itself (SettlePreparedInstruments): ready when every instrument node holds a retained configuration.
           instrumentsReady = [...prepared.nodes].every(([id, kind]) => kind !== 2 || preparedConfigs.has(id))
           preparedBank = { revision, epoch, through: seam, window: 0n, complete: false, seam, sources: new Map(), sourceHistory: new Map(), events: new Map() }
           record({ event: "prepared", revision, content: fields(prepared), seam })
@@ -805,7 +804,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
  return }
 
           if (requestedPublicationFrame > 0n && requestedPublicationFrame !== seam) {
-            // A rebind rebinds the seam and does not arm the Publish (audio-host.cpp:2985–2995), so it is not a publication.
+            // A rebind rebinds the seam and does not arm the Publish, so it is not a publication.
             counts.set("publish", (counts.get("publish") ?? 0) - 1); bump("rebind")
             seam = requestedPublicationFrame
             dropBank(preparedBank)
@@ -849,7 +848,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
 
  return }
 
-          // audio-host.cpp:3079-3095: only the retired plan of that revision answers retired or not-safe.
+          // RetireGraphRevision: only the retired plan of that revision answers retired or not-safe.
           if (retired?.revision !== revision) { finish(status("stale-revision", revision));
 
  return }
@@ -917,7 +916,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
       for (let index = 0; index < view.getUint32(0, true); index++) {
         const offset = 4 + index * 48
 
-        // Dropped at drain when its epoch is not the applied epoch (audio-host.cpp:5409); the floor never sees it.
+        // Dropped at drain when its epoch is not the applied epoch; the floor never sees it.
         if (view.getUint32(offset + 24, true) !== epoch) { urgentDropped++; record({ event: "urgent-dropped", epoch: view.getUint32(offset + 24, true) }); continue }
 
         synthValues.set(view.getUint32(offset + 40, true), view.getFloat32(offset + 44, true))
@@ -948,7 +947,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
       admissionCapacityGeneration: capacityGeneration, latencyCompletionGeneration }
   }
 
-  // Native claims, activates and acknowledges within one callback (audio-host.cpp:5302-5319). The acknowledgement
+  // Native claims, activates and acknowledges within one callback. The acknowledgement
   // does not end the publication: it stays in flight until a control-thread Inspect, SetTransport or Stop settles it.
   const acknowledgePublication = () => {
     if (callbackMode === "not-admitted") {
@@ -1082,8 +1081,8 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
       }
 
       if (publicationRequested() && seam > 0n && frame > seam) {
-        // The callback consumes the request and defers it (audio-host.cpp:5250-5254); the publication stays in flight
-        // until an Inspect clears the deferral (:2986).
+        // The callback consumes the request and defers it; the publication stays in flight
+        // until an Inspect clears the deferral.
         publicationDeferred = true; rebaseRequired = true
         record({ event: "callback-rebase-required", frame, seam })
       }

@@ -65,14 +65,14 @@ export const classes = [
   // seek waits on a graph the controller no longer tracks.
   owned("deferred-outcome-contradicts-native", "B5a"), owned("native-promotion-untracked", "B5a"),
   // A schedule publication released a clip's asset, and native never reclaimed it: ReclaimAssets does nothing while the
-  // published predecessor's plan is unretired (audio-host.cpp:1708), and no Retire or Prepare follows on the schedule path.
+  // published predecessor's plan is unretired, and no Retire or Prepare follows on the schedule path.
   owned("retirement-starves-reclamation", "B5b"),
   // Native still holds a publication in flight once the controller has nothing left to ask: its Inspect or Rollback was
-  // rejected or never sent, so the controller dropped the revision and nothing settles the publication (Fable F3/E2).
+  // rejected or never sent, so the controller dropped the revision and nothing settles the publication.
   owned("publication-left-in-flight", "B5a"),
   // Timeline.tsx handleEffectParamsCommitted falls through to rebuildPlaybackBackend when the
-  // patch is unhandled for a removed target. Contract 3 (target removal cancels its barriers)
-  // and Contract 5 (cancelled is not a caller failure) make that a cancelled receipt in B3b.
+  // patch is unhandled for a removed target. A target removal cancels its barriers,
+  // and a cancelled receipt is not a caller failure, so that is a cancelled receipt in B3b.
   owned("commit-after-removal-rebuild", "B3b"),
   // A desired change with no live dispatch (history replay) reaches native only through a
   // same-processor graph prepare, which keeps the slot's live runtime overrides
@@ -102,7 +102,7 @@ export const classes = [
   owned("parameter-future-epoch-drop", "B3a-i"),
   // A flush that ends a multi-field gesture sent the fields again although every one had applied.
   owned("gesture-end-redispatch", "B3a-i"),
-  // Installing a state patch zeroes the slot's overrides (audio_core.cpp:8426-8450). A gesture applied before
+  // Installing a state patch zeroes the slot's overrides. A gesture applied before
   // it is gone, while its proof, receipt or carrier still stand for it; or a gesture after the install is invalidated with it.
   owned("patch-install-erased-override", "B3a-ii"), owned("patch-install-over-invalidation", "B3a-ii"),
   // A callback claimed the patch, so native applies it whatever the reply says: a negative or lost reply is uncertain, never a rejection.

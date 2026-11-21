@@ -12,6 +12,7 @@ import { resolve } from "node:path"
 import { build } from "vite"
 import solidPlugin from "vite-plugin-solid"
 import { z } from "zod"
+import { agentBrowser } from "../../src/test-support/agent-browser"
 import { portableCampaignRows, type PortableCampaignRow } from "./ae-08-phase-9-rows"
 
 const root = resolve(import.meta.dir, "../..")
@@ -287,20 +288,10 @@ const fixtureServer = async () => {
 const referenceSeconds = 60
 const browserSession = `ae08-portable-${crypto.randomUUID()}`
 
-const browser = async (...args: string[]) => {
-  const { AGENT_BROWSER_CDP: _cdp, AGENT_BROWSER_SESSION: _session, ...inherited } = process.env
-  const child = Bun.spawn(["agent-browser", "--session", browserSession, ...args], { env: { ...inherited, AGENT_BROWSER_ARGS: "--autoplay-policy=no-user-gesture-required", AGENT_BROWSER_DEFAULT_TIMEOUT: "170000" }, stdout: "pipe", stderr: "pipe" })
-  // One bounded deadline per command, cleared on exit: a hung page must fail the campaign, not hang it.
-  const timer = setTimeout(() => child.kill(), 180_000)
-
-  try {
-    const [out, error, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
-
-    if (exit !== 0) throw new Error(`agent-browser ${args.join(" ")}: ${error || out}`)
-
-    return out.trim()
-  } finally { clearTimeout(timer) }
-}
+const browser = agentBrowser(browserSession, {
+  env: { AGENT_BROWSER_ARGS: "--autoplay-policy=no-user-gesture-required", AGENT_BROWSER_DEFAULT_TIMEOUT: "170000" },
+  timeoutMs: 180_000,
+})
 
 const resultSchema = z.object({ id: z.string(), value: z.json().optional(), error: z.string().optional() })
 const results = new Map<string, PromiseWithResolvers<unknown>>()

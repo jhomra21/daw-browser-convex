@@ -3,6 +3,7 @@ import type { ProjectSnapshotV2 } from '@daw-browser/control'
 import { buildTimelineRangeDeletePatchV1 } from './timeline-range-delete'
 
 type Snapshot = Omit<ProjectSnapshotV2, 'version'>
+
 type Clip = Snapshot['clips'][number]
 
 const clip = (input: Partial<Clip> & Pick<Clip, 'id' | 'startSec' | 'duration'>): Clip => ({

@@ -7,30 +7,31 @@ import { nativeMenuItemClass } from "./menu-action-types";
 
 export const EditMenu: Component<{ toolbar: TransportControlsProps }> = (props) => {
   const toolbar = () => props.toolbar;
+  const edit = () => props.toolbar.edit;
 
   return (
     <MenubarMenu value="edit">
       <NativeMenuTrigger label="Edit" />
       <MenubarContent class="border-border bg-popover">
-        <MenubarItem class={nativeMenuItemClass} onSelect={toolbar().onUndo}>
+        <MenubarItem class={nativeMenuItemClass} onSelect={edit().onUndo}>
           <span>Undo</span>
           <MenubarShortcut>Ctrl/Cmd + Z</MenubarShortcut>
         </MenubarItem>
-        <MenubarItem class={nativeMenuItemClass} onSelect={toolbar().onRedo}>
+        <MenubarItem class={nativeMenuItemClass} onSelect={edit().onRedo}>
           <span>Redo</span>
           <MenubarShortcut>Ctrl/Cmd + Y</MenubarShortcut>
         </MenubarItem>
         <MenubarSeparator />
         <MenubarItem
           class={nativeMenuItemClass}
-          onSelect={toolbar().onDuplicateSelection}
+          onSelect={edit().onDuplicateSelection}
         >
           <span>Duplicate</span>
           <MenubarShortcut>Ctrl/Cmd + D</MenubarShortcut>
         </MenubarItem>
         <MenubarItem
           class={nativeMenuItemClass}
-          onSelect={toolbar().onDeleteSelection}
+          onSelect={edit().onDeleteSelection}
         >
           <span>Delete</span>
           <MenubarShortcut>Delete</MenubarShortcut>

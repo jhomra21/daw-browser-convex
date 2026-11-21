@@ -1,8 +1,6 @@
 import type { Accessor } from "solid-js";
-import type { InsertSampleInput } from "~/hooks/useTimelineClipImport";
 import type { ProjectMutationOutcome, TimelineProject } from "~/hooks/useTimelineData";
 import type { CloudBackupStatus } from "~/lib/project-save-status";
-import type { Track } from "@daw-browser/timeline-core/types";
 import type { DashboardView } from "~/lib/dashboard-view";
 import type { TimelineBrowserTab } from "~/lib/timeline-browser/browser-types";
 
@@ -36,12 +34,58 @@ export type TimelineProjectMenuModel = {
 }
 
 export type TransportControlsProps = {
-  isPlaying: boolean;
-  isPlayPending?: boolean;
-  playheadSec: number;
-  onPlay: () => void;
-  onPause: () => void;
-  onStop: () => void;
+  playback: {
+    isPlaying: boolean;
+    isPlayPending?: boolean;
+    playheadSec: number;
+    onPlay: () => void;
+    onPause: () => void;
+    onStop: () => void;
+  };
+  recording: {
+    isRecording: boolean;
+    isRecordingPending?: boolean;
+    onToggleRecord: () => void;
+  };
+  automation: {
+    overrideCount: number;
+    onReEnable: () => void;
+  };
+  timeline: {
+    bpm: number;
+    onChangeBpm: (next: number) => void;
+    metronomeEnabled: boolean;
+    onToggleMetronome: () => void;
+    gridEnabled: boolean;
+    onToggleGrid: () => void;
+    followEnabled: boolean;
+    onToggleFollow: () => void;
+    gridDenominator: number;
+    onChangeGridDenominator: (n: number) => void;
+    loopEnabled: boolean;
+    onToggleLoop: () => void;
+    zoom: {
+      onIn: () => void
+      onOut: () => void
+      onFit: () => void
+    }
+  };
+  edit: {
+    onUndo: () => void;
+    onRedo: () => void;
+    canUndo: boolean;
+    canRedo: boolean;
+    canDuplicateSelection: boolean;
+    canDeleteSelection: boolean;
+    canCopySelection: boolean;
+    canPasteSelection: boolean;
+    canSelectAllClips: boolean;
+    onDeleteSelection: () => void;
+    onDuplicateSelection: () => void;
+    onCopySelection: () => void;
+    onPasteSelection: () => void;
+    onSelectAllClips: () => void;
+  };
   onAddAudio: () => void;
   tracksMenu: {
     syncMix: boolean;
@@ -51,48 +95,6 @@ export type TransportControlsProps = {
     onAddGroupTrack: () => void | Promise<void>;
     onAddInstrumentTrack: () => void | Promise<void>;
   };
-  bpm: number;
-  onChangeBpm: (next: number) => void;
-  metronomeEnabled: boolean;
-  onToggleMetronome: () => void;
-  gridEnabled: boolean;
-  onToggleGrid: () => void;
-  followEnabled: boolean;
-  onToggleFollow: () => void;
-  zoom: {
-    onIn: () => void
-    onOut: () => void
-    onFit: () => void
-  }
-  gridDenominator: number;
-  onChangeGridDenominator: (n: number) => void;
-  loopEnabled: boolean;
-  onToggleLoop: () => void;
-  isRecording: boolean;
-  isRecordingPending?: boolean;
-  onToggleRecord: () => void;
-  onUndo: () => void;
-  onRedo: () => void;
-  canUndo: boolean;
-  canRedo: boolean;
-  canDuplicateSelection: boolean;
-  canDeleteSelection: boolean;
-  canCopySelection: boolean;
-  canPasteSelection: boolean;
-  canSelectAllClips: boolean;
-  automationOverrideCount: number;
-  onReEnableAutomation: () => void;
-  onDeleteSelection: () => void;
-  onDuplicateSelection: () => void;
-  onCopySelection: () => void;
-  onPasteSelection: () => void;
-  onSelectAllClips: () => void;
-  onJumpToClip: (
-    clipId: string,
-    trackId: Track["id"],
-    startSec: number,
-  ) => void;
-  onInsertSample: (input: InsertSampleInput) => void | Promise<void>;
   projectMenu: TimelineProjectMenuModel;
   browser: {
     open: boolean;

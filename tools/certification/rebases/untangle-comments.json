@@ -1,0 +1,163 @@
+{
+ "name": "untangle-comments",
+ "sequence": 105,
+ "createdAt": "2026-11-21T16:55:07.340Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "native/audio-host-macos/tests/audio_host_test.cpp",
+   "from": "9fbacdbc3779fa40753ec1c50fc2d7409583413c5eecc0f4af9cf672d5369823",
+   "to": "135f3b47cce301ef7b80d611c7fb248f0793302602494203066b8cc67faf667e"
+  },
+  {
+   "file": "packages/audio-engine/src/portable-wasm-host.test.ts",
+   "from": "e80d61b1e91b289547f81d16083dba98a27adfb25ce08e928f5fe1efc5cd5a14",
+   "to": "5453ce12c7fd184f2105d16f136dca731d92051694b17d5168a40de99750ba75"
+  },
+  {
+   "file": "src/components/Timeline.tsx",
+   "from": "3d3a72c76b0dae10e7faaafdedde93226a375047cc0e6d93ffeb51b60f81efef",
+   "to": "af20135eaf01f71df381ec265bb486759503a84ab408b4672b6a7cd8f88b814d"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.test.ts",
+   "from": "cca39fbe9e6e5e105ee2ae6f8aa2d02548a77ecc05de6fa09465c21941d6dd13",
+   "to": "725b22bb44ba0788a27f52215af158b35c21d0ece64455ae3b9a1ed2d96c886f"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.ts",
+   "from": "48739f65e4b2b1a5e8269ae0bb939d013c6831427a00457f0e1626e22255dda0",
+   "to": "2ab76f7fc23e57fad08b6f6e4b31aa9619c27d6f47ee1bc138935edfac93338e"
+  },
+  {
+   "file": "src/lib/desktop/native-graph-targets.ts",
+   "from": "e4dc6d99333bfa415904c68d848e9a52d58d8bdc95272b469e4489489aa3aa3a",
+   "to": "6b7afba1a1004b28a5d147ed20af9f8449b155b0ad6e7498d471d0530a8cda2e"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.test.ts",
+   "from": "3b44147e3afed2b449cf7a8182e6f07af45b6e7f4b339e3e6d2e8b729335cac2",
+   "to": "e1c7232e432825d165dfa1a9b6e5e25c72ac7677b627feaf26b6c9661a88a95c"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.ts",
+   "from": "c6d904cc672cd4a906dcf19a9d4d295df83fdedee9c87c4f0d1cbda1c2ded874",
+   "to": "8f4bc890bb28834425fa2b5780989923f44abe55aef64a0b2dfac0048a9c5347"
+  },
+  {
+   "file": "src/lib/desktop/native-processor-state-owner.ts",
+   "from": "51240d9c2b7d9b2f96bb034ec1e1258406fe9981c86775b3d371a5d079934b28",
+   "to": "35a4b4f16192a5460bb790954df9f398ce7a82e678713ff05dafe9f7c4c0c4cd"
+  },
+  {
+   "file": "src/lib/desktop/native-retirement.ts",
+   "from": "3927ba62cd6691447c98999dca5955213b97f4395118d60f1505dbfeb2a527ae",
+   "to": "3da80bafacefc9e94c0d5b90f2a7af104952e9f4479177976b5a5164fd9f8459"
+  },
+  {
+   "file": "src/lib/desktop/native-schedule-publication.ts",
+   "from": "60c068bb251fcd65a3ea2b83048ece885c72d0d3028f758f903a15fa962f065e",
+   "to": "c4453d11cba3b62e7a852168184ba38880dbc90975b87fd06441ce1f29593b22"
+  },
+  {
+   "file": "src/lib/desktop/native-state-patches.ts",
+   "from": "cd51b6aaefb57ef225cd2b7745d54c5da068fc37a57df1b4036f7db1255b602b",
+   "to": "03b4b7e8d2f3431b1661b26703877dfb82291e9738b57e9fd1fd9b12a14bdce4"
+  },
+  {
+   "file": "src/lib/live-processor-control.ts",
+   "from": "3fdfa747f55ddd77895e6f26956d754d102507f24dad85055aaef93be4fa2c61",
+   "to": "eb8d15eca27b7e851424b5049bd865168d8b222a611d395a02386fd366dc237a"
+  },
+  {
+   "file": "src/lib/portable-browser-playback-controller.test.ts",
+   "from": "0b3a65f20379816f89c97e03d405103a15ff469cd8e2bae315c395a66a7cc82c",
+   "to": "237aa50b8adb07e5cf8f18ab10ce9d85648b48d9939cf5f1db67aea7f78c2b02"
+  },
+  {
+   "file": "src/lib/portable-browser-playback-controller.ts",
+   "from": "91d459cba7fe449b685d8512f6730f46a0ca8f9c689f030f5c48afd792db1ff4",
+   "to": "6e984e3219debb419935a9e75ec76507a79afa91a42807de9a87098444292b09"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-classes.ts",
+   "from": "0e64f95c223e3d04047a08272ab4b3a0cd26a9a13897e5e7f6dc1cd74130f5b8",
+   "to": "2c81dbdc18f7fd5e0af78fb6ace1231041398b4352a363ab7aa4125675104002"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts",
+   "from": "65add88798b08937e42cb48a82f1906f1c5e65fcc5c5149fc72c868e044c1a22",
+   "to": "da5ce3f99aa0291e5824745f98bba8fe7272ae71d6e59b45745ec1a87e44c16f"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook-scenarios-a2c.ts",
+   "from": "c84c6295928a446c68595e23b2111a88ba875fb0677015fd2b721f37c97546f2",
+   "to": "6c4e5ef10627963b6001f0664c82de7109e5b9984780e971e661f607a95e2587"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook-scenarios.ts",
+   "from": "411dd4dea8ca527decfc50ac4b45cabf6a1cdd745fe6e1194b3ecffb8fa6873a",
+   "to": "de2ce9943445c409e7e419a14025714da6f8f2a9a0b847a3d7059329dc2d9a3f"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-host.ts",
+   "from": "849ccfc235ee28b37c9cf5b4604d4910f402e6df03f4c292c27eb7ddfe776bdf",
+   "to": "13e168d8424d5167a9b4b00d272b15826ad1a33417478ff3d28dab6c8c7f7f56"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz.ts",
+   "from": "c7e891e3b5ff53005f499a06fda991e35f0b07726d66f0934d54f0b0e0df062b",
+   "to": "105259a4376c43aaeb62f7184a22cceec5866be779a06b9ae07741836ba077fb"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "7d4d785be98a01b12c7bdf3b2065a41a5b80217a8e3dd0bfafae63d2eab9eb07",
+   "new": "caf7e67ed9c93bcd93e40ecab544de64c710c9255cc97f4cb51780a4899fdd9d"
+  },
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "6fef882088684c7524deb3a04fd332dc09baeaa67a7925d87e093112a60eae21",
+   "new": "a5253f13db0da21af479b4370ea6684f10334f5b4c03d8c71fdc2fd64730f9e3"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "aa84e05bf1b03f508e8def8929f36fb589dcb8ff",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "ee3533155ba0a1abab871b3007762027e93b3d5b37afaf02bfe339d6ea2aa187",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "ee3533155ba0a1abab871b3007762027e93b3d5b37afaf02bfe339d6ea2aa187",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b13-bless/live",
+   "resultSha256": "1108271ef0208db99cce2f8c5cd5c14958eedca850da53486849910eefa95683",
+   "seconds": 1257.586074209,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

@@ -9,20 +9,13 @@ import {
   createRecorderSabRingBuffers,
   createRecorderSabRingProducer,
 } from '../../../packages/audio-engine/src/recording/sab-ring-buffer'
+import { createRecordingWriterWorker, deferred } from './recording-worker-session'
 
 type WorkerEndpoint = {
   postMessage: (message: WriterInboundMessage) => void
   setMessageHandler: (handler: (message: WriterOutboundMessage | null) => void) => void
   setErrorHandler?: (handler: (error: Error) => void) => void
   terminate: () => void
-}
-
-const deferred = <T>() => {
-  let resolve = (_value: T) => {}
-  let reject = (_error: Error) => {}
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
-
-  return { promise, resolve, reject }
 }
 
 type NativeSabRecordingWriterInput = {
@@ -176,7 +169,7 @@ export const createNativeSabRecordingWriter = (input: NativeSabRecordingWriterIn
 }
 
 const createBrowserWorker = (injected?: Worker, onTerminate?: () => void): WorkerEndpoint => {
-  const worker = injected ?? new Worker(new URL('../../workers/recording-writer-worker.ts', import.meta.url), { type: 'module' })
+  const worker = injected ?? createRecordingWriterWorker()
 
   return {
     postMessage: (message) => worker.postMessage(message),

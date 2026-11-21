@@ -37,7 +37,7 @@ import {
   attachClipDeletionRecoveriesToHistory,
   flushPendingSharedOutboxHistoryUpdates,
   registerSharedOutboxHistoryHandler,
-} from '~/lib/shared-outbox'
+} from '~/lib/shared-outbox-history'
 
 export type TimelineHistoryActions = Parameters<typeof execUndo>[1]['actions']
 

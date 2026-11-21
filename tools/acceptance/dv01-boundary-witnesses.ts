@@ -17,7 +17,8 @@ import { createLocalEffectsViewOwner } from "../../src/components/timeline/creat
 import { AUDIO_EFFECT_CONTRACTS, createDefaultUtilityParams } from "@daw-browser/shared"
 import type { EngineDisposition } from "@daw-browser/audio-engine/audio-engine"
 import { openLocalProjectDb } from "../../src/lib/local-project-db"
-import { publishDurableEffectsOperation, readSharedOutboxOperation, flushSharedOutbox, subscribeToSharedOutboxSettlements } from "../../src/lib/shared-outbox"
+import { publishDurableEffectsOperation, readSharedOutboxOperation, flushSharedOutbox } from "../../src/lib/shared-outbox"
+import { subscribeToSharedOutboxSettlements } from "../../src/lib/shared-outbox-settlement"
 import { z } from "zod"
 import {
   NativeAudioHostCommandError,

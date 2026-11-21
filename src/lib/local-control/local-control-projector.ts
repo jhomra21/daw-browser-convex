@@ -39,6 +39,7 @@ import {
   parseLocalAssetFolderRow,
 } from '~/lib/local-asset-folders'
 import { normalizeLocalAutomationEnvelopes } from '~/lib/local-automation'
+import { AUTOMATION_ROW_KIND, CLIP_ROW_KIND, EFFECT_ROW_KIND, SIDECHAIN_ROW_KIND, TRACK_ROW_KIND } from '~/lib/local-project-rows'
 import { parseExternalPluginJsonValue } from '~/lib/external-plugin-json'
 import { parseLocalProjectStoredJsonValue } from './local-control-model'
 
@@ -216,7 +217,7 @@ const projectLocalControlSnapshot = <Snapshot>(
   const parsedBpm = parseLocalProjectStoredJsonValue(bpm)
   const parsedLoop = parseLocalProjectStoredJsonValue(loop)
   const parsedProjectMix = parseLocalProjectStoredJsonValue(projectMix)
-  const effects = valueOfKind(input.entities, 'effect', isEffect)
+  const effects = valueOfKind(input.entities, EFFECT_ROW_KIND, isEffect)
 
   const externalProcessors = valueOfKind(input.entities, externalPluginEntityKind, isExternalProcessor)
     .flatMap((value) => {
@@ -239,7 +240,7 @@ const projectLocalControlSnapshot = <Snapshot>(
       loopEndSec: isJsonObject(parsedLoop) && isJsonNumber(parsedLoop.endSec) ? parsedLoop.endSec : DEFAULT_LOOP.endSec,
       updatedAt: metadata.updatedAt,
     },
-    tracks: valueOfKind(input.entities, 'track', isTrack).map((track) => ({
+    tracks: valueOfKind(input.entities, TRACK_ROW_KIND, isTrack).map((track) => ({
       _id: track.id,
       name: track.name,
       index: track.index,
@@ -254,7 +255,7 @@ const projectLocalControlSnapshot = <Snapshot>(
       collapsed: track.collapsed,
       color: track.color,
     })),
-    clips: valueOfKind(input.entities, 'clip', isClip).map((clip) => ({
+    clips: valueOfKind(input.entities, CLIP_ROW_KIND, isClip).map((clip) => ({
       _id: clip.id,
       trackId: clip.trackId,
       name: clip.name,
@@ -305,7 +306,7 @@ const projectLocalControlSnapshot = <Snapshot>(
       parameterOverrides: processor.parameterOverrides,
     })),
     automationEnvelopes: normalizeLocalAutomationEnvelopes(
-      valueOfKind(input.entities, 'automation-envelope', isAutomation),
+      valueOfKind(input.entities, AUTOMATION_ROW_KIND, isAutomation),
     ).map((envelope) => ({
       _id: envelope.id,
       targetKind: envelope.target.kind,
@@ -315,7 +316,7 @@ const projectLocalControlSnapshot = <Snapshot>(
       enabled: envelope.enabled,
       points: envelope.points,
     })),
-    sidechainRoutes: valueOfKind(input.entities, 'sidechain-route', isSidechain),
+    sidechainRoutes: valueOfKind(input.entities, SIDECHAIN_ROW_KIND, isSidechain),
     assets: completeAssets(input.assets, assetSchema),
     assetFolders: input.projectState.flatMap((row) => {
       if (!row.key.startsWith(LOCAL_ASSET_FOLDER_KEY_PREFIX)) return []

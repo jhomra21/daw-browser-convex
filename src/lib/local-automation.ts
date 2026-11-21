@@ -19,8 +19,7 @@ import {
 } from '@daw-browser/shared'
 import { createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-
-const AUTOMATION_KIND = 'automation-envelope'
+import { AUTOMATION_ROW_KIND } from '~/lib/local-project-rows'
 
 const normalizeLocalAutomationPoint = (value: JsonValue): AutomationPoint | null => {
   if (
@@ -145,7 +144,7 @@ export const normalizeLocalAutomationEnvelopes = (
 
 export const loadLocalAutomationEnvelopes = async (projectId: string): Promise<AutomationEnvelope[]> => {
   const db = await openLocalProjectDb(projectId)
-  const rows = await db.getAllFromIndex('entities', 'by-kind', AUTOMATION_KIND)
+  const rows = await db.getAllFromIndex('entities', 'by-kind', AUTOMATION_ROW_KIND)
 
   return normalizeLocalAutomationEnvelopes(rows.map((row) => row.value))
 }
@@ -164,7 +163,7 @@ export const setLocalAutomationEnvelope = async (
 
   if (!incoming) throw new Error('Automation envelope does not have a recognized logical identity.')
   await tx.store.put(createLocalProjectEntityRow(
-    AUTOMATION_KIND,
+    AUTOMATION_ROW_KIND,
     incoming.logicalKey,
     incoming.envelope,
     incoming.envelope.updatedAt,
@@ -180,7 +179,7 @@ export const deleteLocalAutomationEnvelope = async (
   targetKey: string,
 ): Promise<void> => {
   const db = await openLocalProjectDb(projectId)
-  await db.delete('entities', [AUTOMATION_KIND, targetKey])
+  await db.delete('entities', [AUTOMATION_ROW_KIND, targetKey])
   notifyLocalProjectChanged(projectId)
 }
 
@@ -190,11 +189,11 @@ export const replaceLocalAutomationEnvelopes = async (
 ): Promise<void> => {
   const db = await openLocalProjectDb(projectId)
   const tx = db.transaction('entities', 'readwrite')
-  const rows = await tx.store.index('by-kind').getAll(AUTOMATION_KIND)
+  const rows = await tx.store.index('by-kind').getAll(AUTOMATION_ROW_KIND)
 
   for (const row of rows) {
     if (recognizeLocalAutomationEnvelope(row.value)) {
-      await tx.store.delete([AUTOMATION_KIND, row.id])
+      await tx.store.delete([AUTOMATION_ROW_KIND, row.id])
     }
   }
 
@@ -202,7 +201,7 @@ export const replaceLocalAutomationEnvelopes = async (
     const recognized = recognizeLocalAutomationEnvelope(envelope)
 
     if (recognized) {
-      await tx.store.put(createLocalProjectEntityRow(AUTOMATION_KIND, recognized.logicalKey, recognized.envelope, recognized.envelope.updatedAt))
+      await tx.store.put(createLocalProjectEntityRow(AUTOMATION_ROW_KIND, recognized.logicalKey, recognized.envelope, recognized.envelope.updatedAt))
     }
   }
 

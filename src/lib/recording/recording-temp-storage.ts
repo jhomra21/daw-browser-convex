@@ -1,11 +1,20 @@
 import { RECORDER_BLOCK_FRAMES } from "../../../packages/audio-engine/src/recording/recording-protocol"
 import { z } from "zod"
+import { BLOCK_HEADER_BYTES, PCM_FILE, RECORDING_DIRECTORY } from "./recording-session-layout"
+import {
+  classifyStorageFailure,
+  createBrowserLockManager,
+  createBrowserOpfsFilesystem,
+  isSafeSessionName,
+  wrapOpfsWritable,
+  type OpfsDirectory,
+  type OpfsFilesystem,
+  type OpfsLockManager,
+  type OpfsWritable,
+} from "~/lib/opfs-session-store"
 
-const RECORDING_DIRECTORY = "recording-sessions"
 const SESSION_METADATA_FILE = "session.json"
 const SESSION_CREATED_AT_FILE = "created-at"
-const PCM_FILE = "capture.pcm"
-const BLOCK_HEADER_BYTES = Uint32Array.BYTES_PER_ELEMENT
 const STALE_AFTER_MS = 24 * 60 * 60 * 1000
 
 type RecordingTempStorageFailure =
@@ -46,49 +55,16 @@ type PlanarPcmBlock = {
   channels: Float32Array[]
 }
 
-export type RecordingStorageWritable = {
-  write: (data: Uint8Array<ArrayBuffer>) => Promise<void>
-  close: () => Promise<void>
-  abort: () => Promise<void>
-}
-
 export type RecordingStorageFile = {
-  createWritable: () => Promise<RecordingStorageWritable>
+  createWritable: () => Promise<OpfsWritable>
   text: () => Promise<string>
 }
 
-export type RecordingStorageDirectoryEntry = {
-  name: string
-  kind: "file" | "directory"
-}
-
-export type RecordingStorageDirectory = {
-  getDirectory: (name: string, create: boolean) => Promise<RecordingStorageDirectory>
-  getFile: (name: string, create: boolean) => Promise<RecordingStorageFile>
-  entries: () => AsyncIterable<RecordingStorageDirectoryEntry>
-  remove: (name: string, recursive: boolean) => Promise<void>
-}
-
-export type RecordingStorageFilesystem = {
-  root: () => Promise<RecordingStorageDirectory>
-}
-
-export type RecordingStorageLock = {
-  name: string
-  mode: "exclusive"
-}
-
-export type RecordingStorageLockManager = {
-  request: <Value>(
-    name: string,
-    options: { mode: "exclusive"; ifAvailable?: boolean },
-    callback: (lock: RecordingStorageLock | undefined) => Promise<Value>,
-  ) => Promise<Value>
-}
+export type RecordingStorageDirectory = OpfsDirectory<RecordingStorageFile>
 
 type CreateRecordingTempStorageOptions = {
-  filesystem?: RecordingStorageFilesystem
-  lockManager?: RecordingStorageLockManager
+  filesystem?: OpfsFilesystem<RecordingStorageFile>
+  lockManager?: OpfsLockManager
   maxBytes?: number
   now?: () => number
   clock?: () => number
@@ -111,7 +87,6 @@ type RecordingTempSession = {
   }
 }
 
-const isSafeName = (value: string): boolean => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value)
 const lockName = (sessionId: string) => `daw-browser-recording-session:${sessionId}`
 
 export const recordingStorageLimitExceeded = (
@@ -125,16 +100,6 @@ export const isRecordingTempStorageSupported = (): boolean => (
   && globalThis.navigator.storage !== undefined
   && "getDirectory" in globalThis.navigator.storage
 )
-
-const classifyStorageFailure = (cause: unknown): RecordingTempStorageFailure => {
-  if (cause instanceof DOMException) {
-    if (cause.name === "QuotaExceededError") return "quota-exceeded"
-
-    if (cause.name === "NotAllowedError" || cause.name === "SecurityError") return "permission-denied"
-  }
-
-  return "write-failed"
-}
 
 const storageFailure = (message: string, cause: unknown): RecordingTempStorageError =>
   cause instanceof RecordingTempStorageError
@@ -243,58 +208,20 @@ const parseDescriptor = (value: string): RecordingTempSessionDescriptor | null =
   }
 }
 
-const browserFilesystem: RecordingStorageFilesystem = {
-  root: async () => wrapDirectory(await navigator.storage.getDirectory())
-}
-
-const browserLockManager: RecordingStorageLockManager = {
-  request: (name, options, callback) => {
-    const locks = globalThis.navigator?.locks
-
-    if (!locks) {
-      return Promise.reject(new RecordingTempStorageError(
-        "unsupported",
-        "Web Locks are required for recording session storage.",
-      ))
-    }
-
-    return locks.request(name, options, async (lock) => (
-      await callback(lock ? { name: lock.name, mode: "exclusive" } : undefined)
-    ))
-  },
-}
-
-const wrapDirectory = (directory: FileSystemDirectoryHandle): RecordingStorageDirectory => ({
-  getDirectory: async (name, create) => wrapDirectory(await directory.getDirectoryHandle(name, { create })),
-  getFile: async (name, create) => {
-    const handle = await directory.getFileHandle(name, { create })
-
-    return {
-      createWritable: async () => {
-        const createWritable = handle.createWritable
-
-        if (!createWritable) {
-          throw new DOMException("Origin-private file writes are unavailable.", "NotSupportedError")
-        }
-
-        const writable = await createWritable.call(handle)
-
-        return {
-          write: (data) => writable.write(data),
-          close: () => writable.close(),
-          abort: () => writable.abort()
-        }
-      },
-      text: async () => (await handle.getFile()).text()
-    }
-  },
-  entries: async function* () {
-    for await (const [name, handle] of directory.entries()) {
-      yield { name, kind: handle.kind }
-    }
-  },
-  remove: (name, recursive) => directory.removeEntry(name, { recursive })
+const wrapFile = (handle: FileSystemFileHandle): RecordingStorageFile => ({
+  createWritable: () => wrapOpfsWritable(
+    handle,
+    () => new DOMException("Origin-private file writes are unavailable.", "NotSupportedError"),
+  ),
+  text: async () => (await handle.getFile()).text()
 })
+
+const browserFilesystem = createBrowserOpfsFilesystem(wrapFile)
+
+const browserLockManager = createBrowserLockManager(() => new RecordingTempStorageError(
+  "unsupported",
+  "Web Locks are required for recording session storage.",
+))
 
 export const createRecordingTempStorage = (options: CreateRecordingTempStorageOptions = {}) => {
   const filesystem = options.filesystem ?? browserFilesystem
@@ -381,7 +308,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
   }
 
   const createSession = async (input: CreateSessionInput): Promise<RecordingTempSession> => {
-    if (!isSafeName(input.sessionId)) {
+    if (!isSafeSessionName(input.sessionId)) {
       throw new RecordingTempStorageError("invalid-session", "Recording session ID is invalid.")
     }
 
@@ -424,7 +351,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
     }
 
     let directory: RecordingStorageDirectory
-    let writable: RecordingStorageWritable
+    let writable: OpfsWritable
 
     try {
       directory = await sessions.getDirectory(input.sessionId, true)
@@ -649,7 +576,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
   }
 
   const open = async (sessionId: string): Promise<RecordingTempSessionDescriptor | null> => {
-    if (!isSafeName(sessionId)) return null
+    if (!isSafeSessionName(sessionId)) return null
 
     try {
       const directory = await (await sessionsDirectory()).getDirectory(sessionId, false)
@@ -666,7 +593,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
     let removed = 0
 
     for await (const entry of sessions.entries()) {
-      if (entry.kind !== "directory" || !isSafeName(entry.name)) continue
+      if (entry.kind !== "directory" || !isSafeSessionName(entry.name)) continue
 
       const removeIfStale = async () => {
         const descriptor = await open(entry.name)
@@ -700,7 +627,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
   }
 
   const remove = async (sessionId: string): Promise<void> => {
-    if (!isSafeName(sessionId)) return
+    if (!isSafeSessionName(sessionId)) return
     const sessions = await sessionsDirectory()
 
     if (!lockManager) {

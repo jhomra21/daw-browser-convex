@@ -40,6 +40,7 @@ import type {
 import { withLocalProjectAssetLock, withLocalStorageRootLock } from '~/lib/local-project-asset-lock'
 import {
   executeLocalControlRequestInTransactionV1,
+  isRecoverableAction,
   localControlPlannerCapabilities,
   rewriteLocalControlActionReferences,
 } from './local-control-execution'
@@ -376,19 +377,6 @@ const validateProjectedAssetGcLimit = (
     fail('limit-exceeded', 'Local control asset GC limit exceeded.')
   }
 }
-
-const isRecoverableAction = (action: Parameters<typeof planControlRequestV1>[1]['actions'][number]) => (
-  action.kind === 'track.delete'
-  || action.kind === 'track.ungroup'
-  || action.kind === 'clip.delete'
-  || action.kind === 'effect.remove'
-  || action.kind === 'instrument.remove'
-  || action.kind === 'arpeggiator.remove'
-  || action.kind === 'automation.delete'
-  || action.kind === 'sidechain.remove'
-  || action.kind === 'asset.delete'
-  || action.kind === 'timeline.range.delete'
-)
 
 const validateLocalDestructivePreflight = (
   context: Parameters<Parameters<typeof withLocalControlTransaction>[2]>[0],

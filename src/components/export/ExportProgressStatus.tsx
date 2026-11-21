@@ -3,7 +3,7 @@ import { Show, createSignal, onCleanup, type Component } from 'solid-js'
 import { Button } from '~/components/ui/button'
 import { exportOutputPickerStatus } from '~/lib/export/export-output-picker-status'
 import { formatExportProgressLabel } from '~/lib/export/export-progress-label'
-import type { ExportProgress } from '~/lib/export/run-export-job'
+import type { ExportProgress } from '~/lib/export/export-job-types'
 
 type ExportProgressStatusProps = {
   job: {

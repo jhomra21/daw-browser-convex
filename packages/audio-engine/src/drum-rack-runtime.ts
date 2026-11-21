@@ -6,8 +6,7 @@ import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import type { EngineDisposition } from './engine-disposition'
 import {
   localizeSampledInstrumentSeconds,
-  sampledInstrumentRegion,
-  sampledInstrumentRegionIdentity,
+  resolveSampledInstrumentRegion,
   type SampledInstrumentBuffer,
 } from './sampled-instrument-region'
 
@@ -219,16 +218,7 @@ export function createDrumRackRuntime(options: DrumRackRuntimeOptions) {
       id: nextHitId++,
       clipId,
       chokeGroup: pad.chokeGroup,
-      regionKey: pad.sample
-        ? sampledInstrumentRegionIdentity(
-          pad.sample,
-          sampledInstrumentRegion(
-            pad.sample.source,
-            pad.startSec,
-            pad.endSec ?? pad.sample.source.durationSec,
-          ),
-        )
-        : '',
+      regionKey: pad.sample ? resolveSampledInstrumentRegion(pad.sample, pad.startSec, pad.endSec).key : '',
       removed: false,
       stopRequested: false,
     }

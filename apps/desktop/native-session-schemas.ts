@@ -4,6 +4,8 @@ import { sha256HexSchema, unsigned32Schema, uuidSchema } from "@daw-browser/desk
 import { z } from "zod"
 import { projectIdSchemaV1 } from "@daw-browser/desktop-protocol"
 
+export const positiveUnsigned32Schema = unsigned32Schema.min(1)
+
 const transactionTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/)
 
 // The renderer always sends both keys, so a missing one marks a malformed request.

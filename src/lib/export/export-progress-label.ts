@@ -1,7 +1,7 @@
 import { getExportAudioFormatMetadata } from '@daw-browser/shared'
 
 import { formatBytes } from '~/lib/format-bytes'
-import type { ExportProgress } from '~/lib/export/run-export-job'
+import type { ExportProgress } from '~/lib/export/export-job-types'
 
 type ExportProgressJob = {
   name: string

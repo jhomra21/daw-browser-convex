@@ -1510,7 +1510,7 @@ test("3B0 records the params-only unselected local arp route without claiming en
   await fixture.sync.flushPending();
   await fixture.arp.flushPending();
   expect(fixture.arp.readForTarget("track-b")?.enabled).toBe(false);
-  expect(engine.getTrackArpeggiator("track-b")?.enabled).toBe(false);
+  expect(engine.instruments.getTrackArpeggiator("track-b")?.enabled).toBe(false);
 
   if (process.env.DV01_3B0_REPORT === "1") console.log(`DV01-3B0 ${JSON.stringify({
     name: "R2-B5 unselected local arp owner delivery",

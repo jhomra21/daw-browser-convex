@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { automationTargetKey, createDefaultDelayParams, createDefaultDrumRackParams, createDefaultLoFiParams, createDefaultSaturatorParams, createDefaultSpectralParams, type AutomationEnvelope } from '@daw-browser/shared'
-import { createPortableOutputBuffer, createSourceAutomationScope, createStemRenderPlan, downmixStereoBufferToMono, encodeAudioBuffer, getAudioBufferPeak, isAutomationEnvelopeInSourceScope, normalizeAudioBufferInPlace, readPortableDescriptorPage, renderMixdown, resolveExportMixerGraph, type ExportFx } from './export-mixdown'
+import { createSourceAutomationScope, createStemRenderPlan, isAutomationEnvelopeInSourceScope } from './export-stem-plan'
+import { createPortableOutputBuffer, downmixStereoBufferToMono, encodeAudioBuffer, getAudioBufferPeak, normalizeAudioBufferInPlace, readPortableDescriptorPage, renderMixdown, resolveExportMixerGraph, type ExportFx } from './export-mixdown'
 import type { ResolvedMixerChannel, ResolvedMixerGraph } from './mixer/types'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { resolveLiveMixerGraph } from './live-mixer-runtime'

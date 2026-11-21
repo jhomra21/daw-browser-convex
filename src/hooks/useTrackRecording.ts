@@ -274,7 +274,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     setPreviewPoints(livePreviewStartIndex === 0 ? livePreviewPoints : livePreviewPoints.slice(livePreviewStartIndex))
   }
 
-  const unsubscribeRecordingStatus = audioEngine.subscribeRecordingStatus((status) => {
+  const unsubscribeRecordingStatus = audioEngine.recording.subscribe((status) => {
     incrementPerformanceBenchmarkCounter('recording.status-publishes')
 
     if (status.state === 'recording') {
@@ -405,7 +405,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     } else if (ctx?.portableCaptureActive) {
       await portableRecording?.controller.cancel().catch(() => undefined)
     } else if (ctx?.engineCaptureActive) {
-      audioEngine.cancelRecordingCapture()
+      audioEngine.recording.cancel()
     }
 
     await cleanupRecordingSession({
@@ -821,7 +821,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       stream?.getTracks().forEach((mediaTrack) => mediaTrack.stop())
       void cancelNativeCapture()
       void portableRecording?.controller.cancel().catch(() => undefined)
-      audioEngine.cancelRecordingCapture()
+      audioEngine.recording.cancel()
 
       if (stopTransport && (transportStarted || startPromise)) {
         void requestTransportStop?.().catch(() => undefined)
@@ -1149,7 +1149,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       })
 
       if (!isStartCurrent()) {
-        audioEngine.cancelRecordingCapture()
+        audioEngine.recording.cancel()
         throw new Error('Audio lifecycle is suspended.')
       }
 
@@ -1346,7 +1346,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
 
             if (!nativeTake) throw new Error('Native recording import proof is unavailable; source retained.')
           } else if (ctx.portableCaptureActive) await portableRecording?.controller.stop()
-          else await audioEngine.stopRecordingCapture()
+          else await audioEngine.recording.stop()
           haltLivePreview()
           await finalizeRecording(ctx, nativeTake)
 

@@ -1,5 +1,6 @@
 import type { ConfigColorMode } from "@kobalte/core"
 import { parseHexColor } from "~/lib/color"
+import { APP_PREFERENCES_VERSION_ROWS } from "~/lib/preferences/app-preferences-versions"
 import { normalizeMidiSelectedInputIds } from "~/lib/midi/midi-input"
 import type { RecordingCalibration, RecordingInputPreferences } from "~/lib/recording/recording-preferences"
 import { DEFAULT_DAW_THEME_ID, parseThemeId, type DawThemeId } from "~/lib/theme/theme-registry"
@@ -234,14 +235,16 @@ export const updateRecordingCalibrations = (
 export const normalizeAppPreferences = (value: JsonValue): AppPreferences => {
   if (!isJsonObject(value)) return defaultAppPreferences
 
-  if (value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4 && value.version !== 5 && value.version !== 6 && value.version !== 7 && value.version !== 8 && value.version !== APP_PREFERENCES_VERSION) return defaultAppPreferences
+  const version = isJsonNumber(value.version) ? APP_PREFERENCES_VERSION_ROWS.get(value.version) : undefined
+
+  if (!version) return defaultAppPreferences
 
   const appearance = isJsonObject(value.appearance) ? value.appearance : {}
   const sidebar = isJsonObject(value.sidebar) ? value.sidebar : {}
   const timeline = isJsonObject(value.timeline) ? value.timeline : {}
-  const audio = value.version !== 1 && isJsonObject(value.audio) ? value.audio : {}
-  const recording = (value.version === 3 || value.version === 4 || value.version === 5 || value.version === 6 || value.version === 8 || value.version === APP_PREFERENCES_VERSION) && isJsonObject(value.recording) ? value.recording : {}
-  const midi = (value.version === 4 || value.version === 5 || value.version === 6 || value.version === 8 || value.version === APP_PREFERENCES_VERSION) && isJsonObject(value.midi) ? value.midi : {}
+  const audio = version.audio && isJsonObject(value.audio) ? value.audio : {}
+  const recording = version.recording && isJsonObject(value.recording) ? value.recording : {}
+  const midi = version.midi && isJsonObject(value.midi) ? value.midi : {}
 
   return {
     version: APP_PREFERENCES_VERSION,
@@ -275,14 +278,14 @@ export const normalizeAppPreferences = (value: JsonValue): AppPreferences => {
       echoCancellation: parseBoolean(audio.echoCancellation, defaultAppPreferences.audio.echoCancellation),
       noiseSuppression: parseBoolean(audio.noiseSuppression, defaultAppPreferences.audio.noiseSuppression),
       autoGainControl: parseBoolean(audio.autoGainControl, defaultAppPreferences.audio.autoGainControl),
-      nativePlaybackEnabled: (value.version === 5 || value.version === 6 || value.version === 7 || value.version === 8 || value.version === APP_PREFERENCES_VERSION)
-        ? parseBoolean(audio.nativePlaybackEnabled, value.version === APP_PREFERENCES_VERSION
+      nativePlaybackEnabled: version.nativePlayback === "ignored"
+        ? defaultAppPreferences.audio.nativePlaybackEnabled
+        : parseBoolean(audio.nativePlaybackEnabled, version.nativePlayback === "stored"
           ? defaultAppPreferences.audio.nativePlaybackEnabled
-          : false)
-        : defaultAppPreferences.audio.nativePlaybackEnabled,
+          : false),
     },
     recording: {
-      portableEnabled: value.version === APP_PREFERENCES_VERSION
+      portableEnabled: version.portableRecording
         ? parseBoolean(recording.portableEnabled, defaultAppPreferences.recording.portableEnabled)
         : defaultAppPreferences.recording.portableEnabled,
       layout: recording.layout === "stereo" ? "stereo" : "mono",

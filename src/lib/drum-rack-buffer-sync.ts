@@ -1,9 +1,8 @@
 import type { AudioEngine, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
 import { DRUM_RACK_MAX_DECODED_BYTES } from '@daw-browser/audio-engine/drum-rack-runtime'
 import {
-  sampledInstrumentRegion,
+  resolveSampledInstrumentRegion,
   sampledInstrumentRegionBytes,
-  sampledInstrumentRegionIdentity,
   validateSampledInstrumentBuffer,
   type SampledInstrumentBuffer,
 } from '@daw-browser/audio-engine/sampled-instrument-region'
@@ -52,11 +51,11 @@ type CacheEntry = {
 }
 
 const regionForSample = (sample: DrumRackPadSample, startSec: number, endSec?: number) => {
-  const region = sampledInstrumentRegion(sample.source, startSec, endSec ?? sample.source.durationSec)
+  const { region, key } = resolveSampledInstrumentRegion(sample, startSec, endSec)
 
   return {
     region,
-    key: sampledInstrumentRegionIdentity(sample, region),
+    key,
     bytes: sampledInstrumentRegionBytes(region, sample.source.channelCount),
   }
 }
@@ -182,14 +181,14 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
     const engine = enginesByTrack.get(trackId)
     const params = paramsByTrack.get(trackId)
 
-    if (engine && params) engine.setTrackDrumRack(trackId, params, buffers)
+    if (engine && params) engine.instruments.setTrackDrumRack(trackId, params, buffers)
     notify()
   }
 
   const installRuntimeListeners = (engine: AudioEngine) => {
     if (listenerRemovers.has(engine)) return
 
-    const remove = engine.addSamplerRuntimeListeners({
+    const remove = engine.instruments.addSamplerRuntimeListeners({
       onDrumRackAssetUse: (use) => {
         const configured = enginesByTrack.get(use.trackId)
 
@@ -333,7 +332,7 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
   }
 
   const clearTrack = (trackId: Track['id']) => {
-    enginesByTrack.get(trackId)?.clearTrackDrumRack(trackId)
+    enginesByTrack.get(trackId)?.instruments.clearTrackDrumRack(trackId)
     abortControllers.get(trackId)?.abort()
     abortControllers.delete(trackId)
     releaseActivePins(trackId)
@@ -377,7 +376,7 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
     if (identityChanged) missingSampleErrors.delete(trackId)
 
     if (previous && previous.projectId !== projectKey) {
-      engine.clearTrackDrumRack(trackId)
+      engine.instruments.clearTrackDrumRack(trackId)
       releaseTrackCache(trackId, new Set(), true)
       regionCaches.get(trackId)?.clear()
       cache.delete(trackId)
@@ -478,7 +477,7 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
       }
     }
 
-    engine.setTrackDrumRack(trackId, params, buffers)
+    engine.instruments.setTrackDrumRack(trackId, params, buffers)
 
     for (const job of unique.values()) {
       if (disposed) return 'dropped'
@@ -553,7 +552,7 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
       regionKeys: retainedRegionKeys,
       unavailableSampleAssetKeys: [...missingSampleAssetKeys],
     })
-    const disposition = engine.setTrackDrumRack(trackId, params, retainedBuffers)
+    const disposition = engine.instruments.setTrackDrumRack(trackId, params, retainedBuffers)
     notify()
 
     return disposition
@@ -623,7 +622,7 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
       disposed = true
 
       for (const trackId of new Set([...cache.keys(), ...enginesByTrack.keys()])) {
-        enginesByTrack.get(trackId)?.clearTrackDrumRack(trackId)
+        enginesByTrack.get(trackId)?.instruments.clearTrackDrumRack(trackId)
         releaseActivePins(trackId)
         releaseTrackCache(trackId, new Set(), true)
       }

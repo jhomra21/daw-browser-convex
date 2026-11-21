@@ -24,9 +24,9 @@
    "tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts": "87fc943ad3159603cc300de5797ccebf556d45eef2489b24022e540766147c6b",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "13e168d8424d5167a9b4b00d272b15826ad1a33417478ff3d28dab6c8c7f7f56",
    "src/components/timeline/create-timeline-effect-commit.ts": "d484104548d68392c418cb02098eebbfc0880cb18e65d3cee92fd57a557beef9",
-   "src/components/Timeline.tsx": "8a4835193da855bed7ee2c54af6852a58ed9ce152810c89b5522fd43ab4dbc26",
+   "src/components/Timeline.tsx": "c25d7d8d37d084608423071b469b379e4433bca52393f3f61c5bef0cff1be0ee",
    "src/components/Timeline.test.ts": "3ace76f0b468af4c65cb695530a4e79e4b192074960387ff16aaefff94f3385f",
-   "src/lib/desktop/native-playback-lifecycle.browser.test.ts": "d1e59232db2fb6e8abba87edcf70b44d6833285228775c9a57d66d586306db69",
+   "src/lib/desktop/native-playback-lifecycle.browser.test.ts": "9ce4c89b9bcd2c42c6e315e64c3f14227444746b5fd3cd640c018603194f0405",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "b235c55943deae01731def5a9b36e02ea01d2d30b0b751ed59b1ba88ee9f7fe8",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-classes.ts": "25ed91a7d31411619f743ece528f6e673b0b7cd3219fd0925378c9d34d5e2a63",
    "tools/acceptance/ae-08-processor-state-fuzz-classes.ts": "2c81dbdc18f7fd5e0af78fb6ace1231041398b4352a363ab7aa4125675104002",
@@ -2999,7 +2999,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 17,
+     "pass": 18,
      "skip": 0,
      "fail": 0
     },

@@ -5,6 +5,6 @@ import { createAe08Evidence } from "./ae08-evidence"
 
 test("an unavailable evidence directory cannot throw into desktop control", () => {
   const evidence = createAe08Evidence(path.join(tmpdir(), `missing-ae08-${crypto.randomUUID()}`))
-  expect(evidence).toBeDefined()
+  expect(evidence).toBeFunction()
   expect(() => evidence?.("host-spawn", { pid: 1 })).not.toThrow()
 })

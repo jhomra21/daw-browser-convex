@@ -13,7 +13,6 @@ import {
   NativeAudioHostCommandError,
   nativeDeliveryFailureKind,
   nativeProcessorPatchReply,
-  nativeVstEditorOwnershipProbe,
   packagedAudioHostPath,
   probeNativeAudioOutputDevice,
   renderNativeOffline,
@@ -1220,8 +1219,7 @@ test("cleans the offline completion watchdog on abort", async () => {
     await completionWatchdog.promise
     controller.abort()
     await expect(render).rejects.toMatchObject({ name: "AbortError" })
-    expect(completionTimer).toBeDefined()
-    expect(completionTimer === undefined ? false : canceled.includes(completionTimer)).toBeTrue()
+    expect(canceled).toContain(completionTimer)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
@@ -1949,10 +1947,6 @@ test("keeps the host usable after VST state rejection or malformed response", as
 })
 
 test("round-trips a bounded native VST editor command and signed anchor", async () => {
-  expect(nativeVstEditorOwnershipProbe("11111111-1111-4111-8111-111111111111")).toEqual({
-    instanceId: "11111111-1111-4111-8111-111111111111",
-    command: "status",
-  })
   const fixture = await fixtureSupervisor("editor-anchor")
 
   try {

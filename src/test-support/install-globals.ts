@@ -1,6 +1,7 @@
 type InstalledGlobals = {
   window?: object | undefined
   document?: object
+  navigator?: object
   localStorage?: object
   HTMLElement?: object
   PointerEvent?: object

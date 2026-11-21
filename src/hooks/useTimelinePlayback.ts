@@ -2,6 +2,7 @@ import { createEffect, createSignal, onCleanup, untrack } from 'solid-js'
 
 import { LIVE_SCHEDULE_HORIZON_SEC, type AudioEngine, type SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
+import { nativeControllerObserver } from '~/lib/desktop/acceptance-observer'
 import { createNativePlaybackController, nativePlaybackFaultText } from '~/lib/desktop/native-playback-controller'
 import { createPortableBrowserPlaybackController } from '~/lib/portable-browser-playback-controller'
 import type { LivePlaybackCompileContext } from '~/lib/live-playback-snapshot'
@@ -113,8 +114,7 @@ export function useTimelinePlayback(
     : undefined
 
   const requiresNativeAudio = nativeOptions?.requiresNativeAudio === true
-  const acceptance = nativeOptions?.acceptance
-  const externalNativeSession = acceptance?.ownsNativeSession === false
+  const nativeObserver = nativeControllerObserver(nativeOptions?.acceptance)
 
   const hasAudioLifecycle = audioHostBridge !== undefined
     && audioHostBridge.onLifecycle !== undefined
@@ -194,11 +194,7 @@ export function useTimelinePlayback(
     getProcessorTarget: nativeOptions?.getProcessorTarget,
     resolveSource: nativeOptions?.resolveAudioSource,
     reportUnavailable: requiresNativeAudio,
-    observer: acceptance && {
-      adoption: acceptance.adoption,
-      mark: acceptance.mark,
-      externalSessionOwner: externalNativeSession,
-    },
+    observer: nativeObserver,
     instrumentBudget: nativeOptions?.instrumentBudget,
     onInstrumentPreparation: nativeOptions?.onInstrumentPreparation,
     fingerprintSnapshot: loopOptions?.getTracks ? (snapshot) => readScheduleSnapshotFingerprint(snapshot) : undefined,
@@ -1459,7 +1455,7 @@ export function useTimelinePlayback(
   } = createAudioLifecycle({
     audioHostBridge: hasAudioLifecycle ? audioHostBridge : undefined,
     requiresNativeAudio,
-    externalNativeSession,
+    externalNativeSession: nativeObserver?.externalSessionOwner === true,
     nativeOptions,
     portableBrowserOptions,
     audioEngine,

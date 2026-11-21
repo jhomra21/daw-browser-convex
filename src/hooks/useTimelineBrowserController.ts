@@ -25,7 +25,8 @@ import {
   type NativeVst3CatalogSelection,
 } from "~/lib/desktop/native-vst3-insertion";
 import type { ExternalProcessor } from "@daw-browser/external-plugins";
-import { hasVst3TrustAcknowledgement, vst3ScanHealthLabel } from "~/lib/external-plugin-ui";
+import { vst3ScanHealthLabel } from "~/lib/external-plugin-ui";
+import { onPluginCatalogChanged, readVst3TrustAcknowledged } from "~/lib/desktop/plugin-catalog-session";
 import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import { autoHealStaleVst3Catalog } from "~/lib/desktop/vst3-catalog-auto-heal";
 import type { TimelineEditIntent } from "./timeline-playback-types";
@@ -198,18 +199,10 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
 
       if ("catalog" in result) {
         setDesktopPluginEntries(result.catalog.entries)
-        let storage: Storage | undefined
-
-        try {
-          storage = window.localStorage
-        } catch {
-          storage = undefined
-        }
-
         void autoHealStaleVst3Catalog({
           catalog: result.catalog,
           bridge,
-          trustAcknowledged: hasVst3TrustAcknowledgement(storage),
+          trustAcknowledged: readVst3TrustAcknowledged(),
           onCatalog: (catalog) => setDesktopPluginEntries(catalog.entries),
         }).catch(() => {})
       }
@@ -221,9 +214,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   onMount(() => {
     if (!desktopBridge()?.pluginCatalog) return
     void refreshDesktopPluginCatalog()
-    const listener = () => void refreshDesktopPluginCatalog()
-    window.addEventListener("daw-plugin-catalog-changed", listener)
-    onCleanup(() => window.removeEventListener("daw-plugin-catalog-changed", listener))
+    onCleanup(onPluginCatalogChanged(() => void refreshDesktopPluginCatalog()))
   })
   const browserSamplesEnabled = () => options.leftBrowser.open() && options.leftBrowser.activeTab() === "assets";
 

@@ -1,11 +1,7 @@
 import { For, Show, createSignal, onMount } from "solid-js"
 import type { DesktopPluginCatalog } from "~/lib/desktop/attached-host-controller"
-import {
-  canUseVst3CatalogAction,
-  hasVst3TrustAcknowledgement,
-  saveVst3TrustAcknowledgement,
-  vst3TrustDisclosure,
-} from "~/lib/external-plugin-ui"
+import { canUseVst3CatalogAction, vst3TrustDisclosure } from "~/lib/external-plugin-ui"
+import { createVst3Trust, notifyPluginCatalogChanged } from "~/lib/desktop/plugin-catalog-session"
 import { autoHealStaleVst3Catalog } from "~/lib/desktop/vst3-catalog-auto-heal"
 import { DashboardRow, DashboardScrollView, DashboardSection } from "./dashboard-shared"
 import { desktopBridge } from "~/lib/runtime"
@@ -23,17 +19,7 @@ export function DashboardPluginsView() {
   const [busy, setBusy] = createSignal(false)
   const [message, setMessage] = createSignal("")
 
-  const localStorage = (() => {
-    try {
-      return window.localStorage
-    } catch {
-      return undefined
-    }
-  })()
-
-  const [trustAcknowledged, setTrustAcknowledged] = createSignal(
-    hasVst3TrustAcknowledgement(localStorage),
-  )
+  const trust = createVst3Trust()
 
   const bridge = desktopBridge()?.pluginCatalog
   let activeUpdate: Promise<void> | undefined
@@ -46,7 +32,7 @@ export function DashboardPluginsView() {
     const pluginCatalogBridge = bridge
 
     if (!pluginCatalogBridge || busy()) return Promise.resolve()
-    const shouldAutoHeal = autoHeal && trustAcknowledged()
+    const shouldAutoHeal = autoHeal && trust.acknowledged()
 
     const run = async () => {
       setBusy(true)
@@ -57,7 +43,7 @@ export function DashboardPluginsView() {
         if ("catalog" in result) {
           setCatalog(result.catalog)
           setMessage("")
-          window.dispatchEvent(new Event("daw-plugin-catalog-changed"))
+          notifyPluginCatalogChanged()
 
           if (shouldAutoHeal) {
             const healed = await autoHealStaleVst3Catalog({
@@ -96,12 +82,12 @@ export function DashboardPluginsView() {
   })
 
   const addDirectory = async () => {
-    if (!canUseVst3CatalogAction("add-directory", trustAcknowledged())) return
+    if (!canUseVst3CatalogAction("add-directory", trust.acknowledged())) return
     await update(() => bridge?.chooseDirectory() ?? Promise.resolve({ ok: false, error: "The desktop plug-in catalog is unavailable." }))
   }
 
   const rescan = async () => {
-    if (!canUseVst3CatalogAction("scan", trustAcknowledged())) return
+    if (!canUseVst3CatalogAction("scan", trust.acknowledged())) return
 
     if (activeScan) return activeScan
 
@@ -126,20 +112,19 @@ export function DashboardPluginsView() {
         <DashboardRow
           label="Plug-in directories"
           value={`${catalog().directories.length} configured`}
-          action={<button type="button" class="h-8 border border-border px-3 text-sm disabled:opacity-50" disabled={busy() || !trustAcknowledged()} onClick={() => void addDirectory()}>Add directory</button>}
+          action={<button type="button" class="h-8 border border-border px-3 text-sm disabled:opacity-50" disabled={busy() || !trust.acknowledged()} onClick={() => void addDirectory()}>Add directory</button>}
         />
-        <Show when={!trustAcknowledged()}>
+        <Show when={!trust.acknowledged()}>
           <div class="border-b border-border px-4 py-3 text-xs text-muted-foreground">
             <p class="font-medium text-foreground">{vst3TrustDisclosure.title}</p>
             <p class="mt-1">{vst3TrustDisclosure.body}</p>
             <label class="mt-3 flex items-start gap-2 text-foreground">
               <input
                 type="checkbox"
-                checked={trustAcknowledged()}
+                checked={trust.acknowledged()}
                 onChange={(event) => {
                   if (!event.currentTarget.checked) return
-                  saveVst3TrustAcknowledgement(localStorage)
-                  setTrustAcknowledged(true)
+                  trust.set(true)
                   void rescan()
                 }}
               />
@@ -159,7 +144,7 @@ export function DashboardPluginsView() {
         <DashboardRow
           label="Catalog scan"
           value={`${catalog().entries.length} VST3 bundle${catalog().entries.length === 1 ? "" : "s"} discovered`}
-          action={<button type="button" class="h-8 border border-border px-3 text-sm disabled:opacity-50" disabled={busy() || !trustAcknowledged()} onClick={() => void rescan()}>Rescan</button>}
+          action={<button type="button" class="h-8 border border-border px-3 text-sm disabled:opacity-50" disabled={busy() || !trust.acknowledged()} onClick={() => void rescan()}>Rescan</button>}
         />
         <Show when={catalog().diagnostics.length > 0}>
           <div class="border-b border-border px-4 py-3 text-xs text-muted-foreground">

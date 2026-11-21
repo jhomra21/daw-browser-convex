@@ -1,3 +1,4 @@
+import { notifyPluginCatalogChanged } from "~/lib/desktop/plugin-catalog-session"
 import type { DesktopBridge, DesktopPluginCatalog, DesktopPluginCatalogReply } from "~/types/desktop-bridge"
 
 type PluginCatalogBridge = NonNullable<DesktopBridge["pluginCatalog"]>
@@ -56,10 +57,6 @@ export const hasStaleVst3CatalogEntries = (catalog: DesktopPluginCatalog): boole
   ))
 )
 
-const dispatchCatalogChanged = () => {
-  globalThis.window?.dispatchEvent?.(new Event("daw-plugin-catalog-changed"))
-}
-
 const getActiveScan = (bridge: Pick<PluginCatalogBridge, "scan">): ActiveScan => {
   if (activeScan) return activeScan
 
@@ -106,7 +103,7 @@ export const autoHealStaleVst3Catalog = async (
 
     if (!scan.eventDispatched) {
       scan.eventDispatched = true
-      dispatchCatalogChanged()
+      notifyPluginCatalogChanged()
     }
   }
 

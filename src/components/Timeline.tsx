@@ -112,10 +112,9 @@ import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
 import {
   canUseVst3CatalogAction,
   classifyNativeVst3PlaybackFault,
-  hasVst3TrustAcknowledgement,
-  saveVst3TrustAcknowledgement,
   vst3TrustDisclosure,
 } from "~/lib/external-plugin-ui";
+import { createVst3CatalogScan, createVst3Trust } from "~/lib/desktop/plugin-catalog-session";
 import {
   createCapturedEditorStatePersister,
   createExternalProcessorEditorRequests,
@@ -205,55 +204,8 @@ const Timeline: Component<TimelineProps> = (props) => {
   const [appMessage, setAppMessage] =
     createSignal<AppMessageDialogState | null>(null);
 
-  const vst3TrustStorage = (() => {
-    try {
-      return window.localStorage;
-    } catch {
-      return undefined;
-    }
-  })();
-
-  const [vst3TrustAcknowledged, setVst3TrustAcknowledged] = createSignal(
-    hasVst3TrustAcknowledgement(vst3TrustStorage),
-  );
-
-  let vst3ScanPromise: Promise<void> | undefined;
-
-  const scanVst3Catalog = async () => {
-    if (vst3ScanPromise) return vst3ScanPromise;
-
-    const scan = async () => {
-      const bridge = desktopBridge()?.pluginCatalog;
-
-      if (!bridge) {
-        throw new Error("Plug-in rescanning requires the desktop app.");
-      }
-
-      if (!canUseVst3CatalogAction("scan", vst3TrustAcknowledged())) {
-        throw new Error("Acknowledge the VST3 plug-in disclosure before rescanning.");
-      }
-
-      const result = await bridge.scan();
-
-      if ("catalog" in result) {
-        window.dispatchEvent(new Event("daw-plugin-catalog-changed"));
-        setAppMessage(null);
-
-        return;
-      }
-
-      if (!result.ok) throw new Error(result.error);
-    };
-
-    const promise = scan();
-    vst3ScanPromise = promise;
-
-    try {
-      await promise;
-    } finally {
-      vst3ScanPromise = undefined;
-    }
-  };
+  const vst3Trust = createVst3Trust();
+  const scanVst3Catalog = createVst3CatalogScan({ trust: vst3Trust, onScanned: () => setAppMessage(null) });
 
   const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<
     Track["id"] | null
@@ -765,17 +717,16 @@ const Timeline: Component<TimelineProps> = (props) => {
             action: {
               label: "Rescan plug-ins",
               busyLabel: "Rescanning…",
-              enabled: () => canUseVst3CatalogAction("scan", vst3TrustAcknowledged()),
+              enabled: () => canUseVst3CatalogAction("scan", vst3Trust.acknowledged()),
               onAction: scanVst3Catalog,
             },
             cancelLabel: "Cancel",
             trustAcknowledgement: {
-              acknowledged: vst3TrustAcknowledged,
+              acknowledged: vst3Trust.acknowledged,
               onChange: (acknowledged) => {
-                setVst3TrustAcknowledged(acknowledged);
+                vst3Trust.set(acknowledged);
 
                 if (!acknowledged) return;
-                saveVst3TrustAcknowledgement(vst3TrustStorage);
                 void scanVst3Catalog().catch((error) => {
                   setAppMessage((current) => current
                     ? {

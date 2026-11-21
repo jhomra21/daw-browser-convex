@@ -65,7 +65,7 @@ type EffectsPanelProps = {
   insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string, options?: EffectParamsCommitOptions) => void;
   onStructuralPlaybackChange?: (targetId: Track["id"], next: TrackInstrumentParams | undefined, edit?: LiveProcessorEditIdentity) => Promise<void>;
-  usesLegacyAudioEngine?: () => boolean;
+  usesLegacyAudioEngine: () => boolean;
   projectGeneration?: () => number;
   allocateProcessorEdit?: (payload: NativeBuiltInParameterPayload) => LiveProcessorEditIdentity | undefined;
   deliverProcessor?: (edit: LiveProcessorEditIdentity, gesture?: ProcessorDelivery["gesture"]) => DeliveryRegistration;
@@ -877,7 +877,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     insertLocalClip: (trackId, clip) => props.insertLocalClip?.(trackId, clip),
     onEffectParamsCommitted: (payload, projectId, options) => props.onEffectParamsCommitted?.(payload, projectId, options),
     onStructuralPlaybackChange: async (targetId, next, edit) => props.onStructuralPlaybackChange?.(targetId, next, edit),
-    usesLegacyAudioEngine: () => props.usesLegacyAudioEngine?.() ?? true,
+    usesLegacyAudioEngine: () => props.usesLegacyAudioEngine(),
     projectGeneration: () => props.projectGeneration?.() ?? 0,
     allocateProcessorEdit,
     deliverProcessor,

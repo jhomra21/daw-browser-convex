@@ -24,7 +24,7 @@
    "tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts": "87fc943ad3159603cc300de5797ccebf556d45eef2489b24022e540766147c6b",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "13e168d8424d5167a9b4b00d272b15826ad1a33417478ff3d28dab6c8c7f7f56",
    "src/components/timeline/create-timeline-effect-commit.ts": "d484104548d68392c418cb02098eebbfc0880cb18e65d3cee92fd57a557beef9",
-   "src/components/Timeline.tsx": "af20135eaf01f71df381ec265bb486759503a84ab408b4672b6a7cd8f88b814d",
+   "src/components/Timeline.tsx": "8a4835193da855bed7ee2c54af6852a58ed9ce152810c89b5522fd43ab4dbc26",
    "src/components/Timeline.test.ts": "3ace76f0b468af4c65cb695530a4e79e4b192074960387ff16aaefff94f3385f",
    "src/lib/desktop/native-playback-lifecycle.browser.test.ts": "d1e59232db2fb6e8abba87edcf70b44d6833285228775c9a57d66d586306db69",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "b235c55943deae01731def5a9b36e02ea01d2d30b0b751ed59b1ba88ee9f7fe8",

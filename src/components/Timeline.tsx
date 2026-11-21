@@ -1680,21 +1680,18 @@ const Timeline: Component<TimelineProps> = (props) => {
   const handleTransportPause = recordingTransport.pause;
   const handleTransportStop = recordingTransport.stop;
 
-  const addAudioTrack = async () => {
-    await createTimelineTrack();
+  const addTrack = async (options?: Parameters<typeof createTimelineTrack>[0]) => {
+    try {
+      await createTimelineTrack(options);
+    } catch {
+      notify("Track not added", "The track could not be saved.");
+    }
   };
 
-  const addReturnTrack = async () => {
-    await createTimelineTrack({ channelRole: "return" });
-  };
-
-  const addGroupTrack = async () => {
-    await createTimelineTrack({ channelRole: "group" });
-  };
-
-  const addInstrumentTrack = async () => {
-    await createTimelineTrack({ kind: "instrument" });
-  };
+  const addAudioTrack = () => addTrack();
+  const addReturnTrack = () => addTrack({ channelRole: "return" });
+  const addGroupTrack = () => addTrack({ channelRole: "group" });
+  const addInstrumentTrack = () => addTrack({ kind: "instrument" });
 
   useTimelineKeyboard({
     enabled: () => props.dashboardView() === null,
@@ -1709,13 +1706,13 @@ const Timeline: Component<TimelineProps> = (props) => {
     onCopy: copyTimelineSelection,
     onPaste: pasteTimelineSelection,
     onAddAudioTrack: () => {
-      void addAudioTrack().catch(() => {});
+      void addAudioTrack();
     },
     onAddReturnTrack: () => {
-      void addReturnTrack().catch(() => {});
+      void addReturnTrack();
     },
     onAddGroupTrack: () => {
-      void addGroupTrack().catch(() => {});
+      void addGroupTrack();
     },
     onGroupSelectedTracks: () => {
       const rangeTrackIds = selection.rangeSelection()?.trackIds ?? [];
@@ -1746,7 +1743,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       handleRedo();
     },
     onAddInstrumentTrack: () => {
-      void addInstrumentTrack().catch(() => {});
+      void addInstrumentTrack();
     },
     onOpenExport: () => setExportOpen(true),
     onToggleFollow: toggleFollow,

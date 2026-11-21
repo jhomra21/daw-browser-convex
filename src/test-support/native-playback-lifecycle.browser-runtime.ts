@@ -684,7 +684,20 @@ export const hostControl = async (operation: 'control.preview' | 'control.reques
   return response.result
 }
 
-Object.defineProperty(window, 'dawDesktop', { value: { setRequestHandler: (next: typeof hostRequestHandler) => { hostRequestHandler = next }, onPrepareToClose: () => undefined, audioHost: timelineJourney ? {
+// The desktop application menu reaches the mounted Timeline through the listener it registers.
+let applicationMenuListener: Parameters<NonNullable<NonNullable<Window['dawDesktop']>['applicationMenu']>['onCommand']>[0] | undefined
+
+export const applicationMenuCommand = (command: Parameters<NonNullable<typeof applicationMenuListener>>[0]) => {
+  if (!applicationMenuListener) throw new Error('The Timeline registered no application menu listener.')
+  applicationMenuListener(command)
+}
+
+Object.defineProperty(window, 'dawDesktop', { value: { setRequestHandler: (next: typeof hostRequestHandler) => { hostRequestHandler = next },
+  applicationMenu: { onCommand: (listener: NonNullable<typeof applicationMenuListener>) => {
+    applicationMenuListener = listener
+
+    return () => undefined
+  }, setState: () => undefined }, onPrepareToClose: () => undefined, audioHost: timelineJourney ? {
   ...host,
   getLifecycle: async () => ({ state: 'ready', powerGeneration: 0 }),
   onLifecycle: () => () => undefined,

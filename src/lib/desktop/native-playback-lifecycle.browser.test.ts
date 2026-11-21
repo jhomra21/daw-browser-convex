@@ -4,6 +4,7 @@ import { build } from 'vite'
 import solidPlugin from 'vite-plugin-solid'
 import tailwindcss from '@tailwindcss/vite'
 import { z } from 'zod'
+import { agentBrowser } from '~/test-support/agent-browser'
 import { createDefaultSpectralParams } from '@daw-browser/shared'
 
 const root = new URL('../../../', import.meta.url).pathname.replace(/\/$/u, '')
@@ -274,6 +275,45 @@ test('3B1 full Timeline desired instruments reconcile post-capture and exclude a
     })}`)
   } finally {
     await browser('eval', 'dv01Timeline.releaseCapture(); dv01Timeline.releaseRun(); timelineJourney.close()').catch(() => undefined)
+    await browser('close').catch(() => undefined)
+    await rm(directory, { recursive: true, force: true })
+  }
+}, 120_000)
+
+test('a failed add-track is reported once from the keyboard shortcut and the application menu', async () => {
+  const directory = `/tmp/daw-add-track-failure-${crypto.randomUUID()}`
+  await mkdir(directory)
+  await Bun.write(`${directory}/index.html`, await fixtureHtml())
+  const browser = agentBrowser(`daw-add-track-failure-${crypto.randomUUID()}`, { timeoutMs: 90_000 })
+
+  // The write failure rejects in a microtask chain; one task later the app has either reported it or not.
+  const reported = async (failedWrites: number) => {
+    await browser('wait', '--fn', `timelineJourney.failedWrites() === ${failedWrites}`)
+    await browser('eval', '(async () => { await new Promise(resolve => setTimeout(resolve, 100)) })()')
+
+    return browser('eval', `document.body.textContent.includes('Track not added') && document.body.textContent.includes('The track could not be saved.')`)
+  }
+
+  const dismiss = async () => {
+    await browser('eval', `[...document.querySelectorAll('[role="dialog"] button')].find(button => button.textContent.trim() !== '')?.click()`)
+    await browser('wait', '--fn', `!document.querySelector('[role="dialog"]')`)
+  }
+
+  try {
+    await browser('open', `file://${directory}/index.html?timeline&layout`)
+    await browser('wait', '--fn', '!!window.timelineJourney?.instrumentTrackId')
+    await browser('eval', 'timelineJourney.failWrites(true)')
+    await browser('press', 'Shift+t')
+    const keyboard = await reported(1)
+    await dismiss()
+
+    await browser('eval', 'timelineJourney.applicationMenuCommand("add-audio-track")')
+    const menu = await reported(2)
+
+    await browser('eval', 'timelineJourney.failWrites(false)')
+    expect({ keyboard, menu }).toEqual({ keyboard: 'true', menu: 'true' })
+    expect(JSON.parse(JSON.parse(await browser('eval', 'JSON.stringify(timelineJourney.unhandledRejections())')))).toEqual([])
+  } finally {
     await browser('close').catch(() => undefined)
     await rm(directory, { recursive: true, force: true })
   }

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { isJsonObject, isJsonString, type JsonObject, type JsonValue } from '@daw-browser/shared'
 import { createRoot, createSignal } from 'solid-js'
 import { z } from 'zod'
+import { installGlobals } from '~/test-support/install-globals'
 import { createMidiTrackRecordingController } from '~/lib/midi-recording-controller'
 import type { MidiInputEvent, MidiSourceReset } from '~/lib/midi/midi-input'
 import { createLocalProject } from '~/lib/local-project-db'
@@ -54,7 +55,7 @@ const flush = async () => {
 const originalFetch = globalThis.fetch
 
 // Bun has no global window; redefining it by value would leave a non-writable `undefined` behind for later files.
-const originalWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window')
+let restoreWindow: (() => void) | undefined
 let runMidiRecordingHeartbeat: (() => void) | undefined
 
 const createHarness = (input: {
@@ -171,9 +172,8 @@ const createHarness = (input: {
 
 beforeEach(() => {
   let heartbeat: (() => void) | undefined
-  Object.defineProperty(globalThis, 'window', {
-    configurable: true,
-    value: {
+  restoreWindow = installGlobals({
+    window: {
       setInterval: (callback: () => void) => {
         heartbeat = callback
 
@@ -190,8 +190,7 @@ beforeEach(() => {
 afterEach(() => {
   Object.defineProperty(globalThis, 'fetch', { configurable: true, value: originalFetch })
 
-  if (originalWindowDescriptor) Object.defineProperty(globalThis, 'window', originalWindowDescriptor)
-  else Reflect.deleteProperty(globalThis, 'window')
+  restoreWindow?.()
   runMidiRecordingHeartbeat = undefined
 })
 

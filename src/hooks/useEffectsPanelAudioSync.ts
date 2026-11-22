@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, untrack, type Accessor, createTrackedEffect } from "solid-js";
+import { createEffect, createSignal, onCleanup, untrack, type Accessor } from "solid-js";
 import type { FunctionReturnType } from "convex/server";
 import {
   type ArpeggiatorParams,
@@ -341,7 +341,8 @@ export function useEffectsPanelAudioSync(
     },
   );
 
-  createTrackedEffect(function reconcileEffectsRows() {
+  // Split, so the rows apply after the readiness update above: applies run in creation order, and a tracked effect's body does not wait for them.
+  createEffect(() => {
     const audioEngine = options.audioEngine();
     const usesLegacyAudioEngine = options.usesLegacyAudioEngine();
     const projectId = options.projectId();
@@ -351,6 +352,15 @@ export function useEffectsPanelAudioSync(
       : options.roomEffects();
 
     const tracks = options.tracks();
+
+    return {
+      audioEngine, usesLegacyAudioEngine, projectId, effects, tracks,
+      sidechainRoutes: effects !== undefined && projectId && usesLegacyAudioEngine ? options.sidechainRoutes() : [],
+      remoteStatus: options.roomEffectsStatus(),
+      remoteError: options.roomEffectsError(),
+      publicationId: projectId && isLocalId("project", projectId) ? localEffectsView.view()?.publicationId : undefined,
+    };
+  }, function reconcileEffectsRows({ audioEngine, usesLegacyAudioEngine, projectId, effects, tracks, sidechainRoutes, remoteStatus, remoteError, publicationId }) {
     const currentTrackIds = new Set(tracks.map((track) => track.id));
 
     if (effects === undefined) {
@@ -404,8 +414,12 @@ export function useEffectsPanelAudioSync(
     }
 
     const acknowledgeRows = () => {
-      if (isLocalId("project", projectId)) localEffectsView.acknowledge(localEffectsView.view()?.publicationId);
-      else readinessOwner.markRowsProcessed(projectId);
+      if (isLocalId("project", projectId)) localEffectsView.acknowledge(publicationId);
+      else {
+        // The readiness update above can apply after these rows; the owner must hold their status before they are marked.
+        readinessOwner.updateRemote(projectId, effects, remoteStatus, remoteError);
+        readinessOwner.markRowsProcessed(projectId);
+      }
     };
 
     if (!usesLegacyAudioEngine) {
@@ -417,7 +431,7 @@ export function useEffectsPanelAudioSync(
     }
 
     clearSyncedTrackState(audioEngine, staleTrackIds);
-    audioEngine.setExternalSidechainRoutes(options.sidechainRoutes());
+    audioEngine.setExternalSidechainRoutes(sidechainRoutes);
 
     syncedTrackIds = new Set(currentTrackIds);
     syncedProjectId = projectId;

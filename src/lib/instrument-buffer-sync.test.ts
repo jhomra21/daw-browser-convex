@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, expect, test } from "bun:test";
 import "fake-indexeddb/auto";
-import { createComponent, createSignal, untrack } from "solid-js";
+import { createComponent, createSignal, flush, untrack } from "solid-js";
 import { createFlushedRoot as createRoot, mountElement } from "~/test-support/create-flushed-root";
 import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
@@ -720,6 +720,7 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
       if (!local) client.setQueryData(["convex", "effects", "room", nextProject, undefined], []);
       setTracks([]); setProjectId(nextProject);
       // Publish after the observer has changed keys, not to its old cache entry.
+      flush();
       await Promise.resolve();
 
       if (!local) client.setQueryData(["convex", "effects", "room", nextProject, undefined], []);
@@ -858,6 +859,7 @@ for (const spec of step5ArpWitnesses) for (const transport of ["playing", "pause
         // The panel remains closed. A real own control needs its selected
         // target while held; deselection otherwise cancels on lost permission.
         f.selectTarget(f.track.id);
+        flush();
         const holder = new ParameterGestureHolder();
         f.device.arp.gestureOwner.open(holder);
         expect(f.device.arp.gestureOwner.tick(holder, () => f.device.arp.change({ octaves: 2 }))).toBe(true);
@@ -1629,8 +1631,11 @@ for (const local of [true, false]) {
 
           if (scenario === "track removal") fixture.removeTrack();
           else await fixture.switchProject();
+          console.log("DBG switched");
           await fixture.effects.flushPending();
+          console.log("DBG flushPending");
           await fixture.readiness();
+          console.log("DBG readiness");
           fixture.assertRetired(initial);
           console.log("B5c3 matrix", JSON.stringify({ group: "teardown", scenario, family: kind, local, target: "track",
             calls: fixture.calls.slice(before), remainingBytes: fixture.remainingBytes(), runtimeKind: fixture.runtimeKind() }));

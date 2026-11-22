@@ -9,6 +9,7 @@ import type {
   FunctionArgs,
 } from "convex/server";
 import { isDesktopRenderer } from "~/lib/runtime";
+import { withSettledData } from "~/lib/settled-query";
 
 const convexUrl = z.string().min(1).parse(import.meta.env.VITE_CONVEX_URL);
 const convex = new ConvexClient(convexUrl);
@@ -136,7 +137,7 @@ export function useConvexQuery<
     },
   );
 
-  return tanstackQuery;
+  return withSettledData(tanstackQuery);
 }
 
 // Direct access to Convex client for advanced use cases

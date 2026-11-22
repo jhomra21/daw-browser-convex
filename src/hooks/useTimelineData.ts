@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, onCleanup, onSettled, type Accessor, createTrackedEffect, untrack } from 'solid-js'
 import type { FunctionReturnType } from 'convex/server'
-import type { UseQueryResult } from '@tanstack/solid-query'
+import type { SettledQueryResult } from '~/lib/settled-query'
 
 import { acceptShareInvite, createCloudProject, deleteCloudProject, revokeCloudProjectAccess } from '~/lib/cloud-projects-api'
 import { useConvexQuery, convexClient, convexApi } from '~/lib/convex'
@@ -110,7 +110,7 @@ type UseTimelineDataReturn = {
   userId: () => string
   projects: Accessor<TimelineProject[]>
   currentProjectRole: Accessor<ProjectRole | null>
-  fullView: UseQueryResult<FunctionReturnType<typeof convexApi.timeline.fullViewAuthed>, Error>
+  fullView: SettledQueryResult<FunctionReturnType<typeof convexApi.timeline.fullViewAuthed>, Error>
   navigateToRoom: (projectId: string) => Promise<void>
   setProjectTransitionSettlement: (settle: (() => Promise<void>) | undefined) => void
   createProject: () => Promise<ProjectMutationOutcome>

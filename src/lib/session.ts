@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/solid-query'
+import { withSettledData } from '~/lib/settled-query'
 import { authClient } from '~/lib/auth-client'
 import { isJsonObject, isJsonString, type JsonObject } from '@daw-browser/shared'
 import { z } from 'zod'
@@ -43,11 +44,11 @@ async function fetchSession(): Promise<ClientSession> {
 }
 
 export function useSessionQuery() {
-  return useQuery<ClientSession>(() => ({
+  return withSettledData(useQuery<ClientSession>(() => ({
     queryKey: ['session'],
     queryFn: fetchSession,
     staleTime: 1000 * 60 * 15,
     refetchOnWindowFocus: false,
     retry: false,
-  }))
+  })))
 }

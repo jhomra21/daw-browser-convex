@@ -6,7 +6,7 @@
 import { createRoot, createSignal } from "solid-js";
 import { render } from "@solidjs/web";
 import "~/index.css";
-import { ColorModeProvider } from "@kobalte/core";
+import { ColorModeProvider } from "@kobalte/core/color-mode";
 import { AudioEngine, type EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import { createEffectsPanelAudioDevice } from "~/components/timeline/create-effects-panel-audio-effects-state";

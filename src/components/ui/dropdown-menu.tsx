@@ -1,4 +1,5 @@
-import type { Component, JSX, ValidComponent } from "solid-js"
+import type { Component, ValidComponent } from "solid-js"
+import type { JSX } from "@solidjs/web"
 import { omit } from "solid-js"
 
 import * as DropdownMenuPrimitive from "@kobalte/core/dropdown-menu"

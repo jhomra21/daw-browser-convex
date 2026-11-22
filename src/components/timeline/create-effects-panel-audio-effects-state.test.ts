@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import "fake-indexeddb/auto";
-import { createComponent, createRenderEffect, createRoot, createSignal, Show, type Accessor, type JSX } from "solid-js";
+import { createComponent, createRenderEffect, createRoot, createSignal, Show, type Accessor } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import { AudioEngine, type AudioEffectRuntimeInstance, type EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
 import { AUDIO_EFFECT_CONTRACTS, type AudioEffectInstance, type AudioEffectKind, type JsonValue } from "@daw-browser/shared";
 import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types";

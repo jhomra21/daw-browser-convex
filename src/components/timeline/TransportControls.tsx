@@ -1,4 +1,5 @@
-import { type Accessor, type Component, For, Show, type JSX } from "solid-js";
+import { type Accessor, type Component, For, Show } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import Icon from "~/components/ui/Icon";
 import { Button } from "~/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/tooltip";

@@ -1,4 +1,5 @@
-import { omit, type ComponentProps } from 'solid-js'
+import { omit } from 'solid-js'
+import type { ComponentProps } from '@solidjs/web'
 import Knob from '~/components/ui/knob'
 
 type AutomatedKnobProps = Omit<ComponentProps<typeof Knob>, 'automationRange' | 'automated' | 'onAutomationSelect'> & {

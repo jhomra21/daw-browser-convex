@@ -1,4 +1,5 @@
-import type { JSX, ValidComponent } from "solid-js"
+import type { ValidComponent } from "solid-js"
+import type { JSX } from "@solidjs/web"
 import { omit } from "solid-js"
 
 import * as ButtonPrimitive from "@kobalte/core/button"

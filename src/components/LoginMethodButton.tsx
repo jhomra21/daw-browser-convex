@@ -1,4 +1,5 @@
-import { Show, type JSX } from "solid-js";
+import { Show } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 

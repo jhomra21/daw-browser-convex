@@ -1,4 +1,5 @@
-import { createEffect, createSignal, createUniqueId, on, Show, type JSX } from 'solid-js'
+import { createEffect, createSignal, createUniqueId, on, Show } from 'solid-js'
+import type { JSX } from '@solidjs/web'
 import type {
   SynthAutomationParameterId,
   SynthEnvelopeParams,

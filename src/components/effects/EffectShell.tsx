@@ -1,4 +1,5 @@
-import { Show, onCleanup, type JSX } from 'solid-js'
+import { Show, onCleanup } from 'solid-js'
+import type { JSX } from '@solidjs/web'
 import { cn } from '~/lib/utils'
 import {
   recognizeDeviceDoubleTap,

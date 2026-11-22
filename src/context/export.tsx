@@ -1,4 +1,5 @@
-import { createContext, createSignal, onCleanup, type Accessor, type JSX, untrack, useContext } from 'solid-js'
+import { createContext, createSignal, onCleanup, type Accessor, untrack, useContext } from 'solid-js'
+import type { JSX } from '@solidjs/web'
 
 import { assertDefined } from '@daw-browser/shared'
 import type { ExportOutcome, ExportProgress } from '~/lib/export/export-job-types'

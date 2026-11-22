@@ -1,4 +1,5 @@
-import type { Component, ComponentProps, JSX, ValidComponent } from "solid-js"
+import type { Component, ValidComponent } from "solid-js"
+import type { ComponentProps, JSX } from "@solidjs/web"
 import { omit } from "solid-js"
 
 import * as DialogPrimitive from "@kobalte/core/dialog"

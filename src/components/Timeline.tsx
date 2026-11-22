@@ -1,7 +1,6 @@
 import {
   type Accessor,
   type Component,
-  type JSX,
   createComputed,
   createEffect,
   createMemo,
@@ -9,6 +8,7 @@ import {
   onCleanup,
   untrack,
 } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import type {
   Clip,
   ExternalSidechainRoute,

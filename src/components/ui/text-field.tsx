@@ -1,4 +1,5 @@
-import type { JSX, ValidComponent } from "solid-js"
+import type { ValidComponent } from "solid-js"
+import type { JSX } from "@solidjs/web"
 import { merge, omit } from "solid-js"
 
 import type { PolymorphicProps } from "@kobalte/core"

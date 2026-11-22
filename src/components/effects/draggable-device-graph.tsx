@@ -1,4 +1,5 @@
-import { createSignal, createUniqueId, For, type JSX, untrack } from 'solid-js'
+import { createSignal, createUniqueId, For, untrack } from 'solid-js'
+import type { JSX } from '@solidjs/web'
 import { useDrag } from '~/hooks/useDrag'
 import { useParameterGesture } from '~/components/effects/effect-parameter-interaction'
 import { cn } from '~/lib/utils'

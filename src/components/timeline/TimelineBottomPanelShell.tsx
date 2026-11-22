@@ -1,4 +1,5 @@
-import type { Component, JSX } from "solid-js";
+import type { Component } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import { BOTTOM_PANEL_DEFAULT_HEIGHT_PX } from "~/lib/bottom-panel-preferences";
 import { BOTTOM_PANEL_EDGE_PADDING_PX, BOTTOM_PANEL_RESIZE_HANDLE_OVERHANG_PX } from "~/lib/bottom-panel-layout";
 import { useDrag } from "~/hooks/useDrag";

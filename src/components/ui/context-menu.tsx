@@ -1,4 +1,5 @@
-import type { Component, ComponentProps, JSX } from "solid-js";
+import type { Component } from "solid-js";
+import type { ComponentProps, JSX } from "@solidjs/web";
 import { omit } from "solid-js";
 
 import * as ContextMenuPrimitive from "@kobalte/core/context-menu";

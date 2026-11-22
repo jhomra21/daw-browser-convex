@@ -1,4 +1,5 @@
-import { createContext, createEffect, on, onCleanup, untrack, useContext, type JSX } from 'solid-js'
+import { createContext, createEffect, on, onCleanup, untrack, useContext } from 'solid-js'
+import type { JSX } from '@solidjs/web'
 import { ParameterGestureHolder, type ParameterGestureHandle } from '~/components/timeline/parameter-gesture-owner'
 
 // One interaction model for every device control: a control opens a gesture on its owner, ticks values while it

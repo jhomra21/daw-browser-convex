@@ -1,4 +1,5 @@
-import { type Component, type JSX, Show } from "solid-js";
+import { type Component, Show } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import TransportControls from "./TransportControls";
 import LocalSaveFailureBanner from "./local-save-failure-banner";
 import TimelinePanels, { type TimelinePanelsProps } from "./timeline-panels";

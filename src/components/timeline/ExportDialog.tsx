@@ -1,4 +1,5 @@
-import { type Component, createEffect, createMemo, createSignal, For, on, onCleanup, Show, type JSX, untrack } from 'solid-js'
+import { type Component, createEffect, createMemo, createSignal, For, on, onCleanup, Show, untrack } from 'solid-js'
+import type { JSX } from '@solidjs/web'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '~/components/ui/dialog'
 import { Button } from '~/components/ui/button'

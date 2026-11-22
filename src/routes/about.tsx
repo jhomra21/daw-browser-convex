@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from '@tanstack/solid-router'
-import type { JSX } from 'solid-js'
+import type { JSX } from '@solidjs/web'
 import Icon from '~/components/ui/Icon'
 import { normalizeAppRedirect, readAuthRedirectSearch } from '~/lib/auth-redirect'
 import { useSessionQuery } from '~/lib/session'

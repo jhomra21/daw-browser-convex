@@ -1,4 +1,5 @@
-import { type Accessor, type JSX, createEffect, createSignal, onCleanup } from "solid-js";
+import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import {
   disableProjectBackup,
   duplicateCloudBackupAsLocalProject,

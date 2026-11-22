@@ -1,4 +1,5 @@
-import type { Component, JSX} from "solid-js";
+import type { Component } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import { dynamic } from "@solidjs/web";
 import { Show, omit, createUniqueId } from "solid-js";
 

@@ -7,8 +7,8 @@ import {
   onSettled,
   type Accessor,
   type Component,
-  type JSX,
 } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import GridOverlay from "~/components/timeline/GridOverlay";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import ArrangementOverview from "~/components/timeline/ArrangementOverview";

@@ -191,6 +191,7 @@ beforeAll(async () => {
   database.exec("PRAGMA foreign_keys = ON");
   database.exec(await migration("0001_better_auth_schema.sql"));
   database.exec(await migration("0003_control_oauth_provider.sql"));
+  database.exec(await migration("0004_better_auth_1_7_oauth_provider.sql"));
   insertIdentity();
 });
 

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readdir } from "node:fs/promises";
 import {
   CONTROL_ACCESS_TOKEN_SECONDS,
   CONTROL_REFRESH_TOKEN_SECONDS,
@@ -208,11 +209,19 @@ describe("control OAuth policy", () => {
 
   test("uses the installed Better Auth JWT and OAuth provider claim contract", async () => {
     const jwtTypes = await Bun.file(new URL("../node_modules/better-auth/dist/plugins/jwt/index.d.mts", import.meta.url)).text();
-    const provider = await Bun.file(new URL("../node_modules/@better-auth/oauth-provider/dist/index.mjs", import.meta.url)).text();
+    const providerDirectory = new URL("../node_modules/@better-auth/oauth-provider/dist/", import.meta.url);
+
+    const providerSources = await Promise.all(
+      (await readdir(providerDirectory)).filter((name) => name.endsWith(".mjs"))
+        .map((name) => Bun.file(new URL(name, providerDirectory)).text()),
+    );
+
+    const provider = providerSources.join("\n");
+
     expect(jwtTypes).toContain("token: string;");
     expect(jwtTypes).toContain("issuer?: string;");
     expect(provider).toContain("azp: client.clientId");
-    expect(provider).toContain('aud: typeof audience === "string" ? audience');
+    expect(provider).toContain("aud: toAudienceClaim(audienceClaim)");
     expect(provider).toContain("scope: scopes.join(\" \")");
   });
 

@@ -426,7 +426,11 @@ test("detaches Solid-wrapped local runtime domains before export submission", as
     getMasterVolume: () => 1,
     getProjectId: () => "cloud-solid-runtime",
     getUserId: () => "user-1",
-    getCloudRenderRows: () => createStore({ effects: [], automationEnvelopes: [] })[0],
+    getCloudRenderRows: () => {
+      const [rows] = createStore({ effects: [], automationEnvelopes: [] })
+
+      return rows
+    },
     getAutomationPatches: () => automation,
     getEffectsExportSnapshot: () => ({
       awaitInstrumentReadiness: async () => undefined,

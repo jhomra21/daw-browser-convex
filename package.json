@@ -48,7 +48,7 @@
     "@types/node": "^25.5.0",
     "convex-test": "0.0.73",
     "eslint": "9.39.5",
-    "eslint-plugin-solid": "0.14.5",
+    "eslint-plugin-solid": "0.20.1",
     "fake-indexeddb": "^6.2.5",
     "knip": "^6.1.0",
     "oxlint": "1.78.0",

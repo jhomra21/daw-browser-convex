@@ -1,5 +1,10 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "settings": {
+    "solid": {
+      "version": 2
+    }
+  },
   "categories": {
     "correctness": "warn"
   },

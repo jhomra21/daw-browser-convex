@@ -820,26 +820,26 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
       <div class="grid w-full" style={{ 'grid-template-rows': grid().rowTemplate }}>
         <For each={grid().rows}>
           {(row) => {
-            const pitch = grid().pitchForRow(row)
-            const isBlackKey = grid().isBlackKey(pitch)
+            const pitch = () => grid().pitchForRow(row)
+            const isBlackKey = () => grid().isBlackKey(pitch())
 
             return (
               <button
                 type="button"
                 class={cn(
                   'relative flex w-full cursor-pointer items-center justify-center border-b border-border font-mono text-2xs',
-                  props.midiKeyboard.isActive(pitch)
+                  props.midiKeyboard.isActive(pitch())
                     ? 'border-green-400 bg-green-600/50 text-white'
-                    : isBlackKey
+                    : isBlackKey()
                       ? 'bg-secondary/70 text-foreground'
                       : 'bg-muted/70 text-foreground',
                 )}
                 onPointerDown={() => {
-                  if (props.trackId) props.onAuditionNote?.(props.trackId, pitch, DEFAULT_NOTE_VELOCITY, grid().noteDurationSeconds(1, 0.6))
+                  if (props.trackId) props.onAuditionNote?.(props.trackId, pitch(), DEFAULT_NOTE_VELOCITY, grid().noteDurationSeconds(1, 0.6))
                 }}
-                aria-label={`Audition ${grid().noteName(pitch)}`}
+                aria-label={`Audition ${grid().noteName(pitch())}`}
               >
-                <span class="opacity-80">{grid().noteName(pitch)}</span>
+                <span class="opacity-80">{grid().noteName(pitch())}</span>
               </button>
             )
           }}

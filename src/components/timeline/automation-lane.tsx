@@ -355,15 +355,16 @@ export default function AutomationLane(props: AutomationLaneProps) {
   const [contextMenuPosition, setContextMenuPosition] = createSignal<{ clientX: number; clientY: number } | null>(null)
 
   const contextMenuItems = (): TimelineContextMenuItem[] => {
-    const position = contextMenuPosition()
+    // The menu acts on the position it opened at, so Add point keeps that snapshot.
+    const initialPosition = contextMenuPosition()
 
     return [
       { kind: 'label', label: descriptor()?.label ?? props.parameterId },
       {
         kind: 'item',
         label: 'Add point',
-        disabled: !position,
-        onSelect: position ? () => untrack(() => addPointAtPosition(position)) : undefined,
+        disabled: !initialPosition,
+        onSelect: initialPosition ? () => untrack(() => addPointAtPosition(initialPosition)) : undefined,
       },
       { kind: 'separator' },
       {

@@ -121,14 +121,15 @@ function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
       </Show>
 
       <div class="space-y-3">
+        {/* Loading shows its fallback only on first load; a reload holds the previous list while the projects memo is pending. */}
         <Errored
-          fallback={(error, reset) => {
+          fallback={(error) => {
             const failure = error();
 
             return (
               <div class="border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm text-red-200">
                 {failure instanceof Error && isLocalProjectCatalogOpenError(failure) ? failure.message : "Local projects could not be loaded."}
-                <Button variant="outline" size="sm" class="ml-2" onClick={() => { props.reloadProjects(); reset(); }}>
+                <Button variant="outline" size="sm" class="ml-2" onClick={() => props.reloadProjects()}>
                   Retry
                 </Button>
               </div>

@@ -1,4 +1,4 @@
-import { createMemo, createSignal, type Component, Index, Show, onCleanup } from 'solid-js'
+import { createMemo, createSignal, type Component, For, Show, onCleanup } from 'solid-js'
 import { ARRANGEMENT_OVERVIEW_HEIGHT, RULER_HEIGHT, quantizeSecToGrid } from '~/lib/timeline-utils'
 import { musicalBarLabelAtTime, selectTimelineGridIntervals } from '~/lib/timeline-view'
 import { timelineGridPhasePx } from '~/lib/timeline-grid-phase'
@@ -366,7 +366,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
           style={{ left: `${loopStartPx()}px`, width: `${loopWidthPx()}px` }}
         />
       </Show>
-      <Index each={minorMarkerIndices()}>
+      <For each={minorMarkerIndices()} keyed={false}>
         {(markerIndex) => {
           const positionPx = () => props.timeToX(markerIndex() * intervals().minorSec)
 
@@ -377,8 +377,8 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
             />
           )
         }}
-      </Index>
-      <Index each={majorMarkerIndices()}>
+      </For>
+      <For each={majorMarkerIndices()} keyed={false}>
         {(markerIndex) => {
           const positionPx = () => props.timeToX(markerIndex() * intervals().majorSec)
 
@@ -395,7 +395,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
             </div>
           )
         }}
-      </Index>
+      </For>
     </div>
   )
 }

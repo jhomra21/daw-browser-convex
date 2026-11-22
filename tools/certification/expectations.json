@@ -16,7 +16,7 @@
   "path": "tools/certification/manifest-7a.json",
   "sha256": "efc72e432e6bf4716ac10f6971096347ca62ffbd219721544b5d03a6ab300376",
   "entries": {
-   "src/lib/desktop/native-playback-controller.ts": "8f4bc890bb28834425fa2b5780989923f44abe55aef64a0b2dfac0048a9c5347",
+   "src/lib/desktop/native-playback-controller.ts": "3ac152bcb3f26f34e9799f0f67c2026c2fe96dd5acc5a29f930ea8a8ef162053",
    "src/lib/desktop/native-processor-state-owner.ts": "35a4b4f16192a5460bb790954df9f398ce7a82e678713ff05dafe9f7c4c0c4cd",
    "src/hooks/useTimelinePlayback.ts": "2ab76f7fc23e57fad08b6f6e4b31aa9619c27d6f47ee1bc138935edfac93338e",
    "src/lib/desktop/native-playback-controller.test.ts": "e1c7232e432825d165dfa1a9b6e5e25c72ac7677b627feaf26b6c9661a88a95c",
@@ -126,7 +126,7 @@
  },
  "fuzzSources": {
   "controller": {
-   "src/lib/desktop/native-playback-controller.ts": "8f4bc890bb28834425fa2b5780989923f44abe55aef64a0b2dfac0048a9c5347",
+   "src/lib/desktop/native-playback-controller.ts": "3ac152bcb3f26f34e9799f0f67c2026c2fe96dd5acc5a29f930ea8a8ef162053",
    "src/lib/desktop/native-schedule-coordinator.ts": "702e457db755553d65eccb93693f2482c00dab6c874f08adca05bf6021d472cf",
    "src/lib/desktop/native-processor-state-owner.ts": "35a4b4f16192a5460bb790954df9f398ce7a82e678713ff05dafe9f7c4c0c4cd",
    "src/lib/desktop/native-built-in-parameter-mapper.ts": "3cad9a47b30b0b4138366bf79ace341028ff48cada7e81a0329d29522ebb6dd2",
@@ -158,7 +158,7 @@
   "hook": {
    "src/hooks/useTimelinePlayback.ts": "2ab76f7fc23e57fad08b6f6e4b31aa9619c27d6f47ee1bc138935edfac93338e",
    "src/components/timeline/create-effects-panel-audio-effects-state.ts": "ce1b33ce58d065ad0be0590dc12c98ce58a895f04cf408f4ae54ab801d016e02",
-   "src/lib/desktop/native-playback-controller.ts": "8f4bc890bb28834425fa2b5780989923f44abe55aef64a0b2dfac0048a9c5347",
+   "src/lib/desktop/native-playback-controller.ts": "3ac152bcb3f26f34e9799f0f67c2026c2fe96dd5acc5a29f930ea8a8ef162053",
    "src/lib/local-effects.ts": "22cf5a4841c321f6ed549344b16e91fa0f4b662aba6729345d6d6bad351e2f40",
    "src/lib/desktop/native-processor-state-owner.ts": "35a4b4f16192a5460bb790954df9f398ce7a82e678713ff05dafe9f7c4c0c4cd",
    "src/lib/desktop/native-built-in-parameter-mapper.ts": "3cad9a47b30b0b4138366bf79ace341028ff48cada7e81a0329d29522ebb6dd2",
@@ -4188,13 +4188,13 @@
  ],
  "traces": {
   "controller": {
-   "treeSha256": "caf7e67ed9c93bcd93e40ecab544de64c710c9255cc97f4cb51780a4899fdd9d",
+   "treeSha256": "9455484c820863623a5c2c30d0c899790722cfe42e18f876fbe198cf90e886a5",
    "files": 701,
    "a": "trace-controller-a",
    "b": "trace-controller-b"
   },
   "hook": {
-   "treeSha256": "a5253f13db0da21af479b4370ea6684f10334f5b4c03d8c71fdc2fd64730f9e3",
+   "treeSha256": "74847ecfe44ce9b3da5eafef51445c4aac974c4d95fc31a25d1be9989fb52c22",
    "files": 4459,
    "a": "trace-hook-a",
    "b": "trace-hook-b"

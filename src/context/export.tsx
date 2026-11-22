@@ -34,7 +34,8 @@ type ExportProviderProps = {
 }
 
 export function ExportProvider(props: ExportProviderProps) {
-  const [activeJob, setActiveJob] = createSignal<ExportJob | undefined>()
+  // subscribe() replays the queue's current job synchronously, inside this component body. The signal is private to the provider.
+  const [activeJob, setActiveJob] = createSignal<ExportJob | undefined>(undefined, { ownedWrite: true })
   const unsubscribe = untrack(() => props.queue.subscribe(setActiveJob))
 
   const bridge = isDesktopRenderer() ? desktopBridge() : undefined

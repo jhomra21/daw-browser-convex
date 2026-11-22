@@ -1,4 +1,4 @@
-import { createRoot, createSignal } from 'solid-js'
+import { createRoot, createSignal, flush } from 'solid-js'
 import { render } from '@solidjs/web'
 import { ColorModeProvider } from '@kobalte/core/color-mode'
 
@@ -109,7 +109,9 @@ const mountOverlay = (config: {
 
   if (!overlay || !selection) throw new Error('The MIDI overlay did not mount.')
   // The stored preference loads while the hook mounts; enabling afterwards is the user turning the keyboard on.
+  flush()
   overlay.midiKeyboard.toggle()
+  flush()
 
   return {
     overlay,
@@ -188,11 +190,13 @@ const runMidiScenarios = async () => {
       mounted.overlay.midiEditorClipId() === 'clip:a' && mounted.overlay.midiKeyboard.targetLabel() === 'Track a'
     press('KeyA')
     mounted.setDocked('clip:b')
+    flush()
     const cleaned = native.calls.at(-1)
     scenarios['docked-clip-change-force-releases-held-notes'] =
       cleaned?.kind === 'stop' && cleaned.trackId === 'a' && cleaned.force === true
       && mounted.overlay.midiKeyboard.targetLabel() === 'Track b'
     mounted.setDocked('clip:unknown')
+    flush()
     scenarios['docked-clip-without-midi-yields-no-editor-clip'] = mounted.overlay.midiEditorClipId() === null
     mounted.unmount()
   }
@@ -203,9 +207,12 @@ const runMidiScenarios = async () => {
     press('KeyA')
     const callsBefore = native.calls.length
     mounted.setBpm(90)
+    flush()
     scenarios['bpm-change-keeps-held-notes'] = native.calls.length === callsBefore
     mounted.selection.selectTrackTarget('b')
+    flush()
     mounted.setDocked(null)
+    flush()
     const cleaned = native.calls.slice(callsBefore).find((call) => call.kind === 'stop')
     scenarios['target-change-force-releases-held-notes'] =
       cleaned?.trackId === 'a' && cleaned.force === true
@@ -272,7 +279,7 @@ const runSelectionScenarios = () => {
     document.body.append(host)
     const starts: { clientX: number; listen: boolean | undefined }[] = []
     const moves: number[] = []
-    createRoot((dispose) => {
+    const { state, dispose } = createRoot((dispose) => {
       const tracks = [track('one'), track('two')]
       const state = useTimelineSelectionState({ projectId: () => 'project:selection', tracks: () => tracks })
 
@@ -293,15 +300,21 @@ const runSelectionScenarios = () => {
       host.addEventListener('pointerdown', (event) => {
         if (event instanceof PointerEvent) selection.onLanePointerDown(event, { kind: 'scrolling', element: host, rows, rulerOffsetPx: 0 })
       })
-      host.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, clientX: 120, clientY: 70, pointerId: 1 }))
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 122, clientY: 70, pointerId: 1 }))
-      window.dispatchEvent(new PointerEvent('pointerup', { clientX: 122, clientY: 70, pointerId: 1 }))
-      scenarios[`click-selects-the-clicked-track-while-${label}`] = state.selectedTrackId() === 'two'
-      scenarios[`click-${playing ? 'does-not-seek' : 'seeks-without-listening'}-while-${label}`] = playing
-        ? starts.length === 0 && moves.length === 0
-        : starts.length === 1 && starts[0]?.clientX === 120 && starts[0].listen === false && moves.includes(122)
-      dispose()
+
+      return { state, dispose }
     })
+
+    // Pointer events are handled outside any owner, as in the app, and the selection applies at the flush.
+    flush()
+    host.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, clientX: 120, clientY: 70, pointerId: 1 }))
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 122, clientY: 70, pointerId: 1 }))
+    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 122, clientY: 70, pointerId: 1 }))
+    flush()
+    scenarios[`click-selects-the-clicked-track-while-${label}`] = state.selectedTrackId() === 'two'
+    scenarios[`click-${playing ? 'does-not-seek' : 'seeks-without-listening'}-while-${label}`] = playing
+      ? starts.length === 0 && moves.length === 0
+      : starts.length === 1 && starts[0]?.clientX === 120 && starts[0].listen === false && moves.includes(122)
+    dispose()
     host.remove()
   }
 }

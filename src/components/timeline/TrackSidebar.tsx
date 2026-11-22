@@ -7,7 +7,6 @@ import {
   createSignal,
   createStore,
   onCleanup,
-  produce,
 } from "solid-js";
 import { useDrag } from "~/hooks/useDrag";
 import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
@@ -172,18 +171,16 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   createEffect(() => {
     const unsubscribe = sidebar().subscribeTrackLevels((levelsByTrackId) => {
-      setMeters(
-        produce((current) => {
-          for (const [trackId, levels] of levelsByTrackId) {
-            const left = clampUnit(levels.left);
-            const right = clampUnit(levels.right);
-            const previous = current[trackId];
+      setMeters((current) => {
+        for (const [trackId, levels] of levelsByTrackId) {
+          const left = clampUnit(levels.left);
+          const right = clampUnit(levels.right);
+          const previous = current[trackId];
 
-            if (previous?.left === left && previous.right === right) continue;
-            current[trackId] = { left, right };
-          }
-        }),
-      );
+          if (previous?.left === left && previous.right === right) continue;
+          current[trackId] = { left, right };
+        }
+      });
     });
 
     onCleanup(unsubscribe);
@@ -205,13 +202,11 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       sidebar().allTracks.map((track) => track.id),
     );
 
-    setMeters(
-      produce((current) => {
-        for (const trackId of Object.keys(current)) {
-          if (!trackIds.has(trackId)) delete current[trackId];
-        }
-      }),
-    );
+    setMeters((current) => {
+      for (const trackId of Object.keys(current)) {
+        if (!trackIds.has(trackId)) delete current[trackId];
+      }
+    });
   });
 
   const groupTracks = createMemo(() =>

@@ -522,7 +522,12 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     options.onExportSnapshotChange?.(undefined);
     void flushPending();
   });
-  options.onExportSnapshotChange?.(exportSnapshot);
+  createEffect(
+    () => options.onExportSnapshotChange,
+    (onSnapshotChange) => {
+      onSnapshotChange?.(exportSnapshot);
+    },
+  );
 
   createEffect(
     () => options.onEffectInstanceParamsReplayChange,

@@ -423,8 +423,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
                 type="button"
                 aria-label="Warp marker"
                 disabled={!props.canWrite || props.clip.audioWarp?.enabled !== true}
-                class="absolute top-0 h-full w-3 -translate-x-1/2 border-x border-amber-300/80 bg-amber-400/10 disabled:opacity-50"
-                classList={{ "bg-amber-300/30": selectedMarkerId() === marker.id }}
+                class={["absolute top-0 h-full w-3 -translate-x-1/2 border-x border-amber-300/80 bg-amber-400/10 disabled:opacity-50", { "bg-amber-300/30": selectedMarkerId() === marker.id }]}
                 style={{ left: `${markerLeft()}px` }}
                 onClick={() => setSelectedMarkerId(marker.id)}
                 onKeyDown={(event) => {
@@ -503,8 +502,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
               }}
               type="button"
               aria-label="Drag beat offset marker"
-              class="pointer-events-auto absolute -left-2 top-0 h-4 w-4 border border-sky-300 bg-timeline-background hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
-              classList={{ "bg-sky-400": isDraggingMarker() }}
+              class={["pointer-events-auto absolute -left-2 top-0 h-4 w-4 border border-sky-300 bg-timeline-background hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50", { "bg-sky-400": isDraggingMarker() }]}
               disabled={!props.canWrite}
               onPointerDown={(event) => {
                 if (!props.canWrite) return;

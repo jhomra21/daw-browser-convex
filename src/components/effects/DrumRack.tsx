@@ -305,7 +305,7 @@ const DrumRack: Component<DrumRackProps> = (props) => {
             {(status) => (
               <div class="mb-2 text-2xs">
                 <button
-                  classList={{ "text-destructive": status().state === 'error' }}
+                  class={{ "text-destructive": status().state === 'error' }}
                   title={status().error}
                   disabled={status().state !== 'error'}
                   onClick={() => props.onRetry()}
@@ -329,24 +329,22 @@ const DrumRack: Component<DrumRackProps> = (props) => {
             <For each={props.params.pads}>
               {(pad) => (
                 <button
-                  class="relative flex h-14 flex-col justify-between border p-1.5 text-left text-2xs transition-colors"
-                  classList={{
+                  class={["relative flex h-14 flex-col justify-between border p-1.5 text-left text-2xs transition-colors", {
                     "border-cyan-500/70 bg-cyan-950/30 text-cyan-100": pad.id === selectedPadId(),
                     "border-border bg-muted/80 text-muted-foreground hover:border-border": pad.id !== selectedPadId() && !!pad.sample,
                     "border-border/60 bg-app-surface/40 text-muted-foreground hover:border-border": pad.id !== selectedPadId() && !pad.sample,
                     "opacity-40": pad.mute,
-                  }}
+                  }]}
                   onClick={() => setSelectedPadId(pad.id)}
                   onDblClick={() => previewPad(pad)}
                   onDragOver={handleSampleDragOver}
                   onDrop={(event) => handleSampleDrop(event, pad)}
                 >
                   <span
-                    class="truncate"
-                    classList={{
+                    class={["truncate", {
                       "text-foreground": !!pad.sample,
                       "text-muted-foreground": !pad.sample,
-                    }}
+                    }]}
                   >
                     {padDisplayName(pad)}
                   </span>

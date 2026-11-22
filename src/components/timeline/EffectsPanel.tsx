@@ -547,8 +547,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
         }}
       </Show>
       <div
-        class="flex h-full min-w-16 shrink-0 items-stretch gap-3"
-        classList={{ "opacity-60": !props.canWrite }}
+        class={["flex h-full min-w-16 shrink-0 items-stretch gap-3", { "opacity-60": !props.canWrite }]}
         data-timeline-keyboard-local="true"
         onKeyDown={handleKeyDown}
         ref={(element) => {
@@ -637,11 +636,10 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                           <div
                             data-effect-kind={effect().kind}
                             data-reorder-key={key}
-                            class="touch-none transition-opacity focus:outline-none"
-                            classList={{
+                            class={["touch-none transition-opacity focus:outline-none", {
                               "opacity-30": reorderPreview()?.key === key,
                               "[&_.effect-shell]:bg-timeline-surface-muted": selectedEffect()?.id === effect().id,
-                            }}
+                            }]}
                             ref={(node) => { element = node; }}
                             tabIndex={-1}
                             onPointerDown={(event) => {

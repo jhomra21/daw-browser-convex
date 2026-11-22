@@ -848,8 +848,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
 
               </div>
               <div
-                class="contents"
-                classList={{ hidden: track.collapsed }}
+                class={["contents", { hidden: track.collapsed }]}
               >
                 <button
                   class={cn(
@@ -995,8 +994,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 >
                   <div class="flex items-center gap-1 overflow-hidden">
                     <span
-                      class="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
-                      classList={{ "opacity-30": !envelope() }}
+                      class={["h-1.5 w-1.5 shrink-0 rounded-full bg-red-500", { "opacity-30": !envelope() }]}
                     />
                     <span class="truncate">Automation</span>
                   </div>

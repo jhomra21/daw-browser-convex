@@ -227,11 +227,10 @@ export default function Knob(props: KnobProps) {
         aria-valuemax={props.max}
         aria-valuenow={visualValue()}
         aria-valuetext={displayValue()}
-        class="relative select-none transition-transform duration-100"
-        classList={{
+        class={["relative select-none transition-transform duration-100", {
           'cursor-not-allowed opacity-50': props.disabled,
           'cursor-pointer': !props.disabled,
-        }}
+        }]}
         style={{ 
           width: `${size() + 12}px`, 
           height: `${size() + 12}px`,
@@ -284,7 +283,7 @@ export default function Knob(props: KnobProps) {
           </Show>
           
           <path
-            classList={{
+            class={{
               'stroke-sky-300': control.isDragging(),
               'stroke-cyan-400': !control.isDragging(),
             }}
@@ -301,7 +300,7 @@ export default function Knob(props: KnobProps) {
             y1="50"
             x2="50"
             y2={KNOB_POINTER_END_Y}
-            classList={{
+            class={{
               'stroke-sky-100': control.isDragging(),
               'stroke-foreground': !control.isDragging(),
             }}
@@ -314,11 +313,10 @@ export default function Knob(props: KnobProps) {
       
       {props.showValue !== false && (
         <div
-          class="max-w-full w-full whitespace-nowrap text-center font-mono leading-none text-foreground transition-colors duration-150"
-          classList={{
+          class={["max-w-full w-full whitespace-nowrap text-center font-mono leading-none text-foreground transition-colors duration-150", {
             'text-[11px]': displayValue().length > 6,
             'text-xs': displayValue().length <= 6,
-          }}
+          }]}
           style={{ 'word-spacing': '-0.18em' }}
         >
           {displayValue()}

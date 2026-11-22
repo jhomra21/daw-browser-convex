@@ -367,8 +367,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
           />
           <div class="flex items-center gap-1 overflow-hidden">
             <span
-              class="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
-              classList={{ "opacity-30": !props.automation.selectedEnvelope }}
+              class={["h-1.5 w-1.5 shrink-0 rounded-full bg-red-500", { "opacity-30": !props.automation.selectedEnvelope }]}
             />
             <span class="truncate">Automation</span>
           </div>

@@ -44,8 +44,7 @@ function PreviewButtonGroup(props: PreviewButtonGroupProps) {
             type="button"
             variant="outline"
             size="sm"
-            class="h-auto rounded-none px-2 py-1 text-xs focus:bg-accent focus:text-accent-foreground"
-            classList={{ "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground": props.selectedId === option.id }}
+            class={["h-auto rounded-none px-2 py-1 text-xs focus:bg-accent focus:text-accent-foreground", { "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground": props.selectedId === option.id }]}
             aria-pressed={props.selectedId === option.id}
             onMouseEnter={() => props.preview(option.id)}
             onFocus={() => props.preview(option.id)}

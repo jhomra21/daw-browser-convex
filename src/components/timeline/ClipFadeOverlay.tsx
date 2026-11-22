@@ -353,8 +353,7 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
     <Show when={!props.clip.isMidi}>
       <div
         ref={(element) => { overlay = element }}
-        class="pointer-events-none absolute inset-0 z-30 opacity-0 group-hover:opacity-100"
-        classList={{ 'opacity-100': dragging() }}
+        class={["pointer-events-none absolute inset-0 z-30 opacity-0 group-hover:opacity-100", { 'opacity-100': dragging() }]}
       >
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="absolute inset-0 size-full overflow-visible">
           <path d={fadePaths().fadeIn} fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" class="text-foreground/80 pointer-events-none" />

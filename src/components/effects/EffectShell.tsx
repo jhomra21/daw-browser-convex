@@ -98,11 +98,10 @@ export default function EffectShell(props: EffectShellProps) {
     >
       <div
         data-effect-shell-header="true"
-        class="flex items-stretch justify-between border-b border-border"
-        classList={{
+        class={["flex items-stretch justify-between border-b border-border", {
           'px-2 py-1': !collapsed(),
           'h-full min-h-0 flex-col items-center justify-start gap-2': collapsed(),
-        }}
+        }]}
         onPointerDown={toggleFromHeader}
         onDblClick={toggleFromDoubleClick}
       >
@@ -110,10 +109,9 @@ export default function EffectShell(props: EffectShellProps) {
           <button
             type="button"
             data-device-interactive="true"
-            class="effect-shell-chevron flex size-6 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-300/70"
-            classList={{
+            class={["effect-shell-chevron flex size-6 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-300/70", {
               '-my-1 -ml-2 border-r border-border': !collapsed(),
-            }}
+            }]}
             aria-expanded={!collapsed()}
             aria-controls={contentId()}
             aria-label={collapsed() ? 'Unfold device' : 'Fold device'}
@@ -140,15 +138,13 @@ export default function EffectShell(props: EffectShellProps) {
           </button>
         </Show>
         <div
-          class="flex min-w-0 items-center gap-2"
-          classList={{
+          class={["flex min-w-0 items-center gap-2", {
             'flex-1': !collapsed(),
             'min-h-0 flex-1 flex-col gap-1': collapsed(),
-          }}
+          }]}
         >
           <span
-            class="truncate text-xs font-semibold"
-            classList={{ 'max-w-full [writing-mode:vertical-rl] rotate-180': collapsed() }}
+            class={["truncate text-xs font-semibold", { 'max-w-full [writing-mode:vertical-rl] rotate-180': collapsed() }]}
           >
             {props.title}
           </span>
@@ -162,8 +158,7 @@ export default function EffectShell(props: EffectShellProps) {
         </div>
         <Show when={!collapsed() && hasActions()}>
           <div
-            class="-my-1 -mr-2 flex shrink-0 items-stretch"
-            classList={{ 'border-l border-border': Boolean(props.actionsBeforeReset || props.onReset) }}
+            class={["-my-1 -mr-2 flex shrink-0 items-stretch", { 'border-l border-border': Boolean(props.actionsBeforeReset || props.onReset) }]}
             inert={!canWrite()}
           >
             {props.actionsBeforeReset}
@@ -223,8 +218,7 @@ export default function EffectShell(props: EffectShellProps) {
       <div
         id={contentId()}
         data-effect-shell-content="true"
-        class="flex min-h-0 flex-1 flex-col"
-        classList={{ 'pointer-events-none': !canWrite() }}
+        class={["flex min-h-0 flex-1 flex-col", { 'pointer-events-none': !canWrite() }]}
         hidden={collapsed()}
         inert={!canWrite()}
       >

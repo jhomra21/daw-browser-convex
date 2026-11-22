@@ -100,8 +100,7 @@ const ExportFormatOption: Component<{
 
   return (
     <label
-      class="flex h-7 min-w-0 items-center gap-2 whitespace-nowrap text-xs"
-      classList={{ "text-muted-foreground": !props.supported }}
+      class={["flex h-7 min-w-0 items-center gap-2 whitespace-nowrap text-xs", { "text-muted-foreground": !props.supported }]}
     >
       <input
         type="checkbox"

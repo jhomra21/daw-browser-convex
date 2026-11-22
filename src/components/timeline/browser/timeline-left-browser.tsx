@@ -410,11 +410,10 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
             {(tab) => (
               <button
                 type="button"
-                class="px-2 py-1 text-left text-xs hover:bg-app-surface hover:text-foreground"
-                classList={{
+                class={["px-2 py-1 text-left text-xs hover:bg-app-surface hover:text-foreground", {
                   "bg-app-surface text-foreground": props.browser.activeTab === tab,
                   "text-muted-foreground": props.browser.activeTab !== tab,
-                }}
+                }]}
                 aria-pressed={props.browser.activeTab === tab}
                 onClick={() => props.browser.onSelectTab(tab)}
               >

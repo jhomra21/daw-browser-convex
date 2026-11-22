@@ -5389,9 +5389,9 @@
      "id": "115-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      runtimeRevision = tx.binding.revision\n      resumeSafe = true",
-       "to": "      const latestCapture = captureLatencyInputs()\n      snapshot = latestCapture.snapshot\n      graph = latestCapture.graph\n      runtimeRevision = tx.binding.revision\n      resumeSafe = true"
+       "file": "/src/lib/desktop/native-latency-publication.ts",
+       "from": "    runtimeRevision = tx.binding.revision\n    resumeSafe = true",
+       "to": "    const latestCapture = captureLatencyInputs()\n    snapshot = latestCapture.snapshot\n    graph = latestCapture.graph\n    runtimeRevision = tx.binding.revision\n    resumeSafe = true"
       }
      ],
      "bounded": false,
@@ -5988,9 +5988,9 @@
      "id": "120-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      if (acknowledgedEpoch === undefined) coordinator.resumeGraphPublication(runtimeRevision)",
-       "to": "      if (acknowledgedEpoch === undefined && proof.revision.retiredRevision === 0) coordinator.resumeGraphPublication(runtimeRevision)"
+       "file": "/src/lib/desktop/native-latency-publication.ts",
+       "from": "    if (acknowledgedEpoch === undefined) coordinator.resumeGraphPublication(runtimeRevision)",
+       "to": "    if (acknowledgedEpoch === undefined && proof.revision.retiredRevision === 0) coordinator.resumeGraphPublication(runtimeRevision)"
       }
      ],
      "bounded": false,
@@ -14306,9 +14306,9 @@
      "id": "259-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      processorState.published(runtimeRevision)",
-       "to": "      structuralGraphGeneration++\n      processorState.published(runtimeRevision)"
+       "file": "/src/lib/desktop/native-latency-publication.ts",
+       "from": "    processorState.published(runtimeRevision)",
+       "to": "    structuralGraphGeneration++\n    processorState.published(runtimeRevision)"
       }
      ],
      "bounded": false,
@@ -16174,9 +16174,9 @@
        "to": "  const record = host.processorState.capturePublication(attempt,"
       },
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      tx.resourcesPromoted = true\n      tx.binding = undefined\n",
-       "to": "      tx.resourcesPromoted = true\n      tx.binding = undefined\n      Object.assign(record, { nativeResult: { handled: true } })\n"
+       "file": "/src/lib/desktop/native-latency-publication.ts",
+       "from": "    tx.resourcesPromoted = true\n    tx.binding = undefined\n",
+       "to": "    tx.resourcesPromoted = true\n    tx.binding = undefined\n    Object.assign(record, { nativeResult: { handled: true } })\n"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",

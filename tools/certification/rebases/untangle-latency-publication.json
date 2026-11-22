@@ -1,0 +1,171 @@
+{
+ "name": "untangle-latency-publication",
+ "sequence": 111,
+ "createdAt": "2026-11-22T00:02:23.189Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:115:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-latency-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:115:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "      runtimeRevision = tx.binding.revision\n      resumeSafe = true",
+   "new": "    runtimeRevision = tx.binding.revision\n    resumeSafe = true"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:115:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "      const latestCapture = captureLatencyInputs()\n      snapshot = latestCapture.snapshot\n      graph = latestCapture.graph\n      runtimeRevision = tx.binding.revision\n      resumeSafe = true",
+   "new": "    const latestCapture = captureLatencyInputs()\n    snapshot = latestCapture.snapshot\n    graph = latestCapture.graph\n    runtimeRevision = tx.binding.revision\n    resumeSafe = true"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:120:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-latency-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:120:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "      if (acknowledgedEpoch === undefined) coordinator.resumeGraphPublication(runtimeRevision)",
+   "new": "    if (acknowledgedEpoch === undefined) coordinator.resumeGraphPublication(runtimeRevision)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:120:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "      if (acknowledgedEpoch === undefined && proof.revision.retiredRevision === 0) coordinator.resumeGraphPublication(runtimeRevision)",
+   "new": "    if (acknowledgedEpoch === undefined && proof.revision.retiredRevision === 0) coordinator.resumeGraphPublication(runtimeRevision)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:259:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-latency-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:259:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "      processorState.published(runtimeRevision)",
+   "new": "    processorState.published(runtimeRevision)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:259:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "      structuralGraphGeneration++\n      processorState.published(runtimeRevision)",
+   "new": "    structuralGraphGeneration++\n    processorState.published(runtimeRevision)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:273:0:mutant",
+    "spec",
+    "changes",
+    "#1",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-latency-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:273:0:mutant",
+    "spec",
+    "changes",
+    "#1",
+    "from"
+   ],
+   "old": "      tx.resourcesPromoted = true\n      tx.binding = undefined\n",
+   "new": "    tx.resourcesPromoted = true\n    tx.binding = undefined\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:273:0:mutant",
+    "spec",
+    "changes",
+    "#1",
+    "to"
+   ],
+   "old": "      tx.resourcesPromoted = true\n      tx.binding = undefined\n      Object.assign(record, { nativeResult: { handled: true } })\n",
+   "new": "    tx.resourcesPromoted = true\n    tx.binding = undefined\n    Object.assign(record, { nativeResult: { handled: true } })\n"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "refactor(native-latency) moved createLatencyPublication and its NativeLatencyUnsupportedError out of src/lib/desktop/native-playback-controller.ts into src/lib/desktop/native-latency-publication.ts, two spaces shallower; the rc2 arms 115, 120, 259 and 273 (#1) that pin text inside its adoptPublication now name the new file with the same text at the new indent.",
+  "expectationsSha256": "89d34e9154173d06f103a291b6ac70c783a6a330adf7a26fff2ec1d1303cf38e"
+ }
+}

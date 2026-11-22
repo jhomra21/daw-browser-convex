@@ -110,7 +110,8 @@ function applyEqResponseBandParams(filter: BiquadFilterNode, band: EqBandParams)
 export default function Eq(props: EqProps) {
   const appPreferences = useAppPreferences()
   const [selectedId, setSelectedId] = createSignal<string>(untrack(() => props.bands[0]?.id ?? ''))
-  const [draggedId, setDraggedId] = createSignal<string | null>(null)
+  // Plain variable: the pointer-down handler reads it in the same call that picks the band.
+  let draggedId: string | null = null
   const [canvasSize, setCanvasSize] = createSignal({ width: 640, height: 160 })
   const [spectrumTick, setSpectrumTick] = createSignal(0)
 
@@ -552,7 +553,7 @@ export default function Eq(props: EqProps) {
 
   const canvasDrag = useDrag({
     onDragStart: ({ x, y }) => {
-      const id = draggedId()
+      const id = draggedId
 
       if (!id || !canvasRef) return
       const rect = canvasRef.getBoundingClientRect()
@@ -560,20 +561,20 @@ export default function Eq(props: EqProps) {
       gesture.tick(() => applyBandPointerValue(id, x - rect.left, y - rect.top))
     },
     onDragMove: ({ x, y }) => {
-      const id = draggedId()
+      const id = draggedId
 
       if (!id || !canvasRef) return
       const rect = canvasRef.getBoundingClientRect()
       gesture.tick(() => applyBandPointerValue(id, x - rect.left, y - rect.top))
     },
     onDragEnd: () => {
-      if (!draggedId()) return
-      setDraggedId(null)
+      if (!draggedId) return
+      draggedId = null
       gesture.end()
     },
     onDragCancel: () => {
-      if (!draggedId()) return
-      setDraggedId(null)
+      if (!draggedId) return
+      draggedId = null
       gesture.cancel()
     },
   })
@@ -598,7 +599,7 @@ export default function Eq(props: EqProps) {
 
     if (!closest) return
     setSelectedId(closest.id)
-    setDraggedId(closest.id)
+    draggedId = closest.id
     canvasDrag.onPointerDown(event)
   }
 

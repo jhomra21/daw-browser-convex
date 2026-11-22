@@ -1,6 +1,5 @@
-import { createMemo, type Accessor } from 'solid-js'
+import { createMemo, createSignal, type Accessor } from 'solid-js'
 
-import { createLatestSignal } from '~/lib/create-latest-signal'
 import { pushTrackCreateHistory } from '~/lib/tracks'
 import { isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
@@ -64,8 +63,18 @@ const targetClosure = (tracks: readonly ClosureTrack[], targetId: string) => {
 // One lock per timeline. A take holds it from the moment its target is chosen until its clip is saved or discarded.
 // Every refusal is synchronous and a refused edit never stops the take.
 export const createRecordingTargetLock = (tracks: Accessor<readonly ClosureTrack[]>) => {
-  const [state, setState] = createLatestSignal<RecordingTargetLockState>('released')
-  const [targetId, setTargetId] = createLatestSignal<string | null>(null)
+  // The lock's imperative reads (start, refuse*) use these plain variables; the signals only publish them to the UI.
+  let currentState: RecordingTargetLockState = 'released'
+  let currentTargetId: string | null = null
+  const [state, setState] = createSignal<RecordingTargetLockState>(currentState)
+  const [targetId, setTargetId] = createSignal<string | null>(currentTargetId)
+
+  const hold = (nextState: RecordingTargetLockState, nextTargetId: string | null = currentTargetId) => {
+    currentState = nextState
+    currentTargetId = nextTargetId
+    setState(nextState)
+    setTargetId(nextTargetId)
+  }
 
   const heldTrackIds = createMemo(() => {
     const target = targetId()
@@ -74,7 +83,7 @@ export const createRecordingTargetLock = (tracks: Accessor<readonly ClosureTrack
   })
 
   const refuseTransition = (before: readonly ClosureTrack[], after: readonly ClosureTrack[]) => {
-    const target = targetId()
+    const target = currentTargetId
 
     if (target === null || targetClosure(before, target).key === targetClosure(after, target).key) return undefined
 
@@ -91,21 +100,19 @@ export const createRecordingTargetLock = (tracks: Accessor<readonly ClosureTrack
     state,
     targetId,
     start: (trackId: string) => {
-      if (state() !== 'released') return false
-      setTargetId(trackId)
-      setState('starting')
+      if (currentState !== 'released') return false
+      hold('starting', trackId)
 
       return true
     },
     recording: () => {
-      if (state() === 'starting') setState('recording')
+      if (currentState === 'starting') hold('recording')
     },
     finishing: () => {
-      if (state() === 'recording') setState('finishing')
+      if (currentState === 'recording') hold('finishing')
     },
     release: () => {
-      setTargetId(null)
-      setState('released')
+      hold('released', null)
     },
     // Whether a take binds this track: the target, its group and output chain, and its send destinations.
     holds: (trackId: string) => heldTrackIds().has(trackId),

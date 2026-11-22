@@ -5270,9 +5270,9 @@
      "id": "114-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      preparedKeepLatencyNodeIds = serializedKeepLatencyNodeIds",
-       "to": "      preparedKeepLatencyNodeIds = new Set(desiredKeepLatencyNodeIds)"
+       "file": "/src/lib/desktop/native-latency-publication.ts",
+       "from": "    host.preparedKeepLatencyNodeIds = serializedKeepLatencyNodeIds",
+       "to": "    host.preparedKeepLatencyNodeIds = new Set(host.desiredKeepLatencyNodeIds)"
       }
      ],
      "bounded": false,
@@ -14308,7 +14308,12 @@
       {
        "file": "/src/lib/desktop/native-latency-publication.ts",
        "from": "    processorState.published(runtimeRevision)",
-       "to": "    structuralGraphGeneration++\n    processorState.published(runtimeRevision)"
+       "to": "    host.bumpStructuralGraphGeneration()\n    processorState.published(runtimeRevision)"
+      },
+      {
+       "file": "/src/lib/desktop/native-playback-controller.ts",
+       "from": "    advanceScheduleSettledEpoch,\n  }\n\n  const executePublication = createPublicationExecutor({",
+       "to": "    advanceScheduleSettledEpoch,\n    bumpStructuralGraphGeneration: () => { structuralGraphGeneration++ },\n  }\n\n  const executePublication = createPublicationExecutor({"
       }
      ],
      "bounded": false,
@@ -14318,7 +14323,7 @@
     "rejectionGate": false,
     "expect": {
      "exit": 1,
-     "applied": 1,
+     "applied": 2,
      "counts": {
       "pass": 4,
       "skip": 0,

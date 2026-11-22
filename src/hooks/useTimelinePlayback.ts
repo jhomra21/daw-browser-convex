@@ -83,6 +83,13 @@ export function useTimelinePlayback(
   const [backendSignal, publishBackend] = createSignal<ActiveAudioBackend>(liveBackend)
   const [playheadSec, setPlayheadSec] = createSignal(0)
 
+  // The latest value for imperative code; read inside an effect it also subscribes to the published signal.
+  const isPlaying = () => {
+    playingSignal()
+
+    return playing
+  }
+
   const setIsPlaying = (next: boolean) => {
     playing = next
     publishPlaying(next)
@@ -250,7 +257,7 @@ export function useTimelinePlayback(
 
       setActiveBackend('idle')
 
-      if (!playing) {
+      if (!isPlaying()) {
         if (requiresNativeAudio) nativeOptions?.reportFault?.(fault)
 
         return
@@ -648,12 +655,12 @@ export function useTimelinePlayback(
       )
 
       if (
-        playing
+        isPlaying()
         || nativePlayback.isRecording()
         || portableBrowserPlayback.isRecording()
       ) {
         reportNativePlaySkip(
-          playing
+          isPlaying()
             ? "Playback was already marked active before the native graph start."
             : "Native playback could not start while recording was active.",
         )
@@ -1015,7 +1022,7 @@ export function useTimelinePlayback(
   // Portable options exist only in the browser build, which has no native host to prepare or lifecycle to wait on.
   const ensureLivePortableSession = async (): Promise<void> => {
     const owned = () => mounted && portableBrowserOptions !== undefined && Boolean(audioEngine.getAudioContext?.())
-      && !playing && playAttempt === undefined && !rebuildInProgress
+      && !untrack(isPlaying) && playAttempt === undefined && !rebuildInProgress
 
     // A locate inside a Pause's round trip waits for the Pause, so the session ends at the locate, not the pause position.
     await pendingBackendPause?.promise.catch(() => undefined)
@@ -1379,7 +1386,7 @@ export function useTimelinePlayback(
       return
     }
 
-    if (!playing) {
+    if (!isPlaying()) {
       audioEngine.cancelAutomationSchedules()
       audioEngine.onTransportSeek(sec, SCHED_AHEAD_SEC)
       audioEngine.applyAutomationAtTimelineSec(sec)
@@ -1658,7 +1665,7 @@ export function useTimelinePlayback(
     if (pendingPlay) {
       invalidatePlayAttempt()
 
-      if (playing) {
+      if (isPlaying()) {
         setIsPlaying(false)
         cancelRaf()
       }
@@ -1755,7 +1762,7 @@ export function useTimelinePlayback(
         || !isCurrentRequestedProject()
       ) return
 
-      if (!playing) {
+      if (!isPlaying()) {
         throw new Error(lastNativeFault
           ? `The active native playback graph could not be rebuilt after the insertion: ${lastNativeFault}`
           : "The active native playback graph could not be rebuilt after the insertion.")
@@ -2047,7 +2054,7 @@ export function useTimelinePlayback(
     // Recording saves insert unhydrated clips before source release completes.
     if (rebuildInProgress) return
 
-    if (playingSignal()) {
+    if (isPlaying()) {
       followPortableEdits()
 
       return

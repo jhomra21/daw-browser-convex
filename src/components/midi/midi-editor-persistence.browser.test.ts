@@ -15,7 +15,7 @@ const fixtureId = 'virtual:midi-persistence-fixture'
 const localControlService = `${repositoryRoot}src/lib/local-control/local-control-service.ts`
 
 const fixture = `
-import { createComponent, createEffect, createRoot, createSignal } from 'solid-js'
+import { createComponent, createEffect, createRoot, createSignal, flush } from 'solid-js'
 import { render } from '@solidjs/web'
 import MidiClipEditor from '~/components/midi/MidiClipEditor'
 import TimelineBottomPanelFooter from '~/components/timeline/TimelineBottomPanelFooter'
@@ -223,8 +223,9 @@ window.midiFixture = {
         pushHistory: () => {},
       })
     })
+    flush()
     const escape = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
-    const snapshot = () => ({
+    const snapshot = () => (flush(), {
       mode: mode(),
       open: open(),
       audio: controller.selectedAudioClip()?.id ?? null,
@@ -237,9 +238,11 @@ window.midiFixture = {
     controller.openClipDetail('missing-clip')
     const unknownIgnored = snapshot()
     controller.setMarkerDragging(true)
+    flush()
     escape()
     const escapeWhileNoteDragging = snapshot()
     controller.setMarkerDragging(false)
+    flush()
     escape()
     const escapeWhenIdle = snapshot()
     controller.openClipDetail(midiClip.id)
@@ -285,6 +288,7 @@ window.midiFixture = {
     }
     note.dispatchEvent(new PointerEvent('pointerdown', options))
     window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }))
+    flush()
   },
   requestLocalDuplicate: () => {
     document.querySelector('[data-timeline-keyboard-local="true"]')?.dispatchEvent(new Event('timeline-local-duplicate'))

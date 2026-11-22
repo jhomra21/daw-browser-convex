@@ -1,6 +1,6 @@
 import { beforeAll, expect, test } from "bun:test";
 import "fake-indexeddb/auto";
-import { createEffect, createSignal, onCleanup, untrack } from "solid-js";
+import { createEffect, createSignal, flush, onCleanup, untrack } from "solid-js";
 import { createFlushedRoot as createRoot, flushChain } from "~/test-support/create-flushed-root";
 import { AudioEngine, type AudioEffectRuntimeInstance, type EngineDisposition, type SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import { convexTest } from "convex-test";
@@ -706,9 +706,11 @@ for (const local of [true, false]) {
           if (holding) {
             // Establish the draft through the real card binding, then leave the target before changing structure.
             setSelectedTarget(targetId);
+            flush();
             gesture.open(holder);
             gesture.tick(holder, () => fixture.audio.compressor.changeInstance(instanceId, prev => ({ ...prev, thresholdDb: -12 })));
             setSelectedTarget("selected-elsewhere");
+            flush();
             await fixture.sync.flushPending();
             await Promise.all(applications);
             expect(gesture.isOpen(holder)).toBe(true);

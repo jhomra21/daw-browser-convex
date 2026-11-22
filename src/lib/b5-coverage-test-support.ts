@@ -143,7 +143,9 @@ export const b5SubscribeEffects = (
   read: () => Promise<FunctionReturnType<typeof convexApi.effects.listByRoom>>,
   publishRows: (rows: FunctionReturnType<typeof convexApi.effects.listByRoom>) => void,
 ) => {
-  const transport = b5EffectsSubscription(read), client = new QueryClient();
+  const transport = b5EffectsSubscription(read);
+  // Offline would pause the first fetch, and a paused query holds its data read until it resolves.
+  const client = new QueryClient({ defaultOptions: { queries: { networkMode: "always" } } });
   const wasOnline = onlineManager.isOnline();
   onlineManager.setOnline(false);
   let dispose = () => {};

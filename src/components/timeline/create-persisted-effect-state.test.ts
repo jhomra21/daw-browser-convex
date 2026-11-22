@@ -10,7 +10,7 @@ import "fake-indexeddb/auto";
 import { createDefaultUtilityParams } from "@daw-browser/shared";
 import * as outbox from "~/lib/shared-outbox";
 import { publishDurableEffectsOperation } from "~/lib/shared-outbox-publishers";
-import { createRoot, createSignal } from "solid-js";
+import { createRoot, createSignal, flush } from "solid-js";
 import { createPersistedEffectState } from "./create-persisted-effect-state";
 import { effectAdmission, type ParameterSaveResult } from "./effect-publication-result";
 import { flushRegisteredLocalProjectWrites } from "~/lib/local-project-write-flushers";
@@ -190,6 +190,7 @@ test("a scope replacement drops the queued installation of an observation from t
   try {
     owner.external("t", 1, 1);
     setScope({ projectId: "q", generation: 0 });
+    flush();
     await owner.flushPending();
     expect(applies).toEqual([]);
     expect(rows).toEqual([]);

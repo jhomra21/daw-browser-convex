@@ -1,4 +1,4 @@
-import { For, Show, createEffect, onCleanup, onMount } from 'solid-js'
+import { For, Show, createEffect, onCleanup, onSettled } from 'solid-js'
 import type { SpectrumView as SpectrumViewMode } from '@daw-browser/shared'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import { DeviceToggleButton } from '~/components/ui/device-control'
@@ -40,7 +40,7 @@ function SpectrumCanvas(props: SpectrumCanvasProps) {
     props.paint(context, canvas.width, canvas.height, canvas)
   }
 
-  onMount(() => {
+  onSettled(() => {
     // The canvas is out of flow so resizing its bitmap never changes the size being observed.
     const observer = new ResizeObserver(() => {
       if (!frame || !canvas) return

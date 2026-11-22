@@ -4,7 +4,7 @@ import {
   For,
   Show,
   onCleanup,
-  onMount,
+  onSettled,
   type Accessor,
   type Component,
   type JSX,
@@ -61,7 +61,7 @@ const createViewportRedrawState = () => {
   const [devicePixelRatio, setDevicePixelRatio] = createSignal(1);
   const requestRedraw = () => setVersion((value) => value + 1);
 
-  onMount(() => {
+  onSettled(() => {
     requestRedraw();
     window.addEventListener("resize", requestRedraw);
     window.visualViewport?.addEventListener("resize", requestRedraw);

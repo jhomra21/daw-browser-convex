@@ -1,4 +1,4 @@
-import { For, Show, createSignal, onMount } from "solid-js"
+import { For, Show, createSignal, onSettled } from "solid-js"
 import type { DesktopPluginCatalog } from "~/lib/desktop/attached-host-controller"
 import { canUseVst3CatalogAction, vst3TrustDisclosure } from "~/lib/external-plugin-ui"
 import { createVst3Trust, notifyPluginCatalogChanged } from "~/lib/desktop/plugin-catalog-session"
@@ -74,7 +74,7 @@ export function DashboardPluginsView() {
     return promise
   }
 
-  onMount(() => {
+  onSettled(() => {
     void update(
       () => bridge?.read() ?? Promise.resolve({ ok: false, error: "The desktop plug-in catalog is unavailable." }),
       true,

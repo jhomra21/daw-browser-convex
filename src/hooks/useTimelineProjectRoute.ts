@@ -1,4 +1,4 @@
-import { batch, createSignal, onCleanup, onMount } from 'solid-js'
+import { batch, createSignal, onCleanup, onSettled } from 'solid-js'
 import { isLocalId } from '@daw-browser/shared'
 import { readLocationSearchParam, subscribeLocationSearch, writeRoomLocation } from '~/lib/location-search-param'
 
@@ -108,7 +108,7 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
     setMountedProjectId(nextProjectId)
   }
 
-  onMount(() => {
+  onSettled(() => {
     const syncLocationState = async (fromHistory = false) => {
       const nextProjectId = readLocationSearchParam('projectId')
       const nextShareToken = readLocationSearchParam('shareToken')

@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onMount } from 'solid-js'
+import { createSignal, onCleanup, onSettled } from 'solid-js'
 import type { Accessor } from 'solid-js'
 
 import { SAMPLE_DRAG_DATA_TYPE } from '~/lib/sample-drag-data'
@@ -135,7 +135,7 @@ export function useTimelineDragDrop(
     clearDropTarget()
   }
 
-  onMount(() => {
+  onSettled(() => {
     window.addEventListener('dragover', handleGlobalDragOver, capture)
     window.addEventListener('drop', handleWindowDrop, capture)
     window.addEventListener('dragend', handleGlobalDragEnd)

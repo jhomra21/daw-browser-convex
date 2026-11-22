@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, onMount, type Component } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup, onSettled, type Component } from 'solid-js'
 
 import { drawWaveformSignal } from '@daw-browser/waveforms/draw-waveform-signal'
 import type { Clip } from '@daw-browser/timeline-core/types'
@@ -71,7 +71,7 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
     }
   })
 
-  onMount(() => {
+  onSettled(() => {
     const measure = () => {
       const bounds = overviewRef?.getBoundingClientRect()
 

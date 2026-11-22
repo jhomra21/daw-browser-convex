@@ -1,4 +1,4 @@
-import { createEffect, createSignal, on, onCleanup, onMount, untrack, type Accessor } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, onSettled, untrack, type Accessor } from "solid-js";
 import type { TimelineBrowserTab, TimelineLeftBrowserState } from "~/lib/timeline-browser/browser-types";
 import {
   clampTimelineLeftBrowserWidth,
@@ -40,7 +40,7 @@ export const useTimelineLeftBrowserState = (
 
   const saveSnapshot = () => saveTimelineLeftBrowserState(scopeId(), untrack(readSnapshot));
 
-  onMount(() => {
+  onSettled(() => {
     const element = options.getContainerElement();
 
     if (!element) return;
@@ -81,7 +81,7 @@ export const useTimelineLeftBrowserState = (
     });
   });
 
-  onMount(() => {
+  onSettled(() => {
     window.addEventListener("pagehide", saveSnapshot);
     onCleanup(() => {
       saveSnapshot();

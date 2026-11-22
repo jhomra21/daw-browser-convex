@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, on, onCleanup, onMount, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, on, onCleanup, onSettled, type Accessor } from 'solid-js'
 import type { FunctionReturnType } from 'convex/server'
 import type { UseQueryResult } from '@tanstack/solid-query'
 
@@ -177,7 +177,7 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
   // Runs on mount and whenever the open project changes, so a project opened elsewhere (dashboard) lists here.
   createEffect(on(projectId, () => void loadLocalProjects()))
 
-  onMount(() => {
+  onSettled(() => {
     const flushMidi = () => {
       void flushAllMidiProjectWrites().catch(() => undefined)
     }

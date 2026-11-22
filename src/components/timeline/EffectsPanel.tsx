@@ -1,5 +1,5 @@
 import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery, PublicationJoin } from "~/lib/live-processor-control";
-import { type Component, Show, Match, Switch, For, type JSX, createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js";
+import { type Component, Show, Match, Switch, For, type JSX, createEffect, createMemo, createSignal, onCleanup, onSettled, untrack } from "solid-js";
 import type { ExternalProcessor } from "@daw-browser/external-plugins";
 import { automationEnvelopeValueRange, isLocalId, type AudioEffectInstance, type AutomationEnvelope, type SynthParams, type TrackInstrumentParams } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
@@ -459,7 +459,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
   createEffect(() => {
     if (selection() && !selectedEffect()) setSelection();
   });
-  onMount(() => {
+  onSettled(() => {
     const handlePointerDown = (event: PointerEvent) => {
       if (!effectCardsElement?.contains(event.target instanceof Node ? event.target : null)) {
         setSelection();

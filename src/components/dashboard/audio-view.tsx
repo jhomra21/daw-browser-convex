@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js"
+import { For, Show, createMemo, createSignal, onCleanup, onSettled } from "solid-js"
 import type { NativeAudioDevice } from "@daw-browser/audio-engine/native-host-wire"
 import { useAppPreferences } from "~/context/app-preferences"
 import { areAudioDeviceListsEqual, buildActiveInputProbeConstraints, canUseStereoRecording, filterAudioDevices, isSelectedDeviceAvailable, resolveAudioRuntimeConfiguration, resolveRecordingChannelOptions } from "~/lib/audio-settings-core"
@@ -265,7 +265,7 @@ export function DashboardAudioView() {
     }
   }
 
-  onMount(() => {
+  onSettled(() => {
     void refreshDevices()
 
     if (requiresNativeAudio) void refreshNativeDevices()

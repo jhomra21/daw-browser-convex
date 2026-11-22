@@ -1,4 +1,4 @@
-import { For, createEffect, createMemo, createSignal, on, onCleanup, onMount, untrack, type Component } from "solid-js";
+import { For, createEffect, createMemo, createSignal, on, onCleanup, onSettled, untrack, type Component } from "solid-js";
 import { drawWaveformSignal } from "@daw-browser/waveforms/draw-waveform-signal";
 import { waveformCanvasSize } from "~/lib/waveform-canvas";
 import {
@@ -131,7 +131,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     widthPx: waveformWidthPx(),
   }));
 
-  onMount(() => {
+  onSettled(() => {
     const commitSize = (widthPx: number, heightPx: number) => {
       const nextWidthPx = Math.max(1, Math.floor(widthPx));
       const nextHeightPx = Math.max(WAVEFORM_MIN_HEIGHT_PX, Math.floor(heightPx));

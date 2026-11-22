@@ -1,6 +1,6 @@
 import { runBrowserCharacterization, type BrowserCharacterizationReport } from '@daw-browser/audio-engine/browser-characterization'
 import { createFileRoute } from '@tanstack/solid-router'
-import { createSignal, onMount, Show } from 'solid-js'
+import { createSignal, onSettled, Show } from 'solid-js'
 
 export const Route = createFileRoute('/dsp-characterization')({
   head: () => ({ meta: [{ title: 'DSP Characterization' }] }),
@@ -27,7 +27,7 @@ function DspCharacterization() {
     }
   }
 
-  onMount(() => {
+  onSettled(() => {
     if (diagnosticEnabled && searchParams.get('autorun') === '1') void run()
   })
 

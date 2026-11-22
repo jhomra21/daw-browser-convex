@@ -1,4 +1,4 @@
-import { createEffect, createMemo, For, on, onMount, Show, type Component, type JSX } from "solid-js";
+import { createEffect, createMemo, For, on, onSettled, Show, type Component, type JSX } from "solid-js";
 import type { BrowserAssetsModel, BrowserFolderRow, BrowserItem, BrowserSection, BrowserTreeExpansionState, BrowserTreeRow, TimelineBrowserTab, TimelineLeftBrowserModel } from "~/lib/timeline-browser/browser-types";
 import { timelineBrowserTabLabels, timelineBrowserTabs } from "~/lib/timeline-left-browser-preferences";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "../context-menu/timeline-context-menu";
@@ -22,7 +22,7 @@ const BrowserFolderRenameInput: Component<{
 }> = (props) => {
   let inputRef: HTMLInputElement | undefined;
 
-  onMount(() => {
+  onSettled(() => {
     inputRef?.focus();
     inputRef?.select();
   });
@@ -387,7 +387,7 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
     scrollRef.scrollTop = props.browser.scrollTopByTab[props.browser.activeTab] ?? 0;
   };
 
-  onMount(restoreScrollTop);
+  onSettled(restoreScrollTop);
   createEffect(on(() => props.browser.activeTab, restoreScrollTop));
   const activeTreeExpansion = () => props.browser.treeExpansionByTab[props.browser.activeTab];
   const searchActive = () => props.browser.searchQueryByTab[props.browser.activeTab].trim().length > 0;

@@ -1,4 +1,4 @@
-import { For, createSignal, createMemo, onMount, onCleanup, createEffect, on, untrack } from 'solid-js'
+import { For, createSignal, createMemo, onSettled, onCleanup, createEffect, on, untrack } from 'solid-js'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import EffectShell from '~/components/effects/EffectShell'
 import EqFilterTypeSelect from '~/components/effects/eq-filter-type-select'
@@ -142,7 +142,7 @@ export default function Eq(props: EqProps) {
     })
   }
 
-  onMount(() => {
+  onSettled(() => {
     // Initialize size based on container (very compact)
     const update = () => {
       const el = containerRef

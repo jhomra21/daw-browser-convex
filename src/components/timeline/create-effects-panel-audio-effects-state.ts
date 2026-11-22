@@ -874,13 +874,14 @@ export function createEffectsPanelAudioDevice(
       const trackIds = context.tracks ? new Set(context.tracks().map(track => track.id)) : undefined;
 
       if (!legacyInstallation().legacy) return { trackIds, rowTargetIds: undefined };
-      const rows = normalizedPersistedAudioEffectRows();
+      // Read the rows through the same memo as the echo effect above: effects run in the order their sources notify them, and the echo must apply first.
+      const rowsByTarget = persistedRows().byTarget;
       optimisticOrder();
       context.projectId(); currentProjectGeneration(); context.audioEngine();
 
       if (isLocalProject() ? localEffectsView.view()?.projectId !== context.projectId() : context.roomEffects() === undefined) return { trackIds, rowTargetIds: undefined };
 
-      return { trackIds, rowTargetIds: rows.map(row => row.targetId) };
+      return { trackIds, rowTargetIds: [...rowsByTarget.keys()] };
     },
     ({ trackIds, rowTargetIds }) => {
       for (const [targetId, entry] of structuralApplications) {

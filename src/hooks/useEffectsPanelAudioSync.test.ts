@@ -1,6 +1,6 @@
 import { beforeAll, expect, test } from "bun:test";
 import "fake-indexeddb/auto";
-import { createEffect, createSignal, flush, onCleanup, untrack } from "solid-js";
+import { createEffect, createSignal, flush as flushGraph, onCleanup, untrack } from "solid-js";
 import { createFlushedRoot as createRoot, flushChain } from "~/test-support/create-flushed-root";
 import { AudioEngine, type AudioEffectRuntimeInstance, type EngineDisposition, type SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import { convexTest } from "convex-test";
@@ -211,7 +211,7 @@ const createB5c3FxFixture = async (local: boolean, master: boolean, kind: AudioE
       return id;
     },
     removeTrack: () => setTracks([]),
-    switchProject: () => { setTracks([]); setRows([]); setProjectId(`${initialProject}-next`); },
+    switchProject: () => { setTracks([]); setRows([]); setProjectId(`${initialProject}-next`); flushGraph(); },
     close: () => { dispose(); subscription?.close(); isolation?.close(); sampler.dispose(); drum.dispose(); runtime.close(); },
   };
 };
@@ -706,11 +706,11 @@ for (const local of [true, false]) {
           if (holding) {
             // Establish the draft through the real card binding, then leave the target before changing structure.
             setSelectedTarget(targetId);
-            flush();
+            flushGraph();
             gesture.open(holder);
             gesture.tick(holder, () => fixture.audio.compressor.changeInstance(instanceId, prev => ({ ...prev, thresholdDb: -12 })));
             setSelectedTarget("selected-elsewhere");
-            flush();
+            flushGraph();
             await fixture.sync.flushPending();
             await Promise.all(applications);
             expect(gesture.isOpen(holder)).toBe(true);
@@ -1205,7 +1205,8 @@ const mountLocalPanel = (initialProject: string, list: (projectId: string) => Pr
 
   if (!source) throw new Error("The local panel was not created.");
 
-  return { source, flush: () => flush(), setProject: (id: string) => setProject(id), published, stop: () => stop() };
+  // The held read checks the project it started for against the committed one, so the switch is flushed here.
+  return { source, flush: () => flush(), setProject: (id: string) => { setProject(id); flushGraph(); }, published, stop: () => stop() };
 };
 
 const settleMicrotasks = async () => {
@@ -2656,6 +2657,7 @@ for (const local of [true, false]) for (const master of [false, true]) {
       const before=f.calls.length;
       f.setGeneration(1);
       f.audio.reorder({id:"a",kind:"compressor"},1);
+      flushGraph();
       expect(f.audio.orderedEffects().map(i=>i.id)).toEqual(["b","a"]);
       await f.settle();
       console.log(JSON.stringify({probe:"current-lifetime-order",local,master,order:f.audio.orderedEffects().map(i=>i.id),calls:f.calls.slice(before).map(c=>({type:c.type,ids:c.chain.map(i=>i.id),disposition:c.disposition}))}));

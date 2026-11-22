@@ -43,9 +43,12 @@ export const MidiAccessProvider: ParentComponent = (props) => {
     onInputsChange: setInputs,
   })
 
-  createEffect(() => {
-    controller.setSelectedInputIds(appPreferences.midi.selectedInputIds())
-  })
+  createEffect(
+    () => appPreferences.midi.selectedInputIds(),
+    (selectedInputIds) => {
+      controller.setSelectedInputIds(selectedInputIds)
+    },
+  )
 
   onCleanup(controller.dispose)
 

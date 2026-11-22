@@ -6,8 +6,8 @@ import {
   createMemo,
   createSignal,
   createStore,
-  onCleanup,
-} from "solid-js";
+  untrack,
+} from "solid-js"
 import { useDrag } from "~/hooks/useDrag";
 import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
 import {
@@ -169,45 +169,52 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   let returnSectionElement: HTMLDivElement | undefined;
 
-  createEffect(() => {
-    const unsubscribe = sidebar().subscribeTrackLevels((levelsByTrackId) => {
-      setMeters((current) => {
-        for (const [trackId, levels] of levelsByTrackId) {
-          const left = clampUnit(levels.left);
-          const right = clampUnit(levels.right);
-          const previous = current[trackId];
+  createEffect(
+    () => sidebar(),
+    (model) => {
+      const unsubscribe = model.subscribeTrackLevels((levelsByTrackId) => {
+        setMeters((current) => {
+          for (const [trackId, levels] of levelsByTrackId) {
+            const left = clampUnit(levels.left);
+            const right = clampUnit(levels.right);
+            const previous = current[trackId];
 
-          if (previous?.left === left && previous.right === right) continue;
-          current[trackId] = { left, right };
+            if (previous?.left === left && previous.right === right) continue;
+            current[trackId] = { left, right };
+          }
+        });
+      });
+
+      return unsubscribe;
+    },
+  );
+
+  createEffect(
+    () => sidebar(),
+    (model) => {
+      const unsubscribe = model.subscribeMasterLevels((levels) => {
+        setMasterLevels({
+          left: clampUnit(levels.left),
+          right: clampUnit(levels.right),
+        });
+      });
+
+      return unsubscribe;
+    },
+  );
+
+  createEffect(
+    () => new Set<string>(
+      sidebar().allTracks.map((track) => track.id),
+    ),
+    (trackIds) => {
+      setMeters((current) => {
+        for (const trackId of Object.keys(current)) {
+          if (!trackIds.has(trackId)) delete current[trackId];
         }
       });
-    });
-
-    onCleanup(unsubscribe);
-  });
-
-  createEffect(() => {
-    const unsubscribe = sidebar().subscribeMasterLevels((levels) => {
-      setMasterLevels({
-        left: clampUnit(levels.left),
-        right: clampUnit(levels.right),
-      });
-    });
-
-    onCleanup(unsubscribe);
-  });
-
-  createEffect(() => {
-    const trackIds = new Set<string>(
-      sidebar().allTracks.map((track) => track.id),
-    );
-
-    setMeters((current) => {
-      for (const trackId of Object.keys(current)) {
-        if (!trackIds.has(trackId)) delete current[trackId];
-      }
-    });
-  });
+    },
+  );
 
   const groupTracks = createMemo(() =>
     sidebar().allTracks.filter(
@@ -464,44 +471,54 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     return returnTrackNames().get(targetId) ?? "None";
   };
 
-  createEffect(() => {
-    setSelectedOutputTargets((current) => {
-      let next: Map<Track["id"], string> | null = null;
+  const pruneOutputTargets = (current: Map<Track["id"], string>) => {
+    let next: Map<Track["id"], string> | null = null;
 
-      for (const [trackId, targetId] of current) {
-        const track = sidebar().trackById.get(trackId);
+    for (const [trackId, targetId] of current) {
+      const track = sidebar().trackById.get(trackId);
 
-        if (
-          !track ||
-          actualOutputTargetId(track) === targetId ||
-          (targetId && !groupTrackNames().has(targetId))
-        ) {
-          if (!next) next = new Map(current);
-          next.delete(trackId);
-        }
+      if (
+        !track ||
+        actualOutputTargetId(track) === targetId ||
+        (targetId && !groupTrackNames().has(targetId))
+      ) {
+        if (!next) next = new Map(current);
+        next.delete(trackId);
       }
+    }
 
-      return next ?? current;
-    });
-    setSelectedSendTargets((current) => {
-      let next: Map<Track["id"], string> | null = null;
+    return next ?? current;
+  };
 
-      for (const [trackId, targetId] of current) {
-        const track = sidebar().trackById.get(trackId);
+  const pruneSendTargets = (current: Map<Track["id"], string>) => {
+    let next: Map<Track["id"], string> | null = null;
 
-        if (
-          !track ||
-          actualSendTargetId(track) === targetId ||
-          (targetId && !returnTrackNames().has(targetId))
-        ) {
-          if (!next) next = new Map(current);
-          next.delete(trackId);
-        }
+    for (const [trackId, targetId] of current) {
+      const track = sidebar().trackById.get(trackId);
+
+      if (
+        !track ||
+        actualSendTargetId(track) === targetId ||
+        (targetId && !returnTrackNames().has(targetId))
+      ) {
+        if (!next) next = new Map(current);
+        next.delete(trackId);
       }
+    }
 
-      return next ?? current;
-    });
-  });
+    return next ?? current;
+  };
+
+  createEffect(
+    () => ({
+      outputs: pruneOutputTargets(untrack(selectedOutputTargets)),
+      sends: pruneSendTargets(untrack(selectedSendTargets)),
+    }),
+    ({ outputs, sends }) => {
+      setSelectedOutputTargets(outputs);
+      setSelectedSendTargets(sends);
+    },
+  );
 
   const canWriteTrackRouting = (track: Track) =>
     sidebar().canWriteTrackRouting(track.id);

@@ -220,9 +220,9 @@ export default function Knob(props: KnobProps) {
       
       <div
         role="slider"
-        tabIndex={props.disabled ? undefined : 0}
+        tabindex={props.disabled ? undefined : 0}
         aria-label={props.ariaLabel ?? props.label ?? 'Knob'}
-        aria-disabled={props.disabled}
+        aria-disabled={props.disabled === undefined ? undefined : props.disabled ? "true" : "false"}
         aria-valuemin={props.min}
         aria-valuemax={props.max}
         aria-valuenow={visualValue()}

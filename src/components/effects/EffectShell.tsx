@@ -113,7 +113,7 @@ export default function EffectShell(props: EffectShellProps) {
             class={["effect-shell-chevron flex size-6 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-300/70", {
               '-my-1 -ml-2 border-r border-border': !collapsed(),
             }]}
-            aria-expanded={!collapsed()}
+            aria-expanded={!collapsed() ? "true" : "false"}
             aria-controls={contentId()}
             aria-label={collapsed() ? 'Unfold device' : 'Fold device'}
             title={collapsed() ? 'Unfold device' : 'Fold device'}

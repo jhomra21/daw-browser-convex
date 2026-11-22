@@ -196,10 +196,12 @@ export const createLocalEffectsView = (input: {
     },
   });
 
-  createEffect(() => {
-    input.projectId();
-    untrack(owner.sync);
-  });
+  createEffect(
+    () => input.projectId(),
+    () => {
+      untrack(owner.sync);
+    },
+  );
   onCleanup(owner.dispose);
 
   return { view, reload: owner.reload, acknowledge: owner.acknowledge, ready: owner.ready };

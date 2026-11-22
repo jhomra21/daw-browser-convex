@@ -1,4 +1,4 @@
-import { batch, createContext, createEffect, createSignal, type ParentComponent, useContext } from "solid-js"
+import { createContext, createEffect, createSignal, type ParentComponent, useContext } from "solid-js"
 import { useColorMode } from "@kobalte/core"
 import { assertDefined } from "@daw-browser/shared"
 import {
@@ -107,104 +107,108 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
     return themeId === DEFAULT_DAW_THEME_ID ? activeTheme() : themeId
   }
 
-  createEffect(() => {
-    setColorMode(activeTheme())
-  })
+  createEffect(
+    () => activeTheme(),
+    (theme) => {
+      setColorMode(theme)
+    },
+  )
 
-  createEffect(() => {
-    const result = applyDawTheme(activeThemeId(), colorMode())
+  createEffect(
+    () => ({ themeId: activeThemeId(), mode: colorMode() }),
+    ({ themeId, mode }) => {
+      const result = applyDawTheme(themeId, mode)
 
-    if (!result.changed) return
-    setThemeTokens(result.tokens)
-  })
+      if (!result.changed) return
+      setThemeTokens(result.tokens)
+    },
+  )
 
-  createEffect(() => {
-    configureAudioEngine(resolveAudioRuntimeConfiguration(preferences.audio))
-  })
+  createEffect(
+    () => resolveAudioRuntimeConfiguration(preferences.audio),
+    (configuration) => {
+      configureAudioEngine(configuration)
+    },
+  )
 
-  createEffect(() => {
-    configureDesiredAudioOutputDevice(preferences.audio.outputDeviceId)
-  })
+  createEffect(
+    () => preferences.audio.outputDeviceId,
+    (outputDeviceId) => {
+      configureDesiredAudioOutputDevice(outputDeviceId)
+    },
+  )
 
   const setTheme = (theme: AppTheme) => {
     if (preferences.appearance.theme === theme) return
-    setPreferences("appearance", "theme", theme)
+    setPreferences((draft) => { draft.appearance.theme = theme })
   }
 
   const setThemeId = (id: DawThemeId) => {
     if (preferences.appearance.themeId === id) return
-    setPreferences("appearance", "themeId", id)
+    setPreferences((draft) => { draft.appearance.themeId = id })
   }
 
   const previewThemeSelection = (selection: AppTheme | DawThemeId) => {
     if (selection === "system" || selection === "light" || selection === "dark") {
-      batch(() => {
-        setPreviewThemeId(DEFAULT_DAW_THEME_ID)
-        setPreviewTheme(selection)
-      })
+      setPreviewThemeId(DEFAULT_DAW_THEME_ID)
+      setPreviewTheme(selection)
 
       return
     }
 
-    batch(() => {
-      setPreviewThemeId(selection)
-      setPreviewTheme(null)
-    })
+    setPreviewThemeId(selection)
+    setPreviewTheme(null)
   }
 
   const commitThemeSelection = (selection: AppTheme | DawThemeId) => {
-    batch(() => {
-      if (selection === "system" || selection === "light" || selection === "dark") {
-        setThemeId(DEFAULT_DAW_THEME_ID)
-        setTheme(selection)
-      } else {
-        setThemeId(selection)
-      }
+    if (selection === "system" || selection === "light" || selection === "dark") {
+      setThemeId(DEFAULT_DAW_THEME_ID)
+      setTheme(selection)
+    } else {
+      setThemeId(selection)
+    }
 
-      setPreviewThemeId(null)
-      setPreviewTheme(null)
-    })
+    setPreviewThemeId(null)
+    setPreviewTheme(null)
   }
 
   const cancelThemePreview = () => {
-    batch(() => {
-      setPreviewThemeId(null)
-      setPreviewTheme(null)
-    })
+    setPreviewThemeId(null)
+    setPreviewTheme(null)
   }
 
   const setSidebarOpen = (open: boolean) => {
     if (preferences.sidebar.open === open) return
-    setPreferences("sidebar", "open", open)
+    setPreferences((draft) => { draft.sidebar.open = open })
   }
 
   const setDefaultTrackColor = (color: string) => {
     const nextColor = parseHexColor(color, preferences.timeline.defaultTrackColor)
 
     if (preferences.timeline.defaultTrackColor === nextColor) return
-    setPreferences("timeline", "defaultTrackColor", nextColor)
+    setPreferences((draft) => { draft.timeline.defaultTrackColor = nextColor })
   }
 
   const setDefaultGroupColor = (color: string) => {
     const nextColor = parseHexColor(color, preferences.timeline.defaultGroupColor)
 
     if (preferences.timeline.defaultGroupColor === nextColor) return
-    setPreferences("timeline", "defaultGroupColor", nextColor)
+    setPreferences((draft) => { draft.timeline.defaultGroupColor = nextColor })
   }
 
   const resetDefaultTrackColor = () => {
     if (preferences.timeline.defaultTrackColor === TIMELINE_DEFAULT_TRACK_COLOR) return
-    setPreferences("timeline", "defaultTrackColor", TIMELINE_DEFAULT_TRACK_COLOR)
+    setPreferences((draft) => { draft.timeline.defaultTrackColor = TIMELINE_DEFAULT_TRACK_COLOR })
   }
 
   const resetDefaultGroupColor = () => {
     if (preferences.timeline.defaultGroupColor === TIMELINE_DEFAULT_GROUP_COLOR) return
-    setPreferences("timeline", "defaultGroupColor", TIMELINE_DEFAULT_GROUP_COLOR)
+    setPreferences((draft) => { draft.timeline.defaultGroupColor = TIMELINE_DEFAULT_GROUP_COLOR })
   }
 
   const setFollow = (enabled: boolean) => {
     if (preferences.timeline.follow === enabled) return
-    setPreferences("timeline", "follow", enabled)
+    setPreferences((draft) => { draft.timeline.follow = enabled })
   }
 
   const resolveDefaultTimelineColor = (color: string) => {
@@ -255,31 +259,31 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
         },
         audio: {
           preferences: () => preferences.audio,
-          setInputDeviceId: (deviceId) => setPreferences("audio", "inputDeviceId", deviceId),
-          setOutputDeviceId: (deviceId) => setPreferences("audio", "outputDeviceId", deviceId),
-          setNativeInputDeviceId: (deviceId) => setPreferences("audio", "nativeInputDeviceId", deviceId),
-          setNativeOutputDeviceId: (deviceId) => setPreferences("audio", "nativeOutputDeviceId", deviceId),
-          setSampleRate: (sampleRate) => setPreferences("audio", "sampleRate", sampleRate),
-          setLatencyMode: (latencyMode) => setPreferences("audio", "latencyMode", latencyMode),
-          setEchoCancellation: (enabled) => setPreferences("audio", "echoCancellation", enabled),
-          setNoiseSuppression: (enabled) => setPreferences("audio", "noiseSuppression", enabled),
-          setAutoGainControl: (enabled) => setPreferences("audio", "autoGainControl", enabled),
-          setNativePlaybackEnabled: (enabled) => setPreferences("audio", "nativePlaybackEnabled", enabled),
+          setInputDeviceId: (deviceId) => setPreferences((draft) => { draft.audio.inputDeviceId = deviceId }),
+          setOutputDeviceId: (deviceId) => setPreferences((draft) => { draft.audio.outputDeviceId = deviceId }),
+          setNativeInputDeviceId: (deviceId) => setPreferences((draft) => { draft.audio.nativeInputDeviceId = deviceId }),
+          setNativeOutputDeviceId: (deviceId) => setPreferences((draft) => { draft.audio.nativeOutputDeviceId = deviceId }),
+          setSampleRate: (sampleRate) => setPreferences((draft) => { draft.audio.sampleRate = sampleRate }),
+          setLatencyMode: (latencyMode) => setPreferences((draft) => { draft.audio.latencyMode = latencyMode }),
+          setEchoCancellation: (enabled) => setPreferences((draft) => { draft.audio.echoCancellation = enabled }),
+          setNoiseSuppression: (enabled) => setPreferences((draft) => { draft.audio.noiseSuppression = enabled }),
+          setAutoGainControl: (enabled) => setPreferences((draft) => { draft.audio.autoGainControl = enabled }),
+          setNativePlaybackEnabled: (enabled) => setPreferences((draft) => { draft.audio.nativePlaybackEnabled = enabled }),
         },
         recording: {
           preferences: () => preferences.recording,
-          setPortableEnabled: (enabled) => setPreferences("recording", "portableEnabled", enabled),
+          setPortableEnabled: (enabled) => setPreferences((draft) => { draft.recording.portableEnabled = enabled }),
           setInputConfiguration: (configuration) =>
-            setPreferences("recording", (recording) => updateRecordingInputPreferences(recording, configuration)),
+            setPreferences((draft) => { Object.assign(draft.recording, updateRecordingInputPreferences(draft.recording, configuration)) }),
           setManualOffsetFrames: (frames) =>
-            setPreferences("recording", "manualOffsetFrames", normalizeRecordingManualOffsetFrames(frames)),
+            setPreferences((draft) => { draft.recording.manualOffsetFrames = normalizeRecordingManualOffsetFrames(frames) }),
           setCalibrations: (calibrations) =>
-            setPreferences("recording", (recording) => updateRecordingCalibrations(recording, calibrations))
+            setPreferences((draft) => { Object.assign(draft.recording, updateRecordingCalibrations(draft.recording, calibrations)) })
         },
         midi: {
           selectedInputIds: () => preferences.midi.selectedInputIds,
           setSelectedInputIds: (ids) =>
-            setPreferences("midi", "selectedInputIds", () => ids)
+            setPreferences((draft) => { draft.midi.selectedInputIds = ids })
         }
       }}
     >

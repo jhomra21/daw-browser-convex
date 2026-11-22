@@ -28,9 +28,12 @@ type ProjectRenameDialogProps = {
 export default function ProjectRenameDialog(props: ProjectRenameDialogProps) {
   const [name, setName] = createSignal('')
 
-  createEffect(() => {
-    setName(props.project?.name ?? '')
-  })
+  createEffect(
+    () => props.project?.name ?? '',
+    (name) => {
+      setName(name)
+    },
+  )
 
   const confirmRename = () => {
     const project = props.project

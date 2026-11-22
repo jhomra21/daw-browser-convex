@@ -564,18 +564,22 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     });
   };
 
-  createEffect(() => {
-    void props.viewportRedrawVersion;
-    void props.clip;
-    void props.isSelected;
-    void props.bpm;
-    void props.waveformVisible;
-    void appPreferences.appearance.themeTokens();
-    void props.pixelsPerSecond;
-    void props.visibleRange;
-    void waveform.segments();
-    scheduleWaveformDraw();
-  });
+  createEffect(
+    () => {
+      void props.viewportRedrawVersion;
+      void props.clip;
+      void props.isSelected;
+      void props.bpm;
+      void props.waveformVisible;
+      void appPreferences.appearance.themeTokens();
+      void props.pixelsPerSecond;
+      void props.visibleRange;
+      void waveform.segments();
+    },
+    () => {
+      scheduleWaveformDraw();
+    },
+  );
   onCleanup(() => {
     if (waveformFrame !== undefined) cancelAnimationFrame(waveformFrame);
   });

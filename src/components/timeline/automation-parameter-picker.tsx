@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import {
   automationTargetKey,
   createAutomationTarget,
@@ -70,11 +70,16 @@ export default function AutomationParameterPicker(props: AutomationParameterPick
     close()
   }
 
-  createEffect(() => {
-    if (!open()) return
-    document.addEventListener('pointerdown', onDocumentPointerDown, true)
-    onCleanup(() => document.removeEventListener('pointerdown', onDocumentPointerDown, true))
-  })
+  createEffect(
+    () => open(),
+    (isOpen) => {
+      if (!isOpen) return
+
+      document.addEventListener('pointerdown', onDocumentPointerDown, true)
+
+      return () => document.removeEventListener('pointerdown', onDocumentPointerDown, true)
+    },
+  )
 
   return (
     <div
@@ -88,7 +93,7 @@ export default function AutomationParameterPicker(props: AutomationParameterPick
         type="button"
         class="flex h-7 w-full items-center justify-between gap-2 rounded border border-red-500/40 bg-background/90 px-2 py-1 text-left text-red-100 outline-none hover:border-red-400/70"
         aria-haspopup="listbox"
-        aria-expanded={open()}
+        aria-expanded={open() ? "true" : "false"}
         onClick={toggle}
       >
         <span class="min-w-0 truncate">
@@ -116,7 +121,7 @@ export default function AutomationParameterPicker(props: AutomationParameterPick
                             <button
                               type="button"
                               role="option"
-                              aria-selected={targetKey() === selectedTargetKey()}
+                              aria-selected={targetKey() === selectedTargetKey() ? "true" : "false"}
                               class={cn(
                                 'flex h-6 w-full items-center gap-2 rounded px-2 text-left text-foreground hover:bg-red-500/20 hover:text-red-50',
                                 targetKey() === selectedTargetKey() && 'bg-red-500/20 text-red-50',

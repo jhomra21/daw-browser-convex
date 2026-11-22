@@ -1,7 +1,7 @@
 import EffectShell from '~/components/effects/EffectShell'
 import { DeviceToggleButton } from '~/components/ui/device-control'
 import Knob from '~/components/ui/knob'
-import { For, batch, createEffect, createSignal, createUniqueId, onCleanup } from 'solid-js'
+import { For, createEffect, createSignal, createUniqueId } from 'solid-js'
 import type { AudioEngine, CompressorMeterFrame } from '@daw-browser/audio-engine/audio-engine'
 import {
   COMPRESSOR_ATTACK_MS_MAX,
@@ -123,28 +123,32 @@ export default function Compressor(props: CompressorProps) {
   const [meter, setMeter] = createSignal<CompressorMeterFrame | null>(null)
   const [history, setHistory] = createSignal<CompressorMeterFrame[]>([])
 
-  createEffect(() => {
-    const audioEngine = props.audioEngine
-    const targetId = props.targetId
-    batch(() => {
+  createEffect(
+    () => {
+      const audioEngine = props.audioEngine
+      const targetId = props.targetId
+
+      return { audioEngine, targetId, effectInstanceId: audioEngine && targetId ? props.effectInstanceId : undefined }
+    },
+    ({ audioEngine, targetId, effectInstanceId }) => {
       setMeter(null)
       setHistory([])
-    })
 
-    if (!audioEngine || !targetId || !props.effectInstanceId) return
+      if (!audioEngine || !targetId || !effectInstanceId) return
 
-    const unsubscribe = targetId === 'master'
-      ? audioEngine.masterFx.subscribeCompressorMeter(props.effectInstanceId, (frame) => {
-        setMeter(frame)
-        setHistory((frames) => [...frames.slice(1 - HISTORY_SIZE), frame])
-      })
-      : audioEngine.mixer.subscribeTrackCompressorMeter(targetId, props.effectInstanceId, (frame) => {
-        setMeter(frame)
-        setHistory((frames) => [...frames.slice(1 - HISTORY_SIZE), frame])
-      })
+      const unsubscribe = targetId === 'master'
+        ? audioEngine.masterFx.subscribeCompressorMeter(effectInstanceId, (frame) => {
+          setMeter(frame)
+          setHistory((frames) => [...frames.slice(1 - HISTORY_SIZE), frame])
+        })
+        : audioEngine.mixer.subscribeTrackCompressorMeter(targetId, effectInstanceId, (frame) => {
+          setMeter(frame)
+          setHistory((frames) => [...frames.slice(1 - HISTORY_SIZE), frame])
+        })
 
-    onCleanup(unsubscribe)
-  })
+      return unsubscribe
+    },
+  )
 
   return (
     <EffectShell title="Compressor" typeLabel="Audio" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset}  class={cn('w-[560px] min-w-[560px]', props.class)}>

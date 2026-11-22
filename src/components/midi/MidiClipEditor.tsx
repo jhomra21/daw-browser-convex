@@ -1,4 +1,4 @@
-import { type Component, createMemo, createSignal, onCleanup, createEffect, For, on, Show } from 'solid-js'
+import { type Component, createMemo, createSignal, onCleanup, createEffect, For, Show, onSettled, untrack } from 'solid-js'
 import { cn } from '~/lib/utils'
 import { useDrag } from '~/hooks/useDrag'
 import { useMidiEditorPersistence } from '~/hooks/useMidiEditorPersistence'
@@ -110,45 +110,51 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
     event.stopPropagation()
   }
 
-  createEffect(() => {
-    const m = props.midi
-    const normalized = m && Array.isArray(m.notes) ? normalizeLegacyMidiClip(m) : undefined
+  createEffect(
+    () => {
+      const m = props.midi
+      const normalized = m && Array.isArray(m.notes) ? normalizeLegacyMidiClip(m) : undefined
 
-    if (normalized) persistence.reconcile(normalized)
-    const projected = projectedMidi()
+      return { normalized, projected: projectedMidi() }
+    },
+    ({ normalized, projected }) => {
+      if (normalized) persistence.reconcile(normalized)
 
-    const nextNotes = projected
-      ? projected.notes.flatMap((note) => (
-        note.id === undefined ? [] : [{ ...note, id: note.id, channel: note.channel ?? 1 }]
-      ))
-      : []
+      const nextNotes = projected
+        ? projected.notes.flatMap((note) => (
+          note.id === undefined ? [] : [{ ...note, id: note.id, channel: note.channel ?? 1 }]
+        ))
+        : []
 
-    setMappings(projected?.mappings ?? [])
-    projectedNotes = nextNotes
-    const drag = dragNote
+      setMappings(projected?.mappings ?? [])
+      projectedNotes = nextNotes
+      const drag = dragNote
 
-    if (drag && !nextNotes.some((note) => note.id === drag.noteId)) {
-      cleanupNoteDragListeners()
-      dragNote = null
+      if (drag && !nextNotes.some((note) => note.id === drag.noteId)) {
+        cleanupNoteDragListeners()
+        dragNote = null
+        setNotes(nextNotes)
+
+        return
+      }
+
+      if (drag) {
+        const draft = drag.draft
+        setNotes(nextNotes.map((note) => note.id === draft.id ? draft : note))
+
+        return
+      }
+
       setNotes(nextNotes)
-
-      return
-    }
-
-    if (drag) {
-      const draft = drag.draft
-      setNotes(nextNotes.map((note) => note.id === draft.id ? draft : note))
-
-      return
-    }
-
-    setNotes(nextNotes)
+    },
+  )
+  createEffect(clipId, () => {
+    setSelectedNoteIds([])
   })
-  createEffect(on(clipId, () => setSelectedNoteIds([])))
-  createEffect(on(notes, (currentNotes) => {
+  createEffect(notes, (currentNotes) => {
     const currentIds = new Set(currentNotes.map((note) => note.id))
     setSelectedNoteIds((selected) => selected.filter((id) => currentIds.has(id)))
-  }))
+  })
 
   let gridRef: HTMLDivElement | undefined
 
@@ -201,17 +207,22 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
   }
 
   const onLocalDuplicateRequest = () => duplicateSelectedNotes()
-  createEffect(() => {
+  onSettled(() => {
     const currentRoot = root
 
     if (!currentRoot) return
     currentRoot.addEventListener('timeline-local-duplicate', onLocalDuplicateRequest)
-    onCleanup(() => currentRoot.removeEventListener('timeline-local-duplicate', onLocalDuplicateRequest))
+
+    const removeListener = () => currentRoot.removeEventListener('timeline-local-duplicate', onLocalDuplicateRequest)
+
+    return removeListener
   })
-  createEffect(() => {
-    selectedNoteIds()
-    window.dispatchEvent(new Event('timeline-local-duplicate-state-change'))
-  })
+  createEffect(
+    () => selectedNoteIds(),
+    () => {
+      window.dispatchEvent(new Event('timeline-local-duplicate-state-change'))
+    },
+  )
 
   const onEditorKeyDown = (event: KeyboardEvent) => {
     if (
@@ -462,9 +473,12 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
     if (!isForeignNotePointer(e)) cancelNoteDrag()
   }
 
-  createEffect(() => {
-    if (!persistence.canPersist() && dragNote) cancelNoteDrag()
-  })
+  createEffect(
+    () => persistence.canPersist(),
+    (canPersist) => untrack(() => {
+      if (!canPersist && dragNote) cancelNoteDrag()
+    }),
+  )
   onCleanup(cleanupNoteDragListeners)
 
   // Velocity drag: the live value is an overlay, so notes stay projected until pointerup commits one update.
@@ -855,7 +869,7 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
                 ? 'border-foreground ring-1 ring-foreground'
                 : 'border-green-400/80',
             )}
-            aria-selected={selectedNoteIds().includes(note.id)}
+            aria-selected={selectedNoteIds().includes(note.id) ? "true" : "false"}
             data-midi-note-id={note.id}
             style={{
               left: `${grid().noteLeftPercent(note)}%`,
@@ -961,7 +975,7 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
   return (
     <div
       ref={(el) => (root = el)}
-      tabIndex={-1}
+      tabindex={-1}
       class="flex flex-col h-full min-h-0 bg-app-surface outline-none"
       data-timeline-keyboard-local="true"
       data-timeline-keyboard-duplicate-enabled={persistence.canPersist() && selectedNoteIds().length > 0 ? 'true' : 'false'}

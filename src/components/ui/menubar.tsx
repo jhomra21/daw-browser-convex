@@ -33,16 +33,12 @@ type MenubarAnimationContextValue = {
 const MenubarAnimationContext = createContext<MenubarAnimationContextValue>();
 const MenubarMenuValueContext = createContext<Accessor<string | undefined>>();
 
-const useMenubarAnimation = () => {
-  const context = useContext(MenubarAnimationContext);
-
-  return assertDefined(context, "MenubarContent must be used within Menubar.");
-};
+const useMenubarAnimation = () => useContext(MenubarAnimationContext);
 
 const useMenubarMenuValue = () => {
   const value = useContext(MenubarMenuValueContext);
 
-  return () => assertDefined(value?.(), "MenubarContent must be used within MenubarMenu.");
+  return () => assertDefined(value(), "MenubarContent must be used within MenubarMenu.");
 };
 
 type MenubarProps = MenubarPrimitive.MenubarRootProps & {
@@ -64,9 +60,12 @@ const Menubar: Component<MenubarProps> = (props) => {
 
   const rest = omit(props, "onValueChange");
 
-  createEffect(() => {
-    if (props.value !== undefined) setCurrentValue(props.value);
-  });
+  createEffect(
+    () => props.value,
+    (value) => {
+      if (value !== undefined) setCurrentValue(value);
+    },
+  );
 
   return (
     <MenubarAnimationContext value={{ animation }}>

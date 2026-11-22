@@ -1,4 +1,4 @@
-import { createContext, createEffect, createSignal, useContext, type Accessor, type ParentComponent } from "solid-js";
+import { createContext, createEffect, createSignal, useContext, type Accessor, type ParentComponent, untrack } from "solid-js";
 import { REORDER_ACTIVATION_THRESHOLD_PX } from "~/components/timeline/device-interaction";
 import { createStoredValue } from "~/lib/stored-value";
 
@@ -57,7 +57,7 @@ export function createEffectsPanelDeviceCollapse(projectId: Accessor<string | un
     setCollapsedIdentities(currentProjectId ? collapsedDevices.read(currentProjectId) : new Set<string>());
   };
 
-  createEffect(reload);
+  createEffect(projectId, () => untrack(reload));
 
   const setCollapsed = (identity: DeviceCollapseIdentity, collapsed: boolean) => {
     reload();
@@ -89,7 +89,7 @@ type DeviceCollapseContextValue = {
   nativeLimit?: Accessor<string | undefined>;
 };
 
-const DeviceCollapseContext = createContext<DeviceCollapseContextValue>();
+const DeviceCollapseContext = createContext<DeviceCollapseContextValue | null>(null);
 
 export const useDeviceCollapseContext = () => useContext(DeviceCollapseContext);
 

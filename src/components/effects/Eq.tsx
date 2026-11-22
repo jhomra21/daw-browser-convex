@@ -1,4 +1,4 @@
-import { For, createSignal, createMemo, onSettled, onCleanup, createEffect, on, untrack } from 'solid-js'
+import { For, createSignal, createMemo, onSettled, onCleanup, createEffect, untrack } from 'solid-js'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import EffectShell from '~/components/effects/EffectShell'
 import EqFilterTypeSelect from '~/components/effects/eq-filter-type-select'
@@ -208,34 +208,36 @@ export default function Eq(props: EqProps) {
     spectrumDecayFrame = requestAnimationFrame(runSpectrumDecay)
   }
 
-  createEffect(on(collapsed, (isCollapsed) => {
+  createEffect(collapsed, (isCollapsed) => {
     if (isCollapsed) {
       if (spectrumDecayFrame !== null) cancelAnimationFrame(spectrumDecayFrame)
       spectrumDecayFrame = null
     } else if (displayedSpectrum && hasAudibleSpectrum(displayedSpectrum)) {
       startSpectrumDecay()
     }
-  }, { defer: true }))
+  }, { defer: true })
 
-  createEffect(() => {
-    const frame = props.spectrumData
-    const data = frame?.data
+  createEffect(
+    () => props.spectrumData,
+    (frame) => {
+      const data = frame?.data
 
-    if (!data || data.length === 0) {
+      if (!data || data.length === 0) {
+        startSpectrumDecay()
+
+        return
+      }
+
+      if (!displayedSpectrum || displayedSpectrum.length !== data.length) {
+        displayedSpectrum = new Float32Array(data.length)
+      }
+
+      displayedSpectrum.set(data)
+      displayedSpectrumSampleRate = frame.sampleRate
+      lastFreshSpectrumAt = performance.now()
       startSpectrumDecay()
-
-      return
-    }
-
-    if (!displayedSpectrum || displayedSpectrum.length !== data.length) {
-      displayedSpectrum = new Float32Array(data.length)
-    }
-
-    displayedSpectrum.set(data)
-    displayedSpectrumSampleRate = frame.sampleRate
-    lastFreshSpectrumAt = performance.now()
-    startSpectrumDecay()
-  })
+    },
+  )
 
   // Helpers: mapping
   const freqToX = (freq: number) => {
@@ -510,32 +512,40 @@ export default function Eq(props: EqProps) {
   }
 
   // Redraw when relevant inputs change
-  createEffect(() => {
-    for (const band of props.bands) {
-      void band.id
-      void band.frequency
-      void band.gainDb
-      void band.q
-      void band.enabled
-      void band.type
-    }
+  createEffect(
+    () => {
+      for (const band of props.bands) {
+        void band.id
+        void band.frequency
+        void band.gainDb
+        void band.q
+        void band.enabled
+        void band.type
+      }
 
-    void props.enabled
-    void selectedId()
-    void canvasSize()
-    void props.spectrumData
-    void spectrumTick()
-    scheduleDraw()
-  })
+      void props.enabled
+      void selectedId()
+      void canvasSize()
+      void props.spectrumData
+      void spectrumTick()
+    },
+    () => {
+      scheduleDraw()
+    },
+  )
 
-  createEffect(() => {
-    const current = selectedId()
+  createEffect(
+    () => {
+      const current = selectedId()
 
-    if (props.bands.some((band) => band.id === current)) return
-    const next = props.bands[0]?.id ?? ''
+      if (props.bands.some((band) => band.id === current)) return undefined
 
-    if (current !== next) setSelectedId(next)
-  })
+      return { current, next: props.bands[0]?.id ?? '' }
+    },
+    (stale) => {
+      if (stale && stale.current !== stale.next) setSelectedId(stale.next)
+    },
+  )
 
   // Interaction: drag nodes to set freq/gain
   const gesture = useParameterGesture({ onClosed: () => canvasDrag.cancelDrag() })
@@ -835,7 +845,7 @@ export default function Eq(props: EqProps) {
                 <div class="flex h-5 items-center justify-center gap-2">
                   <button
                     type="button"
-                    aria-pressed={band.enabled}
+                    aria-pressed={band.enabled ? "true" : "false"}
                     aria-label={band.enabled ? `Disable EQ band ${index() + 1}` : `Enable EQ band ${index() + 1}`}
                     class={cn(
                       'h-3.5 w-3.5 border border-border',

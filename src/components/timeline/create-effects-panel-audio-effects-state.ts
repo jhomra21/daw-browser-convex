@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, untrack, type Accessor } from "solid-js";
 import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import type { FunctionReturnType } from "convex/server";
 import type { AudioEffectRuntimeInstance, AudioEngine, EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
@@ -73,13 +73,17 @@ export const registerAudioEffectCardInteractionCleanup = (input: {
 }) => {
   // Keyed by identity strings: a card whose effect object is replaced by an equal one keeps its gesture.
   const identity = createMemo(() => `${input.ownerKey()}|${input.targetId() ?? ""}`);
-  createEffect(on(identity, () => {
-    if (!input.ownerKey()) return;
-    const effectId = input.effectId();
-    const audioEffects = input.audioEffects();
-    const targetId = input.targetId();
-    onCleanup(() => audioEffects.interruptGesture(effectId, targetId));
-  }));
+  createEffect(identity, () => {
+    const gesture = untrack(() => input.ownerKey()
+      ? { effectId: input.effectId(), audioEffects: input.audioEffects(), targetId: input.targetId() }
+      : undefined);
+
+    if (!gesture) return;
+
+    return () => {
+      gesture.audioEffects.interruptGesture(gesture.effectId, gesture.targetId);
+    };
+  });
 };
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
@@ -237,7 +241,7 @@ export function createEffectsPanelAudioDevice(
     through: number;
   };
 
-  const projectLifetime = createMemo(() => ({ projectId: context.projectId(), generation: currentProjectGeneration() }), undefined, {
+  const projectLifetime = createMemo(() => ({ projectId: context.projectId(), generation: currentProjectGeneration() }), {
     equals: (previous, next) => previous.projectId === next.projectId && previous.generation === next.generation,
   });
 
@@ -325,7 +329,13 @@ export function createEffectsPanelAudioDevice(
 
   const persistedInstanceCache = createAudioEffectInstanceIdentityCache();
   // Deferred: browser-mode effects may first run after setup has already created optimistic drafts.
-  createEffect(on([context.projectId, currentProjectGeneration], () => persistedInstanceCache.reset(), { defer: true }));
+  createEffect(
+    () => ({ projectId: context.projectId(), generation: currentProjectGeneration() }),
+    () => {
+      persistedInstanceCache.reset();
+    },
+    { defer: true },
+  );
 
   const normalizedPersistedAudioEffectRows = createMemo<AudioEffectPanelRow[]>(() => {
     if (isLocalProject()) {
@@ -401,7 +411,6 @@ export function createEffectsPanelAudioDevice(
 
   const persistedOrderedEffects = createMemo<AudioEffectInstance[]>(
     () => readPersistedOrderedEffectsForTarget(currentTargetId()),
-    [],
     { equals: areAudioEffectInstanceOrdersEqual },
   );
 
@@ -412,26 +421,38 @@ export function createEffectsPanelAudioDevice(
     return optimisticOrderForTarget(currentTargetId()) ?? persistedOrder;
   });
 
-  createEffect(() => {
-    const rows = normalizedPersistedAudioEffectRows();
-    const optimistic = optimisticOrder();
-    // Membership is persisted rows and optimistic additions, so a creation still pending persistence keeps its incarnation.
-    persistedInstanceCache.retain([
-      ...rows.flatMap((row) => row.instanceId ? [{ targetId: row.targetId, id: row.instanceId, kind: row.kind }] : []),
-      ...[...optimisticOrdersByTarget.keys()].flatMap(targetId => (optimisticOrderForTarget(targetId) ?? []).map(entry => ({ targetId, id: entry.id, kind: entry.kind }))),
-    ]);
+  createEffect(
+    () => {
+      const rows = normalizedPersistedAudioEffectRows();
+      const optimistic = optimisticOrder();
 
-    for (const targetId of optimisticOrdersByTarget.keys()) {
-      const order = optimisticOrderForTarget(targetId);
+      // Membership is persisted rows and optimistic additions, so a creation still pending persistence keeps its incarnation.
+      const retained = [
+        ...rows.flatMap((row) => row.instanceId ? [{ targetId: row.targetId, id: row.instanceId, kind: row.kind }] : []),
+        ...[...optimisticOrdersByTarget.keys()].flatMap(targetId => (optimisticOrderForTarget(targetId) ?? []).map(entry => ({ targetId, id: entry.id, kind: entry.kind }))),
+      ];
 
-      if (order && !areAudioEffectInstanceOrdersEqual(order, readPersistedOrderedEffectsForTarget(targetId))) continue;
-      optimisticOrdersByTarget.delete(targetId);
-    }
+      const settledTargetIds: string[] = [];
 
-    if (optimistic && !optimisticOrdersByTarget.has(optimistic.targetId)) {
-      setOptimisticOrder();
-    }
-  });
+      for (const targetId of optimisticOrdersByTarget.keys()) {
+        const order = optimisticOrderForTarget(targetId);
+
+        if (order && !areAudioEffectInstanceOrdersEqual(order, readPersistedOrderedEffectsForTarget(targetId))) continue;
+        settledTargetIds.push(targetId);
+      }
+
+      return { optimistic, retained, settledTargetIds };
+    },
+    ({ optimistic, retained, settledTargetIds }) => {
+      persistedInstanceCache.retain(retained);
+
+      for (const targetId of settledTargetIds) optimisticOrdersByTarget.delete(targetId);
+
+      if (optimistic && !optimisticOrdersByTarget.has(optimistic.targetId)) {
+        setOptimisticOrder();
+      }
+    },
+  );
 
   const currentOrderForTarget = (targetId: string) => {
     return optimisticOrderForTarget(targetId)
@@ -820,56 +841,70 @@ export function createEffectsPanelAudioDevice(
 
   // Rows echo into the owner; a row that disappears is a removal.
   let seenTargets = new Map<string, EffectTarget>();
-  createEffect(() => {
-    const rows = persistedRows().byInstance;
+  createEffect(
+    () => {
+      const rows = persistedRows().byInstance;
 
-    if (isLocalProject() ? localEffectsView.view()?.projectId !== context.projectId() : context.roomEffects() === undefined) return;
-    const next = new Map<string, EffectTarget>();
-    untrack(() => {
-      for (const [key, row] of rows) {
-        const target = { targetId: row.targetId, instanceId: requiredInstanceId(row.instanceId, row.kind), kind: row.kind };
-        const previous = seenTargets.get(key);
+      if (isLocalProject() ? localEffectsView.view()?.projectId !== context.projectId() : context.roomEffects() === undefined) return undefined;
 
-        if (previous && previous.kind !== target.kind) owner.external(previous, undefined);
-        next.set(key, target);
-        owner.external(target, row.params, row.through);
-      }
+      return rows;
+    },
+    (rows) => {
+      if (!rows) return;
+      const next = new Map<string, EffectTarget>();
+      untrack(() => {
+        for (const [key, row] of rows) {
+          const target = { targetId: row.targetId, instanceId: requiredInstanceId(row.instanceId, row.kind), kind: row.kind };
+          const previous = seenTargets.get(key);
 
-      for (const [key, target] of seenTargets) if (!next.has(key)) owner.external(target, undefined);
-    });
-    seenTargets = next;
-  });
+          if (previous && previous.kind !== target.kind) owner.external(previous, undefined);
+          next.set(key, target);
+          owner.external(target, row.params, row.through);
+        }
+
+        for (const [key, target] of seenTargets) if (!next.has(key)) owner.external(target, undefined);
+      });
+      seenTargets = next;
+    },
+  );
   // One signature lane covers additions, removals (including the last row), kinds and order.
   // Observe rows first so the one chain builder reads their fresh effective params.
-  createEffect(() => {
-    const trackIds = context.tracks ? new Set(context.tracks().map(track => track.id)) : undefined;
+  createEffect(
+    () => {
+      const trackIds = context.tracks ? new Set(context.tracks().map(track => track.id)) : undefined;
 
-    for (const [targetId, entry] of structuralApplications) {
-      if (targetId !== "master" && trackIds && !trackIds.has(targetId)) {
-        structuralApplications.delete(targetId);
-        entry.supersede();
+      if (!legacyInstallation().legacy) return { trackIds, rowTargetIds: undefined };
+      const rows = normalizedPersistedAudioEffectRows();
+      optimisticOrder();
+      context.projectId(); currentProjectGeneration(); context.audioEngine();
+
+      if (isLocalProject() ? localEffectsView.view()?.projectId !== context.projectId() : context.roomEffects() === undefined) return { trackIds, rowTargetIds: undefined };
+
+      return { trackIds, rowTargetIds: rows.map(row => row.targetId) };
+    },
+    ({ trackIds, rowTargetIds }) => {
+      for (const [targetId, entry] of structuralApplications) {
+        if (targetId !== "master" && trackIds && !trackIds.has(targetId)) {
+          structuralApplications.delete(targetId);
+          entry.supersede();
+        }
       }
-    }
 
-    if (!legacyInstallation().legacy) return;
-    const rows = normalizedPersistedAudioEffectRows();
-    optimisticOrder();
-    context.projectId(); currentProjectGeneration(); context.audioEngine();
-
-    if (isLocalProject() ? localEffectsView.view()?.projectId !== context.projectId() : context.roomEffects() === undefined) return;
-    const targets = new Set([...structuralApplications.keys(), ...optimisticOrdersByTarget.keys(), ...rows.map(row => row.targetId)]);
-    untrack(() => {
-      for (const targetId of targets) {
-        if (targetId !== "master" && trackIds && !trackIds.has(targetId)) continue;
-        // Effects cannot await; construction reports once and flushPending joins the same promise.
-        void applyStructureToEngine(targetId).catch(() => {});
-      }
-    });
-  });
+      if (!rowTargetIds) return;
+      const targets = new Set([...structuralApplications.keys(), ...optimisticOrdersByTarget.keys(), ...rowTargetIds]);
+      untrack(() => {
+        for (const targetId of targets) {
+          if (targetId !== "master" && trackIds && !trackIds.has(targetId)) continue;
+          // Effects cannot await; construction reports once and flushPending joins the same promise.
+          void applyStructureToEngine(targetId).catch(() => {});
+        }
+      });
+    },
+  );
   // Losing write access ends every open gesture without committing it.
-  createEffect(on(context.canWriteCurrentTargetEffects, (canWrite) => {
-    if (!canWrite) owner.closeAll("cancel");
-  }, { defer: true }));
+  createEffect(context.canWriteCurrentTargetEffects, (canWrite) => {
+    if (!canWrite) untrack(() => owner.closeAll("cancel"));
+  }, { defer: true });
 
   const gestureOwner: EffectsPanelAudioDevice["gestureOwner"] = (instanceId, kind, targetId = currentTargetId()) => (
     owner.handle(() => ({ targetId, instanceId, kind }))

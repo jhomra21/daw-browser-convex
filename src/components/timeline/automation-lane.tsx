@@ -443,7 +443,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
         root = element
       }}
       data-timeline-automation-lane="true"
-      tabIndex={0}
+      tabindex={0}
       data-timeline-keyboard-local="true"
       class="absolute inset-0 z-20 touch-none"
       onPointerDown={(event) => {

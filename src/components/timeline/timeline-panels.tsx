@@ -165,11 +165,16 @@ const TimelinePanels: Component<TimelinePanelsContainerProps> = (props) => {
     return Boolean(projectId && !isLocalId('project', projectId))
   }
 
-  createEffect(() => {
-    if (!canUseSharedChat() && panels().chat.sharedChatOpen) {
-      panels().chat.closeSharedChat()
-    }
-  })
+  createEffect(
+    () => {
+      const chat = panels().chat
+
+      return !canUseSharedChat() && chat.sharedChatOpen ? chat : undefined
+    },
+    (chat) => {
+      chat?.closeSharedChat()
+    },
+  )
 
   return (
     <ExportProvider queue={panels().exportQueue} service={panels().exportService}>

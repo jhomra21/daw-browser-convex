@@ -457,9 +457,12 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
     return props.audioEffects.orderedEffects().find((effect) => effect.id === current.effectId);
   });
 
-  createEffect(() => {
-    if (selection() && !selectedEffect()) setSelection();
-  });
+  createEffect(
+    () => Boolean(selection()) && !selectedEffect(),
+    (stale) => {
+      if (stale) setSelection();
+    },
+  );
   onSettled(() => {
     const handlePointerDown = (event: PointerEvent) => {
       if (!effectCardsElement?.contains(event.target instanceof Node ? event.target : null)) {
@@ -598,7 +601,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                               if (!isDeviceInteractiveTarget(event.target)) element?.focus({ preventScroll: true });
                               drag.onPointerDown(event);
                             }}
-                            tabIndex={-1}
+                            tabindex={-1}
                           >
                             <EffectsPanelDeviceBoundary
                               identity={deviceCollapseIdentity.external(processor().instanceId)}
@@ -642,7 +645,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                               "[&_.effect-shell]:bg-timeline-surface-muted": selectedEffect()?.id === effect().id,
                             }]}
                             ref={(node) => { element = node; }}
-                            tabIndex={-1}
+                            tabindex={-1}
                             onPointerDown={(event) => {
                               setSelection({ targetId: props.targetId, effectId: effect().id });
 
@@ -897,29 +900,31 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const { instrument, audioEffects } = devices;
   const deviceCollapse = createEffectsPanelDeviceCollapse(() => props.projectId);
   const [externalProcessors, setExternalProcessors] = createSignal<ExternalProcessor[]>([]);
-  createEffect(() => {
-    const projectId = props.projectId;
+  createEffect(
+    () => props.projectId,
+    (projectId) => {
+      if (!projectId || !isLocalId("project", projectId)) {
+        setExternalProcessors([]);
 
-    if (!projectId || !isLocalId("project", projectId)) {
-      setExternalProcessors([]);
+        return;
+      }
 
-      return;
-    }
+      const isCurrentProject = () => untrack(() => props.projectId) === projectId;
 
-    const isCurrentProject = () => untrack(() => props.projectId) === projectId;
+      const reload = () => listLocalExternalProcessors(projectId)
+        .then((processors) => {
+          if (isCurrentProject()) setExternalProcessors(processors);
+        })
+        .catch(() => {
+          if (isCurrentProject()) setExternalProcessors([]);
+        });
 
-    const reload = () => listLocalExternalProcessors(projectId)
-      .then((processors) => {
-        if (isCurrentProject()) setExternalProcessors(processors);
-      })
-      .catch(() => {
-        if (isCurrentProject()) setExternalProcessors([]);
-      });
+      void reload();
+      const unsubscribe = subscribeToLocalProjectChanges(projectId, () => void reload());
 
-    void reload();
-    const unsubscribe = subscribeToLocalProjectChanges(projectId, () => void reload());
-    onCleanup(unsubscribe);
-  });
+      return unsubscribe;
+    },
+  );
 
   const externalProcessorsForTarget = createMemo(() => (
     selectExternalProcessorsForTarget(externalProcessors(), props.selectedFXTarget)
@@ -1038,10 +1043,12 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       : undefined;
   });
 
-  createEffect(() => {
-    if (props.isOpen) return;
-    props.onEffectChainElementChange?.(undefined);
-  });
+  createEffect(
+    () => props.isOpen ? undefined : props.onEffectChainElementChange,
+    (onEffectChainElementChange) => {
+      onEffectChainElementChange?.(undefined);
+    },
+  );
 
   return (
     <>

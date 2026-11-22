@@ -1,4 +1,4 @@
-import { For, Show, createEffect, onCleanup, onSettled } from 'solid-js'
+import { For, Show, createEffect, onCleanup, onSettled, untrack } from 'solid-js'
 import type { SpectrumView as SpectrumViewMode } from '@daw-browser/shared'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import { DeviceToggleButton } from '~/components/ui/device-control'
@@ -52,10 +52,12 @@ function SpectrumCanvas(props: SpectrumCanvasProps) {
     if (frame) observer.observe(frame)
     onCleanup(() => observer.disconnect())
   })
-  createEffect(() => {
-    void props.frame
-    paint()
-  })
+  createEffect(
+    () => props.frame,
+    () => {
+      untrack(paint)
+    },
+  )
 
   return (
     <div ref={(element) => (frame = element)} class="relative min-h-0 flex-1" data-spectrum-canvas>
@@ -67,10 +69,13 @@ function SpectrumCanvas(props: SpectrumCanvasProps) {
 export default function SpectrumView(props: { frame: SpectrumFrame | null; view: SpectrumViewMode }) {
   const history = createSpectrogramHistory()
   // One column per delivered frame; a null frame means the analysed target changed or stopped.
-  createEffect(() => {
-    if (props.frame) history.push(props.frame)
-    else history.clear()
-  })
+  createEffect(
+    () => props.frame,
+    (frame) => {
+      if (frame) history.push(frame)
+      else history.clear()
+    },
+  )
 
   const curveColors = (canvas: HTMLCanvasElement) => {
     const style = getComputedStyle(canvas)

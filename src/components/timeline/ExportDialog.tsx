@@ -1,4 +1,4 @@
-import { type Component, createEffect, createMemo, createSignal, For, on, onCleanup, Show, untrack } from 'solid-js'
+import { type Component, createEffect, createMemo, createSignal, For, Show, untrack } from 'solid-js'
 import type { JSX } from '@solidjs/web'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '~/components/ui/dialog'
@@ -155,21 +155,23 @@ const ExportDialog: Component<Props> = (props) => {
   const exportContext = useExportContext()
   let wasOpen = false
 
-  createEffect(on(
+  createEffect(
     () => props.isOpen,
     (isOpen) => {
       if (isOpen && !wasOpen) {
-        const mode: ExportRangeMode = props.loopEnabled ? 'loop' : 'whole'
-        setRangeMode(mode)
-        setRenderStartSec(props.loopEnabled ? props.loopStartSec : 0)
-        setRenderLengthSec(props.loopEnabled
-          ? Math.max(0.001, props.loopEndSec - props.loopStartSec)
-          : initialDuration())
+        untrack(() => {
+          const mode: ExportRangeMode = props.loopEnabled ? 'loop' : 'whole'
+          setRangeMode(mode)
+          setRenderStartSec(props.loopEnabled ? props.loopStartSec : 0)
+          setRenderLengthSec(props.loopEnabled
+            ? Math.max(0.001, props.loopEndSec - props.loopStartSec)
+            : initialDuration())
+        })
       }
 
       wasOpen = isOpen
     },
-  ))
+  )
 
   const renderSettings = () => ({
     sampleRate: sampleRate(),
@@ -210,36 +212,39 @@ const ExportDialog: Component<Props> = (props) => {
     ...encodingSettings(),
   }))
 
-  createEffect(() => {
-    const request = supportRequest()
-    let canceled = false
+  createEffect(
+    () => supportRequest(),
+    (request) => {
+      let canceled = false
 
-    const applySupportedFormats = (formats: ExportAudioFormat[]) => {
-      if (canceled) return
-      setSupportedFormats(formats)
-      setSelectedFormats((selected) => {
-        const supportedSelected = selected.filter((format) => formats.includes(format))
+      const applySupportedFormats = (formats: ExportAudioFormat[]) => {
+        if (canceled) return
+        setSupportedFormats(formats)
+        setSelectedFormats((selected) => {
+          const supportedSelected = selected.filter((format) => formats.includes(format))
 
-        if (supportedSelected.length === selected.length) return selected
+          if (supportedSelected.length === selected.length) return selected
 
-        if (supportedSelected.length > 0) return supportedSelected
+          if (supportedSelected.length > 0) return supportedSelected
 
-        return ['wav']
-      })
-    }
+          return ['wav']
+        })
+      }
 
-    const cached = getCachedSupportedExportAudioFormats(request)
+      const cached = getCachedSupportedExportAudioFormats(request)
 
-    if (cached) {
-      applySupportedFormats(cached)
+      if (cached) {
+        applySupportedFormats(cached)
 
-      return
-    }
+        return
+      }
 
-    setSupportedFormats(null)
-    void probeSupportedExportAudioFormats(request).then(applySupportedFormats)
-    onCleanup(() => { canceled = true })
-  })
+      setSupportedFormats(null)
+      void probeSupportedExportAudioFormats(request).then(applySupportedFormats)
+
+      return () => { canceled = true }
+    },
+  )
 
   const formatSupported = (format: ExportAudioFormat) => supportedFormats()?.includes(format) ?? format === 'wav'
 

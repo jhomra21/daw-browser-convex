@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, onSettled, type Component } from 'solid-js'
+import { createMemo, createSignal, onCleanup, onSettled, type Component, createTrackedEffect } from 'solid-js'
 
 import { drawWaveformSignal } from '@daw-browser/waveforms/draw-waveform-signal'
 import type { Clip } from '@daw-browser/timeline-core/types'
@@ -197,7 +197,7 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
     }
   }
 
-  createEffect(() => draw())
+  createTrackedEffect(() => draw())
 
   return (
     <button

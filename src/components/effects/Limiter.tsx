@@ -3,7 +3,7 @@ import EffectShell from '~/components/effects/EffectShell'
 import AutomatedKnob from '~/components/effects/AutomatedKnob'
 import { formatDeviceDb, formatDeviceMilliseconds, formatDevicePercent } from '~/lib/device-value-format'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { createEffect, createSignal, onCleanup } from 'solid-js'
+import { createEffect, createSignal } from 'solid-js'
 
 type LimiterProps = {
   params: LimiterParams
@@ -22,17 +22,28 @@ const defaults = createDefaultLimiterParams()
 
 export default function Limiter(props: LimiterProps) {
   const [gainReductionDb, setGainReductionDb] = createSignal(0)
-  createEffect(() => {
-    setGainReductionDb(0)
+  createEffect(
+    () => {
+      const audioEngine = props.audioEngine
 
-    if (!props.audioEngine) return
+      if (!audioEngine) return undefined
 
-    const unsubscribe = props.targetId === 'master'
-      ? props.audioEngine.masterFx.subscribeGateMeter(props.effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
-      : props.audioEngine.mixer.subscribeTrackGateMeter(props.targetId, props.effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
+      return { audioEngine, targetId: props.targetId, effectInstanceId: props.effectInstanceId }
+    },
+    (meter) => {
+      setGainReductionDb(0)
 
-    onCleanup(unsubscribe)
-  })
+      if (!meter) return
+
+      const { audioEngine, targetId, effectInstanceId } = meter
+
+      const unsubscribe = targetId === 'master'
+        ? audioEngine.masterFx.subscribeGateMeter(effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
+        : audioEngine.mixer.subscribeTrackGateMeter(targetId, effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
+
+      return unsubscribe
+    },
+  )
 
   return (
     <EffectShell title="Limiter" typeLabel="Audio" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="w-56 min-w-56">

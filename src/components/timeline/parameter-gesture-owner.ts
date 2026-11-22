@@ -1,4 +1,4 @@
-import { batch, createEffect, createMemo, createSignal, getObserver, on, onCleanup, untrack, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, getObserver, onCleanup, untrack, type Accessor } from "solid-js";
 import type { EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
 import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery } from "~/lib/live-processor-control";
 import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
@@ -487,7 +487,7 @@ export function createParameterGestureOwner<Target, Params>(adapter: ParameterGe
     };
 
     queue.push(record);
-    batch(() => patchCell(key, { draft: latest, overlay: undefined }));
+    patchCell(key, { draft: latest, overlay: undefined });;
     void enqueue(key, target, () => runRecord(record));
   };
 
@@ -624,7 +624,7 @@ export function createParameterGestureOwner<Target, Params>(adapter: ParameterGe
     return `${scope.projectId}:${scope.userId}:${scope.generation}`;
   });
 
-  createEffect(on(scopeKey, () => {
+  createEffect(scopeKey, () => untrack(() => {
     const scope = scopeOf(), repair = scope.projectId === lastScope.projectId;
     lastScope = scope;
     const targets = new Map<string, Target>();
@@ -651,7 +651,7 @@ export function createParameterGestureOwner<Target, Params>(adapter: ParameterGe
     }
 
     bumpClosed();
-  }, { defer: true }));
+  }), { defer: true });
   onCleanup(() => {
     for (const gesture of gestures.values()) forgetGesture(gesture);
 

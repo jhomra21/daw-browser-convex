@@ -1,4 +1,4 @@
-import { createEffect, createSignal, createUniqueId, on, Show } from 'solid-js'
+import { createEffect, createSignal, createUniqueId, Show } from 'solid-js'
 import type { JSX } from '@solidjs/web'
 import type {
   SynthAutomationParameterId,
@@ -91,10 +91,10 @@ function WaveformButtons(props: {
 
   return (
     <div class="flex overflow-hidden border border-border" role="group" aria-label={props.label}>
-      <button type="button" class={buttonClass('sine')} disabled={props.disabled} aria-pressed={props.value === 'sine'} aria-label={`${props.label}: sine`} onClick={() => props.onChange('sine')}><WaveformIcon wave="sine" /></button>
-      <button type="button" class={buttonClass('square')} disabled={props.disabled} aria-pressed={props.value === 'square'} aria-label={`${props.label}: square`} onClick={() => props.onChange('square')}><WaveformIcon wave="square" /></button>
-      <button type="button" class={buttonClass('sawtooth')} disabled={props.disabled} aria-pressed={props.value === 'sawtooth'} aria-label={`${props.label}: sawtooth`} onClick={() => props.onChange('sawtooth')}><WaveformIcon wave="sawtooth" /></button>
-      <button type="button" class={buttonClass('triangle')} disabled={props.disabled} aria-pressed={props.value === 'triangle'} aria-label={`${props.label}: triangle`} onClick={() => props.onChange('triangle')}><WaveformIcon wave="triangle" /></button>
+      <button type="button" class={buttonClass('sine')} disabled={props.disabled} aria-pressed={props.value === 'sine' ? "true" : "false"} aria-label={`${props.label}: sine`} onClick={() => props.onChange('sine')}><WaveformIcon wave="sine" /></button>
+      <button type="button" class={buttonClass('square')} disabled={props.disabled} aria-pressed={props.value === 'square' ? "true" : "false"} aria-label={`${props.label}: square`} onClick={() => props.onChange('square')}><WaveformIcon wave="square" /></button>
+      <button type="button" class={buttonClass('sawtooth')} disabled={props.disabled} aria-pressed={props.value === 'sawtooth' ? "true" : "false"} aria-label={`${props.label}: sawtooth`} onClick={() => props.onChange('sawtooth')}><WaveformIcon wave="sawtooth" /></button>
+      <button type="button" class={buttonClass('triangle')} disabled={props.disabled} aria-pressed={props.value === 'triangle' ? "true" : "false"} aria-label={`${props.label}: triangle`} onClick={() => props.onChange('triangle')}><WaveformIcon wave="triangle" /></button>
     </div>
   )
 }
@@ -254,7 +254,7 @@ function OscillatorPanel(props: {
             <option value="sawtooth">Saw</option>
             <option value="triangle">Tri</option>
           </NativeSelect>
-          <button type="button" class={cn(toggleClass(oscillator().enabled), 'w-9 shrink-0')} disabled={props.disabled} aria-pressed={oscillator().enabled} aria-label={`${oscillatorLabel()} enabled`} onClick={() => update({ enabled: !oscillator().enabled })}>{oscillator().enabled ? 'On' : 'Off'}</button>
+          <button type="button" class={cn(toggleClass(oscillator().enabled), 'w-9 shrink-0')} disabled={props.disabled} aria-pressed={oscillator().enabled ? "true" : "false"} aria-label={`${oscillatorLabel()} enabled`} onClick={() => update({ enabled: !oscillator().enabled })}>{oscillator().enabled ? 'On' : 'Off'}</button>
         </div>
       )}
     >
@@ -298,7 +298,7 @@ function FilterPanel(props: {
             <option value="bandpass">Band</option>
             <option value="notch">Notch</option>
           </NativeSelect>
-          <button type="button" class={cn(toggleClass(props.params.filter.enabled), 'w-9 shrink-0')} disabled={props.disabled} aria-pressed={props.params.filter.enabled} aria-label="Filter enabled" onClick={() => props.onChange({ filter: { enabled: !props.params.filter.enabled } })}>{props.params.filter.enabled ? 'On' : 'Off'}</button>
+          <button type="button" class={cn(toggleClass(props.params.filter.enabled), 'w-9 shrink-0')} disabled={props.disabled} aria-pressed={props.params.filter.enabled ? "true" : "false"} aria-label="Filter enabled" onClick={() => props.onChange({ filter: { enabled: !props.params.filter.enabled } })}>{props.params.filter.enabled ? 'On' : 'Off'}</button>
         </div>
       )}
     >
@@ -350,7 +350,7 @@ function LfoDrawer(props: {
     <div class="flex h-28 min-w-0 items-center gap-2 overflow-x-auto px-2 py-1.5">
       <div class="flex shrink-0 items-center gap-1">
         <WaveformButtons value={props.params.lfo.wave} label="LFO waveform" disabled={lfoDisabled()} onChange={(wave) => props.onChange({ lfo: { wave } })} />
-        <button type="button" class={cn(toggleClass(props.params.lfo.enabled), 'w-9 shrink-0')} disabled={props.disabled} aria-pressed={props.params.lfo.enabled} aria-label="LFO enabled" onClick={() => props.onChange({ lfo: { enabled: !props.params.lfo.enabled } })}>{props.params.lfo.enabled ? 'On' : 'Off'}</button>
+        <button type="button" class={cn(toggleClass(props.params.lfo.enabled), 'w-9 shrink-0')} disabled={props.disabled} aria-pressed={props.params.lfo.enabled ? "true" : "false"} aria-label="LFO enabled" onClick={() => props.onChange({ lfo: { enabled: !props.params.lfo.enabled } })}>{props.params.lfo.enabled ? 'On' : 'Off'}</button>
       </div>
       <div class="grid min-w-max flex-1 grid-cols-5 gap-1 justify-items-center">
         <SynthKnob label="Rate" value={props.params.lfo.frequencyHz} valueLabel={formatFrequency(props.params.lfo.frequencyHz)} resetValue={props.defaults.lfo.frequencyHz} {...SYNTH_PARAMETER_LIMITS.lfoFrequencyHz} step={0.01} logarithmic parameterId="lfo.rate" disabled={lfoDisabled()} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(frequencyHz) => props.onChange({ lfo: { frequencyHz } })} />
@@ -376,7 +376,7 @@ function VoiceDrawer(props: {
         <SynthKnob label="Gain" value={props.params.gain} valueLabel={formatPercent(props.params.gain)} resetValue={props.defaults.gain} {...SYNTH_PARAMETER_LIMITS.gain} step={0.01} parameterId="output.gain" disabled={props.disabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(gain) => props.onChange({ gain })} />
         <SynthKnob label="Pan" value={props.params.pan} valueLabel={formatPercent((props.params.pan + 1) / 2)} resetValue={props.defaults.pan} {...SYNTH_PARAMETER_LIMITS.pan} step={0.01} bipolar parameterId="output.pan" disabled={props.disabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(pan) => props.onChange({ pan })} />
       </div>
-      <button type="button" class={cn(toggleClass(props.params.retrigger), 'min-w-16 shrink-0')} disabled={props.disabled} aria-pressed={props.params.retrigger} aria-label="Retrigger voices" onClick={() => props.onChange({ retrigger: !props.params.retrigger })}>Retrig {props.params.retrigger ? 'On' : 'Off'}</button>
+      <button type="button" class={cn(toggleClass(props.params.retrigger), 'min-w-16 shrink-0')} disabled={props.disabled} aria-pressed={props.params.retrigger ? "true" : "false"} aria-label="Retrigger voices" onClick={() => props.onChange({ retrigger: !props.params.retrigger })}>Retrig {props.params.retrigger ? 'On' : 'Off'}</button>
     </div>
   )
 }
@@ -394,7 +394,7 @@ function NoiseDrawer(props: {
       <svg class={cn('h-12 min-w-0 flex-1 border-y border-border/60 bg-background/40', noiseDisabled() && 'opacity-50')} viewBox="0 0 220 48" preserveAspectRatio="none" aria-hidden="true">
         <path d="M0 26 L8 12 L16 33 L24 17 L32 39 L40 9 L48 29 L56 14 L64 36 L72 20 L80 41 L88 8 L96 31 L104 15 L112 38 L120 10 L128 28 L136 18 L144 40 L152 12 L160 34 L168 16 L176 37 L184 11 L192 30 L200 14 L208 35 L220 19" fill="none" stroke="#f8fafc" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
       </svg>
-      <button type="button" class={cn(toggleClass(props.params.noise.enabled), 'w-9 shrink-0')} disabled={props.disabled} aria-pressed={props.params.noise.enabled} aria-label="Noise enabled" onClick={() => props.onChange({ noise: { enabled: !props.params.noise.enabled } })}>{props.params.noise.enabled ? 'On' : 'Off'}</button>
+      <button type="button" class={cn(toggleClass(props.params.noise.enabled), 'w-9 shrink-0')} disabled={props.disabled} aria-pressed={props.params.noise.enabled ? "true" : "false"} aria-label="Noise enabled" onClick={() => props.onChange({ noise: { enabled: !props.params.noise.enabled } })}>{props.params.noise.enabled ? 'On' : 'Off'}</button>
       <SynthKnob label="Level" value={props.params.noise.level} valueLabel={formatPercent(props.params.noise.level)} resetValue={props.defaults.noise.level} {...SYNTH_PARAMETER_LIMITS.noiseLevel} step={0.01} parameterId="noise.level" disabled={noiseDisabled()} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(level) => props.onChange({ noise: { level } })} />
     </div>
   )
@@ -406,14 +406,18 @@ export default function Synth(props: SynthProps) {
   const [sourceTab, setSourceTab] = createSignal<SourceTab>('lfo')
   const [lastFilterEnvelopeAmount, setLastFilterEnvelopeAmount] = createSignal(1)
   const id = createUniqueId()
-  createEffect(on(() => props.instanceId, () => {
-    setLastFilterEnvelopeAmount(1)
-  }))
-  createEffect(() => {
-    const amount = props.params.filter.envelopeAmountOctaves
-
-    if (amount !== 0) setLastFilterEnvelopeAmount(amount)
-  })
+  createEffect(
+    () => props.instanceId,
+    () => {
+      setLastFilterEnvelopeAmount(1)
+    },
+  )
+  createEffect(
+    () => props.params.filter.envelopeAmountOctaves,
+    (amount) => {
+      if (amount !== 0) setLastFilterEnvelopeAmount(amount)
+    },
+  )
 
   const tabClass = (selected: boolean) => cn(
     'min-h-7 select-none border-r border-border px-2 py-1 text-2xs font-semibold uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-300/70 disabled:cursor-not-allowed disabled:opacity-50',
@@ -444,10 +448,10 @@ export default function Synth(props: SynthProps) {
         <div class="grid grid-cols-2 divide-x divide-border border-t border-border">
           <section class="min-w-0">
             <div class="flex min-h-7 border-b border-border" role="tablist" aria-label="Synth envelopes">
-              <button id={`${id}-amp-env-tab`} type="button" role="tab" class={tabClass(envelopeTab() === 'amp')} aria-selected={envelopeTab() === 'amp'} aria-controls={`${id}-amp-env-panel`} tabIndex={envelopeTab() === 'amp' ? 0 : -1} onClick={() => setEnvelopeTab('amp')} onKeyDown={(event) => handleRovingTabKey(event, envelopeTabs, envelopeTab(), setEnvelopeTab)}>Amp Env</button>
-              <button id={`${id}-filter-env-tab`} type="button" role="tab" class={tabClass(envelopeTab() === 'filter')} aria-selected={envelopeTab() === 'filter'} aria-controls={`${id}-filter-env-panel`} tabIndex={envelopeTab() === 'filter' ? 0 : -1} onClick={() => setEnvelopeTab('filter')} onKeyDown={(event) => handleRovingTabKey(event, envelopeTabs, envelopeTab(), setEnvelopeTab)}>Filter Env</button>
+              <button id={`${id}-amp-env-tab`} type="button" role="tab" class={tabClass(envelopeTab() === 'amp')} aria-selected={envelopeTab() === 'amp' ? "true" : "false"} aria-controls={`${id}-amp-env-panel`} tabindex={envelopeTab() === 'amp' ? 0 : -1} onClick={() => setEnvelopeTab('amp')} onKeyDown={(event) => handleRovingTabKey(event, envelopeTabs, envelopeTab(), setEnvelopeTab)}>Amp Env</button>
+              <button id={`${id}-filter-env-tab`} type="button" role="tab" class={tabClass(envelopeTab() === 'filter')} aria-selected={envelopeTab() === 'filter' ? "true" : "false"} aria-controls={`${id}-filter-env-panel`} tabindex={envelopeTab() === 'filter' ? 0 : -1} onClick={() => setEnvelopeTab('filter')} onKeyDown={(event) => handleRovingTabKey(event, envelopeTabs, envelopeTab(), setEnvelopeTab)}>Filter Env</button>
               <Show when={envelopeTab() === 'filter'}>
-                <button type="button" class={cn(toggleClass(props.params.filter.envelopeAmountOctaves !== 0), 'ml-auto mr-1 my-0.5 w-9 shrink-0')} disabled={props.disabled} aria-pressed={props.params.filter.envelopeAmountOctaves !== 0} aria-label="Filter envelope enabled" onClick={() => {
+                <button type="button" class={cn(toggleClass(props.params.filter.envelopeAmountOctaves !== 0), 'ml-auto mr-1 my-0.5 w-9 shrink-0')} disabled={props.disabled} aria-pressed={props.params.filter.envelopeAmountOctaves !== 0 ? "true" : "false"} aria-label="Filter envelope enabled" onClick={() => {
                   if (props.params.filter.envelopeAmountOctaves === 0) {
                     updateFilterEnvelopeAmount(lastFilterEnvelopeAmount())
                   } else {
@@ -466,9 +470,9 @@ export default function Synth(props: SynthProps) {
           </section>
           <section class="min-w-0">
             <div class="flex min-h-7 border-b border-border" role="tablist" aria-label="Synth modulation and sources">
-              <button id={`${id}-lfo-tab`} type="button" role="tab" class={tabClass(sourceTab() === 'lfo')} aria-selected={sourceTab() === 'lfo'} aria-controls={`${id}-lfo-panel`} tabIndex={sourceTab() === 'lfo' ? 0 : -1} onClick={() => setSourceTab('lfo')} onKeyDown={(event) => handleRovingTabKey(event, sourceTabs, sourceTab(), setSourceTab)}>LFO</button>
-              <button id={`${id}-voice-out-tab`} type="button" role="tab" class={tabClass(sourceTab() === 'voice')} aria-selected={sourceTab() === 'voice'} aria-controls={`${id}-voice-out-panel`} tabIndex={sourceTab() === 'voice' ? 0 : -1} onClick={() => setSourceTab('voice')} onKeyDown={(event) => handleRovingTabKey(event, sourceTabs, sourceTab(), setSourceTab)}>Voice / Out</button>
-              <button id={`${id}-noise-tab`} type="button" role="tab" class={tabClass(sourceTab() === 'noise')} aria-selected={sourceTab() === 'noise'} aria-controls={`${id}-noise-panel`} tabIndex={sourceTab() === 'noise' ? 0 : -1} onClick={() => setSourceTab('noise')} onKeyDown={(event) => handleRovingTabKey(event, sourceTabs, sourceTab(), setSourceTab)}>Noise</button>
+              <button id={`${id}-lfo-tab`} type="button" role="tab" class={tabClass(sourceTab() === 'lfo')} aria-selected={sourceTab() === 'lfo' ? "true" : "false"} aria-controls={`${id}-lfo-panel`} tabindex={sourceTab() === 'lfo' ? 0 : -1} onClick={() => setSourceTab('lfo')} onKeyDown={(event) => handleRovingTabKey(event, sourceTabs, sourceTab(), setSourceTab)}>LFO</button>
+              <button id={`${id}-voice-out-tab`} type="button" role="tab" class={tabClass(sourceTab() === 'voice')} aria-selected={sourceTab() === 'voice' ? "true" : "false"} aria-controls={`${id}-voice-out-panel`} tabindex={sourceTab() === 'voice' ? 0 : -1} onClick={() => setSourceTab('voice')} onKeyDown={(event) => handleRovingTabKey(event, sourceTabs, sourceTab(), setSourceTab)}>Voice / Out</button>
+              <button id={`${id}-noise-tab`} type="button" role="tab" class={tabClass(sourceTab() === 'noise')} aria-selected={sourceTab() === 'noise' ? "true" : "false"} aria-controls={`${id}-noise-panel`} tabindex={sourceTab() === 'noise' ? 0 : -1} onClick={() => setSourceTab('noise')} onKeyDown={(event) => handleRovingTabKey(event, sourceTabs, sourceTab(), setSourceTab)}>Noise</button>
             </div>
             <Show when={sourceTab() === 'lfo'}><div id={`${id}-lfo-panel`} role="tabpanel" aria-labelledby={`${id}-lfo-tab`}><LfoDrawer params={props.params} defaults={defaults} onChange={props.onChange} disabled={props.disabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} /></div></Show>
             <Show when={sourceTab() === 'voice'}><div id={`${id}-voice-out-panel`} role="tabpanel" aria-labelledby={`${id}-voice-out-tab`}><VoiceDrawer params={props.params} defaults={defaults} onChange={props.onChange} disabled={props.disabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} /></div></Show>

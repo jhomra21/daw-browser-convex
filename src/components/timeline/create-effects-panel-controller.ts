@@ -257,31 +257,39 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
   });
 
   let observedCloudTrackIds = new Set<string>();
-  createEffect(() => {
-    const effects = roomEffectsQuery.data;
+  createEffect(
+    () => {
+      const effects = roomEffectsQuery.data;
 
-    if (effects === undefined) return;
-    const { instruments, arpeggiators } = indexInstrumentEffectRows(effects);
-    const tracks = options.tracks();
-    const currentTrackIds = new Set(tracks.map(track => track.id));
-    untrack(() => {
-      for (const trackId of observedCloudTrackIds) if (!currentTrackIds.has(trackId)) {
-        instrument.syncRemoteInstrumentForTarget(trackId, undefined);
-        instrument.arp.syncRemoteForTarget(trackId, undefined);
-      }
-    });
-    observedCloudTrackIds = currentTrackIds;
+      if (effects === undefined) return undefined;
+      const { instruments, arpeggiators } = indexInstrumentEffectRows(effects);
 
-    for (const track of tracks) {
-      const instrumentParams = track.kind === "instrument" ? instruments.get(track.id) : undefined;
-      const arpParams = track.kind === "instrument" ? arpeggiators.get(track.id) : undefined;
-      // Cloud query rows remain the remote owners' source of truth.
+      return options.tracks().map((track) => ({
+        id: track.id,
+        instrument: track.kind === "instrument" ? instruments.get(track.id) : undefined,
+        arp: track.kind === "instrument" ? arpeggiators.get(track.id) : undefined,
+      }));
+    },
+    (tracks) => {
+      if (!tracks) return;
+      const currentTrackIds = new Set(tracks.map(track => track.id));
       untrack(() => {
-        instrument.syncRemoteInstrumentForTarget(track.id, instrumentParams?.params, instrumentParams?.through);
-        instrument.arp.syncRemoteForTarget(track.id, arpParams?.params, arpParams?.through);
+        for (const trackId of observedCloudTrackIds) if (!currentTrackIds.has(trackId)) {
+          instrument.syncRemoteInstrumentForTarget(trackId, undefined);
+          instrument.arp.syncRemoteForTarget(trackId, undefined);
+        }
       });
-    }
-  });
+      observedCloudTrackIds = currentTrackIds;
+
+      for (const track of tracks) {
+        // Cloud query rows remain the remote owners' source of truth.
+        untrack(() => {
+          instrument.syncRemoteInstrumentForTarget(track.id, track.instrument?.params, track.instrument?.through);
+          instrument.arp.syncRemoteForTarget(track.id, track.arp?.params, track.arp?.through);
+        });
+      }
+    },
+  );
 
   const flushPending = async () => {
     await Promise.all([
@@ -472,8 +480,8 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
   };
 
   let previousDeviceInsertActions: TimelineDeviceInsertActions | undefined;
-  createEffect(() => {
-    const nextActions = {
+  createEffect(
+    () => ({
       addMidiClip: instrument.addMidiClip,
       addMidiClipToTarget,
       canAddMidiClipToTarget,
@@ -501,12 +509,13 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       canAddSaturator: true,
       canAddDelay: true,
       canAddReverb: true,
-    };
-
-    if (deviceInsertActionsEqual(previousDeviceInsertActions, nextActions)) return;
-    previousDeviceInsertActions = nextActions;
-    options.onDeviceInsertActionsChange?.(nextActions);
-  });
+    }),
+    (nextActions) => {
+      if (deviceInsertActionsEqual(previousDeviceInsertActions, nextActions)) return;
+      previousDeviceInsertActions = nextActions;
+      options.onDeviceInsertActionsChange?.(nextActions);
+    },
+  );
 
   onCleanup(() => {
     options.onEffectInstanceParamsReplayChange?.(undefined);
@@ -515,16 +524,19 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
   });
   options.onExportSnapshotChange?.(exportSnapshot);
 
-  createEffect(() => {
-    const replay = <Effect extends EffectType>(payload: {
-      targetId: string;
-      effect: Effect;
-      instanceId: string;
-      params: EffectParamsByEffect[Effect];
-    }) => audioEffects.replayInstanceParams(payload);
+  createEffect(
+    () => options.onEffectInstanceParamsReplayChange,
+    (onReplayChange) => {
+      const replay = <Effect extends EffectType>(payload: {
+        targetId: string;
+        effect: Effect;
+        instanceId: string;
+        params: EffectParamsByEffect[Effect];
+      }) => audioEffects.replayInstanceParams(payload);
 
-    options.onEffectInstanceParamsReplayChange?.(replay);
-  });
+      onReplayChange?.(replay);
+    },
+  );
 
   return {
     target,

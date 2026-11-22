@@ -36,14 +36,15 @@ export default function AppMessageDialog(props: AppMessageDialogProps) {
   const [actionError, setActionError] = createSignal("");
   let previousState: AppMessageDialogState | null = null;
 
-  createEffect(() => {
-    const state = props.state;
-
-    if (state === previousState) return;
-    previousState = state;
-    setBusy(false);
-    setActionError("");
-  });
+  createEffect(
+    () => props.state,
+    (state) => {
+      if (state === previousState) return;
+      previousState = state;
+      setBusy(false);
+      setActionError("");
+    },
+  );
 
   const runAction = async () => {
     const action = props.state?.action;

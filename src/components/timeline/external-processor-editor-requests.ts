@@ -58,11 +58,16 @@ export const createExternalProcessorEditorRequests = (deps: {
     if (pending()?.requestToken === request.requestToken) setPending();
   };
 
-  createEffect(() => {
-    const request = pending();
+  createEffect(
+    () => {
+      const request = pending();
 
-    if (request && !isCurrent(request)) setPending();
-  });
+      return request !== undefined && !isCurrent(request);
+    },
+    (stale) => {
+      if (stale) setPending();
+    },
+  );
 
   const inserted = async (processor: ExternalProcessor, playbackIntent?: TimelineEditIntent) => {
     deps.openEffectsForTarget(processor.targetId);

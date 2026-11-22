@@ -505,6 +505,7 @@ const Icon: Component<IconProps> = (allProps) => {
     <Show when={registry[allProps.name]}>
       {(svg) => {
         const Svg = dynamic(svg);
+
         return (
           <Svg
             size={allProps.size}

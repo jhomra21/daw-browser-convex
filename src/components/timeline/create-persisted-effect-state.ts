@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
 import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer"
 import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
 import { isAbortError } from '~/lib/dom-errors'
@@ -160,37 +160,36 @@ export function createPersistedEffectState<TRow, TParams>(
     owner.external(targetId, nextParams, through)
   }
 
-  createEffect(on(
+  createEffect(
     () => ({ engine: options.audioEngine?.(), legacy: options.usesLegacyAudioEngine?.() ?? true }),
     (next, previous) => {
       if (previous && (next.engine !== previous.engine || next.legacy && !previous.legacy)) {
-        owner.reinstall()
+        untrack(owner.reinstall)
       }
     },
-  ))
+  )
 
   if (options.canWrite) {
-    createEffect(on(options.canWrite, (canWrite) => {
-      if (!canWrite) owner.closeAll('cancel')
-    }, { defer: true }))
+    createEffect(options.canWrite, (canWrite) => {
+      if (!canWrite) untrack(() => owner.closeAll('cancel'))
+    }, { defer: true })
   }
 
-  createEffect(() => {
-    const targetId = options.targetId()
+  createEffect(
+    () => {
+      const targetId = options.targetId()
 
-    if (!targetId) return
-    const row = options.row()
+      if (!targetId) return undefined
+      const row = options.row()
 
-    if (row === undefined) {
-      if (options.isMissingRowLoaded?.()) untrack(() => syncRemote(targetId, undefined))
+      if (row === undefined) return { targetId, params: undefined, through: 0, sync: Boolean(options.isMissingRowLoaded?.()) }
 
-      return
-    }
-
-    const params = options.readQueryParams(row)
-    const through = options.readQueryThrough?.(row) ?? 0
-    untrack(() => syncRemote(targetId, params, through))
-  })
+      return { targetId, params: options.readQueryParams(row), through: options.readQueryThrough?.(row) ?? 0, sync: true }
+    },
+    (update) => {
+      if (update?.sync) untrack(() => syncRemote(update.targetId, update.params, update.through))
+    },
+  )
 
   onCleanup(() => {
     for (const unregister of registeredFlushers.values()) unregister()

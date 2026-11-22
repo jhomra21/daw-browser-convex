@@ -1,4 +1,4 @@
-import { For, createEffect, createMemo, createSignal, on, onCleanup, onSettled, untrack, type Component } from "solid-js";
+import { For, createEffect, createMemo, createSignal, onCleanup, onSettled, untrack, type Component, createTrackedEffect } from "solid-js";
 import { drawWaveformSignal } from "@daw-browser/waveforms/draw-waveform-signal";
 import { waveformCanvasSize } from "~/lib/waveform-canvas";
 import {
@@ -97,24 +97,21 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     }).contextScaleX,
   });
 
-  createEffect(on(
-    () => [
-      props.clip.id,
-      props.clip.duration,
-      sourceSampleRate(),
-    ].join("|"),
-    () => {
+  createEffect(
+    () => ({
+      clipId: props.clip.id,
+      clipDurationSec: props.clip.duration,
+      sampleRate: sourceSampleRate(),
+    }),
+    ({ clipId, clipDurationSec, sampleRate }) => {
       setViewportState((state) => ({
-        clipId: props.clip.id,
-        viewport: state.clipId === props.clip.id
-          ? clampSampleDetailWaveformViewport(state.viewport, {
-            clipDurationSec: props.clip.duration,
-            sampleRate: sourceSampleRate(),
-          })
-          : fitSampleDetailWaveformViewport(props.clip.duration),
+        clipId,
+        viewport: state.clipId === clipId
+          ? clampSampleDetailWaveformViewport(state.viewport, { clipDurationSec, sampleRate })
+          : fitSampleDetailWaveformViewport(clipDurationSec),
       }));
     },
-  ));
+  );
   const [dragPreviewOffset, setDragPreviewOffset] = createSignal<number | undefined>();
   const [isDraggingMarker, setIsDraggingMarker] = createSignal(false);
   const clipAudioStartSec = createMemo(() => Math.max(0, props.clip.leftPadSec ?? 0));
@@ -362,7 +359,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     }
   };
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     incrementPerformanceBenchmarkCounter("sample-detail.raster-calls");
     measurePerformanceBenchmark("sample-detail.raster", draw);
   });
@@ -406,7 +403,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
             event.preventDefault();
             deleteSelectedMarker();
           }}
-          tabIndex={0}
+          tabindex={0}
         />
         <For each={warpMarkers()}>
           {(marker, index) => {

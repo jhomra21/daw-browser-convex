@@ -66,7 +66,7 @@ export const createAudioLifecycle = (input: AudioLifecycleInput) => {
 
   // Recovery and rebuild paths read the state they just set, so it is a plain variable; the signal publishes it.
   let lifecycleState: DesktopAudioLifecycle["state"] = hasAudioLifecycle ? "recovering" : "ready"
-  const [audioLifecycleState, publishAudioLifecycleState] = createSignal(lifecycleState)
+  const [audioLifecycleState, publishAudioLifecycleState] = createSignal<DesktopAudioLifecycle["state"]>(lifecycleState)
 
   let audioLifecycleGeneration = -1
   let recoveryAttempt: RecoveryAttempt | undefined
@@ -418,5 +418,5 @@ export const createAudioLifecycle = (input: AudioLifecycleInput) => {
     lifecycleReadyWaiters.clear()
   }
 
-  return { audioLifecycleState, audioLifecycleGeneration: () => audioLifecycleGeneration, waitForLifecycleReady, releaseLifecycle, removeAudioLifecycle }
+  return { audioLifecycleState, readAudioLifecycleState: () => lifecycleState, audioLifecycleGeneration: () => audioLifecycleGeneration, waitForLifecycleReady, releaseLifecycle, removeAudioLifecycle }
 }

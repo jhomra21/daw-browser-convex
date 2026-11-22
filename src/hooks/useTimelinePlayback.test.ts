@@ -1518,6 +1518,7 @@ test.skipIf(isServer)('pending save hydration still reports real host loss and h
           else setGeneration(1)
           await flushMicrotasks()
           flushRaf()
+          flush()
           expect(playback.isPlaying()).toBeFalse()
           expect(playback.isNativePlayback()).toBeFalse()
 
@@ -7378,6 +7379,7 @@ const runB6eSupersededRebuild = async (
         if (action === 'pause') pending = playback.handlePause()
 
         if (action === 'stop') pending = playback.handleStop()
+        flush()
         const playheadAtAction = playback.playheadSec()
 
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
@@ -9044,7 +9046,7 @@ const b6f5Cell = (state: B6f5State, kind: B6f5Kind, nativeEnabled: boolean) => r
     const rebuild = live.resumingRebuild()
 
     // The rebuild's own session runs and the hook committed it while the rebuild still owns the transport.
-    const committed = () => playback.isPortableBrowserPlayback() && playback.isPlayPending() === false && playback.isStructuralRebuildInProgress()
+    const committed = () => (flush(), playback.isPortableBrowserPlayback()) && playback.isPlayPending() === false && playback.isStructuralRebuildInProgress()
       && (world.sessions.at(-1)?.createdSeq ?? 0) > before && world.sessions.at(-1)?.positions.at(-1)?.running === true
       && world.sessions.filter((session) => !session.closed).length === 1
 

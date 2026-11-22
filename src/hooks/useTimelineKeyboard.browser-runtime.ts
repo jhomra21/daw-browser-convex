@@ -1,4 +1,4 @@
-import { createComponent, createSignal } from 'solid-js'
+import { createComponent, createSignal, flush } from 'solid-js'
 import { render } from '@solidjs/web'
 import * as Dialog from '@kobalte/core/dialog'
 import { useTimelineKeyboard } from './useTimelineKeyboard'
@@ -104,6 +104,7 @@ const scenarios = () => {
   }
 
   setOpen(true)
+  flush()
   results.portalledDialog = modalButton.closest('[role="dialog"]') !== null && !root.contains(modalButton)
 
   for (const [name, target] of Object.entries({ button: modalButton, input, shadowInput })) {
@@ -116,6 +117,7 @@ const scenarios = () => {
   }
 
   setOpen(false)
+  flush()
 
   for (const modifier of [{ ctrlKey: true }, { metaKey: true }]) {
     check(`undo-${JSON.stringify(modifier)}`, arrangement, { key: 'z', ...modifier }, ['undo'])
@@ -148,8 +150,8 @@ Object.assign(window, {
   keyboardRegression: {
     scenarios,
     calls,
-    open: () => { setOpen(true); modalButton.focus() },
-    close: () => { setOpen(false); arrangement.focus() },
+    open: () => { setOpen(true); flush(); modalButton.focus() },
+    close: () => { setOpen(false); flush(); arrangement.focus() },
     dispose,
   },
 })

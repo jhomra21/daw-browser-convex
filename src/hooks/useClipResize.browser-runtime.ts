@@ -339,7 +339,7 @@ const { resize, resolvedTracks } = createRoot((cleanup) => {
   })
   dispatchWindowEvent(new PointerEvent('pointerup', { pointerId: 10 }))
   const removedTrackDoesNotCommit = commitDurations.length === commitCountBeforeTrackRemoval
-  const removedTrackClearsDraft = !drafts().has('clip:5000')
+  const removedTrackClearsDraft = !untrack(drafts).has('clip:5000')
   const removedTrackEndsResize = !resize.isResizing()
   setCurrentSnapshot(snapshot)
 

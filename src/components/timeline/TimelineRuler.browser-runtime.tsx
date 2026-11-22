@@ -30,6 +30,7 @@ const runGesture = (
   const host = document.createElement('div')
   host.style.cssText = 'position:fixed;left:0;top:0;width:1000px;height:24px'
   document.body.append(host)
+
   const [loop, setLoop] = createSignal({
     startSec: absentBaseline ? undefined : 1,
     endSec: absentBaseline ? undefined : 3,
@@ -278,10 +279,11 @@ scenarios['expanded-group-not-aggregated'] =
   const [tracks, setTracks] = createSignal(overviewTracks)
   const [collapsedGroupIds, setCollapsedGroupIds] = createSignal(new Set<Track['id']>(['outer']))
 
-  const { dispose, mountedOverviews } = createRoot((cleanup) => ({
-    dispose: cleanup,
-    mountedOverviews: createMemo(() => buildGroupClipOverviews(tracks(), collapsedGroupIds())),
-  }))
+  const { dispose, mountedOverviews } = createRoot((cleanup) => {
+    const overviews = createMemo(() => buildGroupClipOverviews(tracks(), collapsedGroupIds()))
+
+    return { dispose: cleanup, mountedOverviews: overviews }
+  })
 
   flush()
   const beforeUpdate = untrack(() => mountedOverviews().get('outer')?.length ?? 0)

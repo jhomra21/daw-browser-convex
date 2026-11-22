@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { expect, test } from 'bun:test'
-import { createSignal, untrack, type Accessor } from 'solid-js';
+import { createSignal, flush, untrack, type Accessor } from 'solid-js';
 import { createFlushedRoot as createRoot } from '~/test-support/create-flushed-root';
 
 import { createLocalProject } from '~/lib/local-project-db'
@@ -60,7 +60,10 @@ const jumpToClipWhile = (playing: boolean, startSec: number) => createRoot((disp
     },
   })
 
+  // The selection's first effects reset it to the master target, so they run before the jump and its write is flushed before the read.
+  flush()
   actions.jumpToClip('track', 'clip', startSec)
+  flush()
   const selected = selection.selectedClip()
   dispose()
 

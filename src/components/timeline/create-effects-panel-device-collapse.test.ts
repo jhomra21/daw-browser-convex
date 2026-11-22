@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { flush } from "solid-js";
 import {
   createEffectsPanelDeviceCollapse,
   deviceCollapseIdentity,
@@ -36,6 +37,7 @@ describe("device collapse preferences", () => {
     expect(collapse.isCollapsed(identity)).toBe(false);
 
     identity = deviceCollapseIdentity.audioEffect("second");
+    flush();
     expect(collapse.isCollapsed(identity)).toBe(true);
   });
 });

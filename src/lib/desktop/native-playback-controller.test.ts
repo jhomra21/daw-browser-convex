@@ -3,7 +3,7 @@ import "fake-indexeddb/auto"
 import { z } from "zod"
 import { convexTest } from "convex-test"
 import schema from "../../../convex/schema"
-import { createRenderEffect, createSignal, untrack } from "solid-js";
+import { createRenderEffect, createSignal, flush, untrack } from "solid-js";
 import { createFlushedRoot as createRoot } from "~/test-support/create-flushed-root";
 
 import { createNativePlaybackController, nativePlaybackFaultText, type NativePlaybackFault } from "./native-playback-controller"
@@ -1558,6 +1558,7 @@ describe("DV01 STEP7 frozen inputs and cleanup witnesses", () => {
       f.fixture.emitVstInstanceEvent({ kind: "failed", instanceId: crypto.randomUUID() })
       expect(vstInstanceFailed(attachment.instanceId)).toBe(false)
       f.fixture.emitVstInstanceEvent({ kind: "failed", instanceId: attachment.instanceId })
+      flush()
       expect(vstInstanceFailed(attachment.instanceId)).toBe(true)
       await step7Turns()
       expect(f.fixture.graphPayloads.length).toBe(before)

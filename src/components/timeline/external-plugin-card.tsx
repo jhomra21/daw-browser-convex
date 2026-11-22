@@ -326,7 +326,7 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
 
       if (autoOpen.started || autoOpenFailed || !autoOpen.available) return;
       setAutoOpenStarted(true);
-      void untrack(() => editor("open")).then((opened) => {
+      void editor("open").then((opened) => {
         if (opened) {
           // The insertion request is consumed only after the native session
           // confirms that the editor is open.

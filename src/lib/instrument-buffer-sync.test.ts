@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, expect, test } from "bun:test";
 import "fake-indexeddb/auto";
 import { createComponent, createSignal, untrack } from "solid-js";
-import { createFlushedRoot as createRoot } from "~/test-support/create-flushed-root";
+import { createFlushedRoot as createRoot, mountElement } from "~/test-support/create-flushed-root";
 import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import { createDefaultArpeggiatorParams, createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams, createDefaultSynthParams, createDefaultUtilityParams, normalizeTrackInstrumentParams, type ArpeggiatorParams, type DecodedAudioPage, type DrumRackParams, type GranularParams, type SamplerParams, type TrackInstrumentParams } from "@daw-browser/shared";
@@ -288,7 +288,7 @@ test("B5c sampled to synth clears the old cache, local track, closed and unselec
   createRoot(end => {
     dispose = end;
 
-    return createComponent(QueryClientProvider, { client, get children() {
+    return mountElement(() => createComponent(QueryClientProvider, { client, get children() {
       panel = createEffectsPanelController({
         isOpen: () => false, selectedFXTarget: () => "selected-elsewhere",
         tracks: () => [track], sidechainRoutes: () => [], audioEngine: () => engine,
@@ -300,7 +300,7 @@ test("B5c sampled to synth clears the old cache, local track, closed and unselec
       });
 
       return null;
-    } });
+    } }));
   });
 
   try {
@@ -608,7 +608,7 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
   createRoot(end => {
     dispose = end;
 
-    return createComponent(QueryClientProvider, { client, get children() {
+    return mountElement(() => createComponent(QueryClientProvider, { client, get children() {
       panel = untrack(() => createEffectsPanelController({
         isOpen: () => false, selectedFXTarget: selectedTarget, tracks, sidechainRoutes: () => [],
         audioEngine: currentEngine, projectId, userId: () => subscribed ? "collaborator" : undefined, playheadSec: () => 0,
@@ -624,7 +624,7 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
       }));
 
       return null;
-    } });
+    } }));
   });
   mounted = true;
 
@@ -1988,7 +1988,7 @@ test.each(["sampler-row", "granular-row", "sampler-draft"])("3B1 r2b compile wai
   createRoot(end => {
     dispose = end;
 
-    return createComponent(QueryClientProvider, {
+    return mountElement(() => createComponent(QueryClientProvider, {
       client,
       get children() {
         panel = createEffectsPanelController({
@@ -2001,7 +2001,7 @@ test.each(["sampler-row", "granular-row", "sampler-draft"])("3B1 r2b compile wai
 
         return null;
       },
-    });
+    }));
   });
 
   try {
@@ -2116,7 +2116,7 @@ test.each(["sampler", "granular", "sampler-change"])("3B1 r3 queued %s successor
   createRoot(end => {
     dispose = end;
 
-    return createComponent(QueryClientProvider, { client, get children() {
+    return mountElement(() => createComponent(QueryClientProvider, { client, get children() {
       panel = createEffectsPanelController({
         isOpen: () => true, selectedFXTarget: () => track.id, tracks: () => [track],
         sidechainRoutes: () => [], audioEngine: () => engine, projectId: () => projectId,
@@ -2126,7 +2126,7 @@ test.each(["sampler", "granular", "sampler-change"])("3B1 r3 queued %s successor
       });
 
       return null;
-    } });
+    } }));
   });
 
   try {
@@ -2216,7 +2216,7 @@ test.each(["utility", "sampler", "granular"])("3B1 r4 missing sample readiness i
   createRoot(end => {
     dispose = end;
 
-    return createComponent(QueryClientProvider, { client, get children() {
+    return mountElement(() => createComponent(QueryClientProvider, { client, get children() {
       panel = createEffectsPanelController({
         isOpen: () => true, selectedFXTarget: () => track.id, tracks: () => [track], sidechainRoutes: () => [],
         audioEngine: () => engine, projectId: () => projectId, userId: () => undefined, playheadSec: () => 0,
@@ -2225,7 +2225,7 @@ test.each(["utility", "sampler", "granular"])("3B1 r4 missing sample readiness i
       });
 
       return null;
-    } });
+    } }));
   });
 
   if (!panel || !snapshot) throw new Error("Missing controller");
@@ -2369,7 +2369,7 @@ test.each(["readiness", "runtime"])("3B1 r4 Drum Rack Retry preserves %s during 
   createRoot(end => {
     dispose = end;
 
-    return createComponent(QueryClientProvider, { client, get children() {
+    return mountElement(() => createComponent(QueryClientProvider, { client, get children() {
       panel = createEffectsPanelController({
         isOpen: () => true, selectedFXTarget: () => track.id, tracks: () => [track], sidechainRoutes: () => [],
         audioEngine: () => engine, projectId: () => projectId, userId: () => undefined, playheadSec: () => 0,
@@ -2378,7 +2378,7 @@ test.each(["readiness", "runtime"])("3B1 r4 Drum Rack Retry preserves %s during 
       });
 
       return null;
-    } });
+    } }));
   });
 
   if (!panel || !snapshot) throw new Error("Missing controller");
@@ -2471,7 +2471,7 @@ test.each(["unchanged", "changed"])("3B1 r4 decode error retries only for %s hyd
   createRoot(end => {
     dispose = end;
 
-    return createComponent(QueryClientProvider, { client, get children() {
+    return mountElement(() => createComponent(QueryClientProvider, { client, get children() {
       panel = createEffectsPanelController({
         isOpen: () => true, selectedFXTarget: () => track.id, tracks: () => [track], sidechainRoutes: () => [],
         audioEngine: () => engine, projectId: () => projectId, userId: () => undefined, playheadSec: () => 0,
@@ -2480,7 +2480,7 @@ test.each(["unchanged", "changed"])("3B1 r4 decode error retries only for %s hyd
       });
 
       return null;
-    } });
+    } }));
   });
 
   if (!panel || !snapshot) throw new Error("Missing controller");

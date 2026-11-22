@@ -1,0 +1,2 @@
+[test]
+preload = ["./src/test-support/query-client-browser-mode.ts"]

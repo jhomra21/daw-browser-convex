@@ -24,7 +24,7 @@ export function SpectrumViewToggle(props: { view: SpectrumViewMode; disabled?: b
 
 type SpectrumCanvasProps = {
   frame: SpectrumFrame | null
-  paint: (context: CanvasRenderingContext2D, width: number, height: number, canvas: HTMLCanvasElement) => void
+  paint: (context: CanvasRenderingContext2D, width: number, height: number, canvas: HTMLCanvasElement, frame: SpectrumFrame | null) => void
   label: string
 }
 
@@ -32,12 +32,14 @@ type SpectrumCanvasProps = {
 function SpectrumCanvas(props: SpectrumCanvasProps) {
   let frame: HTMLDivElement | undefined
   let canvas: HTMLCanvasElement | undefined
+  // The frame is carried from the effect that observes it: reading a lazy prop getter from an effect callback would create a memo there.
+  let latestFrame = untrack(() => props.frame)
 
   const paint = () => {
     const context = canvas?.getContext('2d')
 
     if (!canvas || !context || canvas.width === 0 || canvas.height === 0) return
-    props.paint(context, canvas.width, canvas.height, canvas)
+    props.paint(context, canvas.width, canvas.height, canvas, latestFrame)
   }
 
   onSettled(() => {
@@ -55,7 +57,8 @@ function SpectrumCanvas(props: SpectrumCanvasProps) {
   })
   createEffect(
     () => props.frame,
-    () => {
+    (nextFrame) => {
+      latestFrame = nextFrame
       untrack(paint)
     },
   )
@@ -94,7 +97,7 @@ export default function SpectrumView(props: { frame: SpectrumFrame | null; view:
         <SpectrumCanvas
           frame={props.frame}
           label="Spectrum"
-          paint={(context, width, height, canvas) => drawSpectrumCurve(context, props.frame, width, height, curveColors(canvas))}
+          paint={(context, width, height, canvas, frame) => drawSpectrumCurve(context, frame, width, height, curveColors(canvas))}
         />
       </Show>
       <Show when={props.view !== 'spectrum'}>

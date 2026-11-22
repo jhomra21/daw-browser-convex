@@ -2336,7 +2336,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/metering-runtime.test.ts": {
-      "pass": 8,
+      "pass": 7,
       "skip": 0,
       "fail": 0
      },
@@ -2506,7 +2506,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/sample-rate-characterization.test.ts": {
-      "pass": 4,
+      "pass": 3,
       "skip": 0,
       "fail": 0
      },
@@ -3235,7 +3235,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/metering-runtime.test.ts": {
-      "pass": 8,
+      "pass": 7,
       "skip": 0,
       "fail": 0
      },
@@ -3405,7 +3405,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/sample-rate-characterization.test.ts": {
-      "pass": 4,
+      "pass": 3,
       "skip": 0,
       "fail": 0
      },

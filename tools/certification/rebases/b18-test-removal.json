@@ -1,0 +1,143 @@
+{
+ "name": "b18-test-removal",
+ "sequence": 113,
+ "createdAt": "2026-11-22T05:05:25.337Z",
+ "revert": [
+  {
+   "file": "packages/audio-engine/src/metering-runtime.ts",
+   "entryCopy": "/tmp/fast-cert/entry-b18/metering-runtime.ts",
+   "entrySha256": "3977a1d2d1b7a22312754fc2ea29ce7c0d93a33b69ebc892347eaac1317b2563",
+   "liveSha256": "44ff9624c7e684a0542c28be7c3dd05eeeff0903220fd19a8b64df3f77bfad5f"
+  },
+  {
+   "file": "packages/audio-engine/src/metering-runtime.test.ts",
+   "entryCopy": "/tmp/fast-cert/entry-b18/metering-runtime.test.ts",
+   "entrySha256": "b60796dfde7364f7f9119ef52270379e3bcddef613d1cc678836a70a38d0f986",
+   "liveSha256": "bf4982dd9cee92f1ff1927ac24ac70c196b5878223a5b4e64856b48a1f61b2fc"
+  },
+  {
+   "file": "packages/audio-engine/src/sample-rate-characterization.ts",
+   "entryCopy": "/tmp/fast-cert/entry-b18/sample-rate-characterization.ts",
+   "entrySha256": "5d2a41644e62067ed807ac192ecaee137b2d6ba532ea152822ddb5efebf389cb",
+   "liveSha256": "5fa4984d4189fedd898669a29b0aedd1bf73ef734401783013f6e9e679f30e67"
+  },
+  {
+   "file": "packages/audio-engine/src/sample-rate-characterization.test.ts",
+   "entryCopy": "/tmp/fast-cert/entry-b18/sample-rate-characterization.test.ts",
+   "entrySha256": "7e9e9751bd4605205931ddeaaf8a719bcb696f7a9f79c57b331fbdc11db9ef47",
+   "liveSha256": "0bec5a27966990d21ef79fab73863d18eebfe44800ea26647c79d3fcdced46a2"
+  }
+ ],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/metering-runtime.test.ts",
+    "pass"
+   ],
+   "old": 8,
+   "new": 7
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/sample-rate-characterization.test.ts",
+    "pass"
+   ],
+   "old": 4,
+   "new": 3
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/metering-runtime.test.ts",
+    "pass"
+   ],
+   "old": 8,
+   "new": 7
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/sample-rate-characterization.test.ts",
+    "pass"
+   ],
+   "old": 4,
+   "new": 3
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "rebase",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": {
+   "manifest": "tools/certification/removals/b18-test-removal.json",
+   "manifestSha256": "5d76ac7a898f17494077363d434ae56e18ddb00b08ace8b34c58907f49fb1150",
+   "ruling": "acceptance-reports/untangle-2/RULING-B18-TEST-REMOVAL.md",
+   "rulingSha256": "fe962a58819d8f6c40e3c08525cf71b230512112d9b0d7118908037869e8e6b0",
+   "tests": 2
+  },
+  "scope": "--allow-removal /tmp/fast-cert/entry-b18/removal.json --full",
+  "provenance": {
+   "scope": [
+    "--allow-removal",
+    "/tmp/fast-cert/entry-b18/removal.json",
+    "--full"
+   ],
+   "head": "f9ee5904c5855b697a047ed387092249be9f06af",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "033df0c5a57a2b062f78c664332f9643b5e47a6e00a3ce1b83b57b6f97f2b812",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "033df0c5a57a2b062f78c664332f9643b5e47a6e00a3ce1b83b57b6f97f2b812",
+  "revertRun": {
+   "dir": "/tmp/fast-cert/b18-rebase/revert",
+   "resultSha256": "0aa36b5eb131eda5d0c7f54b1aa6d66369cc994b3742dd4b6ba2501bf6418c66",
+   "seconds": 1249.7704817919998,
+   "observationsEqualToExpectations": 3084
+  },
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b18-rebase/live",
+   "resultSha256": "db931079c3b9b0a7cffeb32933125753088da2c9611af2d4a0ff1bff28cca69e",
+   "seconds": 1360.944456542,
+   "observations": 3084
+  },
+  "unreachedByOverlay": [
+   "gate:g-typecheck",
+   "gate:g-build",
+   "gate:g-lint",
+   "gate:g-tools-typecheck",
+   "gate:rc1-i9-scoped-lint",
+   "gate:g-c0fg-oxlint",
+   "gate:x-b6f5-scoped-lint",
+   "gate:g-c0-oxlint",
+   "arm:search:124-deletion-search",
+   "arm:search:124-settled-call-sites",
+   "arm:search:258-anchor-search",
+   "arm:search:430-anchor-search-0",
+   "arm:search:258-deletion-search",
+   "arm:search:431-anchor-search-0",
+   "gate:x-validate-wasm",
+   "gate:x-test-native",
+   "gate:x-host-ctest"
+  ]
+ }
+}

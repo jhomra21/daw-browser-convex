@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, on, onCleanup, onSettled, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup, onSettled, type Accessor, createTrackedEffect, untrack } from 'solid-js'
 import type { FunctionReturnType } from 'convex/server'
 import type { UseQueryResult } from '@tanstack/solid-query'
 
@@ -175,7 +175,12 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
   const clearBootstrapProjectId = route.clearBootstrapProjectId
 
   // Runs on mount and whenever the open project changes, so a project opened elsewhere (dashboard) lists here.
-  createEffect(on(projectId, () => void loadLocalProjects()))
+  createEffect(
+    projectId,
+    () => {
+      void loadLocalProjects()
+    },
+  )
 
   onSettled(() => {
     const flushMidi = () => {
@@ -186,13 +191,15 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     onCleanup(() => window.removeEventListener('pagehide', flushMidi))
   })
 
-  createEffect(() => {
-    const rid = projectId()
+  createEffect(
+    () => projectId(),
+    (rid) => {
+      if (!isLocalId('project', rid)) return
+      const unsubscribe = subscribeToLocalProjectChanges(rid, () => void loadLocalProjects())
 
-    if (!isLocalId('project', rid)) return
-    const unsubscribe = subscribeToLocalProjectChanges(rid, () => void loadLocalProjects())
-    onCleanup(unsubscribe)
-  })
+      return unsubscribe
+    },
+  )
 
   const myProjects = useConvexQuery(
     convexApi.projects.listMineDetailed,
@@ -244,32 +251,32 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     isProjectRole(projectRole.data) ? projectRole.data : null
   ))
 
-  createEffect(() => {
-    const rid = projectId()
-    const data = fullView.data
+  createEffect(
+    () => ({ rid: projectId(), data: fullView.data }),
+    ({ rid, data }) => {
+      if (!rid || isLocalId('project', rid) || !data) return
+      void cacheRemoteTimelineSnapshot(rid, data).catch(() => undefined)
+    },
+  )
 
-    if (!rid || isLocalId('project', rid) || !data) return
-    void cacheRemoteTimelineSnapshot(rid, data).catch(() => undefined)
-  })
+  createEffect(
+    () => ({ token: acceptingShareToken(), uid: userId() }),
+    ({ token, uid }) => {
+      if (!token || !uid) return
+      void acceptShareInvite(token)
+        .then((acceptedProjectId) => {
+          setAcceptingShareToken(null)
+          clearShareTokenFromLocation()
 
-  createEffect(() => {
-    const token = acceptingShareToken()
-    const uid = userId()
-
-    if (!token || !uid) return
-    void acceptShareInvite(token)
-      .then((acceptedProjectId) => {
-        setAcceptingShareToken(null)
-        clearShareTokenFromLocation()
-
-        if (acceptedProjectId) void replaceRoom(acceptedProjectId)
-      })
-      .catch(() => {
-        setAcceptingShareToken(null)
-        clearShareTokenFromLocation()
-        input.notify('Share link failed', 'This share link could not be accepted.')
-      })
-  })
+          if (acceptedProjectId) void replaceRoom(acceptedProjectId)
+        })
+        .catch(() => {
+          setAcceptingShareToken(null)
+          clearShareTokenFromLocation()
+          input.notify('Share link failed', 'This share link could not be accepted.')
+        })
+    },
+  )
 
   const createOwnedRoom = async (
     rid: string,
@@ -299,7 +306,7 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     }
   }
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const uid = userId()
 
     if (!uid) return
@@ -402,17 +409,22 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     await navigateToRoom(replacement.id)
   }
 
-  createEffect(() => {
-    if (fullView.status !== 'error') return
-    const currentProjectId = projectId()
+  createEffect(
+    () => {
+      if (fullView.status !== 'error') return undefined
+      const currentProjectId = projectId()
 
-    if (!currentProjectId || isLocalId('project', currentProjectId)) return
+      if (!currentProjectId || isLocalId('project', currentProjectId)) return undefined
 
-    if (!isProjectAccessLost(fullView.error)) return
-    void navigateAfterAccessLoss(currentProjectId).catch(() => {
-      input.notify('Project access changed', 'Pending MIDI changes could not be saved.')
-    })
-  })
+      return isProjectAccessLost(fullView.error) ? currentProjectId : undefined
+    },
+    (lostProjectId) => untrack(() => {
+      if (!lostProjectId) return
+      void navigateAfterAccessLoss(lostProjectId).catch(() => {
+        input.notify('Project access changed', 'Pending MIDI changes could not be saved.')
+      })
+    }),
+  )
 
   const deleteCurrentOwnedRoom = async (
     targetProjectId: string,

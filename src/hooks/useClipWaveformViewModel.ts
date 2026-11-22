@@ -1,4 +1,4 @@
-import { batch, createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
 import { pointRadiusForPixelsPerSample } from '@daw-browser/waveforms/lod'
 import type { WaveformSourceData } from '@daw-browser/waveforms/types'
 import { getAudioBufferSessionIdentity } from '@daw-browser/audio-engine/media-pages'
@@ -165,9 +165,9 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     `${sourceIdentityFor(view().assetKey, view().clip)}:${options.waveformVisible?.() ?? true}`
   ))
 
-  createEffect(on(
+  createEffect(
     sourceKey,
-    () => {
+    () => untrack(() => {
       const id = ++sourceRequest
       dataRequest += 1
       sourceCleanup?.()
@@ -175,24 +175,20 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       retainedEntries.clear()
 
       if (options.waveformVisible?.() === false) {
-        batch(() => {
-          setSource(null)
-          setGeneration({ visible: null, replacement: null })
-          setLoading(false)
-          setError(undefined)
-        })
+        setSource(null)
+        setGeneration({ visible: null, replacement: null })
+        setLoading(false)
+        setError(undefined)
 
         return
       }
 
       const controller = new AbortController()
       sourceCleanup = () => controller.abort()
-      batch(() => {
-        setSource(null)
-        setGeneration({ visible: null, replacement: null })
-        setLoading(false)
-        setError(undefined)
-      })
+      setSource(null)
+      setGeneration({ visible: null, replacement: null })
+      setLoading(false)
+      setError(undefined)
       const resolver = options.resolveAudioSource()
       void resolver(view().clip, controller.signal, { verifyContentHash: true }).then((next) => {
         if (id === sourceRequest) setSource(next)
@@ -203,11 +199,10 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
           setError('Waveform source is unavailable.')
         }
       })
-    },
-    { defer: false },
-  ))
+    }),
+  )
 
-  createEffect(on(
+  createEffect(
     () => ({
       source: source(),
       key: JSON.stringify([
@@ -215,7 +210,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         timingSignatureFor(view().clip, options.projectBpm(), view().layout.sourceDurationSec),
       ]),
     }),
-    ({ source: nextSource }) => {
+    ({ source: nextSource }) => untrack(() => {
       const plan = plans()
       const current = view()
 
@@ -356,9 +351,8 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       }).finally(() => {
         incrementPerformanceBenchmarkCounter('waveform.requests-pending', -missing.length)
       })
-    },
-    { defer: false },
-  ))
+    }),
+  )
 
   onCleanup(() => {
     sourceRequest += 1

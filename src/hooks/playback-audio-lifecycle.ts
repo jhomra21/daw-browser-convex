@@ -1,5 +1,6 @@
-import { createSignal, untrack, type Setter } from 'solid-js'
+import { untrack } from 'solid-js'
 
+import { createLatestSignal } from '~/lib/create-latest-signal'
 import { createDesktopAudioLifecycleReconciler, type DesktopAudioLifecycle } from '~/lib/desktop-audio-lifecycle'
 import type { createNativePlaybackController } from '~/lib/desktop/native-playback-controller'
 import type { createPortableBrowserPlaybackController } from '~/lib/portable-browser-playback-controller'
@@ -25,10 +26,10 @@ type AudioLifecycleInput = {
   portableBrowserPlayback: ReturnType<typeof createPortableBrowserPlaybackController>
   deferredStretchQueue: ReturnType<typeof createDeferredStretch>["deferredStretchQueue"]
   isPlaying: () => boolean
-  setIsPlaying: Setter<boolean>
+  setIsPlaying: (next: boolean) => void
   isRebuildingPlayback: () => boolean
-  setIsRebuildingPlayback: Setter<boolean>
-  setActiveBackend: Setter<ActiveAudioBackend>
+  setIsRebuildingPlayback: (next: boolean) => void
+  setActiveBackend: (next: ActiveAudioBackend) => void
   // The hook's transport state and teardown, which a lifecycle change moves.
   host: {
     mounted: () => boolean
@@ -64,7 +65,7 @@ export const createAudioLifecycle = (input: AudioLifecycleInput) => {
 
   const hasAudioLifecycle = audioHostBridge !== undefined
 
-  const [audioLifecycleState, setAudioLifecycleState] = createSignal<DesktopAudioLifecycle["state"]>(
+  const [audioLifecycleState, setAudioLifecycleState] = createLatestSignal<DesktopAudioLifecycle["state"]>(
     hasAudioLifecycle ? "recovering" : "ready",
   )
 

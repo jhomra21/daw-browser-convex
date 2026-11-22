@@ -1,4 +1,6 @@
-import { batch, createRenderEffect, createSignal, on, onCleanup, type Accessor } from 'solid-js'
+import { createRenderEffect, onCleanup, type Accessor, untrack } from 'solid-js'
+
+import { createLatestSignal } from '~/lib/create-latest-signal'
 
 import {
   minimumVisibleDuration,
@@ -52,8 +54,8 @@ type TimelineWheelEvent = Pick<
 >
 
 export function useTimelineViewport(options: UseTimelineViewportOptions) {
-  const [visibleStartSec, setVisibleStartSec] = createSignal(0)
-  const [viewportWidth, setViewportWidth] = createSignal(0)
+  const [visibleStartSec, setVisibleStartSec] = createLatestSignal(0)
+  const [viewportWidth, setViewportWidth] = createLatestSignal(0)
   let element: TimelineScrollElement | undefined
   let observer: ResizeObserver | undefined
   let wheelCommitTimeout: ReturnType<typeof setTimeout> | undefined
@@ -90,7 +92,11 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     setPhysicalAnchor()
   }
 
-  createRenderEffect(on(options.persistenceScope, resetForPersistenceScopeChange, { defer: true }))
+  createRenderEffect(
+    options.persistenceScope,
+    () => untrack(resetForPersistenceScopeChange),
+    { defer: true },
+  )
 
   const measureWidth = () => {
     if (!element) return
@@ -155,13 +161,12 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     const minimumDuration = minimumVisibleDuration(width)
     const normalizedRange = normalizeTimelineRange(range, options.durationSec(), minimumDuration)
     const nextScale = pixelsPerSecondForRange(normalizedRange, width)
-    batch(() => {
-      if (commit) options.commitPixelsPerSecond(nextScale)
-      else options.previewPixelsPerSecond(nextScale)
-      setVisibleStartSec(normalizedRange.startSec)
-      // Zoom changes logical time only; physical anchor is maintained by bind,
-      // resize, reset, and native scroll paths.
-    })
+
+    if (commit) options.commitPixelsPerSecond(nextScale)
+    else options.previewPixelsPerSecond(nextScale)
+    setVisibleStartSec(normalizedRange.startSec)
+    // Zoom changes logical time only; physical anchor is maintained by bind,
+    // resize, reset, and native scroll paths.
 
     if (!isWheelPreview) clearWheelCommit()
     setPerformanceBenchmarkGauge('timeline.pixels-per-second', nextScale)

@@ -141,7 +141,7 @@ createRoot((cleanup) => {
   })
 
   const resolvedTracks = createMemo(() => resolve(drafts()))
-  createEffect(() => { resolvedTracks() })
+  createEffect(() => resolvedTracks(), () => {})
   const selection = useTimelineSelectionState({ projectId, tracks: resolvedTracks })
   let projectionUpdates = 0
 

@@ -1,4 +1,4 @@
-import { createEffect, createSignal, on, onCleanup, type Accessor } from 'solid-js'
+import { createEffect, createSignal, onCleanup, type Accessor, untrack } from 'solid-js'
 import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
 
 type RoomPersistedSetter<TValue> = (value: Exclude<TValue, Function> | ((current: TValue) => TValue)) => TValue
@@ -26,7 +26,8 @@ export function useProjectPersistedState<TValue>(
   options: UseRoomPersistedStateOptions<TValue>,
 ): UseRoomPersistedStateReturn<TValue> {
   const initialProjectId = options.projectId()
-  const [currentValue, setCurrentValue] = createSignal(initialProjectId ? options.load(initialProjectId) : options.createInitial())
+  const initialValue = initialProjectId ? options.load(initialProjectId) : options.createInitial()
+  const [currentValue, setCurrentValue] = createSignal<TValue>(() => initialValue)
   const [asyncHydrated, setAsyncHydrated] = createSignal(!options.loadAsync || !initialProjectId)
   let hydratedProjectId = initialProjectId
   let valueRevision = 0
@@ -75,30 +76,33 @@ export function useProjectPersistedState<TValue>(
     return currentValue()
   }
 
-  createEffect(on(options.projectId, (projectId) => {
-    syncHydratedValue()
+  createEffect(
+    options.projectId,
+    (projectId) => untrack(() => {
+      syncHydratedValue()
 
-    if (!projectId || !options.loadAsync) return
-    const load = options.loadAsync
+      if (!projectId || !options.loadAsync) return
+      const load = options.loadAsync
 
-    const refresh = () => {
-      const loadRevision = ++valueRevision
-      void load(projectId).then((loaded) => {
-        if (options.projectId() !== projectId || valueRevision !== loadRevision) return
+      const refresh = () => {
+        const loadRevision = ++valueRevision
+        void load(projectId).then((loaded) => {
+          if (options.projectId() !== projectId || valueRevision !== loadRevision) return
 
-        if (loaded !== undefined) setCurrentValue(() => loaded)
-        setAsyncHydrated(true)
-      }).catch(() => {
-        if (options.projectId() === projectId && valueRevision === loadRevision) setAsyncHydrated(true)
-      })
-    }
+          if (loaded !== undefined) setCurrentValue(() => loaded)
+          setAsyncHydrated(true)
+        }).catch(() => {
+          if (options.projectId() === projectId && valueRevision === loadRevision) setAsyncHydrated(true)
+        })
+      }
 
-    setAsyncHydrated(false)
-    const unsubscribe = options.subscribeToChanges?.(projectId, refresh)
+      setAsyncHydrated(false)
+      const unsubscribe = options.subscribeToChanges?.(projectId, refresh)
 
-    if (unsubscribe) onCleanup(unsubscribe)
-    refresh()
-  }, { defer: false }))
+      if (unsubscribe) onCleanup(unsubscribe)
+      refresh()
+    }),
+  )
 
   const applyValue: RoomPersistedSetter<TValue> = (next) => {
     syncHydratedValue()

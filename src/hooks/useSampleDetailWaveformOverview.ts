@@ -49,109 +49,113 @@ export function useSampleDetailWaveformOverview(options: SampleDetailWaveformOve
     return { clip, assetKey }
   })
 
-  createEffect(() => {
-    const current = view()
-    const cssWidthPx = options.cssWidthPx()
-    const projectBpm = options.projectBpm()
-    const backingPixelsPerCssPixel = options.backingPixelsPerCssPixel()
-    const currentRequestId = ++requestId
-    const controller = new AbortController()
+  createEffect(
+    () => {
+      const current = view()
+      const cssWidthPx = options.cssWidthPx()
+      const projectBpm = options.projectBpm()
+      const backingPixelsPerCssPixel = options.backingPixelsPerCssPixel()
 
-    if (!current) {
-      setRenderSegments([])
+      return { current, cssWidthPx, projectBpm, backingPixelsPerCssPixel, source: current ? options.source() : undefined }
+    },
+    ({ current, cssWidthPx, projectBpm, backingPixelsPerCssPixel, source }) => {
+      const currentRequestId = ++requestId
+      const controller = new AbortController()
 
-      return
-    }
+      if (!current) {
+        setRenderSegments([])
 
-    const source = options.source()
+        return
+      }
 
-    if (!source) {
-      setRenderSegments([])
-      onCleanup(() => controller.abort())
+      if (!source) {
+        setRenderSegments([])
 
-      return
-    }
+        return () => controller.abort()
+      }
 
-    void Promise.resolve(source)
-      .then(async (source) => {
-        const layout = getAudioWaveformLayout(
-          current.clip,
-          cssWidthPx,
-          source.durationSec,
-          projectBpm,
-        )
+      void Promise.resolve(source)
+        .then(async (source) => {
+          const layout = getAudioWaveformLayout(
+            current.clip,
+            cssWidthPx,
+            source.durationSec,
+            projectBpm,
+          )
 
-        const segments: readonly AudioWaveformLayoutSegment[] = layout.segments
-          ?? (layout.drawCols > 0
-            ? [{
-              drawCols: layout.drawCols,
-              sourceStartSec: layout.sourceStartSec,
-              sourceEndSec: layout.sourceEndSec,
-              startPx: layout.padPx,
-              endPx: layout.padPx + layout.drawCols,
-              canvasStartSec: layout.canvasStartSec ?? current.clip.startSec,
-              canvasEndSec: layout.canvasEndSec ?? current.clip.startSec + current.clip.duration,
-            }]
-            : [])
+          const segments: readonly AudioWaveformLayoutSegment[] = layout.segments
+            ?? (layout.drawCols > 0
+              ? [{
+                drawCols: layout.drawCols,
+                sourceStartSec: layout.sourceStartSec,
+                sourceEndSec: layout.sourceEndSec,
+                startPx: layout.padPx,
+                endPx: layout.padPx + layout.drawCols,
+                canvasStartSec: layout.canvasStartSec ?? current.clip.startSec,
+                canvasEndSec: layout.canvasEndSec ?? current.clip.startSec + current.clip.duration,
+              }]
+              : [])
 
-        const plans = createWaveformRequestPlans({
-          segments,
-          sampleRate: source.sampleRate,
-          sourceFrameCount: source.frameCount,
-          backingPixelsPerCssPixel,
-        })
-
-        const results = await Promise.all(plans.requests.map(async (request) => {
-          const data = await requestWaveformData({
-            assetKey: current.assetKey,
-            source,
-            sourceStartFrame: request.sourceStartFrame,
-            sourceEndFrame: request.sourceEndFrame,
-            framesPerInterval: request.framesPerInterval,
-            priority: request.priority,
-            signal: controller.signal,
+          const plans = createWaveformRequestPlans({
+            segments,
+            sampleRate: source.sampleRate,
+            sourceFrameCount: source.frameCount,
+            backingPixelsPerCssPixel,
           })
 
-          return data ? { key: request.key, data: retainWaveformData(data) } : null
-        }))
+          const results = await Promise.all(plans.requests.map(async (request) => {
+            const data = await requestWaveformData({
+              assetKey: current.assetKey,
+              source,
+              sourceStartFrame: request.sourceStartFrame,
+              sourceEndFrame: request.sourceEndFrame,
+              framesPerInterval: request.framesPerInterval,
+              priority: request.priority,
+              signal: controller.signal,
+            })
 
-        const retainedByKey = new Map(
-          results.flatMap((result) => result ? [[result.key, result.data]] : []),
-        )
+            return data ? { key: request.key, data: retainWaveformData(data) } : null
+          }))
 
-        const map = getAudioClipTimeMap({
-          clip: current.clip,
-          bufferDurationSec: source.durationSec,
-          projectBpm,
-          rangeStartSec: current.clip.startSec,
-          rangeEndSec: current.clip.startSec + current.clip.duration,
+          const retainedByKey = new Map(
+            results.flatMap((result) => result ? [[result.key, result.data]] : []),
+          )
+
+          const map = getAudioClipTimeMap({
+            clip: current.clip,
+            bufferDurationSec: source.durationSec,
+            projectBpm,
+            rangeStartSec: current.clip.startSec,
+            rangeEndSec: current.clip.startSec + current.clip.duration,
+          })
+
+          if (!map) return []
+
+          return projectRetainedWaveformData({
+            retainedByKey,
+            segments: plans.segments,
+            map,
+            backingPixelsPerCssPixel,
+          }).map((segment) => ({
+            drawStartPx: segment.startPx,
+            drawCols: Math.max(0, segment.endPx - segment.startPx),
+            sourceStartFrame: segment.sourceStartFrame,
+            sourceEndFrame: segment.sourceEndFrame,
+            data: segment.data,
+          }))
+        })
+        .then((next) => {
+          if (currentRequestId !== requestId) return
+          setRenderSegments(next.flatMap((segment) => segment ? [segment] : []))
+        })
+        .catch(() => {
+          if (currentRequestId !== requestId) return
+          setRenderSegments([])
         })
 
-        if (!map) return []
-
-        return projectRetainedWaveformData({
-          retainedByKey,
-          segments: plans.segments,
-          map,
-          backingPixelsPerCssPixel,
-        }).map((segment) => ({
-          drawStartPx: segment.startPx,
-          drawCols: Math.max(0, segment.endPx - segment.startPx),
-          sourceStartFrame: segment.sourceStartFrame,
-          sourceEndFrame: segment.sourceEndFrame,
-          data: segment.data,
-        }))
-      })
-      .then((next) => {
-        if (currentRequestId !== requestId) return
-        setRenderSegments(next.flatMap((segment) => segment ? [segment] : []))
-      })
-      .catch(() => {
-        if (currentRequestId !== requestId) return
-        setRenderSegments([])
-      })
-    onCleanup(() => controller.abort())
-  })
+      return () => controller.abort()
+    },
+  )
 
   onCleanup(() => {
     requestId += 1

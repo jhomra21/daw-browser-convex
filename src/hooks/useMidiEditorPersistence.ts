@@ -57,35 +57,44 @@ export function useMidiEditorPersistence(options: MidiEditorPersistenceOptions) 
     return canPersistMidiEditor(options.projectId(), options.userId(), options.canWrite())
   }
 
-  createEffect(() => {
-    const projectId = options.projectId()
-    const clipId = options.clipId()
+  createEffect(
+    () => {
+      const projectId = options.projectId()
 
-    if (!projectId || (!isLocalId('project', projectId) && !options.userId())) {
+      return {
+        projectId,
+        clipId: options.clipId(),
+        userId: projectId && !isLocalId('project', projectId) ? options.userId() : undefined,
+      }
+    },
+    ({ projectId, clipId, userId }) => {
+      if (!projectId || (!isLocalId('project', projectId) && !userId)) {
+        adapter?.dispose()
+        adapter = undefined
+
+        return
+      }
+
+      const current = createMidiEditorPersistence({
+        projectId,
+        clipId,
+        onCommitted: (midi) => {
+          setPendingVersion((version) => version + 1)
+
+          if (isLocalId('project', projectId) && options.projectId() === projectId && options.clipId() === clipId) {
+            options.onLocalMidiSaved?.(clipId, midi)
+          }
+        },
+        onError: retainError,
+        onSettled: () => setPendingVersion((version) => version + 1),
+      })
+
       adapter?.dispose()
-      adapter = undefined
+      adapter = current
 
-      return
-    }
-
-    const current = createMidiEditorPersistence({
-      projectId,
-      clipId,
-      onCommitted: (midi) => {
-        setPendingVersion((version) => version + 1)
-
-        if (isLocalId('project', projectId) && options.projectId() === projectId && options.clipId() === clipId) {
-          options.onLocalMidiSaved?.(clipId, midi)
-        }
-      },
-      onError: retainError,
-      onSettled: () => setPendingVersion((version) => version + 1),
-    })
-
-    adapter?.dispose()
-    adapter = current
-    onCleanup(current.dispose)
-  })
+      return current.dispose
+    },
+  )
 
   const flush = async (): Promise<void> => {
     if (saveTimer) {

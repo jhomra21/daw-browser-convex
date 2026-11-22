@@ -1,4 +1,4 @@
-import { createEffect, createSignal, on, untrack, type Accessor } from 'solid-js'
+import { createEffect, createSignal, untrack, type Accessor } from 'solid-js'
 
 import { clampBpm } from '@daw-browser/timeline-core/project-defaults'
 
@@ -27,11 +27,14 @@ export function useTransportTempoController(
   let tempoDragStartY = 0
   let tempoDragStartValue = 0
 
-  createEffect(on(options.bpm, (value) => {
-    if (!untrack(() => tempoEditing())) {
-      setTempoDraft(String(value))
-    }
-  }))
+  createEffect(
+    options.bpm,
+    (value) => {
+      if (!untrack(() => tempoEditing())) {
+        setTempoDraft(String(value))
+      }
+    },
+  )
 
   const sanitizeTempo = (value: number) => {
     if (!Number.isFinite(value)) return options.bpm()

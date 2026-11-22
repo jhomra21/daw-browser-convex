@@ -81,7 +81,7 @@ export const useDesktopApplicationMenu = (
   document.addEventListener("focusout", onFocusOut);
   window.addEventListener("timeline-local-duplicate-state-change", onFocusChange);
 
-  const menuState = createMemo<DesktopApplicationMenuState, undefined>(() => {
+  const menuState = createMemo<DesktopApplicationMenuState>(() => {
     extensionVersion();
     focusVersion();
     const transport = transportProps();
@@ -112,10 +112,10 @@ export const useDesktopApplicationMenu = (
       gridDenominator: gridDenominatorForState(transport.timeline.gridDenominator),
       extensionContributions: [...(extensionMenu?.contributions() ?? [])],
     };
-  }, undefined, { equals: sameMenuState });
+  }, { equals: sameMenuState });
 
-  createEffect(() => {
-    bridge.setState(menuState());
+  createEffect(menuState, (state) => {
+    bridge.setState(state);
   });
 
   onCleanup(() => {

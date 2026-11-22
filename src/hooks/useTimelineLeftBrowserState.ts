@@ -1,4 +1,4 @@
-import { createEffect, createSignal, on, onCleanup, onSettled, untrack, type Accessor } from "solid-js";
+import { createEffect, createSignal, onCleanup, onSettled, untrack, type Accessor } from "solid-js";
 import type { TimelineBrowserTab, TimelineLeftBrowserState } from "~/lib/timeline-browser/browser-types";
 import {
   clampTimelineLeftBrowserWidth,
@@ -57,29 +57,34 @@ export const useTimelineLeftBrowserState = (
     onCleanup(() => observer.disconnect());
   });
 
-  createEffect(on(scopeId, () => {
-    const loaded = loadTimelineLeftBrowserState(
-      scopeId(),
-      untrack(containerWidthPx),
-      untrack(options.rightSidebarWidthPx),
-    );
+  createEffect(
+    scopeId,
+    () => untrack(() => {
+      const loaded = loadTimelineLeftBrowserState(
+        scopeId(),
+        untrack(containerWidthPx),
+        untrack(options.rightSidebarWidthPx),
+      );
 
-    setOpenSignal(loaded.open);
-    setWidthPx(loaded.widthPx);
-    setActiveTabSignal(loaded.activeTab);
-    setSearchQueryByTab(loaded.searchQueryByTab);
-    setScrollTopByTab(loaded.scrollTopByTab);
-    setTreeExpansionByTab(loaded.treeExpansionByTab);
-  }));
+      setOpenSignal(loaded.open);
+      setWidthPx(loaded.widthPx);
+      setActiveTabSignal(loaded.activeTab);
+      setSearchQueryByTab(loaded.searchQueryByTab);
+      setScrollTopByTab(loaded.scrollTopByTab);
+      setTreeExpansionByTab(loaded.treeExpansionByTab);
+    }),
+  );
 
-  createEffect(() => {
-    const nextWidth = clampWidth(widthPx());
-    setWidthPx((current) => {
-      if (current === nextWidth) return current;
+  createEffect(
+    () => clampWidth(widthPx()),
+    (nextWidth) => {
+      setWidthPx((current) => {
+        if (current === nextWidth) return current;
 
-      return nextWidth;
-    });
-  });
+        return nextWidth;
+      });
+    },
+  );
 
   onSettled(() => {
     window.addEventListener("pagehide", saveSnapshot);

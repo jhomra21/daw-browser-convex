@@ -258,19 +258,27 @@ export function useProjectedTimelineModel(
     setOptimisticClipWriteIds((current) => addIdsToMap(current, clipIds))
   }
 
-  createEffect(() => {
-    currentGrantScopeKey()
-    setOptimisticTrackWriteIds(new Map())
-    setOptimisticClipWriteIds(new Map<string, OptimisticGrantState>())
-  })
+  createEffect(
+    () => currentGrantScopeKey(),
+    () => {
+      setOptimisticTrackWriteIds(new Map())
+      setOptimisticClipWriteIds(new Map<string, OptimisticGrantState>())
+    },
+  )
 
-  createEffect(() => {
-    setOptimisticTrackWriteIds((current) => reconcileOptimisticGrants(current, existingTrackIds(), ownedTrackIds()))
-  })
+  createEffect(
+    () => ({ existing: existingTrackIds(), owned: ownedTrackIds() }),
+    ({ existing, owned }) => {
+      setOptimisticTrackWriteIds((current) => reconcileOptimisticGrants(current, existing, owned))
+    },
+  )
 
-  createEffect(() => {
-    setOptimisticClipWriteIds((current) => reconcileOptimisticGrants(current, existingClipIds(), ownedClipIds()))
-  })
+  createEffect(
+    () => ({ existing: existingClipIds(), owned: ownedClipIds() }),
+    ({ existing, owned }) => {
+      setOptimisticClipWriteIds((current) => reconcileOptimisticGrants(current, existing, owned))
+    },
+  )
 
   const serverTrackState = createMemo(() => {
     const data = options.fullViewData()

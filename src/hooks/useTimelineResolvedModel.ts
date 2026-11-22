@@ -115,12 +115,12 @@ export function useTimelineResolvedModel(
   }
 
   // Each resolve rebuilds every track and clip; reusing the unchanged ones keeps the lanes keyed on them mounted.
-  const resolvedTracks = createMemo<RuntimeTrack[]>((previous) => reuseResolvedTracks(previous, resolveTracks({
+  const resolvedTracks = createMemo<RuntimeTrack[]>((previous = []) => reuseResolvedTracks(previous, resolveTracks({
     draftClipEditsById: emptyDraftClipEditsById,
     previewClipsByTrackId: emptyPreviewClipsByTrackId,
-  })), [])
+  })))
 
-  const placementTracks = createMemo<RuntimeTrack[]>((previous) => {
+  const placementTracks = createMemo<RuntimeTrack[]>((previous = []) => {
     const draftClipEditsById = options.projection.draftClipEditsById()
 
     if (draftClipEditsById.size === 0) return resolvedTracks()
@@ -129,9 +129,9 @@ export function useTimelineResolvedModel(
       draftClipEditsById,
       previewClipsByTrackId: emptyPreviewClipsByTrackId,
     }))
-  }, [])
+  })
 
-  const renderTracks = createMemo<RuntimeTrack[]>((previous) => {
+  const renderTracks = createMemo<RuntimeTrack[]>((previous = []) => {
     const previewClipsByTrackId = options.projection.previewClipsByTrackId()
 
     if (previewClipsByTrackId.size === 0) return placementTracks()
@@ -140,19 +140,22 @@ export function useTimelineResolvedModel(
       draftClipEditsById: options.projection.draftClipEditsById(),
       previewClipsByTrackId,
     }))
-  }, [])
+  })
 
   const trackLookup = createMemo(() => createTimelineTrackIndex(renderTracks()))
 
-  createEffect(() => {
-    for (const track of resolvedTracks()) {
-      options.identity.rememberTrackProjection(track)
+  createEffect(
+    () => resolvedTracks(),
+    (tracks) => {
+      for (const track of tracks) {
+        options.identity.rememberTrackProjection(track)
 
-      for (const clip of track.clips) {
-        options.identity.rememberClipHistoryRef(clip)
+        for (const clip of track.clips) {
+          options.identity.rememberClipHistoryRef(clip)
+        }
       }
-    }
-  })
+    },
+  )
 
   return {
     resolvedTracks,

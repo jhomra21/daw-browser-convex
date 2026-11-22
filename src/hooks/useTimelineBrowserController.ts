@@ -655,15 +655,18 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
 
   const clearRenameAssetFolder = () => setRenameFolderDraft(null);
 
-  createEffect(() => {
-    const draft = renameFolderDraft();
+  createEffect(
+    () => {
+      const draft = renameFolderDraft();
 
-    if (!draft || renameFolderBusy()) return;
+      if (!draft || renameFolderBusy()) return false;
 
-    if (draft.projectId !== currentProjectId() || !browserProjectFolderById().has(draft.folderId)) {
-      clearRenameAssetFolder();
-    }
-  });
+      return draft.projectId !== currentProjectId() || !browserProjectFolderById().has(draft.folderId);
+    },
+    (stale) => {
+      if (stale) clearRenameAssetFolder();
+    },
+  );
 
   const assetFolderBackend = (projectId: string) => createAssetFolderBackend(projectId, {
     refreshFolders: assetFolders.refreshFolders,

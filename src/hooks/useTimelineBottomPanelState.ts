@@ -21,10 +21,13 @@ export const useTimelineBottomPanelState = (options: TimelineBottomPanelStateOpt
   const preferenceScopeId = () => options.projectId() ?? "default";
   const viewportHeightPx = () => globalThis.window?.innerHeight ?? heightPx();
 
-  createEffect(() => {
-    if (!globalThis.window) return;
-    setHeightPx(loadBottomPanelHeight(preferenceScopeId(), window.innerHeight));
-  });
+  createEffect(
+    () => globalThis.window ? preferenceScopeId() : undefined,
+    (scopeId) => {
+      if (scopeId === undefined) return;
+      setHeightPx(loadBottomPanelHeight(scopeId, window.innerHeight));
+    },
+  );
 
   const previewHeightPx = (value: number) => {
     setHeightPx(clampBottomPanelHeight(value, viewportHeightPx()));

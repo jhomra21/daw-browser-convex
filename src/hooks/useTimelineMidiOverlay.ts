@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor, onSettled, createTrackedEffect } from 'solid-js'
 
 import type { AudioEngine, LiveMidiNoteHandle } from '@daw-browser/audio-engine/audio-engine'
 import { createStoredValue } from '~/lib/stored-value'
@@ -375,17 +375,30 @@ export function useTimelineMidiOverlay(
     } catch {}
   }
 
-  createEffect(() => {
-    const unsubscribe = subscribeMidiProjectProjection(options.projectId(), () => {
-      setProjectionRevision((revision) => revision + 1)
-    })
+  createEffect(
+    () => options.projectId(),
+    (projectId) => {
+      const unsubscribe = subscribeMidiProjectProjection(projectId, () => {
+        setProjectionRevision((revision) => revision + 1)
+      })
 
-    onCleanup(unsubscribe)
-  })
+      return unsubscribe
+    },
+  )
 
-  createEffect(() => setMidiKeyboardEnabled(storedMidiKeyboardEnabled.read(midiKeyboardStorageScope())))
+  createEffect(
+    () => storedMidiKeyboardEnabled.read(midiKeyboardStorageScope()),
+    (enabled) => {
+      setMidiKeyboardEnabled(enabled)
+    },
+  )
 
-  createEffect(() => storedMidiKeyboardEnabled.write(midiKeyboardStorageScope(), midiKeyboardEnabled()))
+  createEffect(
+    () => ({ scope: midiKeyboardStorageScope(), enabled: midiKeyboardEnabled() }),
+    ({ scope, enabled }) => {
+      storedMidiKeyboardEnabled.write(scope, enabled)
+    },
+  )
 
   const midiKeyboard = useMidiKeyboardInput({
     projectId: () => options.projectId(),
@@ -475,7 +488,7 @@ export function useTimelineMidiOverlay(
     forceStopAllLiveNotes()
   })
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const targetKey = [
       options.projectId(),
       options.selection.selectedTrackId(),
@@ -498,12 +511,14 @@ export function useTimelineMidiOverlay(
     liveArpeggiator.configure()
   }))
 
-  createEffect(() => {
-    options.bpm()
-    liveArpeggiator.configure()
-  })
+  createEffect(
+    () => options.bpm(),
+    () => {
+      liveArpeggiator.configure()
+    },
+  )
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     if (requiresNativeAudio) return
     activeMappingFingerprint()
     const previousTargetKeys = scheduledMappingTargetKeys
@@ -538,12 +553,14 @@ export function useTimelineMidiOverlay(
     }
   })
 
-  createEffect(() => {
-    activeInputChannel()
-    restoreLiveMappings()
-  })
+  createEffect(
+    () => activeInputChannel(),
+    () => {
+      restoreLiveMappings()
+    },
+  )
 
-  createEffect(() => {
+  onSettled(() => {
     const unsubscribe = midiAccess.subscribe(hardwareRouter.receive)
 
     const unsubscribeReset = midiAccess.subscribeSourceReset((event) => {
@@ -577,7 +594,8 @@ export function useTimelineMidiOverlay(
       : undefined
 
     document.addEventListener('visibilitychange', onVisibilityChange)
-    onCleanup(() => {
+
+    return () => {
       unsubscribe()
       unsubscribeReset()
       document.removeEventListener('visibilitychange', onVisibilityChange)
@@ -586,7 +604,7 @@ export function useTimelineMidiOverlay(
       restoreLiveMappings()
 
       if (!requiresNativeAudio) options.audioEngine.panicLiveMidi()
-    })
+    }
   })
 
   onCleanup(() => {

@@ -1,4 +1,4 @@
-import { createEffect, createSignal, on, onCleanup, untrack, type Accessor } from "solid-js";
+import { createEffect, createSignal, onCleanup, untrack, type Accessor, createTrackedEffect } from "solid-js";
 import type { FunctionReturnType } from "convex/server";
 import {
   type ArpeggiatorParams,
@@ -282,19 +282,31 @@ export function useEffectsPanelAudioSync(
 
   onCleanup(readinessOwner.dispose);
 
-  createEffect(on(options.projectId, () => readinessOwner.projectChanged()));
+  createEffect(
+    options.projectId,
+    () => {
+      readinessOwner.projectChanged()
+    },
+  );
 
-  createEffect(() => {
-    const projectId = options.projectId();
+  createEffect(
+    () => {
+      const projectId = options.projectId();
 
-    if (!projectId || isLocalId("project", projectId)) return;
-    readinessOwner.updateRemote(
-      projectId,
-      options.roomEffects(),
-      options.roomEffectsStatus(),
-      options.roomEffectsError(),
-    );
-  });
+      if (!projectId || isLocalId("project", projectId)) return undefined;
+
+      return {
+        projectId,
+        rows: options.roomEffects(),
+        status: options.roomEffectsStatus(),
+        error: options.roomEffectsError(),
+      };
+    },
+    (remote) => {
+      if (!remote) return;
+      readinessOwner.updateRemote(remote.projectId, remote.rows, remote.status, remote.error);
+    },
+  );
 
   let syncedTrackIds = new Set<Track["id"]>();
   let syncedProjectId: string | null = null;
@@ -318,20 +330,18 @@ export function useEffectsPanelAudioSync(
     void audioEngine.setMasterFxInstances([]).catch(() => undefined);
   };
 
-  createEffect(() => {
-    const audioEngine = options.audioEngine();
+  createEffect(
+    () => ({ audioEngine: options.audioEngine(), clear: options.usesLegacyAudioEngine() && !options.projectId() }),
+    ({ audioEngine, clear }) => {
+      if (!clear) return;
+      clearSyncedTrackState(audioEngine, syncedTrackIds);
+      clearSyncedMasterState(audioEngine);
+      syncedTrackIds = new Set();
+      syncedProjectId = null;
+    },
+  );
 
-    if (!options.usesLegacyAudioEngine()) return;
-    const projectId = options.projectId();
-
-    if (projectId) return;
-    clearSyncedTrackState(audioEngine, syncedTrackIds);
-    clearSyncedMasterState(audioEngine);
-    syncedTrackIds = new Set();
-    syncedProjectId = null;
-  });
-
-  createEffect(function reconcileEffectsRows() {
+  createTrackedEffect(function reconcileEffectsRows() {
     const audioEngine = options.audioEngine();
     const usesLegacyAudioEngine = options.usesLegacyAudioEngine();
     const projectId = options.projectId();
@@ -418,9 +428,12 @@ export function useEffectsPanelAudioSync(
 
   const spectrumSubscription = createSpectrumSubscriptionOwner(setSpectrum);
   spectrumSubscription.update(options.isOpen(), options.spectrumProvider?.(), options.currentTargetId());
-  createEffect(() => {
-    spectrumSubscription.update(options.isOpen(), options.spectrumProvider?.(), options.currentTargetId());
-  });
+  createEffect(
+    () => ({ isOpen: options.isOpen(), provider: options.spectrumProvider?.(), targetId: options.currentTargetId() }),
+    ({ isOpen, provider, targetId }) => {
+      spectrumSubscription.update(isOpen, provider, targetId);
+    },
+  );
   onCleanup(spectrumSubscription.dispose);
 
   return {

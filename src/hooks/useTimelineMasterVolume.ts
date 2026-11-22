@@ -91,24 +91,38 @@ export function useTimelineMasterVolume(options: UseTimelineMasterVolumeOptions)
     options.audioEngine.setMasterVolume(normalizeMasterVolume(nextVolume))
   }
 
-  createEffect(() => {
-    if (!options.projectMix.isHydrated()) return
-    options.audioEngine.setMasterVolume(volume())
-  })
+  createEffect(
+    () => options.projectMix.isHydrated() ? { volume: volume() } : undefined,
+    (hydrated) => {
+      if (!hydrated) return
+      options.audioEngine.setMasterVolume(hydrated.volume)
+    },
+  )
 
-  createEffect(() => {
-    const serverVolume = backend().serverVolume?.()
+  createEffect(
+    () => {
+      const serverVolume = backend().serverVolume?.()
 
-    if (!options.projectId() || serverVolume === undefined || pendingMasterVolume() !== undefined) return
-    options.projectMix.setMasterVolume(serverVolume)
-  })
+      if (!options.projectId() || serverVolume === undefined || pendingMasterVolume() !== undefined) return undefined
 
-  createEffect(() => {
-    const pending = pendingMasterVolume()
+      return { serverVolume }
+    },
+    (server) => {
+      if (!server) return
+      options.projectMix.setMasterVolume(server.serverVolume)
+    },
+  )
 
-    if (pending === undefined || pending !== committedVolume()) return
-    setPendingMasterVolume(undefined)
-  })
+  createEffect(
+    () => {
+      const pending = pendingMasterVolume()
+
+      return pending !== undefined && pending === committedVolume()
+    },
+    (committed) => {
+      if (committed) setPendingMasterVolume(undefined)
+    },
+  )
 
   const commitVolume = (nextVolumeInput: number) => {
     if (!canEdit()) return

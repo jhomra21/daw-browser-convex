@@ -1,4 +1,4 @@
-import { createEffect, createSignal, on, onCleanup } from 'solid-js'
+import { createEffect, createSignal, untrack } from 'solid-js'
 
 import { isEditableKeyboardTarget } from '~/lib/keyboard-event-target'
 import { createStoredValue } from '~/lib/stored-value'
@@ -162,45 +162,64 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
     event.stopPropagation()
   }
 
-  createEffect(on(
+  createEffect(
     () => options.projectId(),
-    () => {
+    () => untrack(() => {
       stopPressedNotes()
       setOctave(storedOctave.read(storageScope()))
       setVelocity(storedVelocity.read(storageScope()))
-    },
+    }),
     { defer: true },
-  ))
+  )
 
-  createEffect(() => storedOctave.write(storageScope(), octave()))
+  createEffect(
+    () => ({ scope: storageScope(), value: octave() }),
+    ({ scope, value }) => {
+      storedOctave.write(scope, value)
+    },
+  )
 
-  createEffect(() => storedVelocity.write(storageScope(), velocity()))
+  createEffect(
+    () => ({ scope: storageScope(), value: velocity() }),
+    ({ scope, value }) => {
+      storedVelocity.write(scope, value)
+    },
+  )
 
-  createEffect(() => {
-    if (!options.enabled()) {
-      stopPressedNotes()
-    }
-  })
+  createEffect(
+    () => options.enabled(),
+    (enabled) => {
+      if (!enabled) {
+        stopPressedNotes()
+      }
+    },
+  )
 
-  createEffect(() => {
-    if (!options.enabled()) return
-    const listenerOptions: AddEventListenerOptions = { capture: true }
+  createEffect(
+    () => options.enabled(),
+    (enabled) => {
+      if (!enabled) return
+      const listenerOptions: AddEventListenerOptions = { capture: true }
 
-    const handleVisibilityChange = () => {
-      if (document.hidden) stopPressedNotes()
-    }
+      const handleVisibilityChange = () => {
+        if (document.hidden) stopPressedNotes()
+      }
 
-    // Window blur also fires when focus moves to the native editor window.
-    window.addEventListener('keydown', handleKeyDown, listenerOptions)
-    window.addEventListener('keyup', handleKeyUp, listenerOptions)
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    onCleanup(() => {
-      window.removeEventListener('keydown', handleKeyDown, listenerOptions)
-      window.removeEventListener('keyup', handleKeyUp, listenerOptions)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-      stopPressedNotes()
-    })
-  })
+      // Window blur also fires when focus moves to the native editor window.
+      window.addEventListener('keydown', handleKeyDown, listenerOptions)
+      window.addEventListener('keyup', handleKeyUp, listenerOptions)
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+
+      const removeListeners = () => {
+        window.removeEventListener('keydown', handleKeyDown, listenerOptions)
+        window.removeEventListener('keyup', handleKeyUp, listenerOptions)
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+        untrack(stopPressedNotes)
+      }
+
+      return removeListeners
+    },
+  )
 
   return {
     octave,

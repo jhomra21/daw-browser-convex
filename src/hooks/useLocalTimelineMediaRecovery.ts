@@ -1,4 +1,4 @@
-import { type Accessor, batch, createEffect, createSignal, onCleanup } from "solid-js";
+import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { ClipBufferWriter, EnsureClipBuffer } from "~/lib/clip-buffer-cache";
 import { createLocalAsset, deleteLocalAsset } from "~/lib/local-assets";
@@ -177,10 +177,8 @@ export const useMissingMediaRecovery = (input: Input) => {
 
       if (isCurrent()) {
         setMountedLocalMediaReady(false);
-        batch(() => {
-          input.projection.reconcileLocalSnapshot?.(snapshot);
-          setLocalTimelineSnapshot(snapshot.tracks.length > 0 || isLocalProject ? snapshot : null);
-        });
+        input.projection.reconcileLocalSnapshot?.(snapshot);
+        setLocalTimelineSnapshot(snapshot.tracks.length > 0 || isLocalProject ? snapshot : null);
         await Promise.resolve();
 
         const mediaReady = await hydrateSnapshotMedia(snapshot, {
@@ -204,36 +202,43 @@ export const useMissingMediaRecovery = (input: Input) => {
     }
   };
 
-  createEffect(() => {
-    const rid = input.projectId();
-    const generation = input.mountedProjectGeneration();
-    const isLocalProject = isLocalId("project", rid);
+  createEffect(
+    () => {
+      const rid = input.projectId();
+      const generation = input.mountedProjectGeneration();
+      const remoteReady = !isLocalId("project", rid) && input.remoteTimelineAvailable();
 
-    if (!isLocalProject && input.remoteTimelineAvailable()) {
-      setMountedLocalMediaReady(true);
-      setLocalTimelineSnapshot(null);
+      if (!remoteReady) input.localTimelineReloadVersion();
 
-      return;
-    }
+      return { rid, generation, remoteReady };
+    },
+    ({ rid, generation, remoteReady }) => {
+      if (remoteReady) {
+        setMountedLocalMediaReady(true);
+        setLocalTimelineSnapshot(null);
 
-    setMountedLocalMediaReady(false);
-    input.localTimelineReloadVersion();
-    const operationController = new AbortController();
-    void reloadLocalTimeline({
-      projectId: rid,
-      mountedProjectGeneration: generation,
-      signal: operationController.signal,
-    }).catch(() => {
-      if (
-        !operationController.signal.aborted
-        && input.projectId() === rid
-        && input.mountedProjectGeneration() === generation
-      ) setLocalTimelineSnapshot(null);
-    });
-    onCleanup(() => {
-      operationController.abort();
-    });
-  });
+        return;
+      }
+
+      setMountedLocalMediaReady(false);
+      const operationController = new AbortController();
+      void reloadLocalTimeline({
+        projectId: rid,
+        mountedProjectGeneration: generation,
+        signal: operationController.signal,
+      }).catch(() => {
+        if (
+          !operationController.signal.aborted
+          && input.projectId() === rid
+          && input.mountedProjectGeneration() === generation
+        ) setLocalTimelineSnapshot(null);
+      });
+
+      return () => {
+        operationController.abort();
+      };
+    },
+  );
 
   const removeMissingMediaClip = async (trackId: Track["id"], clipId: string) => {
     const projectId = input.projectId();

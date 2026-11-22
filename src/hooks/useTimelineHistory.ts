@@ -484,20 +484,25 @@ export function useTimelineHistory(
     runHistoryAction('redo', execRedo)
   }
 
-  createEffect(() => {
-    const scope = readCurrentScope()
-    const tracks = options.getTracks()
+  createEffect(
+    () => {
+      const scope = readCurrentScope()
+      const tracks = options.getTracks()
 
-    if (!scope) {
-      publishAvailability()
+      return { scope, tracks }
+    },
+    ({ scope, tracks }) => {
+      if (!scope) {
+        publishAvailability()
 
-      return
-    }
+        return
+      }
 
-    const context = getScopeContext(scope)
-    context.tracks = cloneHistoryTracks(tracks)
-    publishAvailability(context.manager)
-  })
+      const context = getScopeContext(scope)
+      context.tracks = cloneHistoryTracks(tracks)
+      publishAvailability(context.manager)
+    },
+  )
 
   onCleanup(() => {
     for (const context of scopeContexts.values()) {

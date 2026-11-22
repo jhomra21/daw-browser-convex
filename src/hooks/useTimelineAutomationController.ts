@@ -1,5 +1,6 @@
-import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor, createTrackedEffect } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
+import { createLatestSignal } from "~/lib/create-latest-signal";
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import type { LiveProcessorControlResult } from "~/lib/live-processor-control";
@@ -313,13 +314,13 @@ const replaceAutomationEnvelope = (
 };
 
 export function useTimelineAutomationController(options: TimelineAutomationControllerOptions) {
-  const [automationEnvelopes, setAutomationEnvelopes] = createSignal<AutomationEnvelope[]>([]);
+  const [automationEnvelopes, setAutomationEnvelopes] = createLatestSignal<AutomationEnvelope[]>([]);
   // Every project change reloads these from storage; an unchanged result must not rebuild the lanes workspace.
   const [effectInstancesByOwnerKey, setEffectInstancesByOwnerKey] = createSignal<Record<string, AutomationTargetDeviceInstance[]>>({}, { equals: sameData });
   const [automationValuesByTargetKey, setAutomationValuesByTargetKey] = createSignal<ReadonlyMap<string, number>>(new Map(), { equals: sameData });
   const [effectDataReady, setEffectDataReady] = createSignal(false);
   const [automationDataReady, setAutomationDataReady] = createSignal(false);
-  const [overriddenAutomationTargetKeys, setOverriddenAutomationTargetKeys] = createSignal<Set<string>>(new Set());
+  const [overriddenAutomationTargetKeys, setOverriddenAutomationTargetKeys] = createLatestSignal<Set<string>>(new Set());
   // The newest re-enable of a lane owns its outcome, so an older request answered later cannot undo it.
   const reEnableOwners = new Map<string, number>();
   let lastReEnable = 0;
@@ -754,7 +755,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     }
   };
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const rid = options.projectId();
 
     if (!rid) {
@@ -803,7 +804,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     setAutomationDataReady(true);
     untrack(persistedAutomation.syncRemote);
   });
-  createEffect(() => {
+  createTrackedEffect(() => {
     const rid = options.projectId();
 
     if (!rid) {
@@ -1031,7 +1032,8 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     visibleAutomationLanes.value();
     selectedAutomationParameters.value();
     persistedAutomation.envelopes();
-    seedVisibleAutomationLanes();
+  }, () => {
+    untrack(seedVisibleAutomationLanes);
   });
 
   const targetKeyForTrackSelection = (trackId: Track["id"], selection: AutomationParameterSelection) => (

@@ -1,5 +1,5 @@
 import type { FunctionReturnType } from 'convex/server'
-import { createEffect, createSignal, on, type Accessor } from 'solid-js'
+import { createEffect, createSignal, type Accessor, untrack } from 'solid-js'
 
 import type { convexApi } from '~/lib/convex'
 import {
@@ -234,16 +234,19 @@ export function useTimelineProjectionState(
   const [draftClipEditsById, setDraftClipEditsById] = createSignal<Map<string, ClipTimelinePatch>>(new Map())
   const [previewClipsByTrackId, setPreviewClipsByTrackId] = createSignal<Map<Track['id'], Track['clips']>>(new Map())
 
-  createEffect(on(options.projectId, () => {
-    setPendingTrackEntriesById(new Map())
-    setPendingClipCreatesById(new Map())
-    setRemovedTrackIds(new Set<Track['id']>())
-    setRemovedClipIds(new Set<string>())
-    setPendingTrackLocksById(new Map())
-    setCommittedClipEditsById(new Map<string, ClipTimelinePatch>())
-    setDraftClipEditsById(new Map<string, ClipTimelinePatch>())
-    setPreviewClipsByTrackId(new Map())
-  }))
+  createEffect(
+    options.projectId,
+    () => {
+      setPendingTrackEntriesById(new Map())
+      setPendingClipCreatesById(new Map())
+      setRemovedTrackIds(new Set<Track['id']>())
+      setRemovedClipIds(new Set<string>())
+      setPendingTrackLocksById(new Map())
+      setCommittedClipEditsById(new Map<string, ClipTimelinePatch>())
+      setDraftClipEditsById(new Map<string, ClipTimelinePatch>())
+      setPreviewClipsByTrackId(new Map())
+    },
+  )
 
   const reconcile = (data: TimelineViewLike) => {
     const next = reconcileTimelineProjectionSnapshot({
@@ -263,11 +266,25 @@ export function useTimelineProjectionState(
     setPendingTrackLocksById(next.pendingTrackLocksById)
   }
 
-  createEffect(() => {
-    const data = options.serverData()
+  createEffect(
+    () => {
+      const data = options.serverData()
 
-    if (data) reconcile(data)
-  })
+      if (!data) return undefined
+      // reconcile reads the pending projection state it then rewrites.
+      committedClipEditsById()
+      pendingTrackEntriesById()
+      pendingClipCreatesById()
+      removedTrackIds()
+      removedClipIds()
+      pendingTrackLocksById()
+
+      return data
+    },
+    (data) => {
+      if (data) untrack(() => reconcile(data))
+    },
+  )
 
   const clearDraftClipMoves = (clipIds: Iterable<string>) => {
     const targetIds = new Set(clipIds)

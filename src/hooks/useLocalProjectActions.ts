@@ -1,4 +1,4 @@
-import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
+import { type Accessor, createEffect, createSignal } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import {
   disableProjectBackup,
@@ -51,28 +51,33 @@ export const useLocalProjectActions = (input: Input) => {
   const [sharedOutboxStatus, setSharedOutboxStatus] = createSignal<{ pending: number; failed: number } | null>(null);
   const [localTimelineReloadVersion, setLocalTimelineReloadVersion] = createSignal(0);
 
-  createEffect(() => {
-    const rid = input.projectId();
-    const uid = input.userId();
-    setSharedOutboxStatus(null);
+  createEffect(
+    () => ({ rid: input.projectId(), uid: input.userId() }),
+    ({ rid, uid }) => {
+      setSharedOutboxStatus(null);
 
-    if (!rid || !uid || isLocalId("project", rid)) return;
-    let active = true;
-    let latestRequest = 0;
-    onCleanup(() => { active = false; });
+      if (!rid || !uid || isLocalId("project", rid)) return;
+      let active = true;
+      let latestRequest = 0;
 
-    const refresh = () => {
-      const request = ++latestRequest;
-      const isCurrent = () => active && request === latestRequest;
-      void readSharedOutboxSummary(rid, uid).then(
-        (summary) => { if (isCurrent()) setSharedOutboxStatus(summary); },
-        () => { if (isCurrent()) setSharedOutboxStatus(null); },
-      );
-    };
+      const refresh = () => {
+        const request = ++latestRequest;
+        const isCurrent = () => active && request === latestRequest;
+        void readSharedOutboxSummary(rid, uid).then(
+          (summary) => { if (isCurrent()) setSharedOutboxStatus(summary); },
+          () => { if (isCurrent()) setSharedOutboxStatus(null); },
+        );
+      };
 
-    refresh();
-    onCleanup(subscribeToLocalProjectChanges(rid, refresh));
-  });
+      refresh();
+      const unsubscribe = subscribeToLocalProjectChanges(rid, refresh);
+
+      return () => {
+        active = false;
+        unsubscribe();
+      };
+    },
+  );
 
   const describeBackupConflict = (conflict: Awaited<ReturnType<typeof runProjectBackup>>["conflict"]) => {
     if (!conflict) return "Cloud backup conflict detected.";

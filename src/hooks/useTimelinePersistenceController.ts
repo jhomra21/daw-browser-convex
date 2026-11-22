@@ -1,4 +1,4 @@
-import { createEffect, onCleanup, type Accessor } from "solid-js";
+import { createEffect, type Accessor } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { ClipBufferWriter, EnsureClipBuffer } from "~/lib/clip-buffer-cache";
 import { isLocalId } from "@daw-browser/shared";
@@ -84,10 +84,7 @@ export const useTimelinePersistenceController = (input: Input) => {
     },
     sync: (projectId) => input.localProject.backUpNow({ projectId, skipIfUnchanged: true }),
   });
-  createEffect(() => {
-    const projectId = input.projectId();
-    const userId = input.userId();
-
+  createEffect(() => ({ projectId: input.projectId(), userId: input.userId() }), ({ projectId, userId }) => {
     if (!projectId || isLocalId("project", projectId) || !userId) return;
     let active = true;
     let flushPromise: Promise<void> | undefined;
@@ -126,12 +123,13 @@ export const useTimelinePersistenceController = (input: Input) => {
     void flush();
     window.addEventListener("online", onOnline);
     const unsubscribe = subscribeToLocalProjectChanges(projectId, retry.refresh);
-    onCleanup(() => {
+
+    return () => {
       active = false;
       retry.dispose();
       unsubscribe();
       window.removeEventListener("online", onOnline);
-    });
+    };
   });
 
   return {

@@ -1,8 +1,9 @@
-import { createEffect, createSignal, onCleanup, untrack } from 'solid-js'
+import { createEffect, onCleanup, untrack, createTrackedEffect } from 'solid-js'
 
 import { LIVE_SCHEDULE_HORIZON_SEC, type AudioEngine, type SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { nativeControllerObserver } from '~/lib/desktop/acceptance-observer'
+import { createLatestSignal } from '~/lib/create-latest-signal'
 import { createNativePlaybackController, nativePlaybackFaultText } from '~/lib/desktop/native-playback-controller'
 import { createPortableBrowserPlaybackController } from '~/lib/portable-browser-playback-controller'
 import type { LivePlaybackCompileContext } from '~/lib/live-playback-snapshot'
@@ -73,13 +74,13 @@ export function useTimelinePlayback(
   nativeOptions?: NativePlaybackOptions,
   portableBrowserOptions?: PortableBrowserPlaybackOptions,
 ) {
-  const [isPlaying, setIsPlaying] = createSignal(false)
-  const [isRebuildingPlayback, setIsRebuildingPlayback] = createSignal(false)
-  const [playheadSec, setPlayheadSec] = createSignal(0)
-  const [activeBackend, setActiveBackend] = createSignal<ActiveAudioBackend>('idle')
+  const [isPlaying, setIsPlaying] = createLatestSignal(false)
+  const [isRebuildingPlayback, setIsRebuildingPlayback] = createLatestSignal(false)
+  const [playheadSec, setPlayheadSec] = createLatestSignal(0)
+  const [activeBackend, setActiveBackend] = createLatestSignal<ActiveAudioBackend>('idle')
 
-  const [rafId, setRafId] = createSignal<number | null>(null)
-  const [lastTracks, setLastTracks] = createSignal<Track[]>([])
+  let rafId: number | null = null
+  const [lastTracks, setLastTracks] = createLatestSignal<Track[]>([])
   let lastPlayheadUiUpdateMs = 0
   let lastPublishedPlayheadSec = 0
   let scheduledUntilSec = 0
@@ -96,16 +97,14 @@ export function useTimelinePlayback(
   }
 
   const cancelRaf = () => {
-    const id = rafId()
-
-    if (id !== null) {
-      cancelAnimationFrame(id)
-      setRafId(null)
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId)
+      rafId = null
     }
   }
 
   // The playhead follows the audio clock once per frame; cancelRaf is the matching stop.
-  const requestTick = () => setRafId(requestAnimationFrame(tick))
+  const requestTick = () => { rafId = requestAnimationFrame(tick) }
 
   const desktopAudioHostBridge = globalThis.window?.dawDesktop?.audioHost
 
@@ -147,7 +146,7 @@ export function useTimelinePlayback(
     waitingForRebuild: boolean
   } | undefined
 
-  const [isPlayPending, setIsPlayPending] = createSignal(false)
+  const [isPlayPending, setIsPlayPending] = createLatestSignal(false)
 
   let playAttemptPhase: {
     token: number
@@ -257,7 +256,6 @@ export function useTimelinePlayback(
     // A cold rebuild retires its schedule coordinator before replacement
     // preparation, so observe host loss while no coordinator owns the host.
     // This host event reads current state imperatively, not reactively.
-    // eslint-disable-next-line solid/reactivity
     const remove = audioHostBridge.session.onLoss((message) => {
       if (!isRebuildingPlayback()) return
       setIsRebuildingPlayback(false)
@@ -274,8 +272,7 @@ export function useTimelinePlayback(
     removeRebuildHostLoss = remove
   }
 
-  createEffect(() => {
-    nativeOptions?.keepLatencyNodeIds?.()
+  createEffect(() => nativeOptions?.keepLatencyNodeIds?.(), () => {
     untrack(() => {
       void nativePlayback.updateKeepLatency().then((result) => {
         if (result.handled || result.reason === "unprepared") return
@@ -719,7 +716,7 @@ export function useTimelinePlayback(
 
       const transport = {
         state: 'playing' as const,
-        playheadSec: playheadSec(),
+        playheadSec: lastPublishedPlayheadSec,
         loopEnabled: isActive,
         loopStartSec: start,
         loopEndSec: end,
@@ -735,14 +732,13 @@ export function useTimelinePlayback(
         schedule.previewProjectionBaseline = backend === 'portable-browser' ? schedule.portableCompiledFingerprint : desiredAtStart
         setIsPlaying(true)
         setLastTracks(tracks)
-        lastPublishedPlayheadSec = playheadSec()
         lastPlayheadUiUpdateMs = 0
 
-        if (backend === 'portable-browser') audioEngine.onTransportStart(playheadSec())
+        if (backend === 'portable-browser') audioEngine.onTransportStart(lastPublishedPlayheadSec)
         requestTick()
 
         // A locate made before the start committed had no graph to seek: apply it to the running one.
-        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)
+        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)
       }
 
       const pendingNativePreview = nativePlayback.getPendingStart()
@@ -957,16 +953,15 @@ export function useTimelinePlayback(
       backendOwnerToken += 1
       setActiveBackend('legacy')
       setIsPlaying(true)
-      lastPublishedPlayheadSec = playheadSec()
       lastPlayheadUiUpdateMs = 0
       setLastTracks(tracks)
       deferredStretchQueue.clear()
-      audioEngine.onTransportStart(playheadSec())
-      audioEngine.onTransportSeek(playheadSec(), SCHED_AHEAD_SEC)
-      scheduledUntilSec = getScheduleHorizonEnd(playheadSec(), isActive ? end : undefined)
-      scheduleAndTrackDeferred(readyTracks, playheadSec(), { endLimitSec: scheduledUntilSec })
-      audioEngine.scheduleAutomationFromPlayhead(playheadSec(), {
-        horizonSec: scheduledUntilSec - playheadSec(),
+      audioEngine.onTransportStart(lastPublishedPlayheadSec)
+      audioEngine.onTransportSeek(lastPublishedPlayheadSec, SCHED_AHEAD_SEC)
+      scheduledUntilSec = getScheduleHorizonEnd(lastPublishedPlayheadSec, isActive ? end : undefined)
+      scheduleAndTrackDeferred(readyTracks, lastPublishedPlayheadSec, { endLimitSec: scheduledUntilSec })
+      audioEngine.scheduleAutomationFromPlayhead(lastPublishedPlayheadSec, {
+        horizonSec: scheduledUntilSec - lastPublishedPlayheadSec,
         tracks: readyTracks,
       })
       requestTick()
@@ -1010,7 +1005,7 @@ export function useTimelinePlayback(
     await audioEngine.resume()
 
     if (!owned()) return
-    const sec = untrack(playheadSec)
+    const sec = lastPublishedPlayheadSec
     const { isActive, start, end } = getLoopParams()
 
     const result = await portableBrowserPlayback.ensurePrepared({
@@ -1021,11 +1016,11 @@ export function useTimelinePlayback(
     setActiveBackend("portable-browser")
 
     // A pending ensurePrepared answers a newer locate with the older position: seek again.
-    if (untrack(playheadSec) !== sec) return ensureLivePortableSession()
+    if (lastPublishedPlayheadSec !== sec) return ensureLivePortableSession()
   }
 
   const ensureLiveGraph = async () => {
-    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === "started") return
+    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === "started") return
 
     return ensureLivePortableSession()
   }
@@ -1045,7 +1040,7 @@ export function useTimelinePlayback(
   // A Pause or Stop over a native Play resuming the paused session keeps that session: once the abandoned resume
   // settles, it moves to where the transport now stands. Only a session that no longer exists is prepared again.
   const keepGraphAfter = (resume: Promise<void>) => resume
-    .then(() => nativePlayback.seekPrepared(untrack(playheadSec)))
+    .then(() => nativePlayback.seekPrepared(lastPublishedPlayheadSec))
     .then((result) => result === "started" ? undefined : ensureLiveGraph())
 
   const handlePause = async () => {
@@ -1213,12 +1208,11 @@ export function useTimelinePlayback(
     const seek = nativeSeekSequence
 
     // The returned Stop runs once from the recording transport, an imperative caller outside any tracked scope.
-    // eslint-disable-next-line solid/reactivity
     return async () => {
       if (intent !== transportIntentToken) return
 
       if (seek === nativeSeekSequence) return handleStop()
-      const located = untrack(playheadSec)
+      const located = lastPublishedPlayheadSec
       const pause = handlePause()
       const pausedIntent = transportIntentToken
       const pausedSeek = nativeSeekSequence
@@ -1979,11 +1973,11 @@ export function useTimelinePlayback(
     },
   })
 
-  createEffect(() => {
-    if (!isPlaying() || activeBackend() !== "native") nativePlayback.dropAdoptionIntents()
+  createEffect(() => !isPlaying() || activeBackend() !== "native", (dropIntents) => {
+    if (dropIntents) untrack(nativePlayback.dropAdoptionIntents)
   })
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const nextGeneration = nativeOptions?.projectGeneration?.()
       ?? portableBrowserOptions?.projectGeneration?.()
       ?? 0
@@ -2018,7 +2012,7 @@ export function useTimelinePlayback(
     setActiveBackend('idle')
   })
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const enabled = nativeOptions?.enabled?.() ?? false
     const projectGeneration = nativeOptions?.projectGeneration?.() ?? 0
     const trackFingerprint = readDesiredScheduleFingerprint()
@@ -2104,7 +2098,7 @@ export function useTimelinePlayback(
         // A Stop or locate can land while the dispose this waits for runs: prepare at the playhead as it is now.
         if (nativePlayback.getPendingStart() === undefined) schedule.nativePreviewCompiledFingerprint = trackFingerprint
 
-        return nativePlayback.ensureLivePreview(untrack(playheadSec)).then((result) => {
+        return nativePlayback.ensureLivePreview(lastPublishedPlayheadSec).then((result) => {
           if (result !== "started") return ensureLivePortableSession()
 
           if (token !== nativeLifecycleToken || nativePlayback.isActive()) return
@@ -2122,8 +2116,12 @@ export function useTimelinePlayback(
   createEffect(() => {
     const outputDeviceId = nativeOptions?.outputDeviceId?.()
 
-    if (outputDeviceId === sessionOutputDeviceId || nativeOptions?.isRecording?.()) return
-    sessionOutputDeviceId = outputDeviceId
+    if (outputDeviceId === sessionOutputDeviceId || nativeOptions?.isRecording?.()) return undefined
+
+    return { outputDeviceId }
+  }, (moved) => {
+    if (!moved) return
+    sessionOutputDeviceId = moved.outputDeviceId
     untrack(() => {
       if (!nativePlayback.isActive() && !nativePlayback.isPrepared() && nativePlayback.getPendingStart() === undefined) return
 
@@ -2267,7 +2265,7 @@ export function useTimelinePlayback(
       start: (note: Parameters<typeof nativePlayback.startLiveMidiNote>[0]) => (
         nativePlayback.startLiveMidiNote({
           ...note,
-          playheadSec: playheadSec(),
+          playheadSec: lastPublishedPlayheadSec,
         })
       ),
       stop: nativePlayback.releaseLiveMidiNote,

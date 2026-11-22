@@ -1,4 +1,4 @@
-import { batch, createSignal, onCleanup, onSettled } from 'solid-js'
+import { createSignal, onCleanup, onSettled } from 'solid-js'
 import { isLocalId } from '@daw-browser/shared'
 import { readLocationSearchParam, subscribeLocationSearch, writeRoomLocation } from '~/lib/location-search-param'
 
@@ -80,10 +80,8 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
       writeRoomLocation(nextProjectId, routeOptions.history)
     }
 
-    batch(() => {
-      setBootstrapProjectId(routeOptions?.bootstrap ?? null)
-      setMountedProjectId(nextProjectId)
-    })
+    setBootstrapProjectId(routeOptions?.bootstrap ?? null)
+    setMountedProjectId(nextProjectId)
   }
 
   const settleBeforeRoomChange = async () => {
@@ -134,10 +132,8 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
         return
       }
 
-      batch(() => {
-        setBootstrapProjectId(null)
-        setMountedProjectId('')
-      })
+      setBootstrapProjectId(null)
+      setMountedProjectId('')
 
       if (nextShareToken || !options.bootstrapIfEmpty) return
       const generatedProjectId = crypto.randomUUID()

@@ -1,4 +1,4 @@
-import { batch, createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
 
 import { createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory } from '~/lib/clip-create'
 import type { ClipCreateSnapshot } from '@daw-browser/shared'
@@ -235,16 +235,15 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   let audioLifecycleState: "suspended" | "recovering" | "ready" | "failed" = hasAudioLifecycle ? "recovering" : "ready"
   let recordingStartGeneration = 0
   let observedRecordingProject: string | undefined
-  createEffect(() => {
-    const declaredProject = projectId()
-
+  createEffect(() => ({
+    declaredProject: projectId(),
+    spool: desktopBridge()?.audioHost?.recordingSpool,
+  }), ({ declaredProject, spool }) => {
     if (declaredProject !== observedRecordingProject) {
       recordingStartGeneration += 1
       observedRecordingProject = declaredProject
       cancelPendingSetup?.()
     }
-
-    const spool = desktopBridge()?.audioHost?.recordingSpool
 
     if (!declaredProject || !spool) return
     const scopeGeneration = recordingStartGeneration
@@ -321,15 +320,17 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
 
   // A take binds its devices when it starts and the playback session moves after it ends, so a change is only noticed.
   const savedNativeDevices = createMemo(() => `${audioPreferences().nativeInputDeviceId}\n${audioPreferences().nativeOutputDeviceId}`)
-  createEffect(on(savedNativeDevices, () => {
-    if (isRecordingInternal()) emit('Audio device changes apply after the recording stops.')
-  }, { defer: true }))
+  createEffect(
+    savedNativeDevices,
+    () => untrack(() => {
+      if (isRecordingInternal()) emit('Audio device changes apply after the recording stops.')
+    }),
+    { defer: true },
+  )
 
   const selectRecordingTrack = (trackId: Track['id']) => {
-    batch(() => {
-      selection.selectTrackTarget(trackId)
-      setRecordArmTrackId(trackId)
-    })
+    selection.selectTrackTarget(trackId)
+    setRecordArmTrackId(trackId)
   }
 
   const clearRecordArmForTrack = (trackId: Track['id']) => {

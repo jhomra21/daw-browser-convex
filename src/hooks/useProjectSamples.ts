@@ -1,5 +1,5 @@
 import type { FunctionReturnType } from 'convex/server'
-import { createEffect, createMemo, createSignal, on, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, type Accessor, untrack } from 'solid-js'
 import { useConvexQuery, convexApi } from '~/lib/convex'
 import { useQuery } from '@tanstack/solid-query'
 import { getPersistedAudioSource, type AudioSourceKind, type AudioSourceMetadata } from '~/lib/audio-source'
@@ -336,13 +336,13 @@ export function useProjectAssetFolders(options: UseProjectAssetFoldersArgs): Use
     () => ['asset-folders', 'by_project', projectId(), userId ? userId() : '']
   )
 
-  createEffect(on(
+  createEffect(
     () => ({
       projectId: projectId(),
       enabled: enabled ? enabled() : true,
       refreshKey: refreshKey(),
     }),
-    ({ projectId: rid, enabled: isEnabled }) => {
+    ({ projectId: rid, enabled: isEnabled }) => untrack(() => {
       if (!rid || !isLocalProject()) {
         setLocalFolders([])
         setLocalFoldersProjectId('')
@@ -363,8 +363,8 @@ export function useProjectAssetFolders(options: UseProjectAssetFoldersArgs): Use
         .catch(() => {
           if (isCurrentProject()) setLocalFolders([])
         })
-    },
-  ))
+    }),
+  )
 
   const folders = createMemo<ProjectAssetFolder[]>(() => {
     if (isLocalProject()) return localFoldersProjectId() === projectId() ? localFolders() : []
@@ -459,9 +459,9 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
       : []
   })
 
-  createEffect(on(
+  createEffect(
     () => [projectId(), enabled ? enabled() : true, includeFilePath ? includeFilePath() : false, includeUsage ? includeUsage() : true, sampleLimit ? sampleLimit() : undefined, refreshKey()] as const,
-    ([rid, isEnabled, shouldIncludeFilePath, shouldIncludeUsage, maxSamples]) => {
+    ([rid, isEnabled, shouldIncludeFilePath, shouldIncludeUsage, maxSamples]) => untrack(() => {
       if (!rid || !isLocalProject()) {
         setLocalSamples([])
         setLocalSamplesProjectId('')
@@ -544,12 +544,12 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
       })().catch(() => {
         if (isCurrentProject()) setLocalSamples([])
       })
-    },
-  ))
+    }),
+  )
 
-  createEffect(on(
+  createEffect(
     limitedDefaultSamples,
-    (list) => {
+    (list) => untrack(() => {
       if (list.length === 0) return
 
       void (async () => {
@@ -592,8 +592,8 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
           return isAudioSourceMetadataMapEqual(current, merged) ? current : merged
         })
       })()
-    },
-  ))
+    }),
+  )
 
   const defaultSamples = createMemo<DefaultSampleListItem[]>(() => {
     const list = limitedDefaultSamples()

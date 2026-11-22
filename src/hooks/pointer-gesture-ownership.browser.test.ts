@@ -237,7 +237,7 @@ test('clip resize commits only on owner release and reverts on every cancel path
 
 const effectLifecycleFixture = `
 import { createProcessorEditRegistry } from '~/components/timeline/create-processor-edit-registry'
-import { createComponent, createEffect, createSignal, onCleanup, Show } from 'solid-js'
+import { createComponent, createEffect, createSignal, Show } from 'solid-js'
 import { render } from '@solidjs/web'
 import { AUDIO_EFFECT_CONTRACTS } from '@daw-browser/shared'
 import { createUndoManager } from '~/lib/undo/manager'
@@ -281,10 +281,7 @@ window.effectLifecycleFixture = {
     const undo = createUndoManager({})
     let device
     const Card = () => {
-      createEffect(() => {
-        const targetId = target()
-        onCleanup(() => device.interruptGesture('delay-1', targetId))
-      })
+      createEffect(target, (targetId) => () => device.interruptGesture('delay-1', targetId))
       const base = device.gestureOwner('delay-1', 'delay', target())
       return createComponent(ParameterGestureProvider, {
         owner: { ...base, open: holder => { if (!base.isOpen(holder)) begins.push(target()); base.open(holder) } },
@@ -626,7 +623,7 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
 
 const utilityFixture = `
 import { createProcessorEditRegistry } from '~/components/timeline/create-processor-edit-registry'
-import { createComponent, createEffect, createSignal, onCleanup } from 'solid-js'
+import { createComponent, createEffect, createSignal } from 'solid-js'
 import { render } from '@solidjs/web'
 import { AUDIO_EFFECT_CONTRACTS, normalizeUtilityParamsEnvelope } from '@daw-browser/shared'
 import Utility from '~/components/effects/Utility'
@@ -826,7 +823,7 @@ test('Utility Gain restores the pre-gesture value on every cancel path', async (
 
 const deviceKnobFixture = `
 import { createProcessorEditRegistry } from '~/components/timeline/create-processor-edit-registry'
-import { createComponent, createEffect, createSignal, onCleanup } from 'solid-js'
+import { createComponent, createEffect, createSignal } from 'solid-js'
 import { render } from '@solidjs/web'
 import { AUDIO_EFFECT_CONTRACTS } from '@daw-browser/shared'
 import { createUndoManager } from '~/lib/undo/manager'
@@ -862,10 +859,7 @@ window.deviceKnobFixture = {
     window.deviceKnobFixtureResolvePersistence = () => resolvePersistence?.()
     let device
     const dispose = render(() => {
-      createEffect(() => {
-        ownerKey()
-        onCleanup(() => device?.interruptGesture('delay-1', targetId))
-      })
+      createEffect(ownerKey, () => () => device?.interruptGesture('delay-1', targetId))
       device = createEffectsPanelAudioDevice({
         audioEngine: () => engine,
         projectId: () => 'project:delay-knob-fixture',

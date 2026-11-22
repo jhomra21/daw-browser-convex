@@ -7,7 +7,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { agentBrowser } from '~/test-support/agent-browser'
 
 const fixture = `
-import { createComponent, createEffect, createRoot, createSignal, onCleanup } from 'solid-js'
+import { createComponent, createEffect, createRoot, createSignal, onCleanup, untrack } from 'solid-js'
 import { render } from '@solidjs/web'
 import { useTrackRecording } from './useTrackRecording'
 import { useTimelinePlayback } from './useTimelinePlayback'
@@ -897,11 +897,9 @@ window.playScenarios = async () => {
         return preflightGate.promise
       },
     })
-    createEffect(() => {
-      const playing = controller.isPlaying()
-      const pending = controller.isPlayPending()
+    createEffect(() => ({ playing: controller.isPlaying(), pending: controller.isPlayPending() }), ({ playing, pending }) => {
       setLabel(playing ? 'Pause' : 'Play')
-      button.setAttribute('aria-label', label())
+      button.setAttribute('aria-label', untrack(label))
       button.setAttribute('aria-busy', String(pending))
     })
     return controller

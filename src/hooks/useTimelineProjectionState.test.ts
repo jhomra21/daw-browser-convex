@@ -1,7 +1,8 @@
 import 'fake-indexeddb/auto'
 import { expect, test } from 'bun:test'
 
-import { createEffect, createRoot, createSignal } from 'solid-js'
+import { createEffect, createSignal } from 'solid-js';
+import { createFlushedRoot as createRoot, flushChain } from '~/test-support/create-flushed-root';
 import { isServer } from '@solidjs/web'
 import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
 import { clearClipMovePatch, reconcileTimelineProjectionSnapshot, useTimelineProjectionState } from './useTimelineProjectionState'
@@ -57,23 +58,34 @@ test.skipIf(isServer)('local canonical snapshots retire reflected overlays witho
   try {
     await Promise.resolve()
     projection.commitClipTiming(clip.id, { startSec: 2 })
+    flushChain()
     projection.setDraftClipTiming("unsaved-draft", { startSec: 9 })
+    flushChain()
     projection.insertLocalClip("track-1", { id: "unsaved-create", name: "Draft", startSec: 8, duration: 2, color: "#fff" })
+    flushChain()
     setSnapshot({ ...snapshot, clips: [{ ...clip, startSec: 2 }] })
+    flushChain()
     expect(projection.committedClipEditsById().size).toBe(0)
     expect(projection.draftClipEditsById().get("unsaved-draft")).toEqual({ startSec: 9 })
     expect(projection.pendingClipCreatesById().has("unsaved-create")).toBe(true)
     setSnapshot({ ...snapshot, clips: [{ ...clip, startSec: 3 }] })
+    flushChain()
     expect(projection.committedClipEditsById().size).toBe(0)
     projection.replaceLocalClip("track-1", { ...clip, startSec: 7 })
+    flushChain()
     setSnapshot({ ...snapshot, clips: [{ ...clip, startSec: 3 }] })
+    flushChain()
     expect(projection.pendingClipCreatesById().get(clip.id)?.clip.startSec).toBe(7)
     setSnapshot({ ...snapshot, clips: [{ ...clip, startSec: 7 }] })
+    flushChain()
     expect(projection.pendingClipCreatesById().has(clip.id)).toBe(false)
     projection.replaceLocalClip("track-1", { ...clip, color: "#f00" })
+    flushChain()
     setSnapshot(snapshot)
+    flushChain()
     expect(projection.pendingClipCreatesById().get(clip.id)?.clip.color).toBe("#f00")
     setSnapshot({ ...snapshot, clips: [{ ...clip, color: "#f00" }] })
+    flushChain()
     expect(projection.pendingClipCreatesById().has(clip.id)).toBe(false)
     expect(projection.draftClipEditsById().size).toBe(1)
   } finally { dispose() }
@@ -120,10 +132,12 @@ test.skipIf(isServer)('local canonical snapshots keep the identity of tracks and
     const beforeClip = before?.clips[0]
     expect(beforeClip?.id).toBe('clip-1')
     setSnapshot({ projectId: 'local_project-identity', tracks: [track('track-1', 0), track('track-2', 1)], clips: [clip] })
+    flushChain()
     expect(resolved.renderTracks().map((entry) => entry.id)).toEqual(['track-1', 'track-2'])
     expect(resolved.renderTracks()[0]).toBe(before)
     expect(resolved.renderTracks()[0]?.clips[0]).toBe(beforeClip)
     setSnapshot({ projectId: 'local_project-identity', tracks: [track('track-1', 0), track('track-2', 1)], clips: [{ ...clip, startSec: 1 }] })
+    flushChain()
     expect(resolved.renderTracks()[0]?.clips[0]).not.toBe(beforeClip)
     expect(resolved.renderTracks()[0]?.clips[0]?.startSec).toBe(1)
   } finally { dispose() }
@@ -264,7 +278,7 @@ test.skipIf(isServer)('C0F a track-delete undo while native plays publishes once
           draftClipEditsById: projection.draftClipEditsById, previewClipsByTrackId: projection.previewClipsByTrackId },
         identity, buffers: { getBuffer: (clipId) => buffers.get(clipId), getMediaStatus: () => undefined }, bufferVersion: () => 0 })
 
-      createEffect(() => { setRenderTracks(resolved.renderTracks()) })
+      createEffect(() => resolved.renderTracks(), (tracks) => { setRenderTracks(tracks) })
 
       const history = useTimelineHistory({ projectId, userId: () => 'local', getTracks: renderTracks, convexClient, convexApi,
         grantTrackWrite: () => {}, grantClipWrite: () => {}, persistLocalMix: (_projectId, trackId, patch) => localMix.persist(trackId, patch),
@@ -275,7 +289,7 @@ test.skipIf(isServer)('C0F a track-delete undo while native plays publishes once
           return historyActions
         } })
 
-      createEffect(() => { if (history.canRedo()) undone.resolve() })
+      createEffect(() => history.canRedo(), (canRedo) => { if (canRedo) undone.resolve() })
       historyActions = {
         insertLocalTrack: projection.insertLocalTrack, removeLocalTrack: projection.removeLocalTrack,
         insertLocalClip: projection.insertLocalClip, replaceLocalClip: projection.replaceLocalClip,
@@ -455,7 +469,7 @@ const c0gTrackDeleteUndo = async (variant: 'audio' | 'midi' | 'sampleUrl', endin
           draftClipEditsById: projection.draftClipEditsById, previewClipsByTrackId: projection.previewClipsByTrackId },
         identity, buffers: { getBuffer: (clipId) => buffers.get(clipId), getMediaStatus: () => undefined }, bufferVersion: () => 0 })
 
-      createEffect(() => { setRenderTracks(resolved.renderTracks()) })
+      createEffect(() => resolved.renderTracks(), (tracks) => { setRenderTracks(tracks) })
 
       const history = useTimelineHistory({ projectId, userId: () => 'local', getTracks: renderTracks, convexClient, convexApi,
         grantTrackWrite: () => {}, grantClipWrite: () => {}, persistLocalMix: (_projectId, trackId, patch) => localMix.persist(trackId, patch),
@@ -466,7 +480,7 @@ const c0gTrackDeleteUndo = async (variant: 'audio' | 'midi' | 'sampleUrl', endin
           return historyActions
         } })
 
-      createEffect(() => { if (history.canRedo()) undone.resolve() })
+      createEffect(() => history.canRedo(), (canRedo) => { if (canRedo) undone.resolve() })
       historyActions = {
         insertLocalTrack: projection.insertLocalTrack, removeLocalTrack: projection.removeLocalTrack,
         insertLocalClip: projection.insertLocalClip, replaceLocalClip: projection.replaceLocalClip,

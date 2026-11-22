@@ -1,6 +1,7 @@
 import { beforeAll, expect, test } from "bun:test";
 import "fake-indexeddb/auto";
-import { batch, createEffect, createRoot, createSignal, onCleanup, untrack } from "solid-js";
+import { createEffect, createSignal, onCleanup, untrack } from "solid-js";
+import { createFlushedRoot as createRoot, flushChain } from "~/test-support/create-flushed-root";
 import { AudioEngine, type AudioEffectRuntimeInstance, type EngineDisposition, type SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import { convexTest } from "convex-test";
 import schema from "../../convex/schema";
@@ -210,7 +211,7 @@ const createB5c3FxFixture = async (local: boolean, master: boolean, kind: AudioE
       return id;
     },
     removeTrack: () => setTracks([]),
-    switchProject: () => batch(() => { setTracks([]); setRows([]); setProjectId(`${initialProject}-next`); }),
+    switchProject: () => { setTracks([]); setRows([]); setProjectId(`${initialProject}-next`); },
     close: () => { dispose(); subscription?.close(); isolation?.close(); sampler.dispose(); drum.dispose(); runtime.close(); },
   };
 };
@@ -1175,8 +1176,7 @@ const mountLocalPanel = (initialProject: string, list: (projectId: string) => Pr
       fail: () => undefined,
     });
 
-    createEffect(() => {
-      projectId();
+    createEffect(() => projectId(), () => {
       untrack(owner.sync);
     });
     onCleanup(owner.dispose);
@@ -2074,7 +2074,18 @@ const createStructuralReviewFixture = async (local: boolean, master: boolean, pe
   await settle();
   const close = () => { dispose(); runtime.close(); };
 
-  return { audio, publish, runtime, calls, promises, errors, localErrors, history, targetId, projectId, setProjectId, setGeneration, selected, setSelected, setLegacy, setEngine, engine, settle, close, setUiNoise };
+  // The device's effects run at the flush; each write below is followed by the flush a 1.x write did not need.
+  const flushed = {
+    publish: (chain: AudioEffectRuntimeInstance[]) => { publish(chain); flushChain(); },
+    setProjectId: (next: string | undefined) => { setProjectId(next); flushChain(); },
+    setGeneration: (next: number) => { setGeneration(next); flushChain(); },
+    setSelected: (next: string) => { setSelected(next); flushChain(); },
+    setLegacy: (next: boolean) => { setLegacy(next); flushChain(); },
+    setEngine: (next: AudioEngine) => { setEngine(next); flushChain(); },
+    setUiNoise: (next: number) => { setUiNoise(next); flushChain(); },
+  };
+
+  return { audio, runtime, calls, promises, errors, localErrors, history, targetId, projectId, selected, engine, settle, close, ...flushed };
 };
 
 for (const master of [false, true]) {
@@ -2229,10 +2240,8 @@ for (const local of [true, false]) for (const master of [false, true]) {
     try {
       f.audio.reorder({ id: "a", kind: "compressor" }, 1);
       await f.settle();
-      batch(() => {
-        f.setProjectId(`${local ? "project:" : "cloud-"}next-${crypto.randomUUID()}`);
-        f.publish([compressorInstance(-44, "new-project")]);
-      });
+      f.setProjectId(`${local ? "project:" : "cloud-"}next-${crypto.randomUUID()}`);
+      f.publish([compressorInstance(-44, "new-project")]);
       await f.settle();
       expect(f.runtime.audio.liveWorkletCount()).toBe(1);
       expect(f.audio.snapshotExportProjection().replaceAudioEffectTargets.flatMap(t => t.rows).map(r => r.instanceId)).toEqual(["new-project"]);
@@ -2270,10 +2279,8 @@ for (const local of [true, false]) for (const master of [false, true]) {
       await f.settle();
       expect(g.isOpen(h)).toBe(false);
       expect(f.runtime.audio.compressorThreshold()).toBe(-31);
-      batch(() => {
-        f.setProjectId(`${local ? "project:" : "cloud-"}next-${crypto.randomUUID()}`);
-        f.publish([]);
-      });
+      f.setProjectId(`${local ? "project:" : "cloud-"}next-${crypto.randomUUID()}`);
+      f.publish([]);
       await f.settle();
       expect(f.runtime.audio.liveWorkletCount()).toBe(0);
     } finally { f.close(); }
@@ -2306,10 +2313,8 @@ for (const local of [true, false]) for (const master of [false, true]) {
       f.audio.reorder({ id: "a", kind: "compressor" }, 1);
       await f.settle();
       const before = f.calls.length;
-      batch(() => {
-        f.publish([compressorInstance(-42, "next")]);
-        f.setGeneration(1);
-      });
+      f.publish([compressorInstance(-42, "next")]);
+      f.setGeneration(1);
       await f.settle();
       const changes = f.calls.slice(before);
       expect(changes.filter(c => c.type === "chain").map(c => c.chain.map(i => i.id))).toEqual([["next"]]);
@@ -2391,13 +2396,13 @@ test("r3 native lifetime keeps equal-value order and ignores retired order in a 
     const observed: string[][] = [];
 
     const disposeObserver = createRoot(dispose => {
-      createEffect(() => { observed.push(f.audio.orderedEffects().map(i => i.id)); });
+      createEffect(() => f.audio.orderedEffects().map(i => i.id), (ids) => { observed.push(ids); });
 
       return dispose;
     });
 
     try {
-      batch(() => { f.publish([compressorInstance(-42, "next")]); f.setGeneration(1); });
+      f.publish([compressorInstance(-42, "next")]); f.setGeneration(1);
       await f.settle();
       expect(observed).toEqual([["b", "a"], ["next"]]);
       expect(f.audio.orderedEffects().map(i => i.id)).toEqual(["next"]);
@@ -2421,11 +2426,10 @@ for (const master of [false, true]) for (const lifetimeChange of ["project", "ge
     try {
       const adding = f.audio.addByKindToTarget(f.targetId, "compressor");
       await started.promise;
-      batch(() => {
-        if (lifetimeChange === "project") f.setProjectId(`project:next-${crypto.randomUUID()}`);
-        else f.setGeneration(1);
-        f.publish([compressorInstance(-42, "new-project")]);
-      });
+
+      if (lifetimeChange === "project") f.setProjectId(`project:next-${crypto.randomUUID()}`);
+      else f.setGeneration(1);
+      f.publish([compressorInstance(-42, "new-project")]);
       await f.settle();
       held.reject(new Error("old add reorder failed"));
       expect(await adding).toBe(false);
@@ -2556,11 +2560,10 @@ for (const local of [true, false]) for (const master of [false, true]) {
       try {
         f.audio.reorder({ id: "a", kind: "compressor" }, 1);
         await f.settle();
-        batch(() => {
-          if (lifetimeChange === "project") f.setProjectId(`${local ? "project:" : "cloud-"}next-${crypto.randomUUID()}`);
-          else f.setGeneration(1);
-          f.publish([compressorInstance(-42, "a"), compressorInstance(-25, "b")]);
-        });
+
+        if (lifetimeChange === "project") f.setProjectId(`${local ? "project:" : "cloud-"}next-${crypto.randomUUID()}`);
+        else f.setGeneration(1);
+        f.publish([compressorInstance(-42, "a"), compressorInstance(-25, "b")]);
         await f.settle();
         expect(f.audio.orderedEffects().map(instance => instance.id)).toEqual(["a", "b"]);
         f.audio.reorder({ id: "a", kind: "compressor" }, 1);
@@ -2649,11 +2652,9 @@ for (const local of [true, false]) for (const master of [false, true]) {
 
     try {
       const before=f.calls.length;
-      batch(() => {
-        f.setGeneration(1);
-        f.audio.reorder({id:"a",kind:"compressor"},1);
-        expect(f.audio.orderedEffects().map(i=>i.id)).toEqual(["b","a"]);
-      });
+      f.setGeneration(1);
+      f.audio.reorder({id:"a",kind:"compressor"},1);
+      expect(f.audio.orderedEffects().map(i=>i.id)).toEqual(["b","a"]);
       await f.settle();
       console.log(JSON.stringify({probe:"current-lifetime-order",local,master,order:f.audio.orderedEffects().map(i=>i.id),calls:f.calls.slice(before).map(c=>({type:c.type,ids:c.chain.map(i=>i.id),disposition:c.disposition}))}));
       expect(f.audio.orderedEffects().map(i=>i.id)).toEqual(["b","a"]);
@@ -2667,13 +2668,11 @@ for (const local of [true, false]) for (const master of [false, true]) {
     try {
       f.audio.reorder({id:"a",kind:"compressor"},1);
       await f.settle();
-      batch(()=>{
-        f.publish([]);
-        f.setGeneration(1);
-        expect(f.audio.snapshotExportProjection().replaceAudioEffectTargets).toEqual([]);
-        f.publish([compressorInstance(-42,"next")]);
-        expect(f.audio.snapshotExportProjection().replaceAudioEffectTargets.flatMap(t=>t.rows.map(r=>r.instanceId))).toEqual(["next"]);
-      });
+      f.publish([]);
+      f.setGeneration(1);
+      expect(f.audio.snapshotExportProjection().replaceAudioEffectTargets).toEqual([]);
+      f.publish([compressorInstance(-42,"next")]);
+      expect(f.audio.snapshotExportProjection().replaceAudioEffectTargets.flatMap(t=>t.rows.map(r=>r.instanceId))).toEqual(["next"]);
       await f.settle();
     } finally { f.close(); }
   });

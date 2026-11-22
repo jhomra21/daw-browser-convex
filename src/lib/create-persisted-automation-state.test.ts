@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto'
 import { describe, expect, onTestFinished, test } from 'bun:test'
-import { createRoot, createSignal } from 'solid-js'
+import { createSignal, flush } from 'solid-js';
+import { createFlushedRoot as createRoot } from '~/test-support/create-flushed-root';
 import { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { automationTargetKey, type AutomationEnvelope } from '@daw-browser/shared'
 import { useTimelineAutomationController } from '~/hooks/useTimelineAutomationController'
@@ -447,10 +448,13 @@ describe('useTimelineAutomationController', () => {
     const lanes = controller.workspace().lanes
     expect(lanes.effectInstancesByOwnerKey['track-1']).toEqual([{ id: 'reverb-1', kind: 'reverb' }])
 
+    // The effects-load effect publishes at the flush; the lanes are read right after each write.
     setRemoteEffects([reverb('reverb-1')])
+    flush()
     expect(controller.workspace().lanes).toBe(lanes)
 
     setRemoteEffects([reverb('reverb-2')])
+    flush()
     expect(controller.workspace().lanes.effectInstancesByOwnerKey['track-1']).toEqual([{ id: 'reverb-2', kind: 'reverb' }])
   })
 })

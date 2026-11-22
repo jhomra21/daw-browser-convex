@@ -171,7 +171,7 @@ describe('local send reload path', () => {
 
       await new Promise<void>((resolve, reject) => createRoot((dispose) => {
         const [renderTracks, setRenderTracks] = createSignal<Track[]>(initialTracks)
-        const [mixerTracks, setMixerTracks] = createSignal<() => Track[]>(renderTracks)
+        const [mixerTracks, setMixerTracks] = createSignal<() => Track[]>(() => renderTracks)
         const [writableTrackIds] = createSignal<Set<Track['id']>>(new Set([sourceTrackId, returnTrackId]))
 
         const localMix = useTimelineLocalMix({

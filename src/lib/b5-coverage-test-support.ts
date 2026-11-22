@@ -1,6 +1,7 @@
 import type { Track } from "@daw-browser/timeline-core/types";
 import { parseSharedTimelineOperation, type SharedTimelineOperation } from "@daw-browser/shared";
-import { createComponent, createEffect, createRoot, untrack } from "solid-js";
+import { createComponent, createEffect, untrack } from "solid-js";
+import { createFlushedRoot as createRoot } from "~/test-support/create-flushed-root";
 import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { convexApi, convexClient, useConvexQuery } from "~/lib/convex";
 import type { FunctionReturnType } from "convex/server";
@@ -154,9 +155,10 @@ export const b5SubscribeEffects = (
       const query = untrack(() => useConvexQuery(convexApi.effects.listByRoom, () => ({ projectId }),
         () => ["b5-subscription", projectId]));
 
-      createEffect(() => { const rows = query.data;
-
- if (rows) publishRows(rows); });
+      createEffect(
+        () => query.data,
+        (rows) => { if (rows) publishRows(rows); },
+      );
 
       return null;
     } });

@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto'
 import { expect, test } from 'bun:test'
-import { createRoot, createSignal, untrack, type Accessor } from 'solid-js'
+import { createSignal, untrack, type Accessor } from 'solid-js';
+import { createFlushedRoot as createRoot } from '~/test-support/create-flushed-root';
 
 import { createLocalProject } from '~/lib/local-project-db'
 import { RECORDING_TARGET_LOCKED_REASON, createRecordingTargetLock, type RecordingTargetLock } from '~/lib/track-recording-target'

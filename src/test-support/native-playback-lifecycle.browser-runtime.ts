@@ -818,11 +818,14 @@ if (timelineJourney) {
     faults: [...faults], trace: [...trace],
   })
 
-  createEffect(() => {
-    const status = document.getElementById('status')
+  createEffect(
+    () => playback.isPlaying(),
+    (isPlaying) => {
+      const status = document.getElementById('status')
 
-    if (status) status.textContent = playback.isPlaying() ? 'Playing' : 'Stopped'
-  })
+      if (status) status.textContent = isPlaying ? 'Playing' : 'Stopped'
+    },
+  )
   Object.assign(window, {
     nativeLifecycle: {
       snapshot,

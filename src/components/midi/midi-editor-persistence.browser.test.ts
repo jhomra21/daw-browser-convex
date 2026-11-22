@@ -66,8 +66,8 @@ const actions = { commitClipMidi: (_clipId, midi) => setCurrentMidi(midi) }
 // Resolves once the settle predicate accepts the clip MIDI that the history replay commits.
 const settled = (change, settle) => new Promise((resolve) => {
   createRoot((disposeRoot) => {
-    createEffect(() => {
-      if (!settle(currentMidi())) return
+    createEffect(currentMidi, (midi) => {
+      if (!settle(midi)) return
       disposeRoot()
       resolve()
     })

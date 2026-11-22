@@ -315,7 +315,12 @@ describe("effects panel instance engine synchronization", () => {
                 targetId: () => "track-show",
                 ownerKey: () => `project:1:${shownEffect().id}`,
               });
-              createRenderEffect(() => audioEffects.beginInteraction(shownEffect().id, "track-show"));
+              createRenderEffect(
+                () => shownEffect().id,
+                (id) => {
+                  audioEffects.beginInteraction(id, "track-show");
+                },
+              );
 
               return "";
             };
@@ -364,7 +369,12 @@ describe("effects panel instance engine synchronization", () => {
                 targetId: () => "track-current",
                 ownerKey: () => `project:1:${shownEffect().id}`,
               });
-              createRenderEffect(() => audioEffects.beginInteraction(shownEffect().id));
+              createRenderEffect(
+                () => shownEffect().id,
+                (id) => {
+                  audioEffects.beginInteraction(id);
+                },
+              );
 
               return "";
             };
@@ -519,9 +529,12 @@ describe("effects panel instance engine synchronization", () => {
 
       // Wait for the real persisted row, not an optimistic insertion with an empty query.
       await new Promise<void>((resolve) => {
-        createRenderEffect(() => {
-          if (device.snapshotExportRows(["track-1"]).some((row) => row.instanceId === instance.id)) resolve();
-        });
+        createRenderEffect(
+          () => device.snapshotExportRows(["track-1"]).some((row) => row.instanceId === instance.id),
+          (found) => {
+            if (found) resolve();
+          },
+        );
       });
 
       const gesture = device.gestureOwner(instance.id, "utility");

@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, expect, test } from "bun:test";
 import "fake-indexeddb/auto";
-import { batch, createComponent, createRoot, createSignal, untrack } from "solid-js";
+import { createComponent, createSignal, untrack } from "solid-js";
+import { createFlushedRoot as createRoot } from "~/test-support/create-flushed-root";
 import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import { createDefaultArpeggiatorParams, createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams, createDefaultSynthParams, createDefaultUtilityParams, normalizeTrackInstrumentParams, type ArpeggiatorParams, type DecodedAudioPage, type DrumRackParams, type GranularParams, type SamplerParams, type TrackInstrumentParams } from "@daw-browser/shared";
@@ -717,7 +718,7 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
       const nextProject = `${initialProject}-next`;
 
       if (!local) client.setQueryData(["convex", "effects", "room", nextProject, undefined], []);
-      batch(() => { setTracks([]); setProjectId(nextProject); });
+      setTracks([]); setProjectId(nextProject);
       // Publish after the observer has changed keys, not to its old cache entry.
       await Promise.resolve();
 
@@ -1017,10 +1018,8 @@ for (const local of [true, false]) {
       await f.effects.flushPending();
       const before = f.granularInstalls.length;
       const next: TrackInstrumentParams = { ...instrument, params: { ...instrument.params, position: 0.7 } };
-      batch(() => {
-        f.setLegacyMode(true);
-        f.device.syncRemoteInstrumentForTarget(f.track.id, next, 1_000_000);
-      });
+      f.setLegacyMode(true);
+      f.device.syncRemoteInstrumentForTarget(f.track.id, next, 1_000_000);
       await f.effects.flushPending();
       expect(f.granularInstalls.length - before).toBe(1);
     } finally { f.close(); }
@@ -1036,10 +1035,8 @@ for (const local of [true, false]) {
       await f.start();
       const before = f.granularInstalls.length;
       const next: TrackInstrumentParams = { ...instrument, params: { ...instrument.params, position: 0.7 } };
-      batch(() => {
-        f.replaceEngine(f.makeEngine());
-        f.device.syncRemoteInstrumentForTarget(f.track.id, next, 1_000_000);
-      });
+      f.replaceEngine(f.makeEngine());
+      f.device.syncRemoteInstrumentForTarget(f.track.id, next, 1_000_000);
       await f.effects.flushPending();
       expect(f.granularInstalls.length - before).toBe(1);
     } finally { f.close(); }
@@ -1062,7 +1059,7 @@ for (const local of [true, false]) {
       await f.start();
       f.removeTrack(); await f.effects.flushPending();
       const joins = f.joins.length;
-      batch(() => { f.restoreTrack(); f.replaceEngine(new Replacement()); });
+      f.restoreTrack(); f.replaceEngine(new Replacement());
       await f.effects.flushPending();
       expect(f.joins.length - joins).toBe(1);
     } finally { f.close(); }

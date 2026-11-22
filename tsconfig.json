@@ -5,7 +5,8 @@
     "types": ["vite/client", "vite-plugin-pwa/client", "bun"],
     "paths": {
       "~/*": ["./src/*"],
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@solidjs/web/jsx-dev-runtime": ["./src/test-support/jsx-dev-runtime.ts"]
     },
   },
   "include": [

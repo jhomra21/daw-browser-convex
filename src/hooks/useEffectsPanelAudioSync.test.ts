@@ -2654,8 +2654,9 @@ for (const local of [true, false]) for (const master of [false, true]) {
     const f=await createStructuralReviewFixture(local,master,()=>held.promise);
 
     try {
-      const before=f.calls.length;
       f.setGeneration(1);
+      // A lifetime change re-applies the unchanged chain at its flush; the reorder below is the edit under observation.
+      const before=f.calls.length;
       f.audio.reorder({id:"a",kind:"compressor"},1);
       flushGraph();
       expect(f.audio.orderedEffects().map(i=>i.id)).toEqual(["b","a"]);

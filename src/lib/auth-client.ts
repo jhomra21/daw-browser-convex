@@ -1,4 +1,4 @@
-import { createAuthClient } from 'better-auth/solid'
+import { createAuthClient } from 'better-auth/client'
 import { resolveAuthBaseUrl } from '~/lib/auth-base-url'
 import { rendererApiRuntime } from '~/lib/renderer-api-url'
 

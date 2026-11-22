@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onSettled } from "solid-js";
+import { createSignal, onSettled } from "solid-js";
 import { parseDashboardView, type DashboardView } from "~/lib/dashboard-view";
 import { publishLocationSearchParams, readLocationSearchParam, subscribeLocationSearch } from "~/lib/location-search-param";
 
@@ -8,7 +8,8 @@ export function useDashboardRouteParam() {
   onSettled(() => {
     const syncDashboardView = () => setDashboardView(parseDashboardView(readLocationSearchParam("dashboard")));
     syncDashboardView();
-    onCleanup(subscribeLocationSearch(syncDashboardView));
+
+    return subscribeLocationSearch(syncDashboardView);
   });
 
   const setDashboardParam = (view: DashboardView | null) => {

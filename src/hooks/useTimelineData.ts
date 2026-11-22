@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, onSettled, type Accessor, createTrackedEffect, untrack } from 'solid-js'
+import { createEffect, createMemo, createSignal, onSettled, type Accessor, createTrackedEffect, untrack } from 'solid-js'
 import type { FunctionReturnType } from 'convex/server'
 import type { SettledQueryResult } from '~/lib/settled-query'
 
@@ -188,7 +188,8 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     }
 
     window.addEventListener('pagehide', flushMidi)
-    onCleanup(() => window.removeEventListener('pagehide', flushMidi))
+
+    return () => window.removeEventListener('pagehide', flushMidi)
   })
 
   createEffect(

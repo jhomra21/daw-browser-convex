@@ -1,4 +1,4 @@
-import { For, Show, createEffect, onCleanup, onSettled, untrack } from 'solid-js'
+import { For, Show, createEffect, onSettled, untrack } from 'solid-js'
 import type { SpectrumView as SpectrumViewMode } from '@daw-browser/shared'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import { DeviceToggleButton } from '~/components/ui/device-control'
@@ -50,7 +50,8 @@ function SpectrumCanvas(props: SpectrumCanvasProps) {
     })
 
     if (frame) observer.observe(frame)
-    onCleanup(() => observer.disconnect())
+
+    return () => observer.disconnect()
   })
   createEffect(
     () => props.frame,

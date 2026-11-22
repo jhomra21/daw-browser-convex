@@ -84,13 +84,13 @@ const createViewportRedrawState = () => {
 
     bindDprListener();
 
-    onCleanup(() => {
+    return () => {
       window.removeEventListener("resize", requestRedraw);
       window.visualViewport?.removeEventListener("resize", requestRedraw);
 
       if (dprQuery && dprListener)
         dprQuery.removeEventListener("change", dprListener);
-    });
+    };
   });
 
   return { version, devicePixelRatio };
@@ -234,18 +234,20 @@ export default function TimelineWorkspace(props: Props) {
     onCanonicalScrollTop: setVerticalScrollTop,
   });
 
+  let viewportResizeObserver: ResizeObserver | undefined;
+  onCleanup(() => viewportResizeObserver?.disconnect());
+
   const observeScrollViewport = (element: HTMLDivElement) => {
     timelineScrollElement = element;
     props.scrollRef(element);
     verticalScrollSync.bindTimeline(element);
     setVerticalClientHeight(element.clientHeight);
 
-    const resizeObserver = new ResizeObserver(() => {
+    viewportResizeObserver = new ResizeObserver(() => {
       setVerticalClientHeight(element.clientHeight);
     });
 
-    resizeObserver.observe(element);
-    onCleanup(() => resizeObserver.disconnect());
+    viewportResizeObserver.observe(element);
   };
 
   const verticalWaveformTrackIds = createMemo(() => new Set(trackIdsInYRange(

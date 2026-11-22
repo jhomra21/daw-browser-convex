@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, onSettled, untrack, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, onSettled, untrack, type Accessor } from "solid-js";
 import { useProjectAssetFolders, useProjectSamples, type ProjectAssetFolder } from "~/hooks/useProjectSamples";
 import type { BrowserFolderRow, BrowserItem, BrowserItemSource, BrowserSection, BrowserTreeRow, TimelineLeftBrowserModel, TimelineLeftBrowserState } from "~/lib/timeline-browser/browser-types";
 import type { TimelineDeviceInsertActions } from "~/lib/timeline-device-insert-actions";
@@ -214,7 +214,8 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   onSettled(() => {
     if (!desktopBridge()?.pluginCatalog) return
     void refreshDesktopPluginCatalog()
-    onCleanup(onPluginCatalogChanged(() => void refreshDesktopPluginCatalog()))
+
+    return onPluginCatalogChanged(() => void refreshDesktopPluginCatalog())
   })
   const browserSamplesEnabled = () => options.leftBrowser.open() && options.leftBrowser.activeTab() === "assets";
 

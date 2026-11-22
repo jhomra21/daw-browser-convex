@@ -152,7 +152,8 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     });
 
     if (canvasWrapRef) resizeObserver.observe(canvasWrapRef);
-    onCleanup(() => resizeObserver.disconnect());
+
+    return () => resizeObserver.disconnect();
   });
 
   const onMarkerDragStateChange = untrack(() => props.onMarkerDragStateChange);

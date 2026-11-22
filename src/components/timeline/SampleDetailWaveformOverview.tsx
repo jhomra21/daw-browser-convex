@@ -84,7 +84,8 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
     const resizeObserver = new ResizeObserver(measure)
 
     if (overviewRef) resizeObserver.observe(overviewRef)
-    onCleanup(() => resizeObserver.disconnect())
+
+    return () => resizeObserver.disconnect()
   })
 
   onCleanup(() => {

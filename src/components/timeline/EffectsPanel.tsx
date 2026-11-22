@@ -471,7 +471,8 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
     };
 
     window.addEventListener("pointerdown", handlePointerDown, { capture: true });
-    onCleanup(() => window.removeEventListener("pointerdown", handlePointerDown, { capture: true }));
+
+    return () => window.removeEventListener("pointerdown", handlePointerDown, { capture: true });
   });
   onCleanup(() => props.onElementChange?.(undefined));
 

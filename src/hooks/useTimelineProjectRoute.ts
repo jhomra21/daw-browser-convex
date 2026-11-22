@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onSettled } from 'solid-js'
+import { createSignal, onSettled } from 'solid-js'
 import { isLocalId } from '@daw-browser/shared'
 import { readLocationSearchParam, subscribeLocationSearch, writeRoomLocation } from '~/lib/location-search-param'
 
@@ -146,7 +146,7 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
     void syncLocationState()
     const syncRoomFromHistory = () => { void syncLocationState(true) }
 
-    onCleanup(subscribeLocationSearch(syncRoomFromHistory))
+    return subscribeLocationSearch(syncRoomFromHistory)
   })
 
   return {

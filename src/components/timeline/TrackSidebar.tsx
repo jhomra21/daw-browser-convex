@@ -5,9 +5,10 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  createStore,
   onCleanup,
+  produce,
 } from "solid-js";
-import { createStore, produce } from "solid-js/store";
 import { useDrag } from "~/hooks/useDrag";
 import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
 import {

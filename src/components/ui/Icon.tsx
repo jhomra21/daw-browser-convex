@@ -1,5 +1,5 @@
 import type { Component, JSX} from "solid-js";
-import { Dynamic } from "solid-js/web";
+import { Dynamic } from "@solidjs/web";
 import { Show, splitProps, createUniqueId } from "solid-js";
 
 type IconName = "google" | "solidjs" | "convex" | "file-audio" | "play" | "pause" | "stop" | "metronome" | "repeat" | "grid" | "user" | "log-out" | "log-in" | "house" | "sidebar-open" | "sidebar-closed";

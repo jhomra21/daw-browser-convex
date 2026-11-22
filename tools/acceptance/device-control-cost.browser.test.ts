@@ -8,7 +8,7 @@ import { build } from "vite";
 import solidPlugin from "@solidjs/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
 import { createComputed, createMemo, createRoot, createSignal, untrack } from "solid-js";
-import { isServer } from "solid-js/web";
+import { isServer } from "@solidjs/web";
 import { z } from "zod";
 import { automationTargetKey, createDefaultDelayParams, createDefaultEqParams, createDefaultGateParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultDrumRackParams, createDefaultSamplerParams, createDefaultGranularParams, createDefaultCompressorParams, type AutomationEnvelope, type DelayParams, type TrackInstrumentParams } from "@daw-browser/shared";
 import type { NativeBuiltInParameterPayload } from "~/lib/processor-edit-semantics";

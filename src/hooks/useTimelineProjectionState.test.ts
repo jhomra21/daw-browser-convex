@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import { expect, test } from 'bun:test'
 
 import { createEffect, createRoot, createSignal } from 'solid-js'
-import { isServer } from 'solid-js/web'
+import { isServer } from '@solidjs/web'
 import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
 import { clearClipMovePatch, reconcileTimelineProjectionSnapshot, useTimelineProjectionState } from './useTimelineProjectionState'
 

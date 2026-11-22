@@ -8,7 +8,7 @@ import { agentBrowser } from '~/test-support/agent-browser'
 
 const fixture = `
 import { createComponent, createEffect, createRoot, createSignal, onCleanup } from 'solid-js'
-import { render } from 'solid-js/web'
+import { render } from '@solidjs/web'
 import { useTrackRecording } from './useTrackRecording'
 import { useTimelinePlayback } from './useTimelinePlayback'
 import { createRecordingTransportPolicy, dispatchRecordingToggle, dispatchTransportSpace, retryPendingRecordingCleanup } from './recording-dispatch'
@@ -2319,7 +2319,7 @@ export const createRecordingTempStorage = () => ({ cleanupStale: async () => {},
       resolve: {
         alias: [
           { find: /^solid-js$/, replacement: `${new URL('../../node_modules/solid-js/dist/solid.js', import.meta.url).pathname}` },
-          { find: /^solid-js\/web$/, replacement: `${new URL('../../node_modules/solid-js/web/dist/web.js', import.meta.url).pathname}` },
+          { find: /^@solidjs\/web$/, replacement: `${new URL('../../node_modules/@solidjs/web/dist/web.js', import.meta.url).pathname}` },
           { find: '~', replacement: `${new URL('../../src/', import.meta.url).pathname}` },
         ],
       },

@@ -16,7 +16,7 @@ const localControlService = `${repositoryRoot}src/lib/local-control/local-contro
 
 const fixture = `
 import { createComponent, createEffect, createRoot, createSignal } from 'solid-js'
-import { render } from 'solid-js/web'
+import { render } from '@solidjs/web'
 import MidiClipEditor from '~/components/midi/MidiClipEditor'
 import TimelineBottomPanelFooter from '~/components/timeline/TimelineBottomPanelFooter'
 import TimelineBottomPanelShell from '~/components/timeline/TimelineBottomPanelShell'

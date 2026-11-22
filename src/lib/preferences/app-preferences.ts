@@ -1,5 +1,5 @@
 import { makePersisted, type PersistenceSyncAPI } from "@solid-primitives/storage"
-import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
+import { createStore, type SetStoreFunction, type Store } from "solid-js"
 import { canUseLocalStorage, createStoredValue } from "~/lib/stored-value"
 import {
   APP_PREFERENCES_STORAGE_KEY,

@@ -13,7 +13,7 @@ const fixtureId = 'virtual:project-save-status-fixture'
 const buildFixture = async () => {
   const source = `
 import { createComponent, createSignal } from 'solid-js'
-import { render } from 'solid-js/web'
+import { render } from '@solidjs/web'
 import TransportControls from '~/components/timeline/TransportControls'
 import { DashboardProjectsView } from '~/components/dashboard/projects-view'
 import { getLocalEntityWriteQueue } from '~/lib/local-write-queue'

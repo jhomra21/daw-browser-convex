@@ -100,7 +100,7 @@ export const BUILTIN_INSTRUMENT_PRESETS = [
 
 const fixture = `
 import { createComponent, createSignal } from 'solid-js'
-import { render } from 'solid-js/web'
+import { render } from '@solidjs/web'
 import { useTimelineBrowserController } from '~/hooks/useTimelineBrowserController'
 import { TimelineLeftBrowser } from '~/components/timeline/browser/timeline-left-browser'
 import '~/index.css'

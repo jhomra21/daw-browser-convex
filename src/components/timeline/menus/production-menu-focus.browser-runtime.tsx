@@ -1,5 +1,5 @@
 import { createComponent } from "solid-js";
-import { render } from "solid-js/web";
+import { render } from "@solidjs/web";
 import { Menubar } from "~/components/ui/menubar";
 import { EditMenu } from "./edit-menu";
 import { ViewMenu } from "./view-menu";

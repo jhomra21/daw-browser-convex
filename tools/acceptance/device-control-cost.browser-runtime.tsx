@@ -4,7 +4,7 @@
 // (panel props, engine methods, buffer-sync methods) and browser prototypes (IDBObjectStore.put, AudioContext
 // node factories). requestAnimationFrame is replaced by a manual queue so frames are stepped explicitly.
 import { createRoot, createSignal } from "solid-js";
-import { render } from "solid-js/web";
+import { render } from "@solidjs/web";
 import "~/index.css";
 import { ColorModeProvider } from "@kobalte/core";
 import { AudioEngine, type EngineDisposition } from "@daw-browser/audio-engine/audio-engine";

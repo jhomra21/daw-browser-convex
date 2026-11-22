@@ -1,5 +1,5 @@
 import { createComputed, createMemo, createRoot, createSignal, untrack } from "solid-js"
-import { isServer } from "solid-js/web"
+import { isServer } from "@solidjs/web"
 import { z } from "zod"
 import { replaceEqualDeep } from "@tanstack/solid-query"
 import { AudioEngine, type AudioEffectRuntimeInstance } from "@daw-browser/audio-engine/audio-engine"

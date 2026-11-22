@@ -13,7 +13,7 @@ const fixtureId = 'virtual:shared-retry-fixture'
 const buildFixture = async () => {
   const source = `
 import { createSignal } from 'solid-js'
-import { render } from 'solid-js/web'
+import { render } from '@solidjs/web'
 import { useTimelinePersistenceController } from '~/hooks/useTimelinePersistenceController'
 import { flushSharedOutbox } from '~/lib/shared-outbox'
 import { openLocalProjectDb } from '~/lib/local-project-db'

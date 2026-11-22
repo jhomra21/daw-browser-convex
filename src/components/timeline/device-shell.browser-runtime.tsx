@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js'
-import { render } from 'solid-js/web'
+import { render } from '@solidjs/web'
 
 import EffectShell from '~/components/effects/EffectShell'
 import { DeviceCollapseProvider } from './create-effects-panel-device-collapse'

@@ -12,7 +12,7 @@ const fixtureId = 'virtual:project-dashboard-fixture'
 
 const buildFixture = async () => {
   const source = `
-import { render } from 'solid-js/web'
+import { render } from '@solidjs/web'
 import { createSignal } from 'solid-js'
 import { DashboardProjectsView } from '~/components/dashboard/projects-view'
 

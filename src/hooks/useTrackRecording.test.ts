@@ -1,5 +1,5 @@
 import { createRoot, createSignal } from "solid-js"
-import { isServer } from "solid-js/web"
+import { isServer } from "@solidjs/web"
 import { expect, test } from "bun:test"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import type { createLocalAsset } from "~/lib/local-assets"

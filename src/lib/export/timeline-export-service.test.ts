@@ -1,7 +1,6 @@
 import "fake-indexeddb/auto"
 import { expect, test } from "bun:test"
-import { untrack } from "solid-js"
-import { createMutable, createStore } from "solid-js/store"
+import { createMutable, createStore, untrack } from "solid-js"
 import {
   AUDIO_EFFECT_CONTRACTS,
   automationTargetKey,

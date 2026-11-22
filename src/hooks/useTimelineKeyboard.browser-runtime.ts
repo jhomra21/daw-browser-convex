@@ -1,5 +1,5 @@
 import { createComponent, createSignal } from 'solid-js'
-import { render } from 'solid-js/web'
+import { render } from '@solidjs/web'
 import * as Dialog from '@kobalte/core/dialog'
 import { useTimelineKeyboard } from './useTimelineKeyboard'
 

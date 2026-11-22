@@ -6,7 +6,7 @@ import type { ExportEffectsProjection } from "~/lib/export/export-effect-rows";
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import { readFile } from 'node:fs/promises'
 import { createComputed, createMemo, createRoot, createSignal, untrack } from 'solid-js'
-import { isServer } from 'solid-js/web'
+import { isServer } from '@solidjs/web'
 
 import { useTimelinePlayback } from './useTimelinePlayback'
 import { createParameterGestureOwner } from '../components/timeline/parameter-gesture-owner'

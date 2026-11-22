@@ -70,7 +70,7 @@ const Menubar: Component<MenubarProps> = (props) => {
   });
 
   return (
-    <MenubarAnimationContext.Provider value={{ animation }}>
+    <MenubarAnimationContext value={{ animation }}>
       <MenubarPrimitive.Root
         {...rest}
         onValueChange={(nextValue) => {
@@ -83,7 +83,7 @@ const Menubar: Component<MenubarProps> = (props) => {
           props.onValueChange?.(nextValue);
         }}
       />
-    </MenubarAnimationContext.Provider>
+    </MenubarAnimationContext>
   );
 };
 
@@ -92,9 +92,9 @@ const MenubarMenu: Component<MenubarPrimitive.MenubarMenuProps> = (props) => {
   const value = createMemo(() => props.value);
 
   return (
-    <MenubarMenuValueContext.Provider value={value}>
+    <MenubarMenuValueContext value={value}>
       <MenubarPrimitive.Menu {...mergedProps} />
-    </MenubarMenuValueContext.Provider>
+    </MenubarMenuValueContext>
   );
 };
 

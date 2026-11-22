@@ -8,9 +8,9 @@ const ParameterGestureContext = createContext<ParameterGestureHandle>()
 export function ParameterGestureProvider(props: { owner: ParameterGestureHandle, children: JSX.Element }) {
   return (
     // A context value is read once when the provider mounts.
-    <ParameterGestureContext.Provider value={untrack(() => props.owner)}>
+    <ParameterGestureContext value={untrack(() => props.owner)}>
       {props.children}
-    </ParameterGestureContext.Provider>
+    </ParameterGestureContext>
   )
 }
 

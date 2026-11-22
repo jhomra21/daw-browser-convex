@@ -220,7 +220,7 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
   }
 
   return (
-    <AppPreferencesContext.Provider
+    <AppPreferencesContext
       value={{
         appearance: {
           theme: () => preferences.appearance.theme,
@@ -284,7 +284,7 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
       }}
     >
       {props.children}
-    </AppPreferencesContext.Provider>
+    </AppPreferencesContext>
   )
 }
 

@@ -94,9 +94,9 @@ const DeviceCollapseContext = createContext<DeviceCollapseContextValue>();
 export const useDeviceCollapseContext = () => useContext(DeviceCollapseContext);
 
 export const DeviceCollapseProvider: ParentComponent<DeviceCollapseContextValue> = (props) => (
-  <DeviceCollapseContext.Provider value={props}>
+  <DeviceCollapseContext value={props}>
     {props.children}
-  </DeviceCollapseContext.Provider>
+  </DeviceCollapseContext>
 );
 
 const stableHash = (value: string) => {

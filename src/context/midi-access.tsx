@@ -50,7 +50,7 @@ export const MidiAccessProvider: ParentComponent = (props) => {
   onCleanup(controller.dispose)
 
   return (
-    <MidiAccessContext.Provider value={{
+    <MidiAccessContext value={{
       status,
       inputs,
       requestAccess: controller.requestAccess,
@@ -60,7 +60,7 @@ export const MidiAccessProvider: ParentComponent = (props) => {
       panic: controller.panic,
     }}>
       {props.children}
-    </MidiAccessContext.Provider>
+    </MidiAccessContext>
   )
 }
 

@@ -60,9 +60,9 @@ export function ExportProvider(props: ExportProviderProps) {
   })
 
   return (
-    <ExportContext.Provider value={{ activeJob, enqueueTimelineExport, enqueueStemExport, cancelExport }}>
+    <ExportContext value={{ activeJob, enqueueTimelineExport, enqueueStemExport, cancelExport }}>
       {props.children}
-    </ExportContext.Provider>
+    </ExportContext>
   )
 }
 

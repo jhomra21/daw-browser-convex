@@ -45,8 +45,15 @@ const collapsedDevices = createStoredValue<Set<string>>({
 });
 
 export function createEffectsPanelDeviceCollapse(projectId: Accessor<string | undefined>) {
-  const [collapsedIdentities, setCollapsedIdentities] = createSignal<Set<string>>(new Set());
+  // The set the handlers read and write; the signal publishes it to the cards.
+  let current = new Set<string>();
+  const [collapsedIdentities, setCollapsedIdentities] = createSignal<Set<string>>(current);
   let loadedProjectId: string | undefined;
+
+  const publish = (next: Set<string>) => {
+    current = next;
+    setCollapsedIdentities(next);
+  };
 
   const reload = () => {
     const currentProjectId = projectId();
@@ -54,18 +61,18 @@ export function createEffectsPanelDeviceCollapse(projectId: Accessor<string | un
     if (currentProjectId === loadedProjectId) return;
     loadedProjectId = currentProjectId;
 
-    setCollapsedIdentities(currentProjectId ? collapsedDevices.read(currentProjectId) : new Set<string>());
+    publish(currentProjectId ? collapsedDevices.read(currentProjectId) : new Set<string>());
   };
 
   createEffect(projectId, () => untrack(reload));
 
   const setCollapsed = (identity: DeviceCollapseIdentity, collapsed: boolean) => {
     reload();
-    const next = new Set(collapsedIdentities());
+    const next = new Set(current);
 
     if (collapsed) next.add(identity);
     else next.delete(identity);
-    setCollapsedIdentities(next);
+    publish(next);
     const currentProjectId = projectId();
 
     if (currentProjectId) collapsedDevices.write(currentProjectId, next);
@@ -76,7 +83,7 @@ export function createEffectsPanelDeviceCollapse(projectId: Accessor<string | un
   return {
     isCollapsed,
     setCollapsed,
-    toggle: (identity: DeviceCollapseIdentity) => setCollapsed(identity, !collapsedIdentities().has(identity)),
+    toggle: (identity: DeviceCollapseIdentity) => setCollapsed(identity, !current.has(identity)),
   };
 }
 

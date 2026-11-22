@@ -1,8 +1,8 @@
 import { createMemo, createSignal, onCleanup, Show, type Accessor, type Component } from 'solid-js'
 
 import { clipFadesEqual, getNormalizedClipFadeBezierControlPoint, normalizeClipFades, normalizedFadeGainAtClipTime, type ClipFades, type NormalizedClipFades } from '@daw-browser/timeline-core/clip-fades'
-import {
 import { nativeListener } from '~/lib/native-listener'
+import {
   canStartFadeInteraction,
   clipFadeControlValueText,
   curveFadeControlValueText,

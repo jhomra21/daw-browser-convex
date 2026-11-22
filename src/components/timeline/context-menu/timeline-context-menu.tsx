@@ -2,8 +2,8 @@ import { For, Show, type Component } from "solid-js";
 import type { JSX } from "@solidjs/web";
 
 import { colorInputValue } from "~/lib/color";
-import {
 import { nativeListener } from "~/lib/native-listener"
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,

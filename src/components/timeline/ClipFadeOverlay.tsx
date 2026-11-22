@@ -2,6 +2,7 @@ import { createMemo, createSignal, onCleanup, Show, type Accessor, type Componen
 
 import { clipFadesEqual, getNormalizedClipFadeBezierControlPoint, normalizeClipFades, normalizedFadeGainAtClipTime, type ClipFades, type NormalizedClipFades } from '@daw-browser/timeline-core/clip-fades'
 import {
+import { nativeListener } from '~/lib/native-listener'
   canStartFadeInteraction,
   clipFadeControlValueText,
   curveFadeControlValueText,
@@ -359,8 +360,8 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
           <path d={fadePaths().fadeIn} fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" class="text-foreground/80 pointer-events-none" />
           <path d={fadePaths().fadeOut} fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" class="text-foreground/80 pointer-events-none" />
           <Show when={props.canEdit()}>
-            <path d={fadePaths().fadeIn} fill="none" stroke="transparent" stroke-width="12" vector-effect="non-scaling-stroke" class="pointer-events-auto cursor-pointer touch-none" data-fade-hover-side="fadeIn" on:pointerenter={() => setHoveredSide('fadeIn')} on:pointerleave={(event) => clearHoverOnExit('fadeIn', event)} />
-            <path d={fadePaths().fadeOut} fill="none" stroke="transparent" stroke-width="12" vector-effect="non-scaling-stroke" class="pointer-events-auto cursor-pointer touch-none" data-fade-hover-side="fadeOut" on:pointerenter={() => setHoveredSide('fadeOut')} on:pointerleave={(event) => clearHoverOnExit('fadeOut', event)} />
+            <path d={fadePaths().fadeIn} fill="none" stroke="transparent" stroke-width="12" vector-effect="non-scaling-stroke" class="pointer-events-auto cursor-pointer touch-none" data-fade-hover-side="fadeIn" ref={[nativeListener('pointerenter', () => setHoveredSide('fadeIn')), nativeListener('pointerleave', (event) => clearHoverOnExit('fadeIn', event))]} />
+            <path d={fadePaths().fadeOut} fill="none" stroke="transparent" stroke-width="12" vector-effect="non-scaling-stroke" class="pointer-events-auto cursor-pointer touch-none" data-fade-hover-side="fadeOut" ref={[nativeListener('pointerenter', () => setHoveredSide('fadeOut')), nativeListener('pointerleave', (event) => clearHoverOnExit('fadeOut', event))]} />
           </Show>
         </svg>
         <Show when={props.canEdit()}>
@@ -374,7 +375,7 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
             aria-valuetext={clipFadeControlValueText(currentFades(), 'fadeInStart', props.bpm)}
             class="pointer-events-auto absolute bottom-0 z-40 size-4 -translate-x-1/2 translate-y-1/2 cursor-ew-resize rounded-full bg-transparent touch-none"
             style={{ left: `${endpointPosition('fadeInStart')}%` }}
-            on:pointerdown={(event) => begin('fadeIn', 'fadeInStart', event)}
+            ref={nativeListener('pointerdown', (event) => begin('fadeIn', 'fadeInStart', event))}
             onKeyDown={(event) => commitKeyboard('fadeIn', 'fadeInStart', event)}
             onBlur={() => finishKeyboard('fadeIn', 'fadeInStart')}
           >
@@ -390,7 +391,7 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
             aria-valuetext={clipFadeControlValueText(currentFades(), 'fadeInEnd', props.bpm)}
             class="pointer-events-auto absolute top-0 z-40 size-4 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-full bg-transparent touch-none"
             style={{ left: `${endpointPosition('fadeInEnd')}%` }}
-            on:pointerdown={(event) => begin('fadeIn', 'fadeInEnd', event)}
+            ref={nativeListener('pointerdown', (event) => begin('fadeIn', 'fadeInEnd', event))}
             onKeyDown={(event) => commitKeyboard('fadeIn', 'fadeInEnd', event)}
             onBlur={() => finishKeyboard('fadeIn', 'fadeInEnd')}
           >
@@ -406,7 +407,7 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
             aria-valuetext={clipFadeControlValueText(currentFades(), 'fadeOutStart', props.bpm)}
             class="pointer-events-auto absolute top-0 z-40 size-4 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-full bg-transparent touch-none"
             style={{ left: `${endpointPosition('fadeOutStart')}%` }}
-            on:pointerdown={(event) => begin('fadeOut', 'fadeOutStart', event)}
+            ref={nativeListener('pointerdown', (event) => begin('fadeOut', 'fadeOutStart', event))}
             onKeyDown={(event) => commitKeyboard('fadeOut', 'fadeOutStart', event)}
             onBlur={() => finishKeyboard('fadeOut', 'fadeOutStart')}
           >
@@ -422,7 +423,7 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
             aria-valuetext={clipFadeControlValueText(currentFades(), 'fadeOutEnd', props.bpm)}
             class="pointer-events-auto absolute bottom-0 z-40 size-4 -translate-x-1/2 translate-y-1/2 cursor-ew-resize rounded-full bg-transparent touch-none"
             style={{ left: `${endpointPosition('fadeOutEnd')}%` }}
-            on:pointerdown={(event) => begin('fadeOut', 'fadeOutEnd', event)}
+            ref={nativeListener('pointerdown', (event) => begin('fadeOut', 'fadeOutEnd', event))}
             onKeyDown={(event) => commitKeyboard('fadeOut', 'fadeOutEnd', event)}
             onBlur={() => finishKeyboard('fadeOut', 'fadeOutEnd')}
           >
@@ -436,9 +437,7 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
               class="pointer-events-auto absolute z-40 size-4 -translate-x-1/2 -translate-y-1/2 cursor-move rounded-full bg-transparent touch-none"
               style={curvePosition('fadeIn')}
               data-fade-hover-side="fadeIn"
-              on:pointerenter={() => setHoveredSide('fadeIn')}
-              on:pointerleave={(event) => clearHoverOnExit('fadeIn', event)}
-              on:pointerdown={(event) => begin('fadeIn', 'curve', event)}
+              ref={[nativeListener('pointerenter', () => setHoveredSide('fadeIn')), nativeListener('pointerleave', (event) => clearHoverOnExit('fadeIn', event)), nativeListener('pointerdown', (event) => begin('fadeIn', 'curve', event))]}
               onKeyDown={(event) => commitKeyboard('fadeIn', 'curve', event)}
               onFocus={() => setFocusedCurveSide('fadeIn')}
               onBlur={() => {
@@ -457,9 +456,7 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
               class="pointer-events-auto absolute z-40 size-4 -translate-x-1/2 -translate-y-1/2 cursor-move rounded-full bg-transparent touch-none"
               style={curvePosition('fadeOut')}
               data-fade-hover-side="fadeOut"
-              on:pointerenter={() => setHoveredSide('fadeOut')}
-              on:pointerleave={(event) => clearHoverOnExit('fadeOut', event)}
-              on:pointerdown={(event) => begin('fadeOut', 'curve', event)}
+              ref={[nativeListener('pointerenter', () => setHoveredSide('fadeOut')), nativeListener('pointerleave', (event) => clearHoverOnExit('fadeOut', event)), nativeListener('pointerdown', (event) => begin('fadeOut', 'curve', event))]}
               onKeyDown={(event) => commitKeyboard('fadeOut', 'curve', event)}
               onFocus={() => setFocusedCurveSide('fadeOut')}
               onBlur={() => {

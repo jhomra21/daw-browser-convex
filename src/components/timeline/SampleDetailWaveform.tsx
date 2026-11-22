@@ -14,6 +14,7 @@ import { resolveClipColor } from "~/lib/clip-color";
 import SampleDetailWaveformOverview from "~/components/timeline/SampleDetailWaveformOverview";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { buildNextAudioWarp } from "~/lib/audio-warp-patch";
+import { nativeListener } from "~/lib/native-listener";
 import type { AudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver";
 import {
   fitSampleDetailWaveformViewport,
@@ -395,11 +396,10 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
         class="relative min-h-0 min-w-0 flex-1 overflow-hidden"
       >
         <canvas
-          ref={(el) => {
+          ref={[(el) => {
             canvasRef = el || undefined;
-          }}
+          }, nativeListener('wheel', handleWheel)]}
           class="h-full w-full"
-          on:wheel={handleWheel}
           onDblClick={addMarker}
           onKeyDown={(event) => {
             if (event.key !== "Delete" && event.key !== "Backspace") return;

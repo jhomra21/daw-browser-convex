@@ -3,6 +3,7 @@ import type { JSX } from "@solidjs/web";
 
 import { colorInputValue } from "~/lib/color";
 import {
+import { nativeListener } from "~/lib/native-listener"
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -102,9 +103,9 @@ const TimelineContextMenu: Component<TimelineContextMenuProps> = (props) => {
       <ContextMenuTrigger class="contents" onContextMenu={(event) => event.stopPropagation()}>
         <div
           class="contents"
-          on:contextmenu={(event) => {
+          ref={nativeListener('contextmenu', (event) => {
             if (shouldPreserveNativeContextMenu(event.target)) event.stopPropagation();
-          }}
+          })}
         >
           {props.children}
         </div>

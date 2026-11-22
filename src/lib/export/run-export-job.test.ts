@@ -389,6 +389,7 @@ test("instrument hydration settles as canceled when its sample fetch stalls", as
   })
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
+    writable: true,
     value: async () => {
       notifyFetchStarted?.()
 

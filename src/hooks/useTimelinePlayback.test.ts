@@ -647,6 +647,7 @@ const withPortableAudioWorklet = async (run: () => Promise<void>) => {
   Object.defineProperty(globalThis, "AudioWorkletNode", { configurable: true, value: FakeAudioWorkletNode })
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
+    writable: true,
     value: async (input: string | URL) => (
       String(input).endsWith(".manifest.json")
         ? new Response(manifest, { status: 200 })
@@ -662,7 +663,7 @@ const withPortableAudioWorklet = async (run: () => Promise<void>) => {
 
     if (hadAudioWorkletNode) Object.defineProperty(globalThis, "AudioWorkletNode", { configurable: true, value: previousAudioWorkletNode })
     else Object.defineProperty(globalThis, "AudioWorkletNode", { configurable: true, value: undefined })
-    Object.defineProperty(globalThis, "fetch", { configurable: true, value: previousFetch })
+    Object.defineProperty(globalThis, "fetch", { configurable: true, writable: true, value: previousFetch })
   }
 }
 
@@ -8152,7 +8153,7 @@ const runB6fLive = async (body: (live: ReturnType<typeof mountB6fLive>) => Promi
   Object.defineProperty(globalThis, 'window', { configurable: true, value: {} })
   Object.defineProperty(globalThis, 'AudioContext', { configurable: true, value: FakeAudioContext })
   Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: FakeAudioWorkletNode })
-  Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (input: string | URL) => (
+  Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: async (input: string | URL) => (
     String(input).endsWith('.manifest.json') ? new Response(manifest, { status: 200 }) : new Response(wasm, { status: 200 })) })
 
   try {
@@ -8337,7 +8338,7 @@ const runB6f2Live = async (body: (live: ReturnType<typeof mountB6fLive>, root: B
   Object.defineProperty(globalThis, 'window', { configurable: true, value: {} })
   Object.defineProperty(globalThis, 'AudioContext', { configurable: true, value: FakeAudioContext })
   Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: FakeAudioWorkletNode })
-  Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (input: string | URL) => (
+  Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: async (input: string | URL) => (
     String(input).endsWith('.manifest.json') ? new Response(manifest, { status: 200 }) : new Response(wasm, { status: 200 })) })
 
   try {
@@ -8934,7 +8935,7 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
   Object.defineProperty(globalThis, 'window', { configurable: true, value: {} })
   Object.defineProperty(globalThis, 'AudioContext', { configurable: true, value: FakeAudioContext })
   Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: FakeAudioWorkletNode })
-  Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (input: string | URL) => (
+  Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: async (input: string | URL) => (
     String(input).endsWith('.manifest.json') ? new Response(manifest, { status: 200 }) : new Response(wasm, { status: 200 })) })
 
   try {

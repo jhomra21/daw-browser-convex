@@ -1,5 +1,5 @@
 import { makePersisted, type PersistenceSyncAPI } from "@solid-primitives/storage"
-import { createStore, type SetStoreFunction, type Store } from "solid-js"
+import { createStore, type StoreSetter, type Store } from "solid-js"
 import { canUseLocalStorage, createStoredValue } from "~/lib/stored-value"
 import {
   APP_PREFERENCES_STORAGE_KEY,
@@ -33,11 +33,11 @@ export const createPersistedAppPreferencesWithInitial = (
   initialPreferences: AppPreferences
 ): [
   Store<AppPreferences>,
-  SetStoreFunction<AppPreferences>
+  StoreSetter<AppPreferences>
 ] => {
   const [preferences, setPreferences] = createStore(initialPreferences)
 
-  const store: [Store<AppPreferences>, SetStoreFunction<AppPreferences>] = [
+  const store: [Store<AppPreferences>, StoreSetter<AppPreferences>] = [
     preferences,
     setPreferences,
   ]

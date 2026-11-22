@@ -1,4 +1,4 @@
-import { batch, type Accessor, type Setter } from 'solid-js'
+import type { Accessor, Setter } from 'solid-js'
 
 import type { SelectedClip, Track } from '@daw-browser/timeline-core/types'
 import { isTimelineRangeSelectionEqual, type TimelineRangeSelection } from '~/lib/timeline-range-selection'
@@ -142,35 +142,31 @@ export function selectPrimaryClip(
   input: { trackId: Track['id']; clipId: string },
   options?: { preserveClipIds?: boolean },
 ) {
-  batch(() => {
-    setters.setSelectedTrackId(input.trackId)
-    setters.setSelectedClip(input)
-    setters.setRangeSelection(null)
+  setters.setSelectedTrackId(input.trackId)
+  setters.setSelectedClip(input)
+  setters.setRangeSelection(null)
 
-    if (!options?.preserveClipIds) {
-      setters.setSelectedClipIds(new Set([input.clipId]))
-    }
+  if (!options?.preserveClipIds) {
+    setters.setSelectedClipIds(new Set([input.clipId]))
+  }
 
-    setters.setSelectedFXTarget(input.trackId)
-  })
+  setters.setSelectedFXTarget(input.trackId)
 }
 
 export function appendClipToSelection(
   setters: TimelineSelectionSetters,
   input: { trackId: Track['id']; clipId: string },
 ) {
-  batch(() => {
-    setters.setSelectedTrackId(input.trackId)
-    setters.setSelectedClip(input)
-    setters.setRangeSelection(null)
-    setters.setSelectedClipIds((prev) => {
-      const next = new Set(prev)
-      next.add(input.clipId)
+  setters.setSelectedTrackId(input.trackId)
+  setters.setSelectedClip(input)
+  setters.setRangeSelection(null)
+  setters.setSelectedClipIds((prev) => {
+    const next = new Set(prev)
+    next.add(input.clipId)
 
-      return next
-    })
-    setters.setSelectedFXTarget(input.trackId)
+    return next
   })
+  setters.setSelectedFXTarget(input.trackId)
 }
 
 export function selectClipGroup(
@@ -178,13 +174,11 @@ export function selectClipGroup(
   input: { trackId: Track['id']; clipIds: string[]; primaryClipId?: string },
 ) {
   const primaryClipId = input.primaryClipId ?? input.clipIds[input.clipIds.length - 1]
-  batch(() => {
-    setters.setSelectedTrackId(input.trackId)
-    setters.setSelectedClip(primaryClipId ? { trackId: input.trackId, clipId: primaryClipId } : null)
-    setters.setRangeSelection(null)
-    setters.setSelectedClipIds(new Set(input.clipIds))
-    setters.setSelectedFXTarget(input.trackId)
-  })
+  setters.setSelectedTrackId(input.trackId)
+  setters.setSelectedClip(primaryClipId ? { trackId: input.trackId, clipId: primaryClipId } : null)
+  setters.setRangeSelection(null)
+  setters.setSelectedClipIds(new Set(input.clipIds))
+  setters.setSelectedFXTarget(input.trackId)
 }
 
 export function selectTrackTarget(
@@ -192,43 +186,37 @@ export function selectTrackTarget(
   trackId: Track['id'],
   options?: { clearClipSelection?: boolean; clearPrimaryClip?: boolean },
 ) {
-  batch(() => {
-    setters.setSelectedTrackId(trackId)
-    setters.setSelectedFXTarget(trackId)
-    setters.setRangeSelection(null)
+  setters.setSelectedTrackId(trackId)
+  setters.setSelectedFXTarget(trackId)
+  setters.setRangeSelection(null)
 
-    if (options?.clearClipSelection) {
-      setters.setSelectedClip(null)
-      setters.setSelectedClipIds(new Set<string>())
+  if (options?.clearClipSelection) {
+    setters.setSelectedClip(null)
+    setters.setSelectedClipIds(new Set<string>())
 
-      return
-    }
+    return
+  }
 
-    if (options?.clearPrimaryClip) {
-      setters.setSelectedClip(null)
-    }
-  })
+  if (options?.clearPrimaryClip) {
+    setters.setSelectedClip(null)
+  }
 }
 
 export function selectMasterTarget(setters: TimelineSelectionSetters) {
-  batch(() => {
-    setters.setSelectedTrackId('')
-    setters.setSelectedFXTarget('master')
-    setters.setSelectedClip(null)
-    setters.setSelectedClipIds(new Set<string>())
-    setters.setRangeSelection(null)
-  })
+  setters.setSelectedTrackId('')
+  setters.setSelectedFXTarget('master')
+  setters.setSelectedClip(null)
+  setters.setSelectedClipIds(new Set<string>())
+  setters.setRangeSelection(null)
 }
 
 export function selectTimeRange(
   setters: TimelineSelectionSetters,
   selection: TimelineRangeSelection,
 ) {
-  batch(() => {
-    setters.setRangeSelection(selection)
-    setters.setSelectedClip(null)
-    setters.setSelectedClipIds(new Set<string>())
-    setters.setSelectedTrackId(selection.primaryTrackId ?? selection.trackIds[0] ?? '')
-    setters.setSelectedFXTarget(selection.primaryTrackId ?? selection.trackIds[0] ?? 'master')
-  })
+  setters.setRangeSelection(selection)
+  setters.setSelectedClip(null)
+  setters.setSelectedClipIds(new Set<string>())
+  setters.setSelectedTrackId(selection.primaryTrackId ?? selection.trackIds[0] ?? '')
+  setters.setSelectedFXTarget(selection.primaryTrackId ?? selection.trackIds[0] ?? 'master')
 }

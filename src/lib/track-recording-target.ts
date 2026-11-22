@@ -1,4 +1,6 @@
-import { createMemo, createSignal, type Accessor } from 'solid-js'
+import { createMemo, type Accessor } from 'solid-js'
+
+import { createLatestSignal } from '~/lib/create-latest-signal'
 import { pushTrackCreateHistory } from '~/lib/tracks'
 import { isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
@@ -62,8 +64,8 @@ const targetClosure = (tracks: readonly ClosureTrack[], targetId: string) => {
 // One lock per timeline. A take holds it from the moment its target is chosen until its clip is saved or discarded.
 // Every refusal is synchronous and a refused edit never stops the take.
 export const createRecordingTargetLock = (tracks: Accessor<readonly ClosureTrack[]>) => {
-  const [state, setState] = createSignal<RecordingTargetLockState>('released')
-  const [targetId, setTargetId] = createSignal<string | null>(null)
+  const [state, setState] = createLatestSignal<RecordingTargetLockState>('released')
+  const [targetId, setTargetId] = createLatestSignal<string | null>(null)
 
   const heldTrackIds = createMemo(() => {
     const target = targetId()

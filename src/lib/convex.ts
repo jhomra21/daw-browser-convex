@@ -1,6 +1,6 @@
 import { ConvexClient } from "convex/browser";
 import { useQuery, useQueryClient } from "@tanstack/solid-query";
-import { createEffect, onCleanup, untrack } from "solid-js";
+import { createEffect, untrack } from "solid-js";
 import { z } from "zod";
 
 import { api } from "../../convex/_generated/api";
@@ -92,48 +92,49 @@ export function useConvexQuery<
   }));
 
   // Set up Convex real-time subscription to invalidate TanStack Query cache
-  createEffect(() => {
-    const currentArgs = args();
-
-    if (currentArgs === null || currentArgs === undefined) {
-      return;
-    }
-
-    let unsubscribe: (() => void) | undefined;
-
-    try {
-      unsubscribe = convex.onUpdate(
-        query,
-        currentArgs,
-        (newData) => {
-          // Update TanStack Query cache with new data from Convex
-          // Wrap in untrack to avoid Solid tracking these writes and re-running this effect
-          untrack(() => {
-            queryClient.setQueryData(['convex', ...queryKey()], newData);
-          });
-        },
-        (error: Error) => {
-          // Handle subscription errors by invalidating the query
-          console.warn('Convex subscription error:', error);
-          untrack(() => {
-            queryClient.invalidateQueries({ queryKey: ['convex', ...queryKey()] });
-          });
-        }
-      );
-    } catch (error) {
-      console.warn('Failed to set up Convex subscription:', error);
-    }
-
-    onCleanup(() => {
-      if (unsubscribe) {
-        try {
-          unsubscribe();
-        } catch (error) {
-          console.warn('Failed to cleanup Convex subscription:', error);
-        }
+  createEffect(
+    () => args(),
+    (currentArgs) => {
+      if (currentArgs === null || currentArgs === undefined) {
+        return;
       }
-    });
-  });
+
+      let unsubscribe: (() => void) | undefined;
+
+      try {
+        unsubscribe = convex.onUpdate(
+          query,
+          currentArgs,
+          (newData) => {
+            // Update TanStack Query cache with new data from Convex
+            // Wrap in untrack to avoid Solid tracking these writes and re-running this effect
+            untrack(() => {
+              queryClient.setQueryData(['convex', ...queryKey()], newData);
+            });
+          },
+          (error: Error) => {
+            // Handle subscription errors by invalidating the query
+            console.warn('Convex subscription error:', error);
+            untrack(() => {
+              queryClient.invalidateQueries({ queryKey: ['convex', ...queryKey()] });
+            });
+          }
+        );
+      } catch (error) {
+        console.warn('Failed to set up Convex subscription:', error);
+      }
+
+      return () => {
+        if (unsubscribe) {
+          try {
+            unsubscribe();
+          } catch (error) {
+            console.warn('Failed to cleanup Convex subscription:', error);
+          }
+        }
+      };
+    },
+  );
 
   return tanstackQuery;
 }

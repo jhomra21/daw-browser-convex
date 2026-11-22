@@ -1,5 +1,7 @@
-import { createMemo, createSignal, type Accessor } from 'solid-js'
+import { createMemo, type Accessor } from 'solid-js'
 import type { AutomationEnvelope } from '@daw-browser/shared'
+
+import { createLatestSignal } from '~/lib/create-latest-signal'
 
 type PersistedAutomationContext = {
   projectId?: string
@@ -17,8 +19,8 @@ type PersistedAutomationStateOptions = {
 }
 
 export function createPersistedAutomationState(options: PersistedAutomationStateOptions) {
-  const [draftByTargetKey, setDraftByTargetKey] = createSignal<Record<string, AutomationEnvelope | undefined>>({})
-  const [dirtyTargetKeys, setDirtyTargetKeys] = createSignal<ReadonlySet<string>>(new Set())
+  const [draftByTargetKey, setDraftByTargetKey] = createLatestSignal<Record<string, AutomationEnvelope | undefined>>({})
+  const [dirtyTargetKeys, setDirtyTargetKeys] = createLatestSignal<ReadonlySet<string>>(new Set())
   let lastAppliedEnvelopes = options.envelopes()
 
   const persistedByTargetKey = createMemo(() => new Map(options.envelopes().map((envelope) => [envelope.targetKey, envelope])))
@@ -41,17 +43,16 @@ export function createPersistedAutomationState(options: PersistedAutomationState
   })
 
   const markDirty = (targetKey: string) => {
-    setDirtyTargetKeys((prev) => new Set([...prev, targetKey]))
+    setDirtyTargetKeys(new Set([...dirtyTargetKeys(), targetKey]))
   }
 
   const clearDirty = (targetKey: string) => {
-    setDirtyTargetKeys((prev) => {
-      if (!prev.has(targetKey)) return prev
-      const next = new Set(prev)
-      next.delete(targetKey)
+    const prev = dirtyTargetKeys()
 
-      return next
-    })
+    if (!prev.has(targetKey)) return
+    const next = new Set(prev)
+    next.delete(targetKey)
+    setDirtyTargetKeys(next)
   }
 
   const applyToEngine = (nextEnvelopes: AutomationEnvelope[], changedTargetKeys: ReadonlySet<string>) => {
@@ -122,12 +123,8 @@ export function createPersistedAutomationState(options: PersistedAutomationState
     if (envelope) next.set(targetKey, envelope)
     else next.delete(targetKey)
     clearDirty(targetKey)
-    setDraftByTargetKey((prev) => {
-      const next = { ...prev }
-      delete next[targetKey]
-
-      return next
-    })
+    const { [targetKey]: _committed, ...remainingDrafts } = draftByTargetKey()
+    setDraftByTargetKey(remainingDrafts)
     applyToEngine(Array.from(next.values()), new Set([targetKey]))
     options.onEnvelopeCommitted?.(previous, envelope, context)
   }
@@ -135,13 +132,13 @@ export function createPersistedAutomationState(options: PersistedAutomationState
   const cancelPreview = (targetKey = options.targetKey()) => {
     if (!targetKey) return
     clearDirty(targetKey)
-    setDraftByTargetKey((prev) => {
-      if (!(targetKey in prev)) return prev
-      const next = { ...prev }
-      delete next[targetKey]
+    const drafts = draftByTargetKey()
 
-      return next
-    })
+    if (targetKey in drafts) {
+      const { [targetKey]: _cancelled, ...remainingDrafts } = drafts
+      setDraftByTargetKey(remainingDrafts)
+    }
+
     applyToEngine(options.envelopes(), new Set([targetKey]))
   }
 

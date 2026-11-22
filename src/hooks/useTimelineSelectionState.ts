@@ -1,7 +1,5 @@
 import { createEffect, createSignal, type Accessor } from 'solid-js'
 
-import { createLatestSignal } from '~/lib/create-latest-signal'
-
 import {
   appendClipToSelection,
   isTimelineSelectionEqual,
@@ -29,11 +27,11 @@ type UseTimelineSelectionStateOptions = {
 export function useTimelineSelectionState(
   options: UseTimelineSelectionStateOptions,
 ): TimelineSelectionController {
-  const [selectedTrackId, setSelectedTrackId] = createLatestSignal<Track['id'] | ''>('')
-  const [selectedClip, setSelectedClip] = createLatestSignal<SelectedClip>(null)
+  const [selectedTrackId, setSelectedTrackId] = createSignal<Track['id'] | ''>('')
+  const [selectedClip, setSelectedClip] = createSignal<SelectedClip>(null)
   const [selectedClipIds, setSelectedClipIds] = createSignal<Set<string>>(new Set<string>(), { equals: false })
-  const [selectedFXTarget, setSelectedFXTarget] = createLatestSignal<Track['id'] | 'master'>('master')
-  const [rangeSelection, setRangeSelection] = createLatestSignal<TimelineRangeSelection | null>(null)
+  const [selectedFXTarget, setSelectedFXTarget] = createSignal<Track['id'] | 'master'>('master')
+  const [rangeSelection, setRangeSelection] = createSignal<TimelineRangeSelection | null>(null)
 
   const setters = { setSelectedTrackId, setSelectedClip, setSelectedClipIds, setSelectedFXTarget, setRangeSelection }
 

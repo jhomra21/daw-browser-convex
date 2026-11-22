@@ -5,7 +5,7 @@ import { expect, mock, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { build } from "vite";
-import solidPlugin from "vite-plugin-solid";
+import solidPlugin from "@solidjs/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
 import { createComputed, createMemo, createRoot, createSignal, untrack } from "solid-js";
 import { isServer } from "solid-js/web";

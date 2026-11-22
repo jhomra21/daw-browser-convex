@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdir, rm } from "node:fs/promises";
 import { build } from "vite";
-import solidPlugin from "vite-plugin-solid";
+import solidPlugin from "@solidjs/vite-plugin";
 import { z } from "zod";
 
 const browserSnapshotSchema = z.object({

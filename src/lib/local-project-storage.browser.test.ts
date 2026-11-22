@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { mkdir } from 'node:fs/promises'
 import { build } from 'vite'
-import solidPlugin from 'vite-plugin-solid'
+import solidPlugin from '@solidjs/vite-plugin'
 import { z } from 'zod'
 import { agentBrowser } from '~/test-support/agent-browser'
 

@@ -6,7 +6,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { build } from "vite";
-import solidPlugin from "vite-plugin-solid";
+import solidPlugin from "@solidjs/vite-plugin";
 import { z } from "zod";
 import { agentBrowser } from "../../src/test-support/agent-browser";
 

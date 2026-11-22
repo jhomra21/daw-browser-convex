@@ -2,7 +2,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { expect, test } from 'bun:test'
 import { mkdir } from 'node:fs/promises'
 import { build } from 'vite'
-import solidPlugin from 'vite-plugin-solid'
+import solidPlugin from '@solidjs/vite-plugin'
 import { z } from 'zod'
 
 // Each gesture is owned by real Chromium mouse input (pointer 1 with real

@@ -1,7 +1,7 @@
 import { render } from '@solidjs/web'
 import { RouterProvider, createRouter } from '@tanstack/solid-router'
 import { QueryClientProvider } from '@tanstack/solid-query'
-import { ColorModeProvider, type ColorModeStorageManager } from '@kobalte/core'
+import { ColorModeProvider, type ColorModeStorageManager } from '@kobalte/core/color-mode'
 import { registerSW } from 'virtual:pwa-register'
 import { assertDefined } from '@daw-browser/shared'
 import { routeTree } from './routeTree.gen'

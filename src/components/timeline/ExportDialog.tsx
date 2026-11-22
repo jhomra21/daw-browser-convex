@@ -417,7 +417,7 @@ const ExportDialog: Component<Props> = (props) => {
                   variant="outline"
                   size="sm"
                   class="h-7 px-2"
-                  aria-pressed={rangeMode() === 'whole'}
+                  aria-pressed={rangeMode() === 'whole' ? "true" : "false"}
                   onClick={setWholeTimeline}
                 >
                   Whole Timeline
@@ -427,7 +427,7 @@ const ExportDialog: Component<Props> = (props) => {
                   variant="outline"
                   size="sm"
                   class="h-7 px-2"
-                  aria-pressed={rangeMode() === 'loop'}
+                  aria-pressed={rangeMode() === 'loop' ? "true" : "false"}
                   disabled={!props.loopEnabled}
                   onClick={setLoopRegion}
                 >

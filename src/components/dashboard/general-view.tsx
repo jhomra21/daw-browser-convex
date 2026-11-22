@@ -46,7 +46,7 @@ function PreviewButtonGroup(props: PreviewButtonGroupProps) {
             variant="outline"
             size="sm"
             class={cn("h-auto rounded-none px-2 py-1 text-xs focus:bg-accent focus:text-accent-foreground", props.selectedId === option.id && "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground")}
-            aria-pressed={props.selectedId === option.id}
+            aria-pressed={props.selectedId === option.id ? "true" : "false"}
             onMouseEnter={() => props.preview(option.id)}
             onFocus={() => props.preview(option.id)}
             onClick={() => props.commit(option.id)}

@@ -1,5 +1,5 @@
 import { createContext, createEffect, createSignal, type ParentComponent, useContext } from "solid-js"
-import { useColorMode } from "@kobalte/core"
+import { useColorMode } from "@kobalte/core/color-mode"
 import { assertDefined } from "@daw-browser/shared"
 import {
   createPersistedAppPreferencesWithInitial,

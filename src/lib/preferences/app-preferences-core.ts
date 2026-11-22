@@ -1,4 +1,4 @@
-import type { ConfigColorMode } from "@kobalte/core"
+import type { ConfigColorMode } from "@kobalte/core/color-mode"
 import { parseHexColor } from "~/lib/color"
 import { APP_PREFERENCES_VERSION_ROWS } from "~/lib/preferences/app-preferences-versions"
 import { normalizeMidiSelectedInputIds } from "~/lib/midi/midi-input"

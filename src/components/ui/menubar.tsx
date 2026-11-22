@@ -1,9 +1,8 @@
 import type {
   Accessor,
   Component,
-  ValidComponent,
 } from "solid-js";
-import type { ComponentProps, JSX } from "@solidjs/web";
+import type { ComponentProps, JSX, ValidComponent } from "@solidjs/web";
 import {
   createContext,
   createEffect,

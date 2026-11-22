@@ -1,8 +1,7 @@
-import type { ValidComponent } from "solid-js"
-import type { JSX } from "@solidjs/web"
+import type { JSX, ValidComponent } from "@solidjs/web"
 import { merge, omit } from "solid-js"
 
-import type { PolymorphicProps } from "@kobalte/core"
+import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 import * as TextFieldPrimitive from "@kobalte/core/text-field"
 import { cva } from "class-variance-authority"
 

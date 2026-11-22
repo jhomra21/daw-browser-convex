@@ -10,12 +10,14 @@ import { cn } from "~/lib/utils";
 
 type TooltipProps = TooltipRootProps;
 
+const defaultPlacement: TooltipProps["placement"] = "top";
+
 const Tooltip = (props: TooltipProps) => {
   const merged = merge(
     {
       closeDelay: 0,
       openDelay: 250,
-      placement: "top",
+      placement: defaultPlacement,
       gutter: 6,
     },
     props,

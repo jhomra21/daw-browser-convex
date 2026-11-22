@@ -1,6 +1,6 @@
 import { createRoot, createSignal } from 'solid-js'
 import { render } from '@solidjs/web'
-import { ColorModeProvider } from '@kobalte/core'
+import { ColorModeProvider } from '@kobalte/core/color-mode'
 
 import { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'

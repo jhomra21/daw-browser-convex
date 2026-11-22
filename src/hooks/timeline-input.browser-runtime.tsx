@@ -279,6 +279,7 @@ const runSelectionScenarios = () => {
     document.body.append(host)
     const starts: { clientX: number; listen: boolean | undefined }[] = []
     const moves: number[] = []
+
     const { state, dispose } = createRoot((dispose) => {
       const tracks = [track('one'), track('two')]
       const state = useTimelineSelectionState({ projectId: () => 'project:selection', tracks: () => tracks })

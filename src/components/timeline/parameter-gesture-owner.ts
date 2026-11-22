@@ -1,4 +1,4 @@
-import { batch, createEffect, createMemo, createSignal, getListener, on, onCleanup, untrack, type Accessor } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, getObserver, on, onCleanup, untrack, type Accessor } from "solid-js";
 import type { EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
 import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery } from "~/lib/live-processor-control";
 import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
@@ -113,7 +113,7 @@ export function createParameterGestureOwner<Target, Params>(adapter: ParameterGe
   const triggers = new Map<string, { track: Accessor<undefined>; notify: () => void; readers: number }>();
 
   const readCell = (key: string) => {
-    if (getListener()) {
+    if (getObserver()) {
       let trigger = triggers.get(key);
 
       if (!trigger) {

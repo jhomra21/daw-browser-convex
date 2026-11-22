@@ -1,7 +1,5 @@
-import { createMemo, type Accessor } from 'solid-js'
+import { createMemo, createSignal, type Accessor } from 'solid-js'
 import type { AutomationEnvelope } from '@daw-browser/shared'
-
-import { createLatestSignal } from '~/lib/create-latest-signal'
 
 type PersistedAutomationContext = {
   projectId?: string
@@ -19,8 +17,15 @@ type PersistedAutomationStateOptions = {
 }
 
 export function createPersistedAutomationState(options: PersistedAutomationStateOptions) {
-  const [draftByTargetKey, setDraftByTargetKey] = createLatestSignal<Record<string, AutomationEnvelope | undefined>>({})
-  const [dirtyTargetKeys, setDirtyTargetKeys] = createLatestSignal<ReadonlySet<string>>(new Set())
+  // Drafts and dirty keys are the working state of the preview/commit methods below, which read them back in the same
+  // call; the draft signal only publishes the drafts to the envelopes memo.
+  let drafts: Record<string, AutomationEnvelope | undefined> = {}
+  let dirty: ReadonlySet<string> = new Set()
+  const [draftByTargetKey, publishDrafts] = createSignal(drafts)
+  const setDrafts = (next: Record<string, AutomationEnvelope | undefined>) => {
+    drafts = next
+    publishDrafts(next)
+  }
   let lastAppliedEnvelopes = options.envelopes()
 
   const persistedByTargetKey = createMemo(() => new Map(options.envelopes().map((envelope) => [envelope.targetKey, envelope])))
@@ -36,23 +41,17 @@ export function createPersistedAutomationState(options: PersistedAutomationState
     return Array.from(next.values())
   }
 
-  const envelopes = createMemo(() => {
-    const drafts = draftByTargetKey()
-
-    return mergeDrafts(options.envelopes(), drafts)
-  })
+  const envelopes = createMemo(() => mergeDrafts(options.envelopes(), draftByTargetKey()))
 
   const markDirty = (targetKey: string) => {
-    setDirtyTargetKeys(new Set([...dirtyTargetKeys(), targetKey]))
+    dirty = new Set([...dirty, targetKey])
   }
 
   const clearDirty = (targetKey: string) => {
-    const prev = dirtyTargetKeys()
-
-    if (!prev.has(targetKey)) return
-    const next = new Set(prev)
+    if (!dirty.has(targetKey)) return
+    const next = new Set(dirty)
     next.delete(targetKey)
-    setDirtyTargetKeys(next)
+    dirty = next
   }
 
   const applyToEngine = (nextEnvelopes: AutomationEnvelope[], changedTargetKeys: ReadonlySet<string>) => {
@@ -104,8 +103,8 @@ export function createPersistedAutomationState(options: PersistedAutomationState
 
     if (!targetKey) return
     markDirty(targetKey)
-    const nextDrafts = { ...draftByTargetKey(), [targetKey]: envelope }
-    setDraftByTargetKey(nextDrafts)
+    const nextDrafts = { ...drafts, [targetKey]: envelope }
+    setDrafts(nextDrafts)
     applyToEngine(mergeDrafts(options.envelopes(), nextDrafts), new Set([targetKey]))
   }
 
@@ -123,8 +122,8 @@ export function createPersistedAutomationState(options: PersistedAutomationState
     if (envelope) next.set(targetKey, envelope)
     else next.delete(targetKey)
     clearDirty(targetKey)
-    const { [targetKey]: _committed, ...remainingDrafts } = draftByTargetKey()
-    setDraftByTargetKey(remainingDrafts)
+    const { [targetKey]: _committed, ...remainingDrafts } = drafts
+    setDrafts(remainingDrafts)
     applyToEngine(Array.from(next.values()), new Set([targetKey]))
     options.onEnvelopeCommitted?.(previous, envelope, context)
   }
@@ -132,20 +131,16 @@ export function createPersistedAutomationState(options: PersistedAutomationState
   const cancelPreview = (targetKey = options.targetKey()) => {
     if (!targetKey) return
     clearDirty(targetKey)
-    const drafts = draftByTargetKey()
-
     if (targetKey in drafts) {
       const { [targetKey]: _cancelled, ...remainingDrafts } = drafts
-      setDraftByTargetKey(remainingDrafts)
+      setDrafts(remainingDrafts)
     }
 
     applyToEngine(options.envelopes(), new Set([targetKey]))
   }
 
-  const syncRemote = () => {
-    const dirty = dirtyTargetKeys()
-    const nextEnvelopes = options.envelopes()
-
+  // A caller that just wrote the persisted envelopes passes them, since the accessor still shows the committed ones.
+  const syncRemote = (nextEnvelopes = options.envelopes()) => {
     if (dirty.size === 0) {
       const changed = changedTargetKeysFromLastApplied(nextEnvelopes)
 
@@ -154,7 +149,7 @@ export function createPersistedAutomationState(options: PersistedAutomationState
       return
     }
 
-    const merged = mergeDrafts(nextEnvelopes, draftByTargetKey())
+    const merged = mergeDrafts(nextEnvelopes, drafts)
     const changed = changedTargetKeysFromLastApplied(merged)
     applyToEngine(merged, new Set([...dirty, ...changed]))
   }
@@ -163,7 +158,7 @@ export function createPersistedAutomationState(options: PersistedAutomationState
     commitEnvelope,
     cancelPreview,
     envelopes,
-    snapshotPatches: () => Object.entries(draftByTargetKey()).map(([targetKey, envelope]) => ({ targetKey, envelope })),
+    snapshotPatches: () => Object.entries(drafts).map(([targetKey, envelope]) => ({ targetKey, envelope })),
     previewEnvelope,
     syncRemote,
   }

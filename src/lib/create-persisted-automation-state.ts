@@ -22,10 +22,12 @@ export function createPersistedAutomationState(options: PersistedAutomationState
   let drafts: Record<string, AutomationEnvelope | undefined> = {}
   let dirty: ReadonlySet<string> = new Set()
   const [draftByTargetKey, publishDrafts] = createSignal(drafts)
+
   const setDrafts = (next: Record<string, AutomationEnvelope | undefined>) => {
     drafts = next
     publishDrafts(next)
   }
+
   let lastAppliedEnvelopes = options.envelopes()
 
   const persistedByTargetKey = createMemo(() => new Map(options.envelopes().map((envelope) => [envelope.targetKey, envelope])))
@@ -131,6 +133,7 @@ export function createPersistedAutomationState(options: PersistedAutomationState
   const cancelPreview = (targetKey = options.targetKey()) => {
     if (!targetKey) return
     clearDirty(targetKey)
+
     if (targetKey in drafts) {
       const { [targetKey]: _cancelled, ...remainingDrafts } = drafts
       setDrafts(remainingDrafts)

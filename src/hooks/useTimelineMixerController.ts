@@ -88,8 +88,12 @@ const createControllerMap = <V,>() => {
   return {
     current: () => map,
     signal,
-    set: (next: Map<Track['id'], V> | ((current: Map<Track['id'], V>) => Map<Track['id'], V>)) => {
-      map = typeof next === 'function' ? next(map) : next
+    set: (next: Map<Track['id'], V>) => {
+      map = next
+      publish(map)
+    },
+    update: (change: (current: Map<Track['id'], V>) => Map<Track['id'], V>) => {
+      map = change(map)
       publish(map)
     },
   }
@@ -244,7 +248,7 @@ export function useTimelineMixerController(
     trackId: Track['id'],
     update: (current: PendingTrackMixState | undefined) => PendingTrackMixState | null,
   ) => {
-    sharedMix.set((current) => {
+    sharedMix.update((current) => {
       const nextValue = update(current.get(trackId))
 
       if (nextValue) {
@@ -291,7 +295,7 @@ export function useTimelineMixerController(
     issuedAt = readMixIssuedAt(),
   ) => {
     if (patch.muted === undefined && patch.soloed === undefined) return
-    mixWriteAts.set((current) => {
+    mixWriteAts.update((current) => {
       const previous = current.get(trackId)
 
       const nextValue = {
@@ -315,7 +319,7 @@ export function useTimelineMixerController(
     fields: Partial<Record<PendingTrackMixField, boolean>>,
   ) => {
     if (fields.muted === undefined && fields.soloed === undefined) return
-    mixWriteAts.set((current) => {
+    mixWriteAts.update((current) => {
       const previous = current.get(trackId)
 
       if (!previous) return current
@@ -362,7 +366,7 @@ export function useTimelineMixerController(
 
     if (previous && isTrackRoutingEqual(previous, normalized)) return
 
-    sharedRouting.set((current) => {
+    sharedRouting.update((current) => {
       if (isTrackRoutingEqual(current.get(trackId) ?? { sends: [], outputTargetId: undefined }, normalized)) {
         return current
       }
@@ -377,7 +381,7 @@ export function useTimelineMixerController(
   const persistTrackRouting = (trackId: Track['id'], routing: LocalTrackRouting, afterWrite?: () => void) => {
     scheduleProjectTrackWrite(routingTimers, trackId, (trackWrites) =>
       trackWrites.setRouting(trackId, routing).catch((error) => {
-        sharedRouting.set((current) => {
+        sharedRouting.update((current) => {
           const pending = current.get(trackId)
 
           if (!pending || !isTrackRoutingEqual(pending, routing)) return current
@@ -474,7 +478,7 @@ export function useTimelineMixerController(
       return
     }
 
-    sharedVolumes.set((current) => {
+    sharedVolumes.update((current) => {
       if (current.get(trackId) === volume) return current
       const next = new Map(current)
       next.set(trackId, volume)
@@ -486,7 +490,7 @@ export function useTimelineMixerController(
   const persistTrackVolume = (trackId: Track['id'], volume: number, afterWrite?: () => void) => {
     scheduleProjectTrackWrite(volumeTimers, trackId, (trackWrites) =>
       trackWrites.setVolume(trackId, volume).catch((error) => {
-        sharedVolumes.set((current) => {
+        sharedVolumes.update((current) => {
           if (current.get(trackId) !== volume) return current
           const next = new Map(current)
           next.delete(trackId)
@@ -801,9 +805,9 @@ export function useTimelineMixerController(
   createEffect(
     () => retainedTrackIds(),
     (trackIds) => {
-      sharedVolumes.set((current) => pruneMapToKeys(current, trackIds))
-      sharedRouting.set((current) => pruneMapToKeys(current, trackIds))
-      sharedMix.set((current) => pruneMapToKeys(current, trackIds))
+      sharedVolumes.update((current) => pruneMapToKeys(current, trackIds))
+      sharedRouting.update((current) => pruneMapToKeys(current, trackIds))
+      sharedMix.update((current) => pruneMapToKeys(current, trackIds))
       pruneLocalHistoryMap(pendingLocalRoutingHistoryFrom, trackIds)
       pruneLocalHistoryMap(pendingLocalRoutingHistoryVersion, trackIds)
       pruneLocalHistoryMap(pendingLocalVolumeHistoryFrom, trackIds)
@@ -815,7 +819,7 @@ export function useTimelineMixerController(
   createEffect(
     () => sharedMix.signal(),
     (pendingMixByTrackId) => {
-      mixWriteAts.set((current) => {
+      mixWriteAts.update((current) => {
         let next: Map<Track['id'], PendingTrackMixWriteAt> | null = null
 
         for (const [trackId, writeAts] of current) {
@@ -852,7 +856,7 @@ export function useTimelineMixerController(
 
   createEffect(options.serverTrackState, (serverState) => {
     if (!serverState) return
-    sharedVolumes.set((current) => {
+    sharedVolumes.update((current) => {
       let next: Map<Track['id'], number> | null = null
 
       for (const [trackId, volume] of current) {
@@ -870,7 +874,7 @@ export function useTimelineMixerController(
 
   createEffect(() => ({ serverState: options.serverTrackState(), routingTracks: options.tracks(), index: trackIndex() }), ({ serverState, routingTracks, index }) => {
     if (!serverState) return
-    sharedRouting.set((current) => {
+    sharedRouting.update((current) => {
       let next: Map<Track['id'], LocalTrackRouting> | null = null
 
       for (const [trackId, routing] of current) {
@@ -889,7 +893,7 @@ export function useTimelineMixerController(
 
   createEffect(options.serverTrackState, (serverState) => {
     if (!serverState) return
-    sharedMix.set((current) => {
+    sharedMix.update((current) => {
       let next: Map<Track['id'], PendingTrackMixState> | null = null
 
       for (const [trackId, mix] of current) {

@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor, createTrackedEffect } from "solid-js";
+import { createEffect, createMemo, createSignal, untrack, type Accessor, createTrackedEffect } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
@@ -319,15 +319,18 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
   let currentOverriddenKeys: Set<string> = new Set();
   const [automationEnvelopes, publishAutomationEnvelopes] = createSignal(currentEnvelopes);
   const [overriddenAutomationTargetKeys, publishOverriddenKeys] = createSignal(currentOverriddenKeys);
+
   const setAutomationEnvelopes = (next: AutomationEnvelope[]) => {
     currentEnvelopes = next;
     publishAutomationEnvelopes(next);
   };
+
   const setOverriddenAutomationTargetKeys = (next: Set<string>) => {
     currentOverriddenKeys = next;
     publishOverriddenKeys(next);
   };
   // Every project change reloads these from storage; an unchanged result must not rebuild the lanes workspace.
+
   const [effectInstancesByOwnerKey, setEffectInstancesByOwnerKey] = createSignal<Record<string, AutomationTargetDeviceInstance[]>>({}, { equals: sameData });
   const [automationValuesByTargetKey, setAutomationValuesByTargetKey] = createSignal<ReadonlyMap<string, number>>(new Map(), { equals: sameData });
   const [effectDataReady, setEffectDataReady] = createSignal(false);
@@ -985,8 +988,8 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       };
 
       reload();
-      const unsubscribe = subscribeToLocalProjectChanges(rid, reload);
-      onCleanup(unsubscribe);
+
+      return subscribeToLocalProjectChanges(rid, reload);
     }
 
     if (!isLocalId("project", rid)) {

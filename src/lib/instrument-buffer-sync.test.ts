@@ -897,7 +897,7 @@ for (const spec of step5ArpWitnesses) for (const transport of ["playing", "pause
         persistedOctaves: fresh.fx.trackFx?.[f.track.id]?.arp?.octaves ?? null,
         resolvedOctaves: resolved.trackFx?.[f.track.id]?.arp?.octaves ?? null,
       }));
-      // UD 7 / PARENT-RULING-PHASE8-DESIGN D7 (fc321573): a paused edit is adopted in place exactly like
+      // UD 7: a paused edit is adopted in place exactly like
       // a playing one, so both transports compile and publish once on the kept session.
       expect(counts.scheduleCompiles).toBe(1);
       expect(counts.publishes).toBe(1);

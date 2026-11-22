@@ -3320,7 +3320,7 @@ test('W-E3-8 a seek with the loop on after a wrap and a loop adoption resets the
   } finally { f.controller.dispose() }
 })
 
-// D5 and R-E3-4: a locate stops at the new epoch first (the core clears its sources), then releases the old preparations
+// R-E3-4: a locate stops at the new epoch first (the core clears its sources), then releases the old preparations
 // and prepares the target's pages, then submits the schedule and the sources, then runs. The pages keep the generation
 // the session registered them under, whatever the transport epoch.
 test('W-E3-D5 a seek stops, prepares the target pages, installs, schedules sources and runs; pages keep the session generation', async () => {

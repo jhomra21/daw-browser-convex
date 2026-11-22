@@ -1693,7 +1693,7 @@ test('B6f5 R1 an adoption at the core maximum graph stays inside the audio-threa
 })
 
 // AE-08 phase 8 step 1: failure-first witnesses for the frame-exact publication (M1) and the release of held notes at a
-// locate (D4). Each is `test.failing` until its implementing step flips it to `test`.
+// locate. Each is `test.failing` until its implementing step flips it to `test`.
 const publishedResults = (messages: readonly PortableWasmStatusMessage[], revision: number) =>
   messages.flatMap((message) => message.type === 'graph-published' && message.requestId === revision * 10 + 2 ? [message.result] : [])
 
@@ -1888,7 +1888,7 @@ test('W-E5-3 a removed held note is released by the note-off at the seam and han
   }
 })
 
-// D4: a locate while playing releases held notes with their tails, as native does.
+// A locate while playing releases held notes with their tails, as native does.
 test('W-E3-3 a note held across a transport epoch change decays through its release tail instead of cutting', async () => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []

@@ -104,7 +104,7 @@ const normalizeReferencePeak = (channels: Float32Array[], inputPeak: number) => 
   })
 }
 
-// This is a test-only copy of the Phase 7A whole-array algorithm. It is kept
+// This is a test-only copy of the original whole-array algorithm. It is kept
 // separate from production code so parity tests detect accidental drift.
 const renderPhase7AReference = (
   inputChannels: Float32Array[],

@@ -7518,7 +7518,7 @@ test('resume after a live publication removes a sampler does not report the remo
   } finally { await controller.dispose() }
 })
 
-// AE-08 phase 8 step 8 (UD 7, D7): a paused prepared native session adopts an edit through its own host session. The
+// AE-08 phase 8 step 8 (UD 7): a paused prepared native session adopts an edit through its own host session. The
 // graph is prepared and published with seam 0 (native applies it at the next block, a stopped transport included), then
 // the schedule is re-primed by an epoch bump at the same frame.
 const pausedNativeSession = async () => {

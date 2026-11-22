@@ -540,7 +540,7 @@ const adoptionTiming = async (adoptions: number) => {
     blockMs: BLOCK / SAMPLE_RATE * 1000, series, faults }
 }
 
-// ---- D3: does the render thread stall while the core's maximum graph adopts? ----
+// ---- Does the render thread stall while the core's maximum graph adopts? ----
 // The core renders the maximum graph with a 1 kHz carrier on one track. The worklet has only Date (1 ms), so a stall shows two ways:
 // the carrier's phase (a dropped or repeated block moves it) and the lateness of each block against the audio clock (a block the render
 // thread started late, past the device's buffer, is an underrun). Prepare, install and publish run on the render thread between quanta.

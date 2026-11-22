@@ -344,7 +344,7 @@ async function runSeed(seed: number, plant: Defect | undefined, trace?: SeedTrac
     throw new Error("Control work did not settle")
   }
 
-  // D5 settles the publication before its native latency transition ends.
+  // The publication settles before its native latency transition ends.
   // These legacy finite-drain setups must deliver the real completion, not
   // rely on the caller's former awaited Retire to keep rendering for them.
   // One reader callback is still needed when no latency transition remains.
@@ -1835,7 +1835,7 @@ async function runSeed(seed: number, plant: Defect | undefined, trace?: SeedTrac
         record({ witness: "seed7-lane-release", terminal, frame, pending: immediate.pendingControl, queued: immediate.queuedSends })
         await act({ kind: "check", mode: "transport-lane" })
 
-        // D2: only real control execute/reply events, never a callback or progress.
+        // Only real control execute/reply events, never a callback or progress.
         // Native claim/ACK proof is still required for any claimed publication.
         for (let control = 0; control < 64; control++) {
           const action = fixture.enabled().find(entry => entry.kind === "control-wake" || entry.kind === "deliver-reply")

@@ -28,8 +28,13 @@ export function useProjectPersistedState<TValue>(
   const initialProjectId = options.projectId()
   const initialValue = initialProjectId ? options.load(initialProjectId) : options.createInitial()
   const [currentValue, setCurrentValue] = createSignal<TValue>(() => initialValue)
-  const [asyncHydrated, setAsyncHydrated] = createSignal(!options.loadAsync || !initialProjectId)
+  // The latest value and hydration flag are kept here so a read right after a write or a project switch sees them;
+  // the signals publish them to subscribers at the next flush.
+  let latest = initialValue
+  let latestHydrated = !options.loadAsync || !initialProjectId
+  const [asyncHydrated, setAsyncHydrated] = createSignal(latestHydrated)
   let hydratedProjectId = initialProjectId
+  let unpublishedSwitch = false
   let valueRevision = 0
   const pendingAsyncSavesByProject = new Map<string, Set<Promise<void>>>()
   const registeredFlushers = new Map<string, () => void>()
@@ -52,34 +57,56 @@ export function useProjectPersistedState<TValue>(
     }))
   }
 
+  // Reads may run in a tracking scope, so a project switch only updates the local state here.
   const syncHydratedValue = () => {
     const projectId = options.projectId()
 
     if (projectId === hydratedProjectId) return
     hydratedProjectId = projectId
     valueRevision += 1
+    latest = projectId ? options.load(projectId) : options.createInitial()
+    latestHydrated = !projectId || !options.loadAsync
+    unpublishedSwitch = true
+  }
 
-    if (!projectId) {
-      setCurrentValue(() => options.createInitial())
-      setAsyncHydrated(true)
+  const publishValue = (next: TValue) => {
+    latest = next
+    setCurrentValue(() => next)
+  }
 
-      return
-    }
+  const publishHydrated = (next: boolean) => {
+    latestHydrated = next
+    setAsyncHydrated(next)
+  }
 
-    setCurrentValue(() => options.load(projectId))
-    setAsyncHydrated(!options.loadAsync)
+  // Writers and the project effect run outside tracking scopes, where the switch can reach the signals.
+  const publishSwitch = () => {
+    syncHydratedValue()
+
+    if (!unpublishedSwitch) return
+    unpublishedSwitch = false
+    publishValue(latest)
+    publishHydrated(latestHydrated)
   }
 
   const value: Accessor<TValue> = () => {
     syncHydratedValue()
+    currentValue()
 
-    return currentValue()
+    return latest
+  }
+
+  const isHydrated: Accessor<boolean> = () => {
+    syncHydratedValue()
+    asyncHydrated()
+
+    return latestHydrated
   }
 
   createEffect(
     options.projectId,
     (projectId) => untrack(() => {
-      syncHydratedValue()
+      publishSwitch()
 
       if (!projectId || !options.loadAsync) return
       const load = options.loadAsync
@@ -89,14 +116,14 @@ export function useProjectPersistedState<TValue>(
         void load(projectId).then((loaded) => {
           if (options.projectId() !== projectId || valueRevision !== loadRevision) return
 
-          if (loaded !== undefined) setCurrentValue(() => loaded)
-          setAsyncHydrated(true)
+          if (loaded !== undefined) publishValue(loaded)
+          publishHydrated(true)
         }).catch(() => {
-          if (options.projectId() === projectId && valueRevision === loadRevision) setAsyncHydrated(true)
+          if (options.projectId() === projectId && valueRevision === loadRevision) publishHydrated(true)
         })
       }
 
-      setAsyncHydrated(false)
+      publishHydrated(false)
       const unsubscribe = options.subscribeToChanges?.(projectId, refresh)
 
       if (unsubscribe) onCleanup(unsubscribe)
@@ -105,11 +132,12 @@ export function useProjectPersistedState<TValue>(
   )
 
   const applyValue: RoomPersistedSetter<TValue> = (next) => {
-    syncHydratedValue()
+    publishSwitch()
     valueRevision += 1
-    setAsyncHydrated(true)
+    publishHydrated(true)
+    latest = setCurrentValue(next)
 
-    return setCurrentValue(next)
+    return latest
   }
 
   const persistValue = (projectId: string, value: TValue) => {
@@ -125,10 +153,11 @@ export function useProjectPersistedState<TValue>(
   }
 
   const setPersistedValue: RoomPersistedSetter<TValue> = (next) => {
-    syncHydratedValue()
-    const previous = currentValue()
+    publishSwitch()
+    const previous = latest
     const resolved = setCurrentValue(next)
-    setAsyncHydrated(true)
+    latest = resolved
+    publishHydrated(true)
     const projectId = options.projectId()
 
     if (projectId && resolved !== previous) {
@@ -140,13 +169,13 @@ export function useProjectPersistedState<TValue>(
   }
 
   const commitValue = (value: TValue) => {
-    syncHydratedValue()
+    publishSwitch()
     const projectId = options.projectId()
 
     if (!projectId) return
     valueRevision += 1
-    setAsyncHydrated(true)
-    setCurrentValue(() => value)
+    publishHydrated(true)
+    publishValue(value)
     persistValue(projectId, value)
   }
 
@@ -161,7 +190,7 @@ export function useProjectPersistedState<TValue>(
 
   return {
     value,
-    isHydrated: asyncHydrated,
+    isHydrated,
     setValue: setPersistedValue,
     setValueSilently: applyValue,
     commitValue,

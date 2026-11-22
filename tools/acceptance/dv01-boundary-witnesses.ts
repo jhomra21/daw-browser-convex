@@ -6,7 +6,7 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import path from "node:path"
 import "fake-indexeddb/auto"
-import { batch, createComputed, createRoot, createSignal } from "solid-js"
+import { createRoot, createSignal, createRenderEffect } from "solid-js"
 import { createPersistedEffectState } from "../../src/components/timeline/create-persisted-effect-state"
 import { createParameterGestureOwner, ParameterGestureHolder } from "../../src/components/timeline/parameter-gesture-owner"
 import { effectAdmission, parameterSaveResult, type ParameterSaveResult } from "../../src/components/timeline/effect-publication-result"
@@ -1037,7 +1037,7 @@ const persistedProbe = (options: {
   const [row, publishRow] = createSignal<number | undefined>(0)
   const [through, setThrough] = createSignal(0)
   let observedThrough = 5
-  const setRow = (value: number | undefined, stamp = ++observedThrough) => batch(() => { setThrough(stamp); publishRow(() => value) })
+  const setRow = (value: number | undefined, stamp = ++observedThrough) => { setThrough(stamp); publishRow(() => value) }
   const applied: number[] = [], histories: string[] = [], announced: number[] = []
   const saves: { projectId: string | undefined; userId: string | undefined; value: number }[] = []
 
@@ -1201,9 +1201,7 @@ const runStep3B0Witnesses = async (): Promise<Step3Result[]> => {
         onError: () => {},
       })
 
-      createComputed(() => {
-        const value = owner.effective("track");
-
+      createRenderEffect(() => owner.effective("track"), (value) => {
         if (order > 0 && value !== allocatedValue) publicationBeforeAllocation = true;
       })
       const holder = new ParameterGestureHolder(), handle = owner.handle(() => "track")

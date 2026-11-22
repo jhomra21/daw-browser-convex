@@ -1,4 +1,4 @@
-import { createComputed, createMemo, createRoot, createSignal, untrack } from "solid-js"
+import { createMemo, createRoot, createSignal, untrack, createRenderEffect } from "solid-js"
 import { isServer } from "@solidjs/web"
 import { z } from "zod"
 import { replaceEqualDeep } from "@tanstack/solid-query"
@@ -318,12 +318,12 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
       // Timeline.tsx observes the effective projection before any compile or
       // dispatch reads the desired order; a scope change clears membership first.
       let observed = false
-      createComputed(() => {
+      createRenderEffect(() => {
         projection()
 
-        const fx = resolveDesiredPlaybackFx({ trackFx: instrument ? { parallel: { instances: [], instrument: synthInstrument } } : {}, masterFxInstances: [], masterVolume: 1 },
+        return resolveDesiredPlaybackFx({ trackFx: instrument ? { parallel: { instances: [], instrument: synthInstrument } } : {}, masterFxInstances: [], masterVolume: 1 },
           panel.snapshotExportProjection(), undefined)
-
+      }, (fx) => {
         untrack(() => {
           if (!observed) { processorEdits.reset(); observed = true }
 
@@ -338,7 +338,7 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
           timeSignature: meter(), automationEnvelopes: [], masterVolume: 1, automation: [], sidechains: [],
           processorStructure: processorEdits.structure(),
         })
-      }, undefined, { equals: (previous, next) => replaceEqualDeep(previous, next) === previous })
+      }, { equals: (previous, next) => replaceEqualDeep(previous, next) === previous })
 
       return { playback, panel, history, commitPath, committedGain }
     })

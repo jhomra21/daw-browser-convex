@@ -99,7 +99,7 @@ export const BUILTIN_INSTRUMENT_PRESETS = [
 }
 
 const fixture = `
-import { createComponent, createSignal } from 'solid-js'
+import { createComponent, createSignal, flush } from 'solid-js'
 import { render } from '@solidjs/web'
 import { useTimelineBrowserController } from '~/hooks/useTimelineBrowserController'
 import { TimelineLeftBrowser } from '~/components/timeline/browser/timeline-left-browser'
@@ -217,6 +217,7 @@ window.browserFixture = {
   },
   deviceRows: (tab, query) => {
     state.leftBrowser.setSearchQuery(tab, query)
+    flush()
     const controller = state.controller()
     const sections = tab === 'effects' ? controller.devices.effectSections() : controller.devices.instrumentSections()
     return sections.map((section) => ({ id: section.id, leafCount: section.leafCount, rows: flattenRows(section.rows) }))

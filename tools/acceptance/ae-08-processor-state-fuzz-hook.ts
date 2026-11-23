@@ -1,4 +1,4 @@
-import { createMemo, createRoot, createSignal, untrack, createRenderEffect } from "solid-js"
+import { createMemo, createRoot, createSignal, untrack, createRenderEffect, flush } from "solid-js"
 import { isServer } from "@solidjs/web"
 import { z } from "zod"
 import { replaceEqualDeep } from "@tanstack/solid-query"
@@ -513,6 +513,8 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
       else if (action.kind === "meter") setMeter({ numerator: action.value ?? 7, denominator: 8 })
       else if (action.kind === "long-loop") {
         declaredLoopEnd = 60; setLoopEnd(60); setLoopEnabled(true)
+        // Timeline.tsx reconciles the loop from an effect, which runs after the writes flush.
+        flush()
         watch("long-loop", playback.updateNativeLoop())
       }
       else if (action.kind === "cheap-ack") {
@@ -609,6 +611,7 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
         declaredLoopEnd = action.value ?? 1
 
         if (mutation !== "no-loop-end") setLoopEnd(declaredLoopEnd)
+        flush()
 
         if (playback.isNativePlaybackPrepared()) watch("loop-end", playback.updateNativeLoop())
       }
@@ -662,7 +665,7 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
         }, ...(mutation === "two-sources" && action.mode === "latest" ? [staleClip] : [])] } : track))
       } else if (action.kind === "pause") { h.domain++; ledger.resetConfirmed(); watch("pause", playback.handlePause()) }
       else if (action.kind === "seek") { h.domain++; ledger.resetConfirmed(); playback.setPlayhead(action.value ?? 0.25, untrack(tracks)) }
-      else if (action.kind === "loop") { h.domain++; ledger.resetConfirmed(); setLoopEnabled((value) => !value); watch("loop", playback.updateNativeLoop()) }
+      else if (action.kind === "loop") { h.domain++; ledger.resetConfirmed(); setLoopEnabled((value) => !value); flush(); watch("loop", playback.updateNativeLoop()) }
       else if (action.kind === "patch-mode") h.patchMode = action.mode ?? "normal"
       else if (action.kind === "loss") { h.lose(); h.endLeases() }
       else if (action.kind === "dispose") { panelDispose(); dispose(); disposed = true }

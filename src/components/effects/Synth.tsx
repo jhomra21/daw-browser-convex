@@ -85,8 +85,8 @@ function WaveformButtons(props: {
   onChange: (wave: SynthWave) => void
 }) {
   const buttonClass = (wave: SynthWave) => cn(
-    'flex h-6 w-7 select-none items-center justify-center border-l border-border first:border-l-0 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-300/70 disabled:cursor-not-allowed disabled:opacity-50',
-    props.value === wave ? 'bg-cyan-500/20 text-cyan-200' : 'bg-muted text-muted-foreground hover:bg-secondary',
+    'flex h-6 w-7 select-none items-center justify-center border-l border-border first:border-l-0 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary dark:focus-visible:ring-cyan-300/70 disabled:cursor-not-allowed disabled:opacity-50',
+    props.value === wave ? 'bg-cyan-500/20 text-cyan-800 dark:text-cyan-200' : 'bg-muted text-muted-foreground hover:bg-secondary',
   )
 
   return (
@@ -195,7 +195,7 @@ function NativeSelect(props: {
   return (
     <select
       class={cn(
-        'transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-300/70',
+        'transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary dark:focus-visible:ring-cyan-300/70',
         props.class,
       )}
       aria-label={props.ariaLabel}
@@ -420,8 +420,8 @@ export default function Synth(props: SynthProps) {
   )
 
   const tabClass = (selected: boolean) => cn(
-    'min-h-7 select-none border-r border-border px-2 py-1 text-2xs font-semibold uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-300/70 disabled:cursor-not-allowed disabled:opacity-50',
-    selected ? 'bg-cyan-500/15 text-cyan-200' : 'text-muted-foreground hover:bg-secondary',
+    'min-h-7 select-none border-r border-border px-2 py-1 text-2xs font-semibold uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary dark:focus-visible:ring-cyan-300/70 disabled:cursor-not-allowed disabled:opacity-50',
+    selected ? 'bg-cyan-500/15 text-cyan-800 dark:text-cyan-200' : 'text-muted-foreground hover:bg-secondary',
   )
 
   const filterEnvelopeDisabled = () => props.disabled || !props.params.filter.enabled || props.params.filter.envelopeAmountOctaves === 0
@@ -486,8 +486,8 @@ export default function Synth(props: SynthProps) {
 
 function toggleClass(enabled: boolean): string {
   return cn(
-    'min-h-6 select-none border border-border px-1.5 text-2xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-300/70 disabled:cursor-not-allowed disabled:opacity-50',
-    enabled ? 'bg-cyan-500/20 text-cyan-200' : 'bg-muted text-muted-foreground',
+    'min-h-6 select-none border border-border px-1.5 text-2xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary dark:focus-visible:ring-cyan-300/70 disabled:cursor-not-allowed disabled:opacity-50',
+    enabled ? 'bg-cyan-500/20 text-cyan-800 dark:text-cyan-200' : 'bg-muted text-foreground/70 dark:text-muted-foreground',
   )
 }
 

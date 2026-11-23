@@ -859,8 +859,8 @@ export default function Eq(props: EqProps) {
                   <span
                     class={cn(
                       'w-3 text-center text-[11px] font-semibold leading-none',
-                      selectedId() === band.id ? 'text-amber-300' : 'text-muted-foreground',
-                      !band.enabled && 'text-muted-foreground',
+                      selectedId() === band.id ? 'text-amber-700 dark:text-amber-300' : 'text-foreground/70 dark:text-muted-foreground',
+                      !band.enabled && 'text-foreground/70 dark:text-muted-foreground',
                     )}
                   >
                     {index() + 1}

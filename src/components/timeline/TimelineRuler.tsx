@@ -389,7 +389,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
           return (
             <div class="absolute bottom-0" style={{ left: `${positionPx()}px` }}>
               <div class="w-0.5 bg-timeline-grid-major" style={{ height: `${RULER_HEIGHT}px` }} />
-              <div class="absolute -top-5 text-2xs font-medium text-muted-foreground select-none">
+              <div class="absolute -top-5 text-2xs font-medium text-foreground/70 dark:text-muted-foreground select-none">
                 {label()}
               </div>
             </div>

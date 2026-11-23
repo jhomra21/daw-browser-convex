@@ -505,17 +505,20 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
           }}
         >
           <button
+            type="button"
             class={cn(
-              "flex w-4 shrink-0 items-center justify-center text-xs text-muted-foreground hover:text-foreground",
+              "flex w-4 shrink-0 items-center justify-center text-xs text-foreground/70 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
               track.collapsed ? "h-6" : "h-7",
             )}
             onClick={(event) => {
               event.stopPropagation();
               handleTrackCollapseClick(track, event);
             }}
+            aria-expanded={!track.collapsed ? "true" : "false"}
+            aria-label={`${track.collapsed ? "Expand" : "Collapse"} track ${trackNumber()}`}
             title={track.collapsed ? "Expand track" : "Collapse track"}
           >
-            {track.collapsed ? "▶" : "▼"}
+            <span aria-hidden="true">{track.collapsed ? "▶" : "▼"}</span>
           </button>
           <button
             class={cn(
@@ -559,7 +562,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
         <Show when={!track.collapsed}>
           <div class="flex min-w-0 flex-col gap-1">
             <Show when={!isGroupTrack}>
-              <div class="relative">
+              <div class="relative focus-within:outline focus-within:outline-2 focus-within:outline-offset-[-2px] focus-within:outline-primary">
                 <div
                   class={cn(
                     "flex h-7 w-full items-center justify-between border border-border bg-timeline-background px-2 text-xs text-foreground",
@@ -588,6 +591,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                     handleOutputTargetChange(track, event.currentTarget.value)
                   }
                   class="absolute inset-0 h-7 w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                  aria-label={`Track ${trackNumber()} output`}
                   title={recordingLocked() ? RECORDING_TARGET_LOCKED_REASON : "Track output"}
                 >
                   <option value="">Master</option>
@@ -603,7 +607,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
             </Show>
 
             <Show when={channelRole === "track"}>
-              <div class="relative">
+              <div class="relative focus-within:outline focus-within:outline-2 focus-within:outline-offset-[-2px] focus-within:outline-primary">
                 <div
                   class={cn(
                     "flex h-7 w-full items-center justify-between border border-border bg-timeline-background px-2 text-xs text-foreground",
@@ -636,6 +640,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                     handleSendTargetChange(track, event.currentTarget.value)
                   }
                   class="absolute inset-0 h-7 w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                  aria-label={`Track ${trackNumber()} send`}
                   title={
                     recordingLocked()
                       ? RECORDING_TARGET_LOCKED_REASON
@@ -679,7 +684,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
               class={cn(
                 track.collapsed ? "contents" : "grid gap-1",
               )}
-              style={{ "grid-template-columns": "3fr 1fr 1fr" }}
+              style={{ "grid-template-columns": "1fr 24px 24px" }}
             >
                 <button
                   class={cn(
@@ -754,7 +759,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                       ? "cursor-not-allowed border-red-900 bg-timeline-surface-muted text-red-900"
                       : isRecordArmed()
                         ? "border-red-400 bg-red-500 text-black shadow-inner"
-                        : "border-red-500 text-red-400 hover:bg-red-500/20",
+                        : "border-red-500 text-red-700 dark:text-red-400 hover:bg-red-500/20",
                   )}
                   type="button"
                   aria-pressed={isRecordArmed() ? "true" : "false"}
@@ -791,7 +796,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
               class={cn(
                 track.collapsed ? "contents" : "grid gap-1",
               )}
-              style={{ "grid-template-columns": "3fr 1fr 1fr" }}
+              style={{ "grid-template-columns": "1fr 24px 24px" }}
             >
               <div
                 class={cn(
@@ -855,7 +860,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                     "h-5 border-[0.5px] p-0 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
                     displayedAutomationVisible()
                       ? "border-red-400 bg-red-500/90 text-black"
-                      : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
+                      : "border-border bg-timeline-surface-muted text-red-700 dark:text-red-300 hover:bg-red-500/20",
                   )}
                   type="button"
                   aria-pressed={displayedAutomationVisible() ? "true" : "false"}
@@ -880,8 +885,8 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                   class={cn(
                     "h-5 border-[0.5px] p-0 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
                     canAddAutomationLane()
-                      ? "border-border bg-timeline-surface-muted text-red-200 hover:bg-red-500/20"
-                      : "cursor-not-allowed border-border bg-timeline-surface text-muted-foreground",
+                      ? "border-border bg-timeline-surface-muted text-red-700 dark:text-red-200 hover:bg-red-500/20"
+                      : "cursor-not-allowed border-border bg-timeline-surface text-foreground/70 dark:text-muted-foreground",
                   )}
                   type="button"
                   disabled={!canAddAutomationLane()}

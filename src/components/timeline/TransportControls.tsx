@@ -125,7 +125,7 @@ export const TransportBar: Component<{ transport: TransportBarController }> = (
             type="text"
             value={transport().tempoDraft()}
             size={Math.max(transport().tempoDraft().length + 1, 2)}
-            class="w-auto appearance-none border border-border bg-timeline-surface px-2 py-1 text-xs text-foreground focus:border-border focus:outline-none"
+            class="w-auto appearance-none border border-border bg-timeline-surface px-2 py-1 text-xs text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary"
             inputmode="numeric"
             pattern="[0-9]*"
             onFocus={() => transport().setTempoEditing(true)}
@@ -213,10 +213,14 @@ export const TransportBar: Component<{ transport: TransportBarController }> = (
         Follow
       </Button>
         <DropdownMenu>
-          <DropdownMenuTrigger>
-            <Button variant="ghost" size="sm" class={nativeMenuTriggerClass}>
-              {`1/${transport().gridDenominator}`}
-            </Button>
+          <DropdownMenuTrigger
+            as={Button}
+            variant="ghost"
+            size="sm"
+            class={nativeMenuTriggerClass}
+            aria-label="Grid size"
+          >
+            {`1/${transport().gridDenominator}`}
           </DropdownMenuTrigger>
           <DropdownMenuContent
             class="w-full border-border bg-timeline-surface"

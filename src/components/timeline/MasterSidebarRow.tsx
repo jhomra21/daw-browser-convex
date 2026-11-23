@@ -194,17 +194,20 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
       >
         <div class="flex min-w-0 items-center gap-1 overflow-hidden">
           <button
+            type="button"
             class={cn(
-              "flex w-4 shrink-0 items-center justify-center text-xs text-muted-foreground hover:text-foreground",
+              "flex w-4 shrink-0 items-center justify-center text-xs text-foreground/70 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
               master().collapsed ? "h-6" : "h-7",
             )}
             onClick={(event) => {
               event.stopPropagation();
               master().onToggleCollapsed();
             }}
+            aria-expanded={!master().collapsed ? "true" : "false"}
+            aria-label={`${master().collapsed ? "Expand" : "Collapse"} master`}
             title={master().collapsed ? "Expand master" : "Collapse master"}
           >
-            {master().collapsed ? "▶" : "▼"}
+            <span aria-hidden="true">{master().collapsed ? "▶" : "▼"}</span>
           </button>
           <button
             class={cn(
@@ -241,7 +244,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
                 "h-6 min-w-0 border text-xs font-semibold transition-colors",
                 props.automation.visible
                   ? "border-red-400 bg-red-500/90 text-black"
-                  : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
+                  : "border-border bg-timeline-surface-muted text-red-700 dark:text-red-300 hover:bg-red-500/20",
               )}
               onClick={(event) => {
                 event.stopPropagation();
@@ -262,7 +265,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
                     "h-7 border text-xs font-semibold transition-colors",
                     props.automation.visible
                       ? "border-red-400 bg-red-500/90 text-black"
-                      : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
+                      : "border-border bg-timeline-surface-muted text-red-700 dark:text-red-300 hover:bg-red-500/20",
                   )}
                   onClick={(event) => {
                     event.stopPropagation();

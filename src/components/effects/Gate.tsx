@@ -69,8 +69,8 @@ export default function Gate(props: GateProps) {
         </div>
         <div class="grid content-center gap-1">
           <div class="border border-border bg-background/80 px-1.5 py-1">
-            <div class="text-3xs uppercase leading-none text-muted-foreground">Gain reduction</div>
-            <div class="font-mono text-2xs leading-tight text-yellow-300">{formatDb(-gainReductionDb())}</div>
+            <div class="text-2xs uppercase leading-none text-muted-foreground">Gain reduction</div>
+            <div class="font-mono text-2xs leading-tight text-yellow-700 dark:text-yellow-300">{formatDb(-gainReductionDb())}</div>
           </div>
           <div class="grid grid-cols-2 gap-1">
             <DeviceToggleButton label="Gate" active={props.params.mode === 'gate'} onClick={() => props.onChange({ mode: 'gate' })} />

@@ -293,6 +293,8 @@ for (const start of ['warm', 'cold'] as const)
 const b6fRebuildRoute = async (ctx: B6fContext, action: 'pause' | 'stop' | 'locate', delay: number, gate?: 'compile' | 'transport') => {
   await ctx.playFrom(1)
   ctx.setTracks(b6fEditedTracks)
+  // The edit's effects run before the Timeline starts its rebuild, as the 1.x write ran them.
+  probeFlush()
   const held = gate === 'compile' ? ctx.compileGate : gate === 'transport' ? ctx.transportGate : undefined
   if (held) held.armed = true
   const rebuild = ctx.playback.restartTimelineSchedule(ctx.tracks(), { rebuildBackend: true, resumePlayback: true, playheadSec: 2,
@@ -304,6 +306,8 @@ const b6fRebuildRoute = async (ctx: B6fContext, action: 'pause' | 'stop' | 'loca
   if (action === 'pause') action_ = ctx.playback.handlePause()
   if (action === 'stop') action_ = ctx.playback.handleStop()
   if (action === 'locate') ctx.playback.setPlayhead(3, ctx.tracks())
+  // A 1.x read returned the playhead the hook had already written; Solid 2 shows it after the flush.
+  probeFlush()
   const playheadAtAction = ctx.playback.playheadSec()
   await ctx.settle()
   if (held) b6fRelease(held)
@@ -395,6 +399,8 @@ for (const kind of ['project-switch', 'generation-bump'] as const)
       await ctx.pausedAt(1)
       const mark = ctx.mark()
       ctx.setGeneration(2)
+      // Solid 2 applies writes at the next flush; the route's 1.x writes ran their effects one at a time.
+      probeFlush()
       if (kind === 'project-switch') ctx.setProjectId('project-b')
       await ctx.settle()
       ctx.setTracks(b6fEditedTracks)
@@ -433,7 +439,7 @@ for (const toggle of ['disable', 'enable'] as const)
   })
 
 // ---- B6f3 route probe (scratch, appended after the B6f probe; no repository write) ----
-import { batch as b6f3Batch } from 'solid-js'
+import { flush as probeFlush } from 'solid-js'
 
 // Records every worklet node the portable backend creates, so a route can fault the live one (C:1095-1105;
 // wasm-audio-worklet-backend.ts:397, :401-411). runB6fLive restores the global after the body.
@@ -550,10 +556,11 @@ for (const ne of [false, true]) {
         await live.pausedAt(1)
         const previous = live.liveSession()
         const mark = live.mark()
-        if (order === 'batched') b6f3Batch(() => { live.setGeneration(2); live.setProjectId('project-b') })
+        if (order === 'batched') { live.setGeneration(2); live.setProjectId('project-b'); probeFlush() }
         else {
           live.setGeneration(2)
-          if (order === 'sequential') live.setProjectId('project-b')
+          probeFlush()
+          if (order === 'sequential') { live.setProjectId('project-b'); probeFlush() }
         }
         await live.until(() => previous?.closed === true)
         await b6f3Expect(live, mark, b6f3Live(order === 'generation-only' ? 1 : 0, 'none'), `project ${order}`)

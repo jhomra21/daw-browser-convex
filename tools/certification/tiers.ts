@@ -60,14 +60,16 @@ export const retiredCampaigns = new Set(["controller-b6", "hook-b6", "controller
 // Mutant arms recorded as expected survivors (exit 0, nothing failing, no oracle or compile error, no rejection record) verify
 // nothing: they pin a known gap, listed in test-debt.md. A MISMATCH row that carries a ruling (169) keeps its recorded arms; the
 // others are governed by PARENT-RULING-TEST-TIERS-ACCEPTED.md: the surviving arms retire, and rows 418 and 419, where no arm
-// discriminates (the mutant fails what its control fails), retire whole. A control only exists to qualify its mutants, so one
-// whose every dependant retired goes with them.
-const noWitnessRows = new Set(["rc2:418", "rc2:419"])
+// discriminates (the mutant fails what its control fails), retire whole. Row 432 and its diagnostic pair with 419 retire under
+// acceptance-reports/untangle-2/RULING-SOLID-2-BLESS.md: Solid 2 applies the mutant's write with the one that undoes it. A control
+// only exists to qualify its mutants, so one whose every dependant retired goes with them.
+const noWitnessRows = new Set(["rc2:418", "rc2:419", "rc2:432"])
+const noWitnessArms = new Set(["diag:419:419-plus-432"])
 
 export const retiredArms = (exp: Expectations) => {
   const ruled = new Set(exp.mutations.rows.filter((row) => row.disposition === "MISMATCH" && row.ruling !== null).map((row) => `${row.family}:${row.row}`))
 
-  const retired = new Set(exp.mutations.arms.filter((arm) => noWitnessRows.has(`${arm.family}:${arm.row}`) || arm.role === "mutant" && !ruled.has(`${arm.family}:${arm.row}`) && arm.expect.exit === 0
+  const retired = new Set(exp.mutations.arms.filter((arm) => noWitnessRows.has(`${arm.family}:${arm.row}`) || noWitnessArms.has(arm.id) || arm.role === "mutant" && !ruled.has(`${arm.family}:${arm.row}`) && arm.expect.exit === 0
     && (arm.expect.fails ?? []).length === 0 && (arm.expect.fuzz?.failures.length ?? 0) === 0 && (arm.expect.fuzz?.status ?? "pass") === "pass"
     && arm.expect.oracle === null && (arm.expect.tsErrors ?? []).length === 0 && (arm.expect.rejection ?? []).length === 0).map((arm) => arm.id))
 

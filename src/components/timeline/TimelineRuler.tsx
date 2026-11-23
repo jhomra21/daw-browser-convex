@@ -1,6 +1,6 @@
 import { createMemo, createSignal, type Component, For, Show, onCleanup } from 'solid-js'
 import { ARRANGEMENT_OVERVIEW_HEIGHT, RULER_HEIGHT, gridStepSec, quantizeSecToGrid } from '~/lib/timeline-utils'
-import { barIndexAtTime, formatBarsBeatsSixteenths } from '~/lib/musical-time-format'
+import { formatBarsBeatsSixteenths } from '~/lib/musical-time-format'
 import { nudgeLoopRegion, resizeLoopRegionEnd, stepPlayheadSec } from '~/lib/timeline-keyboard-navigation'
 import { musicalBarLabelAtTime, selectTimelineGridIntervals } from '~/lib/timeline-view'
 import { timelineGridPhasePx } from '~/lib/timeline-grid-phase'
@@ -421,7 +421,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
         <div
           role="group"
           tabindex={0}
-          aria-label={`Loop region, bars ${barIndexAtTime(props.loopStartSec ?? 0, props.bpm) + 1} to ${barIndexAtTime(props.loopEndSec ?? 0, props.bpm) + 1}`}
+          aria-label={`Loop region, ${formatBarsBeatsSixteenths(props.loopStartSec ?? 0, props.bpm)} to ${formatBarsBeatsSixteenths(props.loopEndSec ?? 0, props.bpm)}`}
           class="absolute top-0 bottom-0 bg-green-400/10 border-y border-green-400/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary"
           style={{ left: `${loopStartPx()}px`, width: `${loopWidthPx()}px` }}
           onKeyDown={onLoopKeyDown}

@@ -23047,11 +23047,11 @@
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
        "from": "    const token = nativeLifecycleToken\n    void pendingNativeDispose",
-       "to": "    const token = nativeLifecycleToken\n    const playhead = untrack(playheadSec)\n    void pendingNativeDispose"
+       "to": "    const token = nativeLifecycleToken\n    const playhead = lastPublishedPlayheadSec\n    void pendingNativeDispose"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        return nativePlayback.ensureLivePreview(untrack(playheadSec)).then((result) => {",
+       "from": "        return nativePlayback.ensureLivePreview(lastPublishedPlayheadSec).then((result) => {",
        "to": "        return nativePlayback.ensureLivePreview(playhead).then((result) => {"
       }
      ],
@@ -23172,11 +23172,11 @@
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
        "from": "    const token = nativeLifecycleToken\n    void pendingNativeDispose",
-       "to": "    const token = nativeLifecycleToken\n    const playhead = untrack(playheadSec)\n    void pendingNativeDispose"
+       "to": "    const token = nativeLifecycleToken\n    const playhead = lastPublishedPlayheadSec\n    void pendingNativeDispose"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        return nativePlayback.ensureLivePreview(untrack(playheadSec)).then((result) => {",
+       "from": "        return nativePlayback.ensureLivePreview(lastPublishedPlayheadSec).then((result) => {",
        "to": "        return nativePlayback.ensureLivePreview(playhead).then((result) => {"
       }
      ],
@@ -24895,7 +24895,7 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
        "to": ""
       }
      ],
@@ -25013,7 +25013,7 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
        "to": ""
       }
      ],
@@ -28382,8 +28382,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
-       "to": "    if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
+       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n",
+       "to": "    if (await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n"
       }
      ],
      "bounded": false,
@@ -32693,8 +32693,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
-       "to": "        if (backend === 'native' && seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n"
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
+       "to": "        if (backend === 'native' && seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n"
       }
      ]
     },
@@ -32756,8 +32756,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
-       "to": "        if (backend === 'native' && seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n"
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
+       "to": "        if (backend === 'native' && seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n"
       }
      ]
     },
@@ -32815,8 +32815,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
-       "to": "        if (backend === 'native' && seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n"
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
+       "to": "        if (backend === 'native' && seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n"
       }
      ]
     },
@@ -33045,8 +33045,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
-       "to": "        if (backend === 'portable-browser' && seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n"
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
+       "to": "        if (backend === 'portable-browser' && seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n"
       }
      ]
     },
@@ -33106,8 +33106,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
-       "to": "        if (backend === 'portable-browser' && seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n"
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
+       "to": "        if (backend === 'portable-browser' && seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n"
       }
      ]
     },
@@ -33167,8 +33167,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
-       "to": "        if (backend === 'portable-browser' && seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n"
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
+       "to": "        if (backend === 'portable-browser' && seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n"
       }
      ]
     },
@@ -36594,7 +36594,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "    // A pending ensurePrepared answers a newer locate with the older position: seek again.\n    if (untrack(playheadSec) !== sec) return ensureLivePortableSession()\n",
+       "from": "    // A pending ensurePrepared answers a newer locate with the older position: seek again.\n    if (lastPublishedPlayheadSec !== sec) return ensureLivePortableSession()\n",
        "to": ""
       }
      ]
@@ -36659,7 +36659,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "    // A pending ensurePrepared answers a newer locate with the older position: seek again.\n    if (untrack(playheadSec) !== sec) return ensureLivePortableSession()\n",
+       "from": "    // A pending ensurePrepared answers a newer locate with the older position: seek again.\n    if (lastPublishedPlayheadSec !== sec) return ensureLivePortableSession()\n",
        "to": ""
       }
      ]
@@ -36718,7 +36718,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "    // A pending ensurePrepared answers a newer locate with the older position: seek again.\n    if (untrack(playheadSec) !== sec) return ensureLivePortableSession()\n",
+       "from": "    // A pending ensurePrepared answers a newer locate with the older position: seek again.\n    if (lastPublishedPlayheadSec !== sec) return ensureLivePortableSession()\n",
        "to": ""
       }
      ]
@@ -56231,11 +56231,11 @@
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
        "from": "    const token = nativeLifecycleToken\n    void pendingNativeDispose",
-       "to": "    const token = nativeLifecycleToken\n    const playhead = untrack(playheadSec)\n    void pendingNativeDispose"
+       "to": "    const token = nativeLifecycleToken\n    const playhead = lastPublishedPlayheadSec\n    void pendingNativeDispose"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        return nativePlayback.ensureLivePreview(untrack(playheadSec)).then((result) => {",
+       "from": "        return nativePlayback.ensureLivePreview(lastPublishedPlayheadSec).then((result) => {",
        "to": "        return nativePlayback.ensureLivePreview(playhead).then((result) => {"
       }
      ],
@@ -56781,7 +56781,7 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
        "to": ""
       }
      ],
@@ -57987,8 +57987,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
-       "to": "    if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
+       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n",
+       "to": "    if (await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n"
       }
      ],
      "bounded": false,
@@ -60207,11 +60207,11 @@
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
        "from": "    const token = nativeLifecycleToken\n    void pendingNativeDispose",
-       "to": "    const token = nativeLifecycleToken\n    const playhead = untrack(playheadSec)\n    void pendingNativeDispose"
+       "to": "    const token = nativeLifecycleToken\n    const playhead = lastPublishedPlayheadSec\n    void pendingNativeDispose"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        return nativePlayback.ensureLivePreview(untrack(playheadSec)).then((result) => {",
+       "from": "        return nativePlayback.ensureLivePreview(lastPublishedPlayheadSec).then((result) => {",
        "to": "        return nativePlayback.ensureLivePreview(playhead).then((result) => {"
       }
      ],
@@ -60757,7 +60757,7 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
        "to": ""
       }
      ],
@@ -61963,8 +61963,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
-       "to": "    if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
+       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n",
+       "to": "    if (await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n"
       }
      ],
      "bounded": false,
@@ -62979,8 +62979,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
-       "to": "    if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
+       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n",
+       "to": "    if (await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n"
       }
      ],
      "bounded": false,
@@ -64326,8 +64326,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
-       "to": "    if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
+       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n",
+       "to": "    if (await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n"
       }
      ],
      "bounded": false,

@@ -41,6 +41,11 @@ if (!/^[\w-]+$/.test(name) || (blessing ? reverts.length > 0 || args.includes("-
 
 mkdirSync(out, { recursive: true })
 
+// A rebase is never overwritten. Checked here as well as before writing, so a name already taken refuses before the run, not after it.
+const file = path.join(rebasesDir, `${name}.json`)
+
+if (existsSync(file)) fail(`${file} exists; a rebase is never overwritten`)
+
 const allowRise = args.flatMap((value, index) => args[index - 1] === "--allow-rise" ? [value] : [])
 
 // `--allow-rejection <fixture>:<seed>:<class>`; the class holds no colon, so the first two colons split it.
@@ -286,8 +291,6 @@ const rebase: Rebase = {
 }
 
 mkdirSync(rebasesDir, { recursive: true })
-
-const file = path.join(rebasesDir, `${name}.json`)
 
 if (existsSync(file)) fail(`${file} exists; a rebase is never overwritten`)
 

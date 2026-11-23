@@ -1,4 +1,4 @@
-import { createEffect, createSignal, flush, onCleanup, untrack, createTrackedEffect } from 'solid-js'
+import { createEffect, createSignal, onCleanup, untrack, createTrackedEffect } from 'solid-js'
 
 import { LIVE_SCHEDULE_HORIZON_SEC, type AudioEngine, type SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -1249,17 +1249,8 @@ export function useTimelinePlayback(
     }
   }
 
-  // An imperative caller sets the loop and asks for it to reach native in the same turn, but a setter applies at the next flush.
-  // flush(fn) drains pending writes, so the read after it is the loop the caller just wrote. Reading the old one would make
-  // the update a no-op against native.
-  const settledLoopParams = () => {
-    flush(() => undefined)
-
-    return getLoopParams()
-  }
-
   const updateNativeLoop = (
-    loop: Pick<ReturnType<typeof getLoopParams>, "enabled" | "start" | "end" | "isActive"> = settledLoopParams(),
+    loop: Pick<ReturnType<typeof getLoopParams>, "enabled" | "start" | "end" | "isActive"> = getLoopParams(),
   ) => nativePlayback.updateLoop({
     loopEnabled: loop.isActive,
     loopStartSec: loop.start,

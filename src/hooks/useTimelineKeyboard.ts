@@ -1,6 +1,7 @@
 import { onSettled, onCleanup, type Accessor } from "solid-js";
 
 import {
+  isArrangementKeyboardTarget,
   isLocalTimelineKeyboardTarget,
   keyboardTargetOwner,
 } from "~/lib/keyboard-event-target";
@@ -23,6 +24,11 @@ type KeyboardHandlers = {
   onAddInstrumentTrack: () => void;
   onOpenExport: () => void;
   onToggleFollow: () => void;
+  onToggleLoop: () => void;
+  onLocateStart: () => void;
+  // The clip actions return false when no clip is selected, leaving the key to its default.
+  onNudgeClips: (direction: -1 | 1) => boolean;
+  onNavigateClips: (axis: "time" | "track", direction: -1 | 1) => boolean;
   executeExtensionShortcut: (
     chord: ShortcutChord,
     context: ShortcutResolutionContext,
@@ -62,6 +68,12 @@ const keyIs = (e: TimelineKeyboardEvent, letter: string) => e.key === letter || 
 const mod = (e: TimelineKeyboardEvent) => e.ctrlKey || e.metaKey;
 const bareShift = (e: TimelineKeyboardEvent) => !e.ctrlKey && !e.metaKey && e.shiftKey;
 
+const arrowDirection = (e: TimelineKeyboardEvent) => {
+  if (e.key === "ArrowLeft" || e.key === "ArrowUp") return -1;
+
+  return e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : undefined;
+};
+
 const consume = (e: TimelineKeyboardEvent) => {
   e.preventDefault();
   e.stopPropagation();
@@ -79,6 +91,45 @@ const timelineShortcuts: readonly TimelineShortcut[] = [
       if (e.altKey && isMacDesktop()) return;
       consume(e);
       handlers.onToggleFollow();
+    },
+  },
+  {
+    id: "toggle-loop",
+    matches: (e) => mod(e) && !e.altKey && !e.shiftKey && keyIs(e, "l"),
+    run: ({ e, handlers, menuOwnsCommandKey }) => {
+      if (menuOwnsCommandKey) return;
+      consume(e);
+      handlers.onToggleLoop();
+    },
+  },
+  {
+    id: "locate-start",
+    matches: (e) => e.key === "Home" && !mod(e) && !e.altKey && !e.shiftKey,
+    run: ({ e, path, handlers }) => {
+      if (!isArrangementKeyboardTarget(path)) return;
+      consume(e);
+      handlers.onLocateStart();
+    },
+  },
+  {
+    id: "nudge-clips",
+    matches: (e) => (e.key === "ArrowLeft" || e.key === "ArrowRight") && !mod(e) && !e.altKey && !e.shiftKey,
+    run: ({ e, path, handlers }) => {
+      const direction = arrowDirection(e);
+
+      if (direction && isArrangementKeyboardTarget(path) && handlers.onNudgeClips(direction)) consume(e);
+    },
+  },
+  {
+    id: "navigate-clips",
+    matches: (e) => e.altKey && !mod(e) && !e.shiftKey && arrowDirection(e) !== undefined,
+    run: ({ e, path, handlers }) => {
+      const direction = arrowDirection(e);
+
+      if (!direction || !isArrangementKeyboardTarget(path)) return;
+      const axis = e.key === "ArrowLeft" || e.key === "ArrowRight" ? "time" : "track";
+
+      if (handlers.onNavigateClips(axis, direction)) consume(e);
     },
   },
   {

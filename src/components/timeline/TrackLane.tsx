@@ -20,6 +20,7 @@ type TrackLaneProps = {
   layout: Pick<TimelineTrackLayoutRow, 'topPx' | 'heightPx' | 'clipLaneHeightPx' | 'automationHeightPx'>
   groupClipOverview: GroupClipOverviewSegment[]
   selectedClipIds: Set<string>
+  clipTabStopId: string | undefined
   rangeSelection: TimelineRangeSelection | null
   onClipPointerDown: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
   onClipPointerUp: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
@@ -213,7 +214,9 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
             <ClipComponent
               clip={clip}
               trackId={props.track.id}
+              trackName={props.track.name}
               isSelected={props.selectedClipIds.has(clip.id)}
+              isTabStop={props.clipTabStopId === clip.id}
               rangeOverlap={clipRangeOverlap(clip, rangeForLane())}
               onPointerDown={props.onClipPointerDown}
               onPointerUp={props.onClipPointerUp}

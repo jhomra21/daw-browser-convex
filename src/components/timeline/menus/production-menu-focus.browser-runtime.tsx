@@ -136,6 +136,10 @@ const dispose = render(() => {
     onAddInstrumentTrack: record("timeline:add-instrument-track"),
     onOpenExport: record("timeline:export"),
     onToggleFollow: record("timeline:follow"),
+    onToggleLoop: record("timeline:loop"),
+    onLocateStart: record("timeline:locate-start"),
+    onNudgeClips: () => false,
+    onNavigateClips: () => false,
     executeExtensionShortcut: () => { calls.push("timeline:extension");
 
  return true; },

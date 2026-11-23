@@ -259,7 +259,7 @@ export const createApplicationMenuTemplate = (
       commandItem("open-midi-instruments-browser", sendCommand),
       separator(),
       { ...commandItem("toggle-metronome", sendCommand), type: "checkbox" },
-      { ...commandItem("toggle-loop", sendCommand), type: "checkbox" },
+      { ...commandItem("toggle-loop", sendCommand), type: "checkbox", ...menuShortcut("CmdOrCtrl+L", { macOwnsKey: true }) },
       { ...commandItem("toggle-grid", sendCommand), type: "checkbox" },
       {
         ...commandItem("toggle-follow", sendCommand),

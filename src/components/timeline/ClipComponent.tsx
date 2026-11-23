@@ -16,6 +16,7 @@ import {
   measurePerformanceBenchmark,
 } from "~/lib/performance-benchmark-telemetry";
 import { createClipVisualColors, resolveClipColor } from "~/lib/clip-color";
+import { barIndexAtTime } from "~/lib/musical-time-format";
 import { isEventFromDomDescendant } from "~/lib/pointer-event-target";
 import { LANE_HEIGHT } from "~/lib/timeline-utils";
 import { getTimelineClipViewportSlice } from "~/lib/timeline-viewport-geometry";
@@ -51,7 +52,10 @@ export type ClipContextMenuActions = {
 type ClipComponentProps = {
   clip: RuntimeClip;
   trackId: Track["id"];
+  trackName: string;
   isSelected: boolean;
+  // Roving tab stop: exactly one clip in the arrangement is reachable with Tab.
+  isTabStop: boolean;
   onPointerDown: (
     trackId: Track["id"],
     clipId: string,
@@ -601,6 +605,20 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         height: `${LANE_HEIGHT - 1}px`,
         ...clipVisualColors(),
       }}
+      role="button"
+      aria-label={`${props.clip.name}, ${props.trackName}, bar ${barIndexAtTime(props.clip.startSec, props.bpm) + 1}`}
+      aria-pressed={props.isSelected ? "true" : "false"}
+      tabindex={props.isTabStop ? 0 : -1}
+      onFocus={(e) => {
+        // Keyboard focus selects like a plain click; pointer focus is already handled by the press.
+        if (!props.isSelected && e.currentTarget.matches(":focus-visible")) selectClipForMenu();
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" || e.target !== e.currentTarget || isModifiedClipPress(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        openFromDoubleTap();
+      }}
       onPointerDown={(e) => {
         if (!isEventFromDomDescendant(e)) return;
 
@@ -698,12 +716,15 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       <Show when={props.waveformVisible !== false}>
         <canvas
           ref={(el) => (canvasRef = el || undefined)}
+          aria-hidden="true"
           class="absolute inset-0 size-full pointer-events-none z-10"
           style={waveformCanvasStyle()}
         />
       </Show>
       <ClipFadeOverlay
         clip={fadeOverlayInput()}
+        clipName={props.clip.name}
+        clipSelected={props.isSelected}
         bpm={props.bpm}
         canEdit={() => props.canEditFades()}
         onCommit={(fades, baseline) => props.onCommitFades(props.clip.id, fades, baseline)}

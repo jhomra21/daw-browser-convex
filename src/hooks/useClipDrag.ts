@@ -25,6 +25,8 @@ import type { ClipBuffers } from '~/lib/clip-buffer-cache'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
+import { clampNudgeDeltaSec } from '~/lib/timeline-keyboard-navigation'
+import { gridStepSec } from '~/lib/timeline-utils'
 import type { TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 import type { Track, Clip, TrackId } from '@daw-browser/timeline-core/types'
 import type { HistoryEntry } from '~/lib/undo/types'
@@ -33,8 +35,12 @@ import type { TimelineSelectionController } from '~/lib/timeline-selection'
 
 type ClipDragHandlers = {
   onClipPointerDown: (trackId: Track['id'], clipId: string, event: PointerEvent) => void
+  // Moves the selected clips one grid step; false when there is no selection to move.
+  nudgeSelection: (direction: -1 | 1) => boolean
   isDragging: () => boolean
 }
+
+type ClipMove = { clipId: string; trackId: Track['id']; startSec: number }
 
 const isString = (cause: unknown): cause is string => typeof cause === 'string'
 
@@ -135,6 +141,12 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
 
   const PREVIEW_PREFIX = '__dup_preview:'
   const getScrollRef = () => getScrollElement()
+
+  const changedMoves = (moves: ClipMove[], previousPositions: Map<string, ClipMove>) => moves.filter(move => {
+    const previous = previousPositions.get(move.clipId)
+
+    return !previous || previous.trackId !== move.trackId || Math.abs(previous.startSec - move.startSec) > 1e-9
+  })
 
   const visiblePlacementTracks = () => {
     const tracks = placementTracks()
@@ -672,11 +684,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       return
     }
 
-    const plannedMoves = plannedPlacement.moves.filter(move => {
-      const previous = prePositions.get(move.clipId)
-
-      return !previous || previous.trackId !== move.trackId || Math.abs(previous.startSec - move.startSec) > 1e-9
-    })
+    const plannedMoves = changedMoves(plannedPlacement.moves, prePositions)
 
     // A plain selection click must not persist a move or rebuild playback.
     if (plannedMoves.length === 0) {
@@ -686,15 +694,11 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     }
 
     const previousPositions = new Map(prePositions)
-    const previousMoves = previousMovesFrom(plannedMoves, previousPositions)
     const selectionAfterCommit = plannedPlacement.selection
     const preserveCommittedSelection = plannedPlacement.selection.preserveClipIds ? { preserveClipIds: true } : undefined
-    const historyProjectId = projectId()
     const addedTrackIdForCommit = addedTrackDuringDrag
-    const trackSnapshotForHistory = finalTracks
-    const uid = userId()
 
-    if (!persistence.isLocalProject() && !uid) {
+    if (!persistence.isLocalProject() && !userId()) {
       resetDragState()
 
       return
@@ -709,6 +713,26 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     // The committed move now owns this track; teardown must not delete it.
     if (plannedMoves.some(move => move.trackId === addedTrackIdForCommit)) addedTrackDuringDrag = null
     resetDragState()
+    persistMoves({
+      plannedMoves,
+      previousPositions,
+      selectionAfterCommit,
+      trackSnapshotForHistory: finalTracks,
+      addedTrackId: addedTrackIdForCommit,
+      owner,
+    })
+  }
+
+  // Moves already applied to the projection: persist them as one history entry, rolling back if the write fails.
+  const persistMoves = (input: {
+    plannedMoves: ClipMove[]
+    previousPositions: Map<string, ClipMove>
+    selectionAfterCommit: { trackId: Track['id']; clipId: string; preserveClipIds?: boolean }
+    trackSnapshotForHistory: Track[]
+    addedTrackId: Track['id'] | null
+    owner: typeof gesture
+  }) => {
+    const previousMoves = previousMovesFrom(input.plannedMoves, input.previousPositions)
     let moveFailureNotified = false
 
     const notifyMoveFailure = () => {
@@ -718,16 +742,16 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     }
 
     void commitMovedClipDrag({
-      projectId: historyProjectId,
-      userId: uid,
-      plannedMoves,
+      projectId: projectId(),
+      userId: userId(),
+      plannedMoves: input.plannedMoves,
       previousMoves,
-      previousPositions,
-      selectionAfterCommit,
-      addedTrackId: addedTrackIdForCommit,
-      trackSnapshotForHistory,
+      previousPositions: input.previousPositions,
+      selectionAfterCommit: input.selectionAfterCommit,
+      addedTrackId: input.addedTrackId,
+      trackSnapshotForHistory: input.trackSnapshotForHistory,
       commitClipMoves,
-      cleanupUnusedAddedTrack: (trackId) => cleanupUnusedAddedTrack(trackId ?? null, owner),
+      cleanupUnusedAddedTrack: (trackId) => cleanupUnusedAddedTrack(trackId ?? null, input.owner),
       onCommitMoves: options.onCommitMoves,
       historyPush: options.historyPush,
       moveLocalClips: persistence.moveLocalClips,
@@ -749,16 +773,88 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       commitClipMoves(previousMoves)
       notifyMoveFailure()
 
-      if (addedTrackIdForCommit && plannedMoves.some((move) => move.trackId === addedTrackIdForCommit)) {
-        cleanupUnusedAddedTrack(addedTrackIdForCommit, owner)
+      if (input.addedTrackId && input.plannedMoves.some((move) => move.trackId === input.addedTrackId)) {
+        cleanupUnusedAddedTrack(input.addedTrackId, input.owner)
       }
     })
+  }
+
+  // Keyboard counterpart of a pointer drag-move: same placement rules, commit and history entry.
+  const nudgeSelection = (direction: -1 | 1) => {
+    const anchor = selection.selectedClip()
+
+    if (!anchor || !selection.selectedClipIds().has(anchor.clipId)) return false
+
+    // A pointer gesture owns the selection until it is released.
+    if (gesture) return true
+    const tracks = visiblePlacementTracks()
+    const lookup = createTimelineTrackIndex(tracks)
+    const clip = lookup.clipById.get(anchor.clipId)
+    const track = lookup.trackById.get(anchor.trackId)
+    const laneIdx = lookup.trackIndexById.get(anchor.trackId) ?? -1
+    const uid = userId()
+
+    if (!clip || !track || laneIdx < 0 || !canWriteClip(clip.id) || (canEditClip && !canEditClip(clip.id))) return true
+
+    if (track.lockedBy && track.lockedBy !== uid) return true
+
+    if (!persistence.isLocalProject() && !uid) return true
+
+    const dragStart = buildClipDragStart({
+      trackId: anchor.trackId,
+      clipId: anchor.clipId,
+      clip,
+      tracks,
+      lookup,
+      selectedClipIds: selection.selectedClipIds(),
+      canWriteClip,
+    })
+
+    const deltaSec = clampNudgeDeltaSec(
+      Array.from(dragStart.prePositions.values(), (move) => move.startSec),
+      direction * gridStepSec(options.bpm(), options.gridDenominator()),
+    )
+
+    const placement = resolveNonDupClipDragPlacement({
+      tracks,
+      lookup,
+      draggingIds: dragStart.draggingIds,
+      multiDragging: dragStart.multiDragging,
+      addedTrackDuringDrag: null,
+      userId: uid,
+      desiredStart: clip.startSec + deltaSec,
+      laneIdx,
+      gridEnabled: options.gridEnabled(),
+      bpm: options.bpm(),
+      gridDenominator: options.gridDenominator(),
+    })
+
+    if (placement.status !== 'ready') return true
+    const plannedMoves = changedMoves(placement.moves, dragStart.prePositions)
+
+    if (plannedMoves.length === 0) return true
+    commitClipMoves(plannedMoves)
+    selection.selectPrimaryClip(
+      { trackId: placement.selection.trackId, clipId: placement.selection.clipId },
+      placement.selection.preserveClipIds ? { preserveClipIds: true } : undefined,
+    )
+    persistMoves({
+      plannedMoves,
+      previousPositions: dragStart.prePositions,
+      selectionAfterCommit: placement.selection,
+      trackSnapshotForHistory: tracks,
+      addedTrackId: null,
+      owner: gesture,
+    })
+
+    return true
   }
 
   onCleanup(resetDragState)
 
   return {
     onClipPointerDown,
+    nudgeSelection,
     isDragging: () => dragging,
   }
 }

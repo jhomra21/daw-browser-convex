@@ -10,6 +10,14 @@ export const isLocalTimelineKeyboardTarget = (target: EventTarget | null) => (
   && target.closest('[data-timeline-keyboard-local="true"]') !== null
 )
 
+// Arrow and Home keys drive the arrangement only from the page itself or a clip, never from a control that uses them.
+export const isArrangementKeyboardTarget = (path: readonly EventTarget[]) => {
+  const target = path[0]
+
+  return target instanceof Element
+    && (target.tagName === 'BODY' || target.tagName === 'HTML' || target.matches('[data-timeline-clip="1"]'))
+}
+
 // Kobalte dialog content is portalled and has role="dialog", without aria-modal.
 // Inspect event ancestry, never unrelated dialogs elsewhere in the document.
 const isDialogKeyboardTarget = (target: EventTarget | null) => (

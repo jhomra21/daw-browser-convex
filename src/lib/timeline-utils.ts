@@ -50,14 +50,19 @@ export function calcNonOverlapStart(clips: Clip[], excludeId: string | null, des
   return calcNonOverlappingStart(clips, excludeId, desiredStart, duration)
 }
 
+export function gridStepSec(bpm: number, denom: number): number {
+  const safeBpm = Math.max(1e-6, bpm || 0)
+
+  return (60 / safeBpm) * (4 / Math.max(1, denom || 4))
+}
+
 export function quantizeSecToGrid(
   sec: number,
   bpm: number,
   denom: number,
   mode: 'round' | 'floor' | 'ceil' = 'round',
 ): number {
-  const safeBpm = Math.max(1e-6, bpm || 0)
-  const step = (60 / safeBpm) * (4 / Math.max(1, denom || 4))
+  const step = gridStepSec(bpm, denom)
 
   if (!Number.isFinite(step) || step <= 0) return Math.max(0, sec)
   const idx = sec / step

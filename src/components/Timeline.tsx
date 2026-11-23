@@ -20,7 +20,7 @@ import { getAudioEngine } from "~/lib/audio-engine-singleton";
 import { TIMELINE_HEADER_HEIGHT, timelineDurationSec } from "~/lib/timeline-utils";
 import { useTimelineViewport } from "~/hooks/useTimelineViewport";
 import { useTimelineKeyboard } from "~/hooks/useTimelineKeyboard";
-import { createClipNavigator } from "~/lib/clip-keyboard-navigation";
+import { createClipNavigator, keepNudgedClipFocus } from "~/lib/clip-keyboard-navigation";
 import { useNavigate } from "@tanstack/solid-router";
 import { replaceEqualDeep } from "@tanstack/solid-query";
 import { useTimelineClipImport } from "~/hooks/useTimelineClipImport";
@@ -1773,7 +1773,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     onToggleFollow: toggleFollow,
     onToggleLoop: toggleLoopSafely,
     onLocateStart: () => locatePlayhead(0),
-    onNudgeClips: clipDrag.nudgeSelection,
+    onNudgeClips: keepNudgedClipFocus(clipDrag.nudgeSelection),
     onNavigateClips: navigateClips,
     executeExtensionShortcut: timelineExtensionHost.shortcuts.execute,
   });

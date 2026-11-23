@@ -8114,7 +8114,7 @@ const mountB6fLive = (world: B6fLiveWorld, nativeEnabled: boolean) => {
     rebuildBackend: true, resumePlayback: true, playheadSec: 2, owner: 'portable-browser', projectId: projectId(), projectGeneration: generation(),
   })
 
-  return { playback, tracks, setTracks, setProjectId, setGeneration, holds, until, summary, expectLive, playFrom, pausedAt,
+  return { sessionCount: () => world.sessions.length, playback, tracks, setTracks, setProjectId, setGeneration, holds, until, summary, expectLive, playFrom, pausedAt,
     timelineReschedule, resumingRebuild, mark: () => world.seq, liveSession: () => world.sessions.filter((session) => !session.closed).at(-1) }
 }
 
@@ -8288,12 +8288,16 @@ test('B6f a project switch leaves a live paused portable session of the new proj
     // The project route moves the generation, then the project id; the new project's tracks load once
     // the previous project's session is gone.
     live.setGeneration(2)
+    // The generation's effects settle before the id moves (the 1.x writes ran them synchronously).
+    flush()
     live.setProjectId('project-b')
     await live.until(() => previous?.closed === true)
     expect(previous?.closed).toBeTrue()
     live.setTracks(b6fLiveEditedTracks)
     await live.timelineReschedule()
     await live.expectLive(false, 0, mark, 'structure')
+    // The session kept at the Pause and the new project's: a paused re-run with no edit prepares nothing else.
+    expect(live.sessionCount()).toBe(2)
   }, nativeEnabled)
 })
 
@@ -8395,10 +8399,13 @@ test('B6f2 a project switch that moves the generation, then the project id, with
     const mark = live.mark()
     // useTimelineProjectRoute.ts setProjectId moves them one after the other; nothing re-runs the paused-preview effect.
     live.setGeneration(2)
+    // The generation's effects settle before the id moves (the 1.x writes ran them synchronously).
+    flush()
     live.setProjectId('project-b')
     await live.until(() => previous?.closed === true)
     expect(previous?.closed).toBeTrue()
     await live.expectLive(false, 0, mark, 'none')
+    expect(live.sessionCount()).toBe(2)
   }, nativeEnabled)
 })
 
@@ -9061,6 +9068,9 @@ const b6f5Cell = (state: B6f5State, kind: B6f5Kind, nativeEnabled: boolean) => r
 
   // A paused locate moves the kept session in place; an edit that lands with it reaches that session.
   await live.pausedAt(1)
+  // The Pause keeps its session: a paused re-run with no edit prepares nothing else, and disposes nothing a locate then needs.
+  await live.until(() => world.sessions.length !== 1)
+  expect(world.sessions.length).toBe(1)
   const mark = live.mark()
   live.locate(3)
   live.edit(kind)

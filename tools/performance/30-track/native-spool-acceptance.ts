@@ -469,12 +469,12 @@ const main = async () => {
         || loopSnapshot.project.loop.endSec !== loopEndSec) throw new Error("Supported project loop did not persist.")
 
       const loopButtonPressed = nested(await browserCommand(session, ["eval",
-        "JSON.stringify(document.querySelector('button[aria-label=\"Toggle loop region\"]')?.getAttribute('aria-pressed')==='true')"]))
+        "JSON.stringify(document.querySelector('button[aria-label=\"Loop region\"]')?.getAttribute('aria-pressed')==='true')"]))
 
-      if (loopButtonPressed !== true) await browserCommand(session, ["find", "role", "button", "click", "--name", "Toggle loop region"])
+      if (loopButtonPressed !== true) await browserCommand(session, ["find", "role", "button", "click", "--name", "Loop region"])
 
       const loopButtonReady = nested(await browserCommand(session, ["eval",
-        "JSON.stringify(document.querySelector('button[aria-label=\"Toggle loop region\"]')?.getAttribute('aria-pressed')==='true')"]))
+        "JSON.stringify(document.querySelector('button[aria-label=\"Loop region\"]')?.getAttribute('aria-pressed')==='true')"]))
 
       if (loopButtonReady !== true) throw new Error("Product loop transport control is not enabled.")
       result.plugin = { identity: "ValhallaSupermassive", enabled: true, instanceReady: true,
@@ -595,7 +595,7 @@ const main = async () => {
       if (performance.now() - playbackStartedAt > 15000) throw new Error("Plugin-active source playback exceeded its bounded start window.")
 
       const playbackActive = nested(await browserCommand(session, ["eval",
-        "JSON.stringify(!!document.querySelector('button[aria-label=\"Pause\"]')&&document.querySelector('button[aria-label=\"Toggle loop region\"]')?.getAttribute('aria-pressed')==='true')"]))
+        "JSON.stringify(!!document.querySelector('button[aria-label=\"Pause\"]')&&document.querySelector('button[aria-label=\"Loop region\"]')?.getAttribute('aria-pressed')==='true')"]))
 
       if (playbackActive !== true) throw new Error("Enabled-plugin stereo loop stopped before the mono take began.")
       result.plugin = { ...result.plugin, preCaptureWorker: {

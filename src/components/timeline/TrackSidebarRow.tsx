@@ -912,6 +912,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
               "track-meter-strip relative shrink-0",
               track.collapsed ? "h-6" : "self-stretch",
             )}
+            aria-hidden="true"
           >
             <div class="absolute inset-0 flex items-end justify-center gap-1">
               {(() => {

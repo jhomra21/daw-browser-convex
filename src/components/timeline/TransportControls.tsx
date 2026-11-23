@@ -167,7 +167,7 @@ export const TransportBar: Component<{ transport: TransportBarController }> = (
           size="icon"
           onClick={transport().onToggleMetronome}
           aria-pressed={transport().metronomeEnabled ? "true" : "false"}
-          aria-label="Toggle metronome"
+          aria-label="Metronome"
           class={centerIconButtonClass}
         >
           <Icon name="metronome" class="h-4 w-4" />
@@ -177,7 +177,7 @@ export const TransportBar: Component<{ transport: TransportBarController }> = (
           size="icon"
           onClick={transport().onToggleLoop}
           aria-pressed={transport().loopEnabled ? "true" : "false"}
-          aria-label="Toggle loop region"
+          aria-label="Loop region"
           class={cn(
             centerIconButtonClass,
             transport().loopEnabled && "text-green-400",
@@ -190,7 +190,7 @@ export const TransportBar: Component<{ transport: TransportBarController }> = (
           size="icon"
           onClick={transport().onToggleGrid}
           aria-pressed={transport().gridEnabled ? "true" : "false"}
-          aria-label="Toggle snap to grid"
+          aria-label="Snap to grid"
           class={cn(
             centerIconButtonClass,
             transport().gridEnabled && "text-green-400",
@@ -203,7 +203,7 @@ export const TransportBar: Component<{ transport: TransportBarController }> = (
         size="sm"
         onClick={transport().onToggleFollow}
         aria-pressed={transport().followEnabled ? "true" : "false"}
-        aria-label="Toggle Follow"
+        aria-label="Follow"
         title="Follow playback (Option+Shift+F on Mac, Ctrl+Shift+F on Windows)"
         class={cn(
           "h-7 px-2 text-xs text-muted-foreground hover:bg-timeline-surface-muted hover:text-foreground",

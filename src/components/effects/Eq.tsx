@@ -663,6 +663,15 @@ export default function Eq(props: EqProps) {
 
   const selectedQLabel = () => formatQ(selectedBand()?.q ?? 0)
 
+  const responseLabel = () => {
+    const band = selectedBand()
+
+    if (!band) return 'EQ frequency response, no band selected. Click to add a band.'
+    const gain = supportsGain(band.type) ? `, gain ${selectedGainLabel()}` : ''
+
+    return `EQ frequency response, selected band ${selectedBandState().index + 1} at ${selectedFrequencyLabel()}${gain}, Q ${selectedQLabel()}`
+  }
+
   const selectedBandAutomationRange = (property: 'frequencyHz' | 'gainDb' | 'q') => {
     const band = selectedBand()
 
@@ -782,6 +791,8 @@ export default function Eq(props: EqProps) {
         >
           <canvas
             ref={(el) => (canvasRef = el || undefined)}
+            role="img"
+            aria-label={responseLabel()}
             width={canvasSize().width}
             height={canvasSize().height}
             class={cn('absolute inset-0 block h-full w-full touch-none', props.enabled ? 'cursor-crosshair' : 'cursor-not-allowed opacity-60')}

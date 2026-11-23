@@ -28,6 +28,7 @@ const TimelineBottomPanelFooter: Component<TimelineBottomPanelFooterProps> = (pr
           size="sm"
           type="button"
           class={tabClass(props.activeTab === "effects")}
+          aria-pressed={props.activeTab === "effects" ? "true" : "false"}
           onClick={props.onEffectsTabClick}
         >
           Effects
@@ -37,6 +38,7 @@ const TimelineBottomPanelFooter: Component<TimelineBottomPanelFooterProps> = (pr
           size="sm"
           type="button"
           class={tabClass(props.activeTab === "clip")}
+          aria-pressed={props.activeTab === "clip" ? "true" : "false"}
           disabled={props.activeTab !== "clip" && !props.onClipTabClick}
           onClick={props.onClipTabClick}
         >

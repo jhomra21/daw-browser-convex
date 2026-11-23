@@ -226,6 +226,7 @@ const SampleWaveform: Component<{
       canvasRef = element
     }}
       class="h-16 w-full opacity-80"
+      role="img"
       aria-label={`${props.sample.name} waveform`}
     />
   );

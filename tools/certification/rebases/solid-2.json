@@ -1,0 +1,2209 @@
+{
+ "name": "solid-2",
+ "sequence": 116,
+ "createdAt": "2026-11-23T16:20:54.140Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "src/components/Timeline.test.ts",
+   "from": "3ace76f0b468af4c65cb695530a4e79e4b192074960387ff16aaefff94f3385f",
+   "to": "696ee6ade05492ec5cec9eb6c1912466501c73199ae8049c331393d431d3aa1d"
+  },
+  {
+   "file": "src/components/Timeline.tsx",
+   "from": "c25d7d8d37d084608423071b469b379e4433bca52393f3f61c5bef0cff1be0ee",
+   "to": "c34e9523ad66733773f80805dea3ddee549c0bc2c2ff562d5fb56eba6e68a26d"
+  },
+  {
+   "file": "src/components/effects/Sampler.tsx",
+   "from": "2572d8391dab1389f6ea2224270c0299700ae2f7350055068dc0204cba30476f",
+   "to": "068f7a3d306151b4c74c40c470f3266aeec7bd255fc03005f89f4afe3b660dd8"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-audio-effects-state.test.ts",
+   "from": "f3c83aeddff4c77f0d2414832c60871f0dfd7b4e7272bc9be76352e48b33741e",
+   "to": "0da64041beda5de695b159d1652f3359119aff52097923a45ebc744adc8e3708"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-audio-effects-state.ts",
+   "from": "ce1b33ce58d065ad0be0590dc12c98ce58a895f04cf408f4ae54ab801d016e02",
+   "to": "e597d99243fdf4e8564b01d2de17212619bb13d7823bcb2692740ea050607d76"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-controller.ts",
+   "from": "8506a3a20c2171015bb4a1837fadbffacae7f3b6acb6441c1d92188f217116c9",
+   "to": "978a49ecf05c163cdc05de1a87b6868361fc89179ea7592a9e1df87d3ef6f99d"
+  },
+  {
+   "file": "src/components/timeline/create-persisted-effect-state.test.ts",
+   "from": "188a1d6d71fc57661991f3bb6ca09b326522afed8226f0dde78aa7764f36d5d9",
+   "to": "4015e82cc121cb819afb990b2078c06ca996e0732fcb9184592f324682c5eead"
+  },
+  {
+   "file": "src/components/timeline/create-persisted-effect-state.ts",
+   "from": "3331f5f47be4e672820d8a08e6d9dd71147d382b00eab3c8186b74410d945b49",
+   "to": "200343a8ef20a412aabdef8c0e8c057cb9e96b0b42db9487e337448de800628d"
+  },
+  {
+   "file": "src/components/timeline/create-processor-edit-registry.ts",
+   "from": "42fae08a8e2b62759fc9a9a35fa95c352ad80f744ca9bee1bb7a8452ff16df5b",
+   "to": "0229c145500f6d6bda9c7b388a43447981ffddf64e6537e06fd40836041c22bc"
+  },
+  {
+   "file": "src/components/timeline/parameter-gesture-owner.ts",
+   "from": "6b6ee1ed625da949a06f55df690d7a50ca3f2cb6b81b47facf230e0d0abce049",
+   "to": "c1508853dec2cbcdd350b27ea5e50861e15acbe2a814f916c13bf140b46c5b48"
+  },
+  {
+   "file": "src/hooks/pointer-gesture-ownership.browser.test.ts",
+   "from": "6a30900bf4447887d657ae17034f91e6cb3a12dcc3cea5bc4d4a3c39175ad7cb",
+   "to": "0f21dd1b705357af71f098e18c98562c1d7c8c998c730a927a81bec01574cd60"
+  },
+  {
+   "file": "src/hooks/useEffectsPanelAudioSync.test.ts",
+   "from": "0447a7a1df2b7c19965e5c2040e747eee01d863afcd0e33c764564e06a56f8f8",
+   "to": "b59c7be4e86858c38c62ab84a4414f50c1423e279bb6e164dec46a4daa4e073d"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.test.ts",
+   "from": "f014517b6a8ed9ac33486935daeb16ad4f688ff2399616f86956505e6abfbbc3",
+   "to": "fec2942d3ef2cf9bc4f0a686ec4426bcb0fa864db2e9b87f94026c9c1de8658f"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.ts",
+   "from": "2ab76f7fc23e57fad08b6f6e4b31aa9619c27d6f47ee1bc138935edfac93338e",
+   "to": "f2c739f71501f706ac87571c12e0e6c4b8062693d90532d4ab883d42985d14ab"
+  },
+  {
+   "file": "src/hooks/useTimelineProjectionState.test.ts",
+   "from": "cd0ca0446b51a8e7270527a6c42bbe4e18732bb1db464ac51d3522520b3a6648",
+   "to": "b1f79c9e42930e9bbc5f19301641cda04a54a437c9e97dfcdf9941e1df9fbab3"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.test.ts",
+   "from": "3f0bdeb3be2b1d066df98f753b370261d645261519e09b8297040a7f11cfefc7",
+   "to": "e1b7e4650627992cee0e5aaab4df51e87d5bc2b539d4be004628d8a1559e029d"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.ts",
+   "from": "3ac152bcb3f26f34e9799f0f67c2026c2fe96dd5acc5a29f930ea8a8ef162053",
+   "to": "35e5ea10b7333540d9a0765b898a3fe6df8a995d112ea4a705b8b9b48add66ca"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-lifecycle.browser.test.ts",
+   "from": "9ce4c89b9bcd2c42c6e315e64c3f14227444746b5fd3cd640c018603194f0405",
+   "to": "7b74d9bbbb913da16896efaf98ba15786cdcf11729c040176d2a8d87aefa0ea9"
+  },
+  {
+   "file": "src/lib/instrument-buffer-sync.test.ts",
+   "from": "17aeed4e6a336d93272308fcf49f22f11efa48ca8ab6d00da153acaa337586ef",
+   "to": "f198b72e77121b0d7dba549ffcee1afcdd0846a4e28bb66f21cc8485733cd376"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook.ts",
+   "from": "906d40daeceb6ac1b1b5794616fc10489ee0d1ad55a26dca17a568de23b98a8a",
+   "to": "07da8fac0157b1287ebe8a2886968e671f4de723722d00d88d93b7593ccfbc6b"
+  },
+  {
+   "file": "tools/acceptance/b5c-playback-witness-support.ts",
+   "from": "66ac4947e85da7189372feb3714b812ffb84a3e82ac3af30a4873e1933620f10",
+   "to": "7a8bbae539ef9b815d86cd4c19a8f10cdca3d1275ee554ab289508bb1dcb2744"
+  },
+  {
+   "file": "tools/acceptance/device-control-cost.browser-runtime.tsx",
+   "from": "94458f86647d66188efa35b88abaf5e8cad9a80c0d76b17d00f7c9d71a543c06",
+   "to": "55ab790559fd0655281a2a294e24234e0491cd45fe922e7660f2c03a645147a7"
+  },
+  {
+   "file": "tools/acceptance/device-control-cost.browser.test.ts",
+   "from": "b0157aa0300671b73cc7951eade89667872e0737f83098969a74f467476e0808",
+   "to": "f52fb5a80e4d8c01ff5fc457e7a906c77cdb94cfde31a6a91fd91a90653fe389"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "campaigns",
+    "name=trace-hook-b",
+    "judge",
+    "logSha256"
+   ],
+   "old": "01eb80205d16beb604c7f3d1f04f7a9a6ab3d96df6e884bde8c714cbfc64e417",
+   "new": "d0d32d9bcdfc7719cbc6545ca9a1ae70ea0239e612220ee56c519860434cc273"
+  },
+  {
+   "path": [
+    "campaigns",
+    "name=trace-hook-b",
+    "judge",
+    "summarySha256"
+   ],
+   "old": "ba5146c2289dfaab9aab6099651b183c79b243c7926699b6a59d0eff26146fc6",
+   "new": "31ce8657b56b2b9a88cdadd7f21240ff73f63bc94ef81652989fab21fe901617"
+  },
+  {
+   "path": [
+    "campaigns",
+    "name=trace-hook-a",
+    "judge",
+    "logSha256"
+   ],
+   "old": "01eb80205d16beb604c7f3d1f04f7a9a6ab3d96df6e884bde8c714cbfc64e417",
+   "new": "d0d32d9bcdfc7719cbc6545ca9a1ae70ea0239e612220ee56c519860434cc273"
+  },
+  {
+   "path": [
+    "campaigns",
+    "name=trace-hook-a",
+    "judge",
+    "summarySha256"
+   ],
+   "old": "ba5146c2289dfaab9aab6099651b183c79b243c7926699b6a59d0eff26146fc6",
+   "new": "31ce8657b56b2b9a88cdadd7f21240ff73f63bc94ef81652989fab21fe901617"
+  },
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "804697678477eeaf8ef47340dd076d6ad2e7af8d929c94ac3332a832f12f3e51",
+   "new": "250a76f01105b76c179f97bd01afd87261cfb5fb89d7b87a885c4c3b84f3aa33"
+  },
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "360db82e5e16c12e7aa9819bdc6f42231fcee54846787d497ceff62189980796",
+   "new": "7bfc56aa353ba93899e9ba055533d9e4e9effebfec069c357769f6c0d5f740a6"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:455:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 278,
+   "new": 277
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:455:mutant:playback",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 3,
+   "new": 4
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:455:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f a paused locate moves the live paused portable session to the locate",
+    "B6f2 a paused locate whose re-prepare settles after a Play committed keeps the Play running",
+    "B6f2 two paused locates while the first seek is pending end at the second"
+   ],
+   "new": [
+    "B6f a paused locate moves the live paused portable session to the locate",
+    "B6f2 a paused locate whose re-prepare settles after a Play committed keeps the Play running",
+    "B6f2 two paused locates while the first seek is pending end at the second",
+    "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:471:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 265,
+   "new": 263
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:471:mutant:playback",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:471:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f a project switch leaves a live paused portable session of the new project at the start",
+    "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
+    "B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play resumes the same session",
+    "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
+    "B6f5 a resume after an adoption plays the newest state",
+    "C9b W-C9-clip-6 an audio clip move while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9c W-C9-asset-7 an audio clip asset swap while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9d W-C9-warp-8 a tempo or warp marker edit under a Stretch clip while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9e W-C9-track-11 a track added, reordered and deleted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9f W-C9-fx-5 an effect inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9g W-C9-inst-7 an instrument replaced or a processor parameter edited while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9h W-C9-fx-8 a limiter inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "UD7n W-S11d-E1 a VST3 insert while paused with only a browser session prepared rebuilds nothing and shows the limitation",
+    "W-FB-3 a structural edit while a session is kept paused reaches its adoption and rebuilds nothing"
+   ],
+   "new": [
+    "B6f a project switch leaves a live paused portable session of the new project at the start",
+    "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 481 a rebuild that lands on a pending warm Play resumes that Play; one that lands after its Stop does not",
+    "B6f5 D a structural edit during a warm Play keeps the Play and reaches its session",
+    "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
+    "B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play resumes the same session",
+    "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
+    "B6f5 a resume after an adoption plays the newest state",
+    "C9b W-C9-clip-6 an audio clip move while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9c W-C9-asset-7 an audio clip asset swap while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9d W-C9-warp-8 a tempo or warp marker edit under a Stretch clip while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9e W-C9-track-11 a track added, reordered and deleted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9f W-C9-fx-5 an effect inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9g W-C9-inst-7 an instrument replaced or a processor parameter edited while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9h W-C9-fx-8 a limiter inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "UD7n W-S11d-E1 a VST3 insert while paused with only a browser session prepared rebuilds nothing and shows the limitation",
+    "W-FB-3 a structural edit while a session is kept paused reaches its adoption and rebuilds nothing"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:483:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 280,
+   "new": 277
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:483:mutant:playback",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 1,
+   "new": 4
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:483:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from"
+   ],
+   "new": [
+    "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from",
+    "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
+    "C0G a clip waveform key or key order change while playing is neither adopted nor rebuilt"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 265,
+   "new": 263
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:playback",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f a project switch leaves a live paused portable session of the new project at the start",
+    "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
+    "B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play resumes the same session",
+    "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
+    "B6f5 a resume after an adoption plays the newest state",
+    "C9b W-C9-clip-6 an audio clip move while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9c W-C9-asset-7 an audio clip asset swap while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9d W-C9-warp-8 a tempo or warp marker edit under a Stretch clip while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9e W-C9-track-11 a track added, reordered and deleted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9f W-C9-fx-5 an effect inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9g W-C9-inst-7 an instrument replaced or a processor parameter edited while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9h W-C9-fx-8 a limiter inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "UD7n W-S11d-E1 a VST3 insert while paused with only a browser session prepared rebuilds nothing and shows the limitation",
+    "W-FB-3 a structural edit while a session is kept paused reaches its adoption and rebuilds nothing"
+   ],
+   "new": [
+    "B6f a project switch leaves a live paused portable session of the new project at the start",
+    "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 481 a rebuild that lands on a pending warm Play resumes that Play; one that lands after its Stop does not",
+    "B6f5 D a structural edit during a warm Play keeps the Play and reaches its session",
+    "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
+    "B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play resumes the same session",
+    "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
+    "B6f5 a resume after an adoption plays the newest state",
+    "C9b W-C9-clip-6 an audio clip move while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9c W-C9-asset-7 an audio clip asset swap while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9d W-C9-warp-8 a tempo or warp marker edit under a Stretch clip while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9e W-C9-track-11 a track added, reordered and deleted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9f W-C9-fx-5 an effect inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9g W-C9-inst-7 an instrument replaced or a processor parameter edited while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9h W-C9-fx-8 a limiter inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "UD7n W-S11d-E1 a VST3 insert while paused with only a browser session prepared rebuilds nothing and shows the limitation",
+    "W-FB-3 a structural edit while a session is kept paused reaches its adoption and rebuilds nothing"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 225,
+   "new": 224
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:mutant:playback",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 56,
+   "new": 57
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d2 a paused structural change requested while the pause is pending is not dropped",
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 A an edit the playing portable session cannot take live is adopted once at a seam, with no rebuild",
+    "B6f5 E5 a note and a tempo edit while playing are adopted at a seam without a dispose or a restart",
+    "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
+    "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+    "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
+    "B6f5 a resume after an adoption plays the newest state",
+    "B6f5 an edit back to the adopted state while the previous edit compiles leaves the session on that state",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
+    "B6f5c a failed take followed by the caller stop or cancel adopts each edit once",
+    "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
+    "B6f5c a structural edit during a portable take is adopted in place and the take stops or is cancelled afterwards",
+    "B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take",
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
+    "C0F Pause then Play after a staged live publication resumes warm through the hook",
+    "C9b W-C9-clip-6 an audio clip move while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9c W-C9-asset-7 an audio clip asset swap while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9d W-C9-warp-8 a tempo or warp marker edit under a Stretch clip while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9e W-C9-track-11 a track added, reordered and deleted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9f W-C9-fx-5 an effect inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9g W-C9-inst-7 an instrument replaced or a processor parameter edited while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9h W-C9-fx-8 a limiter inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "F20 W-F20b changing the loop end while playing is adopted at a seam and the schedule loops at the new end",
+    "F20 W-F20f toggling the loop on and off while playing is adopted without a dispose or a restart",
+    "STEP7B3 real paused structural edit during held publication",
+    "STEP7B3 real paused structural edit during held publication that replaces the preview",
+    "STEP7B3 real paused structural edit during held publication then queued start",
+    "STEP7B3 real paused structural edit during held publication then queued start that replaces the preview",
+    "W-FB-2 a refused adopting publish while playing keeps the session and a later adoption carries the edit",
+    "adopted snapshot add preserves the latest live intent",
+    "adopted snapshot automation-only preserves the latest live intent",
+    "adopted snapshot burst preserves the latest live intent",
+    "adopted snapshot burst-during-compile preserves the latest live intent",
+    "adopted snapshot capacity-release preserves the latest live intent",
+    "adopted snapshot compile-error preserves the latest live intent",
+    "adopted snapshot delete preserves the latest live intent",
+    "adopted snapshot duplicate preserves the latest live intent",
+    "adopted snapshot failure preserves the latest live intent",
+    "adopted snapshot inputs-during-compile preserves the latest live intent",
+    "adopted snapshot loop-adopted preserves the latest live intent",
+    "adopted snapshot loop-clip preserves the latest live intent",
+    "adopted snapshot loop-inflight preserves the latest live intent",
+    "adopted snapshot mixer-only preserves the latest live intent",
+    "adopted snapshot move-trim preserves the latest live intent",
+    "adopted snapshot pending-exhaustion preserves the latest live intent",
+    "adopted snapshot progress-retry preserves the latest live intent",
+    "adopted snapshot project preserves the latest live intent",
+    "adopted snapshot publish-error preserves the latest live intent",
+    "adopted snapshot rebase-exhaustion preserves the latest live intent",
+    "adopted snapshot rejection preserves the latest live intent",
+    "adopted snapshot seek preserves the latest live intent",
+    "adopted snapshot stale-compile preserves the latest live intent",
+    "adopted snapshot stop preserves the latest live intent",
+    "adopted snapshot tempo preserves the latest live intent",
+    "adopted snapshot time-signature preserves the latest live intent"
+   ],
+   "new": [
+    "B6d2 a paused structural change requested while the pause is pending is not dropped",
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 A an edit the playing portable session cannot take live is adopted once at a seam, with no rebuild",
+    "B6f5 E5 a note and a tempo edit while playing are adopted at a seam without a dispose or a restart",
+    "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
+    "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+    "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
+    "B6f5 a resume after an adoption plays the newest state",
+    "B6f5 an edit back to the adopted state while the previous edit compiles leaves the session on that state",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
+    "B6f5c a failed take followed by the caller stop or cancel adopts each edit once",
+    "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
+    "B6f5c a structural edit during a portable take is adopted in place and the take stops or is cancelled afterwards",
+    "B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take",
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
+    "C0F Pause then Play after a staged live publication resumes warm through the hook",
+    "C9b W-C9-clip-6 an audio clip move while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9c W-C9-asset-7 an audio clip asset swap while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9d W-C9-warp-8 a tempo or warp marker edit under a Stretch clip while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9e W-C9-track-11 a track added, reordered and deleted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9f W-C9-fx-5 an effect inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9g W-C9-inst-7 an instrument replaced or a processor parameter edited while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "C9h W-C9-fx-8 a limiter inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+    "F20 W-F20b changing the loop end while playing is adopted at a seam and the schedule loops at the new end",
+    "F20 W-F20f toggling the loop on and off while playing is adopted without a dispose or a restart",
+    "STEP7B3 real paused structural edit during held publication",
+    "STEP7B3 real paused structural edit during held publication that replaces the preview",
+    "STEP7B3 real paused structural edit during held publication then queued start",
+    "STEP7B3 real paused structural edit during held publication then queued start that replaces the preview",
+    "W-FB-2 a refused adopting publish while playing keeps the session and a later adoption carries the edit",
+    "adopted snapshot add preserves the latest live intent",
+    "adopted snapshot automation-only preserves the latest live intent",
+    "adopted snapshot burst preserves the latest live intent",
+    "adopted snapshot burst-during-compile preserves the latest live intent",
+    "adopted snapshot capacity-release preserves the latest live intent",
+    "adopted snapshot compile-error preserves the latest live intent",
+    "adopted snapshot delete preserves the latest live intent",
+    "adopted snapshot duplicate preserves the latest live intent",
+    "adopted snapshot failure preserves the latest live intent",
+    "adopted snapshot inputs-during-compile preserves the latest live intent",
+    "adopted snapshot loop-adopted preserves the latest live intent",
+    "adopted snapshot loop-clip preserves the latest live intent",
+    "adopted snapshot loop-inflight preserves the latest live intent",
+    "adopted snapshot loop-ui preserves the latest live intent",
+    "adopted snapshot mixer-only preserves the latest live intent",
+    "adopted snapshot move-trim preserves the latest live intent",
+    "adopted snapshot pending-exhaustion preserves the latest live intent",
+    "adopted snapshot progress-retry preserves the latest live intent",
+    "adopted snapshot project preserves the latest live intent",
+    "adopted snapshot publish-error preserves the latest live intent",
+    "adopted snapshot rebase-exhaustion preserves the latest live intent",
+    "adopted snapshot rejection preserves the latest live intent",
+    "adopted snapshot seek preserves the latest live intent",
+    "adopted snapshot stale-compile preserves the latest live intent",
+    "adopted snapshot stop preserves the latest live intent",
+    "adopted snapshot tempo preserves the latest live intent",
+    "adopted snapshot time-signature preserves the latest live intent"
+   ]
+  },
+  {
+   "path": [
+    "gates",
+    "name=dp",
+    "judge",
+    "files",
+    "results.json"
+   ],
+   "old": "edb0c0d0d0d532bcb998b6e09981854e84af2ec4b7aa502ed636be15a828f1be",
+   "new": "c3bd7a613884da48b288be378389e8fc595916633613dfaeed211656e51162ad"
+  },
+  {
+   "path": [
+    "gates",
+    "name=dp-repeat",
+    "judge",
+    "files",
+    "results.json"
+   ],
+   "old": "edb0c0d0d0d532bcb998b6e09981854e84af2ec4b7aa502ed636be15a828f1be",
+   "new": "c3bd7a613884da48b288be378389e8fc595916633613dfaeed211656e51162ad"
+  }
+ ],
+ "seedRecordChanges": [
+  {
+   "path": [
+    "hook",
+    "#101",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#126",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#139",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#144",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#146",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#149",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 26,
+   "new": 27
+  },
+  {
+   "path": [
+    "hook",
+    "#160",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#161",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#163",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#175",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#186",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#187",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#204",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#211",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#212",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#214",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#216",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 23
+  },
+  {
+   "path": [
+    "hook",
+    "#219",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#226",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#242",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#250",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#255",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#262",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#267",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 24,
+   "new": 26
+  },
+  {
+   "path": [
+    "hook",
+    "#274",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#276",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#278",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#284",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#291",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 23
+  },
+  {
+   "path": [
+    "hook",
+    "#292",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#297",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#299",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#302",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#306",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#310",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#314",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#318",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#318",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#321",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#324",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 23,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#326",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#328",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#329",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#332",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#344",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#345",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#346",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#349",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#349",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#363",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#388",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#398",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#21",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#25",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#34",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#38",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#48",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#50",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#50",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#57",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#62",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 24,
+   "new": 26
+  },
+  {
+   "path": [
+    "hook",
+    "#64",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#72",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#78",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#86",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#90",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#408",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#433",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#435",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#437",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#441",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#444",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#445",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#460",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#463",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#464",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#474",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#479",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#494",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 9,
+   "new": 10
+  },
+  {
+   "path": [
+    "hook",
+    "#498",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#508",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 23
+  },
+  {
+   "path": [
+    "hook",
+    "#509",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#518",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#520",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#542",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#542",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#560",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#566",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#574",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#577",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#579",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#582",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#585",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 10
+  },
+  {
+   "path": [
+    "hook",
+    "#592",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#595",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#596",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#599",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#601",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#614",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#616",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#637",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#647",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 24,
+   "new": 23
+  },
+  {
+   "path": [
+    "hook",
+    "#648",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#654",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#664",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 23,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#665",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#670",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#677",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#680",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#691",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#699",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#714",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#738",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#749",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#753",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#764",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#766",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#766",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 25,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#769",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#771",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#820",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 24,
+   "new": 23
+  },
+  {
+   "path": [
+    "hook",
+    "#834",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#835",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#844",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 24,
+   "new": 25
+  },
+  {
+   "path": [
+    "hook",
+    "#845",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#848",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#849",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#790",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#799",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#800",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#801",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#819",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#851",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 25,
+   "new": 24
+  },
+  {
+   "path": [
+    "hook",
+    "#852",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#859",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#861",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#880",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#888",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#891",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#893",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#906",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#910",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#911",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#915",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 23,
+   "new": 24
+  },
+  {
+   "path": [
+    "hook",
+    "#920",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#970",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#978",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#985",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#986",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#989",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 24,
+   "new": 23
+  },
+  {
+   "path": [
+    "hook",
+    "#996",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#941",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#942",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#951",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#957",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#960",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#968",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 15
+  }
+ ],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [
+   "hook:51:latency|cancelled|ending-transport-domain",
+   "hook:127:latency|cancelled|ending-transport-domain",
+   "hook:319:latency|cancelled|ending-transport-domain",
+   "hook:350:latency|cancelled|ending-transport-domain",
+   "hook:543:latency|cancelled|ending-transport-domain",
+   "hook:767:latency|cancelled|ending-transport-domain"
+  ],
+  "rejectionRuling": "acceptance-reports/ae-08-phase-5-2026-10-18/PARENT-RULING-SEED-274.md",
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full --allow-rejection hook:51:latency|cancelled|ending-transport-domain --allow-rejection hook:127:latency|cancelled|ending-transport-domain --allow-rejection hook:319:latency|cancelled|ending-transport-domain --allow-rejection hook:350:latency|cancelled|ending-transport-domain --allow-rejection hook:543:latency|cancelled|ending-transport-domain --allow-rejection hook:767:latency|cancelled|ending-transport-domain",
+  "provenance": {
+   "scope": [
+    "--full",
+    "--allow-rejection",
+    "hook:51:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:127:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:319:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:350:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:543:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:767:latency|cancelled|ending-transport-domain"
+   ],
+   "head": "f65475d09b1423a5eb1ae5bcabd218186d0bbf3c",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "97560f95d5c7e4519c55ddc698236d341326f5007c07ee38e75dde2edd71e714",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "97560f95d5c7e4519c55ddc698236d341326f5007c07ee38e75dde2edd71e714",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/s2-bless6/live",
+   "resultSha256": "fd5ef5081b4462f35988e6efafc2c3b0c96ca0d9308bdcb2373619918a180877",
+   "seconds": 1429.2399869170001,
+   "observations": 3081
+  },
+  "unreachedByOverlay": []
+ }
+}

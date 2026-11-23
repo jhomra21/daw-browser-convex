@@ -59,7 +59,7 @@ window.saveFixture = {
       surfaces.append(
         createComponent(TransportControls, {
           projectMenu,
-          playback: { isPlaying: false, get playheadSec() { return playhead() }, onPlay: noop, onPause: noop, onStop: noop },
+          playback: { isPlaying: false, get playheadSec() { return playhead() }, onLocate: noop, onPlay: noop, onPause: noop, onStop: noop },
           recording: { isRecording: false, onToggleRecord: noop },
           onAddAudio: noop, tracksMenu: {},
           timeline: {
@@ -87,8 +87,8 @@ window.saveFixture = {
   flush: async () => { try { await queue.flush() } catch {} },
   switchProject: (id) => setProjectId(id),
   setPlayhead: (sec) => setPlayheadSec(sec),
-  playheadLabel: () => [...document.querySelectorAll('span')]
-    .find((node) => node.previousElementSibling?.textContent === 'Playhead')?.textContent?.trim() ?? null,
+  playheadLabel: () => [...document.querySelectorAll('[role="spinbutton"][aria-label^="Arrangement position"]')]
+    .map((node) => node.textContent?.trim()).join('.') || null,
   labels: () => Array.from(document.querySelectorAll('[aria-label], [title]'))
     .map((node) => node.getAttribute('aria-label') ?? node.getAttribute('title'))
     .filter((label) => ['Saved locally on this device', 'Saving locally', 'Some changes could not be saved', 'Shared change rejected: Project was archived'].includes(label)),

@@ -2284,6 +2284,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       isPlaying: isPlaying(),
       isPlayPending: isPlayPending(),
       playheadSec: playheadSec(),
+      onLocate: locatePlayhead,
       onPlay: recordingTransport.play,
       onPause: handleTransportPause,
       onStop: handleTransportStop,

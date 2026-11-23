@@ -3,7 +3,7 @@
 // real device controls with DOM events. Nothing in src/ is modified: counters wrap existing injection points
 // (panel props, engine methods, buffer-sync methods) and browser prototypes (IDBObjectStore.put, AudioContext
 // node factories). requestAnimationFrame is replaced by a manual queue so frames are stepped explicitly.
-import { createRoot, createSignal } from "solid-js";
+import { createRoot, createSignal, flush } from "solid-js";
 import { render } from "@solidjs/web";
 import "~/index.css";
 import { ColorModeProvider } from "@kobalte/core/color-mode";
@@ -1484,7 +1484,12 @@ const measureGesture = async (measure: Measure) => {
   for (const [index, phase] of plan.phases.entries()) {
     const before = frameCounts();
 
-    for (const input of phase) input();
+    // A browser runs pending microtasks after each input event's listeners return, and Solid applies writes in a microtask.
+    for (const input of phase) {
+      input();
+      flush();
+    }
+
     await settle();
     stepFrame();
     await settle();

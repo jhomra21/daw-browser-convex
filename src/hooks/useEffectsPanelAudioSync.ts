@@ -346,9 +346,12 @@ export function useEffectsPanelAudioSync(
     const audioEngine = options.audioEngine();
     const usesLegacyAudioEngine = options.usesLegacyAudioEngine();
     const projectId = options.projectId();
+    // After a project switch the view still holds the previous project's rows until its owner publishes again.
+    const localView = projectId && isLocalId("project", projectId) ? localEffectsView.view() : undefined;
+    const currentView = localView?.projectId === projectId ? localView : undefined;
 
     const effects: SyncedEffectRow[] | undefined = projectId && isLocalId("project", projectId)
-      ? localEffectsView.view()?.rows
+      ? currentView?.rows
       : options.roomEffects();
 
     const tracks = options.tracks();
@@ -358,7 +361,7 @@ export function useEffectsPanelAudioSync(
       sidechainRoutes: effects !== undefined && projectId && usesLegacyAudioEngine ? options.sidechainRoutes() : [],
       remoteStatus: options.roomEffectsStatus(),
       remoteError: options.roomEffectsError(),
-      publicationId: projectId && isLocalId("project", projectId) ? localEffectsView.view()?.publicationId : undefined,
+      publicationId: currentView?.publicationId,
     };
   }, function reconcileEffectsRows({ audioEngine, usesLegacyAudioEngine, projectId, effects, tracks, sidechainRoutes, remoteStatus, remoteError, publicationId }) {
     const currentTrackIds = new Set(tracks.map((track) => track.id));

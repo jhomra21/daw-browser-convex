@@ -8219,6 +8219,7 @@ test('B6f a Pause or Stop during a resuming rebuild leaves a live paused portabl
   for (const [hold, action] of [['compile', 'pause'], ['transport', 'stop']] as const) await runB6fLive(async (live) => {
     await live.playFrom(1)
     live.setTracks(b6fLiveEditedTracks)
+    flush()
     live.holds[hold].armed = true
     const rebuild = live.resumingRebuild()
     await live.holds[hold].reached.promise

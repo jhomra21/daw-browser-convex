@@ -9061,6 +9061,8 @@ const b6f5Cell = (state: B6f5State, kind: B6f5Kind, nativeEnabled: boolean) => r
     expect(committed()).toBeTrue()
     const mark = live.mark()
     live.edit(kind)
+    // The edit's effects run while the rebuild still owns the transport, as the 1.x synchronous write ran them.
+    flush()
     await rebuild.catch(() => undefined)
 
     return live.expectEnd(true, undefined, mark, kind, false)

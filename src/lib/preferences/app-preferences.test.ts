@@ -44,6 +44,7 @@ describe("normalizeAppPreferences", () => {
       timeline: { defaultTrackColor: "#123456", defaultGroupColor: "#abcdef", follow: true },
       audio: defaultAppPreferences.audio,
       recording: defaultAppPreferences.recording,
+      cpuMeter: defaultAppPreferences.cpuMeter,
       midi: defaultAppPreferences.midi
     })
   })
@@ -62,6 +63,7 @@ describe("normalizeAppPreferences", () => {
       timeline: defaultAppPreferences.timeline,
       audio: defaultAppPreferences.audio,
       recording: defaultAppPreferences.recording,
+      cpuMeter: defaultAppPreferences.cpuMeter,
       midi: defaultAppPreferences.midi
     })
 
@@ -79,6 +81,7 @@ describe("normalizeAppPreferences", () => {
       timeline: { defaultTrackColor: defaultAppPreferences.timeline.defaultTrackColor, defaultGroupColor: "#fedcba", follow: true },
       audio: defaultAppPreferences.audio,
       recording: defaultAppPreferences.recording,
+      cpuMeter: defaultAppPreferences.cpuMeter,
       midi: defaultAppPreferences.midi
     })
   })
@@ -193,6 +196,25 @@ describe("normalizeAppPreferences", () => {
       audio: { portableBrowserPlaybackEnabled: true },
       recording: { portableEnabled: true },
     }).recording.portableEnabled).toBeTrue()
+  })
+
+  test("defaults the CPU meter to the average with average text and migrates every prior version to it", () => {
+    expect(defaultAppPreferences.cpuMeter).toEqual({ average: true, current: false, text: "average" })
+
+    for (const version of [1, 5, 9]) {
+      expect(normalizeAppPreferences({ version }).cpuMeter).toEqual({ average: true, current: false, text: "average" })
+    }
+  })
+
+  test("keeps stored CPU meter choices, including off, and repairs malformed ones", () => {
+    expect(normalizeAppPreferences({
+      version: APP_PREFERENCES_VERSION,
+      cpuMeter: { average: false, current: false, text: "current" },
+    }).cpuMeter).toEqual({ average: false, current: false, text: "current" })
+    expect(normalizeAppPreferences({
+      version: APP_PREFERENCES_VERSION,
+      cpuMeter: { average: "yes", current: true, text: "peak" },
+    }).cpuMeter).toEqual({ average: true, current: true, text: "average" })
   })
 
   test("migrates every prior version to empty local MIDI input selections", () => {

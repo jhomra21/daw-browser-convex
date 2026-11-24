@@ -17,6 +17,8 @@ import type { TransportControlsProps } from "~/hooks/transport-types";
 import { useProjectSaveStatus } from "~/hooks/useProjectSaveStatus";
 import { useSharedOutboxFailure } from "~/hooks/useSharedOutboxFailure";
 import ArrangementPosition from "./ArrangementPosition";
+import CpuMeter from "./CpuMeter";
+import { cpuLoadSourceKind } from "~/lib/audio-cpu-load-source";
 import { EditMenu } from "./menus/edit-menu";
 import { FileMenu } from "./menus/file-menu";
 import { SettingsMenu } from "./menus/settings-menu";
@@ -440,6 +442,9 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
         </Show>
         <MidiKeyboardToggle midiKeyboard={props.midiKeyboard} />
         <SaveStatus projectMenu={props.projectMenu} />
+        <Show when={cpuLoadSourceKind()}>
+          <CpuMeter />
+        </Show>
       </div>
     </div>
   );

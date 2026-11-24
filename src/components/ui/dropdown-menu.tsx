@@ -1,4 +1,4 @@
-import type { Component } from "solid-js"
+import type { Component, ParentProps } from "solid-js"
 import type { JSX, ValidComponent } from "@solidjs/web"
 import { omit } from "solid-js"
 
@@ -65,9 +65,47 @@ function DropdownMenuItem(
   )
 }
 
+const checkedItemClass =
+  "relative flex cursor-default select-none items-center py-1.5 pl-8 pr-2 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+
+const ItemCheck: Component = () => (
+  <DropdownMenuPrimitive.ItemIndicator class="absolute left-2 inline-flex h-4 w-4 items-center justify-center">
+    <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" aria-hidden="true">
+      <path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" />
+    </svg>
+  </DropdownMenuPrimitive.ItemIndicator>
+)
+
+const DropdownMenuCheckboxItem: Component<ParentProps<DropdownMenuPrimitive.DropdownMenuCheckboxItemProps & { class?: string }>> = (props) => {
+  const rest = omit(props, "class", "children")
+
+  return (
+    <DropdownMenuPrimitive.CheckboxItem class={cn(checkedItemClass, props.class)} {...rest}>
+      <ItemCheck />
+      {props.children}
+    </DropdownMenuPrimitive.CheckboxItem>
+  )
+}
+
+const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup
+
+const DropdownMenuRadioItem: Component<ParentProps<DropdownMenuPrimitive.DropdownMenuRadioItemProps & { class?: string }>> = (props) => {
+  const rest = omit(props, "class", "children")
+
+  return (
+    <DropdownMenuPrimitive.RadioItem class={cn(checkedItemClass, props.class)} {...rest}>
+      <ItemCheck />
+      {props.children}
+    </DropdownMenuPrimitive.RadioItem>
+  )
+}
+
 export {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
-  DropdownMenuItem
+  DropdownMenuItem,
+  DropdownMenuCheckboxItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem
 }

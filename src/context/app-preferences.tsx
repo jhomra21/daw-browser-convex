@@ -76,6 +76,12 @@ type AppPreferencesContextValue = {
     setManualOffsetFrames: (frames: number) => void
     setCalibrations: (calibrations: RecordingCalibration[]) => void
   }
+  cpuMeter: {
+    preferences: () => AppPreferences["cpuMeter"]
+    setAverage: (enabled: boolean) => void
+    setCurrent: (enabled: boolean) => void
+    setText: (text: AppPreferences["cpuMeter"]["text"]) => void
+  }
   midi: {
     selectedInputIds: () => readonly string[]
     setSelectedInputIds: (ids: string[]) => void
@@ -279,6 +285,12 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
             setPreferences((draft) => { draft.recording.manualOffsetFrames = normalizeRecordingManualOffsetFrames(frames) }),
           setCalibrations: (calibrations) =>
             setPreferences((draft) => { Object.assign(draft.recording, updateRecordingCalibrations(draft.recording, calibrations)) })
+        },
+        cpuMeter: {
+          preferences: () => preferences.cpuMeter,
+          setAverage: (enabled) => setPreferences((draft) => { draft.cpuMeter.average = enabled }),
+          setCurrent: (enabled) => setPreferences((draft) => { draft.cpuMeter.current = enabled }),
+          setText: (text) => setPreferences((draft) => { draft.cpuMeter.text = text }),
         },
         midi: {
           selectedInputIds: () => preferences.midi.selectedInputIds,

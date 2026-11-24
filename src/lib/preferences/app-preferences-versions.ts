@@ -18,4 +18,5 @@ export const APP_PREFERENCES_VERSION_ROWS: ReadonlyMap<number, AppPreferencesVer
   [7, { audio: true, recording: false, midi: false, nativePlayback: "legacy-off", portableRecording: false }],
   [8, { audio: true, recording: true, midi: true, nativePlayback: "legacy-off", portableRecording: false }],
   [9, { audio: true, recording: true, midi: true, nativePlayback: "stored", portableRecording: true }],
+  [10, { audio: true, recording: true, midi: true, nativePlayback: "stored", portableRecording: true }],
 ])

@@ -24,8 +24,9 @@ const randomBands = (rate: number, count: number) => {
   }))
 }
 
+// 2^18 frames: a Q 18 band at 20 Hz rings for about 0.3 s, and a shorter impulse truncates that ringing into dB of error.
 const impulseResponse = async (h: Parameters<Scenario['run']>[0], spec: EffectSpec) => {
-  const { output } = await h.render(spec, { input: [impulse(32768)] }, { parity: false })
+  const { output } = await h.render(spec, { input: [impulse(2 ** 18)] }, { parity: false })
 
   return output[0]
 }
@@ -66,7 +67,7 @@ const bandResponseFor = (name: string, extra: { highQuality: boolean }, limit: (
 
 const bandResponseScenario = bandResponseFor('band-response-vs-analog', { highQuality: false }, (rate) => (rate >= 96000 ? 0.25 : 0.5))
 
-// Shelves are excluded from the 0.5 dB claim: a shelf's analog response is not band-limited, so its error near Nyquist is reported, not gated tight.
+// The 4 dB gate below 96 kHz is for shelves: a shelf's analog response is not band-limited, so its error near Nyquist is reported, not gated tight.
 const bandResponseHq = bandResponseFor('band-response-vs-analog-hq', hiQuality, (rate) => (rate >= 96000 ? 0.25 : 4))
 
 const referenceBandsFor = (name: string, extra: { highQuality: boolean }): Scenario => ({

@@ -467,11 +467,13 @@ const encodeGraphEnvelope = (
     offset += nodeBytes
   }
 
+  const processorInstanceIds = new Map(processors.map(({ processor }) => [processor.id, processor.instanceId]))
+
   for (const edge of snapshot.edges) {
     writeId(view, offset, edge.id)
     writeId(view, offset + 8, edge.fromNodeId)
     writeId(view, offset + 16, edge.toNodeId)
-    view.setBigUint64(offset + 24, edge.targetProcessorId ? nativeGraphNodeId(edge.targetProcessorId) : 0n, true)
+    view.setBigUint64(offset + 24, BigInt(processorInstanceIds.get(edge.targetProcessorId ?? '') ?? 0), true)
     view.setFloat32(offset + 32, edge.gain, true)
     view.setUint32(offset + 36, tap(edge.tap), true)
     view.setUint32(offset + 40, edge.sidechain ? 1 : 0, true)

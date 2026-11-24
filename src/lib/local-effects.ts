@@ -1,7 +1,7 @@
 import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectEntityRow, type LocalProjectStoredValue } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { AUTOMATION_ROW_KIND, EFFECT_ROW_KIND, SIDECHAIN_ROW_KIND } from '~/lib/local-project-rows'
-import { INSTRUMENT_CONTRACTS, audioEffectOrderItemId, audioEffectOrderItemKind, automationTargetMatchesEffectInstance, createAudioEffectInstanceId, createInstrumentInstanceId, isJsonObject, isJsonString, isSidechainCapableKind, type AudioEffectKind, type AudioEffectOrderItem, type JsonValue, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
+import { INSTRUMENT_CONTRACTS, AUDIO_EFFECT_PARAMS_VERSION, migrateAudioEffectParams, audioEffectOrderItemId, audioEffectOrderItemKind, automationTargetMatchesEffectInstance, createAudioEffectInstanceId, createInstrumentInstanceId, isJsonNumber, isJsonObject, isJsonString, isSidechainCapableKind, type AudioEffectKind, type AudioEffectOrderItem, type JsonValue, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { readInstrumentParamsFromEffectRow } from '~/lib/effect-row-instrument-params'
 import { structuredCloneJsonValue } from '~/lib/structured-clone-json'
 import { compareAudioEffectOrderEntries } from '~/lib/audio-effect-order-rows'
@@ -76,7 +76,34 @@ const localEffectJsonValue = <TParams>(row: LocalEffectRow<TParams>): JsonValue 
 
   if (row.index !== undefined) Object.assign(value, { index: row.index })
 
+  const kind = audioEffectKindFromLocalEffect(row.effect)
+
+  if (kind === 'eq' || kind === 'compressor' || kind === 'saturator' || kind === 'delay' || kind === 'reverb') {
+    Object.assign(value, { paramsVersion: AUDIO_EFFECT_PARAMS_VERSION[kind] })
+  }
+
   return z.json().parse(structuredCloneJsonValue(value))
+}
+
+const currentLocalEffectRow = (value: JsonValue): JsonValue | undefined => {
+  if (!isJsonObject(value) || !isJsonString(value.effect)) return undefined
+  const kind = audioEffectKindFromLocalEffect(value.effect)
+
+  if (!kind) return value
+
+  try {
+    const params = migrateAudioEffectParams(
+      kind,
+      value.params,
+      isJsonNumber(value.paramsVersion) ? value.paramsVersion : undefined,
+    )
+
+    const { paramsVersion: _paramsVersion, ...row } = value
+
+    return { ...row, params }
+  } catch {
+    return undefined
+  }
 }
 
 const getExactLocalEffect = async <TParams>(
@@ -129,7 +156,7 @@ export async function getLocalEffect(
   const storedEffect = z.json().safeParse(structuredCloneJsonValue(row?.value))
 
   if (storedEffect.success && isJsonObject(storedEffect.data) && localEffectRowSchema.safeParse(storedEffect.data).success) {
-    return storedEffect.data
+    return currentLocalEffectRow(storedEffect.data)
   }
 
   return undefined
@@ -167,7 +194,14 @@ export const listLocalEffects = async (projectId: string): Promise<LocalEffectRo
   const db = await openLocalProjectDb(projectId)
   const rows = await db.getAllFromIndex('entities', 'by-kind', EFFECT_ROW_KIND)
 
-  return rows.flatMap((row) => isLocalEffectRow(row.value) ? [row.value] : [])
+  return rows.flatMap((row) => {
+    const parsed = z.json().safeParse(structuredCloneJsonValue(row.value))
+
+    if (!parsed.success || !isLocalEffectRow(parsed.data)) return []
+    const current = currentLocalEffectRow(parsed.data)
+
+    return current && isLocalEffectRow<JsonValue>(current) ? [current] : []
+  })
 }
 
 export const setLocalEffect = async <TParams>(

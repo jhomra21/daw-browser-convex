@@ -13,6 +13,7 @@ import {
   normalizeTrackInstrumentParams,
   normalizeArpeggiatorParams,
   normalizeAudioEffectParamsForUpdate,
+  AUDIO_EFFECT_PARAMS_VERSION,
   AUDIO_EFFECT_KINDS,
   audioEffectKindsWithOperation,
   audioEffectOrderItemId,
@@ -209,6 +210,22 @@ const normalizeEffectParamsForUpdate = (
   return params
 }
 
+const persistedEffectParamsVersion = (type: SharedAudioEffectType): number | undefined => {
+  if (!isAudioEffectPersistenceType(type)) return undefined
+
+  if (type !== 'eq' && type !== 'compressor' && type !== 'saturator' && type !== 'delay' && type !== 'reverb') {
+    return undefined
+  }
+
+  return AUDIO_EFFECT_PARAMS_VERSION[type]
+}
+
+const effectParamsVersionField = (type: SharedAudioEffectType) => {
+  const paramsVersion = persistedEffectParamsVersion(type)
+
+  return paramsVersion === undefined ? {} : { paramsVersion }
+}
+
 const stableEffectParams = (value: JsonValue): string => {
   if (Array.isArray(value)) return `[${value.map(stableEffectParams).join(',')}]`
 
@@ -316,7 +333,7 @@ export const upsertTrackEffectRow = async (
     }
 
     edit.stamp()
-    await ctx.db.patch(row._id, { params, targetType: 'track', type: input.type, instanceId: input.instanceId, revision })
+    await ctx.db.patch(row._id, { params, ...effectParamsVersionField(input.type), targetType: 'track', type: input.type, instanceId: input.instanceId, revision })
 
     return effectRowWriteResult('updated', row._id, revision)
   }
@@ -332,6 +349,7 @@ export const upsertTrackEffectRow = async (
     type: input.type,
     instanceId: input.instanceId,
     params,
+    ...effectParamsVersionField(input.type),
     createdAt: Date.now(),
     revision,
   })
@@ -397,7 +415,7 @@ export const upsertMasterEffectRow = async (
 
     if (areEffectParamsEqual(input.type, row.params, params)) return effectRowWriteResult('noop', row._id, row.revision ?? 0)
     edit.stamp()
-    await ctx.db.patch(row._id, { params, targetType: 'master', revision })
+    await ctx.db.patch(row._id, { params, ...effectParamsVersionField(input.type), targetType: 'master', revision })
 
     return effectRowWriteResult('updated', row._id, revision)
   }
@@ -412,6 +430,7 @@ export const upsertMasterEffectRow = async (
     type: input.type,
     instanceId: input.instanceId,
     params,
+    ...effectParamsVersionField(input.type),
     createdAt: Date.now(),
     revision,
   })
@@ -1273,6 +1292,7 @@ export const serverRestoreChain = mutation({
               type: effect.kind,
               instanceId: effect.id,
               params,
+              ...effectParamsVersionField(effect.kind),
               createdAt: Date.now(),
               revision,
             })

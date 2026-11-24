@@ -389,6 +389,7 @@ export default defineSchema({
     type: v.string(),
     instanceId: v.optional(v.string()),
     params: v.any(),
+    paramsVersion: v.optional(v.number()),
     createdAt: v.number(),
     // Project revision of the transaction that last wrote this row. Rows written before stamping have none.
     revision: v.optional(v.number()),

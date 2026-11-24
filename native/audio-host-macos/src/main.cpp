@@ -526,6 +526,15 @@ bool WriteDeviceInventory() {
   return WriteFrame(daw::audio_host_macos::ControlType::kDeviceInventory, response);
 }
 
+bool WriteCpuLoad(daw::audio_host_macos::AudioHost& host) {
+  const auto sample = host.TakeCpuLoad();
+  std::vector<std::uint8_t> response;
+  WriteU64(response, sample.callback_nanoseconds);
+  WriteU64(response, sample.buffer_nanoseconds);
+  WriteU64(response, sample.peak_load_per_million);
+  return WriteFrame(daw::audio_host_macos::ControlType::kCpuLoad, response);
+}
+
 bool InstallAsset(daw::audio_host_macos::AudioHost& host, const std::vector<std::uint8_t>& payload) {
   constexpr std::size_t header_bytes = 24;
   if (payload.size() < header_bytes || (payload.size() - header_bytes) % sizeof(float) != 0) return false;
@@ -896,6 +905,10 @@ int main() {
     if (request->type == daw::audio_host_macos::ControlType::kDiagnostics) {
       if (!payload.empty()) return EXIT_FAILURE;
       if (!WriteDiagnostics(host->diagnostics())) return EXIT_FAILURE;
+      continue;
+    }
+    if (request->type == daw::audio_host_macos::ControlType::kCpuLoadQuery) {
+      if (!payload.empty() || !WriteCpuLoad(*host)) return EXIT_FAILURE;
       continue;
     }
     if (request->type == daw::audio_host_macos::ControlType::kDeviceList) {

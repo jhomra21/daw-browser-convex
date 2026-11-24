@@ -37,7 +37,7 @@ test("the host protocol constants keep their wire values", () => {
     patchStatus: host.nativeAudioHostProcessorPatchStatusBytes,
   }).toEqual({
     magic: 0x44415748,
-    version: 30,
+    version: 31,
     artifactId: "daw-audio-host-macos/v10",
     capabilities: 0x3ff,
     frameHeader: 16,
@@ -79,7 +79,17 @@ test("the host status tables keep their wire codes", () => {
   expect(host.nativeAudioHostPatchOutcomes).toEqual({ applied: 1, refused: 2, claimed: 3 })
   expect(Object.values<number>(host.nativeAudioHostPatchRefusals)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8])
   expect(host.nativeAudioHostSpoolStates).toEqual({ preparing: 0, ready: 1, complete: 2, failed: 3, cancelled: 4 })
-  expect(Object.values<number>(host.nativeAudioHostControlTypes)).toEqual(Array.from({ length: 63 }, (_, index) => index + 1))
+  expect(Object.values<number>(host.nativeAudioHostControlTypes)).toEqual(Array.from({ length: 65 }, (_, index) => index + 1))
+})
+
+test("the CPU load reply is a strict set of non-negative safe integers", () => {
+  expect(host.nativeAudioHostCpuLoadPayloadBytes).toBe(24)
+  expect(host.nativeAudioHostCpuLoadSchema.parse({ callbackNanoseconds: 7, bufferNanoseconds: 20, peakLoadPerMillion: 1_500_000 }))
+    .toEqual({ callbackNanoseconds: 7, bufferNanoseconds: 20, peakLoadPerMillion: 1_500_000 })
+  expect(host.nativeAudioHostCpuLoadSchema.safeParse({ callbackNanoseconds: -1, bufferNanoseconds: 0, peakLoadPerMillion: 0 }).success).toBe(false)
+  expect(host.nativeAudioHostCpuLoadSchema.safeParse({ callbackNanoseconds: 1.5, bufferNanoseconds: 0, peakLoadPerMillion: 0 }).success).toBe(false)
+  expect(host.nativeAudioHostCpuLoadSchema.safeParse({ callbackNanoseconds: 2 ** 60, bufferNanoseconds: 0, peakLoadPerMillion: 0 }).success).toBe(false)
+  expect(host.nativeAudioHostCpuLoadSchema.safeParse({ callbackNanoseconds: 0, bufferNanoseconds: 0, peakLoadPerMillion: 0, extra: 1 }).success).toBe(false)
 })
 
 test("the asset refusals keep the text the renderer matches", () => {

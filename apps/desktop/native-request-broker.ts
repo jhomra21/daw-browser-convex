@@ -8,6 +8,7 @@ import {
   nativeAudioHostMaximumPayloadBytes as maximumPayloadBytes,
   nativeAudioHostProtocolVersion as protocolVersion,
 } from "@daw-browser/desktop-protocol/native-audio-host"
+import type { NativeAudioHostCpuLoad } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
 import type {
   NativeAudioDevice,
@@ -36,7 +37,7 @@ export type NativeHostRequestType = ControlTypes[
   | "midiEvents" | "sourceEvents" | "deviceList" | "transactionBegin" | "transactionCommit"
   | "transactionRollback" | "vstParameterEvents" | "vstMidiEvents" | "vstStateSet" | "vstStateGet"
   | "vstState" | "recordingConfigure" | "recordingStart" | "recordingStop" | "recordingCancel"
-  | "recordingDeviceQuery" | "deviceInventoryQuery" | "graphPrepare" | "graphPublish" | "graphRetire"
+  | "recordingDeviceQuery" | "deviceInventoryQuery" | "cpuLoadQuery" | "graphPrepare" | "graphPublish" | "graphRetire"
   | "graphRollback" | "graphRevisionStatus" | "vstAttach" | "vstDetach" | "vstEditor"
   | "diagnosticStart" | "diagnostics" | "scheduleWindow" | "vstScheduleAutomationEnable"
   | "instrumentStates" | "spectrumSelection"
@@ -96,6 +97,7 @@ type Reply =
   | { kind: "outputDevice"; resolve: (value: NativeOutputDevice | null) => void }
   | { kind: "inputDevice"; resolve: (value: NativeInputDevice | null) => void }
   | { kind: "deviceInventory"; resolve: (value: NativeAudioDevice[]) => void }
+  | { kind: "cpuLoad"; resolve: (value: NativeAudioHostCpuLoad) => void }
   | { kind: "graphRevision"; requestedRevision: number; resolve: (value: NativeGraphRevisionStatus) => void }
   | { kind: "vstState"; instanceId: string; resolve: (value: { bytes: Uint8Array; sha256: string }) => void; cancelled: boolean }
   | { kind: "editor"; resolve: (value: NativeVstEditorStatus) => void }

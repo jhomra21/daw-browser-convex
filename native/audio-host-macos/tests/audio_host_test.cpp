@@ -2238,6 +2238,44 @@ void TestRealtimeDurationHistogramBucketsAreBounded() {
   assert(RealtimeDurationHistogramBucket(std::numeric_limits<std::uint64_t>::max()) == 31);
 }
 
+void TestCpuLoadAccumulatorAveragesAndResets() {
+  daw::audio_host_macos::detail::CpuLoadAccumulator accumulator;
+  assert(accumulator.Take().buffer_nanoseconds == 0);
+  // 480 frames at 48 kHz is 10 ms of buffer.
+  accumulator.Record(480, 48'000, 2'000'000);
+  accumulator.Record(480, 48'000, 5'000'000);
+  accumulator.Record(0, 48'000, 9'000'000);
+  accumulator.Record(480, 0, 9'000'000);
+  const auto sample = accumulator.Take();
+  assert(sample.callback_nanoseconds == 7'000'000);
+  assert(sample.buffer_nanoseconds == 20'000'000);
+  assert(sample.peak_load_per_million == 500'000);
+  const auto empty = accumulator.Take();
+  assert(empty.callback_nanoseconds == 0 && empty.buffer_nanoseconds == 0 && empty.peak_load_per_million == 0);
+  // A callback that overruns its buffer reads above 100%.
+  accumulator.Record(480, 48'000, 15'000'000);
+  assert(accumulator.Take().peak_load_per_million == 1'500'000);
+}
+
+void TestHostCpuLoadCountsCallbacksWhileStopped() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48000,
+    .max_frames_per_block = 480,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  host.RecordOutputCallback(480, 3'000'000);
+  const auto sample = host.TakeCpuLoad();
+  assert(sample.callback_nanoseconds == 3'000'000);
+  assert(sample.buffer_nanoseconds == 10'000'000);
+  assert(sample.peak_load_per_million == 300'000);
+  assert(host.TakeCpuLoad().buffer_nanoseconds == 0);
+  // The diagnostics counters keep their own gate: nothing was recorded for a stopped transport.
+  assert(host.diagnostics().realtime_performance.observation_count == 0);
+}
+
 void TestNativeSessionWireRejectsMalformedFramesAndEvents() {
   daw::audio_host_macos::AudioHost host;
   assert(host.Configure({
@@ -6943,6 +6981,8 @@ int main(const int argc, const char* const argv[]) {
   TestNativeVstRuntimeControlBounds();
   TestNativeVstWatchdogStartupGrace();
   TestRealtimeDurationHistogramBucketsAreBounded();
+  TestCpuLoadAccumulatorAveragesAndResets();
+  TestHostCpuLoadCountsCallbacksWhileStopped();
   TestNativeSessionWireRejectsMalformedFramesAndEvents();
   TestScheduledProcessorSetUsesAbsoluteFrame();
   TestScheduledProcessorRampExpandsAtAdaptiveStride();

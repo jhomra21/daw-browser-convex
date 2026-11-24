@@ -39,6 +39,48 @@ inline constexpr std::size_t kRealtimeDurationHistogramBuckets = 32;
     );
 }
 
+// What the output callbacks cost since the previous Take. Average load is callback / buffer; peak is the
+// worst single callback, in millionths of its own buffer time.
+struct CpuLoadSample {
+  std::uint64_t callback_nanoseconds = 0;
+  std::uint64_t buffer_nanoseconds = 0;
+  std::uint64_t peak_load_per_million = 0;
+};
+
+// Lock-free and allocation-free so the output callback can feed it. Take is read-and-reset: every field is
+// exchanged on its own, so a callback that lands between two exchanges is counted whole in the next interval.
+class CpuLoadAccumulator {
+ public:
+  void Record(
+    const std::uint32_t frame_count,
+    const std::uint32_t sample_rate_hz,
+    const std::uint64_t duration_nanoseconds
+  ) noexcept {
+    if (frame_count == 0 || sample_rate_hz == 0) return;
+    const std::uint64_t buffer_nanoseconds = static_cast<std::uint64_t>(frame_count) * 1'000'000'000ULL / sample_rate_hz;
+    if (buffer_nanoseconds == 0) return;
+    const std::uint64_t load = duration_nanoseconds * 1'000'000ULL / buffer_nanoseconds;
+    callback_nanoseconds_.fetch_add(duration_nanoseconds, std::memory_order_relaxed);
+    buffer_nanoseconds_.fetch_add(buffer_nanoseconds, std::memory_order_relaxed);
+    auto peak = peak_load_per_million_.load(std::memory_order_relaxed);
+    while (load > peak && !peak_load_per_million_.compare_exchange_weak(
+      peak, load, std::memory_order_relaxed, std::memory_order_relaxed)) {}
+  }
+
+  [[nodiscard]] CpuLoadSample Take() noexcept {
+    return {
+      .callback_nanoseconds = callback_nanoseconds_.exchange(0, std::memory_order_relaxed),
+      .buffer_nanoseconds = buffer_nanoseconds_.exchange(0, std::memory_order_relaxed),
+      .peak_load_per_million = peak_load_per_million_.exchange(0, std::memory_order_relaxed),
+    };
+  }
+
+ private:
+  std::atomic<std::uint64_t> callback_nanoseconds_ = 0;
+  std::atomic<std::uint64_t> buffer_nanoseconds_ = 0;
+  std::atomic<std::uint64_t> peak_load_per_million_ = 0;
+};
+
 template <typename PublishTerminal, typename Stop>
 bool PublishOfflineTerminalBeforeStop(PublishTerminal&& publish_terminal, Stop&& stop) {
   const auto published = publish_terminal();
@@ -549,6 +591,8 @@ class AudioHost {
   bool ProcessRecordingPlanar(std::span<const float* const> input, std::uint32_t frame_count);
   void RecordOutputCallback(std::uint32_t frame_count, std::uint64_t duration_nanoseconds) noexcept;
   Diagnostics diagnostics() const;
+  // Read-and-reset: covers the callbacks since the previous call, stopped transport included.
+  detail::CpuLoadSample TakeCpuLoad() noexcept;
   LifecycleState lifecycleState() const;
   DeviceReadinessReason readinessReason() const;
 

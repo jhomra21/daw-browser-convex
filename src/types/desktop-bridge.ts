@@ -34,7 +34,7 @@ import type {
 } from "@daw-browser/plugin-host-protocol"
 import type { ExportAudioFormat } from "@daw-browser/shared"
 
-import type { NativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol/native-audio-host"
+import type { NativeAudioHostCpuLoad, NativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeRevisionSession } from "@daw-browser/desktop-protocol/native-revision"
 import type { NativeInstrumentBudgetPolicy } from "@daw-browser/desktop-protocol/native-instrument-budget-policy"
 
@@ -289,6 +289,9 @@ type NativeOutputDeviceReply = { ok: true; device: NativeOutputDevice | null } |
 
 type NativeInputDeviceReply = { ok: true; device: NativeInputDevice | null } | { ok: false; error: string }
 
+// null: the host process is not running, so there is no load to report.
+type NativeCpuLoadReply = { ok: true; load: NativeAudioHostCpuLoad | null } | { ok: false; error: string }
+
 type NativeDeviceListReply = { ok: true; devices: NativeAudioDevice[] } | { ok: false; error: string }
 
 export type DesktopAudioLifecycle = {
@@ -329,6 +332,7 @@ type DesktopBridge = {
     resolveOutputDevice(preferredDeviceId?: string): Promise<NativeOutputDeviceReply>
     resolveInputDevice(preferredDeviceId?: string): Promise<NativeInputDeviceReply>
     listDevices(): Promise<NativeDeviceListReply>
+    cpuLoad(): Promise<NativeCpuLoadReply>
     session: NativeSessionBridge
     recordingSpool: NativeRecordingSpoolBridge
     offlineRender: {

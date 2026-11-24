@@ -262,6 +262,8 @@ process.stdin.on("data", (chunk) => {
       process.stdout.write(inputDevice())
     } else if (type === 62) {
       process.stdout.write(deviceInventory())
+    } else if (type === 64) {
+      process.stdout.write(frame(65, Buffer.concat([u64(7000000), u64(20000000), u64(1500000)])))
     } else if (type === 28 && process.env.MODE?.startsWith("spool")
       && (payload.length !== 152 + payload.readUInt32BE(56) + payload.readUInt32BE(140) || payload.readBigUInt64BE(144) !== 1n)) {
       // The wire carries the capture target node at 144, ahead of the device UID and root path.
@@ -405,7 +407,7 @@ describe("native audio host protocol", () => {
     expect(encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.graphRollback)).toEqual(
       Buffer.from([
         0x44, 0x41, 0x57, 0x48,
-        0x00, 0x00, 0x00, 0x1e,
+        0x00, 0x00, 0x00, 0x1f,
         0x00, 0x00, 0x00, 0x27,
         0x00, 0x00, 0x00, 0x00,
       ]),
@@ -2616,6 +2618,23 @@ test("round-trips the native device inventory with both channel directions", asy
         available: false,
       },
     ])
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("reads the CPU load only from a running host and never starts one", async () => {
+  const fixture = await fixtureSupervisor()
+
+  try {
+    await expect(fixture.supervisor.cpuLoad()).resolves.toBeNull()
+    await fixture.supervisor.start()
+    await expect(fixture.supervisor.cpuLoad()).resolves.toEqual({
+      callbackNanoseconds: 7_000_000,
+      bufferNanoseconds: 20_000_000,
+      peakLoadPerMillion: 1_500_000,
+    })
   } finally {
     await fixture.supervisor.teardown()
     await fixture.dispose()

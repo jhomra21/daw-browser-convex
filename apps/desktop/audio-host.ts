@@ -11,6 +11,7 @@ import {
   decodeSpectrumFrame,
   decodeVstEditorStatus,
   decodeInputDevice,
+  decodeCpuLoad,
   decodeDeviceInventory,
   decodeNativeProcessorPatchStatus,
   decodeOutputDevice,
@@ -67,6 +68,7 @@ import {
   nativeAudioHostAckStatus,
   nativeOfflineRenderPlanSchema,
 } from "@daw-browser/desktop-protocol/native-audio-host"
+import type { NativeAudioHostCpuLoad } from "@daw-browser/desktop-protocol/native-audio-host"
 import type {
   NativeHostDeviceConfiguration,
   NativeHostDiagnostics,
@@ -140,6 +142,8 @@ const {
   recordingDeviceList: recordingDeviceListType,
   deviceInventoryQuery: deviceInventoryQueryType,
   deviceInventory: deviceInventoryType,
+  cpuLoadQuery: cpuLoadQueryType,
+  cpuLoad: cpuLoadType,
   graphPrepare: graphPrepareType,
   graphPublish: graphPublishType,
   graphRetire: graphRetireType,
@@ -886,6 +890,8 @@ export type NativeAudioHostSupervisor = {
   resolveOutputDevice(preferredDeviceId?: string): Promise<NativeOutputDevice | null>
   resolveInputDevice(preferredDeviceId?: string): Promise<NativeInputDevice | null>
   listDevices(): Promise<NativeAudioDevice[]>
+  /** Audio callback cost since the previous call, or null when no host process is running. Never starts the host. */
+  cpuLoad(): Promise<NativeAudioHostCpuLoad | null>
   startAudio(): Promise<void>
   startDiagnosticAudio(): Promise<void>
   stopAudio(reason?: string): Promise<void>
@@ -1196,6 +1202,14 @@ export const createNativeAudioHostSupervisor = (
         if (devices === undefined) return lost("The native audio host returned an invalid device inventory response.")
         broker.settle(current)
         reply.resolve(devices)
+      } else if (frame.readUInt32BE(8) === cpuLoadType && pending?.reply.kind === "cpuLoad") {
+        const current = pending
+        const reply = pending.reply
+        const load = decodeCpuLoad(frame)
+
+        if (load === undefined) return lost("The native audio host returned an invalid CPU load response.")
+        broker.settle(current)
+        reply.resolve(load)
       } else if (frame.readUInt32BE(8) === graphRevisionStatusType && pending?.reply.kind === "graphRevision") {
         const current = pending
         const reply = pending.reply
@@ -2092,6 +2106,22 @@ export const createNativeAudioHostSupervisor = (
         const queued = broker.submit({ type: deviceInventoryQueryType, reject, reply: { kind: "deviceInventory", resolve } })
 
         if (!queued) reject(new NativeAudioHostNotSentError(broker.queueFullMessage(deviceInventoryQueryType)))
+      })
+    },
+    async cpuLoad() {
+      assertTransactionAccess(undefined)
+
+      return new Promise<NativeAudioHostCpuLoad | null>((resolve, reject) => {
+        // A meter read must not spawn the host, so a missing process is "no load" rather than a start.
+        if (!broker.admits(undefined)) {
+          resolve(null)
+
+          return
+        }
+
+        const queued = broker.submit({ type: cpuLoadQueryType, reject, reply: { kind: "cpuLoad", resolve } })
+
+        if (!queued) reject(new NativeAudioHostNotSentError(broker.queueFullMessage(cpuLoadQueryType)))
       })
     },
     async startAudio() {

@@ -273,6 +273,7 @@ struct AudioHost::Impl {
   std::atomic<std::uint64_t> callback_timing_count = 0;
   std::atomic<std::uint64_t> callback_timing_maximum_nanoseconds = 0;
   std::atomic<std::uint64_t> callback_deadline_misses = 0;
+  detail::CpuLoadAccumulator cpu_load;
   std::array<std::atomic<std::uint64_t>, detail::kRealtimeDurationHistogramBuckets>
     callback_timing_buckets{};
   std::atomic<std::uint64_t> vst_worker_faults = 0;

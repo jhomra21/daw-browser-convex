@@ -1,4 +1,5 @@
-import { migrateAutoFilterParamsV1 } from './auto-filter-params-migration'
+import { migrateAutoFilterEnvelopeAmountV1, migrateAutoFilterParamsV1, migrateAutoFilterResonanceV1 } from './auto-filter-params-migration'
+import { getAutomationParameterDescriptor } from './automation-parameters'
 import { isAudioEffectKind, type AudioEffectKind } from './audio-effect-registry'
 import type { JsonValue } from './json-value'
 
@@ -27,10 +28,15 @@ export const AUDIO_EFFECT_PARAMS_VERSION: Readonly<Record<AudioEffectKind, numbe
 
 type AudioEffectParamsMigrationStep = (params: JsonValue) => JsonValue
 
+type AutomationValueMigration = (value: number) => number
+
 export type AudioEffectParamsVersioning = {
   current: Readonly<Record<AudioEffectKind, number>>
   // migrations[kind][n] upgrades params stored at version n to version n + 1.
   migrations: Readonly<Partial<Record<AudioEffectKind, Readonly<Record<number, AudioEffectParamsMigrationStep>>>>>
+  // parameterValues[kind][n][parameterId] rescales an automation point value recorded at version n to version n + 1.
+  // A parameter with no entry keeps its value across that step.
+  parameterValues: Readonly<Partial<Record<AudioEffectKind, Readonly<Record<number, Readonly<Record<string, AutomationValueMigration>>>>>>>
 }
 
 export const AUDIO_EFFECT_PARAMS_VERSIONING: AudioEffectParamsVersioning = {
@@ -38,10 +44,33 @@ export const AUDIO_EFFECT_PARAMS_VERSIONING: AudioEffectParamsVersioning = {
   migrations: {
     autofilter: { 1: migrateAutoFilterParamsV1 },
   },
+  parameterValues: {
+    autofilter: {
+      1: {
+        'autofilter.resonance': migrateAutoFilterResonanceV1,
+        'autofilter.envelope.amountOctaves': migrateAutoFilterEnvelopeAmountV1,
+      },
+    },
+  },
 }
 
 // Remembers which unreadable versions were already reported so a project list does not log per row.
 const warnedVersions = new Set<string>()
+
+// The version to migrate from, or null when this build cannot read it (newer app, or corrupt): the caller keeps the stored data.
+const readableVersion = (kind: AudioEffectKind, storedVersion: number | undefined, current: number, noun: string): number | null => {
+  const version = storedVersion ?? 1
+
+  if (Number.isInteger(version) && version >= 1 && version <= current) return version
+  const key = `${noun}:${kind}@${version}`
+
+  if (!warnedVersions.has(key)) {
+    warnedVersions.add(key)
+    console.warn(`Stored ${kind} ${noun} version ${version} is not readable by this build (current ${current}); using ${noun} as stored.`)
+  }
+
+  return null
+}
 
 /**
  * Upgrades stored params to the current version. A version this build cannot read
@@ -55,19 +84,9 @@ export const migrateAudioEffectParams = (
   versioning: AudioEffectParamsVersioning = AUDIO_EFFECT_PARAMS_VERSIONING,
 ): JsonValue => {
   const current = versioning.current[kind]
-  let version = storedVersion ?? 1
+  let version = readableVersion(kind, storedVersion, current, 'params')
 
-  if (!Number.isInteger(version) || version < 1 || version > current) {
-    const key = `${kind}@${version}`
-
-    if (!warnedVersions.has(key)) {
-      warnedVersions.add(key)
-      console.warn(`Stored ${kind} params version ${version} is not readable by this build (current ${current}); using params as stored.`)
-    }
-
-    return params
-  }
-
+  if (version === null) return params
   let migrated = params
 
   for (; version < current; version += 1) {
@@ -84,3 +103,43 @@ export const migrateAudioEffectParams = (
 export const audioEffectParamsVersionStamp = (kind: string): { paramsVersion?: number } => (
   isAudioEffectKind(kind) ? { paramsVersion: AUDIO_EFFECT_PARAMS_VERSION[kind] } : {}
 )
+
+// Automation envelopes that target an effect parameter carry the same storage field idea: `valuesVersion` (absent = 1) is the
+// version of the effect kind whose parameter units the point values were written in. Mixer and instrument lanes have no kind.
+const automationParameterEffectKind = (parameterId: string): AudioEffectKind | null => {
+  const owner = getAutomationParameterDescriptor(parameterId)?.owner
+
+  return isAudioEffectKind(owner) ? owner : null
+}
+
+/** Rescales stored automation point values to the current version of the parameter's effect kind. Newer or unreadable versions pass through. */
+export const migrateAutomationPointValues = <Point extends { value: number }>(
+  parameterId: string,
+  points: Point[],
+  storedVersion: number | undefined,
+  versioning: AudioEffectParamsVersioning = AUDIO_EFFECT_PARAMS_VERSIONING,
+): Point[] => {
+  const kind = automationParameterEffectKind(parameterId)
+
+  if (!kind) return points
+  const current = versioning.current[kind]
+  let version = readableVersion(kind, storedVersion, current, 'automation values')
+
+  if (version === null) return points
+  const steps: AutomationValueMigration[] = []
+
+  for (; version < current; version += 1) {
+    const step = versioning.parameterValues[kind]?.[version]?.[parameterId]
+
+    if (step) steps.push(step)
+  }
+
+  return steps.length === 0 ? points : points.map((point) => ({ ...point, value: steps.reduce((value, step) => step(value), point.value) }))
+}
+
+/** The storage field to write with every persisted automation envelope; empty for lanes that do not target an effect parameter. */
+export const automationValuesVersionStamp = (parameterId: string): { valuesVersion?: number } => {
+  const kind = automationParameterEffectKind(parameterId)
+
+  return kind ? { valuesVersion: AUDIO_EFFECT_PARAMS_VERSION[kind] } : {}
+}

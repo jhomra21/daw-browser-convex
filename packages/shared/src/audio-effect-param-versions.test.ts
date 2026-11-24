@@ -11,6 +11,7 @@ import { isJsonObject } from './json-value'
 
 // Test-only chain: eq is pretended to be at version 3 with a rename step then an added field.
 const exampleVersioning: AudioEffectParamsVersioning = {
+  parameterValues: {},
   current: { ...AUDIO_EFFECT_PARAMS_VERSION, eq: 3 },
   migrations: {
     eq: {
@@ -48,7 +49,7 @@ describe('audio effect parameter versions', () => {
   })
 
   it('fails loudly when a migration step is missing', () => {
-    const gap: AudioEffectParamsVersioning = { current: { ...AUDIO_EFFECT_PARAMS_VERSION, gate: 2 }, migrations: {} }
+    const gap: AudioEffectParamsVersioning = { current: { ...AUDIO_EFFECT_PARAMS_VERSION, gate: 2 }, migrations: {}, parameterValues: {} }
 
     expect(() => migrateAudioEffectParams('gate', {}, 1, gap)).toThrow('Missing gate params migration from version 1 to 2.')
   })

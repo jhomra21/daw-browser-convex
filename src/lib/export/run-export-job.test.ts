@@ -1874,6 +1874,57 @@ test("a portable mixdown spools the extra latency frames and encodes from the ra
   }
 })
 
+test("a portable mixdown with automation and a sidechain route renders instead of reporting unavailable", async () => {
+  const file = captureEncodedFile()
+  const volumeTarget = { kind: "track", trackId: "track-align" } as const
+
+  const volume = {
+    id: "volume",
+    projectId: "project",
+    target: volumeTarget,
+    targetKey: "track:track-align:volume",
+    parameterId: "volume",
+    enabled: true,
+    points: [{ id: "a", timeSec: 0, value: 1, interpolation: "linear" as const }, { id: "b", timeSec: 0.5, value: 0.5, interpolation: "hold" as const }],
+    updatedAt: 1,
+  }
+
+  const route = { sourceTrackId: "track-key", targetTrackId: "track-align", effectInstanceId: "comp" }
+  const renderedRequests: Parameters<typeof exportMixdown.renderPortableMixdownChunks>[0][] = []
+
+  const createSpool = spyOn(nativeOfflinePcmSpool, "createNativeOfflinePcmSpool").mockImplementation(() => ({
+    createSession: async ({ totalFrames }) => createImpulseSpool(totalFrames, IMPULSE_FRAME),
+  }))
+
+  const renderPortable = spyOn(exportMixdown, "renderPortableMixdownChunks").mockImplementation(async (request, onChunk) => {
+    renderedRequests.push(request)
+    await onChunk(0, 0, { frameCount: 1, planes: [new Float32Array(1), new Float32Array(1)] }, ALIGN_FRAMES)
+
+    return { frameCount: ALIGN_FRAMES, latencyFrames: 0, sampleRate: ALIGN_RATE, numberOfChannels: 2, cleanup: async () => undefined }
+  })
+
+  try {
+    const outcome = await runTimelineExport({
+      ...alignMixdownInput,
+      sidechainRoutes: [route],
+      getTracks: () => [alignTrack("track-align"), alignTrack("track-key")],
+      renderStateSnapshot: { ...renderStateSnapshot, automationEnvelopes: [volume] },
+      resolveAudioSource: async () => {
+        throw new Error("mock portable renderer must not resolve source pages")
+      },
+    })
+
+    expect(outcome.type).toBe("success")
+    expect(renderedRequests).toHaveLength(1)
+    expect(renderedRequests[0]?.automationEnvelopes).toEqual([volume])
+    expect(renderedRequests[0]?.sidechainRoutes).toEqual([route])
+  } finally {
+    renderPortable.mockRestore()
+    createSpool.mockRestore()
+    file.restore()
+  }
+})
+
 test("each stem is aligned by the latency of its own graph", async () => {
   const latencyByTrack = new Map([["stem-a", 50], ["stem-b", 900]])
   const file = captureEncodedFile()

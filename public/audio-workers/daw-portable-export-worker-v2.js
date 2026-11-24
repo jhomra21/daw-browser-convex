@@ -11,6 +11,9 @@ const MAX_EDGES = portableProtocolConstants.maxGraphEdges
 const MAX_PAGES = portableProtocolConstants.pageSlotCount
 const MAX_PREPARATIONS = portableProtocolConstants.preparationCount
 const PAGE_FRAMES = portableProtocolConstants.pageFrames
+
+// The host rejects an install-schedule with more events than a source window may hold.
+const MAX_SCHEDULE_EVENTS = portableProtocolConstants.maxEvents
 const SUPPORTED_RATES = new Set(portableWasmCapabilityMatrix.sampleRatesHz)
 const SUPPORTED_PROCESSORS = new Set(portableWasmCapabilityMatrix.processorKinds)
 
@@ -34,7 +37,7 @@ const validateSnapshot = (request) => {
 
   if (!positive(request.frameCount) || !positive(request.maxFramesPerBlock) || request.maxFramesPerBlock > MAX_BLOCK) return 'The render request bounds are invalid.'
 
-  if (!request.snapshot || !request.snapshot.graph || !Array.isArray(request.snapshot.assets) || !Array.isArray(request.snapshot.events)) return 'The export snapshot is malformed.'
+  if (!request.snapshot || !request.snapshot.graph || !Array.isArray(request.snapshot.assets) || !Array.isArray(request.snapshot.events) || !Array.isArray(request.snapshot.automation)) return 'The export snapshot is malformed.'
 
   if (request.snapshot.assets.length > MAX_ASSETS || request.snapshot.events.length > MAX_EVENTS) return 'The export snapshot exceeds the portable asset or event bound.'
   const graph = request.snapshot.graph
@@ -80,7 +83,7 @@ const replaceSources = (job, ordinary, prepared) => {
     type: 'replace-sources',
     requestId,
     revision: job.request.snapshot.graph.revision,
-    epoch: job.request.snapshot.events[0]?.epoch ?? 1,
+    epoch: epochOf(job),
     ordinary,
     prepared,
   })
@@ -227,6 +230,34 @@ const requiredPageRange = (asset, event) => {
   }
 }
 
+const epochOf = (job) => job.request.snapshot.events[0]?.epoch ?? 1
+
+// Automation is in render frames. A window needs the events that start inside it and the ramps that began earlier and are
+// still running; values set before the window are held by the core.
+const automationForWindow = (automation, start, end) => automation.filter((event) => event.frame < end
+  && (event.frame >= start || (event.type === 'parameter-ramp' && event.endFrame > start)))
+
+const installAutomation = (job, window) => {
+  const events = automationForWindow(job.request.snapshot.automation, window.start, window.end)
+
+  if (events.length === 0) return
+  const requestId = job.nextHostRequestId++
+  job.host.handleMessage({
+    version: 2,
+    type: 'install-schedule',
+    requestId,
+    schedule: {
+      revision: job.request.snapshot.graph.revision,
+      transportEpoch: epochOf(job),
+      events: events.map((event, index) => ({ ...event, sequence: index + 1 })),
+    },
+  })
+
+  if (statusForRequest(job, 'schedule-installed', requestId)?.result !== 'installed') {
+    throw new Error('Portable export automation window was rejected.')
+  }
+}
+
 const clipEventToWindow = (event, start, end) => {
   const clippedStart = Math.max(event.startFrame, start)
   const clippedStop = Math.min(event.stopFrame, end)
@@ -324,10 +355,12 @@ const createWindows = (job) => {
   const events = job.request.snapshot.events
   const assets = new Map(job.request.snapshot.assets.map((entry) => [entry.asset.assetId, entry]))
   const windows = []
+  const fullLength = job.request.maxFramesPerBlock * 16
   let start = 0
+  let length = fullLength
 
   while (start < job.request.frameCount) {
-    const end = Math.min(job.request.frameCount, start + job.request.maxFramesPerBlock * 16)
+    const end = Math.min(job.request.frameCount, start + length)
 
     const selected = events
       .filter((event) => event.startFrame < end && event.stopFrame > start)
@@ -355,15 +388,23 @@ const createWindows = (job) => {
       0,
     )
 
-    if (pageCount > MAX_PAGES || rangesByAsset.size > MAX_PREPARATIONS) {
-      if (end - start <= job.request.maxFramesPerBlock) throw new Error('Portable export source window exceeds resident page capacity.')
-      windows.push({ start, end: start + Math.floor((end - start) / 2) })
-      start += Math.floor((end - start) / 2)
+    const overCapacity = pageCount > MAX_PAGES || rangesByAsset.size > MAX_PREPARATIONS
+    const overAutomation = automationForWindow(job.request.snapshot.automation, start, end).length > MAX_SCHEDULE_EVENTS
+
+    if (overCapacity || overAutomation) {
+      if (length <= job.request.maxFramesPerBlock) {
+        throw new Error(overCapacity
+          ? 'Portable export source window exceeds resident page capacity.'
+          : 'Portable export automation window exceeds the schedule event capacity.')
+      }
+
+      length = Math.floor(length / 2)
       continue
     }
 
     windows.push({ start, end })
     start = end
+    length = fullLength
   }
 
   return windows
@@ -423,8 +464,8 @@ const renderWindow = async (job, window, assets) => {
     }
   }
 
-  const epoch = job.request.snapshot.events[0]?.epoch ?? 1
-  job.host.handleMessage({ version: 2, type: 'transport', requestId: job.nextHostRequestId++, epoch, running: true, frame: window.start })
+  job.host.handleMessage({ version: 2, type: 'transport', requestId: job.nextHostRequestId++, epoch: epochOf(job), running: true, frame: window.start })
+  installAutomation(job, window)
   replaceSources(job, ordinary, prepared)
   job.sourcesActive = true
   let frame = window.start

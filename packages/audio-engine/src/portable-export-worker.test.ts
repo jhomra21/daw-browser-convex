@@ -18,6 +18,7 @@ import {
 } from './portable-export-worker-protocol'
 import type { PortableExportAsset } from './portable-export-snapshot'
 import { portableWasmCapabilityMatrix } from './backends/portable-wasm-capabilities'
+import { installPortableExportWorker } from './portable-export-render-harness'
 import { portableWasmCapabilityMatrix as emittedPortableWasmCapabilityMatrix } from '../../../public/audio-workers/daw-portable-capability-metadata-v1.js'
 
 const workerUrl = new URL('../../../public/audio-workers/daw-portable-export-worker-v2.js', import.meta.url)
@@ -93,6 +94,7 @@ test('the Worker-compatible client honors cancellation before loading an artifac
       },
       assets: [],
       events: [],
+      automation: [],
     },
     sampleRateHz: 48_000,
     frameCount: 1,
@@ -138,6 +140,7 @@ test('the Worker transfers a copy without detaching the cached Wasm artifact', a
       },
       assets: [],
       events: [],
+      automation: [],
     },
     sampleRateHz: 48_000,
     frameCount: 1,
@@ -166,53 +169,44 @@ test('the Worker transfers a copy without detaching the cached Wasm artifact', a
 })
 
 test('the Worker rejects unsupported snapshots and renders the production Wasm artifact in bounded transferable chunks', async () => {
-  type WorkerHarness = {
-    onmessage: ((event: MessageEvent<object>) => void) | null
-    postMessage: (message: PortableExportWorkerResponse) => void
-  }
-
+  const harness = await installPortableExportWorker()
   const responses: PortableExportWorkerResponse[] = []
   const pageRequests: Extract<PortableExportWorkerResponse, { type: 'page-request' }>[] = []
   const cancellation = { jobId: 0 }
 
-  const harness: WorkerHarness = {
-    onmessage: null,
-    postMessage: (message) => {
-      responses.push(message)
+  harness.listen((message) => {
+    responses.push(message)
 
-      if (message.type === 'page-request') {
-        pageRequests.push(message)
-        queueMicrotask(() => {
-          harness.onmessage?.(new MessageEvent('message', {
-            data: {
-              version: portableExportWorkerProtocolVersion,
-              type: 'page-response',
-              jobId: message.jobId,
-              requestId: message.requestId,
-              assetId: message.assetId,
-              startFrame: message.startFrame,
-              frameCount: message.frameCount,
-              planes: [new Float32Array(message.frameCount), new Float32Array(message.frameCount)],
-            },
-          }))
-        })
-      } else if (cancellation.jobId > 0
-        && message.type === 'chunk'
-        && message.jobId === cancellation.jobId) {
+    if (message.type === 'page-request') {
+      pageRequests.push(message)
+      queueMicrotask(() => {
         harness.onmessage?.(new MessageEvent('message', {
-          data: { version: portableExportWorkerProtocolVersion, type: 'cancel', jobId: cancellation.jobId },
+          data: {
+            version: portableExportWorkerProtocolVersion,
+            type: 'page-response',
+            jobId: message.jobId,
+            requestId: message.requestId,
+            assetId: message.assetId,
+            startFrame: message.startFrame,
+            frameCount: message.frameCount,
+            planes: [new Float32Array(message.frameCount), new Float32Array(message.frameCount)],
+          },
         }))
-      } else if (message.type === 'chunk') {
-        harness.onmessage?.(new MessageEvent('message', {
-          data: { version: portableExportWorkerProtocolVersion, type: 'chunk-consumed', jobId: message.jobId, index: message.index },
-        }))
-      }
-    },
-  }
+      })
+    } else if (cancellation.jobId > 0
+      && message.type === 'chunk'
+      && message.jobId === cancellation.jobId) {
+      harness.onmessage?.(new MessageEvent('message', {
+        data: { version: portableExportWorkerProtocolVersion, type: 'cancel', jobId: cancellation.jobId },
+      }))
+    } else if (message.type === 'chunk') {
+      harness.onmessage?.(new MessageEvent('message', {
+        data: { version: portableExportWorkerProtocolVersion, type: 'chunk-consumed', jobId: message.jobId, index: message.index },
+      }))
+    }
+  })
 
   const wasmUrl = new URL('../../../public/audio-core/daw-audio-core.wasm', import.meta.url)
-  Object.defineProperty(globalThis, 'self', { configurable: true, value: harness, writable: true })
-  await import(`${workerUrl.href}?render=${Date.now()}`)
 
   if (!harness.onmessage) throw new Error('Worker did not install its message handler.')
 
@@ -231,6 +225,7 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
         graph: { version: 1, revision: 1, nodes: [{ kind: 'instrument', processorOrder: [] }], edges: [], assets: [] },
         assets: [],
         events: [],
+        automation: [],
       },
     },
   }))
@@ -270,6 +265,7 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
           pcm: { frameCount: 4, planes: [new Float32Array([0, 0.25, -0.5, 1]), new Float32Array([1, -0.5, 0.25, 0])] },
           transferables: [],
         }],
+        automation: [],
         events: [{
           version: 1,
           epoch: 1,
@@ -386,6 +382,7 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
       },
       assets,
       events,
+      automation: [],
     },
   })
 

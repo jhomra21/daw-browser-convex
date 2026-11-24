@@ -61,6 +61,34 @@ export type PortableFrameScheduleEvent =
     interpolation: 'linear'
   }
 
+/** A schedule event before its timeline time is resolved to a frame; shared by the live and export compilers. */
+export type PortableSchedulePayload =
+  | {
+    type: 'note-on'
+    target: PortableInstrumentTarget
+    noteId: number
+    pitch: number
+    velocity: number
+  }
+  | {
+    type: 'note-off'
+    target: PortableInstrumentTarget
+    noteId: number
+    pitch: number
+  }
+  | {
+    type: 'parameter-set' | 'parameter-restore'
+    target: PortableParameterTarget
+    value: number
+  }
+  | {
+    type: 'parameter-ramp'
+    target: PortableParameterTarget
+    endTimelineSec: number
+    startValue: number
+    endValue: number
+  }
+
 export type PortableFrameSchedule = PortableScheduleIdentity & {
   events: readonly PortableFrameScheduleEvent[]
 }
@@ -159,6 +187,30 @@ export const portableFrameAtTimelineTime = (
   identity: Pick<PortableScheduleIdentity, 'sampleRateHz' | 'timeOrigin'>,
   timelineSec: number,
 ) => identity.timeOrigin.frame + Math.round((timelineSec - identity.timeOrigin.timelineSec) * identity.sampleRateHz)
+
+export const portableEventWithFrame = (
+  event: PortableSchedulePayload,
+  timelineSec: number,
+  identity: Pick<PortableFrameSchedule, 'sampleRateHz' | 'timeOrigin'>,
+): PortableFrameScheduleEvent => {
+  const frame = portableFrameAtTimelineTime(identity, timelineSec)
+
+  if (event.type === 'parameter-ramp') {
+    return {
+      endFrame: portableFrameAtTimelineTime(identity, event.endTimelineSec),
+      endValue: event.endValue,
+      frame,
+      interpolation: 'linear',
+      sequence: 0,
+      startFrame: frame,
+      startValue: event.startValue,
+      target: event.target,
+      type: event.type,
+    }
+  }
+
+  return { ...event, frame, sequence: 0 }
+}
 
 export const eventsForPortableFrameBlock = (
   schedule: PortableFrameSchedule,

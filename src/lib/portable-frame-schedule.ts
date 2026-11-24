@@ -1,14 +1,16 @@
 import {
   assertPortableFrameSchedule,
+  portableEventWithFrame,
   portableFrameAtTimelineTime,
   type PortableFrameSchedule,
   type PortableFrameScheduleEvent,
   type PortableParameterTarget,
+  type PortableSchedulePayload,
 } from '@daw-browser/audio-engine/portable-frame-scheduling'
-import { getAutomationEnvelopeSchedulePlan } from '@daw-browser/audio-engine/automation'
+import { compilePortableAutomationEvents } from '@daw-browser/audio-engine/portable-automation-schedule'
 import { getScheduledMidiEvents } from '@daw-browser/audio-engine/audio-scheduling'
 import { resolveTrackMidiExpressionSchedule } from '@daw-browser/audio-engine/midi-expression-scheduling'
-import { getAutomationParameterDescriptor, normalizeLegacyMidiClip, type ArpParams, type AutomationEnvelope } from '@daw-browser/shared'
+import { normalizeLegacyMidiClip, type ArpParams, type AutomationEnvelope } from '@daw-browser/shared'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import {
   loopFramesForTransport, splitLoopScheduleRange, type LoopTransport,
@@ -36,37 +38,10 @@ export type PortableFrameScheduleAdapterInput = {
   loopPassFrame?: number
 }
 
-type PendingEventPayload =
-  | {
-    type: 'note-on'
-    target: { kind: 'instrument'; trackId: string }
-    noteId: number
-    pitch: number
-    velocity: number
-  }
-  | {
-    type: 'note-off'
-    target: { kind: 'instrument'; trackId: string }
-    noteId: number
-    pitch: number
-  }
-  | {
-    type: 'parameter-set' | 'parameter-restore'
-    target: PortableParameterTarget
-    value: number
-  }
-  | {
-    type: 'parameter-ramp'
-    target: PortableParameterTarget
-    endTimelineSec: number
-    startValue: number
-    endValue: number
-  }
-
 type PendingEvent = {
   timelineSec: number
   ordinal: number
-  event: PendingEventPayload
+  event: PortableSchedulePayload
 }
 
 const stableNoteId = (trackId: string, clipId: string, identity: string) => {
@@ -84,23 +59,6 @@ const noteIdentity = (input: PortableFrameScheduleAdapterInput, identity: string
   input.loopPassFrame === undefined ? identity : `${identity}:loop:${input.loopPassFrame}`
 )
 
-const parameterTarget = (envelope: AutomationEnvelope): PortableParameterTarget => (
-  envelope.target.kind === 'track'
-    ? {
-      kind: 'parameter',
-      scope: 'track',
-      trackId: envelope.target.trackId,
-      effectInstanceId: envelope.target.effectInstanceId,
-      parameterId: envelope.parameterId === 'volume' ? 'mixer.gain' : envelope.parameterId,
-    }
-    : {
-      kind: 'parameter',
-      scope: 'master',
-      effectInstanceId: envelope.target.effectInstanceId,
-      parameterId: envelope.parameterId === 'volume' ? 'mixer.gain' : envelope.parameterId,
-    }
-)
-
 const midiExpressionTarget = (
   trackId: string,
   parameterId: string,
@@ -112,32 +70,6 @@ const midiExpressionTarget = (
   effectInstanceId,
   parameterId: parameterId === 'volume' ? 'mixer.gain' : parameterId,
 })
-
-const eventWithFrame = (
-  event: PendingEventPayload,
-  timelineSec: number,
-  identity: Pick<PortableFrameSchedule, 'sampleRateHz' | 'timeOrigin'>,
-): PortableFrameScheduleEvent => {
-  const frame = portableFrameAtTimelineTime(identity, timelineSec)
-
-  if (event.type === 'parameter-ramp') {
-    const startFrame = frame
-
-    return {
-      endFrame: portableFrameAtTimelineTime(identity, event.endTimelineSec),
-      endValue: event.endValue,
-      frame: startFrame,
-      interpolation: 'linear',
-      sequence: 0,
-      startFrame,
-      startValue: event.startValue,
-      target: event.target,
-      type: event.type,
-    }
-  }
-
-  return { ...event, frame, sequence: 0 }
-}
 
 const eventPriorityAtFrame = (event: PortableFrameScheduleEvent) => (
   event.type === 'note-off' ? 0 : event.type === 'note-on' ? 1 : 2
@@ -178,32 +110,8 @@ const compileSinglePortableFrameSchedule = (
     endLimitSec: input.rangeEndSec,
   }
 
-  for (const envelope of input.automationEnvelopes) {
-    if (!envelope.enabled) continue
-    const fallback = getAutomationParameterDescriptor(envelope.parameterId)?.defaultValue ?? 0
-    const plan = getAutomationEnvelopeSchedulePlan(envelope, window, fallback)
-
-    for (let index = 0; index < plan.length; index += 1) {
-      const point = plan[index]
-      const previous = plan[index - 1]
-
-      if (point.kind === 'ramp' && previous) {
-        append(previous.timeSec, {
-          type: 'parameter-ramp',
-          target: parameterTarget(envelope),
-          endTimelineSec: point.timeSec,
-          startValue: previous.value,
-          endValue: point.value,
-        })
-        continue
-      }
-
-      append(point.timeSec, {
-        type: 'parameter-set',
-        target: parameterTarget(envelope),
-        value: point.value,
-      })
-    }
+  for (const { timelineSec, payload } of compilePortableAutomationEvents(input.automationEnvelopes, window)) {
+    append(timelineSec, payload)
   }
 
   for (const track of input.tracks) {
@@ -290,7 +198,7 @@ const compileSinglePortableFrameSchedule = (
 
   const events = pending
     .flatMap((pendingEvent) => {
-      const event = eventWithFrame(pendingEvent.event, pendingEvent.timelineSec, identity)
+      const event = portableEventWithFrame(pendingEvent.event, pendingEvent.timelineSec, identity)
 
       return input.eventRangeStartSec === undefined
         || event.frame >= input.timeOrigin.frame

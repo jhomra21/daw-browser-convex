@@ -640,7 +640,7 @@ export const graphWithInstruments = (
   return reasons.length > 0 ? { reasons } : { graph: { ...graph, nodes }, reasons: [] }
 }
 
-const targetReasons = (
+export const targetReasons = (
   event: PortableFrameScheduleEvent,
   graph: AudioCoreGraphSnapshot,
 ): readonly string[] => {

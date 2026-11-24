@@ -311,10 +311,6 @@ const selectPortableMixdown = async (
 ): Promise<PortableMixdownSelection> => {
   if (!supportsPortableExport(globalThis)) return { selected: false }
 
-  if (prepared.automationEnvelopes.length > 0 || prepared.sidechainRoutes.length > 0 || req.cueTrackIds?.length) {
-    return { selected: false }
-  }
-
   const artifact = await loadArtifact(resolvePortableWasmManifestUrl())
 
   if (!artifact.available) return { selected: false }
@@ -388,6 +384,8 @@ const selectPortableMixdown = async (
     epoch: 1,
     firstSequence: 1,
     fx: req.fx,
+    automationEnvelopes: prepared.automationEnvelopes,
+    sidechainRoutes: prepared.sidechainRoutes,
     hasExternalPlugins: false,
     projectGeneration,
     preparedStretchAssets: preparedStretchAssets.assets,

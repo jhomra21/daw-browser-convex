@@ -1284,9 +1284,8 @@ window.eqFixture = {
       owner,
       get children() {
         return createComponent(Eq, {
-          get bands() { return params().bands },
-          enabled: true, channelMode: 'stereo',
-          onBandChange: preview, onChannelModeChange: () => {},
+          get params() { return params() },
+          onBandChange: preview,
         })
       },
     }), root)
@@ -1453,9 +1452,7 @@ window.builtInEffectGestureFixture = {
         get children() {
           if (kind === 'eq') {
             return createComponent(Eq, {
-              get bands() { return params().bands },
-              get enabled() { return params().enabled },
-              get channelMode() { return params().channelMode },
+              get params() { return params() },
               onBandChange: (id, updates) => device.eq.changeInstance(instanceId, current => ({ ...current, bands: current.bands.map(band => band.id === id ? { ...band, ...updates } : band) })),
             })
           }

@@ -20,9 +20,16 @@ import {
   EQ_Q_MAX,
   EQ_Q_MIN,
   createEqBandParameterId,
+  eqCurveResponseDb,
+  EQ_BANDS_PER_CURVE,
+  EQ_OUTPUT_DB_MAX,
+  EQ_OUTPUT_DB_MIN,
+  EQ_SCALE_MAX,
+  EQ_SCALE_MIN,
   supportsGain,
   type EqChannelMode,
   type EqBandParams,
+  type EqParams,
 } from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
 import { formatDeviceDb, formatDeviceFrequency } from '~/lib/device-value-format'
@@ -34,11 +41,9 @@ import { useParameterGesture } from '~/components/effects/effect-parameter-inter
 
 // ===== Component =====
 type EqProps = {
-  bands: EqBandParams[]
-  enabled: boolean
-  channelMode: EqChannelMode
+  params: EqParams
   onBandChange: (bandId: string, updates: Partial<EqBandParams>) => void
-  onChannelModeChange: (mode: EqChannelMode) => void
+  onParamsChange?: (updates: Partial<Pick<EqParams, 'channelMode' | 'adaptiveQ' | 'scale' | 'outputDb' | 'highQuality'>>) => void
   onBandToggle?: (bandId: string) => void
   onToggleEnabled?: (enabled: boolean) => void
   onReset?: () => void
@@ -58,9 +63,18 @@ const Q_MIN = EQ_Q_MIN
 const Q_MAX = EQ_Q_MAX
 
 const EQ_CHANNEL_MODE_OPTIONS: { value: EqChannelMode; label: string }[] = [
-  { value: 'mono', label: 'Mono' },
   { value: 'stereo', label: 'Stereo' },
+  { value: 'leftRight', label: 'L/R' },
+  { value: 'midSide', label: 'M/S' },
 ]
+
+// Each of the two curves is named after what it filters in the two-curve modes.
+const EDIT_CURVE_LABELS: Record<EqChannelMode, readonly [string, string]> = {
+  stereo: ['A', 'A'],
+  mono: ['A', 'A'],
+  leftRight: ['L', 'R'],
+  midSide: ['M', 'S'],
+}
 
 const SPECTRUM_DECAY_GRACE_MS = 90
 const SPECTRUM_DECAY_PER_SECOND = 0.04
@@ -73,7 +87,13 @@ const formatDb = (value: number) => formatDeviceDb(value, 2)
 
 const formatQ = (value: number) => value.toFixed(2)
 
-const formatChannelMode = (mode: EqChannelMode) => mode === 'mono' ? 'Mono' : 'Stereo'
+const CHANNEL_MODE_LABELS: Record<EqChannelMode, string> = { stereo: 'Stereo', mono: 'Mono', leftRight: 'L/R', midSide: 'M/S' }
+
+const formatChannelMode = (mode: EqChannelMode) => CHANNEL_MODE_LABELS[mode]
+
+const formatScale = (value: number) => `${Math.round(value * 100)} %`
+
+const DEFAULT_SAMPLE_RATE = 48000
 
 const hasAudibleSpectrum = (data: Float32Array) => {
   for (let i = 0; i < data.length; i++) {
@@ -100,16 +120,30 @@ const sampleSpectrumMagnitude = (data: Float32Array, frequency: number, nyquist:
   return weightTotal > 0 ? total / weightTotal : 0
 }
 
-function applyEqResponseBandParams(filter: BiquadFilterNode, band: EqBandParams) {
-  filter.type = band.type
-  filter.frequency.value = Math.max(FREQ_MIN, Math.min(FREQ_MAX, band.frequency))
-  filter.Q.value = Math.max(0.001, band.q)
-  filter.gain.value = supportsGain(band.type) ? band.gainDb : 0
+// A toggle in the device's right column.
+function EqToggle(props: { label: string; title: string; pressed: boolean; disabled?: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={props.pressed ? 'true' : 'false'}
+      title={props.title}
+      disabled={props.disabled}
+      class={cn(
+        'h-5 border border-border px-1 text-[10px] leading-none',
+        props.pressed ? 'bg-cyan-500/20 text-cyan-100' : 'bg-app-surface text-muted-foreground hover:bg-muted',
+        props.disabled && 'cursor-not-allowed opacity-60',
+      )}
+      onClick={props.onToggle}
+    >
+      {props.label}
+    </button>
+  )
 }
 
 export default function Eq(props: EqProps) {
   const appPreferences = useAppPreferences()
-  const [selectedId, setSelectedId] = createSignal<string>(untrack(() => props.bands[0]?.id ?? ''))
+  const [editCurve, setEditCurve] = createSignal<0 | 1>(0)
+  const [selectedId, setSelectedId] = createSignal<string>(untrack(() => props.params.bands[0]?.id ?? ''))
   // Plain variable: the pointer-down handler reads it in the same call that picks the band.
   let draggedId: string | null = null
   const [canvasSize, setCanvasSize] = createSignal({ width: 640, height: 160 })
@@ -122,18 +156,12 @@ export default function Eq(props: EqProps) {
   let displayedSpectrum: Float32Array | undefined
   let spectrumYBuf: Float32Array | undefined
   let smoothedYBuf: Float32Array | undefined
-  let responseFilter: BiquadFilterNode | undefined
-  let responseFrequencies: Float32Array<ArrayBuffer> | undefined
-  let responseMagnitudes: Float32Array<ArrayBuffer> | undefined
-  let responsePhases: Float32Array<ArrayBuffer> | undefined
-  let responseDb: Float32Array | undefined
-  let displayedSpectrumSampleRate = 44100
+  let displayedSpectrumSampleRate = DEFAULT_SAMPLE_RATE
   let lastFreshSpectrumAt = 0
   let lastSpectrumDecayAt = 0
   let spectrumDecayFrame: number | null = null
   let initialDrawFrame: number | null = null
   let drawFrame: number | null = null
-  let responseCacheKey = ''
 
   const scheduleDraw = () => {
     if (drawFrame !== null) return
@@ -159,8 +187,6 @@ export default function Eq(props: EqProps) {
     resizeObs = new ResizeObserver(() => update())
 
     if (containerRef) resizeObs.observe(containerRef)
-    const responseContext = new OfflineAudioContext(1, 1, 44100)
-    responseFilter = responseContext.createBiquadFilter()
     initialDrawFrame = requestAnimationFrame(() => {
       initialDrawFrame = null
       scheduleDraw()
@@ -175,7 +201,6 @@ export default function Eq(props: EqProps) {
     if (initialDrawFrame !== null) cancelAnimationFrame(initialDrawFrame)
 
     if (drawFrame !== null) cancelAnimationFrame(drawFrame)
-    responseFilter = undefined
   })
 
   // A folded device is not drawn, so its decay loop would only burn frames; unfolding restarts it.
@@ -240,6 +265,15 @@ export default function Eq(props: EqProps) {
     },
   )
 
+  const twoCurves = () => props.params.channelMode === 'leftRight' || props.params.channelMode === 'midSide'
+  // The curve the strip and the graph nodes edit: in Stereo (and Mono) there is only the first.
+  const activeCurve = () => twoCurves() ? editCurve() : 0
+  const curveBands = (curve: 0 | 1) => props.params.bands.slice(curve * EQ_BANDS_PER_CURVE, (curve + 1) * EQ_BANDS_PER_CURVE)
+  const bands = createMemo(() => curveBands(activeCurve()))
+  const enabled = () => props.params.enabled
+  // The gain a band draws at and is dragged at: Scale multiplies every band that has a gain.
+  const displayGain = (band: EqBandParams) => supportsGain(band.type) ? band.gainDb * props.params.scale : 0
+
   // Helpers: mapping
   const freqToX = (freq: number) => {
     const min = Math.log10(FREQ_MIN)
@@ -280,23 +314,6 @@ export default function Eq(props: EqProps) {
     const t = (clamped - top) / h
 
     return GAIN_MAX - t * (GAIN_MAX - GAIN_MIN)
-  }
-
-  const ensureResponseBuffers = (length: number) => {
-    if (!responseFrequencies || responseFrequencies.length !== length) responseFrequencies = new Float32Array(length)
-
-    if (!responseMagnitudes || responseMagnitudes.length !== length) responseMagnitudes = new Float32Array(length)
-
-    if (!responsePhases || responsePhases.length !== length) responsePhases = new Float32Array(length)
-
-    if (!responseDb || responseDb.length !== length) responseDb = new Float32Array(length)
-
-    return {
-      frequencies: responseFrequencies,
-      magnitudes: responseMagnitudes,
-      phases: responsePhases,
-      dbValues: responseDb,
-    }
   }
 
   // Drawing
@@ -432,59 +449,35 @@ export default function Eq(props: EqProps) {
       ctx.globalAlpha = 1
     }
 
-    // Response curve
-    if (props.enabled) {
+    // Response curves, drawn from the same band design the core runs, at the real sample rate. The curve
+    // that is not being edited is dimmed.
+    if (enabled()) {
       const L = 6, R = 6
       const inner = Math.max(1, width - (L + R))
-      let pointCount = 0
+      const frequencies: number[] = []
 
-      for (let x = L; x <= width - R; x += 2) pointCount++
-      const { frequencies, magnitudes, phases, dbValues } = ensureResponseBuffers(pointCount)
-      const filter = responseFilter
-      let nextResponseCacheKey = `${width}x${height}:${props.enabled}:`
+      for (let x = L; x <= width - R; x += 2) frequencies.push(FREQ_MIN * Math.pow(FREQ_MAX / FREQ_MIN, (x - L) / inner))
 
-      for (const band of props.bands) {
-        nextResponseCacheKey += `${band.id}:${band.enabled}:${band.type}:${band.frequency}:${band.gainDb}:${band.q}|`
-      }
+      const curves: (0 | 1)[] = twoCurves() ? (editCurve() === 0 ? [1, 0] : [0, 1]) : [0]
 
-      if (filter && responseCacheKey !== nextResponseCacheKey) {
-        responseCacheKey = nextResponseCacheKey
-        let pointIndex = 0
-
-        for (let x = L; x <= width - R; x += 2) {
-          const t = (x - L) / inner
-          frequencies[pointIndex] = FREQ_MIN * Math.pow(FREQ_MAX / FREQ_MIN, t)
-          dbValues[pointIndex] = 0
-          pointIndex++
-        }
-
-        for (const band of props.bands) {
-          if (!band.enabled) continue
-          applyEqResponseBandParams(filter, band)
-          filter.getFrequencyResponse(frequencies, magnitudes, phases)
-
-          for (let index = 0; index < pointCount; index++) {
-            dbValues[index] += 20 * Math.log10(Math.max(0.000001, magnitudes[index] ?? 1))
-          }
-        }
-
-      }
-
-      if (filter && responseDb) {
+      for (const curve of curves) {
+        const dbValues = eqCurveResponseDb(props.params, curve, frequencies, displayedSpectrumSampleRate)
+        ctx.globalAlpha = curve === activeCurve() ? 1 : 0.35
         ctx.strokeStyle = meterSafe
         ctx.lineWidth = 2.5
         ctx.beginPath()
-        let pointIndex = 0
 
-        for (let x = L; x <= width - R; x += 2) {
+        for (let pointIndex = 0; pointIndex < dbValues.length; pointIndex++) {
+          const x = L + pointIndex * 2
           const y = gainToY(dbValues[pointIndex] ?? 0)
 
-          if (x === L) ctx.moveTo(x, y); else ctx.lineTo(x, y)
-          pointIndex++
+          if (pointIndex === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
         }
 
         ctx.stroke()
       }
+
+      ctx.globalAlpha = 1
     }
 
     // Nodes
@@ -492,12 +485,12 @@ export default function Eq(props: EqProps) {
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
 
-    for (let index = 0; index < props.bands.length; index++) {
-      const b = props.bands[index]
+    for (let index = 0; index < bands().length; index++) {
+      const b = bands()[index]
 
       if (!b.enabled) continue
       const x = freqToX(b.frequency)
-      const y = gainToY(supportsGain(b.type) ? b.gainDb : 0)
+      const y = gainToY(displayGain(b))
       const isSel = selectedId() === b.id
       ctx.beginPath()
       ctx.arc(x, y, isSel ? 8 : 7, 0, Math.PI * 2)
@@ -515,7 +508,7 @@ export default function Eq(props: EqProps) {
   // Redraw when relevant inputs change
   createEffect(
     () => {
-      for (const band of props.bands) {
+      for (const band of props.params.bands) {
         void band.id
         void band.frequency
         void band.gainDb
@@ -524,7 +517,12 @@ export default function Eq(props: EqProps) {
         void band.type
       }
 
-      void props.enabled
+      void props.params.enabled
+      void props.params.channelMode
+      void props.params.adaptiveQ
+      void props.params.scale
+      void props.params.highQuality
+      void editCurve()
       void selectedId()
       void canvasSize()
       void props.spectrumData
@@ -539,9 +537,9 @@ export default function Eq(props: EqProps) {
     () => {
       const current = selectedId()
 
-      if (props.bands.some((band) => band.id === current)) return undefined
+      if (bands().some((band) => band.id === current)) return undefined
 
-      return { current, next: props.bands[0]?.id ?? '' }
+      return { current, next: bands()[0]?.id ?? '' }
     },
     (stale) => {
       if (stale && stale.current !== stale.next) setSelectedId(stale.next)
@@ -580,18 +578,18 @@ export default function Eq(props: EqProps) {
   })
 
   const onCanvasPointerDown = (event: PointerEvent) => {
-    if (!props.enabled || !canvasRef || canvasDrag.isDragging()) return
+    if (!enabled() || !canvasRef || canvasDrag.isDragging()) return
     const rect = canvasRef.getBoundingClientRect()
     const x = event.clientX - rect.left
     const y = event.clientY - rect.top
     let closest: { id: string; distance: number } | undefined
 
-    for (const band of props.bands) {
+    for (const band of bands()) {
       if (!band.enabled) continue
 
       const distance = Math.hypot(
         x - freqToX(band.frequency),
-        y - gainToY(supportsGain(band.type) ? band.gainDb : 0),
+        y - gainToY(displayGain(band)),
       )
 
       if (distance < 24 && (!closest || distance < closest.distance)) closest = { id: band.id, distance }
@@ -609,12 +607,13 @@ export default function Eq(props: EqProps) {
 
   const applyBandPointerValue = (id: string, x: number, y: number) => {
     const nf = Math.max(FREQ_MIN, Math.min(FREQ_MAX, xToFreq(x)))
-    const band = props.bands.find(b => b.id === id)
+    const band = bands().find(b => b.id === id)
 
     if (!band) return
 
-    if (supportsGain(band.type)) {
-      const ng = Math.max(GAIN_MIN, Math.min(GAIN_MAX, yToGain(y)))
+    // With Scale at 0 a band's gain cannot be dragged: every gain draws on the zero line.
+    if (supportsGain(band.type) && props.params.scale > 0.01) {
+      const ng = Math.max(GAIN_MIN, Math.min(GAIN_MAX, yToGain(y) / props.params.scale))
       const gainDb = Math.round(ng * 10) / 10
       const frequency = Math.round(nf)
 
@@ -635,10 +634,10 @@ export default function Eq(props: EqProps) {
 
   // UI helpers
   const selectedBandState = createMemo(() => {
-    const index = props.bands.findIndex((band) => band.id === selectedId())
+    const index = bands().findIndex((band) => band.id === selectedId())
 
     return {
-      band: index === -1 ? undefined : props.bands[index],
+      band: index === -1 ? undefined : bands()[index],
       index,
     }
   })
@@ -648,7 +647,7 @@ export default function Eq(props: EqProps) {
   const defaultSelectedBand = createMemo(() => {
     const index = selectedBandState().index
 
-    return index === -1 ? DEFAULT_EQ_PARAMS.bands[0] : (DEFAULT_EQ_PARAMS.bands[index] ?? createDefaultEqBand(index))
+    return index === -1 ? DEFAULT_EQ_PARAMS.bands[0] : (DEFAULT_EQ_PARAMS.bands[index + activeCurve() * EQ_BANDS_PER_CURVE] ?? createDefaultEqBand(index))
   })
 
   const selectedFrequencyLabel = () => formatFrequency(selectedBand()?.frequency ?? 0)
@@ -704,16 +703,16 @@ export default function Eq(props: EqProps) {
   return (
     <EffectShell
       title="EQ Eight"
-      typeLabel={formatChannelMode(props.channelMode)}
-      enabled={props.enabled}
+      typeLabel={formatChannelMode(props.params.channelMode)}
+      enabled={props.params.enabled}
       onToggleEnabled={props.onToggleEnabled}
       onReset={props.onReset}
-      class={cn('w-[704px] min-w-[704px]', props.class)}
+      class={cn('w-[736px] min-w-[736px]', props.class)}
     >
       <div
         class="grid min-h-0 flex-1 overflow-hidden"
         style={{
-          'grid-template-columns': '72px minmax(220px, 1fr) 72px',
+          'grid-template-columns': '72px minmax(220px, 1fr) 104px',
           'grid-template-rows': 'minmax(0, 1fr) 52px',
         }}
       >
@@ -728,7 +727,7 @@ export default function Eq(props: EqProps) {
             max={FREQ_MAX}
             step={1}
             unit="Hz"
-            disabled={!props.enabled || !selectedBand()?.enabled}
+            disabled={!enabled() || !selectedBand()?.enabled}
             logarithmic={true}
             automationRange={selectedBandAutomationRange('frequencyHz')}
             automated={!!selectedBandAutomationRange('frequencyHz')}
@@ -750,7 +749,7 @@ export default function Eq(props: EqProps) {
             max={GAIN_MAX}
             step={0.1}
             unit="dB"
-            disabled={!props.enabled || !selectedBand()?.enabled || !supportsGain(selectedBand()?.type ?? 'peaking')}
+            disabled={!enabled() || !selectedBand()?.enabled || !supportsGain(selectedBand()?.type ?? 'peaking')}
             bipolar={true}
             automationRange={selectedBandAutomationRange('gainDb')}
             automated={!!selectedBandAutomationRange('gainDb')}
@@ -771,7 +770,7 @@ export default function Eq(props: EqProps) {
             min={Q_MIN}
             max={Q_MAX}
             step={0.1}
-            disabled={!props.enabled || !selectedBand()?.enabled}
+            disabled={!enabled() || !selectedBand()?.enabled}
             automationRange={selectedBandAutomationRange('q')}
             automated={!!selectedBandAutomationRange('q')}
             onAutomationSelect={() => {
@@ -795,23 +794,23 @@ export default function Eq(props: EqProps) {
             aria-label={responseLabel()}
             width={canvasSize().width}
             height={canvasSize().height}
-            class={cn('absolute inset-0 block h-full w-full touch-none', props.enabled ? 'cursor-crosshair' : 'cursor-not-allowed opacity-60')}
+            class={cn('absolute inset-0 block h-full w-full touch-none', enabled() ? 'cursor-crosshair' : 'cursor-not-allowed opacity-60')}
             onPointerDown={onCanvasPointerDown}
           />
         </div>
 
-        <div class="row-span-2 flex flex-col border-l border-border bg-background/40 px-1 py-2 text-[10px]">
-          <div class="mb-1 text-muted-foreground">Mode</div>
+        <div class="row-span-2 flex min-h-0 flex-col gap-1 overflow-y-auto border-l border-border bg-background/40 px-1 py-1 text-[10px]">
+          <div class="text-muted-foreground">Mode</div>
           <DropdownMenu>
             <DropdownMenuTrigger
               class={cn(
-                'mb-3 flex h-5 w-full items-center justify-between border border-border bg-app-surface px-1 text-left text-muted-foreground hover:bg-muted',
-                !props.enabled && 'cursor-not-allowed opacity-60',
+                'flex h-5 w-full items-center justify-between border border-border bg-app-surface px-1 text-left text-muted-foreground hover:bg-muted',
+                !enabled() && 'cursor-not-allowed opacity-60',
               )}
-              disabled={!props.enabled}
+              disabled={!enabled()}
               title="EQ channel mode"
             >
-              <span class="min-w-0 truncate">{formatChannelMode(props.channelMode)}</span>
+              <span class="min-w-0 truncate">{formatChannelMode(props.params.channelMode)}</span>
               <svg viewBox="0 0 8 8" class="h-1.5 w-1.5 shrink-0 text-muted-foreground" aria-hidden="true">
                 <path d="M1 3 L4 6 L7 3 Z" fill="currentColor" />
               </svg>
@@ -822,11 +821,11 @@ export default function Eq(props: EqProps) {
                   <DropdownMenuItem
                     class={cn(
                       'h-6 cursor-pointer px-2 py-1 text-xs text-foreground focus:bg-muted focus:text-foreground',
-                      option.value === props.channelMode && 'bg-cyan-500/20 text-cyan-100',
+                      option.value === props.params.channelMode && 'bg-cyan-500/20 text-cyan-100',
                     )}
-                    disabled={!props.enabled}
+                    disabled={!enabled()}
                     onSelect={() => {
-                      if (option.value !== props.channelMode) props.onChannelModeChange(option.value)
+                      if (option.value !== props.params.channelMode) props.onParamsChange?.({ channelMode: option.value })
                     }}
                   >
                     {option.label}
@@ -835,17 +834,82 @@ export default function Eq(props: EqProps) {
               </For>
             </DropdownMenuContent>
           </DropdownMenu>
-          <div class="mb-1 text-muted-foreground">Edit</div>
-          <div class="mb-3 border border-border bg-app-surface px-1 py-0.5 text-muted-foreground">A</div>
+          <div class="text-muted-foreground">Edit</div>
+          <EqToggle
+            label={EDIT_CURVE_LABELS[props.params.channelMode][activeCurve()]}
+            title={twoCurves() ? 'Switch the curve being edited' : 'Edit is available in L/R and M/S modes'}
+            pressed={false}
+            disabled={!enabled() || !twoCurves()}
+            onToggle={() => setEditCurve((curve) => curve === 0 ? 1 : 0)}
+          />
+          <div class="grid grid-cols-2 gap-1">
+            <EqToggle
+              label="Adapt Q"
+              title="Adaptive Q: the Q of a band increases as its boost or cut increases"
+              pressed={props.params.adaptiveQ}
+              disabled={!enabled()}
+              onToggle={() => props.onParamsChange?.({ adaptiveQ: !props.params.adaptiveQ })}
+            />
+            <EqToggle
+              label="Hi-Q"
+              title="Hi-Quality: runs the filters at twice the sample rate (3 frames of latency)"
+              pressed={props.params.highQuality}
+              disabled={!enabled()}
+              onToggle={() => props.onParamsChange?.({ highQuality: !props.params.highQuality })}
+            />
+          </div>
+          <div class="grid grid-cols-2">
+            <Knob
+              class="px-0 py-0"
+              size={26}
+              label="Scale"
+              valueLabel={formatScale(props.params.scale)}
+              value={props.params.scale}
+              resetValue={DEFAULT_EQ_PARAMS.scale}
+              min={EQ_SCALE_MIN}
+              max={EQ_SCALE_MAX}
+              step={0.01}
+              disabled={!enabled()}
+              automationRange={props.automationRangesByParameterId?.get('eq.scale')}
+              automated={!!props.automationRangesByParameterId?.get('eq.scale')}
+              onAutomationSelect={() => props.onAutomationParameterTouch?.('eq.scale')}
+              onValueChange={(scale) => {
+                props.onManualAutomationOverride?.('eq.scale')
+                props.onParamsChange?.({ scale })
+              }}
+            />
+            <Knob
+              class="px-0 py-0"
+              size={26}
+              label="Gain"
+              ariaLabel="Output gain"
+              valueLabel={formatDb(props.params.outputDb)}
+              value={props.params.outputDb}
+              resetValue={DEFAULT_EQ_PARAMS.outputDb}
+              min={EQ_OUTPUT_DB_MIN}
+              max={EQ_OUTPUT_DB_MAX}
+              step={0.1}
+              unit="dB"
+              bipolar={true}
+              disabled={!enabled()}
+              automationRange={props.automationRangesByParameterId?.get('eq.outputDb')}
+              automated={!!props.automationRangesByParameterId?.get('eq.outputDb')}
+              onAutomationSelect={() => props.onAutomationParameterTouch?.('eq.outputDb')}
+              onValueChange={(outputDb) => {
+                props.onManualAutomationOverride?.('eq.outputDb')
+                props.onParamsChange?.({ outputDb })
+              }}
+            />
+          </div>
         </div>
 
         <div class="relative z-10 flex min-w-0 border-t border-border bg-background">
-          <For each={props.bands}>
+          <For each={bands()}>
             {(band, index) => (
               <div class="flex min-w-0 flex-1 flex-col items-center justify-center gap-1 border-r border-border p-1 last:border-r-0">
                 <EqFilterTypeSelect
                   band={band}
-                  enabled={props.enabled}
+                  enabled={enabled()}
                   selected={selectedId() === band.id}
                   onSelectBand={() => {
                     setSelectedId(band.id)
@@ -863,7 +927,7 @@ export default function Eq(props: EqProps) {
                       'h-3.5 w-3.5 border border-border',
                       band.enabled ? 'bg-cyan-400' : 'bg-app-surface',
                     )}
-                    disabled={!props.enabled || !props.onBandToggle}
+                    disabled={!enabled() || !props.onBandToggle}
                     onClick={() => props.onBandToggle?.(band.id)}
                     title={band.enabled ? 'Disable band' : 'Enable band'}
                   />

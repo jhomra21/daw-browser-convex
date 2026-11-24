@@ -1361,8 +1361,8 @@ window.builtInEffectGestureFixture = {
     const engine = {
       getBpm: () => 120,
       calls: [],
-      mixer: { subscribeTrackGateMeter: () => () => {} },
-      masterFx: { subscribeGateMeter: () => () => {} },
+      mixer: { subscribeTrackGateMeter: () => () => {}, subscribeTrackLimiterMeter: () => () => {} },
+      masterFx: { subscribeGateMeter: () => () => {}, subscribeLimiterMeter: () => () => {} },
       setTrackFxInstance: async () => 'not-held',
       setMasterFxInstance: async () => 'not-held',
       setTrackFxInstances: async (_id, instances) => { engine.calls.push(instances.find(item => item.kind === kind)?.params) },

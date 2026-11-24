@@ -723,6 +723,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     },
     subscribeTrackCompressorMeter: (trackId: string, instanceId: string, listener: CompressorMeterListener) => stateFor(trackId).subscribeCompressorMeter(instanceId, listener),
     subscribeTrackGateMeter: (trackId: string, instanceId: string, listener: GateMeterListener) => stateFor(trackId).subscribeGateMeter(instanceId, listener),
+    subscribeTrackLimiterMeter: (trackId: string, instanceId: string, listener: GateMeterListener) => stateFor(trackId).subscribeGateMeter(instanceId, listener),
     setBpm: (bpm: number) => {
       currentBpm = bpm
       let failure: unknown

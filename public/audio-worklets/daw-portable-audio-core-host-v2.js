@@ -14,7 +14,7 @@ const SUPPORTED_GRAPH_ENVELOPE_VERSIONS = new Set([
 const MAX_FAULTS = 4
 const MAX_INPUT_BUSES = 64
 const CHANNEL_COUNT = 2
-const MAX_PROCESSOR_PARAMETERS = 24
+const MAX_PROCESSOR_PARAMETERS = 64
 const MAX_PROCESSOR_EVENTS = 256
 const continuityResultForCoreResult = (result) => result === 3 || result === 14 ? 'capacity' : 'rejected'
 

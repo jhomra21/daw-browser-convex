@@ -25,6 +25,7 @@
 #include "../src/audio_core_validation.cpp"
 #include "../src/audio_core_wasm.cpp"
 #include "../src/processor_autofilter.cpp"
+#include "../src/processor_limiter.cpp"
 #include "../src/processor_delay.cpp"
 #include "../src/processor_dynamics.cpp"
 #include "../src/processor_eq.cpp"
@@ -125,7 +126,8 @@ void native_instrument_source_hook(const daw::audio_core::NativeGraphNodeRender&
 
 // Every processor state is at schema version 1 except the EQ, whose layout was extended.
 uint32_t schema_version_of(uint32_t kind) {
-  return kind == DAW_AUDIO_PROCESSOR_KIND_EQ ? DAW_AUDIO_CORE_PROCESSOR_EQ_SCHEMA_VERSION : 1u;
+  return kind == DAW_AUDIO_PROCESSOR_KIND_EQ ? DAW_AUDIO_CORE_PROCESSOR_EQ_SCHEMA_VERSION
+    : kind == DAW_AUDIO_PROCESSOR_KIND_LIMITER ? DAW_AUDIO_CORE_PROCESSOR_LIMITER_SCHEMA_VERSION : 1u;
 }
 
 void expect(daw_audio_core_result actual, daw_audio_core_result expected, int line = __builtin_LINE()) {
@@ -1541,9 +1543,9 @@ HistoryFixtureState history_fixture_state(uint32_t kind) {
     write_u32(48, 0); write_u32(52, 0); write_u32(56, 0); write_u32(60, 1);
     write_f32(64, 120.0F); write_f32(68, 0.707F);
   } else if (kind == DAW_AUDIO_PROCESSOR_KIND_LIMITER) {
-    fixture.size = 24; fixture.latency = 240;
-    write_u32(0, 1); write_f32(4, -6.0F); write_f32(8, 50.0F); write_f32(12, 5.0F);
-    write_f32(16, 1.0F); write_u32(20, 4);
+    fixture.size = 28; fixture.latency = 288;
+    write_u32(0, 1); write_f32(4, -6.0F); write_f32(8, 50.0F); write_f32(12, 6.0F);
+    write_f32(16, 1.0F); write_u32(20, 0); write_f32(24, 0.0F);
   } else if (kind == DAW_AUDIO_PROCESSOR_KIND_DELAY) {
     fixture.size = 32;
     write_u32(0, 1); write_f32(4, 10.0F); write_f32(8, 0.5F); write_f32(12, 0.5F);
@@ -2405,8 +2407,8 @@ void test_portable_dynamics_processor_characterization() {
   const float compressor = render(DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR, 72, state, 480);
   assert(compressor < 0.8F);
   state.fill(0); write_u32(state, 0, 1); write_f32(state, 4, -6.0F); write_f32(state, 8, 20.0F);
-  write_f32(state, 12, 5.0F); write_f32(state, 16, 1.0F); write_u32(state, 20, 4);
-  const float limiter = render(DAW_AUDIO_PROCESSOR_KIND_LIMITER, 24, state, 240);
+  write_f32(state, 12, 6.0F); write_f32(state, 16, 1.0F); write_u32(state, 20, 0); write_f32(state, 24, 0.0F);
+  const float limiter = render(DAW_AUDIO_PROCESSOR_KIND_LIMITER, 28, state, 288);
   assert(limiter <= std::pow(10.0F, -6.0F / 20.0F) + 1e-3F);
 }
 
@@ -2418,7 +2420,7 @@ void test_limiter_holds_its_gain_through_the_lookahead() {
   const float ceiling_with_tolerance = ceiling * std::pow(10.0F, 0.01F / 20.0F);
   bool held = true;
   for (const uint32_t rate : {48000u, 96000u}) {
-    for (const float lookahead_ms : {1.5F, 5.0F}) {
+    for (const float lookahead_ms : {1.5F, 6.0F}) {
       for (const float release_ms : {50.0F, 120.0F}) {
         for (const float link : {0.0F, 1.0F}) {
           const uint32_t latency = static_cast<uint32_t>(std::ceil(5.0F * static_cast<float>(rate) / 1000.0F));
@@ -2430,11 +2432,11 @@ void test_limiter_holds_its_gain_through_the_lookahead() {
             {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
           }};
           const daw_audio_limiter_state state{.enabled = 1, .ceiling_dbtp = kCeilingDb, .release_ms = release_ms,
-            .lookahead_ms = lookahead_ms, .link = link, .detector_oversampling = 4};
+            .lookahead_ms = lookahead_ms, .link = link, .auto_release = 0, .gain_db = 0.0F};
           std::array<uint8_t, sizeof(state)> state_bytes{};
           std::memcpy(state_bytes.data(), &state, state_bytes.size());
           const daw_audio_processor_descriptor processor{
-            .node_id = 2, .instance_id = 1, .kind = DAW_AUDIO_PROCESSOR_KIND_LIMITER, .state_version = 1, .state_size = state_bytes.size(),
+            .node_id = 2, .instance_id = 1, .kind = DAW_AUDIO_PROCESSOR_KIND_LIMITER, .state_version = DAW_AUDIO_CORE_PROCESSOR_LIMITER_SCHEMA_VERSION, .state_size = state_bytes.size(),
             .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
             .latency_frames = latency, .tail_frames = 0, .parameter_count = 0, .parameter_targets = nullptr, .state = state_bytes.data(),
           };
@@ -2498,11 +2500,11 @@ float limiter_output_sample_peak(uint32_t rate, float lookahead_ms, const std::v
     {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
   }};
   const daw_audio_limiter_state state{.enabled = 1, .ceiling_dbtp = kCeilingDb, .release_ms = 50.0F,
-    .lookahead_ms = lookahead_ms, .link = 1.0F, .detector_oversampling = 4};
+    .lookahead_ms = lookahead_ms, .link = 1.0F, .auto_release = 0, .gain_db = 0.0F};
   std::array<uint8_t, sizeof(state)> state_bytes{};
   std::memcpy(state_bytes.data(), &state, state_bytes.size());
   const daw_audio_processor_descriptor processor{
-    .node_id = 2, .instance_id = 1, .kind = DAW_AUDIO_PROCESSOR_KIND_LIMITER, .state_version = 1, .state_size = state_bytes.size(),
+    .node_id = 2, .instance_id = 1, .kind = DAW_AUDIO_PROCESSOR_KIND_LIMITER, .state_version = DAW_AUDIO_CORE_PROCESSOR_LIMITER_SCHEMA_VERSION, .state_size = state_bytes.size(),
     .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
     .latency_frames = latency, .tail_frames = 0, .parameter_count = 0, .parameter_targets = nullptr, .state = state_bytes.data(),
   };
@@ -2540,7 +2542,7 @@ void test_limiter_ceiling_holds_for_single_sample_peaks() {
   const float ceiling_with_tolerance = ceiling * (1.0F + 1e-4F);
   bool held = true;
   for (const uint32_t rate : {48000u, 96000u}) {
-    for (const float lookahead_ms : {1.5F, 5.0F}) {
+    for (const float lookahead_ms : {1.5F, 6.0F}) {
       // One isolated impulse per run, placed on 12 frames that straddle the 1024-frame block boundary, alternating polarity.
       float impulse_peak = 0.0F;
       for (uint32_t offset = 0; offset < 12; ++offset) {
@@ -8791,7 +8793,7 @@ void pristine_build(Phase3Rig &rig, const PristineVariant &variant) {
       .detector = 0, .link = 1.0F, .sidechain_enabled = 0, .sidechain_frequency_hz = 100.0F, .sidechain_q = 0.707F};
     rig.add_state(3, 20, DAW_AUDIO_PROCESSOR_KIND_GATE, gate);
     const daw_audio_limiter_state limiter{.enabled = 1, .ceiling_dbtp = -12.0F, .release_ms = 20.0F,
-      .lookahead_ms = 1.0F, .link = 1.0F, .detector_oversampling = 4};
+      .lookahead_ms = 1.5F, .link = 1.0F, .auto_release = 0, .gain_db = 0.0F};
     const auto compressor = [&rig] { rig.add_compressor(3, 21, -30.0F); };
     const auto limit = [&rig, &limiter] { rig.add_state(3, 22, DAW_AUDIO_PROCESSOR_KIND_LIMITER, limiter); };
     if (variant.reordered) { limit(); compressor(); } else { compressor(); limit(); }

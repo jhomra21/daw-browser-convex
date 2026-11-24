@@ -1304,7 +1304,7 @@ const modulationFixtures = modulationDefinitions.flatMap((definition): PortableG
 type DynamicsFixtureDefinition = {
   kind: PortableDynamicsKind
   kindId: 10 | 11 | 12
-  latencyMs: 2 | 5 | 10
+  latencyMs: 2 | 6 | 10
   legacy: PortableLegacyDynamicsFixture
   portableEligible: boolean
 }
@@ -1363,17 +1363,18 @@ const dynamicsDefinitions: readonly DynamicsFixtureDefinition[] = [
   {
     kind: 'limiter',
     kindId: 12,
-    latencyMs: 5,
+    latencyMs: 6,
     portableEligible: true,
     legacy: {
       kind: 'limiter',
       state: {
         enabled: true,
+        gainDb: 0,
         ceilingDbtp: -6,
         releaseMs: 50,
-        lookaheadMs: 5,
+        autoRelease: false,
+        lookaheadMs: 6,
         link: 1,
-        detectorOversampling: 4,
       },
     },
   },
@@ -1392,7 +1393,7 @@ const dynamicsParameterTargets = (kind: PortableDynamicsKind): readonly number[]
 
   if (kind === 'compressor') return Array.from({ length: 11 }, (_, index) => 116 + index)
 
-  return [127, 128, 129, 130]
+  return [127, 128, 130, 170]
 }
 
 const dynamicsStateWithEnabled = (

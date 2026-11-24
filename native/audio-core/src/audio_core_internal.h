@@ -28,6 +28,7 @@
 #include <tuple>
 
 #include "autofilter_kernel.h"
+#include "limiter_kernel.h"
 
 #if defined(DAW_AUDIO_CORE_TEST_INSTRUMENT_REJECTION)
 extern "C" bool daw_audio_core_test_reject_instrument_event(uint32_t index);
@@ -64,6 +65,7 @@ constexpr uint32_t kMaximumModulationDelayFrames = 4132;
 constexpr uint32_t kMaximumDynamicsDelayFrames = 1024;
 constexpr uint32_t kMaximumDelayProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
 constexpr uint32_t kMaximumReverbProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
+constexpr uint32_t kMaximumLimiterProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
 // A published plan and the plan being prepared may each reference every node,
 // so node runtime (instrument voices, fade progress) has two plans' worth of
 // slots. Processor slots equal one plan's capacity, live and transition entries
@@ -95,22 +97,6 @@ constexpr uint32_t kSpectralInputFrames = 131072;
 constexpr uint32_t kSpectralInputFrames = 16384;
 #endif
 constexpr float kSampleTerminationFadeMilliseconds = 6.0F;
-// Port of public/audio-worklets/daw-limiter-processor-v1.js createFir():
-// 48 taps, 0.125 cutoff, Blackman-Harris window, normalized for four phases.
-constexpr std::array<double, 48> kLimiterTruePeakFir = {
-  2.8770393804939532e-19, -8.462079214010202e-05, -0.00036092137667317133, -0.0003633790261733186,
-  0.00070568670835497859, 0.0029338012271598784, 0.0046865622501385462, 0.0029440137922481392,
-  -0.0042954750165350233, -0.014678888263847801, -0.020272630731593962, -0.011363293681758927,
-  0.015119076534081342, 0.047897022892599735, 0.062173748295054919, 0.033175379004903263,
-  -0.042571243043840495, -0.13200353510096746, -0.17082947420323963, -0.093211746888245808,
-  0.12718490344202485, 0.44935166807937821, 0.77127787554504057, 0.97258547035403053,
-  0.97258547035403053, 0.77127787554504068, 0.44935166807937821, 0.12718490344202488,
-  -0.09321174688824585, -0.17082947420323963, -0.13200353510096749, -0.042571243043840502,
-  0.03317537900490327, 0.062173748295054933, 0.047897022892599735, 0.015119076534081344,
-  -0.011363293681758931, -0.020272630731593962, -0.014678888263847821, -0.0042954750165350294,
-  0.0029440137922481444, 0.0046865622501385549, 0.0029338012271598744, 0.00070568670835497989,
-  -0.00036337902617331893, -0.00036092137667317285, -8.4620792140104189e-05, 2.8770393804939532e-19,
-};
 // One extra frame lets a 96 kHz processor read the full 3,000 ms contract maximum.
 constexpr uint32_t kMaximumTimeEffectDelayFrames = 288001;
 // Reverb uses this fixed ring for pre-delay and its early-reflection taps.
@@ -329,6 +315,7 @@ struct GraphRevision {
     uint32_t history_slot = 0;
     uint32_t delay_slot = kMaximumDelayProcessors;
     uint32_t reverb_slot = kMaximumReverbProcessors;
+    uint32_t limiter_slot = kMaximumLimiterProcessors;
     uint32_t spectral_slot = kMaximumSpectralProcessors;
     uint32_t generation = 0;
     // A ghost keeps rendering a deleted processor while it fades out. One on a
@@ -429,25 +416,11 @@ struct EqHistory {
   uint32_t dry_index = 0;
   float bypass = 0.0F;
 };
-// Monotonic-deque sliding minimum of the limiter's recent gain targets, so the gain
-// stays down until the peak that caused it has left the lookahead delay line.
-struct LimiterTargetWindow {
-  std::array<float, kMaximumDynamicsDelayFrames> value{};
-  std::array<uint32_t, kMaximumDynamicsDelayFrames> frame{};
-  uint32_t head = 0;
-  uint32_t count = 0;
-  uint32_t now = 0;
-};
-
 struct DynamicsHistory {
   std::array<float, kMaximumDynamicsDelayFrames> delay_left{};
   std::array<float, kMaximumDynamicsDelayFrames> delay_right{};
   std::array<float, kMaximumDynamicsDelayFrames> detector_left{};
   std::array<float, kMaximumDynamicsDelayFrames> detector_right{};
-  std::array<double, 12> limiter_true_peak_left{};
-  std::array<double, 12> limiter_true_peak_right{};
-  uint32_t limiter_true_peak_write = 0;
-  std::array<LimiterTargetWindow, 2> limiter_targets{};
   uint32_t write = 0;
   std::array<float, 2> gain{1.0F, 1.0F};
   std::array<float, 2> rms{};
@@ -717,6 +690,12 @@ struct SpectralHistory {
   uint32_t analysis_frames = 0;
 };
 
+struct LimiterHistory {
+  daw::audio_core::LimiterKernel kernel;
+  uint32_t prepared_rate_hz = 0;
+  float bypass = 0.0F;
+};
+
 struct AutoFilterHistory {
   daw::audio_core::AutoFilterKernel kernel;
   uint32_t prepared_rate_hz = 0;
@@ -826,6 +805,7 @@ struct Core {
   std::array<ModulationHistory, kMaximumGraphProcessors> modulation_histories{};
   std::array<DelayHistory, kMaximumDelayProcessors> delay_histories{};
   std::array<ReverbHistory, kMaximumReverbProcessors> reverb_histories{};
+  std::array<LimiterHistory, kMaximumLimiterProcessors> limiter_histories{};
   std::array<SpectralHistory, kMaximumSpectralProcessors> spectral_histories{};
   SpectralHistory spectral_state_snapshot{};
   // Callback-owned stage-input histories, including detector input. Separate
@@ -901,11 +881,12 @@ struct Core {
   std::array<AutoFilterHistory, kMaximumGraphProcessors> autofilter_histories{};
   std::array<LoFiHistory, kMaximumGraphProcessors> lofi_histories{};
   // Ownership ledgers. Processor slot i guards every history array at index i
-  // plus the delay/reverb/spectral history named by the owner tables below
+  // plus the delay/reverb/limiter/spectral history named by the owner tables below
   // (index + 1 of the owning processor slot, 0 when free; control-owned).
   std::array<RuntimeSlot, kProcessorRuntimeSlots> processor_slots{};
   std::array<uint32_t, kMaximumDelayProcessors> delay_slot_owners{};
   std::array<uint32_t, kMaximumReverbProcessors> reverb_slot_owners{};
+  std::array<uint32_t, kMaximumLimiterProcessors> limiter_slot_owners{};
   std::array<uint32_t, kMaximumSpectralProcessors> spectral_slot_owners{};
   std::array<RuntimeSlot, kNodeRuntimeSlots> node_slots{};
   // Manual parameter values the callback latched from events and parameter
@@ -1166,6 +1147,9 @@ void render_saturator_processor(
   Core &core, GraphRevision::Processor &processor, uint32_t frame,
   float input_left, float input_right, float, float, float *output_left, float *output_right);
 void render_eq_processor(
+  Core &core, GraphRevision::Processor &processor, uint32_t frame,
+  float input_left, float input_right, float, float, float *output_left, float *output_right);
+void render_limiter_processor(
   Core &core, GraphRevision::Processor &processor, uint32_t frame,
   float input_left, float input_right, float, float, float *output_left, float *output_right);
 void render_autofilter_processor(

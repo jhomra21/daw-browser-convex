@@ -178,11 +178,12 @@ export type CompressorProcessorState = {
 
 export type LimiterProcessorState = {
   enabled: boolean
+  gainDb: number
   ceilingDbtp: number
   releaseMs: number
-  lookaheadMs: number
+  autoRelease: boolean
+  lookaheadMs: 1.5 | 3 | 6
   link: number
-  detectorOversampling: 4
 }
 
 export type DelayProcessorState = {
@@ -1004,14 +1005,15 @@ export const encodeCompressorProcessorState = (state: CompressorProcessorState):
 }
 
 export const encodeLimiterProcessorState = (state: LimiterProcessorState): Uint8Array => {
-  const output = new Uint8Array(24)
+  const output = new Uint8Array(28)
   const view = new DataView(output.buffer)
   view.setUint32(0, state.enabled ? 1 : 0, true)
   view.setFloat32(4, state.ceilingDbtp, true)
   view.setFloat32(8, state.releaseMs, true)
   view.setFloat32(12, state.lookaheadMs, true)
   view.setFloat32(16, state.link, true)
-  view.setUint32(20, state.detectorOversampling, true)
+  view.setUint32(20, state.autoRelease ? 1 : 0, true)
+  view.setFloat32(24, state.gainDb, true)
 
   return output
 }

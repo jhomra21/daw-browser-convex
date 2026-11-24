@@ -255,8 +255,9 @@ bool valid_compressor_state(const daw_audio_compressor_state &state) {
 bool valid_limiter_state(const daw_audio_limiter_state &state) {
   return state.enabled <= 1 && std::isfinite(state.ceiling_dbtp) && state.ceiling_dbtp >= -12.0F && state.ceiling_dbtp <= 0.0F
     && std::isfinite(state.release_ms) && state.release_ms >= 20.0F && state.release_ms <= 1000.0F
-    && std::isfinite(state.lookahead_ms) && state.lookahead_ms >= 1.0F && state.lookahead_ms <= 5.0F
-    && std::isfinite(state.link) && state.link >= 0.0F && state.link <= 1.0F && state.detector_oversampling == 4;
+    && (state.lookahead_ms == 1.5F || state.lookahead_ms == 3.0F || state.lookahead_ms == 6.0F)
+    && std::isfinite(state.link) && state.link >= 0.0F && state.link <= 1.0F && state.auto_release <= 1
+    && std::isfinite(state.gain_db) && state.gain_db >= DAW_AUDIO_CORE_LIMITER_GAIN_DB_MIN && state.gain_db <= DAW_AUDIO_CORE_LIMITER_GAIN_DB_MAX;
 }
 
 bool valid_delay_state(const daw_audio_delay_state &state) {
@@ -443,11 +444,12 @@ bool decode_processor_state(
     out_processor->compressor = state;
     return true;
   }
-  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_LIMITER && descriptor.state_size == 24) {
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_LIMITER && descriptor.state_size == 28) {
     const daw_audio_limiter_state state{
       .enabled = read_u32_le(descriptor.state), .ceiling_dbtp = read_f32_le(descriptor.state + 4),
       .release_ms = read_f32_le(descriptor.state + 8), .lookahead_ms = read_f32_le(descriptor.state + 12),
-      .link = read_f32_le(descriptor.state + 16), .detector_oversampling = read_u32_le(descriptor.state + 20),
+      .link = read_f32_le(descriptor.state + 16), .auto_release = read_u32_le(descriptor.state + 20),
+      .gain_db = read_f32_le(descriptor.state + 24),
     };
     if (!valid_limiter_state(state)) return false;
     out_processor->limiter = state;
@@ -590,8 +592,10 @@ bool valid_processor_parameter_target(uint32_t kind, uint32_t target) {
       return target >= DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_THRESHOLD_DB
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_SIDECHAIN_Q;
     case DAW_AUDIO_PROCESSOR_KIND_LIMITER:
-      return target >= DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_CEILING
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_LINK;
+      return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_CEILING
+        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_RELEASE)
+        || target == DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_LINK
+        || target == DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_GAIN_DB;
     case DAW_AUDIO_PROCESSOR_KIND_DELAY:
       return target >= DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_MS
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_HIGH_CUT_HZ;
@@ -748,7 +752,7 @@ bool valid_processor_parameter_value(uint32_t target, float value) {
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_SIDECHAIN_Q) return value >= DAW_AUDIO_CORE_COMPRESSOR_SIDECHAIN_Q_MIN && value <= DAW_AUDIO_CORE_COMPRESSOR_SIDECHAIN_Q_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_CEILING) return value >= DAW_AUDIO_CORE_LIMITER_CEILING_MIN && value <= DAW_AUDIO_CORE_LIMITER_CEILING_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_RELEASE) return value >= DAW_AUDIO_CORE_LIMITER_RELEASE_MIN && value <= DAW_AUDIO_CORE_LIMITER_RELEASE_MAX;
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_LOOKAHEAD_MS) return value >= DAW_AUDIO_CORE_LIMITER_LOOKAHEAD_MS_MIN && value <= DAW_AUDIO_CORE_LIMITER_LOOKAHEAD_MS_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_GAIN_DB) return value >= DAW_AUDIO_CORE_LIMITER_GAIN_DB_MIN && value <= DAW_AUDIO_CORE_LIMITER_GAIN_DB_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_LINK) return value >= DAW_AUDIO_CORE_LIMITER_LINK_MIN && value <= DAW_AUDIO_CORE_LIMITER_LINK_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DECAY_SEC) return value >= DAW_AUDIO_CORE_REVERB_DECAY_SEC_MIN && value <= DAW_AUDIO_CORE_REVERB_DECAY_SEC_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_REFLECTIONS) return value >= DAW_AUDIO_CORE_REVERB_REFLECTIONS_MIN && value <= DAW_AUDIO_CORE_REVERB_REFLECTIONS_MAX;

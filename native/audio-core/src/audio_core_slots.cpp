@@ -90,8 +90,7 @@ bool compatible_processor_history(
         && same_float(current.compressor.sidechain_frequency_hz, next.compressor.sidechain_frequency_hz)
         && same_float(current.compressor.sidechain_q, next.compressor.sidechain_q);
     case DAW_AUDIO_PROCESSOR_KIND_LIMITER:
-      return current.limiter.detector_oversampling == next.limiter.detector_oversampling
-        && same_float(current.limiter.lookahead_ms, next.limiter.lookahead_ms);
+      return same_float(current.limiter.lookahead_ms, next.limiter.lookahead_ms);
     case DAW_AUDIO_PROCESSOR_KIND_SPECTRAL:
       return current.spectral.fft_size == next.spectral.fft_size
         && current.spectral.overlap == next.spectral.overlap;
@@ -208,11 +207,12 @@ void initialize_node_slot(Core &core, uint32_t slot) {
   core.mixer_ramps[slot] = {};
 }
 
-// Delay, reverb and spectral histories live in small pools that follow the
+// Delay, reverb, limiter and spectral histories live in small pools that follow the
 // lifecycle of the processor slot that owns them.
 void free_processor_slot_histories(Core &core, uint32_t slot) {
   for (uint32_t &owner : core.delay_slot_owners) if (owner == slot + 1) owner = 0;
   for (uint32_t &owner : core.reverb_slot_owners) if (owner == slot + 1) owner = 0;
+  for (uint32_t &owner : core.limiter_slot_owners) if (owner == slot + 1) owner = 0;
   for (uint32_t &owner : core.spectral_slot_owners) if (owner == slot + 1) owner = 0;
 }
 }  // namespace

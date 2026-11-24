@@ -26,6 +26,7 @@ set(DAW_AUDIO_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_delay.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_dynamics.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_eq.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_limiter.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_lofi.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_modulation.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_registry.cpp
@@ -102,6 +103,17 @@ if(BUILD_TESTING)
   endif()
   foreach(group IN ITEMS clean alias latency resonance slope switch modulation safety)
     add_test(NAME daw-autofilter-${group} COMMAND daw-autofilter-test ${group})
+  endforeach()
+  # Limiter kernel (src/limiter_kernel.h). One ctest per measurement group; the executable prints each value.
+  add_executable(daw-limiter-test tests/limiter_test.cpp)
+  target_compile_features(daw-limiter-test PRIVATE cxx_std_20)
+  if(MSVC)
+    target_compile_options(daw-limiter-test PRIVATE /W4 /WX /EHs-c- /GR-)
+  else()
+    target_compile_options(daw-limiter-test PRIVATE -Wall -Wextra -Werror -fno-exceptions -fno-rtti)
+  endif()
+  foreach(group IN ITEMS attack ceiling gain auto latency clean safety cpu)
+    add_test(NAME daw-limiter-${group} COMMAND daw-limiter-test ${group})
   endforeach()
   # EQ band designs (src/dsp/eq_band.h) against the analog prototypes.
   add_executable(daw-eq-design-test tests/eq_design_test.cpp)

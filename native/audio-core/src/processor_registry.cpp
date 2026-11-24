@@ -19,7 +19,7 @@ constexpr std::array<ProcessorImplementation, 17> kProcessorImplementations{{
   {DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE, render_modulation_processor},
   {DAW_AUDIO_PROCESSOR_KIND_GATE, render_dynamics_processor},
   {DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR, render_dynamics_processor},
-  {DAW_AUDIO_PROCESSOR_KIND_LIMITER, render_dynamics_processor},
+  {DAW_AUDIO_PROCESSOR_KIND_LIMITER, render_limiter_processor},
   {DAW_AUDIO_PROCESSOR_KIND_DELAY, render_time_effect_processor},
   {DAW_AUDIO_PROCESSOR_KIND_REVERB, render_time_effect_processor},
   {DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, render_spectral_processor},

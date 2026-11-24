@@ -3,6 +3,7 @@
 #include "daw/audio_core_native.h"
 #include "daw/audio_core_instrument_wire.h"
 #include "graph_fixture.h"
+#include "processor_contract_generated.h"
 #include "processor_kind_generated.h"
 #if defined(DAW_AUDIO_CORE_TEST_SPECTRAL_INTERNALS)
 
@@ -61,7 +62,7 @@
 DAW_AUDIO_CORE_PROCESSOR_KIND_LIST(DAW_ASSERT_PROCESSOR_KIND_ID)
 #undef DAW_ASSERT_PROCESSOR_KIND_ID
 
-static_assert(DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS == 24u);
+static_assert(DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS == 64u);
 static_assert(sizeof(daw_audio_synth_state) == daw::audio_core_wire::kSynthStateBytes);
 static_assert(sizeof(daw_audio_sampler_state) == daw::audio_core_wire::kSamplerStateBytes);
 static_assert(sizeof(daw_audio_sample_zone) == daw::audio_core_wire::kSampleZoneBytes);
@@ -122,8 +123,13 @@ void native_instrument_source_hook(const daw::audio_core::NativeGraphNodeRender&
   }
 }
 
-void expect(daw_audio_core_result actual, daw_audio_core_result expected) {
-  if (actual != expected) std::fprintf(stderr, "actual=%u expected=%u\n", actual, expected);
+// Every processor state is at schema version 1 except the EQ, whose layout was extended.
+uint32_t schema_version_of(uint32_t kind) {
+  return kind == DAW_AUDIO_PROCESSOR_KIND_EQ ? DAW_AUDIO_CORE_PROCESSOR_EQ_SCHEMA_VERSION : 1u;
+}
+
+void expect(daw_audio_core_result actual, daw_audio_core_result expected, int line = __builtin_LINE()) {
+  if (actual != expected) std::fprintf(stderr, "line=%d actual=%u expected=%u\n", line, actual, expected);
   assert(actual == expected);
 }
 
@@ -1511,10 +1517,10 @@ HistoryFixtureState history_fixture_state(uint32_t kind) {
     write_u32(12, 1); write_f32(16, 2500.0F); write_f32(20, 0.5F);
     write_f32(24, -3.0F); write_f32(28, 0.75F);
   } else if (kind == DAW_AUDIO_PROCESSOR_KIND_EQ) {
-    fixture.size = 200;
-    write_u32(0, 1); write_u32(4, 0);
-    for (uint32_t band = 0; band < 8; ++band) {
-      const uint32_t offset = 8 + band * 24;
+    fixture.size = 408;
+    write_u32(0, 1); write_u32(4, 0); write_f32(16, 1.0F);
+    for (uint32_t band = 0; band < DAW_AUDIO_CORE_EQ_BAND_COUNT; ++band) {
+      const uint32_t offset = 24 + band * 24;
       write_u32(offset, band < 3 ? 1 : 0);
       write_u32(offset + 4, band == 0 ? DAW_AUDIO_EQ_BAND_HIGHPASS : DAW_AUDIO_EQ_BAND_PEAKING);
       write_f32(offset + 8, band == 0 ? 120.0F : 1000.0F);
@@ -1583,7 +1589,7 @@ void test_per_instance_history_isolation_and_republication() {
     auto nodes = nodes_for(false);
     nodes[1].latency_frames = state.latency;
     const daw_audio_processor_descriptor processor{
-      .node_id = 2, .instance_id = 77, .kind = kind, .state_version = 1, .state_size = state.size,
+      .node_id = 2, .instance_id = 77, .kind = kind, .state_version = schema_version_of(kind), .state_size = state.size,
       .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
       .latency_frames = state.latency, .tail_frames = 0, .parameter_count = 0,
       .parameter_targets = nullptr, .state = state.bytes.data(),
@@ -2107,18 +2113,18 @@ void test_portable_saturator_and_eq_characterization() {
   const std::array<daw_audio_graph_edge_descriptor, 1> edges{{
     {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
   }};
-  const auto write_u32 = [](std::array<uint8_t, 200> &bytes, uint32_t offset, uint32_t value) {
+  const auto write_u32 = [](std::array<uint8_t, 408> &bytes, uint32_t offset, uint32_t value) {
     bytes[offset] = static_cast<uint8_t>(value);
     bytes[offset + 1] = static_cast<uint8_t>(value >> 8u);
     bytes[offset + 2] = static_cast<uint8_t>(value >> 16u);
     bytes[offset + 3] = static_cast<uint8_t>(value >> 24u);
   };
-  const auto write_f32 = [&write_u32](std::array<uint8_t, 200> &bytes, uint32_t offset, float value) {
+  const auto write_f32 = [&write_u32](std::array<uint8_t, 408> &bytes, uint32_t offset, float value) {
     uint32_t bits = 0;
     std::memcpy(&bits, &value, sizeof(bits));
     write_u32(bytes, offset, bits);
   };
-  std::array<uint8_t, 200> state{};
+  std::array<uint8_t, 408> state{};
   write_u32(state, 0, 1);
   write_f32(state, 4, 18.0F);
   write_u32(state, 8, DAW_AUDIO_SATURATOR_CURVE_HARD);
@@ -2183,9 +2189,10 @@ void test_portable_saturator_and_eq_characterization() {
 
   state.fill(0);
   write_u32(state, 0, 1);
-  write_u32(state, 4, 1);
-  for (uint32_t band = 0; band < 8; ++band) {
-    const uint32_t offset = 8 + band * 24;
+  write_u32(state, 4, DAW_AUDIO_EQ_MODE_MONO);
+  write_f32(state, 16, 1.0F);
+  for (uint32_t band = 0; band < DAW_AUDIO_CORE_EQ_BAND_COUNT; ++band) {
+    const uint32_t offset = 24 + band * 24;
     write_u32(state, offset, band == 0 ? 1 : 0);
     write_u32(state, offset + 4, band == 0 ? DAW_AUDIO_EQ_BAND_LOWPASS : DAW_AUDIO_EQ_BAND_PEAKING);
     write_f32(state, offset + 8, band == 0 ? 1000.0F : 1000.0F);
@@ -2194,7 +2201,7 @@ void test_portable_saturator_and_eq_characterization() {
   }
   daw_audio_processor_descriptor eq{
     .node_id = 2, .instance_id = 2, .kind = DAW_AUDIO_PROCESSOR_KIND_EQ,
-    .state_version = 1, .state_size = 200, .bypassed = 0,
+    .state_version = DAW_AUDIO_CORE_PROCESSOR_EQ_SCHEMA_VERSION, .state_size = 408, .bypassed = 0,
     .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
     .latency_frames = 0, .tail_frames = 0, .parameter_count = 0, .parameter_targets = nullptr, .state = state.data(),
   };
@@ -2298,7 +2305,7 @@ void test_portable_modulation_processor_characterization() {
   const auto render = [&](uint32_t kind, uint32_t state_size, const std::array<uint8_t, 32> &state) {
     daw_audio_core_handle core = create_core(4096, 2, 1);
     const daw_audio_processor_descriptor processor{
-      .node_id = 2, .instance_id = 100 + kind, .kind = kind, .state_version = 1, .state_size = state_size,
+      .node_id = 2, .instance_id = 100 + kind, .kind = kind, .state_version = schema_version_of(kind), .state_size = state_size,
       .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
       .latency_frames = 0, .tail_frames = 0, .parameter_count = 0, .parameter_targets = nullptr, .state = state.data(),
     };
@@ -2357,7 +2364,7 @@ void test_portable_dynamics_processor_characterization() {
     std::array<daw_audio_graph_node_descriptor, 2> processor_nodes = nodes;
     processor_nodes[1].latency_frames = latency;
     const daw_audio_processor_descriptor processor{
-      .node_id = 2, .instance_id = kind, .kind = kind, .state_version = 1, .state_size = state_size, .bypassed = 0,
+      .node_id = 2, .instance_id = kind, .kind = kind, .state_version = schema_version_of(kind), .state_size = state_size, .bypassed = 0,
       .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
       .latency_frames = latency, .tail_frames = 0, .parameter_count = 0, .parameter_targets = nullptr, .state = state.data(),
     };
@@ -4312,7 +4319,7 @@ void test_eq_realtime_parameter_offsets_and_persistence() {
     {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F,
       .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
   }};
-  std::array<uint8_t, 200> state{};
+  std::array<uint8_t, 408> state{};
   const auto write_u32 = [&state](uint32_t offset, uint32_t value) {
     state[offset] = static_cast<uint8_t>(value);
     state[offset + 1] = static_cast<uint8_t>(value >> 8u);
@@ -4326,8 +4333,9 @@ void test_eq_realtime_parameter_offsets_and_persistence() {
   };
   write_u32(0, 1);
   write_u32(4, 0);
-  for (uint32_t index = 0; index < 8; ++index) {
-    const uint32_t offset = 8 + index * 24;
+  write_f32(16, 1.0F);
+  for (uint32_t index = 0; index < DAW_AUDIO_CORE_EQ_BAND_COUNT; ++index) {
+    const uint32_t offset = 24 + index * 24;
     write_u32(offset, index == 0 ? 1 : 0);
     write_u32(offset + 4, DAW_AUDIO_EQ_BAND_LOWSHELF);
     write_f32(offset + 8, 1000.0F);
@@ -4342,7 +4350,7 @@ void test_eq_realtime_parameter_offsets_and_persistence() {
   }
   const daw_audio_processor_descriptor processor{
     .node_id = 2, .instance_id = 43, .kind = DAW_AUDIO_PROCESSOR_KIND_EQ,
-    .state_version = 1, .state_size = static_cast<uint32_t>(state.size()), .bypassed = 0,
+    .state_version = DAW_AUDIO_CORE_PROCESSOR_EQ_SCHEMA_VERSION, .state_size = static_cast<uint32_t>(state.size()), .bypassed = 0,
     .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
     .latency_frames = 0, .tail_frames = 0, .parameter_count = static_cast<uint32_t>(targets.size()),
     .parameter_targets = targets.data(), .state = state.data(),
@@ -6130,7 +6138,8 @@ struct Phase3Rig {
   }
   void add_processor(uint64_t node, uint64_t instance, uint32_t kind, uint32_t size, const uint8_t *state,
     bool automatable) {
-    processors.push_back({.node_id = node, .instance_id = instance, .kind = kind, .state_version = 1,
+    processors.push_back({.node_id = node, .instance_id = instance, .kind = kind,
+      .state_version = schema_version_of(kind),
       .state_size = size, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
       .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .parameter_count = automatable ? 1u : 0u,
       .parameter_targets = automatable ? gain_target.data() : nullptr, .state = state});
@@ -8765,6 +8774,7 @@ void pristine_build(Phase3Rig &rig, const PristineVariant &variant) {
   rig.add_saturator(1, 11);
   daw_audio_eq_state eq{};
   eq.enabled = 1;
+  eq.scale = 1.0F;
   for (daw_audio_eq_band_state &band : eq.bands) band = {0, DAW_AUDIO_EQ_BAND_PEAKING, 1000.0F, 0.0F, 1.0F, 0};
   eq.bands[0] = {1, DAW_AUDIO_EQ_BAND_LOWSHELF, 200.0F, 12.0F, 0.7F, 0};
   rig.add_state(1, 12, DAW_AUDIO_PROCESSOR_KIND_EQ, eq);
@@ -10126,6 +10136,7 @@ void build_reorder_rig(Phase3Rig &rig, bool reordered, bool highpass, float mast
   if (highpass) {
     daw_audio_eq_state eq{};
     eq.enabled = 1;
+    eq.scale = 1.0F;
     for (auto &band : eq.bands) band = {0, DAW_AUDIO_EQ_BAND_PEAKING, 1000.0F, 0.0F, 1.0F, 0};
     eq.bands[0] = {1, DAW_AUDIO_EQ_BAND_HIGHPASS, 40.0F, 0.0F, 10.0F, 0};
     rig.add_state(2, 20, DAW_AUDIO_PROCESSOR_KIND_EQ, eq);

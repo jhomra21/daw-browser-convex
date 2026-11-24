@@ -798,12 +798,16 @@ const saturatorState = (overrides: Partial<SaturatorProcessorState> = {}) => enc
 const eqState = (overrides: Partial<EqProcessorState> = {}) => encodeEqProcessorState({
   enabled: true,
   channelMode: 'stereo',
-  bands: Array.from({ length: 8 }, (_, index) => ({
-    enabled: index < 3,
-    type: index === 0 ? 'highpass' : index === 1 ? 'peaking' : 'highshelf',
-    frequency: index === 0 ? 120 : index === 1 ? 1_000 : 8_000,
-    gainDb: index === 1 ? 6 : index === 2 ? -3 : 0,
-    q: index === 0 ? 0.707 : 1,
+  adaptiveQ: false,
+  highQuality: false,
+  scale: 1,
+  outputDb: 0,
+  bands: Array.from({ length: 16 }, (_, index) => ({
+    enabled: index % 8 < 3,
+    type: index % 8 === 0 ? 'highpass' : index % 8 === 1 ? 'peaking' : 'highshelf',
+    frequency: index % 8 === 0 ? 120 : index % 8 === 1 ? 1_000 : 8_000,
+    gainDb: index % 8 === 1 ? 6 : index % 8 === 2 ? -3 : 0,
+    q: index % 8 === 0 ? 0.707 : 1,
   })),
   ...overrides,
 })

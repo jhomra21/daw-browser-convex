@@ -1,6 +1,7 @@
 import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import {
   AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES,
+  EQ_HIGH_QUALITY_LATENCY_FRAMES,
   getSpectralLatencyFrames,
   normalizeDelayParams,
   normalizeReverbParams,
@@ -47,6 +48,10 @@ export const getEffectTiming = (
 
   if (input.kind === 'autofilter') {
     return { latencyFrames: input.params.state.hiQuality ? AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES : 0, tail: finite(0) }
+  }
+
+  if (input.kind === 'eq') {
+    return { latencyFrames: input.params.highQuality ? EQ_HIGH_QUALITY_LATENCY_FRAMES : 0, tail: finite(0) }
   }
 
   if (input.kind === 'limiter') {

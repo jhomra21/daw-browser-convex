@@ -31,8 +31,6 @@ class PolyphaseIirHalfBand2x {
   static constexpr uint32_t latencyFrames() { return 3; }
   static constexpr Latency latency() { return Latency::fromFrames(latencyFrames()); }
 
-  PolyphaseIirHalfBand2x() { design(); }
-
   void reset() {
     up0_.fill(Section{});
     up1_.fill(Section{});
@@ -47,7 +45,7 @@ class PolyphaseIirHalfBand2x {
       reset();
       return Pair{0.0, 0.0};
     }
-    return Pair{cascade(up0_, coefficients0_, x), cascade(up1_, coefficients1_, x)};
+    return Pair{cascade(up0_, design().branch0, x), cascade(up1_, design().branch1, x)};
   }
 
   // Two doubled-rate samples (in time order) in, one base-rate sample out.
@@ -56,8 +54,8 @@ class PolyphaseIirHalfBand2x {
       reset();
       return 0.0;
     }
-    const double y = 0.5 * (cascade(down0_, coefficients0_, first) + downDelay_);
-    downDelay_ = cascade(down1_, coefficients1_, second);
+    const double y = 0.5 * (cascade(down0_, design().branch0, first) + downDelay_);
+    downDelay_ = cascade(down1_, design().branch1, second);
     return y;
   }
 
@@ -102,7 +100,18 @@ class PolyphaseIirHalfBand2x {
     return sum;
   }
 
-  void design() {
+  struct Design {
+    std::array<double, kBranch0> branch0{};
+    std::array<double, kBranch1> branch1{};
+  };
+
+  // Computed once and shared: a graph holds one oversampler per channel per EQ.
+  static const Design &design() {
+    static const Design shared = computeDesign();
+    return shared;
+  }
+
+  static Design computeDesign() {
     constexpr double kPi = 3.14159265358979323846;
     const double k = std::tan((1.0 - 2.0 * kTransitionWidth) * kPi / 4.0);
     const double root = std::pow(1.0 - k * k, 0.25);
@@ -119,12 +128,10 @@ class PolyphaseIirHalfBand2x {
       sorted[i] = (1.0 - x) / (1.0 + x);
     }
     std::sort(sorted.begin(), sorted.end());
-    for (uint32_t i = 0; i < kCoefficients; ++i) (i % 2 == 0 ? coefficients0_[i / 2] : coefficients1_[i / 2]) = sorted[i];
-    reset();
+    Design result;
+    for (uint32_t i = 0; i < kCoefficients; ++i) (i % 2 == 0 ? result.branch0[i / 2] : result.branch1[i / 2]) = sorted[i];
+    return result;
   }
-
-  std::array<double, kBranch0> coefficients0_{};
-  std::array<double, kBranch1> coefficients1_{};
   std::array<Section, kBranch0> up0_{};
   std::array<Section, kBranch1> up1_{};
   std::array<Section, kBranch0> down0_{};

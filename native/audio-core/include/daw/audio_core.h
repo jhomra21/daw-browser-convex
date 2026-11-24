@@ -19,8 +19,8 @@ extern "C" {
 #define DAW_AUDIO_CORE_MAX_PAGED_PREPARATIONS 64u
 #define DAW_AUDIO_CORE_MAX_PAGED_PREPARATION_PAGES DAW_AUDIO_CORE_MAX_PAGED_PAGE_SLOTS
 #define DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE 32u
-#define DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES 256u
-#define DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS 24u
+#define DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES 512u
+#define DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS 64u
 #define DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETER_BLOCKS 512u
 #define DAW_AUDIO_CORE_MAX_PROCESSOR_EVENTS 256u
 #define DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS 256u
@@ -523,14 +523,23 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DENSITY = 140,
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION_LOW_CUT_HZ = 141,
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION_HIGH_CUT_HZ = 142,
-  DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_OUTPUT_DB = 143
+  DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_OUTPUT_DB = 143,
+  /* Bands 8 to 15 (the second curve of the L/R and M/S modes) follow the same frequency, gain, Q order as bands 0 to 7. */
+  DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_8_FREQUENCY_HZ = 143,
+  DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_15_Q = 166,
+  DAW_AUDIO_PROCESSOR_PARAMETER_EQ_SCALE = 167,
+  DAW_AUDIO_PROCESSOR_PARAMETER_EQ_OUTPUT_DB = 168
 } daw_audio_processor_parameter;
 
 #define DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_0_FREQUENCY_HZ
 #define DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_LAST DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_7_Q
 #define DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_STRIDE 3u
+#define DAW_AUDIO_PROCESSOR_PARAMETER_EQ_SECOND_BAND_TARGET_BASE DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_8_FREQUENCY_HZ
+#define DAW_AUDIO_PROCESSOR_PARAMETER_EQ_SECOND_BAND_TARGET_LAST DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_15_Q
 #define DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_FREQUENCY_HZ(band_index) \
-  (DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE + ((band_index) * DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_STRIDE))
+  ((band_index) < 8u \
+    ? DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE + ((band_index) * DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_STRIDE) \
+    : DAW_AUDIO_PROCESSOR_PARAMETER_EQ_SECOND_BAND_TARGET_BASE + (((band_index) - 8u) * DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_STRIDE))
 #define DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_GAIN_DB(band_index) \
   (DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_FREQUENCY_HZ(band_index) + 1u)
 #define DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_Q(band_index) \
@@ -706,8 +715,26 @@ typedef enum daw_audio_eq_band_type {
   DAW_AUDIO_EQ_BAND_HIGHSHELF = 4,
   DAW_AUDIO_EQ_BAND_PEAKING = 5,
   DAW_AUDIO_EQ_BAND_NOTCH = 6,
-  DAW_AUDIO_EQ_BAND_ALLPASS = 7
+  DAW_AUDIO_EQ_BAND_ALLPASS = 7,
+  /* 48 dB/oct (8th-order Butterworth) variants of the 12 dB/oct LOWPASS (High cut) and HIGHPASS (Low cut). */
+  DAW_AUDIO_EQ_BAND_LOWPASS_48 = 8,
+  DAW_AUDIO_EQ_BAND_HIGHPASS_48 = 9
 } daw_audio_eq_band_type;
+
+typedef enum daw_audio_eq_mode {
+  DAW_AUDIO_EQ_MODE_STEREO = 0,
+  /* Legacy "sum to mono": the sum of both channels through the first curve on both outputs. */
+  DAW_AUDIO_EQ_MODE_MONO = 1,
+  DAW_AUDIO_EQ_MODE_LEFT_RIGHT = 2,
+  DAW_AUDIO_EQ_MODE_MID_SIDE = 3
+} daw_audio_eq_mode;
+
+#define DAW_AUDIO_CORE_EQ_BAND_COUNT 16u
+#define DAW_AUDIO_CORE_EQ_BANDS_PER_CURVE 8u
+/* Latency of the Hi-Quality half-band oversampler: the low-frequency group delay of its up + down round trip. */
+#define DAW_AUDIO_CORE_EQ_HIGH_QUALITY_LATENCY_FRAMES 3u
+#define DAW_AUDIO_CORE_EQ_SCALE_MAX 2.0F
+#define DAW_AUDIO_CORE_EQ_OUTPUT_DB_MAX 12.0F
 
 typedef struct daw_audio_eq_band_state {
   uint32_t enabled;
@@ -718,12 +745,17 @@ typedef struct daw_audio_eq_band_state {
   uint32_t reserved;
 } daw_audio_eq_band_state;
 
-/* A fixed eight-band RBJ cookbook biquad profile. It intentionally does not
- * claim browser BiquadFilterNode coefficient or AudioParam automation parity. */
+/* EQ Eight: two curves of eight bands. Bands 0 to 7 are the only curve in Stereo and Mono, the left (or mid) curve
+ * in L/R (M/S); bands 8 to 15 are the right (or side) curve. Scale multiplies every band gain, output_db is the
+ * final gain, adaptive_q widens or narrows Q with the band gain, high_quality runs the bands at twice the rate. */
 typedef struct daw_audio_eq_state {
   uint32_t enabled;
-  uint32_t mono;
-  daw_audio_eq_band_state bands[8];
+  uint32_t mode;
+  uint32_t adaptive_q;
+  uint32_t high_quality;
+  float scale;
+  float output_db;
+  daw_audio_eq_band_state bands[16];
 } daw_audio_eq_state;
 
 typedef struct daw_audio_delay_modulation_state {

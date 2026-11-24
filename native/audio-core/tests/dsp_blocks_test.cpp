@@ -1,13 +1,17 @@
 // Tests for the shared DSP blocks in src/dsp. Every case prints the number it checks against its limit.
 // Run with a group name (smoother, safety, latency, delay, oversampler, adaa, filters) or with no argument for all.
+// "bench" prints the cost per sample of each block; it is only meaningful in an optimised build.
 #include "../src/dsp/adaa.h"
+#include "../src/dsp/biquad.h"
 #include "../src/dsp/fractional_delay.h"
 #include "../src/dsp/half_band_oversampler.h"
 #include "../src/dsp/latency.h"
 #include "../src/dsp/numeric_safety.h"
 #include "../src/dsp/parameter_smoother.h"
+#include "../src/dsp/svf.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <complex>
@@ -245,20 +249,26 @@ void safetyNonFiniteResetsBlock() {
   expectTrue("finite_samples_pass_untouched", dsp::finiteOrReset(healthy, y) == y && healthy.state == y);
 }
 
+// Out of line so the compiler cannot schedule the multiply across the scope's control-register write.
+[[gnu::noinline]] float multiplyOpaque(float a, float b) {
+  volatile float x = a;
+  volatile float y = b;
+  return x * y;
+}
+
 void safetyHardwareFlushScope() {
   if (!dsp::kHasHardwareDenormalFlush) {
     std::printf("  no hardware flush on this target (wasm or unknown arch): value-based flush only\n");
     return;
   }
-  volatile float tiny = std::numeric_limits<float>::denorm_min();
-  volatile float one = 1.0F;
-  const bool subnormalOutside = tiny * one != 0.0F;
+  const float tiny = std::numeric_limits<float>::denorm_min();
+  const bool subnormalOutside = multiplyOpaque(tiny, 1.0F) != 0.0F;
   bool flushedInside = false;
   {
     dsp::ScopedDenormalFlush scope;
-    flushedInside = tiny * one == 0.0F;
+    flushedInside = multiplyOpaque(tiny, 1.0F) == 0.0F;
   }
-  const bool restored = tiny * one != 0.0F;
+  const bool restored = multiplyOpaque(tiny, 1.0F) != 0.0F;
   expectTrue("subnormal_arithmetic_works_outside_the_scope", subnormalOutside);
   expectTrue("scope_flushes_subnormals", flushedInside);
   expectTrue("scope_restores_the_previous_mode", restored);
@@ -691,7 +701,393 @@ void adaaAliasTanh() { adaaAliasFor<dsp::TanhShaper>("tanh"); }
 void adaaAliasHardClip() { adaaAliasFor<dsp::HardClipShaper>("hard clip"); }
 void adaaAliasSoftCubic() { adaaAliasFor<dsp::SoftCubicShaper>("soft cubic"); }
 
+// ---- filters -----------------------------------------------------------------------------------------------------
+
+enum class Kind { Bell, LowShelf, HighShelf, LowPass, HighPass };
+
+// Analog prototypes (RBJ cookbook forms, s normalised to the corner so x = Omega / Omega0). a = 10^(dB/40).
+double analogDb(Kind kind, double x, double q, double gainDb) {
+  const double a = std::pow(10.0, gainDb / 40.0);
+  const double base = 1.0 - x * x;
+  using C = std::complex<double>;
+  switch (kind) {
+    case Kind::Bell: return 20.0 * std::log10(std::abs(C(base, x * a / q)) / std::abs(C(base, x / (a * q))));
+    case Kind::LowShelf:
+      return 20.0 * std::log10(a * std::abs(C(a - x * x, x * std::sqrt(a) / q)) / std::abs(C(1.0 - a * x * x, x * std::sqrt(a) / q)));
+    case Kind::HighShelf:
+      return 20.0 * std::log10(a * std::abs(C(1.0 - a * x * x, x * std::sqrt(a) / q)) / std::abs(C(a - x * x, x * std::sqrt(a) / q)));
+    case Kind::LowPass: return -20.0 * std::log10(std::abs(C(base, x / q)));
+    case Kind::HighPass: return 20.0 * std::log10(x * x / std::abs(C(base, x / q)));
+  }
+  return 0.0;
+}
+
+double digitalDb(const dsp::BiquadCoefficients &c, double omega) {
+  using C = std::complex<double>;
+  const C z1 = std::polar(1.0, -omega);
+  const C z2 = z1 * z1;
+  return 20.0 * std::log10(std::abs(c.b0 + c.b1 * z1 + c.b2 * z2) / std::abs(1.0 + c.a1 * z1 + c.a2 * z2));
+}
+
+// RBJ cookbook designs, kept here to show what the matched designs improve on.
+dsp::BiquadCoefficients rbj(Kind kind, double frequency, double rate, double q, double gainDb) {
+  const double w0 = 2.0 * kPi * frequency / rate;
+  const double c = std::cos(w0);
+  const double alpha = std::sin(w0) / (2.0 * q);
+  const double a = std::pow(10.0, gainDb / 40.0);
+  const double r = 2.0 * std::sqrt(a) * alpha;
+  double b0 = 1, b1 = 0, b2 = 0, a0 = 1, a1 = 0, a2 = 0;
+  switch (kind) {
+    case Kind::Bell: b0 = 1 + alpha * a; b1 = -2 * c; b2 = 1 - alpha * a; a0 = 1 + alpha / a; a1 = -2 * c; a2 = 1 - alpha / a; break;
+    case Kind::LowPass: b0 = (1 - c) / 2; b1 = 1 - c; b2 = b0; a0 = 1 + alpha; a1 = -2 * c; a2 = 1 - alpha; break;
+    case Kind::HighPass: b0 = (1 + c) / 2; b1 = -(1 + c); b2 = b0; a0 = 1 + alpha; a1 = -2 * c; a2 = 1 - alpha; break;
+    case Kind::LowShelf:
+      b0 = a * ((a + 1) - (a - 1) * c + r); b1 = 2 * a * ((a - 1) - (a + 1) * c); b2 = a * ((a + 1) - (a - 1) * c - r);
+      a0 = (a + 1) + (a - 1) * c + r; a1 = -2 * ((a - 1) + (a + 1) * c); a2 = (a + 1) + (a - 1) * c - r; break;
+    case Kind::HighShelf:
+      b0 = a * ((a + 1) + (a - 1) * c + r); b1 = -2 * a * ((a - 1) + (a + 1) * c); b2 = a * ((a + 1) + (a - 1) * c - r);
+      a0 = (a + 1) - (a - 1) * c + r; a1 = 2 * ((a - 1) - (a + 1) * c); a2 = (a + 1) - (a - 1) * c - r; break;
+  }
+  return dsp::BiquadCoefficients{b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0};
+}
+
+dsp::BiquadCoefficients matched(Kind kind, double frequency, double rate, double q, double gainDb) {
+  switch (kind) {
+    case Kind::Bell: return dsp::designMatchedBell(frequency, rate, q, gainDb);
+    case Kind::LowShelf: return dsp::designMatchedLowShelf(frequency, rate, q, gainDb);
+    case Kind::HighShelf: return dsp::designMatchedHighShelf(frequency, rate, q, gainDb);
+    case Kind::LowPass: return dsp::designMatchedLowPass(frequency, rate, q);
+    case Kind::HighPass: return dsp::designMatchedHighPass(frequency, rate, q);
+  }
+  return {};
+}
+
+// Largest |digital - analog| in dB over 20 Hz .. 0.45 fs (log spaced), where the prototype is above -60 dB (below that
+// impulse-invariant poles alias their own tail and no biquad numerator matters).
+double maxErrorDb(const dsp::BiquadCoefficients &c, Kind kind, double frequency, double rate, double q, double gainDb) {
+  double worst = 0.0;
+  const double top = 0.45 * rate;
+  for (int i = 0; i <= 240; ++i) {
+    const double f = 20.0 * std::pow(top / 20.0, i / 240.0);
+    const double omega = 2.0 * kPi * f / rate;
+    const double analog = analogDb(kind, f / frequency, q, gainDb);
+    if (analog > -60.0) worst = std::max(worst, std::fabs(digitalDb(c, omega) - analog));
+  }
+  return worst;
+}
+
+void filtersAnchorsFromResearch() {
+  // eq-filters.md section 1.2 (48 kHz): bell 12 kHz, +12 dB, Q=1 is +1.15 dB at 20 kHz digital (RBJ), +5.66 dB analog;
+  // low-pass 16 kHz Q=0.707 is -13.5 dB at 20 kHz digital, -5.4 dB analog.
+  const double omega20k = 2.0 * kPi * 20000.0 / 48000.0;
+  const dsp::BiquadCoefficients rbjBell = rbj(Kind::Bell, 12000, 48000, 1.0, 12.0);
+  const dsp::BiquadCoefficients matchedBell = matched(Kind::Bell, 12000, 48000, 1.0, 12.0);
+  const double analogBell = analogDb(Kind::Bell, 20000.0 / 12000.0, 1.0, 12.0);
+  std::printf("  bell 12k +12 dB Q1 at 20 kHz: analog %.2f, RBJ %.2f, matched %.2f dB\n", analogBell, digitalDb(rbjBell, omega20k),
+    digitalDb(matchedBell, omega20k));
+  expectNear("analog_prototype_matches_the_research_number", analogBell, 5.66, 0.02);
+  expectNear("rbj_reproduces_the_research_cramping", digitalDb(rbjBell, omega20k), 1.15, 0.05);
+  expectAtMost("matched_bell_within_0.6_db_at_20k", std::fabs(digitalDb(matchedBell, omega20k) - analogBell), 0.6);
+  const dsp::BiquadCoefficients rbjLp = rbj(Kind::LowPass, 16000, 48000, 0.7071, 0.0);
+  const dsp::BiquadCoefficients matchedLp = matched(Kind::LowPass, 16000, 48000, 0.7071, 0.0);
+  const double analogLp = analogDb(Kind::LowPass, 20000.0 / 16000.0, 0.7071, 0.0);
+  std::printf("  low-pass 16k Q0.707 at 20 kHz: analog %.2f, RBJ %.2f, matched %.2f dB\n", analogLp, digitalDb(rbjLp, omega20k),
+    digitalDb(matchedLp, omega20k));
+  expectNear("analog_lowpass_matches_the_research_number", analogLp, -5.4, 0.05);
+  expectNear("rbj_lowpass_reproduces_the_research_number", digitalDb(rbjLp, omega20k), -13.5, 0.1);
+  expectAtMost("matched_lowpass_within_one_db_at_20k", std::fabs(digitalDb(matchedLp, omega20k) - analogLp), 1.0);
+  // 44.1 kHz: a band at 18 kHz is within 1 dB of analog up to 21 kHz (eq-filters.md E3 acceptance).
+  const dsp::BiquadCoefficients nearNyquist = matched(Kind::Bell, 18000, 44100, 1.0, 12.0);
+  double worst = 0.0;
+  for (double f = 1000.0; f <= 21000.0; f += 250.0) {
+    worst = std::max(worst, std::fabs(digitalDb(nearNyquist, 2.0 * kPi * f / 44100.0) - analogDb(Kind::Bell, f / 18000.0, 1.0, 12.0)));
+  }
+  const dsp::BiquadCoefficients rbjNear = rbj(Kind::Bell, 18000, 44100, 1.0, 12.0);
+  double worstRbj = 0.0;
+  for (double f = 1000.0; f <= 21000.0; f += 250.0) {
+    worstRbj = std::max(worstRbj, std::fabs(digitalDb(rbjNear, 2.0 * kPi * f / 44100.0) - analogDb(Kind::Bell, f / 18000.0, 1.0, 12.0)));
+  }
+  std::printf("  44.1 kHz bell 18k +12 dB Q1, worst error to 21 kHz: RBJ %.2f dB, matched %.2f dB\n", worstRbj, worst);
+  expectAtMost("near_nyquist_bell_within_1_db_to_21k_at_44k1", worst, 1.0);
+}
+
+struct Lcg {
+  uint64_t state = 0x9E3779B97F4A7C15ULL;
+  double next() {
+    state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+    return static_cast<double>(state >> 11) / 9007199254740992.0;
+  }
+  double between(double lo, double hi) { return lo + (hi - lo) * next(); }
+  double logBetween(double lo, double hi) { return lo * std::pow(hi / lo, next()); }
+};
+
+// 500 random bands per rate. The matched designs are regression-gated by corner-frequency region: Vicanek's fits do
+// not constrain Nyquist, so error grows with the corner, and the numbers below are the bounds this code achieves.
+struct BandLimits {
+  double qLow, qHigh, gainRange;
+  double belowTenthFs;    // corner below 0.1 fs
+  double belowQuarterFs;  // corner below 0.25 fs
+  double allCorners;      // corner up to 0.45 fs
+};
+
+void runRandomBands(Kind kind, const char *name, const BandLimits &limits) {
+  for (const double rate : {44100.0, 48000.0, 96000.0}) {
+    Lcg rng;
+    double worstMatched[3] = {0.0, 0.0, 0.0};  // corner below 0.1 fs, below 0.25 fs, up to 0.45 fs
+    double worstRbj[3] = {0.0, 0.0, 0.0};
+    for (int i = 0; i < 500; ++i) {
+      const double frequency = rng.logBetween(20.0, 0.45 * rate);
+      const double q = rng.logBetween(limits.qLow, limits.qHigh);
+      const double gain = rng.between(-limits.gainRange, limits.gainRange);
+      const double matchedError = maxErrorDb(matched(kind, frequency, rate, q, gain), kind, frequency, rate, q, gain);
+      const double rbjError = maxErrorDb(rbj(kind, frequency, rate, q, gain), kind, frequency, rate, q, gain);
+      const int region = frequency < 0.1 * rate ? 0 : frequency < 0.25 * rate ? 1 : 2;
+      for (int r = region; r < 3; ++r) {
+        worstMatched[r] = std::max(worstMatched[r], matchedError);
+        worstRbj[r] = std::max(worstRbj[r], rbjError);
+      }
+    }
+    std::printf("  %s Q %.1f..%.0f +-%.0f dB, %.0f Hz, worst error by corner <0.1fs / <0.25fs / <=0.45fs: matched %.2f / %.2f / %.2f dB, RBJ %.2f / %.2f / %.2f dB\n",
+      name, limits.qLow, limits.qHigh, limits.gainRange, rate, worstMatched[0], worstMatched[1], worstMatched[2], worstRbj[0], worstRbj[1], worstRbj[2]);
+    expectAtMost("matched_error_db_corner_below_0.1_fs", worstMatched[0], limits.belowTenthFs);
+    expectAtMost("matched_error_db_corner_below_0.25_fs", worstMatched[1], limits.belowQuarterFs);
+    expectAtMost("matched_error_db_all_corners", worstMatched[2], limits.allCorners);
+    expectAtMost("matched_beats_rbj_below_0.25_fs", worstMatched[1], worstRbj[1]);
+  }
+}
+
+void filtersRandomBells() {
+  runRandomBands(Kind::Bell, "bell", {0.5, 4.0, 15.0, 1.2, 1.7, 2.2});
+  runRandomBands(Kind::Bell, "bell", {0.2, 18.0, 24.0, 3.0, 3.0, 3.5});
+}
+void filtersRandomLowShelves() { runRandomBands(Kind::LowShelf, "low shelf", {0.5, 2.0, 15.0, 1.7, 2.8, 99.0}); }
+void filtersRandomHighShelves() { runRandomBands(Kind::HighShelf, "high shelf", {0.5, 2.0, 15.0, 1.0, 2.0, 99.0}); }
+void filtersRandomLowPass() { runRandomBands(Kind::LowPass, "low-pass", {0.5, 4.0, 0.0, 99.0, 99.0, 99.0}); }
+void filtersRandomHighPass() { runRandomBands(Kind::HighPass, "high-pass", {0.5, 4.0, 0.0, 0.2, 1.1, 3.6}); }
+
+// Resonant shelves, low-pass and high-pass at the full Q range: reported, not gated. No biquad follows a Q=18 shelf
+// notch near Nyquist, and RBJ is as bad.
+void filtersWideQReport() {
+  for (const Kind kind : {Kind::LowShelf, Kind::HighShelf, Kind::LowPass, Kind::HighPass}) {
+    Lcg rng;
+    double worstMatched = 0.0;
+    double worstRbj = 0.0;
+    for (int i = 0; i < 500; ++i) {
+      const double frequency = rng.logBetween(20.0, 0.45 * 48000.0);
+      const double q = rng.logBetween(0.2, 18.0);
+      const double gain = rng.between(-24.0, 24.0);
+      worstMatched = std::max(worstMatched, maxErrorDb(matched(kind, frequency, 48000.0, q, gain), kind, frequency, 48000.0, q, gain));
+      worstRbj = std::max(worstRbj, maxErrorDb(rbj(kind, frequency, 48000.0, q, gain), kind, frequency, 48000.0, q, gain));
+    }
+    const char *const names[] = {"bell", "low shelf", "high shelf", "low-pass", "high-pass"};
+    std::printf("  %s, Q 0.2..18 +-24 dB, 48 kHz, all corners: worst error matched %.2f dB, RBJ %.2f dB\n", names[static_cast<int>(kind)], worstMatched, worstRbj);
+  }
+}
+
+void filtersCoefficientStability() {
+  int unstable = 0;
+  int nonFinite = 0;
+  int designs = 0;
+  for (const Kind kind : {Kind::Bell, Kind::LowShelf, Kind::HighShelf, Kind::LowPass, Kind::HighPass}) {
+    for (const double rate : {44100.0, 96000.0}) {
+      for (const double frequency : {1.0, 20.0, 100.0, 1000.0, 10000.0, 0.45 * rate, 0.49 * rate, 0.499 * rate, 0.9 * rate}) {
+        for (const double q : {0.05, 0.2, 0.7071, 4.0, 18.0, 100.0}) {
+          for (const double gain : {-24.0, -6.0, 0.0, 6.0, 24.0}) {
+            const dsp::BiquadCoefficients c = matched(kind, frequency, rate, q, gain);
+            ++designs;
+            const bool finite = std::isfinite(c.b0) && std::isfinite(c.b1) && std::isfinite(c.b2) && std::isfinite(c.a1) && std::isfinite(c.a2);
+            if (!finite) ++nonFinite;
+            else if (!(std::fabs(c.a2) < 1.0 && std::fabs(c.a1) < 1.0 + c.a2)) ++unstable;
+          }
+        }
+      }
+    }
+  }
+  std::printf("  %d extreme designs: %d non-finite, %d with poles outside the unit circle\n", designs, nonFinite, unstable);
+  expectTrue("every_extreme_design_is_finite", nonFinite == 0);
+  expectTrue("every_extreme_design_is_stable", unstable == 0);
+}
+
+// Frequency response of the SVF as actually processed: impulse response, then a direct DFT at the probe frequency.
+double svfDb(dsp::SvfMode mode, double frequency, double rate, double q, double gainDb, double probe) {
+  dsp::Svf<double> svf;
+  const dsp::SvfCoefficients c = dsp::designSvf(mode, frequency, rate, q, gainDb);
+  const int length = 1 << 15;
+  std::complex<double> sum = 0.0;
+  for (int n = 0; n < length; ++n) {
+    const double y = svf.process(n == 0 ? 1.0 : 0.0, c);
+    sum += y * std::polar(1.0, -2.0 * kPi * probe / rate * n);
+  }
+  return 20.0 * std::log10(std::abs(sum));
+}
+
+// The SVF is a bilinear design: its response is the analog prototype at the pre-warped frequency tan(w/2)/tan(w0/2).
+double warpedAnalogDb(Kind kind, double frequency, double rate, double q, double gainDb, double probe) {
+  const double x = std::tan(kPi * probe / rate) / std::tan(kPi * frequency / rate);
+  return analogDb(kind, x, q, gainDb);
+}
+
+void filtersSvfMatchesWarpedPrototype() {
+  struct Row { dsp::SvfMode mode; Kind kind; const char *name; double gain; };
+  const Row rows[] = {
+    {dsp::SvfMode::Bell, Kind::Bell, "bell+9", 9.0}, {dsp::SvfMode::Bell, Kind::Bell, "bell-9", -9.0},
+    {dsp::SvfMode::LowShelf, Kind::LowShelf, "lowshelf+9", 9.0}, {dsp::SvfMode::LowShelf, Kind::LowShelf, "lowshelf-9", -9.0},
+    {dsp::SvfMode::HighShelf, Kind::HighShelf, "highshelf+9", 9.0}, {dsp::SvfMode::HighShelf, Kind::HighShelf, "highshelf-9", -9.0},
+    {dsp::SvfMode::LowPass, Kind::LowPass, "lowpass", 0.0}, {dsp::SvfMode::HighPass, Kind::HighPass, "highpass", 0.0},
+  };
+  for (const double rate : {44100.0, 48000.0, 96000.0}) {
+    for (const Row &row : rows) {
+      double worst = 0.0;
+      for (const double frequency : {200.0, 3000.0}) {
+        for (const double q : {0.7071, 3.0}) {
+          for (int i = 0; i <= 24; ++i) {
+            const double probe = 20.0 * std::pow(0.45 * rate / 20.0, i / 24.0);
+            worst = std::max(worst, std::fabs(svfDb(row.mode, frequency, rate, q, row.gain, probe) -
+              warpedAnalogDb(row.kind, frequency, rate, q, row.gain, probe)));
+          }
+        }
+      }
+      std::printf("  %.0f Hz %s: SVF vs warped analog prototype, worst %.5f dB\n", rate, row.name, worst);
+      expectAtMost("svf_matches_the_prewarped_prototype_db", worst, 0.01);
+    }
+  }
+  // Modes with no gain parameter: unity band-pass peak, notch null, all-pass flatness, peak = LP - HP.
+  const double bandPeak = svfDb(dsp::SvfMode::BandPass, 1000.0, 48000.0, 5.0, 0.0, 1000.0);
+  const double notchNull = svfDb(dsp::SvfMode::Notch, 1000.0, 48000.0, 5.0, 0.0, 1000.0);
+  double allPassSpread = 0.0;
+  for (const double probe : {50.0, 500.0, 1000.0, 5000.0, 15000.0}) {
+    allPassSpread = std::max(allPassSpread, std::fabs(svfDb(dsp::SvfMode::AllPass, 1000.0, 48000.0, 5.0, 0.0, probe)));
+  }
+  const double peakAtCentre = svfDb(dsp::SvfMode::Peak, 1000.0, 48000.0, 5.0, 0.0, 1000.0);
+  std::printf("  SVF band-pass peak %.4f dB, notch at centre %.1f dB, all-pass spread %.5f dB, peak mode at centre %.4f dB\n", bandPeak,
+    notchNull, allPassSpread, peakAtCentre);
+  expectNear("bandpass_has_unity_gain_at_the_centre", bandPeak, 0.0, 0.01);
+  expectAtMost("notch_nulls_the_centre", notchNull, -60.0);
+  expectAtMost("allpass_is_flat", allPassSpread, 0.01);
+  expectNear("peak_mode_is_twice_the_bandpass_gain_at_the_centre", peakAtCentre, 20.0, 0.05);
+}
+
+void filtersSvfCramping() {
+  // Same cramping as RBJ (both bilinear): reported so the Phase 1 decision has the number.
+  double worst = 0.0;
+  for (int i = 0; i <= 120; ++i) {
+    const double probe = 20.0 * std::pow(0.45 * 48000.0 / 20.0, i / 120.0);
+    worst = std::max(worst, std::fabs(svfDb(dsp::SvfMode::Bell, 12000.0, 48000.0, 1.0, 12.0, probe) - analogDb(Kind::Bell, probe / 12000.0, 1.0, 12.0)));
+  }
+  std::printf("  SVF bell 12k +12 dB Q1 vs the true analog prototype: worst %.2f dB (bilinear cramping, as RBJ)\n", worst);
+  expectAtLeast("svf_is_bilinear_so_it_cramps_like_rbj", worst, 1.0);
+}
+
+double snrDb(const std::vector<double> &signal, const std::vector<double> &reference) {
+  double signalPower = 0.0, errorPower = 0.0;
+  for (size_t i = 0; i < signal.size(); ++i) {
+    signalPower += reference[i] * reference[i];
+    errorPower += (signal[i] - reference[i]) * (signal[i] - reference[i]);
+  }
+  return 10.0 * std::log10(signalPower / std::max(errorPower, 1e-300));
+}
+
+void filtersLowFrequencyPrecision() {
+  const double rate = 48000.0;
+  struct Setting { double frequency; double q; double gain; };
+  const Setting settings[] = {{40.0, 1.0, 12.0}, {20.0, 0.5, -12.0}, {100.0, 18.0, 12.0}};
+  for (const Setting &setting : settings) {
+    const dsp::BiquadCoefficients c = dsp::designMatchedBell(setting.frequency, rate, setting.q, setting.gain);
+    const dsp::SvfCoefficients s = dsp::designSvf(dsp::SvfMode::Bell, setting.frequency, rate, setting.q, setting.gain);
+    dsp::Biquad<double> biquadDouble;
+    dsp::Biquad<float> biquadFloat;
+    dsp::Svf<double> svfDouble;
+    dsp::Svf<float> svfFloat;
+    Lcg rng;
+    std::vector<double> reference, biquadReference, floatBiquad, floatSvf;
+    for (int n = 0; n < 96000; ++n) {
+      const float x = static_cast<float>(0.1 * std::sin(2.0 * kPi * 60.0 / rate * n) + 0.02 * (rng.next() - 0.5));
+      const double ref = svfDouble.process(x, s);
+      reference.push_back(ref);
+      floatSvf.push_back(svfFloat.process(x, s));
+      floatBiquad.push_back(biquadFloat.process(x, c));
+      biquadReference.push_back(biquadDouble.process(x, c));
+    }
+    std::printf("  bell %.0f Hz Q%.1f %+.0f dB: SNR vs float64 of same structure: biquad float %.1f dB, SVF float %.1f dB\n", setting.frequency,
+      setting.q, setting.gain, snrDb(floatBiquad, biquadReference), snrDb(floatSvf, reference));
+    expectAtLeast("svf_with_float_state_snr_db", snrDb(floatSvf, reference), 100.0);
+    expectAtLeast("biquad_float_snr_is_measured_for_comparison", snrDb(floatBiquad, biquadReference), 40.0);
+  }
+}
+
+void filtersSafety() {
+  dsp::Biquad<float> biquad;
+  dsp::Svf<float> svf;
+  const dsp::BiquadCoefficients c = dsp::designMatchedBell(500.0, 48000.0, 4.0, 12.0);
+  const dsp::SvfCoefficients s = dsp::designSvf(dsp::SvfMode::Bell, 500.0, 48000.0, 4.0, 12.0);
+  for (int n = 0; n < 200; ++n) {
+    biquad.process(std::sin(0.05F * static_cast<float>(n)), c);
+    svf.process(std::sin(0.05F * static_cast<float>(n)), s);
+  }
+  expectTrue("nan_input_gives_silence", biquad.process(std::nanf(""), c) == 0.0F && svf.process(std::nanf(""), s) == 0.0F);
+  dsp::Biquad<float> freshBiquad;
+  dsp::Svf<float> freshSvf;
+  bool clean = true;
+  for (int n = 0; n < 500; ++n) {
+    const float x = std::sin(0.03F * static_cast<float>(n));
+    clean = clean && biquad.process(x, c) == freshBiquad.process(x, c) && svf.process(x, s) == freshSvf.process(x, s);
+  }
+  expectTrue("blocks_match_fresh_blocks_after_a_nan", clean);
+
+  // A long-ringing 40 Hz, Q 18 band: after a burst and 6 s of silence nothing may be subnormal.
+  const dsp::BiquadCoefficients ring = dsp::designMatchedBell(40.0, 48000.0, 18.0, 24.0);
+  const dsp::SvfCoefficients ringSvf = dsp::designSvf(dsp::SvfMode::Bell, 40.0, 48000.0, 18.0, 24.0);
+  dsp::Biquad<float> b;
+  dsp::Svf<float> v;
+  long subnormal = 0;
+  for (int n = 0; n < 48000 * 7; ++n) {
+    const float x = n < 480 ? 1.0F : 0.0F;
+    if (std::fpclassify(b.process(x, ring)) == FP_SUBNORMAL) ++subnormal;
+    if (std::fpclassify(v.process(x, ringSvf)) == FP_SUBNORMAL) ++subnormal;
+  }
+  std::printf("  subnormal outputs after a burst and silence: %ld\n", subnormal);
+  expectTrue("no_subnormal_outputs", subnormal == 0);
+}
+
+void filtersSvfPerSampleUpdate() {
+  dsp::Svf<float> constant;
+  dsp::Svf<float> perSample;
+  const dsp::SvfCoefficients fixed = dsp::designSvf(dsp::SvfMode::LowPass, 1500.0, 48000.0, 2.0, 0.0);
+  bool identical = true;
+  for (int n = 0; n < 2000; ++n) {
+    const float x = std::sin(0.2F * static_cast<float>(n));
+    identical = identical && constant.process(x, fixed) == perSample.process(x, dsp::designSvf(dsp::SvfMode::LowPass, 1500.0, 48000.0, 2.0, 0.0));
+  }
+  expectTrue("redesigning_every_sample_is_identical_to_constant_coefficients", identical);
+
+  // Cutoff swept 20 Hz .. 20 kHz and back every sample with high resonance on noise: must stay finite and bounded.
+  Lcg rng;
+  dsp::Svf<float> swept;
+  float peak = 0.0F;
+  for (int n = 0; n < 96000; ++n) {
+    const double phase = std::fabs(2.0 * (n / 48000.0) - 1.0);
+    const double cutoff = 20.0 * std::pow(1000.0, 1.0 - phase);
+    const float y = swept.process(static_cast<float>(rng.between(-1.0, 1.0)), dsp::designSvf(dsp::SvfMode::LowPass, cutoff, 48000.0, 20.0, 0.0));
+    peak = std::max(peak, std::fabs(y));
+  }
+  std::printf("  per-sample swept SVF, Q 20 on full-scale noise: peak output %.2f\n", static_cast<double>(peak));
+  expectAtMost("swept_resonant_svf_stays_bounded", peak, 100.0);
+}
+
 constexpr Case kCases[] = {
+  {"filters", "research_anchors", filtersAnchorsFromResearch},
+  {"filters", "random_bells", filtersRandomBells},
+  {"filters", "random_low_shelves", filtersRandomLowShelves},
+  {"filters", "random_high_shelves", filtersRandomHighShelves},
+  {"filters", "random_low_pass", filtersRandomLowPass},
+  {"filters", "random_high_pass", filtersRandomHighPass},
+  {"filters", "wide_q_report", filtersWideQReport},
+  {"filters", "coefficient_stability", filtersCoefficientStability},
+  {"filters", "svf_matches_warped_prototype", filtersSvfMatchesWarpedPrototype},
+  {"filters", "svf_cramping", filtersSvfCramping},
+  {"filters", "low_frequency_precision", filtersLowFrequencyPrecision},
+  {"filters", "safety", filtersSafety},
+  {"filters", "svf_per_sample_update", filtersSvfPerSampleUpdate},
   {"oversampler", "latency_and_dc", oversamplerLatencyAndDc},
   {"oversampler", "passband_and_stopband", oversamplerPassbandAndStopband},
   {"oversampler", "image_rejection", oversamplerImageRejection},
@@ -716,10 +1112,104 @@ constexpr Case kCases[] = {
   {"latency", "conversions", latencyConversions},
 };
 
+// ---- cost per sample (only with the "bench" argument) -----------------------------------------------------------------
+
+template <class Body>
+void bench(const char *name, Body body) {
+  constexpr int samples = 4000000;
+  float sink = 0.0F;
+  for (int n = 0; n < 100000; ++n) sink += body(n);
+  const auto start = std::chrono::steady_clock::now();
+  for (int n = 0; n < samples; ++n) sink += body(n);
+  const auto stop = std::chrono::steady_clock::now();
+  std::printf("  %-52s %7.2f ns/sample%s\n", name, std::chrono::duration<double, std::nano>(stop - start).count() / samples,
+    sink == 12345.678F ? " " : "");
+}
+
+void runBench() {
+  const auto input = [](int n) { return 0.5F * std::sin(0.01F * static_cast<float>(n & 4095)); };
+  bench("baseline: the test signal alone (subtract from the rows below)", [&](int n) { return input(n); });
+  dsp::ParameterSmoother<> linear;
+  linear.prepare(48000.0, 10.0);
+  linear.reset(0.0F);
+  bench("smoother, linear, settled", [&](int) { return linear.next(); });
+  linear.setTarget(1.0F);
+  bench("smoother, linear, settling (re-targeted each 20000)", [&](int n) {
+    if (n % 20000 == 0) linear.setTarget(n % 40000 == 0 ? 1.0F : 0.0F);
+    return linear.next();
+  });
+  dsp::ParameterSmoother<dsp::SmoothDomain::Log> log;
+  log.prepare(48000.0, 10.0);
+  log.reset(100.0F);
+  bench("smoother, log, settling (re-targeted each 20000)", [&](int n) {
+    if (n % 20000 == 0) log.setTarget(n % 40000 == 0 ? 8000.0F : 100.0F);
+    return log.next();
+  });
+  dsp::DelayRing<float> ring;
+  ring.prepare(4096);
+  bench("delay ring push + Hermite read", [&](int n) {
+    ring.push(input(n));
+    return ring.readHermite(100.37F + static_cast<float>(n & 7));
+  });
+  bench("delay ring push + Lagrange3 read", [&](int n) {
+    ring.push(input(n));
+    return ring.readLagrange3(100.37F + static_cast<float>(n & 7));
+  });
+  bench("delay ring push + linear read", [&](int n) {
+    ring.push(input(n));
+    return readLinear(ring, 100.37F + static_cast<float>(n & 7));
+  });
+  dsp::HalfBandOversampler2x os;
+  bench("oversampler up + down, per base-rate sample", [&](int n) {
+    const auto pair = os.up(input(n));
+    return os.down(pair.first, pair.second);
+  });
+  bench("std::tanh (reference)", [&](int n) { return std::tanh(4.0F * input(n)); });
+  dsp::Adaa1<dsp::TanhShaper> adaaTanh;
+  bench("ADAA1 tanh", [&](int n) { return adaaTanh.process(4.0F * input(n)); });
+  dsp::Adaa1<dsp::HardClipShaper> adaaClip;
+  bench("ADAA1 hard clip", [&](int n) { return adaaClip.process(4.0F * input(n)); });
+  dsp::Adaa1<dsp::SoftCubicShaper> adaaCubic;
+  bench("ADAA1 soft cubic", [&](int n) { return adaaCubic.process(4.0F * input(n)); });
+  dsp::Adaa1<dsp::TanhShaper> adaaTanh2x;
+  dsp::HalfBandOversampler2x os2;
+  bench("oversampler 2x + ADAA1 tanh, per base-rate sample", [&](int n) {
+    const auto pair = os2.up(4.0F * input(n));
+    return os2.down(adaaTanh2x.process(pair.first), adaaTanh2x.process(pair.second));
+  });
+  const dsp::SvfCoefficients svfCoefficients = dsp::designSvf(dsp::SvfMode::Bell, 1000.0, 48000.0, 1.0, 6.0);
+  dsp::Svf<float> svfFloat;
+  dsp::Svf<double> svfDouble;
+  bench("SVF float, fixed coefficients", [&](int n) { return svfFloat.process(input(n), svfCoefficients); });
+  bench("SVF double, fixed coefficients", [&](int n) { return static_cast<float>(svfDouble.process(input(n), svfCoefficients)); });
+  dsp::Svf<float> svfModulated;
+  bench("SVF float, designSvf (tan) every sample", [&](int n) {
+    return svfModulated.process(input(n), dsp::designSvf(dsp::SvfMode::LowPass, 200.0 + static_cast<double>(n & 1023), 48000.0, 2.0));
+  });
+  const dsp::BiquadCoefficients biquadCoefficients = dsp::designMatchedBell(1000.0, 48000.0, 1.0, 6.0);
+  dsp::Biquad<float> biquadFloat;
+  dsp::Biquad<double> biquadDouble;
+  bench("biquad float, fixed coefficients", [&](int n) { return biquadFloat.process(input(n), biquadCoefficients); });
+  bench("biquad double, fixed coefficients", [&](int n) { return static_cast<float>(biquadDouble.process(input(n), biquadCoefficients)); });
+  bench("designMatchedBell every sample", [&](int n) {
+    return static_cast<float>(dsp::designMatchedBell(200.0 + static_cast<double>(n & 1023), 48000.0, 1.0, 6.0).b0);
+  });
+  bench("designMatchedLowShelf every sample", [&](int n) {
+    return static_cast<float>(dsp::designMatchedLowShelf(200.0 + static_cast<double>(n & 1023), 48000.0, 0.7, 6.0).b0);
+  });
+  bench("RBJ bell design every sample (reference)", [&](int n) {
+    return static_cast<float>(rbj(Kind::Bell, 200.0 + static_cast<double>(n & 1023), 48000.0, 1.0, 6.0).b0);
+  });
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
   const char *group = argc > 1 ? argv[1] : nullptr;
+  if (group && std::strcmp(group, "bench") == 0) {
+    runBench();
+    return 0;
+  }
   int ran = 0;
   for (const Case &testCase : kCases) {
     if (group && std::strcmp(group, testCase.group) != 0) continue;

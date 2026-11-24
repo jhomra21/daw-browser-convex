@@ -286,8 +286,6 @@ export const compileNativeOfflineRenderPlan = (input: {
 
   const unsupported: string[] = []
 
-  if (input.sidechainRoutes.length > 0) unsupported.push('Native Phase A export does not support sidechain routing.')
-
   for (const track of input.tracks) {
     if (input.fx.trackFx?.[track.id]?.arp?.enabled) {
       unsupported.push(`${track.id}: Native Phase A export does not support arpeggiators.`)
@@ -306,7 +304,7 @@ export const compileNativeOfflineRenderPlan = (input: {
     epoch: 1,
     firstSequence: 1,
     fx: input.fx,
-    sidechainRoutes: [],
+    sidechainRoutes: input.sidechainRoutes,
     allowInstruments: true,
     externalLatencyFrames,
     projectGeneration: input.projectGeneration,

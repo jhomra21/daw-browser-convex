@@ -628,3 +628,42 @@ test("keeps the browser worklet graph envelope byte-for-byte equal to the native
 
   expect([...graphEnvelope(snapshot)]).toEqual([...encodePortableGraphEnvelope(snapshot)])
 })
+
+test("addresses a sidechain edge's target processor by its instance id in every graph encoder", () => {
+  const snapshot: AudioCoreGraphSnapshot = {
+    version: audioCoreContractVersion,
+    revision: 4,
+    contractHash: "contract",
+    masterNodeId: "master",
+    assets: [],
+    nodes: [
+      { id: "key", kind: "source", inputLayout: "stereo", outputLayout: "stereo", processorOrder: [], latencyFrames: 0 },
+      {
+        id: "pad", kind: "mixer", inputLayout: "stereo", outputLayout: "stereo", latencyFrames: 0,
+        processorOrder: [{
+          id: "compressor-1", kind: "compressor", kindId: 11, instanceId: 77, stateVersion: 1,
+          state: new Uint8Array(72), parameterTargets: [], latencyFrames: 0, tailFrames: 0, bypassed: false,
+        }],
+      },
+      { id: "master", kind: "master", inputLayout: "stereo", outputLayout: "stereo", processorOrder: [], latencyFrames: 0 },
+    ],
+    edges: [
+      { version: audioCoreContractVersion, id: "pad-master", fromNodeId: "pad", toNodeId: "master", gain: 1, kind: "output", tap: "post-fader", sidechain: false, pdcDelayFrames: 0 },
+      { version: audioCoreContractVersion, id: "key-pad", fromNodeId: "key", toNodeId: "pad", gain: 1, kind: "send", tap: "post-fader", sidechain: true, targetProcessorId: "compressor-1", pdcDelayFrames: 0 },
+    ],
+  }
+
+  // The envelope is nodes of 132 bytes after a 24-byte header, then 48-byte edges; the target is the edge's fourth word.
+  const sidechainTarget = (envelope: Uint8Array) => {
+    const view = new DataView(envelope.buffer, envelope.byteOffset, envelope.byteLength)
+    const sidechainEdge = 24 + 3 * 132 + 48
+
+    expect(view.getUint32(sidechainEdge + 40, true)).toBe(1)
+
+    return view.getBigUint64(sidechainEdge + 24, true)
+  }
+
+  expect(sidechainTarget(serializeNativeGraph(snapshot).subarray(12))).toBe(77n)
+  expect(sidechainTarget(encodePortableGraphEnvelope(snapshot))).toBe(77n)
+  expect(sidechainTarget(graphEnvelope(snapshot))).toBe(77n)
+})

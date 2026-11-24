@@ -935,8 +935,6 @@ const liveControlPair = (
   ]
 }
 
-const bypassInput = stereo(sine(16, 1_000, 48_000), sine(16, 2_000, 48_000, 0.25))
-
 // A Saturator or EQ that is bypassed when its graph is first built has nothing
 // sounding to ramp away from, so it passes its input dry from the first sample.
 const rampedBypassFrames = 960
@@ -2644,6 +2642,7 @@ const autoFilterImpulseFixture = (hiQuality: boolean): PortableGraphParityFixtur
     // before the declared latency, and the peak must not.
     assertOutput: (output) => {
       const left = output[0]
+
       if (!finite(output) || left === undefined) return false
       const energy = (samples: Float32Array) => samples.reduce((sum, sample) => sum + sample * sample, 0)
       const peak = left.reduce((best, sample, index) => Math.abs(sample) > Math.abs(left[best] ?? 0) ? index : best, 0)

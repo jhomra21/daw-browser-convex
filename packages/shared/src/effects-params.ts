@@ -870,27 +870,36 @@ export const normalizeGateParamsEnvelope = (value: JsonValue): GateParamsEnvelop
   }
 }
 
+export const LIMITER_LOOKAHEAD_STEPS_MS = [1.5, 3, 6] as const
+
+export type LimiterLookaheadMs = (typeof LIMITER_LOOKAHEAD_STEPS_MS)[number]
+
+// The nearest step; a value between two steps goes to the longer one.
+export const snapLimiterLookaheadMs = (lookaheadMs: number): LimiterLookaheadMs => (
+  LIMITER_LOOKAHEAD_STEPS_MS.reduce((best, step) => Math.abs(step - lookaheadMs) <= Math.abs(best - lookaheadMs) ? step : best)
+)
+
 export type LimiterParams = {
   enabled: boolean
+  gainDb: number
   ceilingDbtp: number
   releaseMs: number
-  lookaheadMs: number
+  autoRelease: boolean
+  lookaheadMs: LimiterLookaheadMs
   link: number
-  detectorOversampling: 4
 }
 
-export type LimiterParamsInput = Partial<Omit<LimiterParams, 'detectorOversampling'>> & {
-  detectorOversampling?: JsonValue
-}
+export type LimiterParamsInput = Partial<Omit<LimiterParams, 'lookaheadMs'>> & { lookaheadMs?: number }
 
 export type LimiterParamsEnvelope = ProcessorStateEnvelope<LimiterParams>
 
 export function createDefaultLimiterParams(): LimiterParams {
-  return { enabled: true, ceilingDbtp: -1, releaseMs: 100, lookaheadMs: 5, link: 1, detectorOversampling: 4 }
+  return { enabled: true, gainDb: 0, ceilingDbtp: -1, releaseMs: 100, autoRelease: false, lookaheadMs: 3, link: 1 }
 }
 
 export function normalizeLimiterParams(input: LimiterParamsInput = {}): LimiterParams {
   const defaults = createDefaultLimiterParams()
+  const gainDb = readFiniteNumber(input.gainDb)
   const ceilingDbtp = readFiniteNumber(input.ceilingDbtp)
   const releaseMs = readFiniteNumber(input.releaseMs)
   const lookaheadMs = readFiniteNumber(input.lookaheadMs)
@@ -898,11 +907,12 @@ export function normalizeLimiterParams(input: LimiterParamsInput = {}): LimiterP
 
   return {
     enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
+    gainDb: gainDb === undefined ? defaults.gainDb : clamp(gainDb, -12, 24),
     ceilingDbtp: ceilingDbtp === undefined ? defaults.ceilingDbtp : clamp(ceilingDbtp, -12, 0),
     releaseMs: releaseMs === undefined ? defaults.releaseMs : clamp(releaseMs, 20, 1000),
-    lookaheadMs: lookaheadMs === undefined ? defaults.lookaheadMs : clamp(lookaheadMs, 1, 5),
+    autoRelease: isJsonBoolean(input.autoRelease) ? input.autoRelease : defaults.autoRelease,
+    lookaheadMs: lookaheadMs === undefined ? defaults.lookaheadMs : snapLimiterLookaheadMs(lookaheadMs),
     link: link === undefined ? defaults.link : clamp(link, 0, 1),
-    detectorOversampling: 4,
   }
 }
 
@@ -916,11 +926,12 @@ export const normalizeLimiterParamsEnvelope = (value: JsonValue): LimiterParamsE
     version: 1,
     state: normalizeLimiterParams({
       enabled: state.enabled === true || state.enabled === false ? state.enabled : undefined,
+      gainDb: isJsonNumber(state.gainDb) ? state.gainDb : undefined,
       ceilingDbtp: isJsonNumber(state.ceilingDbtp) ? state.ceilingDbtp : undefined,
       releaseMs: isJsonNumber(state.releaseMs) ? state.releaseMs : undefined,
+      autoRelease: state.autoRelease === true || state.autoRelease === false ? state.autoRelease : undefined,
       lookaheadMs: isJsonNumber(state.lookaheadMs) ? state.lookaheadMs : undefined,
       link: isJsonNumber(state.link) ? state.link : undefined,
-      detectorOversampling: state.detectorOversampling,
     }),
   }
 }

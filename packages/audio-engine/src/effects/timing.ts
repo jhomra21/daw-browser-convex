@@ -55,7 +55,7 @@ export const getEffectTiming = (
   }
 
   if (input.kind === 'limiter') {
-    return { latencyFrames: Math.ceil(5 * rate / 1000), tail: finite(0) }
+    return { latencyFrames: Math.ceil(input.params.state.lookaheadMs * rate / 1000), tail: finite(0) }
   }
 
   if (input.kind === 'gate') {

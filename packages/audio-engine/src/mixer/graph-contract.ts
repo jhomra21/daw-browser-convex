@@ -456,8 +456,8 @@ const toPortableProcessor = (
       parameterTargets: [
         { id: 'limiter.ceiling', target: 127 },
         { id: 'limiter.release', target: 128 },
-        { id: 'limiter.lookaheadMs', target: 129 },
         { id: 'limiter.link', target: 130 },
+        { id: 'limiter.gainDb', target: 170 },
       ], bypassed: !instance.params.state.enabled,
     }
   }

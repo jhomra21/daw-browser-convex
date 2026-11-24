@@ -28,6 +28,7 @@ import {
   serializeDelayParams,
   serializeEqParams,
   serializeReverbParams,
+  snapLimiterLookaheadMs,
   serializeSaturatorParams,
   REVERB_DECAY_SEC_MAX,
   REVERB_WET_MAX,
@@ -262,27 +263,34 @@ describe('Compressor params', () => {
 })
 
 describe('Limiter params', () => {
-  test('normalizes the fixed true-peak state envelope', () => {
+  test('normalizes the state envelope', () => {
     expect(AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams({ version: 1,
       state: {
         enabled: false,
+        gainDb: 40,
         ceilingDbtp: -20,
         releaseMs: 5,
+        autoRelease: true,
         lookaheadMs: 20,
         link: 2,
-        detectorOversampling: 8,
       },
     })).toEqual({
       version: 1,
       state: {
         enabled: false,
+        gainDb: 24,
         ceilingDbtp: -12,
         releaseMs: 20,
-        lookaheadMs: 5,
+        autoRelease: true,
+        lookaheadMs: 6,
         link: 1,
-        detectorOversampling: 4,
       },
     })
+  })
+
+  test('snaps the lookahead to the nearest step and defaults to Gain 0 dB with Auto off', () => {
+    expect(AUDIO_EFFECT_CONTRACTS.limiter.createDefaultParams().state).toMatchObject({ gainDb: 0, autoRelease: false, lookaheadMs: 3 })
+    expect([1, 2, 2.3, 2.3, 4.5, 5].map(snapLimiterLookaheadMs)).toEqual([1.5, 1.5, 3, 3, 6, 6])
   })
 })
 

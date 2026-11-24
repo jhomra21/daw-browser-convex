@@ -998,6 +998,112 @@ void TestOfflineStartProcessesWithoutDevice() {
   host.Stop();
 }
 
+// Source 1 feeds mixer 2 quietly (0.01) and, through a sidechain edge of `key_gain`, the compressor 77 on mixer 2.
+// The compressor's own signal sits far below its threshold, so only the key can make it duck.
+std::vector<std::uint8_t> SidechainCompressorGraph(
+  const std::uint32_t revision, const bool with_key_edge, const float key_gain) {
+  constexpr std::uint32_t kCompressorInstance = 77;
+  std::vector<std::uint8_t> payload;
+  AppendLeU32(payload, DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION);
+  AppendLeU32(payload, revision);
+  AppendLeU32(payload, 3);
+  AppendLeU32(payload, with_key_edge ? 3 : 2);
+  AppendLeU32(payload, 1);
+  AppendLeU32(payload, 0);
+  for (const auto& [id, kind] : {std::pair<std::uint64_t, std::uint32_t>{1, 1}, {2, 3}, {3, 6}}) {
+    AppendLeU64(payload, id);
+    AppendLeU32(payload, kind);
+    AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+    AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+    AppendLeU32(payload, 0);
+    for (std::size_t field = 0; field < 21; ++field) AppendLeU32(payload, 0);
+    AppendLeU64(payload, 0);
+    AppendLeFloat(payload, 0.0F);
+    AppendLeFloat(payload, 0.0F);
+    AppendLeU32(payload, 0);
+    AppendLeU32(payload, 0);
+  }
+  const auto append_edge = [&payload](
+    const std::uint64_t id, const std::uint64_t from, const std::uint64_t to, const std::uint64_t target,
+    const float gain, const std::uint32_t sidechain) {
+    AppendLeU64(payload, id);
+    AppendLeU64(payload, from);
+    AppendLeU64(payload, to);
+    AppendLeU64(payload, target);
+    AppendLeFloat(payload, gain);
+    AppendLeU32(payload, DAW_AUDIO_GRAPH_EDGE_POST_FADER);
+    AppendLeU32(payload, sidechain);
+    AppendLeU32(payload, 0);
+  };
+  append_edge(10, 1, 2, 0, 0.01F, 0);
+  append_edge(11, 2, 3, 0, 1.0F, 0);
+  if (with_key_edge) append_edge(12, 1, 2, kCompressorInstance, key_gain, 1);
+  AppendLeU64(payload, 2);
+  AppendLeU32(payload, DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR);
+  AppendLeU32(payload, 1);
+  AppendLeU32(payload, 72);
+  AppendLeU32(payload, kCompressorInstance);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+  AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 1);
+  AppendLeFloat(payload, -24.0F);
+  AppendLeFloat(payload, 20.0F);
+  AppendLeFloat(payload, 1.0F);
+  AppendLeFloat(payload, 100.0F);
+  AppendLeU32(payload, 0);
+  AppendLeFloat(payload, 0.0F);
+  AppendLeFloat(payload, 0.0F);
+  AppendLeFloat(payload, 1.0F);
+  AppendLeFloat(payload, 0.0F);
+  AppendLeFloat(payload, 0.0F);
+  for (std::size_t field = 0; field < 5; ++field) AppendLeU32(payload, 0);
+  AppendLeFloat(payload, 120.0F);
+  AppendLeFloat(payload, 0.707F);
+  std::vector<std::uint8_t> frame;
+  AppendBeU64(frame, revision);
+  AppendBeU32(frame, static_cast<std::uint32_t>(payload.size()));
+  frame.insert(frame.end(), payload.begin(), payload.end());
+  return frame;
+}
+
+// The master's left sample once a constant 0.5 key has played through the graph long enough for the compressor to settle.
+float SidechainCompressorOutput(const bool offline, const bool with_key_edge, const float key_gain) {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({.device_uid = offline ? "offline:render" : "diagnostic", .sample_rate_hz = 48000,
+    .max_frames_per_block = 128, .channel_count = 2, .revision = 1}));
+  assert(host.PrepareAndPublishGraph(2, SidechainCompressorGraph(2, with_key_edge, key_gain)));
+  if (offline) {
+    assert(host.SetTransport(1, true, 0));
+    assert(host.StartOffline());
+  } else {
+    assert(host.StartDiagnosticMode());
+    assert(host.SetTransport(1, true, 0));
+  }
+  std::array<float, 128> input{};
+  input.fill(0.5F);
+  std::array<float, 128> output_left{};
+  std::array<float, 128> output_right{};
+  const std::array<const float*, 2> inputs{input.data(), input.data()};
+  const std::array<float*, 2> outputs{output_left.data(), output_right.data()};
+  for (int block = 0; block < 16; ++block) assert(host.ProcessPlanar(inputs, outputs, 128));
+  host.Stop();
+  return output_left.back();
+}
+
+void TestSidechainKeyDucksTheTargetCompressor() {
+  for (const bool offline : {false, true}) {
+    // Without a key edge the compressor detects its own -46 dB signal, below the -24 dB threshold.
+    assert(std::fabs(SidechainCompressorOutput(offline, false, 1.0F) - 0.005F) < 1e-4F);
+    // A silent key leaves the detector at silence.
+    assert(std::fabs(SidechainCompressorOutput(offline, true, 0.0F) - 0.005F) < 1e-4F);
+    // A -6 dB key against a -24 dB threshold at 20:1 reduces the target by about 17 dB.
+    assert(SidechainCompressorOutput(offline, true, 1.0F) < 0.0010F);
+  }
+}
 void TestStaleUrgentInstrumentEventIsDiscardedAfterTransportEpochAdvance() {
   daw::audio_host_macos::AudioHost host;
   assert(host.Configure({
@@ -6948,6 +7054,7 @@ int main(const int argc, const char* const argv[]) {
   TestNativeVstAutomationOverrideTable();
   TestCallbackPlanarBuffersAndSplitting();
   TestOfflineStartProcessesWithoutDevice();
+  TestSidechainKeyDucksTheTargetCompressor();
   TestEmptyGranularInstrumentState();
   TestPackedInstrumentStatePayloadBounds();
   TestStaleUrgentInstrumentEventIsDiscardedAfterTransportEpochAdvance();

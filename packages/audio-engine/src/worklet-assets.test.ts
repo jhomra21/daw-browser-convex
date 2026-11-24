@@ -178,24 +178,24 @@ describe('checked-in worklet assets', () => {
     expect(output[96]).toBe(1)
   })
 
-  test('registers limiter with fixed five millisecond delayed bypass', async () => {
+  test('registers limiter with a delayed bypass equal to its lookahead', async () => {
     const evaluated = await evaluateAsset(limiterWorklet.modulePath)
     const Processor = evaluated.registered.get(limiterWorklet.processorName)
 
     if (!Processor) throw new Error('Limiter processor was not registered.')
     const processor = new Processor()
-    processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, state: { enabled: false } } })
-    const input = new Float32Array(242)
+    processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, state: { enabled: false, lookaheadMs: 6 } } })
+    const input = new Float32Array(300)
     input[0] = 1
-    const output = new Float32Array(242)
+    const output = new Float32Array(300)
     expect(processor.process([[input]], [[output]], {
+      'limiter.gainDb': Float32Array.of(0),
       'limiter.ceiling': Float32Array.of(-1),
       'limiter.release': Float32Array.of(100),
-      'limiter.lookaheadMs': Float32Array.of(5),
       'limiter.link': Float32Array.of(1),
-      'limiter.detectorOversampling': Float32Array.of(4),
     })).toBe(true)
-    expect(output[240]).toBe(1)
+    expect(output[287]).toBe(0)
+    expect(output[288]).toBe(1)
   })
   test('registers and processes the exact compressor asset with curve parity', async () => {
     const evaluated = await evaluateAsset(compressorWorklet.modulePath)

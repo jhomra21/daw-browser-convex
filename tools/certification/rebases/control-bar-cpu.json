@@ -1,0 +1,86 @@
+{
+ "name": "control-bar-cpu",
+ "sequence": 119,
+ "createdAt": "2026-11-24T01:25:26.405Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "apps/desktop/audio-host.ts",
+   "from": "4f5c0d7353606f6b939cac7913f6f0a655998aa058030039d332ee60b9590156",
+   "to": "f3cebe2bdc83c11d84d3070eff016c87ad51eed2d0eb4147ecd05b10507085d1"
+  },
+  {
+   "file": "native/audio-host-macos/tests/audio_host_test.cpp",
+   "from": "135f3b47cce301ef7b80d611c7fb248f0793302602494203066b8cc67faf667e",
+   "to": "272b192713391387770e786fb29d93e3cb3f3ef1dbcce3c054bb5a55dd148d41"
+  },
+  {
+   "file": "src/components/Timeline.tsx",
+   "from": "cca7951fc35684076536fe0d91bf26bab449b753dd1a5ffd5cde31a5f5c99d77",
+   "to": "fdc877bb071ab7efe026d5cc4b6ea92fb4d3a0d216148eac309838b508923ebb"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=rc1-g-panel-audiohost",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 145,
+   "new": 146
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-i6-desktop",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 450,
+   "new": 451
+  },
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "250a76f01105b76c179f97bd01afd87261cfb5fb89d7b87a885c4c3b84f3aa33",
+   "new": "01d790b9a0486bf83469d8c63e4520527144f133e8eb397f26c476b218063365"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "6c947f0248e8f37d4bf576c9b4e2ea13d94ced1f",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "b33757a82a54dc174f50fcc771fd01aa279c79835a29b9ae7b7cc5778e8cfc41",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "b33757a82a54dc174f50fcc771fd01aa279c79835a29b9ae7b7cc5778e8cfc41",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/control-bar-cpu-bless/live",
+   "resultSha256": "f8807b2554bc6045c1b9abea58092ca3eb2c13446e34b00d95e415c1fdaa69e5",
+   "seconds": 1675.402037917,
+   "observations": 3081
+  },
+  "unreachedByOverlay": []
+ }
+}

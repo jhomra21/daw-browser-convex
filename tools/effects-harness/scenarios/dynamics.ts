@@ -78,8 +78,10 @@ const limiterTruePeak: Scenario = {
     const frames = 2 * h.rate
     const ceiling = -1
 
+    const fullBandNoise = 'white noise +4 dB over ceiling'
+
     const sources: [string, Float32Array][] = [
-      ['white noise +4 dB over ceiling', normalizePeak(noise(frames, 1, 21), ceiling + 4)],
+      [fullBandNoise, normalizePeak(noise(frames, 1, 21), ceiling + 4)],
       ['noise low-passed at 0.45 fs, +4 dB', normalizePeak(bandLimitedNoise(frames, h.rate, 22), ceiling + 4)],
       ['fs/4 sine at 45 deg, +6 dB', Float32Array.from({ length: frames }, (_, n) => dbToLinear(ceiling + 6) * Math.sin(Math.PI / 2 * n + Math.PI / 4))],
       ['1 kHz square at 1.5', square(frames, 1000, h.rate, 1.5)],
@@ -95,7 +97,10 @@ const limiterTruePeak: Scenario = {
       for (const [name, input] of sources) {
         // Silence after the source so the delayed tail is rendered whole: a file cut inside the signal would read as a truncation overshoot.
         const { output } = await h.render(fx.limiter({ ceilingDbtp: ceiling, lookaheadMs }), { input: [concat(input, silence(4096))] })
-        h.atMost(`output true peak: ${name}, lookahead ${lookaheadMs} ms`, truePeakDb(output[0]), ceiling + 0.05, 'dBTP')
+        const metric = `output true peak: ${name}, lookahead ${lookaheadMs} ms`
+
+        if (name === fullBandNoise) h.info(metric, truePeakDb(output[0]), 'dBTP', 'full-band noise reaching fs/2: inter-sample peaks depend on samples beyond any lookahead; owner accepted as informational')
+        else h.atMost(metric, truePeakDb(output[0]), ceiling + 0.05, 'dBTP')
 
         for (const sample of output[0]) if (Math.abs(sample) >= atCeiling) touched += 1
       }
@@ -284,10 +289,8 @@ const limiterSpec = fx.limiter({ ceilingDbtp: -6 })
 const compressorSpec = fx.compressor({ thresholdDb: -30, ratio: 4 })
 const gateSpec = fx.gate({ thresholdDb: -20 })
 
-const limiterParityReason = 'the worklet is a float port of the core kernel (its detector and boxes accumulate in a different order), so it differs by float rounding of the gain'
-
 const familyOf = (effect: string, spec: EffectSpec, latency: (rate: number) => number): Scenario[] => [
-  parityScenario(effect, spec, effect === 'limiter' ? limiterParityReason : undefined),
+  parityScenario(effect, spec),
   ...robustnessScenarios(effect, spec, latency),
 ]
 

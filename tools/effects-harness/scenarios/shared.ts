@@ -20,8 +20,7 @@ export const parityFixtures = (rate: number): [string, Float32Array][] => {
   ]
 }
 
-// `informationalReason` turns the bound into a reported value, for a legacy port that cannot match the core bit for bit.
-export const parityScenario = (effect: string, spec: EffectSpec, informationalReason?: string): Scenario => ({
+export const parityScenario = (effect: string, spec: EffectSpec): Scenario => ({
   effect,
   name: 'parity-fixtures',
   run: async (h) => {
@@ -32,8 +31,7 @@ export const parityScenario = (effect: string, spec: EffectSpec, informationalRe
       else {
         const difference = Math.max(maxAbsDiff(output[0], legacy[0]), maxAbsDiff(output[1], legacy[1]))
 
-        if (informationalReason) h.info(`parity ${name}`, difference, 'abs', informationalReason)
-        else h.atMost(`parity ${name}`, difference, parityLimit, 'abs')
+        h.atMost(`parity ${name}`, difference, parityLimit, 'abs')
       }
     }
   },

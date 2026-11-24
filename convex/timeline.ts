@@ -6,6 +6,7 @@ import { requireProjectAccess } from "./projectAccess";
 import { requireAuthenticatedUserId } from "./identity";
 import { requireProjectRow } from "./projectRows";
 import { currentAutomationRows } from "./automationRowValues";
+import { currentEffectRows } from "./effectRowParams";
 
 const readFullTimelineView = async (
   ctx: QueryCtx,
@@ -54,7 +55,7 @@ const readFullTimelineView = async (
     clips,
     mixerSettings,
     automationEnvelopes: currentAutomationRows(automationEnvelopes),
-    effects,
+    effects: currentEffectRows(effects),
     sidechainRoutes,
   };
 };

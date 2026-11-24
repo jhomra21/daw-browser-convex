@@ -1,5 +1,6 @@
 // Tests for the shared DSP blocks in src/dsp. Every case prints the number it checks against its limit.
 // Run with a group name (smoother, safety, latency, delay, oversampler, adaa, filters) or with no argument for all.
+#include "../src/dsp/fractional_delay.h"
 #include "../src/dsp/latency.h"
 #include "../src/dsp/numeric_safety.h"
 #include "../src/dsp/parameter_smoother.h"
@@ -280,7 +281,84 @@ void latencyConversions() {
     dsp::Latency::fromMilliseconds(1.0e12, 48000.0).frames == std::numeric_limits<uint32_t>::max());
 }
 
+// ---- fractional delay -------------------------------------------------------------------------------------------
+
+constexpr double kPi = 3.14159265358979323846;
+
+void delayRingWrapsAtCapacity() {
+  dsp::DelayRing<float> ring;
+  ring.prepare(100);
+  expectTrue("capacity_is_a_power_of_two_at_least_the_request", ring.capacity() == 128);
+  const uint32_t pushes = ring.capacity() * 3 + 7;
+  for (uint32_t n = 0; n < pushes; ++n) ring.push(static_cast<float>(n));
+  bool exact = true;
+  for (uint32_t age = 0; age < ring.capacity(); ++age) exact = exact && ring.read(age) == static_cast<float>(pushes - 1 - age);
+  expectTrue("every_age_below_capacity_reads_the_right_sample_after_three_wraps", exact);
+  expectTrue("age_at_capacity_is_clamped_not_out_of_bounds", ring.read(ring.capacity() + 50) == ring.read(ring.capacity() - 1));
+  ring.reset();
+  expectTrue("reset_clears_history", ring.read(0) == 0.0F && ring.read(60) == 0.0F);
+  dsp::DelayRing<float> tiny;
+  tiny.prepare(0);
+  expectTrue("zero_request_still_has_room_for_the_cubic_taps", tiny.capacity() >= 8);
+}
+
+double maxInterpolationError(float (*read)(const dsp::DelayRing<float> &, float), double cyclesPerSample) {
+  dsp::DelayRing<float> ring;
+  ring.prepare(64);
+  const int newest = 400;
+  for (int n = 0; n <= newest; ++n) ring.push(static_cast<float>(std::sin(2.0 * kPi * cyclesPerSample * n)));
+  double worst = 0.0;
+  for (double delay = 1.0; delay <= 20.0; delay += 0.05) {
+    const double expected = std::sin(2.0 * kPi * cyclesPerSample * (newest - delay));
+    worst = std::max(worst, std::fabs(read(ring, static_cast<float>(delay)) - expected));
+  }
+  return worst;
+}
+
+float readLinear(const dsp::DelayRing<float> &ring, float delay) {
+  const uint32_t whole = static_cast<uint32_t>(delay);
+  const float fraction = delay - static_cast<float>(whole);
+  return ring.read(whole) * (1.0F - fraction) + ring.read(whole + 1) * fraction;
+}
+float readHermite(const dsp::DelayRing<float> &ring, float delay) { return ring.readHermite(delay); }
+float readLagrange(const dsp::DelayRing<float> &ring, float delay) { return ring.readLagrange3(delay); }
+
+void delayCubicReadAccuracy() {
+  for (const double frequency : {0.02, 0.05, 0.1}) {
+    const double omega = 2.0 * kPi * frequency;
+    const double linear = maxInterpolationError(readLinear, frequency);
+    const double hermite = maxInterpolationError(readHermite, frequency);
+    const double lagrange = maxInterpolationError(readLagrange, frequency);
+    std::printf("  %.2f fs sine: max error linear=%.3g hermite=%.3g lagrange3=%.3g\n", frequency, linear, hermite, lagrange);
+    expectAtMost("hermite_error_bound_omega3_over_10", hermite, std::pow(omega, 3) / 10.0 + 1e-6);
+    expectAtMost("lagrange_error_bound_omega4_over_24", lagrange, std::pow(omega, 4) / 24.0 * 1.05 + 1e-6);
+    expectAtMost("hermite_beats_linear_by_4x", hermite, linear / 4.0);
+  }
+}
+
+void delayCubicExactAtIntegerDelaysAndClamped() {
+  dsp::DelayRing<float> ring;
+  ring.prepare(32);
+  for (int n = 0; n < 100; ++n) ring.push(static_cast<float>(std::sin(0.3 * n)));
+  bool exact = true;
+  for (uint32_t age = 1; age < 20; ++age) {
+    exact = exact && std::fabs(ring.readHermite(static_cast<float>(age)) - ring.read(age)) < 1e-6F &&
+      std::fabs(ring.readLagrange3(static_cast<float>(age)) - ring.read(age)) < 1e-6F;
+  }
+  expectTrue("integer_delay_returns_the_stored_sample", exact);
+  const float early = ring.readHermite(0.25F);
+  expectTrue("delay_below_one_frame_is_clamped_to_one", early == ring.readHermite(1.0F));
+  const float late = ring.readHermite(1.0e9F);
+  expectTrue("delay_beyond_capacity_is_clamped_in_bounds", std::isfinite(late));
+  expectTrue("nan_delay_is_clamped", std::isfinite(ring.readHermite(std::nanf(""))) && std::isfinite(ring.readLagrange3(std::nanf(""))));
+  const float top = static_cast<float>(ring.capacity() - 3);
+  expectTrue("largest_delay_is_capacity_minus_three", ring.readHermite(top + 0.9F) == ring.readHermite(top));
+}
+
 constexpr Case kCases[] = {
+  {"delay", "ring_wraps_at_capacity", delayRingWrapsAtCapacity},
+  {"delay", "cubic_read_accuracy", delayCubicReadAccuracy},
+  {"delay", "cubic_exact_and_clamped", delayCubicExactAtIntegerDelaysAndClamped},
   {"smoother", "linear_step", smootherLinearStep},
   {"smoother", "settling_query", smootherSettlingQuery},
   {"smoother", "retarget_continuity", smootherRetargetContinuity},

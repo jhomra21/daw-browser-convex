@@ -32,6 +32,7 @@ import {
   parseLocalAssetFolderRow,
 } from '~/lib/local-asset-folders'
 import {
+  localEffectParamsVersionStamp,
   localEffectRowId,
   localSidechainRouteRowId,
   type LocalEffectKind,
@@ -349,7 +350,7 @@ export const materializeLocalControlSnapshot = (
       updatedAt: timestamp,
     }
 
-    entities.push(createLocalProjectEntityRow(EFFECT_ROW_KIND, id, row, timestamp))
+    entities.push(createLocalProjectEntityRow(EFFECT_ROW_KIND, id, { ...row, ...localEffectParamsVersionStamp(kind) }, timestamp))
   }
 
   for (const item of snapshot.automation) {

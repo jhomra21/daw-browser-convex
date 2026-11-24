@@ -23,7 +23,7 @@ import {
   parseExternalProcessorValue,
   type ExternalProcessor,
 } from '@daw-browser/external-plugins'
-import type { LocalEffectRow } from '~/lib/local-effects'
+import { currentLocalEffectRows } from '~/lib/local-effects'
 import {
   LOCAL_CONTROL_PROJECT_METADATA_KEY,
   isCanonicalLocalControlTimeSignature,
@@ -39,7 +39,7 @@ import {
   parseLocalAssetFolderRow,
 } from '~/lib/local-asset-folders'
 import { normalizeLocalAutomationEnvelopes } from '~/lib/local-automation'
-import { AUTOMATION_ROW_KIND, CLIP_ROW_KIND, EFFECT_ROW_KIND, SIDECHAIN_ROW_KIND, TRACK_ROW_KIND } from '~/lib/local-project-rows'
+import { AUTOMATION_ROW_KIND, CLIP_ROW_KIND, SIDECHAIN_ROW_KIND, TRACK_ROW_KIND } from '~/lib/local-project-rows'
 import { parseExternalPluginJsonValue } from '~/lib/external-plugin-json'
 import { parseLocalProjectStoredJsonValue } from './local-control-model'
 
@@ -123,14 +123,6 @@ const isClip = (value: JsonValue): value is TimelineClipRow => (
   && isJsonNumber(value.startSec)
   && isJsonNumber(value.duration)
   && isJsonString(value.color)
-)
-
-const isEffect = (value: JsonValue): value is LocalEffectRow<JsonValue> => (
-  isJsonObject(value)
-  && isJsonString(value.id)
-  && isJsonString(value.targetId)
-  && isJsonString(value.effect)
-  && 'params' in value
 )
 
 const isExternalProcessor = (value: JsonValue): value is ExternalProcessor => (
@@ -217,7 +209,7 @@ const projectLocalControlSnapshot = <Snapshot>(
   const parsedBpm = parseLocalProjectStoredJsonValue(bpm)
   const parsedLoop = parseLocalProjectStoredJsonValue(loop)
   const parsedProjectMix = parseLocalProjectStoredJsonValue(projectMix)
-  const effects = valueOfKind(input.entities, EFFECT_ROW_KIND, isEffect)
+  const effects = currentLocalEffectRows(input.entities)
 
   const externalProcessors = valueOfKind(input.entities, externalPluginEntityKind, isExternalProcessor)
     .flatMap((value) => {

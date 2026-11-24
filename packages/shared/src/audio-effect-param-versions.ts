@@ -1,7 +1,9 @@
-import type { AudioEffectKind } from './audio-effect-registry'
-import { isJsonNumber, isJsonObject, type JsonValue } from './json-value'
+import { isAudioEffectKind, type AudioEffectKind } from './audio-effect-registry'
+import type { JsonValue } from './json-value'
 
-export const AUDIO_EFFECT_PARAMS_VERSION = {
+// Storage-only versioning: persisted effect rows carry an optional `paramsVersion` (absent = 1).
+// Public contracts and in-memory params always use the current shape; readers migrate before use.
+export const AUDIO_EFFECT_PARAMS_VERSION: Readonly<Record<AudioEffectKind, number>> = {
   eq: 1,
   compressor: 1,
   saturator: 1,
@@ -20,59 +22,62 @@ export const AUDIO_EFFECT_PARAMS_VERSION = {
   spectral: 1,
   utility: 1,
   spectrum: 1,
-} satisfies Record<AudioEffectKind, number>
-
-export const readAudioEffectParamsVersion = (version: number | undefined): number => version ?? 1
-
-export const audioEffectParamsVersion = (
-  kind: AudioEffectKind,
-  params: JsonValue,
-): number => {
-  if (
-    kind !== 'eq'
-    && kind !== 'compressor'
-    && kind !== 'saturator'
-    && kind !== 'delay'
-    && kind !== 'reverb'
-    && isJsonObject(params)
-    && isJsonNumber(params.version)
-  ) return params.version
-
-  return AUDIO_EFFECT_PARAMS_VERSION[kind]
 }
 
+type AudioEffectParamsMigrationStep = (params: JsonValue) => JsonValue
+
+export type AudioEffectParamsVersioning = {
+  current: Readonly<Record<AudioEffectKind, number>>
+  // migrations[kind][n] upgrades params stored at version n to version n + 1.
+  migrations: Readonly<Partial<Record<AudioEffectKind, Readonly<Record<number, AudioEffectParamsMigrationStep>>>>>
+}
+
+export const AUDIO_EFFECT_PARAMS_VERSIONING: AudioEffectParamsVersioning = {
+  current: AUDIO_EFFECT_PARAMS_VERSION,
+  migrations: {},
+}
+
+// Remembers which unreadable versions were already reported so a project list does not log per row.
+const warnedVersions = new Set<string>()
+
+/**
+ * Upgrades stored params to the current version. A version this build cannot read
+ * (newer app, or corrupt) returns the params unchanged so the normalizers apply as they do today.
+ * A gap in the migration table is a programming error and throws.
+ */
 export const migrateAudioEffectParams = (
   kind: AudioEffectKind,
   params: JsonValue,
   storedVersion: number | undefined,
-  migrations: Partial<Record<AudioEffectKind, Readonly<Record<number, (params: JsonValue) => JsonValue>>>> = {},
-  currentVersion = AUDIO_EFFECT_PARAMS_VERSION[kind],
+  versioning: AudioEffectParamsVersioning = AUDIO_EFFECT_PARAMS_VERSIONING,
 ): JsonValue => {
-  const embeddedVersion = isJsonObject(params)
-    && isJsonNumber(params.version)
-    && kind !== 'eq'
-    && kind !== 'compressor'
-    && kind !== 'saturator'
-    && kind !== 'delay'
-    && kind !== 'reverb'
-    ? params.version
-    : undefined
+  const current = versioning.current[kind]
+  let version = storedVersion ?? 1
 
-  let version = readAudioEffectParamsVersion(storedVersion ?? embeddedVersion)
+  if (!Number.isInteger(version) || version < 1 || version > current) {
+    const key = `${kind}@${version}`
 
-  let current = params
+    if (!warnedVersions.has(key)) {
+      warnedVersions.add(key)
+      console.warn(`Stored ${kind} params version ${version} is not readable by this build (current ${current}); using params as stored.`)
+    }
 
-  if (!Number.isInteger(version) || version < 1 || version > currentVersion) {
-    throw new Error(`Unsupported ${kind} params version ${version}.`)
+    return params
   }
 
-  while (version < currentVersion) {
-    const migrate = migrations[kind]?.[version]
+  let migrated = params
 
-    if (!migrate) throw new Error(`Missing ${kind} params migration from version ${version}.`)
-    current = migrate(current)
-    version += 1
+  for (; version < current; version += 1) {
+    const step = versioning.migrations[kind]?.[version]
+
+    if (!step) throw new Error(`Missing ${kind} params migration from version ${version} to ${version + 1}.`)
+    migrated = step(migrated)
   }
 
-  return current
+  return migrated
 }
+
+/** The storage field to write with every persisted effect; empty for non-catalog rows such as instruments. */
+export const audioEffectParamsVersionStamp = (kind: string): { paramsVersion?: number } => (
+  isAudioEffectKind(kind) ? { paramsVersion: AUDIO_EFFECT_PARAMS_VERSION[kind] } : {}
+)

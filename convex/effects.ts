@@ -6,6 +6,7 @@ import { requireMasterBusWriteAccess, requireProjectAccess } from "./projectAcce
 import { requireAuthenticatedUserId } from "./identity";
 import { getTrackWriteAccess } from "./trackWrites";
 import { runSharedOperationOnce } from "./sharedOperationResults";
+import { currentEffectDocs, currentEffectRows } from "./effectRowParams";
 import { withProjectEdit, type ProjectEdit } from "./projectRows";
 import { arpeggiatorParamsValidator, legacySynthParamsValidator, literalUnion, synthParamsValidator, trackInstrumentValidator } from "./validators";
 import {
@@ -13,8 +14,7 @@ import {
   normalizeTrackInstrumentParams,
   normalizeArpeggiatorParams,
   normalizeAudioEffectParamsForUpdate,
-  AUDIO_EFFECT_PARAMS_VERSION,
-  migrateAudioEffectParams,
+  audioEffectParamsVersionStamp,
   AUDIO_EFFECT_KINDS,
   audioEffectKindsWithOperation,
   audioEffectOrderItemId,
@@ -211,32 +211,6 @@ const normalizeEffectParamsForUpdate = (
   return params
 }
 
-const persistedEffectParamsVersion = (type: SharedAudioEffectType): number | undefined => {
-  if (!isAudioEffectPersistenceType(type)) return undefined
-
-  if (type !== 'eq' && type !== 'compressor' && type !== 'saturator' && type !== 'delay' && type !== 'reverb') {
-    return undefined
-  }
-
-  return AUDIO_EFFECT_PARAMS_VERSION[type]
-}
-
-const effectParamsVersionField = (type: SharedAudioEffectType) => {
-  const paramsVersion = persistedEffectParamsVersion(type)
-
-  return paramsVersion === undefined ? {} : { paramsVersion }
-}
-
-const currentEffectRow = (row: any) => {
-  const { paramsVersion, ...effect } = row
-
-  if (!isAudioEffectPersistenceType(effect.type)) return effect
-
-  const params = migrateAudioEffectParams(effect.type, effect.params, paramsVersion)
-
-  return { ...effect, params: normalizeEffectParamsForUpdate(effect.type, params) }
-}
-
 const stableEffectParams = (value: JsonValue): string => {
   if (Array.isArray(value)) return `[${value.map(stableEffectParams).join(',')}]`
 
@@ -281,7 +255,7 @@ export const upsertTrackEffectRow = async (
 ): Promise<EffectRowWriteResult> => {
   const revision = edit.revision
 
-  const existing = (await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect())
+  const existing = (await currentEffectDocs(ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()))
     .sort((left: EffectOrderRow, right: EffectOrderRow) => (
       (left.index ?? 0) - (right.index ?? 0)
       || (String(left._id) < String(right._id) ? -1 : 1)
@@ -344,7 +318,7 @@ export const upsertTrackEffectRow = async (
     }
 
     edit.stamp()
-    await ctx.db.patch(row._id, { params, ...effectParamsVersionField(input.type), targetType: 'track', type: input.type, instanceId: input.instanceId, revision })
+    await ctx.db.patch(row._id, { params, ...audioEffectParamsVersionStamp(input.type), targetType: 'track', type: input.type, instanceId: input.instanceId, revision })
 
     return effectRowWriteResult('updated', row._id, revision)
   }
@@ -360,7 +334,7 @@ export const upsertTrackEffectRow = async (
     type: input.type,
     instanceId: input.instanceId,
     params,
-    ...effectParamsVersionField(input.type),
+    ...audioEffectParamsVersionStamp(input.type),
     createdAt: Date.now(),
     revision,
   })
@@ -410,7 +384,7 @@ export const upsertMasterEffectRow = async (
   },
 ): Promise<EffectRowWriteResult> => {
   const revision = edit.revision
-  const existing = await ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect()
+  const existing = await currentEffectDocs(ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect())
 
   if (input.instanceId) {
     const audioRows = existing.filter((entry: EffectOrderRow) => isAudioEffectKind(entry.type))
@@ -426,7 +400,7 @@ export const upsertMasterEffectRow = async (
 
     if (areEffectParamsEqual(input.type, row.params, params)) return effectRowWriteResult('noop', row._id, row.revision ?? 0)
     edit.stamp()
-    await ctx.db.patch(row._id, { params, ...effectParamsVersionField(input.type), targetType: 'master', revision })
+    await ctx.db.patch(row._id, { params, ...audioEffectParamsVersionStamp(input.type), targetType: 'master', revision })
 
     return effectRowWriteResult('updated', row._id, revision)
   }
@@ -441,7 +415,7 @@ export const upsertMasterEffectRow = async (
     type: input.type,
     instanceId: input.instanceId,
     params,
-    ...effectParamsVersionField(input.type),
+    ...audioEffectParamsVersionStamp(input.type),
     createdAt: Date.now(),
     revision,
   })
@@ -857,7 +831,7 @@ export const listByRoom = query({
       return (a.index ?? 0) - (b.index ?? 0);
     });
 
-    return rows.map(currentEffectRow);
+    return currentEffectRows(rows);
   },
 });
 
@@ -872,10 +846,9 @@ export const listByTrack = query({
       .withIndex("by_track", (q) => q.eq("trackId", trackId))
       .collect();
 
-    return rows
+    return currentEffectRows(rows
       .filter((row) => row.projectId === projectId && row.targetType === 'track')
-      .sort((left, right) => (left.index ?? 0) - (right.index ?? 0))
-      .map(currentEffectRow);
+      .sort((left, right) => (left.index ?? 0) - (right.index ?? 0)));
   },
 });
 
@@ -1166,7 +1139,7 @@ const sameRestoreChainState = async (
     arpeggiator?: ReturnType<typeof sanitizeArpParams>
   },
 ) => {
-  const existing = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()
+  const existing = await currentEffectDocs(ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect())
 
   const existingAudio = existing
     .filter((effect: any) => effect.targetType === 'track' && isAudioEffectKind(effect.type))
@@ -1304,7 +1277,7 @@ export const serverRestoreChain = mutation({
               type: effect.kind,
               instanceId: effect.id,
               params,
-              ...effectParamsVersionField(effect.kind),
+              ...audioEffectParamsVersionStamp(effect.kind),
               createdAt: Date.now(),
               revision,
             })

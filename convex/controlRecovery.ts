@@ -22,6 +22,7 @@ import {
 } from "@daw-browser/control-core";
 import type { NormalizedTrackControlStateV1, TimelineRangeDeletePatchV1 } from "@daw-browser/control-core";
 import {
+  audioEffectParamsVersionStamp,
   automationTargetKey,
   granularAutomationKey,
   instrumentAutomationKey,
@@ -38,6 +39,7 @@ import {
 import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { ControlDomainError } from "./controlPreflight";
+import { currentEffectRow } from "./effectRowParams";
 import type { ProjectEdit } from "./projectRows";
 import { readProjectControlSnapshotV2 } from "./controlSnapshot";
 import { findSampleRow } from "./sampleRows";
@@ -285,7 +287,7 @@ const effectPayload = (row: Doc<"effects">): RecoveryEffect => ({
     ? { kind: "master" }
     : { kind: "track", trackId: String(row.trackId) },
   index: row.index,
-  processor: persistedProcessorSnapshotSchema.parse({ kind: row.type, params: row.params }),
+  processor: persistedProcessorSnapshotSchema.parse({ kind: row.type, params: currentEffectRow(row).params }),
   instanceId: row.instanceId,
   createdAt: row.createdAt,
 });
@@ -858,6 +860,7 @@ const restoreEffectBundle = async (
       type: instrument ? "instrument" : item.effect.processor.kind,
       instanceId: item.effect.instanceId,
       params: instrument ?? item.effect.processor.params,
+      ...audioEffectParamsVersionStamp(item.effect.processor.kind),
       createdAt: item.effect.createdAt,
       revision,
     });
@@ -1113,7 +1116,7 @@ const restoreTrackBundle = async (
       projectId: effect.projectId, targetType: effect.target.kind, trackId,
       index: effect.index, type: instrument ? "instrument" : effect.processor.kind,
       instanceId: effect.instanceId,
-      params: instrument ?? effect.processor.params, createdAt: effect.createdAt,
+      params: instrument ?? effect.processor.params, ...audioEffectParamsVersionStamp(effect.processor.kind), createdAt: effect.createdAt,
       revision: effectRevision,
     });
 

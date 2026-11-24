@@ -19,9 +19,9 @@ const isLimiterConfigureMessage = (message, revision) => isLimiterMessage(messag
 // input gain -> true-peak detector -> gain target -> min-hold over the lookahead plus a 10 ms hold -> two moving averages -> release stage
 // -> gain on the audio delayed by exactly the lookahead -> safety clip at the ceiling.
 const OVERSAMPLE = 8
-const PAST = 64
+const PAST = 32
 const MINIMUM_AHEAD = 12
-const MAXIMUM_AHEAD = 64
+const MAXIMUM_AHEAD = 32
 const MAXIMUM_TAPS = PAST + MAXIMUM_AHEAD
 const BOX_FRAMES = 48
 const DETECTOR_MARGIN = Math.fround(0.99655)
@@ -76,6 +76,34 @@ class SlidingMinimum {
   }
 }
 
+// Sliding maximum of the last `window` pushes (at most MAXIMUM_TAPS), in O(1) per push.
+class SlidingMaximum {
+  constructor() {
+    this.value = new Float32Array(MAXIMUM_TAPS)
+    this.frame = new Float64Array(MAXIMUM_TAPS)
+    this.head = 0
+    this.count = 0
+    this.now = 0
+  }
+
+  push(magnitude, window) {
+    while (this.count > 0 && this.now - this.frame[this.head] >= window) {
+      this.head = (this.head + 1) & (MAXIMUM_TAPS - 1)
+      this.count--
+    }
+
+    while (this.count > 0 && this.value[(this.head + this.count - 1) & (MAXIMUM_TAPS - 1)] <= magnitude) this.count--
+    const tail = (this.head + this.count) & (MAXIMUM_TAPS - 1)
+    this.value[tail] = magnitude
+    this.frame[tail] = this.now++
+    this.count++
+  }
+
+  largest() {
+    return this.value[this.head]
+  }
+}
+
 // Moving average of the last `length` pushes, started at unity gain.
 class Box {
   constructor() {
@@ -102,7 +130,9 @@ class Box {
 class Channel {
   constructor() {
     this.dry = new Float32Array(CAPACITY)
-    this.gained = new Float32Array(CAPACITY)
+    // Written at i and i + CAPACITY, so any window of MAXIMUM_TAPS samples is contiguous without wrapping.
+    this.gained = new Float32Array(2 * CAPACITY)
+    this.peak = new SlidingMaximum()
     this.minimum = new SlidingMinimum()
     this.first = new Box()
     this.second = new Box()
@@ -116,7 +146,6 @@ class LimiterKernel {
     this.rate = sampleRate
     this.channels = [new Channel(), new Channel()]
     this.point = new Float32Array(GRID * MAXIMUM_TAPS)
-    this.window = new Float32Array(MAXIMUM_TAPS)
     this.grid = new Float32Array(GRID)
     this.bound = 1
     this.boxLengths = [1, 1]
@@ -236,21 +265,16 @@ class LimiterKernel {
   // Largest magnitude of the waveform between the sample the detector judges and the next one.
   truePeak(channel) {
     const taps = PAST + this.ahead
-    const window = this.window
-    let largest = 0
-
-    for (let j = 0; j < taps; j++) {
-      window[j] = channel.gained[(this.write - (taps - 1) + j) & MASK]
-      largest = Math.max(largest, Math.abs(window[j]))
-    }
-
+    const window = channel.gained
+    const base = (this.write - (taps - 1)) & MASK
+    const largest = channel.peak.largest()
     const margin = f(this.ceiling * DETECTOR_MARGIN)
     const bounded = f(largest * this.bound)
 
     if (bounded <= margin) return bounded
     const grid = this.grid
-    grid[1] = Math.abs(window[PAST - 1])
-    grid[OVERSAMPLE + 1] = Math.abs(window[PAST])
+    grid[1] = Math.abs(window[base + PAST - 1])
+    grid[OVERSAMPLE + 1] = Math.abs(window[base + PAST])
 
     for (let i = 0; i < GRID; i++) {
       if (i === 1 || i === OVERSAMPLE + 1) continue
@@ -263,13 +287,13 @@ class LimiterKernel {
 
       // Four partial sums, as in the core; a tap past the window would add an exact zero.
       for (let j = 0; j < taps; j += 4) {
-        p0 = f(p0 + f(window[j] * point[offset + j]))
+        p0 = f(p0 + f(window[base + j] * point[offset + j]))
 
-        if (j + 1 < taps) p1 = f(p1 + f(window[j + 1] * point[offset + j + 1]))
+        if (j + 1 < taps) p1 = f(p1 + f(window[base + j + 1] * point[offset + j + 1]))
 
-        if (j + 2 < taps) p2 = f(p2 + f(window[j + 2] * point[offset + j + 2]))
+        if (j + 2 < taps) p2 = f(p2 + f(window[base + j + 2] * point[offset + j + 2]))
 
-        if (j + 3 < taps) p3 = f(p3 + f(window[j + 3] * point[offset + j + 3]))
+        if (j + 3 < taps) p3 = f(p3 + f(window[base + j + 3] * point[offset + j + 3]))
       }
 
       grid[i] = Math.abs(f(f(p0 + p1) + f(p2 + p3)))
@@ -314,7 +338,10 @@ class LimiterKernel {
 
     for (let c = 0; c < 2; c++) {
       this.channels[c].dry[slot] = input[c]
-      this.channels[c].gained[slot] = f(input[c] * this.inputGain)
+      const gained = f(input[c] * this.inputGain)
+      this.channels[c].gained[slot] = gained
+      this.channels[c].gained[slot + CAPACITY] = gained
+      this.channels[c].peak.push(Math.abs(gained), PAST + this.ahead)
     }
 
     for (let c = 0; c < 2; c++) target[c] = Math.min(1, f(f(this.ceiling * DETECTOR_MARGIN) / Math.max(this.truePeak(this.channels[c]), f(1e-12))))

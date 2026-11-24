@@ -3,8 +3,8 @@
 // Limiter DSP kernel, independent of the audio-core graph so it can be measured on its own.
 //
 // Signal path per channel: input gain -> true-peak detector (8x polyphase FIR, flat to 0.45 fs, plus the raw samples)
-// -> gain target -> min-hold over the lookahead window plus a 10 ms hold -> two cascaded moving averages -> release stage -> gain on the
-// audio delayed by exactly the lookahead -> safety clip at the ceiling.
+// -> gain target -> min-hold over the lookahead window plus a 10 ms hold -> two cascaded moving averages
+// -> release stage -> gain on the audio delayed by exactly the lookahead -> safety clip at the ceiling.
 //
 // The min-hold window and the averages are sized so that the smoothed gain at the moment a sample leaves the delay
 // line is never above the target computed for that sample (Hamalainen, DAFx-02; Signalsmith, "Designing a
@@ -39,9 +39,9 @@ class LimiterKernel {
   // The detector reads kPast frames before the sample it judges, which cost nothing, and ahead_ frames after it, which
   // come out of the lookahead. It takes all it can up to kMaximumAhead; a short lookahead keeps kBoxFrames for the
   // averages and gets a window that is cut short on that side.
-  static constexpr uint32_t kPast = 64;
+  static constexpr uint32_t kPast = 32;
   static constexpr uint32_t kMinimumAhead = 12;
-  static constexpr uint32_t kMaximumAhead = 64;
+  static constexpr uint32_t kMaximumAhead = 32;
   static constexpr uint32_t kMaximumTaps = kPast + kMaximumAhead;
   static constexpr uint32_t kBoxFrames = 48;
   // The gain aims 0.03 dB under the ceiling so that the detector's rounding never leaves a peak for the clip to flatten:
@@ -121,7 +121,10 @@ class LimiterKernel {
     std::array<float, 2> target{};
     for (uint32_t c = 0; c < 2; ++c) {
       channels_[c].dry[slot] = input[c];
-      channels_[c].gained[slot] = input[c] * input_gain_;
+      const float gained = input[c] * input_gain_;
+      channels_[c].gained[slot] = gained;
+      channels_[c].gained[slot + kCapacity] = gained;
+      channels_[c].peak.push(std::fabs(gained), kPast + ahead_);
     }
     for (uint32_t c = 0; c < 2; ++c) target[c] = std::min(1.0F, ceiling_ * kDetectorMargin / std::max(true_peak(channels_[c]), 1.0e-12F));
     const float linked = std::min(target[0], target[1]);
@@ -174,6 +177,31 @@ class LimiterKernel {
     }
   };
 
+  // Sliding maximum of the last `window` pushes (at most kMaximumTaps), in O(1) per push.
+  struct SlidingMaximum {
+    static_assert((kMaximumTaps & (kMaximumTaps - 1)) == 0);
+    std::array<float, kMaximumTaps> value{};
+    std::array<uint32_t, kMaximumTaps> frame{};
+    uint32_t head = 0;
+    uint32_t count = 0;
+    uint32_t now = 0;
+
+    void push(float magnitude, uint32_t window) {
+      const auto slot = [this](uint32_t offset) { return (head + offset) & (kMaximumTaps - 1); };
+      while (count > 0 && now - frame[slot(0)] >= window) {
+        head = slot(1);
+        --count;
+      }
+      while (count > 0 && value[slot(count - 1)] <= magnitude) --count;
+      const uint32_t tail = slot(count);
+      value[tail] = magnitude;
+      frame[tail] = now++;
+      ++count;
+    }
+
+    float largest() const { return value[head]; }
+  };
+
   // Moving average of the last `length` pushes, started at unity gain. The sum is exact: every ring entry is a float
   // held in a double.
   struct Box {
@@ -197,7 +225,9 @@ class LimiterKernel {
 
   struct Channel {
     std::array<float, kCapacity> dry{};
-    std::array<float, kCapacity> gained{};
+    // Written at i and i + kCapacity, so any window of kMaximumTaps samples is contiguous without wrapping.
+    std::array<float, 2 * kCapacity> gained{};
+    SlidingMaximum peak{};
     SlidingMinimum minimum{};
     Box first{};
     Box second{};
@@ -217,7 +247,7 @@ class LimiterKernel {
   // Windowed sinc cut at fs/2, kPast + ahead taps per point, each point normalised to unit gain at DC. The window is cos^0.75:
   // a rectangular window leaves the sinc's ripple at low frequencies, which would show as gain wobble on a steady tone,
   // and cos^2 (Hann) narrows the passband so much that content near fs/2 is read low. This one leaves the 997 Hz reading
-  // flat to about 0.002 dB and reads white noise within 0.05 dB.
+  // flat to about 0.002 dB and reads band-limited noise to within 0.02 dB.
   void design(uint32_t ahead) {
     constexpr double kPi = 3.14159265358979323846;
     coefficients_.bound = 1.0F;
@@ -246,14 +276,10 @@ class LimiterKernel {
   // Largest magnitude of the waveform between the sample the detector judges and the next one.
   // Nothing needs computing while the window cannot reach the ceiling even at the filter's largest gain.
   float true_peak(const Channel &channel) const {
-    const uint32_t taps = kPast + ahead_;
-    std::array<float, kMaximumTaps> window{};
-    float largest = 0.0F;
-    for (uint32_t j = 0; j < taps; ++j) {
-      window[j] = channel.gained[(write_ - (taps - 1) + j) & kMask];
-      largest = std::max(largest, std::fabs(window[j]));
-    }
+    const float largest = channel.peak.largest();
     if (largest * coefficients_.bound <= ceiling_ * kDetectorMargin) return largest * coefficients_.bound;
+    const uint32_t taps = kPast + ahead_;
+    const float *window = channel.gained.data() + ((write_ - (taps - 1)) & kMask);
     std::array<float, kGrid> grid{};
     grid[1] = std::fabs(window[kPast - 1]);
     grid[kOversample + 1] = std::fabs(window[kPast]);
@@ -261,12 +287,14 @@ class LimiterKernel {
       if (i == 1 || i == kOversample + 1) continue;
       const float *point = coefficients_.point[i].data();
       std::array<float, 4> partial{};
-      for (uint32_t j = 0; j < taps; j += 4) {
+      uint32_t j = 0;
+      for (; j + 4 <= taps; j += 4) {
         partial[0] += window[j] * point[j];
         partial[1] += window[j + 1] * point[j + 1];
         partial[2] += window[j + 2] * point[j + 2];
         partial[3] += window[j + 3] * point[j + 3];
       }
+      for (uint32_t lane = 0; j < taps; ++j, ++lane) partial[lane] += window[j] * point[j];
       grid[i] = std::fabs((partial[0] + partial[1]) + (partial[2] + partial[3]));
     }
     uint32_t at = 1;

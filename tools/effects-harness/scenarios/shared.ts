@@ -28,11 +28,7 @@ export const parityScenario = (effect: string, spec: EffectSpec): Scenario => ({
       const { output, legacy } = await h.render(spec, { input: [input] })
 
       if (legacy === null) h.info(`parity ${name}`, null, '', 'not measured: legacy implementation is a Web Audio node chain')
-      else {
-        const difference = Math.max(maxAbsDiff(output[0], legacy[0]), maxAbsDiff(output[1], legacy[1]))
-
-        h.atMost(`parity ${name}`, difference, parityLimit, 'abs')
-      }
+      else h.atMost(`parity ${name}`, Math.max(maxAbsDiff(output[0], legacy[0]), maxAbsDiff(output[1], legacy[1])), parityLimit, 'abs')
     }
   },
 })

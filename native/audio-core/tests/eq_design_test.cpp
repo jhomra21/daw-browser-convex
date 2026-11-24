@@ -67,7 +67,7 @@ double analogDb(Type type, double f0, double q, double gainDb, double f) {
 
 // Worst |digital - analog| over 20 Hz to 0.45 fs of the project rate, where the filter runs at `processingRate`.
 double worstError(Type type, double f0, double q, double gainDb, double projectRate, double processingRate) {
-  const dsp::EqBandSections band = dsp::designEqBand(type, f0, processingRate, q, gainDb);
+  const dsp::EqBandSections band = dsp::designEqBand(type, f0, processingRate, q, gainDb, projectRate);
   double worst = 0.0;
   for (int k = 0; k < 200; ++k) {
     const double f = 20.0 * std::pow(0.45 * projectRate / 20.0, k / 199.0);

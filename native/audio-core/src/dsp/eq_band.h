@@ -38,54 +38,21 @@ inline bool eqBandHasGain(EqBandType type) {
 
 namespace detail {
 
-// RBJ cookbook biquad in double. Used where no matched design exists (band-pass, notch, all-pass) and for shelves
-// outside the region where the matched shelf measures better (see designEqBand).
-inline BiquadCoefficients rbjBiquad(EqBandType type, double frequency, double sampleRate, double q, double gainDb) {
+// RBJ cookbook biquad in double, for band-pass, notch and all-pass, which have no matched design.
+inline BiquadCoefficients rbjBiquad(EqBandType type, double frequency, double sampleRate, double q) {
   const double omega = 2.0 * kPi * std::clamp(frequency, 1.0, 0.49 * sampleRate) / sampleRate;
   const double cosine = std::cos(omega);
   const double alpha = std::sin(omega) / (2.0 * std::max(q, 0.01));
-  const double a = std::pow(10.0, gainDb / 40.0);
-  double b0 = 1.0, b1 = 0.0, b2 = 0.0, a0 = 1.0, a1 = 0.0, a2 = 0.0;
+  double b0 = 1.0, b1 = 0.0, b2 = 0.0, a0 = 1.0, a1 = -2.0 * cosine, a2 = 1.0 - alpha;
   switch (type) {
-    case EqBandType::Lowpass:
-    case EqBandType::Lowpass48:
-      b0 = (1.0 - cosine) * 0.5; b1 = 1.0 - cosine; b2 = b0; a0 = 1.0 + alpha; a1 = -2.0 * cosine; a2 = 1.0 - alpha;
-      break;
-    case EqBandType::Highpass:
-    case EqBandType::Highpass48:
-      b0 = (1.0 + cosine) * 0.5; b1 = -(1.0 + cosine); b2 = b0; a0 = 1.0 + alpha; a1 = -2.0 * cosine; a2 = 1.0 - alpha;
-      break;
     case EqBandType::Bandpass:
-      b0 = alpha; b2 = -alpha; a0 = 1.0 + alpha; a1 = -2.0 * cosine; a2 = 1.0 - alpha;
+      b0 = alpha; b2 = -alpha; a0 = 1.0 + alpha;
       break;
     case EqBandType::Notch:
-      b0 = 1.0; b1 = -2.0 * cosine; b2 = 1.0; a0 = 1.0 + alpha; a1 = b1; a2 = 1.0 - alpha;
+      b0 = 1.0; b1 = a1; b2 = 1.0; a0 = 1.0 + alpha;
       break;
-    case EqBandType::Allpass:
-      b0 = 1.0 - alpha; b1 = -2.0 * cosine; b2 = 1.0 + alpha; a0 = b2; a1 = b1; a2 = b0;
-      break;
-    case EqBandType::Lowshelf: {
-      const double beta = 2.0 * std::sqrt(a) * alpha;
-      b0 = a * ((a + 1.0) - (a - 1.0) * cosine + beta);
-      b1 = 2.0 * a * ((a - 1.0) - (a + 1.0) * cosine);
-      b2 = a * ((a + 1.0) - (a - 1.0) * cosine - beta);
-      a0 = (a + 1.0) + (a - 1.0) * cosine + beta;
-      a1 = -2.0 * ((a - 1.0) + (a + 1.0) * cosine);
-      a2 = (a + 1.0) + (a - 1.0) * cosine - beta;
-      break;
-    }
-    case EqBandType::Highshelf: {
-      const double beta = 2.0 * std::sqrt(a) * alpha;
-      b0 = a * ((a + 1.0) + (a - 1.0) * cosine + beta);
-      b1 = -2.0 * a * ((a - 1.0) + (a + 1.0) * cosine);
-      b2 = a * ((a + 1.0) + (a - 1.0) * cosine - beta);
-      a0 = (a + 1.0) - (a - 1.0) * cosine + beta;
-      a1 = 2.0 * ((a - 1.0) - (a + 1.0) * cosine);
-      a2 = (a + 1.0) - (a - 1.0) * cosine - beta;
-      break;
-    }
-    case EqBandType::Peaking:
-      b0 = 1.0 + alpha * a; b1 = -2.0 * cosine; b2 = 1.0 - alpha * a; a0 = 1.0 + alpha / a; a1 = b1; a2 = 1.0 - alpha / a;
+    default:
+      b0 = 1.0 - alpha; b1 = a1; b2 = 1.0 + alpha; a0 = b2;
       break;
   }
   return BiquadCoefficients{b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0};
@@ -97,24 +64,25 @@ inline constexpr std::array<double, kEqMaxSections> kButterworth8Q = {0.50979557
 
 }  // namespace detail
 
-// Designs one band for a filter running at `sampleRate`. Choices, from measurements of the worst error against the analog
-// prototype between 20 Hz and 0.45 fs of the project rate (random bands, Q 0.5 to 4, 6 to 15 dB, 44.1 and 48 kHz):
-//   - bell, 12 dB and 48 dB cuts: matched (Vicanek). Processing at the project rate: bell 0.6/2.0/2.4/2.3 dB for corners
-//     below 0.1/0.25/0.35/0.45 fs against RBJ 1.5/6.2/8.9/10.3; low cut 1.1 to 1.7 dB against RBJ 22 to 26;
-//     high cut 0.15/0.9/1.3/5.3 against RBJ 0.6/4.2/10.1/26. At twice the project rate (Hi-Quality) bell 0.03 to 0.16
-//     and cuts 0.01 to 0.16 dB, so the 0.5 dB target holds up to 0.45 fs.
-//   - shelves: the matched shelf is better for Q <= 1.5 when boosting, or when cutting with the corner under 0.25 fs of the
-//     processing rate; elsewhere RBJ is better (a matched cut shelf with the corner above 0.25 fs errs by 9 to 33 dB).
-//   - band-pass, notch, all-pass: RBJ.
-inline EqBandSections designEqBand(EqBandType type, double frequency, double sampleRate, double q, double gainDb) {
+// Designs one band for a filter running at `sampleRate`: matched designs (impulse-invariant poles, numerator fitted to the
+// analog prototype, see biquad.h) for bells, shelves, low-pass and high-pass, RBJ for band-pass, notch and all-pass.
+// Worst error against the analog prototype between 20 Hz and 0.45 fs of the project rate (20 random bands, Q 0.2 to 18,
+// gain +-24 dB; tools/effects-harness, row band-response-vs-analog), before -> after:
+//   44.1 kHz  5.9 -> 0.53 dB     48 kHz  2.1 -> 0.54 dB     96 kHz  1.6 -> 0.42 dB
+//   Hi-Quality (processing at twice the rate): 44.1 kHz 0.94 -> 0.06, 48 kHz 0.91 -> 0.06, 96 kHz 0.67 -> 0.04 dB.
+// The remainder is the impulse-invariant pole placement: with all five coefficients free, a biquad reaches 0.06 dB on the
+// worst 44.1 and 48 kHz bands (low shelf 11.3 kHz Q 0.29 -22 dB, bell 19 kHz Q 0.45 +22 dB).
+// `projectRate` is the rate the EQ range (up to 0.45 of it) is judged at when `sampleRate` is oversampled.
+inline EqBandSections designEqBand(EqBandType type, double frequency, double sampleRate, double q, double gainDb, double projectRate = 0.0) {
+  const double span = detail::kFitSpanDefault * (projectRate > 0.0 ? projectRate : sampleRate) / sampleRate;
   EqBandSections band;
   band.count = 1;
   switch (type) {
     case EqBandType::Peaking:
-      band.sections[0] = designMatchedBell(frequency, sampleRate, q, gainDb);
+      band.sections[0] = designMatchedBell(frequency, sampleRate, q, gainDb, span);
       break;
     case EqBandType::Lowpass:
-      band.sections[0] = designMatchedLowPass(frequency, sampleRate, q);
+      band.sections[0] = designMatchedLowPass(frequency, sampleRate, q, span);
       break;
     case EqBandType::Highpass:
       band.sections[0] = designMatchedHighPass(frequency, sampleRate, q);
@@ -124,24 +92,21 @@ inline EqBandSections designEqBand(EqBandType type, double frequency, double sam
       band.count = kEqMaxSections;
       for (uint32_t i = 0; i < kEqMaxSections; ++i) {
         const double sectionQ = i == kEqMaxSections - 1 ? detail::kButterworth8Q[i] * q * 1.4142135623730951 : detail::kButterworth8Q[i];
-        band.sections[i] = type == EqBandType::Lowpass48 ? designMatchedLowPass(frequency, sampleRate, sectionQ)
+        band.sections[i] = type == EqBandType::Lowpass48 ? designMatchedLowPass(frequency, sampleRate, sectionQ, span)
                                                          : designMatchedHighPass(frequency, sampleRate, sectionQ);
       }
       break;
     }
     case EqBandType::Lowshelf:
-    case EqBandType::Highshelf: {
-      const double corner = std::clamp(frequency, 1.0, 0.49 * sampleRate) / sampleRate;
-      const bool matched = q <= 1.5 && (gainDb >= 0.0 || corner < 0.25);
-      band.sections[0] = !matched ? detail::rbjBiquad(type, frequency, sampleRate, q, gainDb)
-                                  : type == EqBandType::Lowshelf ? designMatchedLowShelf(frequency, sampleRate, q, gainDb)
-                                                                 : designMatchedHighShelf(frequency, sampleRate, q, gainDb);
+      band.sections[0] = designMatchedLowShelf(frequency, sampleRate, q, gainDb, span);
       break;
-    }
+    case EqBandType::Highshelf:
+      band.sections[0] = designMatchedHighShelf(frequency, sampleRate, q, gainDb, span);
+      break;
     case EqBandType::Bandpass:
     case EqBandType::Notch:
     case EqBandType::Allpass:
-      band.sections[0] = detail::rbjBiquad(type, frequency, sampleRate, q, gainDb);
+      band.sections[0] = detail::rbjBiquad(type, frequency, sampleRate, q);
       break;
   }
   return band;

@@ -59,31 +59,73 @@ const withNumerator = (poles: Poles, B0: number, B1: number, B2: number): Biquad
   return { b0, b1: 0.5 * (r0 - r1), b2: b0 > 0 ? -held / (4 * b0) : 0, a1: poles.a1, a2: poles.a2 }
 }
 
-const matchedBell = (frequency: number, sampleRate: number, q: number, gainDb: number) => {
-  const omega0 = cornerOmega(frequency, sampleRate)
-  const gain = 10 ** (gainDb / 20)
-  const poles = impulseInvariantPoles(0.5 / (Math.sqrt(gain) * Math.max(q, 0.01)), omega0)
-  const den = denominator(poles)
-  const phi1 = Math.sin(0.5 * omega0) ** 2
-  const phi0 = 1 - phi1
-  const B0 = den.c0
-  const R1 = quadraticAt(den, omega0) * gain * gain
-  const R2 = (-den.c0 + den.c1 + 4 * (phi0 - phi1) * den.c2) * gain * gain
-  const B2 = (R1 - R2 * phi1 - B0) / (4 * phi1 * phi1)
-  const B1 = R2 + B0 + 4 * (phi1 - phi0) * B2
+// Numerator for the analog |H|^2 (a function of x = Omega / Omega0). |H|^2 is linear in B0, B1, B2 once the poles are fixed.
+// DC (B0) and the corner are matched exactly, which leaves one degree of freedom: B2, with B1 following from the corner.
+// B2 is fitted from DC to `span` (0.45 of the project rate, the top of the EQ range) by least squares on the relative
+// error, repeated with each point weighted by its previous error (Lawson) so the error spreads evenly instead of piling
+// up at the band edge.
+// Matching Nyquist, as Vicanek's closed forms do for shelves, leaves 1 to 6 dB inside the band for wide boosts, deep cuts
+// and resonant low-passes, because the analog response is still moving at Nyquist.
+// The top of the EQ range as a fraction of the project rate.
+const FIT_TOP = 0.45
+const FIT_POINTS = 64
+const FIT_PASSES = 8
 
-  return withNumerator(poles, B0, B1, B2)
+const fittedNumerator = (poles: Poles, omega0: number, span: number, analogSquared: (x: number) => number) => {
+  const den = denominator(poles)
+  const B0 = den.c0 * analogSquared(0)
+  const corner1 = Math.sin(0.5 * omega0) ** 2
+  const corner2 = 4 * (1 - corner1) * corner1
+  const corner = quadraticAt(den, omega0) * analogSquared(1) - B0 * (1 - corner1)
+
+  // Residual of point i is rest - B2 * slope, with B1 = (corner - B2 corner2) / corner1 substituted.
+  const points = Array.from({ length: FIT_POINTS }, (_, index) => {
+    const omega = span * (index + 1) / FIT_POINTS
+    const phi1 = Math.sin(0.5 * omega) ** 2
+    const scale = 1 / (quadraticAt(den, omega) * analogSquared(omega / omega0))
+    const u1 = phi1 * scale
+    const u2 = 4 * (1 - phi1) * phi1 * scale
+
+    return { rest: 1 - B0 * (1 - phi1) * scale - u1 * corner / corner1, slope: u2 - u1 * corner2 / corner1 }
+  })
+
+  let weights = points.map(() => 1)
+  let B2 = 0
+
+  for (let pass = 0; pass < FIT_PASSES; pass++) {
+    const num = points.reduce((sum, p, i) => sum + weights[i] * p.slope * p.rest, 0)
+    const dn = points.reduce((sum, p, i) => sum + weights[i] * p.slope * p.slope, 0)
+
+    B2 = dn > 0 ? num / dn : 0
+
+    const next = weights.map((w, i) => w * Math.max(Math.abs(points[i].rest - B2 * points[i].slope), 1e-6))
+    const total = next.reduce((sum, w) => sum + w, 0)
+
+    weights = next.map((w) => w * FIT_POINTS / total)
+  }
+
+  return withNumerator(poles, B0, (corner - B2 * corner2) / corner1, B2)
 }
 
-const matchedLowPass = (frequency: number, sampleRate: number, q: number) => {
+const matchedBell = (frequency: number, sampleRate: number, span: number, q: number, gainDb: number) => {
+  const omega0 = cornerOmega(frequency, sampleRate)
+  const gain = 10 ** (gainDb / 20)
+  const quality = Math.max(q, 0.01)
+  const poles = impulseInvariantPoles(0.5 / (Math.sqrt(gain) * quality), omega0)
+
+  return fittedNumerator(poles, omega0, span, (x) => {
+    const plain = (1 - x * x) ** 2
+    const c = x / quality
+
+    return (plain + gain * c * c) / (plain + c * c / gain)
+  })
+}
+
+const matchedLowPass = (frequency: number, sampleRate: number, span: number, q: number) => {
   const omega0 = cornerOmega(frequency, sampleRate)
   const quality = Math.max(q, 0.01)
-  const poles = impulseInvariantPoles(0.5 / quality, omega0)
-  const den = denominator(poles)
-  const phi1 = Math.sin(0.5 * omega0) ** 2
-  const R1 = quadraticAt(den, omega0) * quality * quality
 
-  return withNumerator(poles, den.c0, (R1 - den.c0 * (1 - phi1)) / phi1, 0)
+  return fittedNumerator(impulseInvariantPoles(0.5 / quality, omega0), omega0, span, (x) => 1 / ((1 - x * x) ** 2 + (x / quality) ** 2))
 }
 
 const matchedHighPass = (frequency: number, sampleRate: number, q: number): BiquadCoefficients => {
@@ -104,95 +146,53 @@ const shelfMagnitudeSquared = (low: boolean, a: number, q: number, x: number) =>
   return a * a * (low ? plain / scaled : scaled / plain)
 }
 
-const matchedShelf = (low: boolean, frequency: number, sampleRate: number, q: number, gainDb: number) => {
+const matchedShelf = (low: boolean, frequency: number, sampleRate: number, span: number, q: number, gainDb: number) => {
   const omega0 = cornerOmega(frequency, sampleRate)
   const a = 10 ** (gainDb / 40)
-  const poles = impulseInvariantPoles(0.5 / Math.max(q, 0.01), low ? omega0 / Math.sqrt(a) : omega0 * Math.sqrt(a))
-  const den = denominator(poles)
-  const B0 = den.c0 * shelfMagnitudeSquared(low, a, q, 0)
-  const B1 = den.c1 * shelfMagnitudeSquared(low, a, q, Math.PI / omega0)
-  const phi1 = Math.sin(0.5 * omega0) ** 2
-  const phi2 = 4 * (1 - phi1) * phi1
-  const mid = quadraticAt(den, omega0) * a * a
-  const B2 = phi2 > 1e-12 ? (mid - B0 * (1 - phi1) - B1 * phi1) / phi2 : 0
+  const quality = Math.max(q, 0.01)
+  const poles = impulseInvariantPoles(0.5 / quality, low ? omega0 / Math.sqrt(a) : omega0 * Math.sqrt(a))
 
-  return withNumerator(poles, B0, B1, B2)
+  return fittedNumerator(poles, omega0, span, (x) => shelfMagnitudeSquared(low, a, quality, x))
 }
 
-const rbjBiquad = (type: EqBandType, frequency: number, sampleRate: number, q: number, gainDb: number): BiquadCoefficients => {
+const rbjBiquad = (type: 'bandpass' | 'notch' | 'allpass', frequency: number, sampleRate: number, q: number): BiquadCoefficients => {
   const omega = cornerOmega(frequency, sampleRate)
   const cosine = Math.cos(omega)
   const alpha = Math.sin(omega) / (2 * Math.max(q, 0.01))
-  const a = 10 ** (gainDb / 40)
-  let b0 = 1
-  let b1 = 0
-  let b2 = 0
-  let a0 = 1
-  let a1 = 0
-  let a2 = 0
+  const a1 = -2 * cosine
 
-  if (type === 'lowpass' || type === 'lowpass48') {
-    b0 = (1 - cosine) / 2; b1 = 1 - cosine; b2 = b0; a0 = 1 + alpha; a1 = -2 * cosine; a2 = 1 - alpha
-  } else if (type === 'highpass' || type === 'highpass48') {
-    b0 = (1 + cosine) / 2; b1 = -(1 + cosine); b2 = b0; a0 = 1 + alpha; a1 = -2 * cosine; a2 = 1 - alpha
-  } else if (type === 'bandpass') {
-    b0 = alpha; b2 = -alpha; a0 = 1 + alpha; a1 = -2 * cosine; a2 = 1 - alpha
-  } else if (type === 'notch') {
-    b0 = 1; b1 = -2 * cosine; b2 = 1; a0 = 1 + alpha; a1 = b1; a2 = 1 - alpha
-  } else if (type === 'allpass') {
-    b0 = 1 - alpha; b1 = -2 * cosine; b2 = 1 + alpha; a0 = b2; a1 = b1; a2 = b0
-  } else if (type === 'lowshelf') {
-    const beta = 2 * Math.sqrt(a) * alpha
-
-    b0 = a * ((a + 1) - (a - 1) * cosine + beta)
-    b1 = 2 * a * ((a - 1) - (a + 1) * cosine)
-    b2 = a * ((a + 1) - (a - 1) * cosine - beta)
-    a0 = (a + 1) + (a - 1) * cosine + beta
-    a1 = -2 * ((a - 1) + (a + 1) * cosine)
-    a2 = (a + 1) + (a - 1) * cosine - beta
-  } else if (type === 'highshelf') {
-    const beta = 2 * Math.sqrt(a) * alpha
-
-    b0 = a * ((a + 1) + (a - 1) * cosine + beta)
-    b1 = -2 * a * ((a - 1) + (a + 1) * cosine)
-    b2 = a * ((a + 1) + (a - 1) * cosine - beta)
-    a0 = (a + 1) - (a - 1) * cosine + beta
-    a1 = 2 * ((a - 1) - (a + 1) * cosine)
-    a2 = (a + 1) - (a - 1) * cosine - beta
-  } else {
-    b0 = 1 + alpha * a; b1 = -2 * cosine; b2 = 1 - alpha * a; a0 = 1 + alpha / a; a1 = b1; a2 = 1 - alpha / a
-  }
+  const [b0, b1, b2, a0, a2] = type === 'bandpass' ? [alpha, 0, -alpha, 1 + alpha, 1 - alpha]
+    : type === 'notch' ? [1, a1, 1, 1 + alpha, 1 - alpha]
+      : [1 - alpha, a1, 1 + alpha, 1 + alpha, 1 - alpha]
 
   return { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
 }
 
 /**
- * The biquad sections of one band for a filter running at `sampleRate`, as the core designs them: matched (Vicanek)
- * bells and cuts; matched shelves for Q <= 1.5 when boosting or with the corner under 0.25 fs, RBJ otherwise;
- * RBJ band-pass, notch and all-pass. The numbers behind the choice are in eq_band.h.
+ * The biquad sections of one band for a filter running at `sampleRate`, as the core designs them: matched (Vicanek poles,
+ * fitted numerator) bells, shelves, low-pass and high-pass; RBJ band-pass, notch and all-pass. The numbers behind the
+ * choice are in eq_band.h. `projectRate` is the rate the EQ range (up to 0.45 of it) is judged at when `sampleRate` is
+ * oversampled.
  */
-export const designEqBand = (type: EqBandType, frequency: number, sampleRate: number, q: number, gainDb: number): BiquadCoefficients[] => {
+export const designEqBand = (type: EqBandType, frequency: number, sampleRate: number, q: number, gainDb: number, projectRate = sampleRate): BiquadCoefficients[] => {
+  const span = TWO_PI * FIT_TOP * projectRate / sampleRate
+
   switch (type) {
-    case 'peaking': return [matchedBell(frequency, sampleRate, q, gainDb)]
-    case 'lowpass': return [matchedLowPass(frequency, sampleRate, q)]
+    case 'peaking': return [matchedBell(frequency, sampleRate, span, q, gainDb)]
+    case 'lowpass': return [matchedLowPass(frequency, sampleRate, span, q)]
     case 'highpass': return [matchedHighPass(frequency, sampleRate, q)]
     case 'lowpass48':
     case 'highpass48':
       return BUTTERWORTH_8_Q.map((sectionQ, index) => {
         const scaled = index === BUTTERWORTH_8_Q.length - 1 ? sectionQ * q * Math.SQRT2 : sectionQ
 
-        return type === 'lowpass48' ? matchedLowPass(frequency, sampleRate, scaled) : matchedHighPass(frequency, sampleRate, scaled)
+        return type === 'lowpass48' ? matchedLowPass(frequency, sampleRate, span, scaled) : matchedHighPass(frequency, sampleRate, scaled)
       })
     case 'lowshelf':
-    case 'highshelf': {
-      const corner = clamp(frequency, 1, 0.49 * sampleRate) / sampleRate
+    case 'highshelf':
+      return [matchedShelf(type === 'lowshelf', frequency, sampleRate, span, q, gainDb)]
 
-      return q <= 1.5 && (gainDb >= 0 || corner < 0.25)
-        ? [matchedShelf(type === 'lowshelf', frequency, sampleRate, q, gainDb)]
-        : [rbjBiquad(type, frequency, sampleRate, q, gainDb)]
-    }
-
-    default: return [rbjBiquad(type, frequency, sampleRate, q, gainDb)]
+    default: return [rbjBiquad(type, frequency, sampleRate, q)]
   }
 }
 
@@ -238,7 +238,7 @@ export const eqCurveResponseDb = (params: EqParams, curve: 0 | 1, frequencies: r
     .map((band) => {
       const { gainDb, q } = effectiveEqBand(band, params)
 
-      return designEqBand(band.type, band.frequency, processingRate, q, gainDb)
+      return designEqBand(band.type, band.frequency, processingRate, q, gainDb, sampleRate)
     })
 
   return eqChainResponseDb(bands, frequencies, processingRate)

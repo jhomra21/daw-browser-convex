@@ -3,6 +3,7 @@
 #include "numeric_safety.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace daw::audio_core::dsp {
@@ -37,9 +38,11 @@ class Biquad {
 
 // Matched-magnitude designs. The poles come from impulse invariance (z = e^s), so a resonance does not narrow toward
 // Nyquist. The numerator is then fitted to the analog prototype's magnitude:
-//   bell, low-pass, high-pass: Vicanek, "Matched Second Order Digital Filters" (2016), sections 4.1, 4.2 and 4.4:
-//     match at DC and at the corner or centre frequency (bell also has zero slope there).
-//   shelves (free Q, which Vicanek's 2025 shelf paper does not cover): match at DC, at the corner and at Nyquist.
+//   high-pass: Vicanek, "Matched Second Order Digital Filters" (2016), section 4.2: double zero at DC, match at the corner.
+//   bell, low-pass, shelves: match at DC and at the corner, as Vicanek's sections 4.1 and 4.4 do, then fit the one degree of
+//     freedom left over 0 to 0.45 fs (fittedNumerator). Vicanek fixes it with B2 = 0 (low-pass), zero slope at the centre
+//     (bell) or the Nyquist magnitude (shelves, section 5). Measured against the analog prototype, those leave 1 to 6 dB
+//     inside the band for wide boosts, deep cuts and resonant low-passes, where the analog response is still moving at Nyquist.
 // Prototypes are the RBJ cookbook analog filters, so Q and gain mean what they mean in the existing EQ.
 // Frequencies above 0.49 fs are held there. All designs keep both poles inside the unit circle.
 namespace detail {
@@ -100,51 +103,90 @@ inline double shelfMagnitudeSquared(bool low, double a, double q, double x) {
   return a * a * (low ? plain / scaled : scaled / plain);
 }
 
-inline BiquadCoefficients designShelf(bool low, double frequency, double sampleRate, double q, double gainDb) {
+// Numerator for the analog |H|^2 (a function of x = Omega / Omega0). |H|^2 is linear in B0, B1, B2 once the poles are fixed.
+// DC (B0) and the corner are matched exactly, which leaves one degree of freedom: B2, with B1 following from the corner.
+// B2 is fitted from DC to `span` (0.45 of the project rate, the top of the EQ range) by least squares on the relative error,
+// repeated with each point weighted by its previous error (Lawson) so the error spreads evenly instead of piling up at the
+// band edge.
+inline constexpr double kFitTop = 0.45;
+inline constexpr double kFitSpanDefault = 2.0 * kPi * kFitTop;
+inline constexpr int kFitPoints = 64;
+inline constexpr int kFitPasses = 8;
+
+template <class AnalogSquared>
+inline BiquadCoefficients fittedNumerator(const Poles &p, double omega0, double span, AnalogSquared analogSquared) {
+  const Quadratic den = denominator(p);
+  const double B0 = den.c0 * analogSquared(0.0);
+  const double s0 = std::sin(0.5 * omega0);
+  const double corner1 = s0 * s0;
+  const double corner2 = 4.0 * (1.0 - corner1) * corner1;
+  const double corner = den.at(omega0) * analogSquared(1.0) - B0 * (1.0 - corner1);
+
+  // Residual of point i is rest - B2 * slope, with B1 = (corner - B2 corner2) / corner1 substituted.
+  std::array<double, kFitPoints> rest{};
+  std::array<double, kFitPoints> slope{};
+  std::array<double, kFitPoints> weights{};
+  for (int i = 0; i < kFitPoints; ++i) {
+    const double omega = span * (i + 1) / kFitPoints;
+    const double s = std::sin(0.5 * omega);
+    const double phi1 = s * s;
+    const double scale = 1.0 / (den.at(omega) * analogSquared(omega / omega0));
+    const double u1 = phi1 * scale;
+    const double u2 = 4.0 * (1.0 - phi1) * phi1 * scale;
+    rest[i] = 1.0 - B0 * (1.0 - phi1) * scale - u1 * corner / corner1;
+    slope[i] = u2 - u1 * corner2 / corner1;
+    weights[i] = 1.0;
+  }
+
+  double B2 = 0.0;
+  for (int pass = 0; pass < kFitPasses; ++pass) {
+    double num = 0.0;
+    double dn = 0.0;
+    for (int i = 0; i < kFitPoints; ++i) {
+      num += weights[i] * slope[i] * rest[i];
+      dn += weights[i] * slope[i] * slope[i];
+    }
+    B2 = dn > 0.0 ? num / dn : 0.0;
+    double total = 0.0;
+    for (int i = 0; i < kFitPoints; ++i) {
+      weights[i] *= std::max(std::abs(rest[i] - B2 * slope[i]), 1.0e-6);
+      total += weights[i];
+    }
+    for (int i = 0; i < kFitPoints; ++i) weights[i] = weights[i] * kFitPoints / total;
+  }
+  return withNumerator(p, B0, (corner - B2 * corner2) / corner1, B2);
+}
+
+inline BiquadCoefficients designShelf(bool low, double frequency, double sampleRate, double span, double q, double gainDb) {
   const double omega0 = cornerOmega(frequency, sampleRate);
   const double a = std::pow(10.0, gainDb / 40.0);
-  const Poles poles = impulseInvariantPoles(0.5 / std::max(q, 0.01), low ? omega0 / std::sqrt(a) : omega0 * std::sqrt(a));
-  const Quadratic den = denominator(poles);
-  const double B0 = den.c0 * shelfMagnitudeSquared(low, a, q, 0.0);
-  const double B1 = den.c1 * shelfMagnitudeSquared(low, a, q, kPi / omega0);
-  const double s = std::sin(0.5 * omega0);
-  const double phi1 = s * s;
-  const double phi2 = 4.0 * (1.0 - phi1) * phi1;
-  const double mid = den.at(omega0) * a * a;
-  const double B2 = phi2 > 1.0e-12 ? (mid - B0 * (1.0 - phi1) - B1 * phi1) / phi2 : 0.0;
-  return withNumerator(poles, B0, B1, B2);
+  const double quality = std::max(q, 0.01);
+  const Poles poles = impulseInvariantPoles(0.5 / quality, low ? omega0 / std::sqrt(a) : omega0 * std::sqrt(a));
+  return fittedNumerator(poles, omega0, span, [&](double x) { return shelfMagnitudeSquared(low, a, quality, x); });
 }
 
 }  // namespace detail
 
-inline BiquadCoefficients designMatchedBell(double frequency, double sampleRate, double q, double gainDb) {
+inline BiquadCoefficients designMatchedBell(double frequency, double sampleRate, double q, double gainDb, double span = detail::kFitSpanDefault) {
   using namespace detail;
   const double omega0 = cornerOmega(frequency, sampleRate);
   const double gain = std::pow(10.0, gainDb / 20.0);
-  const Poles poles = impulseInvariantPoles(0.5 / (std::sqrt(gain) * std::max(q, 0.01)), omega0);
-  const Quadratic den = denominator(poles);
-  const double s = std::sin(0.5 * omega0);
-  const double phi1 = s * s;
-  const double phi0 = 1.0 - phi1;
-  const double B0 = den.c0;
-  const double R1 = den.at(omega0) * gain * gain;
-  const double R2 = (-den.c0 + den.c1 + 4.0 * (phi0 - phi1) * den.c2) * gain * gain;
-  const double B2 = (R1 - R2 * phi1 - B0) / (4.0 * phi1 * phi1);
-  const double B1 = R2 + B0 + 4.0 * (phi1 - phi0) * B2;
-  return withNumerator(poles, B0, B1, B2);
+  const double quality = std::max(q, 0.01);
+  const Poles poles = impulseInvariantPoles(0.5 / (std::sqrt(gain) * quality), omega0);
+  return fittedNumerator(poles, omega0, span, [&](double x) {
+    const double plain = (1.0 - x * x) * (1.0 - x * x);
+    const double c = x / quality;
+    return (plain + gain * c * c) / (plain + c * c / gain);
+  });
 }
 
-inline BiquadCoefficients designMatchedLowPass(double frequency, double sampleRate, double q) {
+inline BiquadCoefficients designMatchedLowPass(double frequency, double sampleRate, double q, double span = detail::kFitSpanDefault) {
   using namespace detail;
   const double omega0 = cornerOmega(frequency, sampleRate);
   const double quality = std::max(q, 0.01);
-  const Poles poles = impulseInvariantPoles(0.5 / quality, omega0);
-  const Quadratic den = denominator(poles);
-  const double s = std::sin(0.5 * omega0);
-  const double phi1 = s * s;
-  const double R1 = den.at(omega0) * quality * quality;
-  const double B1 = (R1 - den.c0 * (1.0 - phi1)) / phi1;
-  return withNumerator(poles, den.c0, B1, 0.0);
+  return fittedNumerator(impulseInvariantPoles(0.5 / quality, omega0), omega0, span, [&](double x) {
+    return 1.0 / ((1.0 - x * x) * (1.0 - x * x) + (x / quality) * (x / quality));
+  });
 }
 
 inline BiquadCoefficients designMatchedHighPass(double frequency, double sampleRate, double q) {
@@ -158,12 +200,12 @@ inline BiquadCoefficients designMatchedHighPass(double frequency, double sampleR
   return BiquadCoefficients{b0, -2.0 * b0, b0, poles.a1, poles.a2};
 }
 
-inline BiquadCoefficients designMatchedLowShelf(double frequency, double sampleRate, double q, double gainDb) {
-  return detail::designShelf(true, frequency, sampleRate, q, gainDb);
+inline BiquadCoefficients designMatchedLowShelf(double frequency, double sampleRate, double q, double gainDb, double span = detail::kFitSpanDefault) {
+  return detail::designShelf(true, frequency, sampleRate, span, q, gainDb);
 }
 
-inline BiquadCoefficients designMatchedHighShelf(double frequency, double sampleRate, double q, double gainDb) {
-  return detail::designShelf(false, frequency, sampleRate, q, gainDb);
+inline BiquadCoefficients designMatchedHighShelf(double frequency, double sampleRate, double q, double gainDb, double span = detail::kFitSpanDefault) {
+  return detail::designShelf(false, frequency, sampleRate, span, q, gainDb);
 }
 
 }  // namespace daw::audio_core::dsp

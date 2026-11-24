@@ -94,7 +94,7 @@ void aim_eq_smoothers(Core &core, GraphRevision::Processor &processor, EqHistory
 
 // Advances the smoothers one sample and redesigns the sections of every band whose effective values moved. Adaptive Q
 // is this device's own law (Live's manual only says Q grows with the amount of boost or cut): Q * (1 + |gain| / 24).
-void advance_eq_bands(EqHistory &history, const daw_audio_eq_state &eq, double design_rate) {
+void advance_eq_bands(EqHistory &history, const daw_audio_eq_state &eq, double design_rate, double project_rate) {
   const float scale = history.scale.next();
   for (uint32_t index = 0; index < DAW_AUDIO_CORE_EQ_BAND_COUNT; ++index) {
     if (!band_active(eq, index)) continue;
@@ -106,7 +106,7 @@ void advance_eq_bands(EqHistory &history, const daw_audio_eq_state &eq, double d
     std::array<float, 3> &designed = history.designed[index];
     if (history.sections[index].count != 0 && designed[0] == frequency && designed[1] == gain && designed[2] == q) continue;
     designed = {frequency, gain, q};
-    history.sections[index] = dsp::designEqBand(type, frequency, design_rate, q, gain);
+    history.sections[index] = dsp::designEqBand(type, frequency, design_rate, q, gain, project_rate);
   }
 }
 
@@ -132,7 +132,7 @@ void render_eq_processor(
   const bool high_quality = eq.high_quality != 0;
   const bool two_curves = eq.mode == DAW_AUDIO_EQ_MODE_LEFT_RIGHT || eq.mode == DAW_AUDIO_EQ_MODE_MID_SIDE;
   aim_eq_smoothers(core, processor, history, frame);
-  advance_eq_bands(history, eq, static_cast<double>(core.config.sample_rate_hz) * (high_quality ? 2.0 : 1.0));
+  advance_eq_bands(history, eq, static_cast<double>(core.config.sample_rate_hz) * (high_quality ? 2.0 : 1.0), static_cast<double>(core.config.sample_rate_hz));
   const float output_db = history.output_db.next();
   if (output_db != history.output_gain_db) {
     history.output_gain_db = output_db;

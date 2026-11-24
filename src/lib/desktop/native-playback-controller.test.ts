@@ -10,6 +10,7 @@ import { createNativePlaybackController, nativePlaybackFaultText, type NativePla
 import { classifyNativeVst3PlaybackFault, nativeVst3LaunchAuthorizationRequiredMessage } from "~/lib/external-plugin-ui"
 import { createNativeProcessorStateOwner } from "./native-processor-state-owner"
 import { createNativeRetirement } from "./native-retirement"
+import { nativeSnapshotLimitations, nativeSnapshotSupportError } from "./native-snapshot-support"
 import type { ScheduleRevisionCandidate } from "./native-schedule-publication"
 import { nativeTimelinePageStagingBytes } from "./native-timeline-page-manager"
 import { clearInstanceLimits, instanceLimit, vstInstanceFailed } from "./vst-instance-failures"
@@ -11486,11 +11487,11 @@ for (const accepted of [true, false]) test(`tempo and meter context is revision-
   } finally { await controller.destroy() }
 })
 
-for (const unsupported of ["sidechain", "midi-mappings", "midi-device-mapping", "missing-attachment-plan"]) {
+for (const unsupported of ["midi-mappings", "midi-device-mapping", "missing-attachment-plan"]) {
   test(`shared native admission rejects live ${unsupported} before staging and at startup`, async () => {
     const fixture = createBridge("runtime-revision-progress")
     let changed = false
-    // E6: MIDI expression automation and a sidechain are limitations of the native graph, never defects.
+    // E6: MIDI expression automation is a limitation of the native graph, never a defect.
     const limitation = unsupported !== "missing-attachment-plan"
     const snapshotInput = nativeInstrumentInput()
     clearInstanceLimits()
@@ -11506,8 +11507,6 @@ for (const unsupported of ["sidechain", "midi-mappings", "midi-device-mapping", 
         return { ...compiled, snapshot: { ...snapshot, revision: 2,
           nativeExternalAttachmentPlan: limitation ? nativeAttachmentPlan : undefined,
           requiresNativePlayback: unsupported === "missing-attachment-plan",
-          mixer: { ...snapshot.mixer, sidechainRoutes: unsupported === "sidechain"
-            ? [{ sourceTrackId: "instrument", targetTrackId: "master", effectInstanceId: "external" }] : [] },
           tracks: unsupported.startsWith("midi") ? snapshot.tracks.map((track) => ({ ...track,
             clips: track.clips.map((clip) => ({ ...clip, midi: clip.midi && { ...clip.midi,
               mappings: [{ id: "mapping", source: { kind: "cc", controller: 1, channel: 1 },
@@ -11525,12 +11524,11 @@ for (const unsupported of ["sidechain", "midi-mappings", "midi-device-mapping", 
         .toMatchObject({ status: limitation ? "unsupported" : "failed" })
       expect(fixture.calls).not.toContain("revision-prepare")
       expect(controller.isActive()).toBe(true)
-      // The notice sits on the element the routing belongs to: the device whose sidechain input is set, or, for a mapping
+      // The notice sits on the element the routing belongs to: the device a mapping targets, or, for a mapping
       // that targets no device, the track it sits on. The plug-in the graph merely holds carries none.
       expect({ device: instanceLimit("external"), track: instanceLimit(snapshotInput.tracks[0]!.id), plugin: instanceLimit(nativeAttachmentPlan.attachments[0].instanceId) })
         .toEqual({
-          device: unsupported === "sidechain" ? "The native VST3 graph cannot activate with the current sidechain routing."
-            : unsupported === "midi-device-mapping" ? "Native VST3 playback does not support MIDI expression automation yet." : undefined,
+          device: unsupported === "midi-device-mapping" ? "Native VST3 playback does not support MIDI expression automation yet." : undefined,
           track: unsupported === "midi-mappings" ? "Native VST3 playback does not support MIDI expression automation yet." : undefined,
           plugin: undefined })
       await controller.dispose()
@@ -11540,6 +11538,20 @@ for (const unsupported of ["sidechain", "midi-mappings", "midi-device-mapping", 
     } finally { await controller.dispose() }
   })
 }
+
+test("a sidechain route is not a limitation of the native graph", async () => {
+  const snapshotInput = nativeInstrumentInput()
+  const compiled = compileLivePlaybackSnapshot({ ...snapshotInput, transport: snapshotInput.transport })
+
+  if (!compiled.supported) throw new Error("Expected a supported snapshot.")
+
+  const snapshot = { ...compiled.snapshot, nativeExternalAttachmentPlan: nativeAttachmentPlan,
+    mixer: { ...compiled.snapshot.mixer,
+      sidechainRoutes: [{ sourceTrackId: "instrument", targetTrackId: "master", effectInstanceId: "compressor" }] } }
+
+  expect(nativeSnapshotLimitations(snapshot)).toEqual([])
+  expect(nativeSnapshotSupportError(snapshot)).toBeUndefined()
+})
 
 for (const edit of ["vst-state", "vst-state-requirements", "time-signature"]) {
   test(`native staged admission adopts a ${edit} change live and hands plug-in state to the host, never rebuilding`, async () => {

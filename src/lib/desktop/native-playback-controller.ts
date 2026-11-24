@@ -1658,6 +1658,7 @@ export const createNativePlaybackController = (input: {
         epoch: transportEpoch,
         firstSequence: 1,
         fx: snapshot.mixer.fx,
+        sidechainRoutes: snapshot.mixer.sidechainRoutes,
         externalLatencyFrames: nativeOfflineExternalLatencyFrames(attachmentPlan),
         projectGeneration: safePreparedProjectGeneration(projectGeneration),
         preparedStretchAssets,
@@ -3022,7 +3023,8 @@ export const createNativePlaybackController = (input: {
       const projection = compileLiveNativeProjection({
         tracks: snapshot.tracks, bpm: snapshot.bpm, sampleRateHz: sampleRate,
         revision: snapshot.revision, epoch: transportEpoch, firstSequence: 1,
-        fx: snapshot.mixer.fx, externalLatencyFrames: nativeOfflineExternalLatencyFrames(snapshot.nativeExternalAttachmentPlan),
+        fx: snapshot.mixer.fx, sidechainRoutes: snapshot.mixer.sidechainRoutes,
+        externalLatencyFrames: nativeOfflineExternalLatencyFrames(snapshot.nativeExternalAttachmentPlan),
         projectGeneration: safePreparedProjectGeneration(resolveProjectGeneration()),
         preparedStretchAssets: stretchAssets, instrumentRegionMode: "metadata",
       })

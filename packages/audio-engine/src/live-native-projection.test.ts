@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import {
+  createDefaultCompressorParams,
   createDefaultDrumRackParams,
   createDefaultGranularParams,
   createDefaultReverbParams,
@@ -1132,4 +1133,23 @@ test('an instrument for a track the snapshot does not hold leaves the compile su
 
   if (!result.supported) throw new Error(result.reasons.join('\n'))
   expect(result.graph.nodes.map((node) => node.id)).not.toContain('absent')
+})
+
+test('a sidechain route reaches the native graph as an edge to the compressor it keys', () => {
+  const fx: ExportFx = {
+    masterVolume: 1,
+    masterFxInstances: [],
+    trackFx: { pad: { instances: [{ id: 'compressor-1', kind: 'compressor', params: createDefaultCompressorParams() }] } },
+  }
+
+  const result = compileLiveNativeProjection({
+    tracks: [track({ id: 'drums' }), track({ id: 'pad' })], fx, bpm: 120, sampleRateHz: 48_000, revision: 1, epoch: 1, firstSequence: 1,
+    sidechainRoutes: [{ sourceTrackId: 'drums', targetTrackId: 'pad', effectInstanceId: 'compressor-1' }],
+  })
+
+  if (!result.supported) throw new Error(result.reasons.join(' '))
+
+  expect(result.graph.edges.filter((edge) => edge.sidechain)).toMatchObject([
+    { fromNodeId: 'drums', toNodeId: 'pad', targetProcessorId: 'compressor-1' },
+  ])
 })

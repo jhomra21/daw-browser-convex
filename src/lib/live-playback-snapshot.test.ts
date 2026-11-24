@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
-import { compileLivePlaybackSnapshot, type LivePlaybackSnapshotInput } from "./live-playback-snapshot"
+import { compileDesiredNativeProcessorState, compileLivePlaybackSnapshot, type LivePlaybackSnapshotInput } from "./live-playback-snapshot"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
-import { createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams } from "@daw-browser/shared"
+import { createDefaultCompressorParams, createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams } from "@daw-browser/shared"
 import {
   sampledInstrumentRegion,
   sampledInstrumentRegionIdentity,
@@ -697,4 +697,17 @@ test("rejects a configured Granular zone without its authoritative buffer", () =
     supported: false,
     reasons: ['Granular zone "granular-zone" is missing its authoritative audio buffer.'],
   })
+})
+
+test("the desired native graph keeps a sidechain route as an edge to the compressor it keys", () => {
+  const result = compileLivePlaybackSnapshot({
+    ...input,
+    renderState: { ...input.renderState, fx: { ...input.renderState.fx,
+      trackFx: { "return-a": { instances: [{ id: "compressor-a", kind: "compressor", params: createDefaultCompressorParams() }] } } } },
+  })
+
+  if (!result.supported) throw new Error(result.reasons.join(" "))
+
+  expect(compileDesiredNativeProcessorState(result.snapshot, 48_000, 1).graph.edges.filter((edge) => edge.sidechain))
+    .toMatchObject([{ fromNodeId: "track-a", toNodeId: "return-a", targetProcessorId: "compressor-a" }])
 })

@@ -274,7 +274,7 @@ export const compileDesiredNativeProcessorState = (
       graph: resolveLiveMixerGraph(snapshot.tracks, fx.trackFx ?? {}, {
         masterFxInstances: fx.masterFxInstances, masterVolume: fx.masterVolume,
       }),
-      revision: snapshot.revision, sampleRate, bpm: snapshot.bpm,
+      revision: snapshot.revision, sampleRate, bpm: snapshot.bpm, sidechainRoutes: snapshot.mixer.sidechainRoutes,
     }),
     instruments,
     instrumentReasons,

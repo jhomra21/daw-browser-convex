@@ -1,4 +1,4 @@
-import type { Track } from '@daw-browser/timeline-core/types'
+import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import type { AudioAssetRef, AudioCoreGraphSnapshot, PlanarPcm } from '../../audio-core-contract/src/index'
 import {
   createDefaultSynthParams,
@@ -64,6 +64,7 @@ export type LiveNativeProjectionInput = {
    * playback snapshot boundary.
    */
   fx?: ExportFx
+  sidechainRoutes?: readonly ExternalSidechainRoute[]
   instrumentRegionMode?: 'metadata'
   externalLatencyFrames?: ExternalNodeLatencyFrames
   projectGeneration?: number
@@ -403,6 +404,7 @@ export const compileLiveNativeProjection = (input: LiveNativeProjectionInput): L
     assets: [...sourceAssets.values()].map(({ asset }) => asset),
     includeInstruments: false,
     externalLatencyFrames: input.externalLatencyFrames,
+    sidechainRoutes: input.sidechainRoutes,
   })
 
   const instrumentGraph = graphWithInstruments(baseGraph, instruments.configurations)

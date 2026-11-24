@@ -7,7 +7,7 @@ import type { RunMeta } from './report'
 import { families } from './scenarios'
 import { wasmPath } from './render-wasm'
 
-const defaultOutRoot = '/Users/juan/Documents/daw-browser-convex/acceptance-reports/effects-harness'
+const defaultOutRoot = path.resolve(import.meta.dir, '../../acceptance-reports/effects-harness')
 
 const option = (name: string) => {
   const at = process.argv.indexOf(`--${name}`)
@@ -43,7 +43,7 @@ const sha = new Bun.CryptoHasher('sha256').update(await Bun.file(wasmPath).array
 const meta: RunMeta = {
   timestamp: new Date().toISOString(),
   commit: (await git('rev-parse', '--short', 'HEAD')) || 'unknown',
-  dirty: (await git('status', '--porcelain', '--', ':!tools/effects-harness')).length > 0,
+  dirty: (await git('status', '--porcelain', '--untracked-files=no')).length > 0,
   wasmSha256: sha,
   families: Object.fromEntries(selected.map(([name, family]) => [name, [...new Set(family.scenarios.map((scenario) => scenario.effect))]])),
 }

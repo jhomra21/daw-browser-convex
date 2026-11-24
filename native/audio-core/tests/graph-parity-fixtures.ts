@@ -36,7 +36,8 @@ import {
   type SaturatorProcessorState,
   type SpectralProcessorState,
 } from '../../../packages/audio-core-contract/src/index'
-import { AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES } from '../../../packages/shared/src/effects-params'
+import { processorRegistry } from '../../../packages/audio-core-contract/src/generated/processor-contract-metadata'
+import { AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES, EQ_HIGH_QUALITY_LATENCY_FRAMES } from '../../../packages/shared/src/effects-params'
 
 export type PortableModulationKind = 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble'
 
@@ -417,7 +418,7 @@ const graph = (
     const parameterTargets = processor.parameterTargets ?? [1, 2, 3, 4]
     view.setBigUint64(offset, processor.nodeId, true)
     view.setUint32(offset + 8, processor.kindId ?? 1, true)
-    view.setUint32(offset + 12, 1, true)
+    view.setUint32(offset + 12, processorRegistry.find((entry) => entry.id === (processor.kindId ?? 1))?.schemaVersion ?? 1, true)
     view.setUint32(offset + 16, state.byteLength, true)
     view.setUint32(offset + 20, processor.instanceId, true)
     view.setUint32(offset + 24, processor.bypassed ? 1 : 0, true)
@@ -795,7 +796,7 @@ const saturatorState = (overrides: Partial<SaturatorProcessorState> = {}) => enc
   ...overrides,
 })
 
-const eqState = (overrides: Partial<EqProcessorState> = {}) => encodeEqProcessorState({
+const eqState = (overrides: Partial<EqProcessorState> = {}): EqProcessorState => ({
   enabled: true,
   channelMode: 'stereo',
   adaptiveQ: false,
@@ -811,6 +812,53 @@ const eqState = (overrides: Partial<EqProcessorState> = {}) => encodeEqProcessor
   })),
   ...overrides,
 })
+
+const eqImpulseFixture = (highQuality: boolean): PortableGraphParityFixture => {
+  const latency = highQuality ? EQ_HIGH_QUALITY_LATENCY_FRAMES : 0
+  const frames = latency + 64
+  const state = eqState({ highQuality })
+
+  return {
+    name: highQuality ? 'eq-hi-quality-impulse-partitions-reset' : 'eq-impulse-partitions-reset',
+    capability: 'chains',
+    processorKind: 'eq',
+    sampleRateHz: 48_000,
+    maxFramesPerBlock: 32,
+    inputBusCount: 1,
+    channelCount: 2,
+    graph: processorSourceMaster({
+      nodeId: 2n,
+      instanceId: 11,
+      kindId: 3,
+      state: encodeEqProcessorState(state),
+      parameterTargets: [],
+      latencyFrames: latency,
+    }),
+    frames,
+    blockPartitions: highQuality ? [1, 3, 12, 16, 32, 3] : [1, 3, 12, 16, 32],
+    input: stereo([1, ...Array.from({ length: frames - 1 }, () => 0)], [-0.5, ...Array.from({ length: frames - 1 }, () => 0)]),
+    assertReset: true,
+    expectedLatencyFrames: latency,
+    nativeWasmTolerance: 2e-5,
+    assertOutput: (output) => {
+      const left = output[0]
+
+      if (!finite(output) || left === undefined) return false
+
+      if (!highQuality) {
+        return Math.abs(sampleAt(output, 0) - 1) > 0.001
+          && output.some((plane) => plane.slice(1).some((sample) => Math.abs(sample) > 1e-6))
+      }
+
+      const energy = (samples: Float32Array) => samples.reduce((sum, sample) => sum + sample * sample, 0)
+      const peak = left.reduce((best, sample, index) => Math.abs(sample) > Math.abs(left[best] ?? 0) ? index : best, 0)
+
+      return energy(left) > 1e-12
+        && energy(left.slice(0, latency)) <= 0.1 * energy(left)
+        && peak >= latency
+    },
+  }
+}
 
 const stereo = (left: readonly number[], right = left) => new Float32Array([...left, ...right])
 
@@ -2916,29 +2964,8 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
     expectedResult: 'reject',
     assertOutput: () => false,
   },
-  {
-    name: 'eq-impulse-partitions-reset',
-    capability: 'chains',
-    processorKind: 'eq',
-    sampleRateHz: 48_000,
-    maxFramesPerBlock: 32,
-    inputBusCount: 1,
-    channelCount: 2,
-    graph: processorSourceMaster({
-      nodeId: 2n,
-      instanceId: 11,
-      kindId: 3,
-      state: eqState(),
-      parameterTargets: [],
-    }),
-    frames: 64,
-    blockPartitions: [1, 3, 12, 16, 32],
-    input: stereo([1, ...Array.from({ length: 63 }, () => 0)], [-0.5, ...Array.from({ length: 63 }, () => 0)]),
-    assertReset: true,
-    assertOutput: (output) => finite(output)
-      && Math.abs(sampleAt(output, 0) - 1) > 0.001
-      && output.some((plane) => plane.slice(1).some((sample) => Math.abs(sample) > 1e-6)),
-  },
+  eqImpulseFixture(false),
+  eqImpulseFixture(true),
   {
     name: 'eq-step-mono-44100',
     capability: 'sampleRates',
@@ -2951,11 +2978,14 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       nodeId: 2n,
       instanceId: 11,
       kindId: 3,
-      state: eqState({ channelMode: 'mono' }),
+      state: encodeEqProcessorState(eqState({ channelMode: 'mono' })),
       parameterTargets: [],
+      latencyFrames: 0,
     }),
     frames: 32,
     blockPartitions: [3, 5, 8, 7, 9],
+    expectedLatencyFrames: 0,
+    nativeWasmTolerance: 2e-5,
     input: stereo(Array.from({ length: 32 }, () => 0.25), Array.from({ length: 32 }, () => -0.125)),
     assertOutput: (output) => finite(output)
       && output[0]?.every((sample, frame) => closeTo(sample, output[1]?.[frame] ?? 0)) === true,
@@ -2972,11 +3002,14 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       nodeId: 2n,
       instanceId: 11,
       kindId: 3,
-      state: eqState(),
+      state: encodeEqProcessorState(eqState()),
       parameterTargets: [],
+      latencyFrames: 0,
     }),
     frames: 96,
     blockPartitions: [16, 32, 7, 41],
+    expectedLatencyFrames: 0,
+    nativeWasmTolerance: 2e-5,
     input: stereo(sine(96, 1_000, 96_000), sine(96, 8_000, 96_000, 0.25)),
     assertOutput: (output) => finite(output) && output.every((plane) => plane.some((sample) => Math.abs(sample) > 0.01)),
   },
@@ -2993,13 +3026,46 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       nodeId: 2n,
       instanceId: 11,
       kindId: 3,
-      state: eqState(),
+      state: encodeEqProcessorState(eqState()),
       parameterTargets: [],
       bypassed: true,
+      latencyFrames: 0,
     }),
     frames: rampedBypassFrames,
     input: rampedBypassInput,
+    expectedLatencyFrames: 0,
+    nativeWasmTolerance: 2e-5,
     assertOutput: (output) => finite(output) && output.every(dryFromTheStart),
+  },
+  {
+    name: 'eq-hi-quality-bypass-delay',
+    capability: 'chains',
+    processorKind: 'eq',
+    sampleRateHz: 48_000,
+    maxFramesPerBlock: 480,
+    blockPartitions: [480, 480, EQ_HIGH_QUALITY_LATENCY_FRAMES],
+    inputBusCount: 1,
+    channelCount: 2,
+    graph: processorSourceMaster({
+      nodeId: 2n,
+      instanceId: 11,
+      kindId: 3,
+      state: encodeEqProcessorState(eqState({ highQuality: true })),
+      parameterTargets: [],
+      bypassed: true,
+      latencyFrames: EQ_HIGH_QUALITY_LATENCY_FRAMES,
+    }),
+    frames: rampedBypassFrames + EQ_HIGH_QUALITY_LATENCY_FRAMES,
+    input: stereo(
+      sine(rampedBypassFrames + EQ_HIGH_QUALITY_LATENCY_FRAMES, 1_000, 48_000),
+      sine(rampedBypassFrames + EQ_HIGH_QUALITY_LATENCY_FRAMES, 2_000, 48_000, 0.25),
+    ),
+    expectedLatencyFrames: EQ_HIGH_QUALITY_LATENCY_FRAMES,
+    nativeWasmTolerance: 2e-5,
+    assertOutput: (output) => finite(output)
+      && output.every((plane) => plane.slice(0, EQ_HIGH_QUALITY_LATENCY_FRAMES).every((sample) => sample === 0))
+      && output.every((plane, channel) => plane.slice(EQ_HIGH_QUALITY_LATENCY_FRAMES).every((sample, frame) =>
+        closeTo(sample, rampedBypassInput[channel * rampedBypassFrames + frame] ?? 0))),
   },
   {
     name: 'eq-nonfinite',
@@ -3013,10 +3079,13 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       nodeId: 2n,
       instanceId: 11,
       kindId: 3,
-      state: eqState(),
+      state: encodeEqProcessorState(eqState()),
       parameterTargets: [],
+      latencyFrames: 0,
     }),
     frames: 4,
+    expectedLatencyFrames: 0,
+    nativeWasmTolerance: 2e-5,
     input: new Float32Array([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0.25, Number.NaN, 0.5, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]),
     assertOutput: finite,
   },
@@ -3032,11 +3101,14 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       nodeId: 2n,
       instanceId: 11,
       kindId: 3,
-      state: eqState(),
+      state: encodeEqProcessorState(eqState()),
       parameterTargets: Array.from({ length: 24 }, (_, index) => 45 + index),
+      latencyFrames: 0,
     }),
     frames: 64,
     blockPartitions: [1, 7, 16, 40],
+    expectedLatencyFrames: 0,
+    nativeWasmTolerance: 2e-5,
     input: stereo(sine(64, 440, 48_000), sine(64, 880, 48_000, 0.25)),
     assertOutput: (output) => finite(output),
   }, 45, 2_000),
@@ -3052,10 +3124,12 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       nodeId: 2n,
       instanceId: 11,
       kindId: 3,
-      state: eqState(),
+      state: encodeEqProcessorState(eqState()),
       parameterTargets: [],
+      latencyFrames: 0,
     }),
     frames: 4,
+    expectedLatencyFrames: 0,
     input: new Float32Array(8).fill(0.25),
     events: processorEventEnvelope(),
     expectedResult: 'reject',

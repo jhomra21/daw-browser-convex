@@ -31,7 +31,7 @@ class DawAutoFilterProcessor extends AudioWorkletProcessor {
   constructor() {
     super()
     this.revision = -1
-    this.state = { enabled: true, mode: 'lowpass', lfo: { waveform: 'sine' }, quality: '2x' }
+    this.state = { enabled: true, mode: 'lowpass', lfo: { waveform: 'sine' } }
     this.channels = [this.createChannel(), this.createChannel()]
     this.delay = [new Float64Array(LATENCY), new Float64Array(LATENCY)]
     this.delayIndex = 0
@@ -113,7 +113,8 @@ class DawAutoFilterProcessor extends AudioWorkletProcessor {
     const envOctaves = valueAt(parameters['autofilter.envelope.amountOctaves'], frame) * channel.envelope
     const lfoOctaves = valueAt(parameters['autofilter.lfo.depthOctaves'], frame) * lfo
     const cutoff = clamp(valueAt(parameters['autofilter.frequencyHz'], frame) * (2 ** (envOctaves + lfoOctaves)), 20, 0.45 * sampleRate)
-    const q = 0.5 + 19.5 * valueAt(parameters['autofilter.resonance'], frame)
+    // The knob now follows the core's law, Q 0.7071 to 8 exponentially; this fallback keeps its own filter and only maps the knob onto it.
+    const q = 0.70710678 * (8 / 0.70710678) ** valueAt(parameters['autofilter.resonance'], frame)
     const drive = 10 ** (valueAt(parameters['autofilter.driveDb'], frame) / 20)
     const driven = Math.tanh(input * drive)
     const midpoint = 0.5 * (channel.previous + driven)

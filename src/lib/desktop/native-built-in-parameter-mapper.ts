@@ -226,12 +226,20 @@ const mapAutoFilter = (payload: EffectChange<'autofilter' | 'master-autofilter'>
       { parameterId: 'autofilter.lfo.depthOctaves', from: from.lfo.depthOctaves, to: to.lfo.depthOctaves },
       { parameterId: 'autofilter.lfo.phaseOffset', from: from.lfo.phaseOffset, to: to.lfo.phaseOffset },
       { parameterId: 'autofilter.lfo.stereoPhase', from: from.lfo.stereoPhase, to: to.lfo.stereoPhase },
+      { parameterId: 'autofilter.outputDb', from: from.outputDb, to: to.outputDb },
     ],
     [
       { from: from.enabled, to: to.enabled },
       { from: from.mode, to: to.mode },
+      { from: from.slope, to: to.slope },
+      { from: from.hiQuality, to: to.hiQuality },
+      { from: from.clip, to: to.clip },
+      { from: from.envelope.hold, to: to.envelope.hold },
+      { from: from.envelope.link, to: to.envelope.link },
       { from: from.lfo.waveform, to: to.lfo.waveform },
-      { from: from.quality, to: to.quality },
+      { from: from.lfo.sync, to: to.lfo.sync },
+      { from: from.lfo.division, to: to.lfo.division },
+      { from: from.lfo.stereoMode, to: to.lfo.stereoMode },
     ],
   )
 }

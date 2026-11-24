@@ -64,7 +64,7 @@ export const encodeSpec = (spec: EffectSpec): Uint8Array => {
 
 /** Latency the graph validator requires a descriptor to declare (audio_core_validation.cpp); zero for everything else. */
 export const declaredLatencyFrames = (spec: EffectSpec): number =>
-  spec.kind === 'autofilter' ? 6 : spec.kind === 'spectral' ? spec.state.fftSize : 0
+  spec.kind === 'autofilter' ? (spec.state.hiQuality ? 63 : 0) : spec.kind === 'spectral' ? spec.state.fftSize : 0
 
 const range = (first: number, keys: readonly string[]): Record<string, number> =>
   Object.fromEntries(keys.map((key, index) => [key, first + index]))
@@ -99,7 +99,10 @@ export const parameterTargets: Record<EffectKind, Record<string, number>> = {
     density: 140, diffusionLowCutHz: 141, diffusionHighCutHz: 142,
   },
   spectral: range(15, ['freeze', 'gateThresholdDb', 'gateAttackMs', 'gateReleaseMs', 'morph', 'binShift', 'blur', 'harmonicPercussiveBalance', 'noiseReduction', 'profileLearn', 'mix']),
-  autofilter: range(30, ['frequencyHz', 'resonance', 'driveDb', 'mix', 'envelope.amountOctaves', 'envelope.attackMs', 'envelope.releaseMs', 'lfo.rateHz', 'lfo.depthOctaves', 'lfo.phaseOffset', 'lfo.stereoPhase']),
+  autofilter: {
+    ...range(30, ['frequencyHz', 'resonance', 'driveDb', 'mix', 'envelope.amountOctaves', 'envelope.attackMs', 'envelope.releaseMs', 'lfo.rateHz', 'lfo.depthOctaves', 'lfo.phaseOffset', 'lfo.stereoPhase']),
+    outputDb: 143,
+  },
   lofi: { sampleRateRatio: 41, jitter: 42, noiseDb: 43, mix: 44, bitDepth: 131 },
 }
 
@@ -182,9 +185,9 @@ export const fx = {
   autofilter: (state: Partial<AutoFilterProcessorState> = {}): EffectSpec => ({
     kind: 'autofilter',
     state: {
-      enabled: true, mode: 'lowpass', quality: '2x', frequencyHz: 1000, resonance: 0.25, driveDb: 0, mix: 1,
-      envelope: { amountOctaves: 0, attackMs: 10, releaseMs: 100 },
-      lfo: { waveform: 'sine', rateHz: 1, depthOctaves: 0, phaseOffset: 0, stereoPhase: 0 }, ...state,
+      enabled: true, mode: 'lowpass', slope: 12, hiQuality: true, frequencyHz: 1000, resonance: 0.15, driveDb: 0, mix: 1, outputDb: 0, clip: false,
+      envelope: { amountOctaves: 0, attackMs: 10, releaseMs: 100, hold: false, link: false },
+      lfo: { waveform: 'sine', sync: false, division: 5, rateHz: 1, depthOctaves: 0, phaseOffset: 0, stereoMode: 'phase', stereoPhase: 0 }, ...state,
     },
   }),
   lofi: (state: Partial<LoFiProcessorState> = {}): EffectSpec => ({

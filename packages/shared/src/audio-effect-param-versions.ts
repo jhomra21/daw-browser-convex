@@ -1,3 +1,4 @@
+import { migrateAutoFilterParamsV1 } from './auto-filter-params-migration'
 import { isAudioEffectKind, type AudioEffectKind } from './audio-effect-registry'
 import type { JsonValue } from './json-value'
 
@@ -9,7 +10,7 @@ export const AUDIO_EFFECT_PARAMS_VERSION: Readonly<Record<AudioEffectKind, numbe
   saturator: 1,
   delay: 1,
   reverb: 1,
-  autofilter: 1,
+  autofilter: 2,
   gate: 1,
   limiter: 1,
   lofi: 1,
@@ -34,7 +35,9 @@ export type AudioEffectParamsVersioning = {
 
 export const AUDIO_EFFECT_PARAMS_VERSIONING: AudioEffectParamsVersioning = {
   current: AUDIO_EFFECT_PARAMS_VERSION,
-  migrations: {},
+  migrations: {
+    autofilter: { 1: migrateAutoFilterParamsV1 },
+  },
 }
 
 // Remembers which unreadable versions were already reported so a project list does not log per row.

@@ -77,13 +77,17 @@ const limiter = envelope(z.object({
 
 const autoFilter = envelope(z.object({
   enabled: z.boolean(), mode: z.enum(['lowpass', 'highpass', 'bandpass', 'notch', 'peak']),
+  slope: z.union([z.literal(12), z.literal(24)]), hiQuality: z.boolean(),
   frequencyHz: finiteNumber, resonance: finiteNumber, driveDb: finiteNumber, mix: finiteNumber,
-  envelope: z.object({ amountOctaves: finiteNumber, attackMs: finiteNumber, releaseMs: finiteNumber }).strict(),
-  lfo: z.object({
-    waveform: z.enum(['sine', 'triangle']), rateHz: finiteNumber, depthOctaves: finiteNumber,
-    phaseOffset: finiteNumber, stereoPhase: finiteNumber,
+  outputDb: finiteNumber, clip: z.boolean(),
+  envelope: z.object({
+    amountOctaves: finiteNumber, attackMs: finiteNumber, releaseMs: finiteNumber, hold: z.boolean(), link: z.boolean(),
   }).strict(),
-  quality: z.literal('2x'),
+  lfo: z.object({
+    waveform: z.enum(['sine', 'triangle', 'sawDown', 'sawUp', 'square', 'sampleHold']), sync: z.boolean(), division: finiteNumber,
+    rateHz: finiteNumber, depthOctaves: finiteNumber, phaseOffset: finiteNumber,
+    stereoMode: z.enum(['phase', 'spin']), stereoPhase: finiteNumber,
+  }).strict(),
 }).strict())
 
 const chorus = envelope(z.object({

@@ -881,25 +881,53 @@ export const normalizeLimiterParamsEnvelope = (value: JsonValue): LimiterParamsE
 
 export type AutoFilterMode = 'lowpass' | 'highpass' | 'bandpass' | 'notch' | 'peak'
 
-export type AutoFilterWaveform = 'sine' | 'triangle'
+export type AutoFilterSlope = 12 | 24
+
+export type AutoFilterWaveform = 'sine' | 'triangle' | 'sawDown' | 'sawUp' | 'square' | 'sampleHold'
+
+export type AutoFilterStereoMode = 'phase' | 'spin'
+
+// The native core's resonance law: Q = MIN * (MAX / MIN) ^ resonance. Resonance 0 is Butterworth, 1 is the top Q.
+export const AUTO_FILTER_MIN_Q = Math.SQRT1_2
+export const AUTO_FILTER_MAX_Q = 8
+
+// Latency of the Hi-Quality half-band pair at the project rate, in frames; the native kernel reports the same number.
+export const AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES = 63
+
+// One LFO cycle per entry, in the order of the native tempo table (2 bars, 1 bar, then straight/dotted/triplet to 1/32).
+export const AUTO_FILTER_LFO_DIVISIONS = ['2 bars', '1 bar', '1/2.', '1/2', '1/4.', '1/4', '1/4T', '1/8.', '1/8', '1/8T', '1/16.', '1/16', '1/16T', '1/32.', '1/32', '1/32T'] as const
+
+const AUTO_FILTER_WAVEFORMS: readonly AutoFilterWaveform[] = ['sine', 'triangle', 'sawDown', 'sawUp', 'square', 'sampleHold']
 
 export type AutoFilterParams = {
   enabled: boolean
   mode: AutoFilterMode
+  slope: AutoFilterSlope
+  hiQuality: boolean
   frequencyHz: number
   resonance: number
   driveDb: number
   mix: number
-  envelope: { amountOctaves: number; attackMs: number; releaseMs: number }
-  lfo: { waveform: AutoFilterWaveform; rateHz: number; depthOctaves: number; phaseOffset: number; stereoPhase: number }
-  quality: '2x'
+  outputDb: number
+  clip: boolean
+  envelope: { amountOctaves: number; attackMs: number; releaseMs: number; hold: boolean; link: boolean }
+  lfo: {
+    waveform: AutoFilterWaveform
+    sync: boolean
+    division: number
+    rateHz: number
+    depthOctaves: number
+    phaseOffset: number
+    stereoMode: AutoFilterStereoMode
+    stereoPhase: number
+  }
 }
 
-export type AutoFilterParamsInput = Partial<Omit<AutoFilterParams, 'mode' | 'envelope' | 'lfo' | 'quality'>> & {
+export type AutoFilterParamsInput = Partial<Omit<AutoFilterParams, 'mode' | 'slope' | 'envelope' | 'lfo'>> & {
   mode?: JsonValue
+  slope?: JsonValue
   envelope?: Partial<AutoFilterParams['envelope']>
-  lfo?: Partial<Omit<AutoFilterParams['lfo'], 'waveform'>> & { waveform?: JsonValue }
-  quality?: JsonValue
+  lfo?: Partial<Omit<AutoFilterParams['lfo'], 'waveform' | 'stereoMode'>> & { waveform?: JsonValue; stereoMode?: JsonValue }
 }
 
 export type AutoFilterParamsEnvelope = ProcessorStateEnvelope<AutoFilterParams>
@@ -908,13 +936,16 @@ export function createDefaultAutoFilterParams(): AutoFilterParams {
   return {
     enabled: true,
     mode: 'lowpass',
+    slope: 12,
+    hiQuality: true,
     frequencyHz: 1000,
-    resonance: 0.25,
+    resonance: 0.15,
     driveDb: 0,
     mix: 1,
-    envelope: { amountOctaves: 0, attackMs: 10, releaseMs: 100 },
-    lfo: { waveform: 'sine', rateHz: 1, depthOctaves: 0, phaseOffset: 0, stereoPhase: 0 },
-    quality: '2x',
+    outputDb: 0,
+    clip: false,
+    envelope: { amountOctaves: 0, attackMs: 10, releaseMs: 100, hold: false, link: false },
+    lfo: { waveform: 'sine', sync: false, division: 5, rateHz: 1, depthOctaves: 0, phaseOffset: 0, stereoMode: 'phase', stereoPhase: 0 },
   }
 }
 
@@ -927,28 +958,39 @@ export function normalizeAutoFilterParams(input: AutoFilterParamsInput = {}): Au
     return finite === undefined ? fallback : clamp(finite, min, max)
   }
 
+  const flag = (value: boolean | undefined, fallback: boolean) => isJsonBoolean(value) ? value : fallback
+
   const mode = input.mode
+  const waveform = AUTO_FILTER_WAVEFORMS.find((candidate) => candidate === input.lfo?.waveform)
 
   return {
-    enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
+    enabled: flag(input.enabled, defaults.enabled),
     mode: mode === 'highpass' || mode === 'bandpass' || mode === 'notch' || mode === 'peak' ? mode : 'lowpass',
+    slope: input.slope === 24 ? 24 : 12,
+    hiQuality: flag(input.hiQuality, defaults.hiQuality),
     frequencyHz: number(input.frequencyHz, defaults.frequencyHz, 20, 20000),
     resonance: number(input.resonance, defaults.resonance, 0, 1),
     driveDb: number(input.driveDb, defaults.driveDb, 0, 24),
     mix: number(input.mix, defaults.mix, 0, 1),
+    outputDb: number(input.outputDb, defaults.outputDb, -24, 24),
+    clip: flag(input.clip, defaults.clip),
     envelope: {
       amountOctaves: number(input.envelope?.amountOctaves, defaults.envelope.amountOctaves, -6, 6),
       attackMs: number(input.envelope?.attackMs, defaults.envelope.attackMs, 0.5, 500),
       releaseMs: number(input.envelope?.releaseMs, defaults.envelope.releaseMs, 5, 2000),
+      hold: flag(input.envelope?.hold, defaults.envelope.hold),
+      link: flag(input.envelope?.link, defaults.envelope.link),
     },
     lfo: {
-      waveform: input.lfo?.waveform === 'triangle' ? 'triangle' : 'sine',
+      waveform: waveform ?? defaults.lfo.waveform,
+      sync: flag(input.lfo?.sync, defaults.lfo.sync),
+      division: Math.round(number(input.lfo?.division, defaults.lfo.division, 0, AUTO_FILTER_LFO_DIVISIONS.length - 1)),
       rateHz: number(input.lfo?.rateHz, defaults.lfo.rateHz, 0.01, 20),
       depthOctaves: number(input.lfo?.depthOctaves, defaults.lfo.depthOctaves, 0, 6),
       phaseOffset: number(input.lfo?.phaseOffset, defaults.lfo.phaseOffset, 0, 1),
+      stereoMode: input.lfo?.stereoMode === 'spin' ? 'spin' : 'phase',
       stereoPhase: number(input.lfo?.stereoPhase, defaults.lfo.stereoPhase, -0.5, 0.5),
     },
-    quality: '2x',
   }
 }
 
@@ -959,29 +1001,39 @@ export const normalizeAutoFilterParamsEnvelope = (value: JsonValue): AutoFilterP
   const state = readObject(envelope.version === 1 ? envelope.state : value)
   const env = readObject(state.envelope)
   const lfo = readObject(state.lfo)
+  const bool = (candidate: JsonValue | undefined) => candidate === true || candidate === false ? candidate : undefined
+  const num = (candidate: JsonValue | undefined) => isJsonNumber(candidate) ? candidate : undefined
 
   return {
     version: 1,
     state: normalizeAutoFilterParams({
-      enabled: state.enabled === true || state.enabled === false ? state.enabled : undefined,
+      enabled: bool(state.enabled),
       mode: state.mode,
-      frequencyHz: isJsonNumber(state.frequencyHz) ? state.frequencyHz : undefined,
-      resonance: isJsonNumber(state.resonance) ? state.resonance : undefined,
-      driveDb: isJsonNumber(state.driveDb) ? state.driveDb : undefined,
-      mix: isJsonNumber(state.mix) ? state.mix : undefined,
+      slope: state.slope,
+      hiQuality: bool(state.hiQuality),
+      frequencyHz: num(state.frequencyHz),
+      resonance: num(state.resonance),
+      driveDb: num(state.driveDb),
+      mix: num(state.mix),
+      outputDb: num(state.outputDb),
+      clip: bool(state.clip),
       envelope: {
-        amountOctaves: isJsonNumber(env.amountOctaves) ? env.amountOctaves : undefined,
-        attackMs: isJsonNumber(env.attackMs) ? env.attackMs : undefined,
-        releaseMs: isJsonNumber(env.releaseMs) ? env.releaseMs : undefined,
+        amountOctaves: num(env.amountOctaves),
+        attackMs: num(env.attackMs),
+        releaseMs: num(env.releaseMs),
+        hold: bool(env.hold),
+        link: bool(env.link),
       },
       lfo: {
         waveform: lfo.waveform,
-        rateHz: isJsonNumber(lfo.rateHz) ? lfo.rateHz : undefined,
-        depthOctaves: isJsonNumber(lfo.depthOctaves) ? lfo.depthOctaves : undefined,
-        phaseOffset: isJsonNumber(lfo.phaseOffset) ? lfo.phaseOffset : undefined,
-        stereoPhase: isJsonNumber(lfo.stereoPhase) ? lfo.stereoPhase : undefined,
+        sync: bool(lfo.sync),
+        division: num(lfo.division),
+        rateHz: num(lfo.rateHz),
+        depthOctaves: num(lfo.depthOctaves),
+        phaseOffset: num(lfo.phaseOffset),
+        stereoMode: lfo.stereoMode,
+        stereoPhase: num(lfo.stereoPhase),
       },
-      quality: state.quality,
     }),
   }
 }

@@ -1,6 +1,8 @@
 // Tests for the shared DSP blocks in src/dsp. Every case prints the number it checks against its limit.
 // Run with a group name (smoother, safety, latency, delay, oversampler, adaa, filters) or with no argument for all.
+#include "../src/dsp/adaa.h"
 #include "../src/dsp/fractional_delay.h"
+#include "../src/dsp/half_band_oversampler.h"
 #include "../src/dsp/latency.h"
 #include "../src/dsp/numeric_safety.h"
 #include "../src/dsp/parameter_smoother.h"
@@ -8,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <complex>
 #include <cstring>
 #include <limits>
 #include <vector>
@@ -355,7 +358,349 @@ void delayCubicExactAtIntegerDelaysAndClamped() {
   expectTrue("largest_delay_is_capacity_minus_three", ring.readHermite(top + 0.9F) == ring.readHermite(top));
 }
 
+// ---- oversampler -------------------------------------------------------------------------------------------------
+
+// Steady-state gain in dB of a base-rate sine through `process`, measured by projecting the output onto the input
+// frequency over a whole number of cycles. Frequency is in cycles per base-rate sample.
+template <class Process>
+double sineGainDb(double frequency, Process process, int settle = 400, int span = 2000) {
+  const int cycles = std::max(1, static_cast<int>(std::lround(frequency * span)));
+  const int length = static_cast<int>(std::lround(cycles / frequency));
+  double re = 0.0;
+  double im = 0.0;
+  for (int n = 0; n < settle + length; ++n) {
+    const double y = process(static_cast<float>(std::sin(2.0 * kPi * frequency * n)));
+    if (n >= settle) {
+      re += y * std::sin(2.0 * kPi * frequency * n);
+      im += y * std::cos(2.0 * kPi * frequency * n);
+    }
+  }
+  const double amplitude = 2.0 * std::hypot(re, im) / length;
+  return 20.0 * std::log10(std::max(amplitude, 1e-12));
+}
+
+void oversamplerLatencyAndDc() {
+  dsp::HalfBandOversampler2x os;
+  const int latency = static_cast<int>(dsp::HalfBandOversampler2x::latencyFrames());
+  std::vector<float> response;
+  for (int n = 0; n < latency * 3; ++n) {
+    const auto pair = os.up(n == 0 ? 1.0F : 0.0F);
+    response.push_back(os.down(pair.first, pair.second));
+  }
+  int peakAt = 0;
+  for (int n = 0; n < static_cast<int>(response.size()); ++n) {
+    if (std::fabs(response[n]) > std::fabs(response[peakAt])) peakAt = n;
+  }
+  std::printf("  round-trip impulse peaks at sample %d (reported latency %d), peak value %.6f\n", peakAt, latency,
+    static_cast<double>(response[peakAt]));
+  expectTrue("reported_latency_is_the_impulse_peak_position", peakAt == latency);
+  // The transition band (0.45 to 0.55 fs_in) is attenuated, so the impulse peak sits a little under 1.
+  expectTrue("impulse_peak_is_within_two_percent_of_unity", response[peakAt] > 0.97F && response[peakAt] < 1.0F);
+  expectTrue("latency_helper_agrees", dsp::HalfBandOversampler2x::latency().frames == static_cast<uint32_t>(latency));
+
+  os.reset();
+  float last = 0.0F;
+  for (int n = 0; n < latency * 4; ++n) {
+    const auto pair = os.up(1.0F);
+    last = os.down(pair.first, pair.second);
+  }
+  std::printf("  DC in 1.0 -> out %.9f\n", static_cast<double>(last));
+  expectNear("dc_gain_is_unity", last, 1.0, 1e-6);
+}
+
+void oversamplerPassbandAndStopband() {
+  dsp::HalfBandOversampler2x os;
+  double worstRipple = 0.0;
+  for (double f = 0.01; f <= 0.40; f += 0.01) {
+    os.reset();
+    const double gain = sineGainDb(f, [&](float x) {
+      const auto pair = os.up(x);
+      return os.down(pair.first, pair.second);
+    });
+    worstRipple = std::max(worstRipple, std::fabs(gain));
+  }
+  std::printf("  round-trip passband to 0.40 fs_in: worst deviation %.5f dB\n", worstRipple);
+  expectAtMost("passband_ripple_db_to_0.40_fs_in", worstRipple, 0.01);
+
+  // Down filter alone: a sine at `f` of the base rate, generated at the doubled rate, must vanish above 0.55 fs_in.
+  double worstStop = -300.0;
+  double worstAt = 0.0;
+  for (double f = 0.55; f < 1.0; f += 0.0125) {
+    os.reset();
+    double re = 0.0;
+    double im = 0.0;
+    const int settle = 400;
+    const int length = 2000;
+    for (int n = 0; n < settle + length; ++n) {
+      const double a = std::sin(2.0 * kPi * (f / 2.0) * (2 * n));
+      const double b = std::sin(2.0 * kPi * (f / 2.0) * (2 * n + 1));
+      const double y = os.down(static_cast<float>(a), static_cast<float>(b));
+      if (n >= settle) {
+        // The decimated tone lands at 1 - f of the base rate.
+        const double folded = 1.0 - f;
+        re += y * std::sin(2.0 * kPi * folded * n);
+        im += y * std::cos(2.0 * kPi * folded * n);
+      }
+    }
+    const double gain = 20.0 * std::log10(std::max(2.0 * std::hypot(re, im) / length, 1e-12));
+    if (gain > worstStop) {
+      worstStop = gain;
+      worstAt = f;
+    }
+  }
+  std::printf("  down filter worst stopband above 0.55 fs_in: %.2f dB at %.4f fs_in\n", worstStop, worstAt);
+  expectAtMost("down_filter_stopband_db_above_0.55_fs_in", worstStop, -90.0);
+}
+
+void oversamplerImageRejection() {
+  dsp::HalfBandOversampler2x os;
+  // A sine at f upsampled has an image at 1 - f (of the base rate). Project the doubled-rate output onto it.
+  for (const double f : {0.1, 0.25, 0.4}) {
+    os.reset();
+    const double image = 1.0 - f;
+    double reFund = 0.0, imFund = 0.0, reImg = 0.0, imImg = 0.0;
+    const int settle = 400;
+    const int length = 2000;
+    for (int n = 0; n < settle + length; ++n) {
+      const auto pair = os.up(static_cast<float>(std::sin(2.0 * kPi * f * n)));
+      if (n < settle) continue;
+      const double outputs[2] = {pair.first, pair.second};
+      for (int phase = 0; phase < 2; ++phase) {
+        const double t = (2.0 * n + phase) / 2.0;  // in base-rate sample units
+        reFund += outputs[phase] * std::sin(2.0 * kPi * f * t);
+        imFund += outputs[phase] * std::cos(2.0 * kPi * f * t);
+        reImg += outputs[phase] * std::sin(2.0 * kPi * image * t);
+        imImg += outputs[phase] * std::cos(2.0 * kPi * image * t);
+      }
+    }
+    const double fundamental = std::hypot(reFund, imFund);
+    const double imageLevel = std::hypot(reImg, imImg);
+    const double rejection = 20.0 * std::log10(std::max(imageLevel, 1e-12) / fundamental);
+    std::printf("  f=%.2f fs_in: image at %.2f fs_in is %.1f dB below the tone\n", f, image, rejection);
+    expectAtMost("image_rejection_db", rejection, -90.0);
+  }
+}
+
+void oversamplerResetAndSilence() {
+  dsp::HalfBandOversampler2x fresh;
+  dsp::HalfBandOversampler2x used;
+  for (int n = 0; n < 500; ++n) {
+    const auto pair = used.up(std::sin(0.7F * static_cast<float>(n)));
+    used.down(pair.first, pair.second);
+  }
+  used.reset();
+  bool identical = true;
+  for (int n = 0; n < 300; ++n) {
+    const float x = n % 17 == 0 ? 1.0F : 0.0F;
+    const auto a = fresh.up(x);
+    const auto b = used.up(x);
+    identical = identical && a.first == b.first && a.second == b.second && fresh.down(a.first, a.second) == used.down(b.first, b.second);
+  }
+  expectTrue("reset_matches_a_fresh_instance_bit_for_bit", identical);
+  dsp::HalfBandOversampler2x quiet;
+  float peak = 0.0F;
+  for (int n = 0; n < 500; ++n) {
+    const auto pair = quiet.up(0.0F);
+    peak = std::max(peak, std::fabs(quiet.down(pair.first, pair.second)));
+  }
+  expectTrue("silence_in_is_exact_silence_out", peak == 0.0F);
+}
+
+// ---- ADAA --------------------------------------------------------------------------------------------------------
+
+template <class Shaper>
+void checkAntiderivative(const char *what) {
+  double worst = 0.0;
+  for (double x = -6.0; x <= 6.0; x += 0.0371) {
+    const double h = 1e-5;
+    const double derivative = (Shaper::antiderivative(x + h) - Shaper::antiderivative(x - h)) / (2.0 * h);
+    worst = std::max(worst, std::fabs(derivative - Shaper::value(x)));
+  }
+  std::printf("  %s: max |F' - f| = %.3g\n", what, worst);
+  expectAtMost("antiderivative_matches_the_curve", worst, 1e-6);
+}
+
+void adaaAntiderivatives() {
+  checkAntiderivative<dsp::TanhShaper>("tanh");
+  checkAntiderivative<dsp::HardClipShaper>("hard clip");
+  checkAntiderivative<dsp::SoftCubicShaper>("soft cubic");
+  expectTrue("tanh_antiderivative_does_not_overflow", std::isfinite(dsp::TanhShaper::antiderivative(1.0e4)) &&
+    std::fabs(dsp::TanhShaper::antiderivative(-1.0e4) - dsp::TanhShaper::antiderivative(1.0e4)) < 1e-9);
+  expectNear("soft_cubic_is_continuous_at_the_knee", dsp::SoftCubicShaper::value(1.0 + 1e-9), dsp::SoftCubicShaper::value(1.0 - 1e-9), 1e-8);
+}
+
+template <class Shaper>
+void checkIllConditioned(const char *what) {
+  dsp::Adaa1<Shaper> adaa;
+  float worstConstant = 0.0F;
+  for (const float level : {0.0F, 0.3F, -0.8F, 2.5F, -7.0F}) {
+    adaa.reset();
+    adaa.process(level);
+    for (int n = 0; n < 8; ++n) {
+      worstConstant = std::max(worstConstant, std::fabs(adaa.process(level) - static_cast<float>(Shaper::value(level))));
+    }
+  }
+  // Steps of 1e-12 .. 1e-5 around a point where the curve has non-zero slope must not spike.
+  float worstTiny = 0.0F;
+  for (const double step : {1e-12, 1e-10, 1e-8, 1e-7, 1e-6, 1.1e-6, 1e-5}) {
+    adaa.reset();
+    adaa.process(0.4F);
+    const float y = adaa.process(static_cast<float>(0.4 + step));
+    worstTiny = std::max(worstTiny, std::fabs(y - static_cast<float>(Shaper::value(0.4))));
+  }
+  std::printf("  %s: constant-input error %.3g, tiny-step error %.3g\n", what, static_cast<double>(worstConstant),
+    static_cast<double>(worstTiny));
+  expectAtMost("constant_input_returns_the_curve_value", worstConstant, 1e-6);
+  expectAtMost("tiny_steps_do_not_divide_by_zero", worstTiny, 1e-5);
+  adaa.reset();
+  adaa.process(0.5F);
+  const float bad = adaa.process(std::numeric_limits<float>::quiet_NaN());
+  const float after = adaa.process(0.25F);
+  expectTrue("nan_input_resets_and_outputs_zero", bad == 0.0F && std::isfinite(after));
+}
+
+void adaaIllConditioned() {
+  checkIllConditioned<dsp::TanhShaper>("tanh");
+  checkIllConditioned<dsp::HardClipShaper>("hard clip");
+  checkIllConditioned<dsp::SoftCubicShaper>("soft cubic");
+  dsp::Adaa1<dsp::HardClipShaper> clip;
+  clip.process(0.2F);
+  expectNear("hard_clip_linear_region_is_the_midpoint", clip.process(0.6F), 0.4, 1e-6);
+  clip.reset();
+  clip.process(3.0F);
+  expectTrue("hard_clip_both_samples_over_the_rail_is_exactly_the_rail", clip.process(5.0F) == 1.0F);
+}
+
+// 426 cycles in 4096 samples: 4992 Hz at 48 kHz, coherent, so every harmonic and alias lands on a whole bin.
+constexpr int kAliasLength = 4096;
+constexpr int kAliasCycles = 426;
+constexpr double kAliasFrequency = static_cast<double>(kAliasCycles) / kAliasLength;  // cycles per base-rate sample
+
+std::vector<std::complex<double>> fft(const std::vector<float> &signal) {
+  const int length = static_cast<int>(signal.size());
+  std::vector<std::complex<double>> x(signal.begin(), signal.end());
+  for (int i = 1, j = 0; i < length; ++i) {
+    int bit = length >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) std::swap(x[i], x[j]);
+  }
+  for (int size = 2; size <= length; size <<= 1) {
+    const std::complex<double> step = std::polar(1.0, -2.0 * kPi / size);
+    for (int start = 0; start < length; start += size) {
+      std::complex<double> w = 1.0;
+      for (int k = 0; k < size / 2; ++k, w *= step) {
+        const std::complex<double> even = x[start + k];
+        const std::complex<double> odd = x[start + k + size / 2] * w;
+        x[start + k] = even + odd;
+        x[start + k + size / 2] = even - odd;
+      }
+    }
+  }
+  return x;
+}
+
+// Power in the audible band (up to 20 kHz) that is neither the tone nor one of its in-band harmonics, relative to the
+// tone, in dB. Energy between 20 kHz and Nyquist is not counted: a 2x half-band's transition band lets the harmonic just
+// above Nyquist fold there, and that is not shaper aliasing.
+double aliasLevelDb(const std::vector<float> &signal) {
+  const std::vector<std::complex<double>> spectrum = fft(signal);
+  const int audibleBins = static_cast<int>(20000.0 / 48000.0 * kAliasLength);
+  double alias = 0.0;
+  for (int bin = 1; bin <= audibleBins; ++bin) {
+    if (bin % kAliasCycles != 0) alias += std::norm(spectrum[bin]);
+  }
+  return 10.0 * std::log10(std::max(alias, 1e-30) / std::norm(spectrum[kAliasCycles]));
+}
+
+// Reference: the sine generated directly at 8x, shaped naively, then low-passed (cutoff 0.40 fs_in, Kaiser beta 10, 513
+// taps at 8x) and decimated. Independent of the blocks under test.
+std::vector<float> eightTimesReference(double (*shape)(double), double gain) {
+  constexpr int ratio = 8;
+  constexpr int half = 256;
+  const auto bessel = [](double x) {
+    double sum = 1.0, term = 1.0;
+    for (int m = 1; m < 60; ++m) {
+      term *= (x / 2.0 / m) * (x / 2.0 / m);
+      sum += term;
+    }
+    return sum;
+  };
+  std::vector<double> taps(2 * half + 1);
+  double total = 0.0;
+  for (int k = -half; k <= half; ++k) {
+    const double cutoff = 0.40 / ratio;
+    const double sinc = k == 0 ? 2.0 * cutoff : std::sin(2.0 * kPi * cutoff * k) / (kPi * k);
+    const double r = static_cast<double>(k) / half;
+    taps[k + half] = sinc * bessel(10.0 * std::sqrt(1.0 - r * r)) / bessel(10.0);
+    total += taps[k + half];
+  }
+  for (double &tap : taps) tap /= total;
+  std::vector<float> out(kAliasLength);
+  for (int n = 0; n < kAliasLength; ++n) {
+    double y = 0.0;
+    for (int k = -half; k <= half; ++k) {
+      const double i = static_cast<double>(n) * ratio + k;
+      y += taps[k + half] * shape(gain * std::sin(2.0 * kPi * kAliasFrequency * i / ratio));
+    }
+    out[n] = static_cast<float>(y);
+  }
+  return out;
+}
+
+template <class Shaper>
+void adaaAliasFor(const char *what) {
+  constexpr int warmup = 600;
+  const double drive = std::pow(10.0, 18.0 / 20.0);
+  const double gain = 0.5 * drive;
+  std::vector<float> naive(kAliasLength), adaa1x(kAliasLength), adaa2x(kAliasLength), naive2x(kAliasLength);
+  dsp::Adaa1<Shaper> single;
+  dsp::Adaa1<Shaper> doubled;
+  dsp::HalfBandOversampler2x os;
+  dsp::HalfBandOversampler2x osNaive;
+  for (int n = -warmup; n < kAliasLength; ++n) {
+    const float x = static_cast<float>(gain * std::sin(2.0 * kPi * kAliasFrequency * n));
+    const float a = static_cast<float>(Shaper::value(x));
+    const float b = single.process(x);
+    const auto up = os.up(x);
+    const float c = os.down(doubled.process(up.first), doubled.process(up.second));
+    const auto upNaive = osNaive.up(x);
+    const float e = osNaive.down(static_cast<float>(Shaper::value(upNaive.first)), static_cast<float>(Shaper::value(upNaive.second)));
+    if (n >= 0) {
+      naive[n] = a;
+      adaa1x[n] = b;
+      adaa2x[n] = c;
+      naive2x[n] = e;
+    }
+  }
+  const double naiveDb = aliasLevelDb(naive);
+  const double adaaDb = aliasLevelDb(adaa1x);
+  const double adaa2xDb = aliasLevelDb(adaa2x);
+  const double naive2xDb = aliasLevelDb(naive2x);
+  const double referenceDb = aliasLevelDb(eightTimesReference(Shaper::value, gain));
+  std::printf("  %s, 4992 Hz sine, 18 dB drive, alias to 20 kHz vs tone: naive 1x %.1f dB, ADAA 1x %.1f dB, naive 2x %.1f dB, "
+    "ADAA 2x %.1f dB, 8x reference %.1f dB\n", what, naiveDb, adaaDb, naive2xDb, adaa2xDb, referenceDb);
+  expectAtMost("reference_is_clean", referenceDb, -60.0);
+  expectAtLeast("naive_1x_does_alias", naiveDb, -30.0);
+  expectAtMost("adaa_1x_beats_naive_1x_by_8_db", adaaDb, naiveDb - 8.0);
+  expectAtMost("adaa_2x_beats_naive_2x_by_15_db", adaa2xDb, naive2xDb - 15.0);
+  expectAtMost("adaa_2x_beats_naive_1x_by_30_db", adaa2xDb, naiveDb - 30.0);
+}
+
+void adaaAliasTanh() { adaaAliasFor<dsp::TanhShaper>("tanh"); }
+void adaaAliasHardClip() { adaaAliasFor<dsp::HardClipShaper>("hard clip"); }
+void adaaAliasSoftCubic() { adaaAliasFor<dsp::SoftCubicShaper>("soft cubic"); }
+
 constexpr Case kCases[] = {
+  {"oversampler", "latency_and_dc", oversamplerLatencyAndDc},
+  {"oversampler", "passband_and_stopband", oversamplerPassbandAndStopband},
+  {"oversampler", "image_rejection", oversamplerImageRejection},
+  {"oversampler", "reset_and_silence", oversamplerResetAndSilence},
+  {"adaa", "antiderivatives", adaaAntiderivatives},
+  {"adaa", "ill_conditioned_inputs", adaaIllConditioned},
+  {"adaa", "alias_tanh", adaaAliasTanh},
+  {"adaa", "alias_hard_clip", adaaAliasHardClip},
+  {"adaa", "alias_soft_cubic", adaaAliasSoftCubic},
   {"delay", "ring_wraps_at_capacity", delayRingWrapsAtCapacity},
   {"delay", "cubic_read_accuracy", delayCubicReadAccuracy},
   {"delay", "cubic_exact_and_clamped", delayCubicExactAtIntegerDelaysAndClamped},

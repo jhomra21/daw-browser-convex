@@ -22,6 +22,8 @@
 #include <type_traits>
 #include <tuple>
 
+#include "autofilter_kernel.h"
+
 #if defined(DAW_AUDIO_CORE_TEST_INSTRUMENT_REJECTION)
 extern "C" bool daw_audio_core_test_reject_instrument_event(uint32_t index);
 #endif
@@ -73,7 +75,6 @@ constexpr uint32_t kMaximumSpectralProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PE
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
 constexpr uint32_t kMaximumNativeGraphStagesPerNode = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE * 2u;
 #endif
-constexpr uint32_t kAutoFilterLatencyFrames = 6;
 constexpr uint32_t kMaximumSpectralFftSize = 4096;
 constexpr uint32_t kMaximumSpectralBins = kMaximumSpectralFftSize / 2 + 1;
 constexpr uint32_t kSpectralHpssFrames = 31;
@@ -689,18 +690,9 @@ struct SpectralHistory {
   uint32_t analysis_frames = 0;
 };
 
-struct AutoFilterChannelHistory {
-  float ic1 = 0.0F;
-  float ic2 = 0.0F;
-  float envelope = 0.0F;
-  float phase = 0.0F;
-  float previous = 0.0F;
-};
-
 struct AutoFilterHistory {
-  std::array<AutoFilterChannelHistory, 2> channels{};
-  std::array<std::array<float, kAutoFilterLatencyFrames>, 2> delay{};
-  uint32_t delay_index = 0;
+  daw::audio_core::AutoFilterKernel kernel;
+  uint32_t prepared_rate_hz = 0;
   float bypass = 0.0F;
 };
 

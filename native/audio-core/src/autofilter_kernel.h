@@ -357,10 +357,9 @@ class AutoFilterKernel {
       wet = clip_sample(channel, false, config.clip, filtered * output_gain_);
     }
     if (!std::isfinite(wet)) {
-      const dsp::HalfBandOversampler2x clean;
       channel.paths[0].stages = {};
       channel.paths[1].stages = {};
-      channel.oversampler = clean;
+      channel.oversampler.reset();
       channel.drive_adaa.reset();
       channel.clip_adaa.reset();
       wet = 0.0F;

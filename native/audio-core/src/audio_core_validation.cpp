@@ -305,7 +305,10 @@ bool valid_spectral_state(const daw_audio_spectral_state &state) {
 }
 
 bool valid_autofilter_state(const daw_audio_autofilter_state &state) {
-  return state.enabled <= 1 && state.mode <= DAW_AUDIO_AUTOFILTER_MODE_PEAK && state.quality == 0
+  return state.enabled <= 1 && state.mode <= DAW_AUDIO_AUTOFILTER_MODE_PEAK && state.hi_quality <= 1
+    && state.slope <= 1 && state.clip <= 1 && state.envelope_hold <= 1 && state.envelope_link <= 1 && state.lfo_sync <= 1
+    && state.lfo_division < daw::audio_core::AutoFilterKernel::kDivisionCount && state.lfo_stereo_mode <= 1
+    && std::isfinite(state.output_db) && state.output_db >= -24.0F && state.output_db <= 24.0F
     && std::isfinite(state.frequency_hz) && state.frequency_hz >= 20.0F && state.frequency_hz <= 20000.0F
     && std::isfinite(state.resonance) && state.resonance >= 0.0F && state.resonance <= 1.0F
     && std::isfinite(state.drive_db) && state.drive_db >= 0.0F && state.drive_db <= 24.0F
@@ -313,7 +316,7 @@ bool valid_autofilter_state(const daw_audio_autofilter_state &state) {
     && std::isfinite(state.envelope_amount_octaves) && state.envelope_amount_octaves >= -6.0F && state.envelope_amount_octaves <= 6.0F
     && std::isfinite(state.envelope_attack_ms) && state.envelope_attack_ms >= 0.5F && state.envelope_attack_ms <= 500.0F
     && std::isfinite(state.envelope_release_ms) && state.envelope_release_ms >= 5.0F && state.envelope_release_ms <= 2000.0F
-    && state.lfo_waveform <= 1 && std::isfinite(state.lfo_rate_hz) && state.lfo_rate_hz >= 0.01F && state.lfo_rate_hz <= 20.0F
+    && state.lfo_waveform <= 5 && std::isfinite(state.lfo_rate_hz) && state.lfo_rate_hz >= 0.01F && state.lfo_rate_hz <= 20.0F
     && std::isfinite(state.lfo_depth_octaves) && state.lfo_depth_octaves >= 0.0F && state.lfo_depth_octaves <= 6.0F
     && std::isfinite(state.lfo_phase_offset) && state.lfo_phase_offset >= 0.0F && state.lfo_phase_offset <= 1.0F
     && std::isfinite(state.lfo_stereo_phase) && state.lfo_stereo_phase >= -0.5F && state.lfo_stereo_phase <= 0.5F;
@@ -488,18 +491,23 @@ bool decode_processor_state(
     out_processor->spectral = state;
     return true;
   }
-  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER && descriptor.state_size == 60) {
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER && descriptor.state_size == 92) {
     const daw_audio_autofilter_state state{
       .enabled = read_u32_le(descriptor.state), .mode = read_u32_le(descriptor.state + 4),
-      .quality = read_u32_le(descriptor.state + 8), .frequency_hz = read_f32_le(descriptor.state + 12),
+      .hi_quality = read_u32_le(descriptor.state + 8), .frequency_hz = read_f32_le(descriptor.state + 12),
       .resonance = read_f32_le(descriptor.state + 16), .drive_db = read_f32_le(descriptor.state + 20),
       .mix = read_f32_le(descriptor.state + 24), .envelope_amount_octaves = read_f32_le(descriptor.state + 28),
       .envelope_attack_ms = read_f32_le(descriptor.state + 32), .envelope_release_ms = read_f32_le(descriptor.state + 36),
       .lfo_waveform = read_u32_le(descriptor.state + 40), .lfo_rate_hz = read_f32_le(descriptor.state + 44),
       .lfo_depth_octaves = read_f32_le(descriptor.state + 48), .lfo_phase_offset = read_f32_le(descriptor.state + 52),
-      .lfo_stereo_phase = read_f32_le(descriptor.state + 56),
+      .lfo_stereo_phase = read_f32_le(descriptor.state + 56), .slope = read_u32_le(descriptor.state + 60),
+      .output_db = read_f32_le(descriptor.state + 64), .clip = read_u32_le(descriptor.state + 68),
+      .envelope_hold = read_u32_le(descriptor.state + 72), .envelope_link = read_u32_le(descriptor.state + 76),
+      .lfo_sync = read_u32_le(descriptor.state + 80), .lfo_division = read_u32_le(descriptor.state + 84),
+      .lfo_stereo_mode = read_u32_le(descriptor.state + 88),
     };
-    if (!valid_autofilter_state(state) || descriptor.latency_frames != kAutoFilterLatencyFrames
+    if (!valid_autofilter_state(state)
+      || descriptor.latency_frames != daw::audio_core::AutoFilterKernel::latency_frames(state.hi_quality != 0)
       || descriptor.tail_frames != 0) return false;
     out_processor->autofilter = state;
     return true;
@@ -586,8 +594,9 @@ bool valid_processor_parameter_target(uint32_t kind, uint32_t target) {
       return target >= DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_FREEZE
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_MIX;
     case DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER:
-      return target >= DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_FREQUENCY_HZ
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE;
+      return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_FREQUENCY_HZ
+        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE)
+        || target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_OUTPUT_DB;
     case DAW_AUDIO_PROCESSOR_KIND_LOFI:
       return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_RATIO
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_MIX)
@@ -640,6 +649,7 @@ bool valid_processor_parameter_value(uint32_t target, float value) {
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_DEPTH_OCTAVES) return value >= 0.0F && value <= 6.0F;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_PHASE_OFFSET) return value >= 0.0F && value <= 1.0F;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE) return value >= -0.5F && value <= 0.5F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_OUTPUT_DB) return value >= -24.0F && value <= 24.0F;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_RATIO) return value >= 0.01F && value <= 1.0F;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_JITTER) return value >= 0.0F && value <= 1.0F;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_NOISE_DB) return value >= -120.0F && value <= -24.0F;

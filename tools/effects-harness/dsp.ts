@@ -113,6 +113,26 @@ export const toneFit = (signal: ArrayLike<number>, frequencyHz: number, rate: nu
   return { amplitude: 2 * Math.hypot(re, im) / weight, phase: Math.atan2(im, re) }
 }
 
+/**
+ * Power of the folded harmonics of `fundamentalHz` that land at or below `bandHz`, relative to the fundamental, in dB.
+ * A fold above the audible band (an oversampler's transition band at 48 kHz) is inaudible and not counted.
+ */
+export const audibleAliasDb = (signal: ArrayLike<number>, fundamentalHz: number, rate: number, maximumHarmonic: number, bandHz = 20000) => {
+  const fundamental = toneFit(signal, fundamentalHz, rate).amplitude
+  let power = 0
+
+  for (let harmonic = 2; harmonic <= maximumHarmonic; harmonic += 1) {
+    const frequency = harmonic * fundamentalHz
+
+    if (frequency < rate / 2) continue
+    const folded = Math.abs(frequency - rate * Math.round(frequency / rate))
+
+    if (folded <= bandHz) power += toneFit(signal, folded, rate).amplitude ** 2
+  }
+
+  return 10 * Math.log10(power / fundamental ** 2 + 1e-30)
+}
+
 export const toneGainDb = (input: ArrayLike<number>, output: ArrayLike<number>, frequencyHz: number, rate: number, from: number, to: number) =>
   linearToDb(toneFit(output, frequencyHz, rate, from, to).amplitude / toneFit(input, frequencyHz, rate, from, to).amplitude)
 

@@ -1,7 +1,6 @@
 import type { PortableExportSnapshot } from './portable-export-snapshot'
 import {
   portableExportWorkerProtocolVersion,
-  type PortableExportWorkerRequest,
   type PortableExportWorkerResponse,
 } from './portable-export-worker-protocol'
 
@@ -13,7 +12,7 @@ const wasmUrl = new URL('../../../public/audio-core/daw-audio-core.wasm', import
 let nextJobId = 1
 
 type WorkerHarness = {
-  onmessage: ((event: MessageEvent<PortableExportWorkerRequest>) => void) | null
+  onmessage: ((event: MessageEvent<object>) => void) | null
   postMessage: (message: PortableExportWorkerResponse) => void
   listen: (listener: (message: PortableExportWorkerResponse) => void) => void
 }

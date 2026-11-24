@@ -2,10 +2,37 @@ import { automationTargetKey, createDefaultCompressorParams, createDefaultDelayP
 import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import type { ExportFx } from './export-types'
 
+export type ComparisonVariant = 'automation' | 'full'
+
 export const comparisonSampleRate = 48_000
 export const comparisonDurationSec = 3
 export const comparisonToneHz = 1_000
 export const comparisonKickBursts = [{ startSec: 0.6, endSec: 0.9 }, { startSec: 1.8, endSec: 2.1 }] as const
+
+/** A planar PCM `AudioBuffer` for runtimes without the Web Audio constructor. */
+export class PlanarAudioBuffer implements AudioBuffer {
+  readonly duration: number
+  readonly length: number
+  readonly numberOfChannels: number
+
+  constructor(private readonly channels: Float32Array<ArrayBuffer>[], readonly sampleRate: number) {
+    this.numberOfChannels = channels.length
+    this.length = channels[0]?.length ?? 0
+    this.duration = this.length / sampleRate
+  }
+
+  copyFromChannel(destination: Float32Array, channel: number, offset = 0) {
+    destination.set(this.channels[channel].subarray(offset, offset + destination.length))
+  }
+
+  copyToChannel(source: Float32Array, channel: number, offset = 0) {
+    this.channels[channel].set(source, offset)
+  }
+
+  getChannelData(channel: number): Float32Array<ArrayBuffer> {
+    return this.channels[channel]
+  }
+}
 
 const planes = (generate: (timeSec: number) => number): Float32Array[] => {
   const samples = Float32Array.from(
@@ -36,15 +63,15 @@ const envelope = (
   }
 }
 
-// 100.5 ms is a whole number of periods plus half of one at the tone frequency, so the delayed copy is in antiphase.
 /**
  * One project that exercises every export feature the portable Worker must
  * match against the legacy OfflineAudioContext render: mixer volume
- * automation, an automated delay parameter, and a compressor sidechained to a
- * second track.
+ * automation, an automated delay parameter, and (in the `full` variant) a
+ * compressor sidechained to a second track.
  */
 export const createComparisonProject = (
   createBuffer: (planes: Float32Array[], sampleRate: number) => AudioBuffer,
+  variant: ComparisonVariant = 'full',
 ) => {
   const clip = (id: string, buffer: AudioBuffer): Track<AudioBuffer>['clips'][number] => ({
     id,
@@ -75,17 +102,20 @@ export const createComparisonProject = (
     },
   ]
 
+  const compressor = {
+    id: 'comp',
+    kind: 'compressor',
+    params: { ...createDefaultCompressorParams(), thresholdDb: -30, ratio: 8, attackMs: 2, releaseMs: 80 },
+  } as const
+
   const fx: ExportFx = {
     masterFxInstances: [],
     trackFx: {
       tone: {
         instances: [
-          { id: 'delay', kind: 'delay', params: { ...createDefaultDelayParams(), mode: 'time', timeMs: 100.5, feedback: 0.3, dryWet: 0 } },
-          {
-            id: 'comp',
-            kind: 'compressor',
-            params: { ...createDefaultCompressorParams(), thresholdDb: -30, ratio: 8, attackMs: 2, releaseMs: 80 },
-          },
+          // 100.5 ms is a whole number of tone periods plus half of one, so the wet copy is in antiphase and a quarter-wet mix halves the tone.
+          { id: 'delay', kind: 'delay', params: { ...createDefaultDelayParams(), mode: 'time', timeMs: 100.5, feedback: 0, dryWet: 0 } },
+          ...(variant === 'full' ? [compressor] : []),
         ],
       },
     },
@@ -93,10 +123,12 @@ export const createComparisonProject = (
 
   const automationEnvelopes = [
     envelope('tone', 'volume', [[0.5, 1, 'linear'], [2.5, 0.5, 'linear']]),
-    envelope('tone', 'delay.dryWet', [[1, 0, 'linear'], [1.2, 0.5, 'linear']], 'delay'),
+    envelope('tone', 'delay.dryWet', [[1, 0, 'linear'], [1.2, 0.25, 'linear']], 'delay'),
   ]
 
-  const sidechainRoutes: ExternalSidechainRoute[] = [{ sourceTrackId: 'kick', targetTrackId: 'tone', effectInstanceId: 'comp' }]
+  const sidechainRoutes: ExternalSidechainRoute[] = variant === 'full'
+    ? [{ sourceTrackId: 'kick', targetTrackId: 'tone', effectInstanceId: 'comp' }]
+    : []
 
   return { tracks, fx, automationEnvelopes, sidechainRoutes }
 }

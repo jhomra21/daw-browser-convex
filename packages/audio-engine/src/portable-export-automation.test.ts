@@ -6,38 +6,15 @@ import {
   comparisonSampleRate,
   comparisonToneHz,
   createComparisonProject,
+  PlanarAudioBuffer,
 } from './portable-export-comparison-project'
 import { compilePortableExportSnapshot } from './portable-export-snapshot'
 import { renderThroughExportWorker } from './portable-export-render-harness'
 
-class TestAudioBuffer implements AudioBuffer {
-  readonly duration: number
-  readonly length: number
-  readonly numberOfChannels: number
-
-  constructor(private readonly channels: Float32Array<ArrayBuffer>[], readonly sampleRate: number) {
-    this.numberOfChannels = channels.length
-    this.length = channels[0]?.length ?? 0
-    this.duration = this.length / sampleRate
-  }
-
-  copyFromChannel(destination: Float32Array, channel: number, offset = 0) {
-    destination.set(this.channels[channel].subarray(offset, offset + destination.length))
-  }
-
-  copyToChannel(source: Float32Array, channel: number, offset = 0) {
-    this.channels[channel].set(source, offset)
-  }
-
-  getChannelData(channel: number): Float32Array<ArrayBuffer> {
-    return this.channels[channel]
-  }
-}
-
 type ProjectOptions = { effects: readonly ('delay' | 'comp')[]; volume?: boolean; delayWet?: boolean; sidechain?: boolean }
 
 const project = (options: ProjectOptions) => {
-  const base = createComparisonProject((planes, sampleRate) => new TestAudioBuffer(planes.map((plane) => new Float32Array(plane)), sampleRate))
+  const base = createComparisonProject((planes, sampleRate) => new PlanarAudioBuffer(planes.map((plane) => new Float32Array(plane)), sampleRate))
 
   return {
     ...base,
@@ -124,10 +101,17 @@ describe('portable export automation, sidechains and graph latency', () => {
     const automated = await render(project({ effects: ['delay'], delayWet: true }))
     const held = await render(project({ effects: ['delay'] }))
 
-    // delay.dryWet ramps 0 -> 0.5 from 1.0 s; the delayed copy is in antiphase, so the tone collapses once the mix opens.
+    // delay.dryWet ramps 0 -> 0.25 from 1.0 s; the copy is in antiphase, so the tone falls to |0.75 - 0.25| of its level.
     expect(toneAmplitude(held.left, 1.5, 1.9)).toBeCloseTo(0.4, 2)
-    expect(toneAmplitude(automated.left, 1.5, 1.9)).toBeLessThan(0.4 * 0.5)
+    expect(toneAmplitude(automated.left, 1.5, 1.9)).toBeCloseTo(0.4 * 0.5, 2)
     expect(toneAmplitude(automated.left, 0.2, 0.8)).toBeCloseTo(0.4, 2)
+  }, timeout)
+
+  test('a fader and a processor parameter automated in the same blocks both apply', async () => {
+    const faderOnly = await render(project({ effects: ['delay'], volume: true }))
+    const both = await render(project({ effects: ['delay'], volume: true, delayWet: true }))
+
+    expect(toneAmplitude(both.left, 1.5, 1.9) / toneAmplitude(faderOnly.left, 1.5, 1.9)).toBeCloseTo(0.5, 2)
   }, timeout)
 
   test('a sidechained compressor ducks the tone while the source track plays, and only then', async () => {

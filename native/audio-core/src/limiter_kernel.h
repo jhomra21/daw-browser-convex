@@ -3,7 +3,7 @@
 // Limiter DSP kernel, independent of the audio-core graph so it can be measured on its own.
 //
 // Signal path per channel: input gain -> true-peak detector (8x polyphase FIR, flat to 0.45 fs, plus the raw samples)
-// -> gain target -> min-hold over the lookahead window -> two cascaded moving averages -> release stage -> gain on the
+// -> gain target -> min-hold over the lookahead window plus a 10 ms hold -> two cascaded moving averages -> release stage -> gain on the
 // audio delayed by exactly the lookahead -> safety clip at the ceiling.
 //
 // The min-hold window and the averages are sized so that the smoothed gain at the moment a sample leaves the delay
@@ -50,6 +50,13 @@ class LimiterKernel {
   static constexpr uint32_t kCapacity = 2048;
   static constexpr uint32_t kMask = kCapacity - 1;
   static constexpr uint32_t kMaximumBox = 1024;
+  // The detector reads the successive peaks of a steady tone with a ripple that depends on where each peak falls between
+  // samples. Holding the minimum for longer than that ripple's cycle keeps a steady tone's gain constant; the release
+  // stage only starts once a peak has been out of the window for this long.
+  static constexpr float kHoldMs = 10.0F;
+  // The min-hold ring must fit the lookahead window and the hold; at a rate where it cannot, the hold is cut short.
+  static constexpr uint32_t kHoldCapacity = 4096;
+  static constexpr uint32_t kHoldMask = kHoldCapacity - 1;
   // Auto release: the fast stage answers isolated peaks; the slow stage engages as the gain reduction is sustained.
   static constexpr float kAutoFastMs = 25.0F;
   static constexpr float kAutoSlowMs = 500.0F;
@@ -123,7 +130,7 @@ class LimiterKernel {
     std::array<float, 2> wet{};
     for (uint32_t c = 0; c < 2; ++c) {
       Channel &channel = channels_[c];
-      const float held = channel.minimum.push(target[c] + (linked - target[c]) * values.link, delay_ - ahead_ + 1);
+      const float held = channel.minimum.push(target[c] + (linked - target[c]) * values.link, delay_ - ahead_ + 1 + hold_frames_);
       const float smooth = channel.second.push(channel.first.push(held, box_lengths_[0]), box_lengths_[1]);
       channel.gain = std::min(smooth, 1.0F + release_coefficient(channel, config.auto_release) * (channel.gain - 1.0F));
       if (config.auto_release) track_sustain(channel, smooth);
@@ -146,14 +153,14 @@ class LimiterKernel {
  private:
   // Sliding minimum of the last window + 1 pushes, in O(1) per push.
   struct SlidingMinimum {
-    std::array<float, kCapacity> value{};
-    std::array<uint32_t, kCapacity> frame{};
+    std::array<float, kHoldCapacity> value{};
+    std::array<uint32_t, kHoldCapacity> frame{};
     uint32_t head = 0;
     uint32_t count = 0;
     uint32_t now = 0;
 
     float push(float target, uint32_t window) {
-      const auto slot = [this](uint32_t offset) { return (head + offset) & kMask; };
+      const auto slot = [this](uint32_t offset) { return (head + offset) & kHoldMask; };
       while (count > 0 && value[slot(count - 1)] >= target) --count;
       while (count > 0 && now - frame[slot(0)] > window) {
         head = slot(1);
@@ -301,6 +308,7 @@ class LimiterKernel {
     // and its two neighbours: a min-hold window of D - H + 2 frames, and two boxes whose supports add to D - H.
     const uint32_t span = delay_ - ahead_ + 1;
     box_lengths_ = {std::min((span + 1) / 2, kMaximumBox), std::min(span / 2, kMaximumBox)};
+    hold_frames_ = std::min(static_cast<uint32_t>(std::lround(kHoldMs * 0.001 * rate_)), kHoldCapacity - 2 - span);
     for (Channel &channel : channels_) {
       channel.first.start(box_lengths_[0]);
       channel.second.start(box_lengths_[1]);
@@ -317,6 +325,7 @@ class LimiterKernel {
   Coefficients coefficients_{};
   uint32_t delay_ = 0;
   uint32_t ahead_ = kMinimumAhead;
+  uint32_t hold_frames_ = 0;
   uint32_t write_ = 0;
   float input_gain_ = 1.0F;
   float ceiling_ = 0.891F;

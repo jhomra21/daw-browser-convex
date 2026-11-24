@@ -96,7 +96,7 @@ export const parameterTargets: Record<EffectKind, Record<string, number>> = {
   ensemble: range(100, ['delayMs', 'depthMs', 'rateHz', 'spread', 'mix']),
   gate: range(105, ['thresholdDb', 'ratio', 'attackMs', 'holdMs', 'releaseMs', 'hysteresisDb', 'rangeDb', 'lookaheadMs', 'link', 'sidechain.frequencyHz', 'sidechain.q']),
   compressor: range(116, ['thresholdDb', 'ratio', 'attackMs', 'releaseMs', 'makeupDb', 'outputDb', 'dryWet', 'kneeDb', 'lookaheadMs', 'sidechain.frequencyHz', 'sidechain.q']),
-  limiter: range(127, ['ceilingDbtp', 'releaseMs', 'lookaheadMs', 'link']),
+  limiter: { ceilingDbtp: 127, releaseMs: 128, link: 130, gainDb: 170 },
   delay: range(5, ['delayMs', 'feedback', 'dryWet', 'lowCutHz', 'highCutHz']),
   reverb: {
     wet: 10, preDelayMs: 11, lowCutHz: 12, highCutHz: 13, stereoWidth: 14, decaySec: 132, reflections: 133,
@@ -173,7 +173,7 @@ export const fx = {
     },
   }),
   limiter: (state: Partial<LimiterProcessorState> = {}): EffectSpec => ({
-    kind: 'limiter', state: { enabled: true, ceilingDbtp: -1, releaseMs: 100, lookaheadMs: 5, link: 1, detectorOversampling: 4, ...state },
+    kind: 'limiter', state: { enabled: true, gainDb: 0, ceilingDbtp: -1, releaseMs: 100, autoRelease: false, lookaheadMs: 3, link: 1, ...state },
   }),
   delay: (state: Partial<DelayProcessorState> = {}): EffectSpec => ({
     kind: 'delay',

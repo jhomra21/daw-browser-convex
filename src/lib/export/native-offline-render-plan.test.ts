@@ -1275,8 +1275,8 @@ test('renders one graph latency past the range and the tail so the export can st
     tailFrames: 10,
   })
 
-  // Master Limiter lookahead (5 ms) plus the VST3's declared 32 frames and 512 transport frames.
-  expect(latencyFrames).toBe(240 + 32 + 512)
+  // Master Limiter lookahead (3 ms) plus the VST3's declared 32 frames and 512 transport frames.
+  expect(latencyFrames).toBe(144 + 32 + 512)
   expect(plan.totalFrames).toBe(RANGE_FRAMES + 10 + latencyFrames)
 })
 

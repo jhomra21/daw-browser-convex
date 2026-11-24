@@ -1775,7 +1775,7 @@ const alignMixdownInput = {
 } satisfies Partial<Parameters<typeof runTimelineExport>[0]>
 
 test("a native mixdown with graph latency starts on the timeline and keeps the range length", async () => {
-  const limiterFrames = Math.ceil(5 * ALIGN_RATE / 1000)
+  const limiterFrames = Math.ceil(3 * ALIGN_RATE / 1000)
   const file = captureEncodedFile()
   let renderedFrames = 0
 

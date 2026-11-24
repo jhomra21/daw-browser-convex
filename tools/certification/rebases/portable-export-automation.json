@@ -1,0 +1,183 @@
+{
+ "name": "portable-export-automation",
+ "sequence": 121,
+ "createdAt": "2026-11-24T03:53:56.846Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "packages/audio-engine/src/native-host-wire.ts",
+   "from": "9bc4e20db021dae7b7b49edb06bd70bd0a8f0f7c979f518eccf3c3c07c53d7e0",
+   "to": "7f4d56b92169ecf5896c8b7b63bd967c7684767fb8f9c7a859c203ac767912a8"
+  },
+  {
+   "file": "public/audio-core/daw-audio-core.manifest.json",
+   "from": "cc7eb2eb74a740e26eaacc11286d0b60537cf03581ba19bc01578a1a186342b9",
+   "to": "4113d569fbe3d9a7fda627e30465b0f887c06279246ce724730cd7f630d23a99"
+  },
+  {
+   "file": "public/audio-core/daw-audio-core.wasm",
+   "from": "c18cf4fe1b5711010cb1c808c1d9d129e681f5480888366ad08035bf5d9222d2",
+   "to": "87321a156480539e0819a7f220fce052b13074b56ad8cdbf0c0c937c643a1c09"
+  },
+  {
+   "file": "public/audio-worklets/daw-portable-graph-envelope-v3.js",
+   "from": "12e03002e9d602d0da33fba4489b54cfd8cb9147616e6e3722a9ae5d43812741",
+   "to": "53ecf1158f097547efc0d389ab1fe22e2bd3fedd191c8423175aa88174d67712"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "01d790b9a0486bf83469d8c63e4520527144f133e8eb397f26c476b218063365",
+   "new": "fe532f0937e6a3df6e1ad5c702433a94ad05777b2c00eb641f8a0c1850dff79c"
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-i4-consumers",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 435,
+   "new": 436
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "value"
+   ],
+   "old": "fc929bf4ea484647af3b93d369263f4504bb5e82b0cdd2deeb78c41a0410d6d8",
+   "new": "fbe1a3e11c97e7a8889ed1cd82d814afd836875a7e6260527c9ca8e94af172a1"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "public/audio-core/daw-audio-core.wasm"
+   ],
+   "old": "c18cf4fe1b5711010cb1c808c1d9d129e681f5480888366ad08035bf5d9222d2",
+   "new": "87321a156480539e0819a7f220fce052b13074b56ad8cdbf0c0c937c643a1c09"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm"
+   ],
+   "old": "c18cf4fe1b5711010cb1c808c1d9d129e681f5480888366ad08035bf5d9222d2",
+   "new": "87321a156480539e0819a7f220fce052b13074b56ad8cdbf0c0c937c643a1c09"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "public/audio-core/daw-audio-core.manifest.json"
+   ],
+   "old": "cc7eb2eb74a740e26eaacc11286d0b60537cf03581ba19bc01578a1a186342b9",
+   "new": "4113d569fbe3d9a7fda627e30465b0f887c06279246ce724730cd7f630d23a99"
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/portable-export-automation.test.ts"
+   ],
+   "old": null,
+   "new": {
+    "pass": 7,
+    "skip": 0,
+    "fail": 0
+   }
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/portable-export-legacy-comparison.browser.test.ts"
+   ],
+   "old": null,
+   "new": {
+    "pass": 1,
+    "skip": 0,
+    "fail": 0
+   }
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/portable-export-automation.test.ts"
+   ],
+   "old": null,
+   "new": {
+    "pass": 7,
+    "skip": 0,
+    "fail": 0
+   }
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/portable-export-legacy-comparison.browser.test.ts"
+   ],
+   "old": null,
+   "new": {
+    "pass": 1,
+    "skip": 0,
+    "fail": 0
+   }
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "691c162b2785340c64b426383d13660c8ee49ac4",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "c21ea8e06197fed08c427856a455789b77c120b35ac7410da5022b22b266e67c",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "c21ea8e06197fed08c427856a455789b77c120b35ac7410da5022b22b266e67c",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/pe-bless/live",
+   "resultSha256": "2be503b79744538cb979763e840fd729161031b52c792de65ec77f681f08289b",
+   "seconds": 1699.77376675,
+   "observations": 3081
+  },
+  "unreachedByOverlay": []
+ }
+}

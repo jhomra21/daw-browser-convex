@@ -28,8 +28,9 @@ import {
   deriveTrackUngroupAfterStatesV1,
   type NormalizedTrackControlStateV1,
 } from "@daw-browser/control-core";
+import { currentAutomationDocs } from "./automationRowValues";
 import { currentEffectDocs } from "./effectRowParams";
-import { AUDIO_EFFECT_KINDS, audioEffectParamsVersionStamp, automationTargetKey, canonicalTrackCreation, collectTrackDescendantIds, createDefaultSynthParams, createInstrumentInstanceId, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, isSidechainCapableKind, normalizeClipColor, normalizeMixerVolume, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, normalizeTrackColor, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sidechainEligibilityError, sidechainTargetEligibilityError, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
+import { AUDIO_EFFECT_KINDS, audioEffectParamsVersionStamp, automationTargetKey, automationValuesVersionStamp, canonicalTrackCreation, collectTrackDescendantIds, createDefaultSynthParams, createInstrumentInstanceId, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, isSidechainCapableKind, normalizeClipColor, normalizeMixerVolume, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, normalizeTrackColor, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sidechainEligibilityError, sidechainTargetEligibilityError, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
 
 type DeleteOwnedTrackOptions = {
   onlyIfEmpty?: boolean
@@ -1613,10 +1614,10 @@ const ungroupTrackForUser = async (ctx: any, userId: string, projectId: string, 
 
   await Promise.all(childPatches);
 
-  const automation = await ctx.db
+  const automation = await currentAutomationDocs(ctx.db
     .query("automationEnvelopes")
     .withIndex("by_project_track", (q: any) => q.eq("projectId", group.projectId).eq("trackId", normalizedGroupId))
-    .collect();
+    .collect());
 
   const effects = await currentEffectDocs(ctx.db.query("effects").withIndex("by_track", (q: any) => q.eq("trackId", normalizedGroupId)).collect());
 
@@ -1952,6 +1953,7 @@ export const serverRestoreUngroup = mutation({
             parameterId,
             enabled: envelope.enabled,
             points: envelope.points,
+            ...automationValuesVersionStamp(parameterId),
             updatedAt: envelope.updatedAt,
           });
         }

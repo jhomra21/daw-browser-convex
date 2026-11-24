@@ -5,6 +5,7 @@ import { getProjectMixerSettings } from "./projectMixerSettings";
 import { requireProjectAccess } from "./projectAccess";
 import { requireAuthenticatedUserId } from "./identity";
 import { requireProjectRow } from "./projectRows";
+import { currentAutomationRows } from "./automationRowValues";
 
 const readFullTimelineView = async (
   ctx: QueryCtx,
@@ -52,7 +53,7 @@ const readFullTimelineView = async (
     tracks,
     clips,
     mixerSettings,
-    automationEnvelopes,
+    automationEnvelopes: currentAutomationRows(automationEnvelopes),
     effects,
     sidechainRoutes,
   };

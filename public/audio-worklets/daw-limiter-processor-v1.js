@@ -16,7 +16,7 @@ const isLimiterConfigureMessage = (message, revision) => isLimiterMessage(messag
   && Object.prototype.toString.call(message.state) === '[object Object]'
 
 // Everything below is a port of native/audio-core/src/limiter_kernel.h, kept line for line so the two stay comparable:
-// input gain -> true-peak detector -> gain target -> min-hold over the lookahead -> two moving averages -> release stage
+// input gain -> true-peak detector -> gain target -> min-hold over the lookahead plus a 10 ms hold -> two moving averages -> release stage
 // -> gain on the audio delayed by exactly the lookahead -> safety clip at the ceiling.
 const OVERSAMPLE = 8
 const PAST = 64
@@ -28,35 +28,46 @@ const DETECTOR_MARGIN = Math.fround(0.99655)
 const CAPACITY = 2048
 const MASK = CAPACITY - 1
 const MAXIMUM_BOX = 1024
+
+// A steady tone's peaks are read with a sub-sample-position ripple; holding the minimum for longer than its cycle keeps
+// the tone's gain constant. The ring must fit the lookahead window and the hold; where it cannot, the hold is cut short.
+const HOLD_MS = 10
+
+const HOLD_CAPACITY = 4096
+const HOLD_MASK = HOLD_CAPACITY - 1
 const AUTO_FAST_MS = 25
 const AUTO_SLOW_MS = 500
 const AUTO_BUILD_MS = 150
-const AUTO_SLOW_FROM = 0.15
-const AUTO_SLOW_TO = 0.65
+const AUTO_SLOW_FROM = Math.fround(0.15)
+const AUTO_SLOW_TO = Math.fround(0.65)
 const GRID = OVERSAMPLE + 3
-const DENORMAL_FLOOR = 1e-19
+const DENORMAL_FLOOR = Math.fround(1e-19)
+
+// The core computes in float, and the parabola below subtracts nearly equal values, so each float operation of the
+// core is rounded here too.
+const f = Math.fround
 
 const flushDenormal = (value) => Math.abs(value) < DENORMAL_FLOOR ? 0 : value
 
 // Sliding minimum of the last window + 1 pushes, in O(1) per push.
 class SlidingMinimum {
   constructor() {
-    this.value = new Float32Array(CAPACITY)
-    this.frame = new Float64Array(CAPACITY)
+    this.value = new Float32Array(HOLD_CAPACITY)
+    this.frame = new Float64Array(HOLD_CAPACITY)
     this.head = 0
     this.count = 0
     this.now = 0
   }
 
   push(target, window) {
-    while (this.count > 0 && this.value[(this.head + this.count - 1) & MASK] >= target) this.count--
+    while (this.count > 0 && this.value[(this.head + this.count - 1) & HOLD_MASK] >= target) this.count--
 
     while (this.count > 0 && this.now - this.frame[this.head] > window) {
-      this.head = (this.head + 1) & MASK
+      this.head = (this.head + 1) & HOLD_MASK
       this.count--
     }
 
-    const tail = (this.head + this.count) & MASK
+    const tail = (this.head + this.count) & HOLD_MASK
     this.value[tail] = target
     this.frame[tail] = this.now++
     this.count++
@@ -111,9 +122,10 @@ class LimiterKernel {
     this.boxLengths = [1, 1]
     this.delay = 0
     this.ahead = MINIMUM_AHEAD
+    this.holdFrames = 0
     this.write = 0
     this.inputGain = 1
-    this.ceiling = 0.891
+    this.ceiling = Math.fround(0.891)
     this.release = 0
     this.autoBuild = 0
     this.autoDecay = 0
@@ -139,7 +151,7 @@ class LimiterKernel {
   }
 
   onePole(milliseconds) {
-    return Math.exp(-1 / (Math.max(milliseconds, 0.01) * 0.001 * this.rate))
+    return f(Math.exp(f(-1 / f(f(Math.max(milliseconds, f(0.01)) * f(0.001)) * f(this.rate)))))
   }
 
   nextInputGainDb(target) {
@@ -210,6 +222,7 @@ class LimiterKernel {
     this.design(this.ahead)
     const span = delay - this.ahead + 1
     this.boxLengths = [Math.min(Math.floor((span + 1) / 2), MAXIMUM_BOX), Math.min(Math.floor(span / 2), MAXIMUM_BOX)]
+    this.holdFrames = Math.min(Math.round(HOLD_MS * 0.001 * this.rate), HOLD_CAPACITY - 2 - span)
 
     for (const channel of this.channels) {
       channel.first.start(this.boxLengths[0])
@@ -231,20 +244,35 @@ class LimiterKernel {
       largest = Math.max(largest, Math.abs(window[j]))
     }
 
-    const margin = this.ceiling * DETECTOR_MARGIN
+    const margin = f(this.ceiling * DETECTOR_MARGIN)
+    const bounded = f(largest * this.bound)
 
-    if (largest * this.bound <= margin) return largest * this.bound
+    if (bounded <= margin) return bounded
     const grid = this.grid
     grid[1] = Math.abs(window[PAST - 1])
     grid[OVERSAMPLE + 1] = Math.abs(window[PAST])
 
     for (let i = 0; i < GRID; i++) {
       if (i === 1 || i === OVERSAMPLE + 1) continue
+      const point = this.point
       const offset = i * MAXIMUM_TAPS
-      let sum = 0
+      let p0 = 0
+      let p1 = 0
+      let p2 = 0
+      let p3 = 0
 
-      for (let j = 0; j < taps; j++) sum += window[j] * this.point[offset + j]
-      grid[i] = Math.abs(sum)
+      // Four partial sums, as in the core; a tap past the window would add an exact zero.
+      for (let j = 0; j < taps; j += 4) {
+        p0 = f(p0 + f(window[j] * point[offset + j]))
+
+        if (j + 1 < taps) p1 = f(p1 + f(window[j + 1] * point[offset + j + 1]))
+
+        if (j + 2 < taps) p2 = f(p2 + f(window[j + 2] * point[offset + j + 2]))
+
+        if (j + 3 < taps) p3 = f(p3 + f(window[j + 3] * point[offset + j + 3]))
+      }
+
+      grid[i] = Math.abs(f(f(p0 + p1) + f(p2 + p3)))
     }
 
     let at = 1
@@ -253,57 +281,58 @@ class LimiterKernel {
 
     // A largest point that is not a local maximum means the peak lies in a neighbouring interval, whose own pass reads it.
     if (grid[at - 1] > grid[at] || grid[at + 1] > grid[at]) return grid[at]
-    const curvature = 2 * grid[at] - grid[at - 1] - grid[at + 1]
+    const curvature = f(f(2 * grid[at] - grid[at - 1]) - grid[at + 1])
+    const slope = f(grid[at + 1] - grid[at - 1])
 
-    return curvature > 0 ? grid[at] + (grid[at + 1] - grid[at - 1]) * (grid[at + 1] - grid[at - 1]) / (8 * curvature) : grid[at]
+    return curvature > 0 ? f(grid[at] + f(f(slope * slope) / f(8 * curvature))) : grid[at]
   }
 
   releaseCoefficient(channel, autoRelease, releaseCoefficient) {
     if (!autoRelease) return releaseCoefficient
-    const slow = Math.min(Math.max((channel.sustain - AUTO_SLOW_FROM) / (AUTO_SLOW_TO - AUTO_SLOW_FROM), 0), 1)
+    const slow = Math.min(Math.max(f(f(channel.sustain - AUTO_SLOW_FROM) / f(AUTO_SLOW_TO - AUTO_SLOW_FROM)), 0), 1)
 
-    return this.onePole(AUTO_FAST_MS + (AUTO_SLOW_MS - AUTO_FAST_MS) * slow)
+    return this.onePole(f(AUTO_FAST_MS + f((AUTO_SLOW_MS - AUTO_FAST_MS) * slow)))
   }
 
   // The sustain only rises while the smoothed gain is what sets the output; it falls at the slow stage's pace after.
   trackSustain(channel, smooth) {
     const working = smooth < 1 && channel.gain === smooth
 
-    channel.sustain = flushDenormal(working ? channel.sustain + (1 - channel.sustain) * (1 - this.autoBuild) : channel.sustain * this.autoDecay)
+    channel.sustain = flushDenormal(working ? f(channel.sustain + f(f(1 - channel.sustain) * f(1 - this.autoBuild))) : f(channel.sustain * this.autoDecay))
   }
 
   // Writes the delayed, limited pair into out[0..1]; `enabled` false passes the delayed dry signal.
   process(values, lookaheadMs, autoRelease, enabled, inputLeft, inputRight, out) {
     this.configure(lookaheadMs)
     const gainDb = this.nextInputGainDb(values.gainDb)
-    this.inputGain = 10 ** (gainDb / 20)
-    this.ceiling = 10 ** (values.ceilingDbtp / 20)
+    this.inputGain = f(10 ** f(gainDb / 20))
+    this.ceiling = f(10 ** f(values.ceilingDbtp / 20))
     const releaseCoefficient = this.onePole(values.releaseMs)
-    const input = [flushDenormal(inputLeft), flushDenormal(inputRight)]
+    const input = [flushDenormal(f(inputLeft)), flushDenormal(f(inputRight))]
     const slot = this.write & MASK
     const target = [0, 0]
 
     for (let c = 0; c < 2; c++) {
       this.channels[c].dry[slot] = input[c]
-      this.channels[c].gained[slot] = input[c] * this.inputGain
+      this.channels[c].gained[slot] = f(input[c] * this.inputGain)
     }
 
-    for (let c = 0; c < 2; c++) target[c] = Math.min(1, this.ceiling * DETECTOR_MARGIN / Math.max(this.truePeak(this.channels[c]), 1e-12))
+    for (let c = 0; c < 2; c++) target[c] = Math.min(1, f(f(this.ceiling * DETECTOR_MARGIN) / Math.max(this.truePeak(this.channels[c]), f(1e-12))))
     const linked = Math.min(target[0], target[1])
     const read = (this.write - this.delay) & MASK
     const wet = [0, 0]
 
     for (let c = 0; c < 2; c++) {
       const channel = this.channels[c]
-      const held = channel.minimum.push(target[c] + (linked - target[c]) * values.link, this.delay - this.ahead + 1)
+      const held = channel.minimum.push(f(target[c] + f(f(linked - target[c]) * f(values.link))), this.delay - this.ahead + 1 + this.holdFrames)
       const smooth = channel.second.push(channel.first.push(held, this.boxLengths[0]), this.boxLengths[1])
-      channel.gain = Math.min(smooth, 1 + this.releaseCoefficient(channel, autoRelease, releaseCoefficient) * (channel.gain - 1))
+      channel.gain = Math.min(smooth, f(1 + f(this.releaseCoefficient(channel, autoRelease, releaseCoefficient) * f(channel.gain - 1))))
 
       if (autoRelease) this.trackSustain(channel, smooth)
-      let value = channel.gained[read] * channel.gain
+      let value = f(channel.gained[read] * channel.gain)
 
       if (Math.abs(value) > this.ceiling) {
-        if (Math.abs(value) > this.ceiling * 1.00001) this.safetyClips++
+        if (Math.abs(value) > f(this.ceiling * f(1.00001))) this.safetyClips++
         value = Math.sign(value) * this.ceiling
       }
 

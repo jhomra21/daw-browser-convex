@@ -133,7 +133,7 @@ function EqToggle(props: { label: string; title: string; pressed: boolean; disab
         props.pressed ? 'bg-cyan-500/20 text-cyan-100' : 'bg-app-surface text-muted-foreground hover:bg-muted',
         props.disabled && 'cursor-not-allowed opacity-60',
       )}
-      onClick={props.onToggle}
+      onClick={() => props.onToggle()}
     >
       {props.label}
     </button>

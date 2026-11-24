@@ -465,6 +465,7 @@ test('Saturator and eight-band EQ codecs preserve their portable state profiles'
       q: 1,
     })),
   })
+
   const eqView = new DataView(eq.buffer)
 
   expect(eq.byteLength).toBe(408)

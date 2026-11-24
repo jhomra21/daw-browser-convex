@@ -378,6 +378,7 @@ export const getAutomationParameterDescriptor = (
   const staticDescriptor = staticDescriptors.find((descriptor) => descriptor.id === parameterId)
 
   if (staticDescriptor) return staticDescriptor
+
   const effectDescriptor = effectDescriptors.find((descriptor) => descriptor.id === parameterId)
     ?? eqDeviceDescriptors.find((descriptor) => descriptor.id === parameterId)
 

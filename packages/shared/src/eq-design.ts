@@ -23,6 +23,7 @@ const cornerOmega = (frequency: number, sampleRate: number) => TWO_PI * clamp(fr
 // Impulse-invariant poles for damping `q` = 1 / (2 Q) at `omega` radians per sample.
 const impulseInvariantPoles = (q: number, omega: number) => {
   const decay = Math.exp(-q * omega)
+
   const a1 = q <= 1
     ? -2 * decay * Math.cos(Math.sqrt(1 - q * q) * omega)
     : -2 * decay * Math.cosh(Math.sqrt(q * q - 1) * omega)
@@ -190,6 +191,7 @@ export const designEqBand = (type: EqBandType, frequency: number, sampleRate: nu
         ? [matchedShelf(type === 'lowshelf', frequency, sampleRate, q, gainDb)]
         : [rbjBiquad(type, frequency, sampleRate, q, gainDb)]
     }
+
     default: return [rbjBiquad(type, frequency, sampleRate, q, gainDb)]
   }
 }
@@ -229,6 +231,7 @@ export const effectiveEqBand = (band: EqBandParams, params: Pick<EqParams, 'scal
 /** The curve (0 = first, 1 = second) of the device as the graph draws it: enabled bands only, at the real sample rate. */
 export const eqCurveResponseDb = (params: EqParams, curve: 0 | 1, frequencies: readonly number[], sampleRate: number): number[] => {
   const processingRate = params.highQuality ? 2 * sampleRate : sampleRate
+
   const bands = params.bands
     .slice(curve * EQ_BANDS_PER_CURVE, (curve + 1) * EQ_BANDS_PER_CURVE)
     .filter((band) => band.enabled)

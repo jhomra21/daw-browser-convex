@@ -9,7 +9,6 @@ import {
   normalizeEqParams,
   normalizeEqParamsForUpdate,
   supportsGain,
-  type EqBandParams,
 } from './effects-params'
 import type { JsonValue } from './json-value'
 import { getAutomationParameterDescriptor } from './automation-parameters'
@@ -17,7 +16,7 @@ import { designEqBand, eqChainResponseDb } from './eq-design'
 
 const migrateV1 = (params: JsonValue) => normalizeAudioEffect('eq', migrateAudioEffectParams('eq', params, 1)).params
 
-const v1Params: { enabled: boolean; channelMode: string; bands: EqBandParams[] } = {
+const v1Params = {
   enabled: true,
   channelMode: 'stereo',
   bands: [

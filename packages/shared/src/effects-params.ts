@@ -64,6 +64,7 @@ export const EQ_OUTPUT_DB_MIN = -12
 export const EQ_OUTPUT_DB_MAX = 12
 export const EQ_BANDS_PER_CURVE = 8
 export const EQ_BAND_COUNT = 2 * EQ_BANDS_PER_CURVE
+
 // The core's declared latency with Hi-Quality on: the group delay of its half-band oversampler at low frequencies.
 export const EQ_HIGH_QUALITY_LATENCY_FRAMES = 3
 const DEFAULT_EQ_FREQUENCIES = [40, 100, 200, 500, 1000, 2500, 6000, 12000]
@@ -183,6 +184,7 @@ export function serializeNormalizedEqParams(params: EqParams): string {
 
   return signature
 }
+
 export function serializeEqParams(params: EqParams): string {
   return serializeNormalizedEqParams(normalizeEqParams(params))
 }

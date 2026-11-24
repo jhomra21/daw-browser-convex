@@ -1,6 +1,6 @@
 // Acceptance tests from eq-filters.md section 3: E1/E3 (response vs analog), E2 (precision, NaN, denormals), E4 (click),
 // E5 (slopes), A1 (drive), A2 (parity, latency), A3 (resonance level).
-import { analogBandDb, audibleAliasDb, biquad, countNonFinite, logFrequencies, maxAbsDiff, peakAbs, peakDb, responseDb, rbjCoefficients, rms, toneFit } from '../dsp'
+import { analogBandDb, audibleAliasDb, biquad, countNonFinite, logFrequencies, maxAbsDiff, peakAbs, peakDb, responseDb, rms, toneFit } from '../dsp'
 import { measureAliasingEnergyDb, measureThdPlusNoise } from '../../../packages/audio-engine/src/dsp-characterization'
 import { autofilterLfo, eqWith, fx } from '../effects'
 import type { EffectSpec } from '../effects'

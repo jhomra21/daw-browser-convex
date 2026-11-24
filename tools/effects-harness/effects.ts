@@ -69,13 +69,13 @@ export const declaredLatencyFrames = (spec: EffectSpec): number =>
 const range = (first: number, keys: readonly string[]): Record<string, number> =>
   Object.fromEntries(keys.map((key, index) => [key, first + index]))
 
-const eqBandTarget = (band: number) => (band < 8 ? 45 + band * 3 : 143 + (band - 8) * 3)
+const eqBandTarget = (band: number) => (band < 8 ? 45 + band * 3 : 144 + (band - 8) * 3)
 
 const eqTargets = Object.fromEntries([
   ...Array.from({ length: 16 }, (_, band) => [
     [`bands.${band}.frequency`, eqBandTarget(band)], [`bands.${band}.gainDb`, eqBandTarget(band) + 1], [`bands.${band}.q`, eqBandTarget(band) + 2],
   ]).flat(),
-  ['scale', 167], ['outputDb', 168],
+  ['scale', 168], ['outputDb', 169],
 ])
 
 const modulationKeys = ['delayMs', 'depthMs', 'rateHz', 'feedback', 'stereoPhase', 'mix']

@@ -113,9 +113,9 @@ const EQ_BAND_PARAMETER_TARGET_BASE = 45
 const EQ_BAND_PARAMETER_TARGET_STRIDE = 3
 
 // Bands 8-15 (curve B) were added after the other processors' targets and sit past the rest of the target space.
-const EQ_SECOND_CURVE_PARAMETER_TARGET_BASE = 143
-const EQ_SCALE_PARAMETER_TARGET = 167
-const EQ_OUTPUT_DB_PARAMETER_TARGET = 168
+const EQ_SECOND_CURVE_PARAMETER_TARGET_BASE = 144
+const EQ_SCALE_PARAMETER_TARGET = 168
+const EQ_OUTPUT_DB_PARAMETER_TARGET = 169
 
 const eqBandParameterTarget = (bandIndex: number, propertyOffset: number) => (
   bandIndex < EQ_BANDS_PER_CURVE

@@ -328,10 +328,10 @@ describe('mixer routing plan', () => {
       ['saturator', 2, 32],
       ['eq', 3, 408],
     ])
-    // Curve A keeps its targets 45-68; curve B (bands 9-16) sits at 143-166, then Scale and Output.
+    // Curve A keeps its targets 45-68; curve B (bands 9-16) sits at 144-167, then Scale and Output.
     expect(snapshot.nodes[0]?.processorOrder[1]?.parameterTargets).toEqual([
       ...createDefaultEqParams().bands.flatMap((band, index) => {
-        const base = index < 8 ? 45 + index * 3 : 143 + (index - 8) * 3
+        const base = index < 8 ? 45 + index * 3 : 144 + (index - 8) * 3
 
         return [
           { id: createEqBandParameterId(band.id, 'frequencyHz'), target: base },
@@ -339,8 +339,8 @@ describe('mixer routing plan', () => {
           { id: createEqBandParameterId(band.id, 'q'), target: base + 2 },
         ]
       }),
-      { id: 'eq.scale', target: 167 },
-      { id: 'eq.outputDb', target: 168 },
+      { id: 'eq.scale', target: 168 },
+      { id: 'eq.outputDb', target: 169 },
     ])
     expect(snapshot.nodes[0]?.processorOrder[1]?.latencyFrames).toBe(3)
     expect(snapshot.nodes[0]?.processorOrder[1]?.stateVersion).toBe(2)

@@ -408,26 +408,26 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
       </div>
 
       <div class="justify-self-center flex items-center gap-2">
-      <ArrangementPosition
-        playheadSec={props.playback.playheadSec}
-        bpm={props.timeline.bpm}
-        onLocate={props.playback.onLocate}
-      />
-      <TransportBar
-        transport={{
-          ...props.recording,
-          ...props.playback,
-          ...props.timeline,
-          tempoDraft: tempo.tempoDraft,
-          setTempoDraft: tempo.setTempoDraft,
-          tempoEditing: tempo.tempoEditing,
-          setTempoEditing: tempo.setTempoEditing,
-          commitTempo: tempo.commitTempo,
-          beginTempoDrag: tempo.beginTempoDrag,
-          updateTempoDrag: tempo.updateTempoDrag,
-          endTempoDrag: tempo.endTempoDrag,
-        }}
-      />
+        <ArrangementPosition
+          playheadSec={props.playback.playheadSec}
+          bpm={props.timeline.bpm}
+          onLocate={props.playback.onLocate}
+        />
+        <TransportBar
+          transport={{
+            ...props.recording,
+            ...props.playback,
+            ...props.timeline,
+            tempoDraft: tempo.tempoDraft,
+            setTempoDraft: tempo.setTempoDraft,
+            tempoEditing: tempo.tempoEditing,
+            setTempoEditing: tempo.setTempoEditing,
+            commitTempo: tempo.commitTempo,
+            beginTempoDrag: tempo.beginTempoDrag,
+            updateTempoDrag: tempo.updateTempoDrag,
+            endTempoDrag: tempo.endTempoDrag,
+          }}
+        />
       </div>
 
       <div class="justify-self-end flex items-center gap-3">

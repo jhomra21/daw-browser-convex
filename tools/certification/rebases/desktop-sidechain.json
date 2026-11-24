@@ -1,0 +1,179 @@
+{
+ "name": "desktop-sidechain",
+ "sequence": 122,
+ "createdAt": "2026-11-24T06:40:32.785Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "native/audio-host-macos/tests/audio_host_test.cpp",
+   "from": "272b192713391387770e786fb29d93e3cb3f3ef1dbcce3c054bb5a55dd148d41",
+   "to": "7ced47a18c9c8d37f61d06f3a76f562e4a2a6f63bf9701f9e5354c8dc66dc562"
+  },
+  {
+   "file": "packages/audio-engine/src/native-host-wire.test.ts",
+   "from": "9b6ce8571eb84fa04530229541ef4c74829378a64fdee8e772a484d22a0e466c",
+   "to": "19d2b6b19f4e292148b7a01aae71a7ae4cdf50b807a828a0f81919e130ae2a39"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.test.ts",
+   "from": "e1b7e4650627992cee0e5aaab4df51e87d5bc2b539d4be004628d8a1559e029d",
+   "to": "05ed6d296529f9570d23475cb1d5571c756308e8a4f93f500e93079444de8580"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.ts",
+   "from": "35e5ea10b7333540d9a0765b898a3fe6df8a995d112ea4a705b8b9b48add66ca",
+   "to": "2a064d7e1680e924bd58cbfc930bde8e30cd303a7e9ba3d58f8d340266c1dd2d"
+  },
+  {
+   "file": "src/lib/desktop/native-snapshot-support.ts",
+   "from": "49e39dec1f0931a9089bafaa71e11b4c47048e1a3e1fa41d709f7d6ca1a5a731",
+   "to": "0b1fe6d13ed7105bb3c502814873760f2bdef0b1b710b0f4d7d3d6e47f66753a"
+  },
+  {
+   "file": "src/lib/live-playback-snapshot.ts",
+   "from": "3a3d721a6b275cf05a36c22cae25bc239638592178d2d5ca7cded60ecd527bf5",
+   "to": "392a4d0fb1f00a50397d276728c81ff40aa6de78cf046e70447e0e1e537301b9"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts",
+   "from": "da5ce3f99aa0291e5824745f98bba8fe7272ae71d6e59b45745ec1a87e44c16f",
+   "to": "de31ddad9c966f2032ae3d4f68ddac197ba717a99e38cb1192d5550570158bd7"
+  },
+  {
+   "file": "tools/acceptance/device-control-cost.browser.test.ts",
+   "from": "f52fb5a80e4d8c01ff5fc457e7a906c77cdb94cfde31a6a91fd91a90653fe389",
+   "to": "6596a1bb52d2838f6e6fbed1017658dbaac8e256b0f20e458dc21df2332bffa1"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "fe532f0937e6a3df6e1ad5c702433a94ad05777b2c00eb641f8a0c1850dff79c",
+   "new": "9642dc9e922742056170f9824cd7bfc6dcb339a5b91a153837529c5ba78d2faa"
+  },
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "4a57ad7b942fdd8990a421d8583f41001809899a2dd98792933608567c4ccd91",
+   "new": "b7569286e448c481953f86a036484dfd69e338c38387695e6c91cc2cb4326637"
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-g-coordinator",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 116,
+   "new": 117
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-i4-consumers",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 436,
+   "new": 437
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wire",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 21,
+   "new": 22
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/live-native-projection.test.ts",
+    "pass"
+   ],
+   "old": 24,
+   "new": 25
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/native-host-wire.test.ts",
+    "pass"
+   ],
+   "old": 21,
+   "new": 22
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/live-native-projection.test.ts",
+    "pass"
+   ],
+   "old": 24,
+   "new": 25
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/native-host-wire.test.ts",
+    "pass"
+   ],
+   "old": 21,
+   "new": 22
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "8d4286d9f74f399a249c0699ee63a5a16287ba7d",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "f990021f8b8a6bc963246b9afbf661e76af8038878579dd168c2d8c9bad560f5",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "f990021f8b8a6bc963246b9afbf661e76af8038878579dd168c2d8c9bad560f5",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/ds-bless/live",
+   "resultSha256": "ca2a517aba24986221061d04a427da362da426750d886c88062b59f640ab2d9e",
+   "seconds": 1347.246542709,
+   "observations": 3081
+  },
+  "unreachedByOverlay": []
+ }
+}

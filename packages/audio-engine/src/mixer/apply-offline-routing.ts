@@ -1,6 +1,6 @@
 import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import { assertDefined, getAutomationParameterDescriptor, isOwnedProcessorKind, isSidechainCapableKind, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeSaturatorParams, type CompressorParamsLite } from '@daw-browser/shared'
-import { createEqNodes } from '../effects/dsp'
+import { createEqNodes, getLegacyEqBands } from '../effects/dsp'
 import { connectFxChain, createCompressorNodeChain, createDelayNodeChain, createReverbNodeChain, createSaturatorNodeChain, disconnectCompressorChain, type CompressorNodeChain, type DelayNodeChain, type ReverbNodeChain, type SaturatorNodeChain } from '../effects/chain'
 import type { ResolvedMixerGraph } from './types'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
@@ -86,7 +86,7 @@ async function buildOfflineFxChain(
       const normalized = normalizeEqParams(instance.params)
       const eqNodes = createEqNodes(ctx, normalized, ctx.destination.channelCount || 2)
 
-      const nodesByBand = new Map(normalized.bands.filter((band) => band.enabled).flatMap((band, index) => {
+      const nodesByBand = new Map(getLegacyEqBands(normalized).flatMap((band, index) => {
         const eqNode = eqNodes[index]
 
         return eqNode ? [[band.id, eqNode]] : []

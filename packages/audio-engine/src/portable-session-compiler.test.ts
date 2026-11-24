@@ -789,10 +789,10 @@ test('rejects unsupported graph features and unresolved schedule targets without
     processor.tailFrames,
   ])).toEqual([
     ['saturator', 0, 0],
-    ['eq', 0, 0],
+    ['eq', 3, 0], // Hi-Quality is on for a new EQ
     ['chorus', 0, 768],
   ])
-  expect(group?.processorOrder[1]?.parameterTargets).toHaveLength(24)
+  expect(group?.processorOrder[1]?.parameterTargets).toHaveLength(50)
 
   const closingEvent = portableEffectsInput.schedule.events[6]
 

@@ -8,7 +8,9 @@ import {
   type SpectralParamsEnvelope,
 } from './spectral-params'
 
-export type EqBandType = 'lowpass' | 'highpass' | 'bandpass' | 'lowshelf' | 'highshelf' | 'peaking' | 'notch' | 'allpass'
+export type EqBandType =
+  | 'lowpass' | 'highpass' | 'bandpass' | 'lowshelf' | 'highshelf' | 'peaking' | 'notch' | 'allpass'
+  | 'lowpass48' | 'highpass48'
 
 export type EqBandParams = {
   id: string
@@ -19,12 +21,21 @@ export type EqBandParams = {
   type: EqBandType
 }
 
-export type EqChannelMode = 'stereo' | 'mono'
+// 'mono' is the pre-EQ-Eight "sum to mono" mode, kept so saved devices sound the same; the chooser offers the other three.
+export type EqChannelMode = 'stereo' | 'leftRight' | 'midSide' | 'mono'
 
+// EQ Eight: `bands` holds two curves of EQ_BANDS_PER_CURVE bands. Curve A (indices 0-7) is the only curve in Stereo
+// and Mono and the left (mid) curve in L/R (M/S); curve B (indices 8-15) is the right (side) curve.
 export type EqParams = {
   bands: EqBandParams[]
   enabled: boolean
   channelMode: EqChannelMode
+  adaptiveQ: boolean
+  // Multiplies every band gain: 1 is 100 %.
+  scale: number
+  outputDb: number
+  // Runs the bands at twice the sample rate, which costs CPU and 3 frames of latency.
+  highQuality: boolean
 }
 
 export type EqParamsLite = EqParams
@@ -35,6 +46,10 @@ export type EqParamsInput = {
   enabled?: boolean
   bands?: EqBandParamsInput[]
   channelMode?: JsonValue
+  adaptiveQ?: boolean
+  scale?: number
+  outputDb?: number
+  highQuality?: boolean
 }
 
 export const EQ_FREQUENCY_MIN = 20
@@ -43,6 +58,14 @@ export const EQ_GAIN_DB_MIN = -24
 export const EQ_GAIN_DB_MAX = 24
 export const EQ_Q_MIN = 0.2
 export const EQ_Q_MAX = 18
+export const EQ_SCALE_MIN = 0
+export const EQ_SCALE_MAX = 2
+export const EQ_OUTPUT_DB_MIN = -12
+export const EQ_OUTPUT_DB_MAX = 12
+export const EQ_BANDS_PER_CURVE = 8
+export const EQ_BAND_COUNT = 2 * EQ_BANDS_PER_CURVE
+// The core's declared latency with Hi-Quality on: the group delay of its half-band oversampler at low frequencies.
+export const EQ_HIGH_QUALITY_LATENCY_FRAMES = 3
 const DEFAULT_EQ_FREQUENCIES = [40, 100, 200, 500, 1000, 2500, 6000, 12000]
 
 function readFiniteNumber(value: JsonValue | undefined): number | undefined {
@@ -50,9 +73,11 @@ function readFiniteNumber(value: JsonValue | undefined): number | undefined {
 }
 
 function getDefaultEqBandType(index: number): EqBandType {
-  if (index === 0) return 'lowshelf'
+  const curveIndex = index % EQ_BANDS_PER_CURVE
 
-  if (index === DEFAULT_EQ_FREQUENCIES.length - 1) return 'highshelf'
+  if (curveIndex === 0) return 'lowshelf'
+
+  if (curveIndex === EQ_BANDS_PER_CURVE - 1) return 'highshelf'
 
   return 'peaking'
 }
@@ -60,7 +85,7 @@ function getDefaultEqBandType(index: number): EqBandType {
 export function createDefaultEqBand(index: number): EqBandParams {
   return {
     id: `b${index + 1}`,
-    frequency: DEFAULT_EQ_FREQUENCIES[index] ?? 1000,
+    frequency: DEFAULT_EQ_FREQUENCIES[index % EQ_BANDS_PER_CURVE] ?? 1000,
     gainDb: 0,
     q: 1,
     enabled: true,
@@ -70,14 +95,18 @@ export function createDefaultEqBand(index: number): EqBandParams {
 
 export function createDefaultEqParams(): EqParams {
   return {
-    bands: DEFAULT_EQ_FREQUENCIES.map((_, index) => createDefaultEqBand(index)),
+    bands: Array.from({ length: EQ_BAND_COUNT }, (_, index) => createDefaultEqBand(index)),
     enabled: true,
     channelMode: 'stereo',
+    adaptiveQ: false,
+    scale: 1,
+    outputDb: 0,
+    highQuality: true,
   }
 }
 
 export function normalizeEqChannelMode(value: JsonValue | undefined): EqChannelMode {
-  return value === 'mono' ? 'mono' : 'stereo'
+  return value === 'mono' || value === 'leftRight' || value === 'midSide' ? value : 'stereo'
 }
 
 export function isEqBandType(value: JsonValue | undefined): value is EqBandType {
@@ -85,8 +114,10 @@ export function isEqBandType(value: JsonValue | undefined): value is EqBandType 
     value === 'allpass'
     || value === 'bandpass'
     || value === 'highpass'
+    || value === 'highpass48'
     || value === 'highshelf'
     || value === 'lowpass'
+    || value === 'lowpass48'
     || value === 'lowshelf'
     || value === 'notch'
     || value === 'peaking'
@@ -95,16 +126,25 @@ export function isEqBandType(value: JsonValue | undefined): value is EqBandType 
 
 export function normalizeEqParams(input: EqParamsInput): EqParams {
   const defaults = createDefaultEqParams()
-  // The EQ has exactly eight bands, which the engine contract requires: slots the input leaves out keep their flat default band.
-  const given = Array.isArray(input.bands) ? input.bands.slice(0, defaults.bands.length) : []
+  // The EQ has exactly two curves of eight bands, which the engine contract requires. Slots the input leaves out keep
+  // their flat default band, except that a missing second curve starts as a copy of the first (as in EQ Eight).
+  const given = Array.isArray(input.bands) ? input.bands.slice(0, EQ_BAND_COUNT) : []
   const givenIds = new Set(given.flatMap((band) => isJsonString(band.id) ? [band.id] : []))
 
-  const bandsInput = defaults.bands.map((defaultBand, index) => given[index]
-    ?? (givenIds.has(defaultBand.id) ? { ...defaultBand, id: `${defaultBand.id}-default` } : defaultBand))
+  const bandsInput = defaults.bands.map((defaultBand, index) => {
+    const mirrored = given.length <= EQ_BANDS_PER_CURVE && index >= EQ_BANDS_PER_CURVE ? given[index - EQ_BANDS_PER_CURVE] : undefined
+    const band = given[index] ?? (mirrored === undefined ? undefined : { ...mirrored, id: defaultBand.id })
+
+    return band ?? (givenIds.has(defaultBand.id) ? { ...defaultBand, id: `${defaultBand.id}-default` } : defaultBand)
+  })
 
   return {
     enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
     channelMode: normalizeEqChannelMode(input.channelMode),
+    adaptiveQ: isJsonBoolean(input.adaptiveQ) ? input.adaptiveQ : defaults.adaptiveQ,
+    scale: clamp(readFiniteNumber(input.scale) ?? defaults.scale, EQ_SCALE_MIN, EQ_SCALE_MAX),
+    outputDb: clamp(readFiniteNumber(input.outputDb) ?? defaults.outputDb, EQ_OUTPUT_DB_MIN, EQ_OUTPUT_DB_MAX),
+    highQuality: isJsonBoolean(input.highQuality) ? input.highQuality : defaults.highQuality,
     bands: bandsInput.map((band, index) => {
       const defaultBand = defaults.bands[index] ?? createDefaultEqBand(index)
       const frequency = readFiniteNumber(band.frequency)
@@ -125,12 +165,17 @@ export function normalizeEqParams(input: EqParamsInput): EqParams {
 
 export function normalizeEqParamsForUpdate(input: EqParamsInput, existing?: EqParamsInput): EqParams {
   const base = existing === undefined ? {} : normalizeEqParams(existing)
+  // An update that names only the first curve leaves the stored second curve alone.
+  const keepsSecondCurve = existing !== undefined && Array.isArray(input.bands) && input.bands.length <= EQ_BANDS_PER_CURVE
+  const merged = { ...base, ...input }
 
-  return normalizeEqParams({ ...base, ...input })
+  return normalizeEqParams(keepsSecondCurve && 'bands' in base && Array.isArray(base.bands)
+    ? { ...merged, bands: [...(input.bands ?? []), ...base.bands.slice(input.bands?.length ?? 0)] }
+    : merged)
 }
 
 export function serializeNormalizedEqParams(params: EqParams): string {
-  let signature = `${params.enabled ? '1' : '0'}|${params.channelMode}`
+  let signature = `${params.enabled ? '1' : '0'}|${params.channelMode}|${params.adaptiveQ ? 1 : 0}|${params.scale}|${params.outputDb}|${params.highQuality ? 1 : 0}`
 
   for (const band of params.bands) {
     signature += `|${band.id}:${band.enabled ? 1 : 0}:${band.type}:${band.frequency}:${band.gainDb}:${band.q}`
@@ -138,7 +183,6 @@ export function serializeNormalizedEqParams(params: EqParams): string {
 
   return signature
 }
-
 export function serializeEqParams(params: EqParams): string {
   return serializeNormalizedEqParams(normalizeEqParams(params))
 }
@@ -1573,6 +1617,7 @@ export function createDefaultArpeggiatorParams(): ArpeggiatorParams {
   }
 }
 
+// Bands whose gain is a control: bell and shelves. Cuts, notch, band-pass and all-pass have none, and Scale ignores them.
 export function supportsGain(type: EqBandType): boolean {
   return type === 'peaking' || type === 'lowshelf' || type === 'highshelf'
 }

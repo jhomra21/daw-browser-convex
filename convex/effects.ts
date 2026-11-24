@@ -56,8 +56,10 @@ const eqBandTypeValidator = v.union(
   v.literal("allpass"),
   v.literal("bandpass"),
   v.literal("highpass"),
+  v.literal("highpass48"),
   v.literal("highshelf"),
   v.literal("lowpass"),
+  v.literal("lowpass48"),
   v.literal("lowshelf"),
   v.literal("notch"),
   v.literal("peaking"),
@@ -65,7 +67,11 @@ const eqBandTypeValidator = v.union(
 
 const eqParamsValidator = v.object({
   enabled: v.boolean(),
-  channelMode: v.optional(v.union(v.literal("mono"), v.literal("stereo"))),
+  channelMode: v.optional(v.union(v.literal("mono"), v.literal("stereo"), v.literal("leftRight"), v.literal("midSide"))),
+  adaptiveQ: v.optional(v.boolean()),
+  scale: v.optional(v.number()),
+  outputDb: v.optional(v.number()),
+  highQuality: v.optional(v.boolean()),
   bands: v.array(v.object({
     id: v.string(),
     type: eqBandTypeValidator,

@@ -1,12 +1,12 @@
 import { migrateAutoFilterEnvelopeAmountV1, migrateAutoFilterParamsV1, migrateAutoFilterResonanceV1 } from './auto-filter-params-migration'
 import { getAutomationParameterDescriptor } from './automation-parameters'
 import { isAudioEffectKind, type AudioEffectKind } from './audio-effect-registry'
-import type { JsonValue } from './json-value'
+import { isJsonObject, type JsonValue } from './json-value'
 
 // Storage-only versioning: persisted effect rows carry an optional `paramsVersion` (absent = 1).
 // Public contracts and in-memory params always use the current shape; readers migrate before use.
 export const AUDIO_EFFECT_PARAMS_VERSION: Readonly<Record<AudioEffectKind, number>> = {
-  eq: 1,
+  eq: 2,
   compressor: 1,
   saturator: 1,
   delay: 1,
@@ -39,10 +39,21 @@ export type AudioEffectParamsVersioning = {
   parameterValues: Readonly<Partial<Record<AudioEffectKind, Readonly<Record<number, Readonly<Record<string, AutomationValueMigration>>>>>>>
 }
 
+function migrateEqV1ToV2(params: JsonValue): JsonValue {
+  if (!isJsonObject(params)) return params
+  const bands = Array.isArray(params.bands) ? params.bands : []
+  const curveB = bands.map((band, index) => (isJsonObject(band) ? { ...band, id: `b${index + 9}` } : band))
+
+  return { ...params, bands: [...bands, ...curveB], adaptiveQ: false, scale: 1, outputDb: 0, highQuality: false }
+}
+
 export const AUDIO_EFFECT_PARAMS_VERSIONING: AudioEffectParamsVersioning = {
   current: AUDIO_EFFECT_PARAMS_VERSION,
   migrations: {
     autofilter: { 1: migrateAutoFilterParamsV1 },
+    // EQ Eight: curve B (a copy of curve A, so L/R and M/S start identical), Scale 100 %, Output 0 dB, Adaptive Q off and
+    // Hi-Quality off. Band types, frequencies, gains and Qs and the channel mode (incl. 'mono') carry over unchanged.
+    eq: { 1: migrateEqV1ToV2 },
   },
   parameterValues: {
     autofilter: {

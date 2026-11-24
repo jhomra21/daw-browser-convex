@@ -113,16 +113,25 @@ describe('EQ params', () => {
     expect(normalizeEqParamsForUpdate({ channelMode: 'stereo' }, existing).channelMode).toBe('stereo')
   })
 
-  test('keeps exactly eight bands', () => {
+  test('keeps exactly two curves of eight bands', () => {
     const custom = { id: 'b8', type: 'highpass' as const, frequency: 180, gainDb: 0, q: 0.7, enabled: true }
     const fewer = normalizeEqParams({ bands: [custom] })
-    const more = normalizeEqParams({ bands: Array.from({ length: 9 }, (_, index) => createDefaultEqBand(index)) })
+    const more = normalizeEqParams({ bands: Array.from({ length: 20 }, (_, index) => createDefaultEqBand(index)) })
 
-    expect(fewer.bands).toEqual([custom, ...createDefaultEqParams().bands.slice(1, 7), { ...createDefaultEqBand(7), id: 'b8-default' }])
+    // A missing second curve starts as a copy of the first.
+    expect(fewer.bands).toEqual([
+      custom,
+      ...createDefaultEqParams().bands.slice(1, 7),
+      { ...createDefaultEqBand(7), id: 'b8-default' },
+      { ...custom, id: 'b9' },
+      ...createDefaultEqParams().bands.slice(9),
+    ])
     expect(more.bands).toEqual(createDefaultEqParams().bands)
   })
 
   test('parses shared EQ operations with normalized payloads', () => {
+    const firstBand = { id: 'b1', type: 'peaking' as const, frequency: EQ_FREQUENCY_MIN, gainDb: EQ_GAIN_DB_MAX, q: EQ_Q_MAX, enabled: true }
+
     expect(parseSharedTimelineOperation({
       kind: 'effects.setMasterEqParams',
       payload: {
@@ -147,14 +156,11 @@ describe('EQ params', () => {
         params: {
           enabled: true,
           channelMode: 'stereo',
-          bands: [{
-            id: 'b1',
-            type: 'peaking',
-            frequency: EQ_FREQUENCY_MIN,
-            gainDb: EQ_GAIN_DB_MAX,
-            q: EQ_Q_MAX,
-            enabled: true,
-          }, ...createDefaultEqParams().bands.slice(1)],
+          adaptiveQ: false,
+          scale: 1,
+          outputDb: 0,
+          highQuality: true,
+          bands: [firstBand, ...createDefaultEqParams().bands.slice(1, 8), { ...firstBand, id: 'b9' }, ...createDefaultEqParams().bands.slice(9)],
         },
       },
     })

@@ -7,6 +7,10 @@ import {
   createDefaultReverbParams,
   createDefaultSaturatorParams,
   DELAY_DRY_WET_MAX,
+  EQ_OUTPUT_DB_MAX,
+  EQ_OUTPUT_DB_MIN,
+  EQ_SCALE_MAX,
+  EQ_SCALE_MIN,
   DELAY_DRY_WET_MIN,
   DELAY_FEEDBACK_MAX,
   DELAY_FEEDBACK_MIN,
@@ -224,6 +228,12 @@ const effectDescriptors: AutomationParameterDescriptor[] = [
   { id: 'spectral.mix', label: 'Spectral Mix', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 1, scale: 'linear', unit: 'percent' },
 ]
 
+// EQ Eight's device-level controls; the per-band ids (eq.<bandId>.<property>) are built from the band list.
+const eqDeviceDescriptors: AutomationParameterDescriptor[] = [
+  { id: 'eq.scale', label: 'EQ Scale', group: 'Audio Effects', device: 'EQ Eight', owner: 'eq', targetKinds: ['track', 'master'], min: EQ_SCALE_MIN, max: EQ_SCALE_MAX, defaultValue: 1, scale: 'linear', unit: 'percent' },
+  { id: 'eq.outputDb', label: 'EQ Output', group: 'Audio Effects', device: 'EQ Eight', owner: 'eq', targetKinds: ['track', 'master'], min: EQ_OUTPUT_DB_MIN, max: EQ_OUTPUT_DB_MAX, defaultValue: 0, scale: 'linear', unit: 'db' },
+]
+
 const descriptorsByEffectKind = {
   utility: effectDescriptors.filter((descriptor) => descriptor.owner === 'utility'),
   eq: [],
@@ -248,6 +258,7 @@ const descriptorsByEffectKind = {
 export const getAutomationParameterOptions = (): AutomationParameterOption[] => [
   { id: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer' },
   ...effectDescriptors.map(({ id, label, group, device }) => ({ id, label, group, device })),
+  ...eqDeviceDescriptors.map(({ id, label, group, device }) => ({ id, label, group, device })),
   ...createDefaultEqParams().bands.flatMap((band, index) => {
     const label = `EQ ${index + 1}`
 
@@ -259,8 +270,9 @@ export const getAutomationParameterOptions = (): AutomationParameterOption[] => 
   }),
 ]
 
-const eqParameterOptions = (): AutomationParameterOption[] => (
-  createDefaultEqParams().bands.flatMap((band, index) => {
+const eqParameterOptions = (): AutomationParameterOption[] => [
+  ...eqDeviceDescriptors.map(({ id, label, group, device }) => ({ id, label, group, device })),
+  ...createDefaultEqParams().bands.flatMap((band, index) => {
     const label = `EQ ${index + 1}`
 
     return [
@@ -268,8 +280,8 @@ const eqParameterOptions = (): AutomationParameterOption[] => (
       { id: createEqBandParameterId(band.id, 'gainDb'), label: `${label} Gain`, group: 'Audio Effects', device: 'EQ Eight' },
       { id: createEqBandParameterId(band.id, 'q'), label: `${label} Q`, group: 'Audio Effects', device: 'EQ Eight' },
     ]
-  })
-)
+  }),
+]
 
 export const getAutomationParameterOptionsForTarget = (
   effects: readonly AutomationTargetDeviceInstance[],
@@ -367,6 +379,7 @@ export const getAutomationParameterDescriptor = (
 
   if (staticDescriptor) return staticDescriptor
   const effectDescriptor = effectDescriptors.find((descriptor) => descriptor.id === parameterId)
+    ?? eqDeviceDescriptors.find((descriptor) => descriptor.id === parameterId)
 
   if (effectDescriptor) return effectDescriptor
   const sampler = parseInstrumentAutomationKey(parameterId)

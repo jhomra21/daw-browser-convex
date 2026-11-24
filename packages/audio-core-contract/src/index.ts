@@ -727,8 +727,8 @@ export type AudioCoreProcessorParameterTarget = {
 
 export const audioCoreMaxProcessorsPerNode = 32
 export const audioCoreMaxGraphProcessors = 512
-const audioCoreMaxProcessorStateBytes = 256
-export const audioCoreMaxProcessorParameterTargets = 24
+const audioCoreMaxProcessorStateBytes = 512
+export const audioCoreMaxProcessorParameterTargets = 64
 const audioCoreProcessorStateEnvelopeBytes = 40
 
 export type AudioCoreProcessorStateEnvelope = {

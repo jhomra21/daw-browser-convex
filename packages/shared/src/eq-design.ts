@@ -68,8 +68,10 @@ const withNumerator = (poles: Poles, B0: number, B1: number, B2: number): Biquad
 // and resonant low-passes, because the analog response is still moving at Nyquist.
 // The top of the EQ range as a fraction of the project rate.
 const FIT_TOP = 0.45
-const FIT_POINTS = 64
-const FIT_PASSES = 8
+
+// Point and pass counts match kFitPoints and kFitPasses in biquad.h.
+const FIT_POINTS = 48
+const FIT_PASSES = 3
 
 const fittedNumerator = (poles: Poles, omega0: number, span: number, analogSquared: (x: number) => number) => {
   const den = denominator(poles)

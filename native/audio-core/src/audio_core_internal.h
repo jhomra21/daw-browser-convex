@@ -418,6 +418,8 @@ struct EqHistory {
   std::array<dsp::EqBandSections, DAW_AUDIO_CORE_EQ_BAND_COUNT> sections{};
   // The (frequency, gain, Q) the sections were designed from, so settled bands cost nothing.
   std::array<std::array<float, 3>, DAW_AUDIO_CORE_EQ_BAND_COUNT> designed{};
+  // Counts processed samples so each band redesigns on its own slot of the control interval.
+  uint32_t design_phase = 0;
   float output_gain = 1.0F;
   float output_gain_db = 0.0F;
   std::array<std::array<std::array<dsp::Biquad<double>, dsp::kEqMaxSections>, DAW_AUDIO_CORE_EQ_BANDS_PER_CURVE>, 2> filters{};

@@ -2,7 +2,7 @@
 // E5 (slopes), A1 (drive), A2 (parity, latency), A3 (resonance level).
 import { analogBandDb, biquad, countNonFinite, logFrequencies, maxAbsDiff, peakAbs, peakDb, responseDb, rbjCoefficients, rms, toneFit } from '../dsp'
 import { measureAliasingEnergyDb, measureThdPlusNoise } from '../../../packages/audio-engine/src/dsp-characterization'
-import { eqWith, fx } from '../effects'
+import { autofilterLfo, eqWith, fx } from '../effects'
 import type { EffectSpec } from '../effects'
 import type { Family } from './index'
 import type { Scenario } from '../harness'
@@ -220,7 +220,7 @@ const lfoWaveforms: Scenario = {
     const input = sine(4 * h.rate, coherentFrequency(2000, h.rate, h.rate), h.rate, 0.1)
 
     for (const waveform of ['sine', 'triangle', 'sawDown', 'sawUp', 'square', 'sampleHold'] as const) {
-      const { output } = await h.render(fx.autofilter({ frequencyHz: 500, resonance: 0, hiQuality: false, lfo: { ...fx.autofilter().state.lfo, waveform, rateHz: 2, depthOctaves: 2 } }), { input: [input] }, { parity: false })
+      const { output } = await h.render(fx.autofilter({ frequencyHz: 500, resonance: 0, hiQuality: false, lfo: { ...autofilterLfo, waveform, rateHz: 2, depthOctaves: 2 } }), { input: [input] }, { parity: false })
       const levels = windowedDb(output[0].subarray(h.rate), Math.round(h.rate / 100))
 
       h.atLeast(`2 kHz level swing through a 2-octave ${waveform} sweep of a 500 Hz low-pass`, Math.max(...levels) - Math.min(...levels), 6, 'dB', 'A5: every shape moves the cutoff')
@@ -234,7 +234,7 @@ const tempoSync: Scenario = {
   rates: [48000],
   run: async (h) => {
     const input = sine(2 * h.rate, coherentFrequency(2000, h.rate, h.rate), h.rate, 0.1)
-    const lfo = { ...fx.autofilter().state.lfo, depthOctaves: 2 }
+    const lfo = { ...autofilterLfo, depthOctaves: 2 }
     const free = await h.render(fx.autofilter({ frequencyHz: 500, hiQuality: false, lfo: { ...lfo, rateHz: 2 } }), { input: [input] }, { parity: false })
     const synced = await h.render(fx.autofilter({ frequencyHz: 500, hiQuality: false, lfo: { ...lfo, sync: true, division: 5 } }), { input: [input] }, { parity: false })
 

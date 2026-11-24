@@ -123,6 +123,10 @@ const amplitude = (state: Partial<AmplitudeModulationProcessorState>): Amplitude
 })
 
 /** Product-default states with per-scenario overrides; nested groups are replaced whole. */
+export const autofilterLfo: AutoFilterProcessorState['lfo'] = {
+  waveform: 'sine', sync: false, division: 5, rateHz: 1, depthOctaves: 0, phaseOffset: 0, stereoMode: 'phase', stereoPhase: 0,
+}
+
 export const fx = {
   utility: (state: Partial<UtilityProcessorState> = {}): EffectSpec => ({
     kind: 'utility',
@@ -187,7 +191,7 @@ export const fx = {
     state: {
       enabled: true, mode: 'lowpass', slope: 12, hiQuality: true, frequencyHz: 1000, resonance: 0.15, driveDb: 0, mix: 1, outputDb: 0, clip: false,
       envelope: { amountOctaves: 0, attackMs: 10, releaseMs: 100, hold: false, link: false },
-      lfo: { waveform: 'sine', sync: false, division: 5, rateHz: 1, depthOctaves: 0, phaseOffset: 0, stereoMode: 'phase', stereoPhase: 0 }, ...state,
+      lfo: autofilterLfo, ...state,
     },
   }),
   lofi: (state: Partial<LoFiProcessorState> = {}): EffectSpec => ({

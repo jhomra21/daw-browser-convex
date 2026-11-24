@@ -1,6 +1,6 @@
 // Renders one effect through the production audio-core wasm: external planar input -> source node -> processor -> master.
 // The source node reads input bus 0, the entry the portable host uses for live input (see graph envelope node field +20).
-import { audioCoreContractVersion } from '../../packages/audio-core-contract/src'
+import { audioCoreContractVersion, processorSchemaVersion } from '../../packages/audio-core-contract/src'
 import type { AudioCoreGraphSnapshot } from '../../packages/audio-core-contract/src'
 import { processorContractHash } from '../../packages/audio-core-contract/src/generated/processor-contract-metadata'
 import { graphEnvelope } from '../../public/audio-worklets/daw-portable-graph-envelope-v3.js'
@@ -65,7 +65,7 @@ const snapshot = (spec: EffectSpec | null, targets: readonly number[]): AudioCor
     {
       id: 's', kind: 'source', inputLayout: 'stereo', outputLayout: 'stereo', latencyFrames: spec === null ? 0 : declaredLatencyFrames(spec),
       processorOrder: spec === null ? [] : [{
-        id: 'p', kind: spec.kind, kindId: kindIds[spec.kind], instanceId: processorInstanceId, stateVersion: audioCoreContractVersion,
+        id: 'p', kind: spec.kind, kindId: kindIds[spec.kind], instanceId: processorInstanceId, stateVersion: processorSchemaVersion(spec.kind),
         state: encodeSpec(spec), parameterTargets: targets.map((target) => ({ id: String(target), target })),
         latencyFrames: declaredLatencyFrames(spec), tailFrames: 0, bypassed: false,
       }],

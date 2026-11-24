@@ -2,6 +2,7 @@ import { For, createSignal, createMemo, onSettled, onCleanup, createEffect, untr
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import EffectShell from '~/components/effects/EffectShell'
 import EqFilterTypeSelect from '~/components/effects/eq-filter-type-select'
+import { DeviceToggleButton } from '~/components/ui/device-control'
 import Knob from '~/components/ui/knob'
 import { useAppPreferences } from '~/context/app-preferences'
 import {
@@ -118,26 +119,6 @@ const sampleSpectrumMagnitude = (data: Float32Array, frequency: number, nyquist:
   }
 
   return weightTotal > 0 ? total / weightTotal : 0
-}
-
-// A toggle in the device's right column.
-function EqToggle(props: { label: string; title: string; pressed: boolean; disabled?: boolean; onToggle: () => void }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={props.pressed ? 'true' : 'false'}
-      title={props.title}
-      disabled={props.disabled}
-      class={cn(
-        'h-5 border border-border px-1 text-[10px] leading-none',
-        props.pressed ? 'bg-cyan-500/20 text-cyan-100' : 'bg-app-surface text-muted-foreground hover:bg-muted',
-        props.disabled && 'cursor-not-allowed opacity-60',
-      )}
-      onClick={() => props.onToggle()}
-    >
-      {props.label}
-    </button>
-  )
 }
 
 export default function Eq(props: EqProps) {
@@ -707,6 +688,7 @@ export default function Eq(props: EqProps) {
       enabled={props.params.enabled}
       onToggleEnabled={props.onToggleEnabled}
       onReset={props.onReset}
+      titleActions={<DeviceToggleButton label="HQ" ariaLabel="Hi-Quality: 2x oversampling, adds 3 frames of latency" active={props.params.highQuality} disabled={!enabled()} class="px-2" onClick={() => props.onParamsChange?.({ highQuality: !props.params.highQuality })} />}
       class={cn('w-[736px] min-w-[736px]', props.class)}
     >
       <div
@@ -835,29 +817,19 @@ export default function Eq(props: EqProps) {
             </DropdownMenuContent>
           </DropdownMenu>
           <div class="text-muted-foreground">Edit</div>
-          <EqToggle
+          <DeviceToggleButton
             label={EDIT_CURVE_LABELS[props.params.channelMode][activeCurve()]}
-            title={twoCurves() ? 'Switch the curve being edited' : 'Edit is available in L/R and M/S modes'}
-            pressed={false}
+            ariaLabel={twoCurves() ? 'Switch the curve being edited' : 'Edit is available in L/R and M/S modes'}
             disabled={!enabled() || !twoCurves()}
-            onToggle={() => setEditCurve((curve) => curve === 0 ? 1 : 0)}
+            onClick={() => setEditCurve((curve) => curve === 0 ? 1 : 0)}
           />
-          <div class="grid grid-cols-2 gap-1">
-            <EqToggle
-              label="Adapt Q"
-              title="Adaptive Q: the Q of a band increases as its boost or cut increases"
-              pressed={props.params.adaptiveQ}
-              disabled={!enabled()}
-              onToggle={() => props.onParamsChange?.({ adaptiveQ: !props.params.adaptiveQ })}
-            />
-            <EqToggle
-              label="Hi-Q"
-              title="Hi-Quality: runs the filters at twice the sample rate (3 frames of latency)"
-              pressed={props.params.highQuality}
-              disabled={!enabled()}
-              onToggle={() => props.onParamsChange?.({ highQuality: !props.params.highQuality })}
-            />
-          </div>
+          <DeviceToggleButton
+            label="Adapt Q"
+            ariaLabel="Adaptive Q: the Q of a band increases as its boost or cut increases"
+            active={props.params.adaptiveQ}
+            disabled={!enabled()}
+            onClick={() => props.onParamsChange?.({ adaptiveQ: !props.params.adaptiveQ })}
+          />
           <div class="grid grid-cols-2">
             <Knob
               class="px-0 py-0"

@@ -1,0 +1,76 @@
+{
+ "name": "effects-dsp-blocks",
+ "sequence": 123,
+ "createdAt": "2026-11-24T07:35:08.123Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "public/audio-core/daw-audio-core.manifest.json",
+   "from": "4113d569fbe3d9a7fda627e30465b0f887c06279246ce724730cd7f630d23a99",
+   "to": "305a8260c4606f828e166eb1f72122482f599bac599121473d0891a05bf01415"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "value"
+   ],
+   "old": "fbe1a3e11c97e7a8889ed1cd82d814afd836875a7e6260527c9ca8e94af172a1",
+   "new": "a275468ce7611437ea073ebda85d2c891ca2f4a5ea97f96d496c78e2f14d727f"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "public/audio-core/daw-audio-core.manifest.json"
+   ],
+   "old": "4113d569fbe3d9a7fda627e30465b0f887c06279246ce724730cd7f630d23a99",
+   "new": "305a8260c4606f828e166eb1f72122482f599bac599121473d0891a05bf01415"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-test-native",
+    "judge",
+    "total"
+   ],
+   "old": 18,
+   "new": 25
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "e27b5d1f0e5a5df7d937e92acbe1649b82d0a49e",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "63438f738f3ac5baf6d38e81624a5f21c10e285ce9c1fdfdf95ed7b973768c6b",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "63438f738f3ac5baf6d38e81624a5f21c10e285ce9c1fdfdf95ed7b973768c6b",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/dsp-bless/live",
+   "resultSha256": "e873f0f892958fb48c6535e413d1d89ace717880d34503e918ce042d15405593",
+   "seconds": 1667.042713458,
+   "observations": 3081
+  },
+  "unreachedByOverlay": []
+ }
+}

@@ -5,6 +5,7 @@
 #include "../src/dsp/biquad.h"
 #include "../src/dsp/fractional_delay.h"
 #include "../src/dsp/half_band_oversampler.h"
+#include "../src/dsp/polyphase_iir_half_band.h"
 #include "../src/dsp/latency.h"
 #include "../src/dsp/numeric_safety.h"
 #include "../src/dsp/parameter_smoother.h"
@@ -514,6 +515,162 @@ void oversamplerResetAndSilence() {
     peak = std::max(peak, std::fabs(quiet.down(pair.first, pair.second)));
   }
   expectTrue("silence_in_is_exact_silence_out", peak == 0.0F);
+}
+
+// ---- polyphase IIR half-band (low-latency alternative to the linear-phase FIR above) -------------------------------
+
+// Group delay of the up + down round trip at a low frequency, in base-rate frames, from the phase of a steady sine.
+double iirRoundTripGroupDelay(dsp::PolyphaseIirHalfBand2x &os, double frequency) {
+  const auto phaseAt = [&](double f) {
+    os.reset();
+    double re = 0.0;
+    double im = 0.0;
+    for (int n = 0; n < 4000; ++n) {
+      const auto pair = os.up(std::sin(2.0 * kPi * f * n));
+      const double y = os.down(pair.first, pair.second);
+      if (n >= 2000) {
+        re += y * std::cos(2.0 * kPi * f * n);
+        im += y * std::sin(2.0 * kPi * f * n);
+      }
+    }
+    return std::atan2(-im, re);
+  };
+  const double step = frequency * 0.05;
+  return -(phaseAt(frequency + step) - phaseAt(frequency - step)) / (2.0 * kPi * 2.0 * step);
+}
+
+void iirLatencyAndDc() {
+  dsp::PolyphaseIirHalfBand2x os;
+  const double delay = iirRoundTripGroupDelay(os, 0.01);
+  std::printf("  round-trip group delay at 0.01 fs_in: %.3f base frames (reported %u, FIR %u)\n", delay,
+    dsp::PolyphaseIirHalfBand2x::latencyFrames(), dsp::HalfBandOversampler2x::latencyFrames());
+  expectTrue("reported_latency_is_the_low_frequency_group_delay_rounded_up",
+    static_cast<double>(dsp::PolyphaseIirHalfBand2x::latencyFrames()) >= delay
+      && static_cast<double>(dsp::PolyphaseIirHalfBand2x::latencyFrames()) < delay + 1.0);
+  expectTrue("latency_is_far_below_the_fir", dsp::PolyphaseIirHalfBand2x::latencyFrames() * 10 < dsp::HalfBandOversampler2x::latencyFrames());
+  expectTrue("latency_helper_agrees",
+    dsp::PolyphaseIirHalfBand2x::latency().frames == dsp::PolyphaseIirHalfBand2x::latencyFrames());
+  os.reset();
+  double last = 0.0;
+  for (int n = 0; n < 400; ++n) {
+    const auto pair = os.up(1.0);
+    last = os.down(pair.first, pair.second);
+  }
+  expectNear("dc_gain_is_unity", last, 1.0, 1e-6);
+}
+
+void iirPassbandAndStopband() {
+  dsp::PolyphaseIirHalfBand2x os;
+  double worstRipple = 0.0;
+  for (double f = 0.01; f <= 0.45; f += 0.01) {
+    os.reset();
+    const double gain = sineGainDb(f, [&](float x) {
+      const auto pair = os.up(x);
+      return static_cast<float>(os.down(pair.first, pair.second));
+    });
+    worstRipple = std::max(worstRipple, std::fabs(gain));
+  }
+  std::printf("  round-trip passband to 0.45 fs_in: worst deviation %.5f dB\n", worstRipple);
+  expectAtMost("passband_ripple_db_to_0.45_fs_in", worstRipple, 0.01);
+
+  double worstStop = -300.0;
+  double worstAt = 0.0;
+  for (double f = 0.55; f < 1.0; f += 0.0125) {
+    os.reset();
+    double re = 0.0;
+    double im = 0.0;
+    const int settle = 400;
+    const int length = 2000;
+    for (int n = 0; n < settle + length; ++n) {
+      const double a = std::sin(2.0 * kPi * (f / 2.0) * (2 * n));
+      const double b = std::sin(2.0 * kPi * (f / 2.0) * (2 * n + 1));
+      const double y = os.down(a, b);
+      if (n >= settle) {
+        const double folded = 1.0 - f;
+        re += y * std::sin(2.0 * kPi * folded * n);
+        im += y * std::cos(2.0 * kPi * folded * n);
+      }
+    }
+    const double gain = 20.0 * std::log10(std::max(2.0 * std::hypot(re, im) / length, 1e-12));
+    if (gain > worstStop) {
+      worstStop = gain;
+      worstAt = f;
+    }
+  }
+  std::printf("  IIR down filter worst stopband above 0.55 fs_in: %.2f dB at %.4f fs_in\n", worstStop, worstAt);
+  expectAtMost("down_filter_stopband_db_above_0.55_fs_in", worstStop, -60.0);
+}
+
+void iirImageRejection() {
+  dsp::PolyphaseIirHalfBand2x os;
+  for (const double f : {0.1, 0.25, 0.4}) {
+    os.reset();
+    const double image = 1.0 - f;
+    double reFund = 0.0, imFund = 0.0, reImg = 0.0, imImg = 0.0;
+    const int settle = 400;
+    const int length = 2000;
+    for (int n = 0; n < settle + length; ++n) {
+      const auto pair = os.up(std::sin(2.0 * kPi * f * n));
+      if (n < settle) continue;
+      const double outputs[2] = {pair.first, pair.second};
+      for (int phase = 0; phase < 2; ++phase) {
+        const double t = (2.0 * n + phase) / 2.0;
+        reFund += outputs[phase] * std::sin(2.0 * kPi * f * t);
+        imFund += outputs[phase] * std::cos(2.0 * kPi * f * t);
+        reImg += outputs[phase] * std::sin(2.0 * kPi * image * t);
+        imImg += outputs[phase] * std::cos(2.0 * kPi * image * t);
+      }
+    }
+    const double rejection = 20.0 * std::log10(std::max(std::hypot(reImg, imImg), 1e-12) / std::hypot(reFund, imFund));
+    std::printf("  f=%.2f fs_in: IIR image at %.2f fs_in is %.1f dB below the tone\n", f, image, rejection);
+    expectAtMost("image_rejection_db", rejection, -60.0);
+  }
+}
+
+void iirResetAndSafety() {
+  dsp::PolyphaseIirHalfBand2x fresh;
+  dsp::PolyphaseIirHalfBand2x used;
+  for (int n = 0; n < 500; ++n) {
+    const auto pair = used.up(std::sin(0.7 * n));
+    used.down(pair.first, pair.second);
+  }
+  used.reset();
+  bool identical = true;
+  for (int n = 0; n < 300; ++n) {
+    const double x = n % 17 == 0 ? 1.0 : 0.0;
+    const auto a = fresh.up(x);
+    const auto b = used.up(x);
+    identical = identical && a.first == b.first && a.second == b.second && fresh.down(a.first, a.second) == used.down(b.first, b.second);
+  }
+  expectTrue("reset_matches_a_fresh_instance_bit_for_bit", identical);
+
+  // A loud burst then silence: the recursive state must decay below float range without ever entering the double
+  // subnormal range, where arithmetic slows down.
+  dsp::PolyphaseIirHalfBand2x tail;
+  for (int n = 0; n < 200; ++n) {
+    const auto pair = tail.up(n < 100 ? std::sin(0.3 * n) : 0.0);
+    tail.down(pair.first, pair.second);
+  }
+  double smallest = 1.0;
+  double last = 1.0;
+  for (int n = 0; n < 200000; ++n) {
+    const auto pair = tail.up(0.0);
+    last = tail.down(pair.first, pair.second);
+    if (last != 0.0) smallest = std::min(smallest, std::fabs(last));
+  }
+  std::printf("  smallest nonzero output in the tail %.3g, last %.3g\n", smallest, last);
+  expectTrue("tail_decays_below_float_range_without_subnormals", std::fabs(last) < 1.0e-30 && smallest >= 1.0e-300);
+
+  // One NaN must not live on in the recursive state.
+  dsp::PolyphaseIirHalfBand2x poisoned;
+  const auto bad = poisoned.up(std::numeric_limits<double>::quiet_NaN());
+  poisoned.down(bad.first, bad.second);
+  bool finite = true;
+  for (int n = 0; n < 50; ++n) {
+    const auto pair = poisoned.up(0.5);
+    finite = finite && std::isfinite(poisoned.down(pair.first, pair.second));
+  }
+  expectTrue("a_nan_input_does_not_poison_later_output", finite);
 }
 
 // ---- ADAA --------------------------------------------------------------------------------------------------------
@@ -1092,6 +1249,10 @@ constexpr Case kCases[] = {
   {"oversampler", "passband_and_stopband", oversamplerPassbandAndStopband},
   {"oversampler", "image_rejection", oversamplerImageRejection},
   {"oversampler", "reset_and_silence", oversamplerResetAndSilence},
+  {"oversampler", "iir_latency_and_dc", iirLatencyAndDc},
+  {"oversampler", "iir_passband_and_stopband", iirPassbandAndStopband},
+  {"oversampler", "iir_image_rejection", iirImageRejection},
+  {"oversampler", "iir_reset_and_safety", iirResetAndSafety},
   {"adaa", "antiderivatives", adaaAntiderivatives},
   {"adaa", "ill_conditioned_inputs", adaaIllConditioned},
   {"adaa", "alias_tanh", adaaAliasTanh},
@@ -1163,6 +1324,11 @@ void runBench() {
   bench("oversampler up + down, per base-rate sample", [&](int n) {
     const auto pair = os.up(input(n));
     return os.down(pair.first, pair.second);
+  });
+  dsp::PolyphaseIirHalfBand2x iirOs;
+  bench("IIR half-band up + down, per base-rate sample", [&](int n) {
+    const auto pair = iirOs.up(input(n));
+    return static_cast<float>(iirOs.down(pair.first, pair.second));
   });
   bench("std::tanh (reference)", [&](int n) { return std::tanh(4.0F * input(n)); });
   dsp::Adaa1<dsp::TanhShaper> adaaTanh;

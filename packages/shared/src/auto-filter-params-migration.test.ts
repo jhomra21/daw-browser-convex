@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { AUDIO_EFFECT_PARAMS_VERSION, migrateAudioEffectParams } from './audio-effect-param-versions'
 import { AUTO_FILTER_MAX_Q, AUTO_FILTER_MIN_Q, normalizeAutoFilterParamsEnvelope } from './effects-params'
-import type { JsonValue } from './json-value'
+import { isJsonObject, type JsonValue } from './json-value'
 
 // The shape every stored Auto Filter had before params version 2.
 const storedV1 = (state: Record<string, JsonValue> = {}): JsonValue => ({
@@ -71,13 +71,15 @@ describe('Auto Filter params version 2', () => {
     expect(migrated({ envelope: { amountOctaves: -6, attackMs: 10, releaseMs: 100 } }).envelope.amountOctaves).toBeGreaterThanOrEqual(-6)
   })
 
-  it('compensates the small-signal gain the old drive added with the new output slider', () => {
+  it('compensates the loudness the old drive added at a -12 dBFS reference with the new output slider', () => {
+    const added = (driveDb: number) => 20 * Math.log10(Math.tanh(0.25 * 10 ** (driveDb / 20)) / 0.25)
+
     expect(migrated({ driveDb: 0 }).outputDb).toBe(0)
-    expect(migrated({ driveDb: 6 }).outputDb).toBeCloseTo(6, 6)
-    expect(migrated({ driveDb: 24 }).outputDb).toBe(24)
+    expect(migrated({ driveDb: 6 }).outputDb).toBeCloseTo(added(6), 6)
+    expect(migrated({ driveDb: 24 }).outputDb).toBeCloseTo(added(24), 6)
+    expect(added(24)).toBeLessThan(12.1)
     expect(migrated({ driveDb: 6 }).driveDb).toBe(6)
   })
-
   it('compensates the old band-pass gain of Q at the cutoff', () => {
     const state = migrated({ mode: 'bandpass', resonance: 0.25 })
 
@@ -87,7 +89,7 @@ describe('Auto Filter params version 2', () => {
 
   it('migrates a bare state and an enveloped one alike, and leaves version 2 params alone', () => {
     const bare = storedV1()
-    const state = bare !== null && typeof bare === 'object' && !Array.isArray(bare) ? bare.state : null
+    const state = isJsonObject(bare) ? bare.state : null
 
     expect(normalizeAutoFilterParamsEnvelope(migrateAudioEffectParams('autofilter', state, 1)).state).toEqual(migrated())
     const current = { version: 1, state: migrated() }

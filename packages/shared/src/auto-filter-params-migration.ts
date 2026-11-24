@@ -5,6 +5,7 @@ import { isJsonNumber, isJsonObject, type JsonValue } from './json-value'
 // was Q = 0.5 + 19.5 r, its drive added its full gain to quiet signals, its band-pass peaked at Q, and its envelope was
 // the linear peak. Everything below keeps those sounds where the new design can reproduce them.
 
+const DRIVE_REFERENCE_PEAK = 0.25 // -12 dBFS
 const ENVELOPE_AMOUNT_SCALE = 0.25118864 / 0.8 // old excursion at -12 dBFS (10^(-12/20)) over the new law's 48/60
 
 const finite = (value: JsonValue | undefined, fallback: number) => isJsonNumber(value) && Number.isFinite(value) ? value : fallback
@@ -22,9 +23,12 @@ export const migrateAutoFilterParamsV1 = (params: JsonValue): JsonValue => {
   const lfo = isJsonObject(old.lfo) ? old.lfo : {}
   const oldQ = 0.5 + 19.5 * clamp(finite(old.resonance, 0.25), 0, 1)
   const driveDb = clamp(finite(old.driveDb, 0), 0, 24)
-  // Old drive multiplied quiet signals by its gain; the new one leaves them alone. Old band-pass peaked at Q; the new is unity.
-  const outputDb = clamp(driveDb + (old.mode === 'bandpass' ? 20 * Math.log10(oldQ) : 0), -24, 24)
+  // Old drive was tanh(gain * x) and the new one leaves quiet signals alone, so the loudness it added at -12 dBFS moves
+  // to Output. Old band-pass peaked at Q; the new one is unity.
+  const driveLoudnessDb = driveDb === 0 ? 0 : 20 * Math.log10(Math.tanh(DRIVE_REFERENCE_PEAK * 10 ** (driveDb / 20)) / DRIVE_REFERENCE_PEAK)
+  const outputDb = clamp(driveLoudnessDb + (old.mode === 'bandpass' ? 20 * Math.log10(oldQ) : 0), -24, 24)
   const kept = Object.fromEntries(Object.entries(old).filter(([key]) => key !== 'quality'))
+
   const state: JsonValue = {
     ...kept,
     slope: 12,

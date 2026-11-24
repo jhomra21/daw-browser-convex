@@ -12,7 +12,7 @@ enum class SvfMode { LowPass, BandPass, HighPass, Notch, Peak, AllPass, Bell, Lo
 // Cytomic/Simper trapezoidal-integrated state variable filter (bilinear, so it warps toward Nyquist like RBJ; its
 // strengths are low-frequency numerics and safe per-sample coefficient changes). out = m0 * x + m1 * band + m2 * low.
 // q is the resonance (the pole Q); for Bell and the shelves it is the RBJ-prototype Q and gainDb the boost or cut.
-// BandPass has unity gain at the centre frequency; Peak is the high-pass minus the low-pass (+6 dB at Q = 1.. 2Q).
+// BandPass has unity gain at the centre frequency; Peak is the high-pass minus the low-pass (gain 2Q at the centre).
 struct SvfCoefficients {
   double a1 = 1.0;
   double a2 = 0.0;

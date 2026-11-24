@@ -23,7 +23,7 @@ export default function AutoFilterGraph(props: {
     <DraggableDeviceGraph
       disabled={props.disabled}
       path={() => autoFilterResponsePath(props.params)}
-      class="h-[116px]"
+      class="h-[92px]"
       patternWidth={30}
       patternHeight={14}
       stroke="#22d3ee"

@@ -1021,14 +1021,11 @@ for (const field of ["meter", "masterVolume", "automation", "sidechain"]) {
         await f.playback.awaitPlaybackPreparation();
         const counts = f.counts(before);
         console.log("STEP5 compiler field guard", JSON.stringify({ field, transport, counts, faults: f.faults }));
-        // Playing and paused edits are adopted on the kept session alike (UD 7). A sidechain edit is an accepted native
-        // limitation: no fault, nothing prepared or retried, the graph and host stay as they were.
+        // Playing and paused edits are adopted on the kept session alike (UD 7).
         expect(f.faults).toEqual([]);
         expect(f.typedFaults).toEqual([]);
         expect(counts.scheduleCompiles).toBe(1);
-        expect(counts.publishes).toBe(field === "sidechain" ? 0 : 1);
-
-        if (field === "sidechain") expect(f.host.calls.slice(before.calls)).not.toContain("revision.prepare");
+        expect(counts.publishes).toBe(1);
         expect(counts.previewCompiles).toBe(0);
         expect(counts.previewDisposals).toBe(0);
         expect(counts.teardowns).toBe(0);

@@ -104,7 +104,7 @@ const precision: Scenario = {
 
     for (const band of settings) {
       const { output } = await h.render(eqWith(band), { input: [input] }, { parity: false })
-      const reference = designEqBand(band.type, band.frequency, h.rate, band.q, band.gainDb).reduce((signal, section) => biquad(signal, section), input)
+      const reference = designEqBand(band.type, band.frequency, h.rate, band.q, band.gainDb).reduce<ArrayLike<number>>((signal, section) => biquad(signal, section), input)
       const error = output[0].map((v, n) => v - reference[n])
       h.atLeast(`SNR vs float64 reference, ${band.type} ${band.frequency} Hz`, 20 * Math.log10(rms(reference, h.rate) / rms(error, h.rate)), 110, 'dB')
     }

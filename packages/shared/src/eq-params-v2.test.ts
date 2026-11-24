@@ -9,6 +9,7 @@ import {
   normalizeEqParams,
   normalizeEqParamsForUpdate,
   supportsGain,
+  type EqBandParams,
 } from './effects-params'
 import type { JsonValue } from './json-value'
 import { getAutomationParameterDescriptor } from './automation-parameters'
@@ -16,20 +17,18 @@ import { designEqBand, eqChainResponseDb } from './eq-design'
 
 const migrateV1 = (params: JsonValue) => normalizeAudioEffect('eq', migrateAudioEffectParams('eq', params, 1)).params
 
-const v1Params = {
-  enabled: true,
-  channelMode: 'stereo',
-  bands: [
-    { id: 'b1', type: 'highpass', frequency: 80, gainDb: 0, q: 4, enabled: true },
-    { id: 'b2', type: 'lowshelf', frequency: 200, gainDb: 3, q: 0.7, enabled: true },
-    { id: 'b3', type: 'peaking', frequency: 1000, gainDb: -6, q: 2, enabled: false },
-    { id: 'b4', type: 'bandpass', frequency: 1500, gainDb: 0, q: 1, enabled: true },
-    { id: 'b5', type: 'notch', frequency: 3000, gainDb: 0, q: 5, enabled: true },
-    { id: 'b6', type: 'allpass', frequency: 4000, gainDb: 0, q: 1, enabled: true },
-    { id: 'b7', type: 'highshelf', frequency: 8000, gainDb: 2, q: 1, enabled: true },
-    { id: 'b8', type: 'lowpass', frequency: 16000, gainDb: 0, q: 1.2, enabled: true },
-  ],
-}
+const v1Bands: EqBandParams[] = [
+  { id: 'b1', type: 'highpass', frequency: 80, gainDb: 0, q: 4, enabled: true },
+  { id: 'b2', type: 'lowshelf', frequency: 200, gainDb: 3, q: 0.7, enabled: true },
+  { id: 'b3', type: 'peaking', frequency: 1000, gainDb: -6, q: 2, enabled: false },
+  { id: 'b4', type: 'bandpass', frequency: 1500, gainDb: 0, q: 1, enabled: true },
+  { id: 'b5', type: 'notch', frequency: 3000, gainDb: 0, q: 5, enabled: true },
+  { id: 'b6', type: 'allpass', frequency: 4000, gainDb: 0, q: 1, enabled: true },
+  { id: 'b7', type: 'highshelf', frequency: 8000, gainDb: 2, q: 1, enabled: true },
+  { id: 'b8', type: 'lowpass', frequency: 16000, gainDb: 0, q: 1.2, enabled: true },
+]
+
+const v1Params = { enabled: true, channelMode: 'stereo', bands: v1Bands }
 
 describe('EQ params v2', () => {
   test('the current version is 2', () => {

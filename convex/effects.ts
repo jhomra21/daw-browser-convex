@@ -14,6 +14,7 @@ import {
   normalizeArpeggiatorParams,
   normalizeAudioEffectParamsForUpdate,
   AUDIO_EFFECT_PARAMS_VERSION,
+  migrateAudioEffectParams,
   AUDIO_EFFECT_KINDS,
   audioEffectKindsWithOperation,
   audioEffectOrderItemId,
@@ -224,6 +225,16 @@ const effectParamsVersionField = (type: SharedAudioEffectType) => {
   const paramsVersion = persistedEffectParamsVersion(type)
 
   return paramsVersion === undefined ? {} : { paramsVersion }
+}
+
+const currentEffectRow = (row: any) => {
+  const { paramsVersion, ...effect } = row
+
+  if (!isAudioEffectPersistenceType(effect.type)) return effect
+
+  const params = migrateAudioEffectParams(effect.type, effect.params, paramsVersion)
+
+  return { ...effect, params: normalizeEffectParamsForUpdate(effect.type, params) }
 }
 
 const stableEffectParams = (value: JsonValue): string => {
@@ -846,7 +857,7 @@ export const listByRoom = query({
       return (a.index ?? 0) - (b.index ?? 0);
     });
 
-    return rows;
+    return rows.map(currentEffectRow);
   },
 });
 
@@ -863,7 +874,8 @@ export const listByTrack = query({
 
     return rows
       .filter((row) => row.projectId === projectId && row.targetType === 'track')
-      .sort((left, right) => (left.index ?? 0) - (right.index ?? 0));
+      .sort((left, right) => (left.index ?? 0) - (right.index ?? 0))
+      .map(currentEffectRow);
   },
 });
 

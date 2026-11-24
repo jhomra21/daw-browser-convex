@@ -27,7 +27,7 @@ class HalfBandOversampler2x {
   static constexpr uint32_t latencyFrames() { return 2 * kHalfLength - 1; }
   static constexpr Latency latency() { return Latency::fromFrames(latencyFrames()); }
 
-  HalfBandOversampler2x() { design(); }
+  HalfBandOversampler2x() : taps_(sharedTaps()) { reset(); }
 
   void reset() {
     input_.fill(0.0F);
@@ -75,9 +75,16 @@ class HalfBandOversampler2x {
     return sum;
   }
 
-  // taps_[j] = h[2j] of the windowed-sinc half-band, whose centre tap 0.5 and zero odd-offset taps are not stored.
+  // The design is the same for every instance, so it is computed once: a processor holds one oversampler per channel
+  // per slot, and a core holds hundreds of slots.
+  static const std::array<float, kHalfLength> &sharedTaps() {
+    static const std::array<float, kHalfLength> taps = design();
+    return taps;
+  }
+
+  // taps[j] = h[2j] of the windowed-sinc half-band, whose centre tap 0.5 and zero odd-offset taps are not stored.
   // The non-centre taps are scaled so the half-band sums to exactly 1 (unity DC gain in both directions).
-  void design() {
+  static std::array<float, kHalfLength> design() {
     constexpr double kBeta = 10.0;
     constexpr int kCentre = 2 * kHalfLength - 1;
     constexpr double kPi = 3.14159265358979323846;
@@ -90,11 +97,12 @@ class HalfBandOversampler2x {
       raw[j] = std::sin(kPi * offset / 2.0) / (kPi * offset) * window;
       side += raw[j];
     }
-    for (uint32_t j = 0; j < kHalfLength; ++j) taps_[j] = static_cast<float>(raw[j] * 0.5 / side);
-    reset();
+    std::array<float, kHalfLength> taps{};
+    for (uint32_t j = 0; j < kHalfLength; ++j) taps[j] = static_cast<float>(raw[j] * 0.5 / side);
+    return taps;
   }
 
-  std::array<float, kHalfLength> taps_{};
+  std::array<float, kHalfLength> taps_;
   History input_{};
   History even_{};
   History odd_{};

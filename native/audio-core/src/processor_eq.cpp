@@ -55,7 +55,8 @@ namespace {
 constexpr float kSmoothingMs = 10.0F;
 // A band reads its parameters and redesigns once per this many samples (0.67 ms at 48 kHz, well inside the 10 ms smoothing),
 // not every sample: the matched fit costs microseconds and every parameter read is a lookup. Bands take staggered slots so
-// the cost is even across samples.
+// the cost is even across samples. A parameter event is the exception: every band reads and redesigns on the event's
+// frame, so an event's change starts on its own sample.
 constexpr uint32_t kDesignInterval = 32;
 constexpr uint32_t kBandsPerCurve = DAW_AUDIO_CORE_EQ_BANDS_PER_CURVE;
 
@@ -68,13 +69,19 @@ bool band_slot_due(const EqHistory &history, uint32_t band) {
   return (history.design_phase + band * (kDesignInterval / DAW_AUDIO_CORE_EQ_BAND_COUNT)) % kDesignInterval == 0;
 }
 
+// Whether one of this processor's parameter events took effect on this frame (resolve consumed it just now).
+bool parameter_event_on_frame(const Core &core, const GraphRevision::Processor &processor, uint32_t frame) {
+  const uint32_t cursor = core.parameter_event_cursors[processor.control_slot];
+  return cursor > core.event_starts[processor.control_slot] && core.active_events[cursor - 1].frame_offset == frame;
+}
+
 // Points every smoother at this frame's parameter values. The first call snaps them instead of gliding from zero.
-void aim_eq_smoothers(Core &core, GraphRevision::Processor &processor, EqHistory &history, uint32_t frame) {
+void aim_eq_smoothers(Core &core, GraphRevision::Processor &processor, EqHistory &history, uint32_t frame, bool event) {
   const daw_audio_eq_state &eq = processor.eq;
   const bool first = !history.initialized;
   const auto aim = [first](auto &smoother, float value) { first ? smoother.reset(value) : smoother.setTarget(value); };
   for (uint32_t index = 0; index < DAW_AUDIO_CORE_EQ_BAND_COUNT; ++index) {
-    if (!band_active(eq, index) || (!first && !band_slot_due(history, index))) continue;
+    if (!band_active(eq, index) || (!first && !event && !band_slot_due(history, index))) continue;
     const daw_audio_eq_band_state &band = eq.bands[index];
     aim(history.frequency[index], processor_parameter_value(
       core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_FREQUENCY_HZ(index), frame, band.frequency_hz));
@@ -102,7 +109,7 @@ void aim_eq_smoothers(Core &core, GraphRevision::Processor &processor, EqHistory
 
 // Advances the smoothers one sample and redesigns the sections of every band whose effective values moved. Adaptive Q
 // is this device's own law (Live's manual only says Q grows with the amount of boost or cut): Q * (1 + |gain| / 24).
-void advance_eq_bands(EqHistory &history, const daw_audio_eq_state &eq, double design_rate, double project_rate) {
+void advance_eq_bands(EqHistory &history, const daw_audio_eq_state &eq, double design_rate, double project_rate, bool event) {
   const float scale = history.scale.next();
   for (uint32_t index = 0; index < DAW_AUDIO_CORE_EQ_BAND_COUNT; ++index) {
     if (!band_active(eq, index)) continue;
@@ -115,7 +122,7 @@ void advance_eq_bands(EqHistory &history, const daw_audio_eq_state &eq, double d
     if (history.sections[index].count != 0 && designed[0] == frequency && designed[1] == gain && designed[2] == q) continue;
     const bool settled = !history.frequency[index].settling() && !history.gain_db[index].settling() && !history.q[index].settling()
       && !history.scale.settling();
-    if (history.sections[index].count != 0 && !band_slot_due(history, index) && !settled) continue;
+    if (history.sections[index].count != 0 && !event && !band_slot_due(history, index) && !settled) continue;
     designed = {frequency, gain, q};
     history.sections[index] = dsp::designEqBand(type, frequency, design_rate, q, gain, project_rate);
   }
@@ -143,8 +150,10 @@ void render_eq_processor(
   const daw_audio_eq_state &eq = processor.eq;
   const bool high_quality = eq.high_quality != 0;
   const bool two_curves = eq.mode == DAW_AUDIO_EQ_MODE_LEFT_RIGHT || eq.mode == DAW_AUDIO_EQ_MODE_MID_SIDE;
-  aim_eq_smoothers(core, processor, history, frame);
-  advance_eq_bands(history, eq, static_cast<double>(core.config.sample_rate_hz) * (high_quality ? 2.0 : 1.0), static_cast<double>(core.config.sample_rate_hz));
+  const bool event = parameter_event_on_frame(core, processor, frame);
+  aim_eq_smoothers(core, processor, history, frame, event);
+  advance_eq_bands(history, eq, static_cast<double>(core.config.sample_rate_hz) * (high_quality ? 2.0 : 1.0),
+    static_cast<double>(core.config.sample_rate_hz), event);
   const float output_db = history.output_db.next();
   if (output_db != history.output_gain_db) {
     history.output_gain_db = output_db;

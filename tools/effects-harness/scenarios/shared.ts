@@ -8,7 +8,7 @@ import { clickTrain, concat, constant, noise, sine, silence } from '../signals'
 const parityLimit = 1e-5
 
 /** Fixed fixtures, 2 s: tone, noise, step, isolated clicks and a near-Nyquist tone. */
-const parityFixtures = (rate: number): [string, Float32Array][] => {
+export const parityFixtures = (rate: number): [string, Float32Array][] => {
   const frames = 2 * rate
 
   return [

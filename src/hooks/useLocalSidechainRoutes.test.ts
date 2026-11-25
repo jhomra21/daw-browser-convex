@@ -23,7 +23,7 @@ test("follows local sidechain route writes, source deletion, and project switche
   await repository.createTrack({ id: "bass", kind: "audio" })
   await setLocalEffectInstance(projectId, "drums", "gate", {}, { instanceId: "gate-1" })
   const [id, setId] = createSignal(projectId)
-  const routes = createRoot(() => useLocalSidechainRoutes(id))
+  const routes = createRoot(() => useLocalSidechainRoutes(id, () => null))
   flush()
   await waitFor(routes, [])
 
@@ -48,4 +48,32 @@ test("follows local sidechain route writes, source deletion, and project switche
   setId("cloud-project")
   flush()
   await waitFor(routes, [])
+})
+
+test("shows the loaded snapshot's routes until the first read of the project lands", async () => {
+  const projectId = `project:sidechain-seed-${crypto.randomUUID()}`
+  const repository = createLocalTimelineRepository(projectId)
+  await repository.createTrack({ id: "drums", kind: "audio" })
+  await repository.createTrack({ id: "perc", kind: "audio" })
+  await setLocalEffectInstance(projectId, "drums", "gate", {}, { instanceId: "gate-1" })
+  const perc = { sourceTrackId: "perc", targetTrackId: "drums", effectInstanceId: "gate-1" }
+  await repository.setSidechainRoute(perc)
+
+  const [snapshot, setSnapshot] = createSignal<{ projectId: string; sidechainRoutes: ExternalSidechainRoute[] } | null>(
+    { projectId, sidechainRoutes: [perc] },
+  )
+  const routes = createRoot(() => useLocalSidechainRoutes(() => projectId, snapshot))
+  flush()
+  expect(routes()).toEqual([perc])
+
+  await repository.removeSidechainRoute("drums", "gate-1")
+  await waitFor(routes, [])
+  setSnapshot({ projectId, sidechainRoutes: [perc] })
+  flush()
+  expect(routes()).toEqual([])
+
+  const [otherProject] = createSignal(`project:sidechain-seed-other-${crypto.randomUUID()}`)
+  const other = createRoot(() => useLocalSidechainRoutes(otherProject, snapshot))
+  flush()
+  expect(other()).toEqual([])
 })

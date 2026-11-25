@@ -190,6 +190,22 @@ const modes: Scenario = {
     h.within('Output -6 dB', out[0], -6, 0.05, 'dB')
     const adaptive = await gainOf(eqWith(bell, { adaptiveQ: true }), [input, input])
     h.within('Adaptive Q leaves the centre gain unchanged', adaptive[0], 12, 0.3, 'dB')
+
+    // The width where the bell is 3 dB below its peak, measured on the impulse response. Adaptive Q scales Q by 1 + |gain| / 24,
+    // so a +18 dB bell gets 1.75 times narrower.
+    const frequencies = logFrequencies(100, 10000, 2048)
+
+    const bandwidthHz = async (adaptiveQ: boolean) => {
+      const response = responseDb(await impulseResponse(h, eqWith({ type: 'peaking', frequency: 1000, gainDb: 18, q: 1 }, { adaptiveQ })), h.rate, frequencies)
+      const inside = frequencies.filter((_, i) => response[i] >= Math.max(...response) - 3)
+
+      return inside[inside.length - 1] - inside[0]
+    }
+
+    const [plain, narrowed] = [await bandwidthHz(false), await bandwidthHz(true)]
+    h.info('-3 dB bandwidth of a +18 dB Q 1 bell at 1 kHz, Adaptive Q off', plain, 'Hz')
+    h.info('-3 dB bandwidth of the same bell, Adaptive Q on', narrowed, 'Hz')
+    h.within('Adaptive Q narrows a +18 dB bell: bandwidth off / on', plain / narrowed, 1.75, 0.15, 'ratio', 'Q * (1 + |gain| / 24)')
     const ms = await gainOf(eqWith(bell, { channelMode: 'midSide' }), [input, input])
     h.within('M/S mode: curve A shapes the mid of a mono signal', ms[0], 12, 0.3, 'dB')
     const side = await gainOf(eqWith(bell, { channelMode: 'midSide' }), [input, Float32Array.from(input, (v) => -v)])
@@ -334,18 +350,72 @@ const hiQualityLatency: Scenario = {
 
 const windowedDb = (signal: Float32Array, window: number) => Array.from({ length: Math.floor(signal.length / window) }, (_, index) => linearToDb(rms(signal.subarray(index * window, (index + 1) * window), 1) + 1e-9))
 
+// The LFO shapes of lfo_shape in autofilter_kernel.h, as a function of the cycle fraction.
+const lfoShapes = {
+  sine: (fraction: number) => Math.sin(2 * Math.PI * fraction),
+  triangle: (fraction: number) => 1 - 4 * Math.abs(fraction - 0.5),
+  sawDown: (fraction: number) => 1 - 2 * fraction,
+  sawUp: (fraction: number) => 2 * fraction - 1,
+  square: (fraction: number) => (fraction < 0.5 ? 1 : -1),
+}
+
 const lfoWaveforms: Scenario = {
   effect: 'autofilter',
   name: 'lfo-shapes',
   rates: [48000],
   run: async (h) => {
-    const input = sine(4 * h.rate, coherentFrequency(2000, h.rate, h.rate), h.rate, 0.1)
+    const tone = coherentFrequency(2000, h.rate, h.rate)
+    const input = sine(4 * h.rate, tone, h.rate, 0.1)
+    const window = Math.round(h.rate / 100)
+    const base = 500
+    const depth = 2
+    const rate = 2
+    const lfo = { ...autofilterLfo, rateHz: rate, depthOctaves: depth }
+
+    // What the 2 kHz tone's level is for a fixed cutoff, at quarter-octave steps over the sweep: the map from the cutoff the
+    // LFO picks to the level the render shows.
+    const octaves = Array.from({ length: 4 * 2 * depth + 1 }, (_, index) => -depth + index / 4)
+
+    const calibration = await Promise.all(octaves.map(async (octave) => {
+      const { output } = await h.render(fx.autofilter({ frequencyHz: base * 2 ** octave, resonance: 0, hiQuality: false }), { input: [input.subarray(0, h.rate)] }, { parity: false })
+      const levels = windowedDb(output[0].subarray(h.rate / 2), window)
+
+      return levels.reduce((sum, level) => sum + level, 0) / levels.length
+    }))
+
+    const levelAt = (octave: number) => {
+      const position = Math.min(Math.max((octave + depth) * 4, 0), octaves.length - 1)
+      const low = Math.min(Math.floor(position), octaves.length - 2)
+
+      return calibration[low] + (calibration[low + 1] - calibration[low]) * (position - low)
+    }
+
+    // Windows right after a jump of the square or saw shapes are skipped: the filter is still settling there.
+    const settled = (index: number) => ((index * window) / h.rate * rate * 2) % 1 > 0.2 && index * window > h.rate / 4
+
+    const deviation = (levels: number[], shape: (fraction: number) => number) => Math.max(...levels.map((level, index) => {
+      if (!settled(index)) return 0
+
+      const fraction = (((index + 0.5) * window) / h.rate * rate) % 1
+
+      return Math.abs(level - levelAt(depth * shape(fraction)))
+    }))
 
     for (const waveform of ['sine', 'triangle', 'sawDown', 'sawUp', 'square', 'sampleHold'] as const) {
-      const { output } = await h.render(fx.autofilter({ frequencyHz: 500, resonance: 0, hiQuality: false, lfo: { ...autofilterLfo, waveform, rateHz: 2, depthOctaves: 2 } }), { input: [input] }, { parity: false })
-      const levels = windowedDb(output[0].subarray(h.rate), Math.round(h.rate / 100))
+      const { output } = await h.render(fx.autofilter({ frequencyHz: base, resonance: 0, hiQuality: false, lfo: { ...lfo, waveform } }), { input: [input] }, { parity: false })
+      const levels = windowedDb(output[0].subarray(h.rate), window)
 
       h.atLeast(`2 kHz level swing through a 2-octave ${waveform} sweep of a 500 Hz low-pass`, Math.max(...levels) - Math.min(...levels), 6, 'dB', 'A5: every shape moves the cutoff')
+
+      if (waveform === 'sampleHold') continue
+
+      const measured = windowedDb(output[0], window)
+      const own = deviation(measured, lfoShapes[waveform])
+
+      const others = Object.entries(lfoShapes).filter(([name]) => name !== waveform).map(([, shape]) => deviation(measured, shape))
+
+      h.atMost(`${waveform}: worst gap between the measured level path and the expected ${waveform} cutoff path`, own, 0.5, 'dB', 'the cutoff follows the shape')
+      h.atLeast(`${waveform}: smallest gap to any other shape's expected path`, Math.min(...others), 4, 'dB', 'the shapes can be told apart')
     }
   },
 }

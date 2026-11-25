@@ -1115,6 +1115,7 @@ daw_audio_core_result prepare_graph_revision(
 bool valid_utility_state(const daw_audio_utility_state &state);
 bool decode_processor_state(
   const daw_audio_processor_descriptor &descriptor,
+  uint32_t sample_rate_hz,
   GraphRevision::Processor *out_processor);
 float processor_parameter_value(
   const Core &core,

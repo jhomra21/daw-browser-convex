@@ -4,7 +4,7 @@
 import { countNonFinite, lowpass, maxAbsDiff, peakAbs, peakDb, rmsDb, toneGainDb, truePeakDb } from '../dsp'
 import { measureThdPlusNoise } from '../../../packages/audio-engine/src/dsp-characterization'
 import { ebuTruePeakCases } from '../ebu3341'
-import { fx } from '../effects'
+import { declaredLatencyFrames, fx } from '../effects'
 import type { EffectSpec } from '../effects'
 import type { Family } from './index'
 import type { Scenario } from '../harness'
@@ -12,8 +12,6 @@ import { clickTrain, coherentFrequency, concat, constant, dbToLinear, linearToDb
 import { parityScenario, robustnessScenarios } from './shared'
 
 const normalizePeak = (signal: Float32Array, db: number) => scale(signal, dbToLinear(db) / peakAbs(signal))
-
-const msFrames = (ms: number, rate: number) => Math.ceil(ms * rate / 1000)
 
 const lookaheads = [1.5, 3, 6] as const
 
@@ -230,7 +228,7 @@ const limiterLatency: Scenario = {
   name: 'l5-lookahead-latency',
   run: async (h) => {
     for (const lookaheadMs of lookaheads) {
-      h.within(`impulse delay, lookahead ${lookaheadMs} ms`, await h.latencyFrames(fx.limiter({ lookaheadMs })), msFrames(lookaheadMs, h.rate), 1, 'frames')
+      h.within(`impulse delay, lookahead ${lookaheadMs} ms`, await h.latencyFrames(fx.limiter({ lookaheadMs })), declaredLatencyFrames(fx.limiter({ lookaheadMs }), h.rate), 0, 'frames')
     }
   },
 }
@@ -275,7 +273,7 @@ const compressorLatency: Scenario = {
   name: 'c5-lookahead-latency',
   run: async (h) => {
     for (const lookaheadMs of [0, 1, 10] as const) {
-      h.within(`impulse delay, lookahead ${lookaheadMs} ms`, await h.latencyFrames(fx.compressor({ ratio: 1, thresholdDb: 0, lookaheadMs })), msFrames(lookaheadMs, h.rate), 1, 'frames')
+      h.within(`impulse delay, lookahead ${lookaheadMs} ms`, await h.latencyFrames(fx.compressor({ ratio: 1, thresholdDb: 0, lookaheadMs })), declaredLatencyFrames(fx.compressor({ ratio: 1, thresholdDb: 0, lookaheadMs }), h.rate), 0, 'frames')
     }
   },
 }
@@ -657,7 +655,7 @@ const gateLatency: Scenario = {
   name: 'g5-lookahead-latency',
   run: async (h) => {
     for (const lookaheadMs of [0, 1, 10] as const) {
-      h.within(`impulse delay, lookahead ${lookaheadMs} ms`, await h.latencyFrames(fx.gate({ lookaheadMs })), msFrames(lookaheadMs, h.rate), 1, 'frames')
+      h.within(`impulse delay, lookahead ${lookaheadMs} ms`, await h.latencyFrames(fx.gate({ lookaheadMs })), declaredLatencyFrames(fx.gate({ lookaheadMs }), h.rate), 0, 'frames')
     }
   },
 }
@@ -674,9 +672,9 @@ const gateCpu: Scenario = {
 const limiterSpec = fx.limiter({ ceilingDbtp: -6 })
 const gateSpec = fx.gate({ thresholdDb: -20 })
 
-const familyOf = (effect: string, spec: EffectSpec, latency: (rate: number) => number): Scenario[] => [
+const familyOf = (effect: string, spec: EffectSpec): Scenario[] => [
   parityScenario(effect, spec),
-  ...robustnessScenarios(effect, spec, latency),
+  ...robustnessScenarios(effect, spec, (rate) => declaredLatencyFrames(spec, rate)),
 ]
 
 export const dynamics: Family = {
@@ -687,11 +685,11 @@ export const dynamics: Family = {
     compressorThd('c1-thd-rms-fast', 'rms', 1, 50, -45),
     compressorPeakSteady, compressorRmsConstant, compressorKeyFilter, compressorGuards, compressorAutoRelease, compressorCpu, compressorAutoMakeup, compressorExpand,
     makeupStep, compressorLatency, gateChatter, gateTiming, gateGuards, gateFlip, gateKey, gateKeyFilter, gateParityKey, gateLatency, gateCpu,
-    ...familyOf('limiter', limiterSpec, (rate) => msFrames(3, rate)),
-    ...familyOf('compressor', compressorSpec, () => 0),
+    ...familyOf('limiter', limiterSpec),
+    ...familyOf('compressor', compressorSpec),
     { ...parityScenario('compressor', fx.compressor({ thresholdDb: -30, ratio: 3, kneeDb: 6, dynamicsMode: 'expand', autoMakeup: true, makeupDb: 2, envelopeCurve: 'linear', sidechain: { enabled: true, filterType: 'bandpass', frequencyHz: 800, q: 2 } })), name: 'parity-expand' },
     { ...parityScenario('compressor', fx.compressor({ thresholdDb: -30, ratio: 4, lookaheadMs: 10, detectorMode: 'peak', envelopeCurve: 'linear', autoMakeup: true, sidechain: { enabled: true, filterType: 'bandpass', frequencyHz: 800, q: 2 } })), name: 'parity-fixtures-peak-linear-lookahead' },
-    ...familyOf('gate', gateSpec, () => 0),
+    ...familyOf('gate', gateSpec),
   ],
   notEncoded: [
     'L2: the limiter\'s own detector reading on EBU 3341 cases 15 to 23 is internal; the harness instead validates its own true-peak meter against those cases and limits the signals above 0 dBTP.',

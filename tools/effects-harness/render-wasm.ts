@@ -60,7 +60,7 @@ const keyEdge: AudioCoreGraphEdgeDto = {
   version: audioCoreContractVersion, id: 'key', fromNodeId: 'k', toNodeId: 's', targetProcessorId: 'p', gain: 1, kind: 'output', tap: 'post-fader', sidechain: true, pdcDelayFrames: 0,
 }
 
-const snapshot = (spec: EffectSpec | null, targets: readonly number[], keyed: boolean, revision: number): AudioCoreGraphSnapshot => ({
+const snapshot = (spec: EffectSpec | null, rate: number, targets: readonly number[], keyed: boolean, revision: number): AudioCoreGraphSnapshot => ({
   version: audioCoreContractVersion,
   revision,
   contractHash: processorContractHash,
@@ -68,11 +68,11 @@ const snapshot = (spec: EffectSpec | null, targets: readonly number[], keyed: bo
   assets: [],
   nodes: [
     {
-      id: 's', kind: 'source', inputLayout: 'stereo', outputLayout: 'stereo', latencyFrames: spec === null ? 0 : declaredLatencyFrames(spec),
+      id: 's', kind: 'source', inputLayout: 'stereo', outputLayout: 'stereo', latencyFrames: spec === null ? 0 : declaredLatencyFrames(spec, rate),
       processorOrder: spec === null ? [] : [{
         id: 'p', kind: spec.kind, kindId: kindIds[spec.kind], instanceId: processorInstanceId, stateVersion: processorSchemaVersion(spec.kind),
         state: encodeSpec(spec), parameterTargets: targets.map((target) => ({ id: String(target), target })),
-        latencyFrames: declaredLatencyFrames(spec), tailFrames: 0, bypassed: false,
+        latencyFrames: declaredLatencyFrames(spec, rate), tailFrames: 0, bypassed: false,
       }],
     },
     { id: 'm', kind: 'master', inputLayout: 'stereo', outputLayout: 'stereo', latencyFrames: 0, processorOrder: [] },
@@ -127,7 +127,7 @@ export const renderWasm = async (spec: EffectSpec | null, rate: number, options:
   if (exports.initialize(rate, blockFrames, buses, 2, 1) !== 0) throw new Error('audio-core initialize failed')
 
   const publishGraph = (current: EffectSpec | null, revision: number) => {
-    const graph = graphEnvelope(snapshot(current, targets, key !== undefined, revision))
+    const graph = graphEnvelope(snapshot(current, rate, targets, key !== undefined, revision))
     const graphView = new DataView(graph.buffer, graph.byteOffset, graph.byteLength)
 
     graphView.setUint32(sourceBusOffset, 0, true)

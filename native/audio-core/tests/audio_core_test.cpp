@@ -5,6 +5,9 @@
 #include "graph_fixture.h"
 #include "processor_contract_generated.h"
 #include "processor_kind_generated.h"
+#include "../src/compressor_kernel.h"
+#include "../src/gate_kernel.h"
+#include "../src/limiter_kernel.h"
 #if defined(DAW_AUDIO_CORE_TEST_SPECTRAL_INTERNALS)
 
 // The one contract that reads private voice state; see the CMake target that builds this variant.
@@ -1650,6 +1653,53 @@ void test_per_instance_history_isolation_and_republication() {
   }
 }
 
+// A device declares the latency its kernel really has: the host aligns the dry paths by it.
+void test_dynamics_declared_latency_must_match_the_kernel() {
+  const std::array<daw_audio_graph_edge_descriptor, 1> edges{{
+    {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F,
+      .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
+  }};
+  struct Case { uint32_t kind; uint32_t lookahead_offset; std::array<float, 3> lookaheads; };
+  const std::array<Case, 3> cases{{
+    {DAW_AUDIO_PROCESSOR_KIND_GATE, 36, {0.0F, 1.0F, 10.0F}},
+    {DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR, 40, {0.0F, 1.0F, 10.0F}},
+    {DAW_AUDIO_PROCESSOR_KIND_LIMITER, 12, {1.5F, 3.0F, 6.0F}},
+  }};
+  for (const uint32_t rate : {48000u, 44100u, 24000u, 16000u}) {
+    for (const Case &item : cases) {
+      for (const float lookahead : item.lookaheads) {
+        HistoryFixtureState state = history_fixture_state(item.kind);
+        std::memcpy(state.bytes.data() + item.lookahead_offset, &lookahead, sizeof(lookahead));
+        const double rate_hz = static_cast<double>(rate);
+        const uint32_t expected = item.kind == DAW_AUDIO_PROCESSOR_KIND_GATE ? daw::audio_core::GateKernel::latency_frames(lookahead, rate_hz)
+          : item.kind == DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR ? daw::audio_core::CompressorKernel::latency_frames(lookahead, rate_hz)
+          : daw::audio_core::LimiterKernel::latency_frames(lookahead, rate_hz);
+        for (const uint32_t declared : {expected, expected + 1}) {
+          const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
+            {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+              .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
+            {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+              .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = declared},
+          }};
+          const daw_audio_processor_descriptor processor{
+            .node_id = 2, .instance_id = 77, .kind = item.kind, .state_version = schema_version_of(item.kind), .state_size = state.size,
+            .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+            .latency_frames = declared, .tail_frames = 0, .parameter_count = 0,
+            .parameter_targets = nullptr, .state = state.bytes.data(),
+          };
+          daw_audio_core_handle core = create_core_at_rate(128, 2, 1, rate);
+          const daw_audio_graph_prepare_request request{
+            .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = 1, .node_count = 2, .edge_count = 1,
+            .processor_count = 1, .nodes = nodes.data(), .edges = edges.data(), .processors = &processor,
+          };
+          expect(daw_audio_core_prepare_graph(core, &request), declared == expected ? DAW_AUDIO_CORE_OK : DAW_AUDIO_CORE_INVALID_ARGUMENT);
+          daw_audio_core_destroy(core);
+        }
+      }
+    }
+  }
+}
+
 // The renderers follow the sidechain filter's frequency live, so editing it must not replace the slot: the gate and the
 // compressor keep their gain, and the output on the other side of the edit stays where the unedited run has it.
 void test_sidechain_frequency_edit_keeps_gate_and_compressor_history() {
@@ -2502,7 +2552,7 @@ void test_limiter_holds_its_gain_through_the_lookahead() {
     for (const float lookahead_ms : {1.5F, 6.0F}) {
       for (const float release_ms : {50.0F, 120.0F}) {
         for (const float link : {0.0F, 1.0F}) {
-          const uint32_t latency = static_cast<uint32_t>(std::ceil(5.0F * static_cast<float>(rate) / 1000.0F));
+          const uint32_t latency = daw::audio_core::LimiterKernel::latency_frames(lookahead_ms, static_cast<double>(rate));
           const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
             {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
             {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = latency},
@@ -2570,7 +2620,7 @@ void test_limiter_holds_its_gain_through_the_lookahead() {
 // fed the same signal on both channels. `signal` must be a multiple of 512 frames long.
 float limiter_output_sample_peak(uint32_t rate, float lookahead_ms, const std::vector<float> &signal) {
   constexpr float kCeilingDb = -1.0F;
-  const uint32_t latency = static_cast<uint32_t>(std::ceil(5.0F * static_cast<float>(rate) / 1000.0F));
+  const uint32_t latency = daw::audio_core::LimiterKernel::latency_frames(lookahead_ms, static_cast<double>(rate));
   const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
     {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
     {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = latency},
@@ -6218,12 +6268,15 @@ struct Phase3Rig {
     processors.back().parameter_targets = declared_targets.back().data();
   }
   void add_processor(uint64_t node, uint64_t instance, uint32_t kind, uint32_t size, const uint8_t *state,
-    bool automatable) {
+    bool automatable, uint32_t latency = 0) {
     processors.push_back({.node_id = node, .instance_id = instance, .kind = kind,
       .state_version = schema_version_of(kind),
       .state_size = size, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
-      .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .parameter_count = automatable ? 1u : 0u,
+      .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .latency_frames = latency, .parameter_count = automatable ? 1u : 0u,
       .parameter_targets = automatable ? gain_target.data() : nullptr, .state = state});
+    for (daw_audio_graph_node_descriptor &candidate : nodes) {
+      if (candidate.id == node) candidate.latency_frames += latency;
+    }
   }
   void add_utility(uint64_t node, uint64_t instance, float gain_db = 0.0F, bool dc_block = false,
     bool automatable = false) {
@@ -6248,7 +6301,7 @@ struct Phase3Rig {
     put_float(16, 2500.0F); put_float(20, 0.5F); put_float(24, -3.0F); put_float(28, 0.75F);
     add_processor(node, instance, DAW_AUDIO_PROCESSOR_KIND_SATURATOR, 32, bytes.data(), false);
   }
-  // A hard compressor with full lookahead, so its detector reacts at once, and a
+  // A hard compressor whose detector reacts at once, and a
   // detector low-pass wide enough to pass a steady key: with the key on a second
   // bus, only the key decides how far the program is pulled down.
   void add_compressor(uint64_t node, uint64_t instance, float threshold_db) {
@@ -6263,15 +6316,15 @@ struct Phase3Rig {
       put(offset, bits);
     };
     put(0, 1); put_float(4, threshold_db); put_float(8, 100.0F); put_float(12, 0.1F); put_float(16, 5.0F);
-    put_float(32, 1.0F); put_float(40, 10.0F); put(56, 1); put(60, 1); put_float(64, 20000.0F); put_float(68, 0.707F);
+    put_float(32, 1.0F); put(56, 1); put(60, 1); put_float(64, 20000.0F); put_float(68, 0.707F);
     add_processor(node, instance, DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR, 76, bytes.data(), false);
   }
   // Any processor whose ABI state is a plain struct (EQ, gate, limiter, ...).
   template <typename State>
-  void add_state(uint64_t node, uint64_t instance, uint32_t kind, const State &state) {
+  void add_state(uint64_t node, uint64_t instance, uint32_t kind, const State &state, uint32_t latency = 0) {
     const auto *bytes = reinterpret_cast<const uint8_t *>(&state);
     states.emplace_back(bytes, bytes + sizeof(State));
-    add_processor(node, instance, kind, sizeof(State), states.back().data(), false);
+    add_processor(node, instance, kind, sizeof(State), states.back().data(), false, latency);
   }
   // Any processor given as the ABI's raw state bytes.
   void add_bytes(uint64_t node, uint64_t instance, uint32_t kind, const uint8_t *bytes, uint32_t size) {
@@ -8875,11 +8928,17 @@ void pristine_build(Phase3Rig &rig, const PristineVariant &variant) {
     const daw_audio_limiter_state limiter{.enabled = 1, .ceiling_dbtp = -12.0F, .release_ms = 20.0F,
       .lookahead_ms = 1.5F, .link = 1.0F, .auto_release = 0, .gain_db = 0.0F};
     const auto compressor = [&rig] { rig.add_compressor(3, 21, -30.0F); };
-    const auto limit = [&rig, &limiter] { rig.add_state(3, 22, DAW_AUDIO_PROCESSOR_KIND_LIMITER, limiter); };
+    const auto limit = [&rig, &limiter] {
+      rig.add_state(3, 22, DAW_AUDIO_PROCESSOR_KIND_LIMITER, limiter, daw::audio_core::LimiterKernel::latency_frames(limiter.lookahead_ms, static_cast<double>(rig.sample_rate)));
+    };
     if (variant.reordered) { limit(); compressor(); } else { compressor(); limit(); }
     const Phase3RawState lofi = phase3_lofi_state();
     rig.add_bytes(3, 23, DAW_AUDIO_PROCESSOR_KIND_LOFI, lofi.bytes.data(), lofi.size);
     rig.add_utility(3, 24, 3.0F, true, true);
+    // The limiter delays its branch; the other branches wait for it.
+    for (daw_audio_graph_edge_descriptor &branch : rig.edges) {
+      if (branch.from_node_id != 3) branch.pdc_delay_frames = rig.nodes[2].latency_frames;
+    }
   }
   rig.add_utility(5, 30, 0.0F, true);
   for (auto &processor : rig.processors) {
@@ -11464,6 +11523,7 @@ int main(int argc, char **argv) {
   test_portable_graph_utility_node();
   test_per_instance_history_isolation_and_republication();
   test_sidechain_frequency_edit_keeps_gate_and_compressor_history();
+  test_dynamics_declared_latency_must_match_the_kernel();
   test_same_core_processor_state_patch_preserves_revision();
   test_utility_history_isolated_between_instances_and_standalone();
   test_pdc_delay_may_exceed_runtime_block_size_within_ring_capacity();

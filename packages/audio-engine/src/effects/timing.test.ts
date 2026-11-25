@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import {
   createDefaultDelayParams,
+  createDefaultCompressorParams,
   createDefaultGateParams,
+  createDefaultLimiterParams,
   createDefaultReverbParams,
   createDefaultUtilityParams,
 } from '@daw-browser/shared'
@@ -23,6 +25,42 @@ describe('utility and gate timing', () => {
     expect(gateLatency(1)).toBe(45)
     expect(gateLatency(10)).toBe(441)
     expect(gateLatency(10, false)).toBe(441)
+  })
+})
+
+// The native core refuses a Gate, Compressor or Limiter whose declared latency differs from its kernel's.
+describe('lookahead latency matches the native kernels', () => {
+  const limiterLatency = (lookaheadMs: number, rate: number) => getEffectTiming(
+    { id: 'limiter-1', kind: 'limiter', params: { version: 1, state: { ...createDefaultLimiterParams(), lookaheadMs } } },
+    rate,
+  ).latencyFrames
+  const compressorLatency = (lookaheadMs: number, rate: number) => getEffectTiming(
+    { id: 'compressor-1', kind: 'compressor', params: { ...createDefaultCompressorParams(), lookaheadMs } },
+    rate,
+  ).latencyFrames
+  const gateLatency = (lookaheadMs: number, rate: number) => getEffectTiming(
+    { id: 'gate-1', kind: 'gate', params: { version: 1, state: { ...createDefaultGateParams(), lookaheadMs } } },
+    rate,
+  ).latencyFrames
+
+  test('keeps the Limiter delay between the kernel minimum and its capacity', () => {
+    expect(limiterLatency(1.5, 48_000)).toBe(72)
+    expect(limiterLatency(1.5, 8_000)).toBe(14)
+    expect(limiterLatency(0, 48_000)).toBe(14)
+    expect(limiterLatency(1_000, 48_000)).toBe(2_000)
+  })
+
+  test('caps the Gate and Compressor delay one frame under the kernel capacity', () => {
+    expect(compressorLatency(10, 48_000)).toBe(480)
+    expect(compressorLatency(1_000, 48_000)).toBe(2_047)
+    expect(gateLatency(10, 48_000)).toBe(480)
+    expect(gateLatency(1_000, 48_000)).toBe(2_047)
+  })
+
+  test('rounds a float32 lookahead like the kernel does', () => {
+    // 0.1f is 0.10000000149, so at 48 kHz the kernel needs 4.8000000715 frames and rounds up to 5.
+    expect(compressorLatency(0.1, 48_000)).toBe(5)
+    expect(compressorLatency(-1, 48_000)).toBe(0)
   })
 })
 

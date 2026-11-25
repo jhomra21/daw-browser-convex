@@ -33,6 +33,23 @@ const finite = (frames: number): EffectTiming['tail'] => ({
   frames: Math.max(0, Math.ceil(frames)),
 })
 
+// The core rejects a processor whose declared latency differs from its kernel's, so these mirror
+// dsp::Latency::fromMilliseconds and the kernels' latency_frames in native/audio-core/src, which read the
+// lookahead as a float: Math.fround keeps the same value, and the ceiling rounds the same way.
+const KERNEL_DELAY_CAPACITY_FRAMES = 2048
+const LIMITER_MINIMUM_LATENCY_FRAMES = 14
+const LIMITER_MAXIMUM_LATENCY_FRAMES = KERNEL_DELAY_CAPACITY_FRAMES - 48
+
+const lookaheadFrames = (lookaheadMs: number, rate: number) =>
+  Math.max(0, Math.ceil(Math.fround(lookaheadMs) * rate / 1000))
+
+export const limiterLatencyFrames = (lookaheadMs: number, rate: number) =>
+  Math.min(Math.max(lookaheadFrames(lookaheadMs, rate), LIMITER_MINIMUM_LATENCY_FRAMES), LIMITER_MAXIMUM_LATENCY_FRAMES)
+
+/** The Gate and the Compressor share one cap: their delay lines hold one frame less than their capacity. */
+export const gateCompressorLatencyFrames = (lookaheadMs: number, rate: number) =>
+  Math.min(lookaheadFrames(lookaheadMs, rate), KERNEL_DELAY_CAPACITY_FRAMES - 1)
+
 export const getEffectTiming = (
   input: EffectTimingInput,
   sampleRate: number,
@@ -53,11 +70,11 @@ export const getEffectTiming = (
   }
 
   if (input.kind === 'limiter') {
-    return { latencyFrames: Math.ceil(input.params.state.lookaheadMs * rate / 1000), tail: finite(0) }
+    return { latencyFrames: limiterLatencyFrames(input.params.state.lookaheadMs, rate), tail: finite(0) }
   }
 
   if (input.kind === 'gate') {
-    return { latencyFrames: Math.ceil(input.params.state.lookaheadMs * rate / 1000), tail: finite(0) }
+    return { latencyFrames: gateCompressorLatencyFrames(input.params.state.lookaheadMs, rate), tail: finite(0) }
   }
 
   if (input.kind === 'spectral') {
@@ -68,10 +85,7 @@ export const getEffectTiming = (
   }
 
   if (input.kind === 'compressor') {
-    return {
-      latencyFrames: Math.ceil(input.params.lookaheadMs * rate / 1000),
-      tail: finite(0),
-    }
+    return { latencyFrames: gateCompressorLatencyFrames(input.params.lookaheadMs, rate), tail: finite(0) }
   }
 
   if (input.kind === 'delay') {

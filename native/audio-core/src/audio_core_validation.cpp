@@ -346,7 +346,9 @@ namespace daw::audio_core_internal {
 
 bool decode_processor_state(
   const daw_audio_processor_descriptor &descriptor,
+  uint32_t sample_rate_hz,
   GraphRevision::Processor *out_processor) {
+  const double rate = static_cast<double>(sample_rate_hz);
   const ProcessorContract *contract = find_processor_contract(descriptor.kind);
   if (contract == nullptr || descriptor.state_version != contract->schema_version
     || descriptor.state == nullptr
@@ -429,7 +431,8 @@ bool decode_processor_state(
       .sidechain_filter_type = read_u32_le(descriptor.state + 64), .sidechain_gain_db = read_f32_le(descriptor.state + 68),
       .sidechain_mix = read_f32_le(descriptor.state + 72),
     };
-    if (!valid_gate_state(state)) return false;
+    if (!valid_gate_state(state)
+      || descriptor.latency_frames != daw::audio_core::GateKernel::latency_frames(state.lookahead_ms, rate)) return false;
     out_processor->gate = state;
     return true;
   }
@@ -446,7 +449,8 @@ bool decode_processor_state(
       .sidechain_frequency_hz = read_f32_le(descriptor.state + 64), .sidechain_q = read_f32_le(descriptor.state + 68),
       .auto_makeup = read_u32_le(descriptor.state + 72),
     };
-    if (!valid_compressor_state(state)) return false;
+    if (!valid_compressor_state(state)
+      || descriptor.latency_frames != daw::audio_core::CompressorKernel::latency_frames(state.lookahead_ms, rate)) return false;
     out_processor->compressor = state;
     return true;
   }
@@ -457,7 +461,8 @@ bool decode_processor_state(
       .link = read_f32_le(descriptor.state + 16), .auto_release = read_u32_le(descriptor.state + 20),
       .gain_db = read_f32_le(descriptor.state + 24),
     };
-    if (!valid_limiter_state(state)) return false;
+    if (!valid_limiter_state(state)
+      || descriptor.latency_frames != daw::audio_core::LimiterKernel::latency_frames(state.lookahead_ms, rate)) return false;
     out_processor->limiter = state;
     return true;
   }

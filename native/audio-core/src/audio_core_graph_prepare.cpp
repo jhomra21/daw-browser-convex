@@ -195,7 +195,7 @@ daw_audio_core_result prepare_graph_revision(
     processor.tail_frames = descriptor.tail_frames;
     processor.state_size = descriptor.state_size;
     for (uint32_t byte = 0; byte < descriptor.state_size; ++byte) processor.state[byte] = descriptor.state[byte];
-    if (!decode_processor_state(descriptor, &processor)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    if (!decode_processor_state(descriptor, core.config.sample_rate_hz, &processor)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
     processor.parameter_count = descriptor.parameter_count;
     for (uint32_t parameter = 0; parameter < descriptor.parameter_count; ++parameter) {
       processor.parameter_targets[parameter] = descriptor.parameter_targets[parameter];

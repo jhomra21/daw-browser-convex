@@ -131,6 +131,7 @@ class Adaa {
 
       return 0
     }
+
     const x = input
     const integral = antiderivative(x)
     const step = x - this.previousInput
@@ -235,8 +236,8 @@ const qFromResonance = (resonance) => f(MINIMUM_Q * f(Math.pow(f(MAXIMUM_Q / MIN
 const syncRateHz = (division, tempoBpm) =>
   f((tempoBpm > 0 ? tempoBpm : DEFAULT_TEMPO_BPM) / 60 / BEATS[Math.min(division, DIVISION_COUNT - 1)])
 
-// Bipolar shape for one point of a cycle. `cycle` seeds sample and hold so left and right share one sequence.
-const lfoShape = (waveform, fraction, cycle) => {
+// Bipolar value for one point of a cycle. `cycle` seeds sample and hold so left and right share one sequence.
+const lfoValue = (waveform, fraction, cycle) => {
   const phase = f(fraction)
 
   switch (waveform) {
@@ -252,7 +253,8 @@ const lfoShape = (waveform, fraction, cycle) => {
 
       return f(f(f(x) * 2 ** -31) - 1)
     }
-    default: return f(Math.sin(f(f(6.2831853071795864769) * phase)))
+
+    default: return f(Math.sin(f(f(2 * Math.PI) * phase)))
   }
 }
 
@@ -326,6 +328,7 @@ class AutoFilterKernel {
       channel.paths[0].mode = config.mode
       channel.paths[0].slope = config.slope
     }
+
     this.applied = { ...config }
     this.initialized = true
   }
@@ -348,11 +351,13 @@ class AutoFilterKernel {
         channel.paths[incoming] = createPath(config.mode, config.slope)
         channel.valid.fill(false)
       }
+
       this.active = incoming
       this.fading = true
       this.fadePosition = 0
       this.fadeFrames = Math.max(1, Math.floor(0.010 * this.rate) >>> 0)
     }
+
     this.applied = { ...config }
   }
   smooth(values) {
@@ -368,6 +373,7 @@ class AutoFilterKernel {
       this.q = qFromResonance(resonance)
       this.lastResonance = resonance
     }
+
     const drive = this.drive.next()
 
     if (drive !== this.lastDrive) {
@@ -375,6 +381,7 @@ class AutoFilterKernel {
       this.driveBlend = Math.min(1, f(drive / 6))
       this.lastDrive = drive
     }
+
     this.mixValue = this.mix.next()
     const output = this.output.next()
 
@@ -413,6 +420,7 @@ class AutoFilterKernel {
         this.attacking[c] = false
         env = level > env ? f(f(attack * env) + f(f(1 - attack) * level)) : f(f(release * env) + f(f(1 - release) * level))
       }
+
       this.envelope[c] = flushDenormal(env)
     }
 
@@ -459,10 +467,11 @@ class AutoFilterKernel {
 
       return x
     }
-    const u = f(this.driveGain * x)
-    const shaped = f(f(hiQuality ? channel.driveAdaa.process(u) : f(Math.tanh(u))) / this.driveGain)
 
-    return f(x + f(this.driveBlend * f(shaped - x)))
+    const u = f(this.driveGain * x)
+    const driven = f(f(hiQuality ? channel.driveAdaa.process(u) : f(Math.tanh(u))) / this.driveGain)
+
+    return f(x + f(this.driveBlend * f(driven - x)))
   }
   clipSample(channel, hiQuality, clip, x) {
     if (!clip) return x
@@ -475,7 +484,7 @@ class AutoFilterKernel {
 
     if (index === 1 && config.stereoMode === 0) phase += values.lfoStereoPhase
     const whole = Math.floor(phase)
-    const lfo = lfoShape(config.waveform, phase - whole, (channel.cycle + whole) >>> 0)
+    const lfo = lfoValue(config.waveform, phase - whole, (channel.cycle + whole) >>> 0)
     channel.phase += rate / this.rate
 
     if (channel.phase >= 1) {
@@ -483,6 +492,7 @@ class AutoFilterKernel {
       channel.phase -= wraps
       channel.cycle = (channel.cycle + wraps) >>> 0
     }
+
     const envUnit = clamp(f(f(f(20 * f(Math.log10(Math.max(this.envelope[index], f(1e-6))))) + 60) / 60), 0, 1)
     const octaves = f(f(values.envAmountOctaves * envUnit) + f(values.lfoDepthOctaves * lfo))
     const cutoff = clamp(f(this.baseFrequency * f(Math.pow(2, octaves))), 20, f(f(0.45) * f(this.rate)))
@@ -501,6 +511,7 @@ class AutoFilterKernel {
         const filtered = this.filterSample(channel, cutoff, rate2, this.driveSample(channel, true, doubled[n]))
         doubled[n] = this.clipSample(channel, true, config.clip, f(filtered * this.outputGain))
       }
+
       wet = channel.oversampler.down(doubled[0], doubled[1])
     } else {
       const filtered = this.filterSample(channel, cutoff, f(this.rate), this.driveSample(channel, false, input))
@@ -515,6 +526,7 @@ class AutoFilterKernel {
       channel.clipAdaa.reset()
       wet = 0
     }
+
     const mixed = f(dry + f(f(wet - dry) * this.mixValue))
 
     return flushDenormal(f(mixed + f(f(dry - mixed) * bypass)))

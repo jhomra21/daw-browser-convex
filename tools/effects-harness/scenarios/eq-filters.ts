@@ -280,6 +280,7 @@ const driveZeroLinearity: Scenario = {
   name: 'drive-zero-linearity',
   run: async (h) => {
     const frames = h.rate
+
     const thd = async (spec: EffectSpec, frequency: number, amplitude: number) => {
       const f = coherentFrequency(frequency, frames / 2, h.rate)
       const { output } = await h.render(spec, { input: [sine(frames, f, h.rate, amplitude)] }, { parity: false })
@@ -351,7 +352,7 @@ const hiQualityLatency: Scenario = {
 const windowedDb = (signal: Float32Array, window: number) => Array.from({ length: Math.floor(signal.length / window) }, (_, index) => linearToDb(rms(signal.subarray(index * window, (index + 1) * window), 1) + 1e-9))
 
 // The LFO shapes of lfo_shape in autofilter_kernel.h, as a function of the cycle fraction.
-const lfoShapes = {
+const lfoWaves = {
   sine: (fraction: number) => Math.sin(2 * Math.PI * fraction),
   triangle: (fraction: number) => 1 - 4 * Math.abs(fraction - 0.5),
   sawDown: (fraction: number) => 1 - 2 * fraction,
@@ -393,12 +394,12 @@ const lfoWaveforms: Scenario = {
     // Windows right after a jump of the square or saw shapes are skipped: the filter is still settling there.
     const settled = (index: number) => ((index * window) / h.rate * rate * 2) % 1 > 0.2 && index * window > h.rate / 4
 
-    const deviation = (levels: number[], shape: (fraction: number) => number) => Math.max(...levels.map((level, index) => {
+    const deviation = (levels: number[], wave: (fraction: number) => number) => Math.max(...levels.map((level, index) => {
       if (!settled(index)) return 0
 
       const fraction = (((index + 0.5) * window) / h.rate * rate) % 1
 
-      return Math.abs(level - levelAt(depth * shape(fraction)))
+      return Math.abs(level - levelAt(depth * wave(fraction)))
     }))
 
     for (const waveform of ['sine', 'triangle', 'sawDown', 'sawUp', 'square', 'sampleHold'] as const) {
@@ -410,9 +411,9 @@ const lfoWaveforms: Scenario = {
       if (waveform === 'sampleHold') continue
 
       const measured = windowedDb(output[0], window)
-      const own = deviation(measured, lfoShapes[waveform])
+      const own = deviation(measured, lfoWaves[waveform])
 
-      const others = Object.entries(lfoShapes).filter(([name]) => name !== waveform).map(([, shape]) => deviation(measured, shape))
+      const others = Object.entries(lfoWaves).filter(([name]) => name !== waveform).map(([, wave]) => deviation(measured, wave))
 
       h.atMost(`${waveform}: worst gap between the measured level path and the expected ${waveform} cutoff path`, own, 0.5, 'dB', 'the cutoff follows the shape')
       h.atLeast(`${waveform}: smallest gap to any other shape's expected path`, Math.min(...others), 4, 'dB', 'the shapes can be told apart')

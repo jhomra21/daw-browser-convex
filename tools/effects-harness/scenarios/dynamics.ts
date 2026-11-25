@@ -408,6 +408,45 @@ const compressorAutoMakeup: Scenario = {
   },
 }
 
+// Expand is upward expansion, as in Live: a ratio of 1:2 adds 1 dB of output per dB of input above the threshold.
+const compressorExpand: Scenario = {
+  effect: 'compressor',
+  name: 'c9-expand-curve',
+  run: async (h) => {
+    const f = coherentFrequency(1000, h.rate, h.rate)
+    const base = { thresholdDb: -24, ratio: 2, kneeDb: 0, attackMs: 0.1, releaseMs: 50, autoRelease: false, detectorMode: 'peak', dynamicsMode: 'expand' } as const
+
+    const gainAt = async (levelDb: number, state: Parameters<typeof fx.compressor>[0] = base) => {
+      const input = sine(2 * h.rate, f, h.rate, dbToLinear(levelDb))
+      const { output } = await h.render(fx.compressor(state), { input: [input] })
+
+      return peakDb(output[0].slice(h.rate)) - peakDb(input.slice(h.rate))
+    }
+
+    h.within('gain at -12 dBFS, 1:2 over threshold -24 (expected +12)', await gainAt(-12), 12, 0.1, 'dB')
+    h.within('gain at -6 dBFS, 1:2 over threshold -24 (expected +18)', await gainAt(-6), 18, 0.1, 'dB')
+    h.within('gain at -30 dBFS, below the threshold (expected 0)', await gainAt(-30), 0, 0.05, 'dB')
+    h.within('gain at -6 dBFS, ratio 1:1 (expected 0)', await gainAt(-6, { ...base, ratio: 1 }), 0, 0.05, 'dB')
+    h.within('gain at 0 dBFS, ratio 1:100 stops at the limit', await gainAt(0, { ...base, ratio: 100 }), 24, 0.1, 'dB', 'COMPRESSOR_EXPAND_MAX_GAIN_DB')
+
+    // A knee of 6 dB centred on the threshold: 0 dB at its lower edge, 0.75 dB at the threshold, 3 dB at its upper edge.
+    const soft = { ...base, kneeDb: 6 }
+    const levels = Array.from({ length: 17 }, (_, index) => -28 + index * 0.5)
+    const gains = await Promise.all(levels.map((level) => gainAt(level, soft)))
+    h.within('knee 6 dB: gain at the threshold', gains[8], 0.75, 0.05, 'dB')
+    h.within('knee 6 dB: gain at the lower edge', gains[2], 0, 0.05, 'dB')
+    h.within('knee 6 dB: gain at the upper edge', gains[14], 3, 0.05, 'dB')
+    const steps = gains.slice(1).map((gain, index) => gain - gains[index])
+    // The line's slope is 1 dB per dB, so a half-dB step is at most 0.5 dB; a jump in value would exceed it.
+    h.atMost('knee 6 dB: largest gain change per 0.5 dB step, 28 to 20 dB under full scale', Math.max(...steps), 0.55, 'dB')
+    // A slope that jumps shows as a second difference far above the knee's curvature (slope / knee * 0.5 dB squared = 0.042 dB).
+    h.atMost('knee 6 dB: largest change of slope per 0.5 dB step', Math.max(...steps.slice(1).map((step, index) => Math.abs(step - steps[index]))), 0.09, 'dB')
+
+    const makeup = await h.render(fx.compressor({ ...base, makeupDb: 3, autoMakeup: true }), { input: [sine(2 * h.rate, f, h.rate, dbToLinear(-40))] })
+    h.within('Auto Makeup on in Expand, Makeup 3 dB: gain below the threshold (the knob applies)', peakDb(makeup.output[0].slice(h.rate)) - -40, 3, 0.05, 'dB')
+  },
+}
+
 const gateChatter: Scenario = {
   effect: 'gate',
   name: 'g1-chatter-thd',
@@ -646,10 +685,11 @@ export const dynamics: Family = {
     compressorThd('c1-thd-peak', 'peak', 10, 120, -55),
     compressorThd('c1-thd-rms', 'rms', 10, 120, -55),
     compressorThd('c1-thd-rms-fast', 'rms', 1, 50, -45),
-    compressorPeakSteady, compressorRmsConstant, compressorKeyFilter, compressorGuards, compressorAutoRelease, compressorCpu, compressorAutoMakeup,
+    compressorPeakSteady, compressorRmsConstant, compressorKeyFilter, compressorGuards, compressorAutoRelease, compressorCpu, compressorAutoMakeup, compressorExpand,
     makeupStep, compressorLatency, gateChatter, gateTiming, gateGuards, gateFlip, gateKey, gateKeyFilter, gateParityKey, gateLatency, gateCpu,
     ...familyOf('limiter', limiterSpec, (rate) => msFrames(3, rate)),
     ...familyOf('compressor', compressorSpec, () => 0),
+    { ...parityScenario('compressor', fx.compressor({ thresholdDb: -30, ratio: 3, kneeDb: 6, dynamicsMode: 'expand', autoMakeup: true, makeupDb: 2, envelopeCurve: 'linear', sidechain: { enabled: true, filterType: 'bandpass', frequencyHz: 800, q: 2 } })), name: 'parity-expand' },
     { ...parityScenario('compressor', fx.compressor({ thresholdDb: -30, ratio: 4, lookaheadMs: 10, detectorMode: 'peak', envelopeCurve: 'linear', autoMakeup: true, sidechain: { enabled: true, filterType: 'bandpass', frequencyHz: 800, q: 2 } })), name: 'parity-fixtures-peak-linear-lookahead' },
     ...familyOf('gate', gateSpec, () => 0),
   ],

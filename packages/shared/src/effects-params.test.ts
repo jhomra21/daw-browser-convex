@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   AUDIO_EFFECT_CONTRACTS,
   computeCompressorStaticCurveDb,
+  COMPRESSOR_EXPAND_MAX_GAIN_DB,
   COMPRESSOR_RATIO_MAX,
   createDefaultCompressorParams,
   createDefaultEqParams,
@@ -221,8 +222,14 @@ describe('Compressor params', () => {
 
   test('computes hard-knee compression and expansion static curves', () => {
     expect(computeCompressorStaticCurveDb(-12, { thresholdDb: -24, ratio: 4, kneeDb: 0 })).toBeCloseTo(-21, 5)
-    expect(computeCompressorStaticCurveDb(-12, { thresholdDb: -24, ratio: 4, kneeDb: 0, dynamicsMode: 'expand' })).toBeCloseTo(-12, 5)
-    expect(computeCompressorStaticCurveDb(-36, { thresholdDb: -24, ratio: 2, kneeDb: 0, dynamicsMode: 'expand' })).toBeCloseTo(-48, 5)
+    // Live: a ratio of 1:2 means that every 1 dB of input above the threshold raises the output by 2 dB; 1:1 is no expansion.
+    expect(computeCompressorStaticCurveDb(-12, { thresholdDb: -24, ratio: 2, kneeDb: 0, dynamicsMode: 'expand' })).toBeCloseTo(0, 5)
+    expect(computeCompressorStaticCurveDb(-36, { thresholdDb: -24, ratio: 2, kneeDb: 0, dynamicsMode: 'expand' })).toBeCloseTo(-36, 5)
+    expect(computeCompressorStaticCurveDb(-12, { thresholdDb: -24, ratio: 1, kneeDb: 0, dynamicsMode: 'expand' })).toBeCloseTo(-12, 5)
+  })
+
+  test('stops upward expansion at the gain limit', () => {
+    expect(computeCompressorStaticCurveDb(0, { thresholdDb: -24, ratio: 100, kneeDb: 0, dynamicsMode: 'expand' })).toBeCloseTo(COMPRESSOR_EXPAND_MAX_GAIN_DB, 5)
   })
 
   test('keeps soft-knee compression continuous around threshold', () => {
@@ -231,15 +238,22 @@ describe('Compressor params', () => {
     expect(Math.abs(above - below)).toBeLessThan(0.03)
   })
 
-  test('keeps soft-knee expansion continuous around threshold', () => {
-    const below = computeCompressorStaticCurveDb(-24.01, { thresholdDb: -24, ratio: 4, kneeDb: 6, dynamicsMode: 'expand' })
-    const above = computeCompressorStaticCurveDb(-23.99, { thresholdDb: -24, ratio: 4, kneeDb: 6, dynamicsMode: 'expand' })
-    expect(Math.abs(above - below)).toBeLessThan(0.03)
+  test('keeps soft-knee expansion continuous in value and slope across the knee', () => {
+    const params = { thresholdDb: -24, ratio: 3, kneeDb: 6, dynamicsMode: 'expand' } as const
+    const gain = (inputDb: number) => computeCompressorStaticCurveDb(inputDb, params) - inputDb
+
+    for (const edge of [-27, -21]) {
+      expect(Math.abs(gain(edge + 1e-6) - gain(edge - 1e-6))).toBeLessThan(1e-5)
+      const slopeBelow = (gain(edge) - gain(edge - 1e-3)) / 1e-3
+      const slopeAbove = (gain(edge + 1e-3) - gain(edge)) / 1e-3
+      expect(Math.abs(slopeAbove - slopeBelow)).toBeLessThan(0.01)
+    }
   })
 
   test('computes soft-knee expansion fixtures around threshold and knee edge', () => {
-    expect(computeCompressorStaticCurveDb(-25, { thresholdDb: -24, ratio: 2, kneeDb: 6, dynamicsMode: 'expand' })).toBeCloseTo(-25.33333, 5)
-    expect(computeCompressorStaticCurveDb(-27, { thresholdDb: -24, ratio: 2, kneeDb: 6, dynamicsMode: 'expand' })).toBeCloseTo(-30, 5)
+    expect(computeCompressorStaticCurveDb(-24, { thresholdDb: -24, ratio: 2, kneeDb: 6, dynamicsMode: 'expand' })).toBeCloseTo(-24 + 0.75, 5)
+    expect(computeCompressorStaticCurveDb(-21, { thresholdDb: -24, ratio: 2, kneeDb: 6, dynamicsMode: 'expand' })).toBeCloseTo(-21 + 3, 5)
+    expect(computeCompressorStaticCurveDb(-27, { thresholdDb: -24, ratio: 2, kneeDb: 6, dynamicsMode: 'expand' })).toBeCloseTo(-27, 5)
   })
 
   test('parses shared track and master compressor operations', () => {

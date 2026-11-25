@@ -564,6 +564,10 @@ export const COMPRESSOR_RELEASE_MS_MIN = 5
 export const COMPRESSOR_RELEASE_MS_MAX = 1000
 export const COMPRESSOR_GAIN_DB_MIN = -36
 export const COMPRESSOR_GAIN_DB_MAX = 36
+// Neither Live's manual nor Cycling '74's abl.device.compressor~ reference documents a separate ratio range for Expand
+// mode, so the ratio keeps its 1 to 100 range and the gain that upward expansion adds stops at this limit. The
+// kernel and the worklet carry the same number.
+export const COMPRESSOR_EXPAND_MAX_GAIN_DB = 24
 export const COMPRESSOR_DRY_WET_MIN = 0
 export const COMPRESSOR_DRY_WET_MAX = 1
 export const COMPRESSOR_KNEE_DB_MIN = 0
@@ -683,31 +687,23 @@ export function serializeCompressorParams(params: CompressorParams): string {
 export function computeCompressorStaticCurveDb(inputDb: number, params: CompressorParamsInput = {}): number {
   const normalized = normalizeCompressorParams(params)
   const threshold = normalized.thresholdDb
-  const ratio = normalized.ratio
   const knee = normalized.kneeDb
+  const expand = normalized.dynamicsMode === 'expand'
+  // Compress and Expand share the curve's shape, a quadratic knee that meets the line above the threshold in value and
+  // slope; only the slope differs. Expand is upward expansion: above the threshold every dB in adds (ratio - 1) dB.
+  const slope = expand ? normalized.ratio - 1 : 1 / normalized.ratio - 1
+  const lower = threshold - knee / 2
+  let gain = 0
 
-  if (normalized.dynamicsMode === 'expand') {
-    if (inputDb >= threshold) return inputDb
-    const expanded = threshold + (inputDb - threshold) * ratio
-
-    if (knee <= 0 || inputDb <= threshold - knee / 2) return expanded
-    const distance = threshold - inputDb
-
-    return inputDb - (2 * (ratio - 1) * distance * distance) / knee
+  if (knee <= 0) {
+    if (inputDb > threshold) gain = (inputDb - threshold) * slope
+  } else if (inputDb >= threshold + knee / 2) {
+    gain = (inputDb - threshold) * slope
+  } else if (inputDb > lower) {
+    gain = (slope * (inputDb - lower) ** 2) / (2 * knee)
   }
 
-  const compressed = threshold + (inputDb - threshold) / ratio
-
-  if (knee <= 0) return inputDb <= threshold ? inputDb : compressed
-  const lower = threshold - knee / 2
-  const upper = threshold + knee / 2
-
-  if (inputDb <= lower) return inputDb
-
-  if (inputDb >= upper) return compressed
-  const x = inputDb - lower
-
-  return inputDb + ((1 / ratio - 1) * x * x) / (2 * knee)
+  return inputDb + (expand ? Math.min(gain, COMPRESSOR_EXPAND_MAX_GAIN_DB) : gain)
 }
 
 export type ProcessorStateEnvelope<TState> = { version: 1; state: TState }

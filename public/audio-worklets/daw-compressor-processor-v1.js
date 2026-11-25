@@ -14,6 +14,9 @@ const AUTO_DECAY_MS = 1000
 const ENGAGED_DB = -0.1
 const RECOVERED_DB = -0.5
 const FLOOR_DB = -120
+// Neither Live's manual nor Cycling '74's abl.device.compressor~ reference documents a separate ratio range for Expand
+// mode, so the ratio keeps its 1 to 100 range and the gain that upward expansion adds stops at this limit.
+const EXPAND_MAX_GAIN_DB = 24
 const DB_TO_NEPER = 0.11512925464970228
 const ENVELOPE_EPSILON_DB = 1e-9
 const TWO_PI = Math.fround(2 * Math.PI)
@@ -139,24 +142,19 @@ class CompressorKernel {
   targetDb(db) {
     const c = this.curve
     const threshold = c.threshold
+    let gain = 0
 
-    if (c.expand) {
-      if (db >= threshold) return 0
+    if (c.knee <= 0) {
+      if (db > threshold) gain = (db - threshold) * c.slope
+    } else if (db >= c.upper) {
+      gain = (db - threshold) * c.slope
+    } else if (db > c.lower) {
+      const x = db - c.lower
 
-      if (c.knee <= 0 || db <= c.lower) return (db - threshold) * c.slope
-      const distance = threshold - db
-
-      return -2 * c.slope * distance * distance / c.knee
+      gain = c.slope * x * x / (2 * c.knee)
     }
 
-    if (c.knee <= 0) return db <= threshold ? 0 : (db - threshold) * c.slope
-
-    if (db <= c.lower) return 0
-
-    if (db >= c.upper) return (db - threshold) * c.slope
-    const x = db - c.lower
-
-    return c.slope * x * x / (2 * c.knee)
+    return c.expand ? Math.min(gain, EXPAND_MAX_GAIN_DB) : gain
   }
   designCurve(threshold, ratio, knee, expand, rms) {
     const c = this.curve
@@ -172,7 +170,7 @@ class CompressorKernel {
     const perDb = rms ? 2 * DB_TO_NEPER : DB_TO_NEPER
 
     c.dbScale = 1 / perDb
-    c.edgeLevel = Math.exp((expand ? threshold : c.lower) * perDb)
+    c.edgeLevel = Math.exp(c.lower * perDb)
     c.floorLevel = Math.exp(FLOOR_DB * perDb)
     c.autoMakeupDb = 0
 
@@ -213,7 +211,7 @@ class CompressorKernel {
       this.designCurve(threshold, ratio, knee, c.expand, c.rms)
     }
 
-    const makeupTarget = c.autoMakeup ? f(curve.autoMakeupDb) : v.makeupDb
+    const makeupTarget = c.autoMakeup && !c.expand ? f(curve.autoMakeupDb) : v.makeupDb
 
     if (!this.makeupPrimed) {
       this.makeup.reset(makeupTarget)
@@ -272,16 +270,19 @@ class CompressorKernel {
     const level = c.rms ? this.meanSquare : this.peak
     let target = 0
 
-    if (c.expand ? level < curve.edgeLevel : level > curve.edgeLevel) {
+    if (level > curve.edgeLevel) {
       target = Math.max(this.targetDb(curve.dbScale * Math.log(Math.max(level, curve.floorLevel))), FLOOR_DB)
     }
 
+    const sign = c.expand ? -1 : 1
+    const attacking = sign * target < sign * this.envelopeDb
+
     if (c.linear) {
-      const step = target < this.envelopeDb ? this.attackStep : this.releaseStepDb(c.autoRelease)
+      const step = attacking ? this.attackStep : this.releaseStepDb(c.autoRelease)
 
       this.envelopeDb += Math.max(-step, Math.min(step, target - this.envelopeDb))
     } else {
-      const coefficient = target < this.envelopeDb ? this.attack : this.releaseCoefficient(c.autoRelease)
+      const coefficient = attacking ? this.attack : this.releaseCoefficient(c.autoRelease)
 
       this.envelopeDb = target + coefficient * (this.envelopeDb - target)
     }
@@ -289,8 +290,8 @@ class CompressorKernel {
     if (Math.abs(this.envelopeDb) < ENVELOPE_EPSILON_DB) this.envelopeDb = 0
 
     if (c.autoRelease) {
-      if (target < ENGAGED_DB) this.sustain += (1 - this.sustain) * this.autoBuild
-      else if (this.envelopeDb > RECOVERED_DB) this.sustain = flushDouble(this.sustain * this.autoDecay)
+      if (sign * target < ENGAGED_DB) this.sustain += (1 - this.sustain) * this.autoBuild
+      else if (sign * this.envelopeDb > RECOVERED_DB) this.sustain = flushDouble(this.sustain * this.autoDecay)
     }
 
     const gainDb = this.envelopeDb + makeup + outputDb

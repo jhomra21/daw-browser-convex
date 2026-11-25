@@ -134,11 +134,10 @@ function CompressorGraph(props: { params: CompressorParams; makeupDb: number; vi
 
 export default function Compressor(props: CompressorProps) {
   const externalKey = () => props.sourceTrackId !== undefined
-  // Auto Makeup gives back what the curve takes at 0 dB in, so the level stays put as Threshold and Ratio move.
-
-  const makeupDb = () => props.params.autoMakeup && !externalKey() && props.params.dynamicsMode === 'compress'
-    ? -computeCompressorStaticCurveDb(0, props.params)
-    : props.params.makeupDb
+  // Auto Makeup gives back what the curve takes at 0 dB in, so the level stays put as Threshold and Ratio move. It is a
+  // Compress-mode feature without an external key; in Expand and with a key the Makeup knob applies.
+  const autoMakeupActive = () => props.params.autoMakeup && !externalKey() && props.params.dynamicsMode === 'compress'
+  const makeupDb = () => autoMakeupActive() ? -computeCompressorStaticCurveDb(0, props.params) : props.params.makeupDb
 
   const [viewMode, setViewMode] = createSignal<ViewMode>('transfer')
   const [meter, setMeter] = createSignal<CompressorMeterFrame | null>(null)
@@ -209,8 +208,8 @@ export default function Compressor(props: CompressorProps) {
           </div>
         </div>
         <div class="flex min-h-0 flex-col gap-2">
-          <AutomatedKnob label="Makeup" valueLabel={formatDb(props.params.makeupDb)} value={props.params.makeupDb} resetValue={DEFAULT_PARAMS.makeupDb} min={COMPRESSOR_GAIN_DB_MIN} max={COMPRESSOR_GAIN_DB_MAX} step={0.1} bipolar disabled={!props.params.enabled || (props.params.autoMakeup && !externalKey())} parameterId="compressor.makeupDb" automation={props} onValueChange={(makeupDb) => props.onChange({ makeupDb })} />
-          <DeviceToggleButton class="h-6 py-0" label="Auto Makeup" active={props.params.autoMakeup && !externalKey()} disabled={!props.params.enabled || externalKey()} onClick={() => props.onChange({ autoMakeup: !props.params.autoMakeup })} />
+          <AutomatedKnob label="Makeup" valueLabel={formatDb(props.params.makeupDb)} value={props.params.makeupDb} resetValue={DEFAULT_PARAMS.makeupDb} min={COMPRESSOR_GAIN_DB_MIN} max={COMPRESSOR_GAIN_DB_MAX} step={0.1} bipolar disabled={!props.params.enabled || autoMakeupActive()} parameterId="compressor.makeupDb" automation={props} onValueChange={(makeupDb) => props.onChange({ makeupDb })} />
+          <DeviceToggleButton class="h-6 py-0" label="Auto Makeup" active={autoMakeupActive()} disabled={!props.params.enabled || externalKey() || props.params.dynamicsMode === 'expand'} onClick={() => props.onChange({ autoMakeup: !props.params.autoMakeup })} />
           <div class="grid grid-cols-2 gap-1">
             <For each={DETECTOR_MODES}>{(mode) => <DeviceToggleButton label={mode.toUpperCase()} active={props.params.detectorMode === mode} disabled={!props.params.enabled} onClick={() => props.onChange({ detectorMode: mode })} />}</For>
             <For each={DYNAMICS_MODES}>{(mode) => <DeviceToggleButton label={label(mode)} active={props.params.dynamicsMode === mode} disabled={!props.params.enabled} onClick={() => props.onChange({ dynamicsMode: mode })} />}</For>

@@ -124,7 +124,7 @@ if(BUILD_TESTING)
   else()
     target_compile_options(daw-compressor-test PRIVATE -Wall -Wextra -Werror -fno-exceptions -fno-rtti)
   endif()
-  foreach(group IN ITEMS detector safety smoothing sidechain latency release makeup cpu)
+  foreach(group IN ITEMS detector safety smoothing sidechain latency release makeup expand cpu)
     add_test(NAME daw-compressor-${group} COMMAND daw-compressor-test ${group})
   endforeach()
   # Gate kernel (src/gate_kernel.h). One ctest per measurement group; the executable prints each value.

@@ -1,5 +1,5 @@
 // Measurements for the Compressor kernel (src/compressor_kernel.h). Every case prints the number it checks.
-// Run with a group name (detector, safety, smoothing, sidechain, latency, release, makeup, cpu) or with none for all.
+// Run with a group name (detector, safety, smoothing, sidechain, latency, release, makeup, expand, cpu) or with none for all.
 #include "../src/compressor_kernel.h"
 
 #include <algorithm>
@@ -326,6 +326,50 @@ void makeup() {
   }
 }
 
+// Gain in dB that a steady 1 kHz tone at level_db receives in Expand mode.
+double expandGainDb(double rate, const CompressorValues &values, bool autoMakeup, double levelDb) {
+  Rig rig(rate);
+  rig.config.expand = true;
+  rig.config.auto_makeup = autoMakeup;
+  rig.values = values;
+  const size_t frames = static_cast<size_t>(rate);
+  const auto out = rig.run(sine(2 * frames, 1000.0, rate, fromDb(levelDb)));
+  return toDb(peakOf(out, frames, 2 * frames)) - levelDb;
+}
+
+// Expand is upward expansion, as in Live: a ratio of 1:2 adds 1 dB of output per dB of input above the threshold.
+void expand() {
+  currentName = "expand";
+  for (const double rate : kRates) {
+    const CompressorValues hard = {.threshold_db = -24.0F, .ratio = 2.0F, .attack_ms = 0.1F, .release_ms = 50.0F, .knee_db = 0.0F};
+    char label[112];
+    for (const double levelDb : {-12.0, -6.0}) {
+      std::snprintf(label, sizeof label, "%.0f Hz 1:2 gain at %.0f dBFS (threshold -24), dB", rate, levelDb);
+      expectNear(label, expandGainDb(rate, hard, false, levelDb), levelDb + 24.0, 0.1);
+    }
+    for (const double levelDb : {-30.0, -60.0}) {
+      std::snprintf(label, sizeof label, "%.0f Hz 1:2 gain below the threshold at %.0f dBFS, dB", rate, levelDb);
+      expectNear(label, expandGainDb(rate, hard, false, levelDb), 0.0, 0.05);
+    }
+    CompressorValues steep = hard;
+    steep.ratio = 100.0F;
+    std::snprintf(label, sizeof label, "%.0f Hz 1:100 gain at 0 dBFS stops at the limit, dB", rate);
+    expectNear(label, expandGainDb(rate, steep, false, 0.0), CompressorKernel::kMaxExpandGainDb, 0.05);
+    // The knee is centred on the threshold: at the threshold itself the gain is slope * (knee / 2)^2 / (2 * knee).
+    CompressorValues soft = hard;
+    soft.knee_db = 6.0F;
+    std::snprintf(label, sizeof label, "%.0f Hz 1:2 knee 6 gain at the threshold, dB", rate);
+    expectNear(label, expandGainDb(rate, soft, false, -24.0), 0.75, 0.05);
+    std::snprintf(label, sizeof label, "%.0f Hz 1:2 knee 6 gain at the knee's upper edge, dB", rate);
+    expectNear(label, expandGainDb(rate, soft, false, -21.0), 3.0, 0.05);
+    // Auto Makeup is a Compress-mode feature: the knob applies in Expand.
+    CompressorValues knob = hard;
+    knob.makeup_db = 3.0F;
+    std::snprintf(label, sizeof label, "%.0f Hz Auto Makeup on, Makeup knob 3 dB, gain below the threshold, dB", rate);
+    expectNear(label, expandGainDb(rate, knob, true, -40.0), 3.0, 0.05);
+  }
+}
+
 void cpu() {
   currentName = "cpu";
   for (const bool rms : {false, true}) {
@@ -352,7 +396,7 @@ void cpu() {
 int main(int argc, char **argv) {
   struct Group { const char *name; void (*run)(); };
   const Group groups[] = {{"detector", detector}, {"safety", safety}, {"smoothing", smoothing}, {"sidechain", sidechain},
-    {"latency", latency}, {"release", release}, {"makeup", makeup}, {"cpu", cpu}};
+    {"latency", latency}, {"release", release}, {"makeup", makeup}, {"expand", expand}, {"cpu", cpu}};
   for (const Group &group : groups) {
     if (argc > 1 && std::strcmp(argv[1], group.name) != 0) continue;
     std::printf("%s\n", group.name);

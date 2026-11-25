@@ -180,11 +180,10 @@ export default function Compressor(props: CompressorProps) {
           <DeviceToggleButton class="mt-auto h-6 py-0" label="Auto" active={props.params.autoRelease} disabled={!props.params.enabled} onClick={() => props.onChange({ autoRelease: !props.params.autoRelease })} />
         </div>
         <div class="flex min-w-0 flex-col gap-1.5">
-          <div class="grid grid-cols-4 gap-1">
+          <div class="grid grid-cols-3 gap-1">
             <MiniStatus label="Thresh" value={formatDb(props.params.thresholdDb)} tone="cyan" />
             <MiniStatus label="GR" value={formatDb(meter()?.gainReductionDb ?? 0)} tone="yellow" />
             <MiniStatus label="Output" value={formatDb(meter()?.outputDb ?? -120)} />
-            <MiniStatus label="Out" value={formatDb(props.params.outputDb)} />
           </div>
           <CompressorGraph params={props.params} makeupDb={makeupDb()} viewMode={viewMode()} history={history()} />
           <div class="grid grid-cols-[auto_1fr] items-start gap-2">
@@ -215,7 +214,10 @@ export default function Compressor(props: CompressorProps) {
             <For each={DYNAMICS_MODES}>{(mode) => <DeviceToggleButton label={label(mode)} active={props.params.dynamicsMode === mode} disabled={!props.params.enabled} onClick={() => props.onChange({ dynamicsMode: mode })} />}</For>
             <For each={ENVELOPE_CURVES}>{(mode) => <DeviceToggleButton label={label(mode)} active={props.params.envelopeCurve === mode} disabled={!props.params.enabled} onClick={() => props.onChange({ envelopeCurve: mode })} />}</For>
           </div>
-          <AutomatedKnob label="Dry/Wet" valueLabel={formatPercent(props.params.dryWet)} value={props.params.dryWet} resetValue={DEFAULT_PARAMS.dryWet} min={COMPRESSOR_DRY_WET_MIN} max={COMPRESSOR_DRY_WET_MAX} step={0.01} disabled={!props.params.enabled} parameterId="compressor.dryWet" automation={props} onValueChange={(dryWet) => props.onChange({ dryWet })} />
+          <div class="grid grid-cols-2 gap-1">
+            <AutomatedKnob size={32} label="Dry/Wet" valueLabel={formatPercent(props.params.dryWet)} value={props.params.dryWet} resetValue={DEFAULT_PARAMS.dryWet} min={COMPRESSOR_DRY_WET_MIN} max={COMPRESSOR_DRY_WET_MAX} step={0.01} disabled={!props.params.enabled} parameterId="compressor.dryWet" automation={props} onValueChange={(dryWet) => props.onChange({ dryWet })} />
+            <AutomatedKnob size={32} label="Output" valueLabel={formatDb(props.params.outputDb)} value={props.params.outputDb} resetValue={DEFAULT_PARAMS.outputDb} min={COMPRESSOR_GAIN_DB_MIN} max={COMPRESSOR_GAIN_DB_MAX} step={0.1} bipolar disabled={!props.params.enabled} parameterId="compressor.outputDb" automation={props} onValueChange={(outputDb) => props.onChange({ outputDb })} />
+          </div>
         </div>
         <div class="flex min-h-0 flex-col gap-1.5 border-l border-border pl-2">
           <span class="text-2xs uppercase leading-none text-muted-foreground">Sidechain</span>

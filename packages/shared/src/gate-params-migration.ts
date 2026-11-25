@@ -5,7 +5,8 @@ import { isJsonNumber, isJsonObject, type JsonValue } from './json-value'
 // whatever it said. The lookahead moves to the nearest of the 0, 1 and 10 ms steps and now sets the delay. The detector
 // filter was always a high-pass, and the key from another track was used as it came, so Gain starts at 0 dB and Dry/Wet at
 // 100 %. Every other knob keeps its value. Attack and Release now mean the time the gain takes to cover the whole Floor
-// range, where they used to be one-pole time constants.
+// range, where they used to be one-pole time constants. The saved numbers are kept on purpose: a saved Gate closes faster
+// than it did, which matches what Attack and Release now mean.
 export const migrateGateParamsV1 = (params: JsonValue): JsonValue => {
   if (!isJsonObject(params)) return params
   const wrapped = isJsonObject(params.state)

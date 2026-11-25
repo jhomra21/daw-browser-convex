@@ -330,7 +330,8 @@ class LimiterKernel {
     if (delay == delay_) return;
     reset();
     delay_ = delay;
-    ahead_ = std::clamp(delay_ - kBoxFrames, kMinimumAhead, kMaximumAhead) & ~1U;
+    // Unsigned: a delay under kBoxFrames must read as no room, not wrap to a huge one that lets the window pass the delay.
+    ahead_ = std::clamp(delay_ > kBoxFrames ? delay_ - kBoxFrames : 0U, kMinimumAhead, kMaximumAhead) & ~1U;
     design(ahead_);
     // The detector judges the interval after the sample D - H frames back, and the held targets must cover that interval
     // and its two neighbours: a min-hold window of D - H + 2 frames, and two boxes whose supports add to D - H.

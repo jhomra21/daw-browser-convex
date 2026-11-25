@@ -111,6 +111,30 @@ const limiterTruePeak: Scenario = {
   },
 }
 
+// Bluetooth headsets run at 16 and 24 kHz, where 1.5 ms is shorter than the limiter's smoothing boxes.
+const limiterLowRate: Scenario = {
+  effect: 'limiter',
+  name: 'l2-true-peak-low-rate',
+  rates: [16000, 24000],
+  run: async (h) => {
+    const frames = 2 * h.rate
+    const ceiling = -1
+    const atCeiling = dbToLinear(ceiling) * 0.99999
+
+    const sources: [string, Float32Array][] = [
+      ['noise low-passed at 0.45 fs, +4 dB', normalizePeak(bandLimitedNoise(frames, h.rate, 22), ceiling + 4)],
+      ['fs/4 sine at 45 deg, +6 dB', Float32Array.from({ length: frames }, (_, n) => dbToLinear(ceiling + 6) * Math.sin(Math.PI / 2 * n + Math.PI / 4))],
+    ]
+
+    for (const [name, input] of sources) {
+      const { output } = await h.render(fx.limiter({ ceilingDbtp: ceiling, lookaheadMs: 1.5 }), { input: [concat(input, silence(4096))] })
+      h.atMost(`output true peak: ${name}, lookahead 1.5 ms`, truePeakDb(output[0]), ceiling + 0.05, 'dBTP')
+      // The gain aims under the ceiling, so a sample at the ceiling is the safety clip acting.
+      h.atMost(`output samples at the ceiling: ${name}, lookahead 1.5 ms`, output[0].filter((sample) => Math.abs(sample) >= atCeiling).length, 0, 'samples')
+    }
+  },
+}
+
 const meterSelfCheck: Scenario = {
   effect: 'limiter',
   name: 'ebu-3341-meter-self-check',
@@ -601,7 +625,7 @@ const familyOf = (effect: string, spec: EffectSpec, latency: (rate: number) => n
 
 export const dynamics: Family = {
   scenarios: [
-    limiterClick, limiterThd, limiterTruePeak, meterSelfCheck, limiterAuto, limiterGain, limiterLatency, limiterCpu,
+    limiterClick, limiterThd, limiterTruePeak, limiterLowRate, meterSelfCheck, limiterAuto, limiterGain, limiterLatency, limiterCpu,
     compressorThd('c1-thd-peak', 'peak', 10, 120, -55),
     compressorThd('c1-thd-rms', 'rms', 10, 120, -55),
     compressorThd('c1-thd-rms-fast', 'rms', 1, 50, -45),

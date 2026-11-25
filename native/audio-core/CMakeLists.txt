@@ -113,7 +113,7 @@ if(BUILD_TESTING)
   else()
     target_compile_options(daw-limiter-test PRIVATE -Wall -Wextra -Werror -fno-exceptions -fno-rtti)
   endif()
-  foreach(group IN ITEMS attack ceiling gain auto latency clean safety cpu)
+  foreach(group IN ITEMS attack ceiling lowrate gain auto latency clean safety cpu)
     add_test(NAME daw-limiter-${group} COMMAND daw-limiter-test ${group})
   endforeach()
   # Compressor kernel (src/compressor_kernel.h). One ctest per measurement group; the executable prints each value.

@@ -1,5 +1,5 @@
 // Measurements for the Limiter kernel (src/limiter_kernel.h). Every case prints the number it checks.
-// Run with a group name (attack, ceiling, gain, auto, latency, clean, safety, cpu) or with none for all.
+// Run with a group name (attack, ceiling, lowrate, gain, auto, latency, clean, safety, cpu) or with none for all.
 #include "../src/limiter_kernel.h"
 
 #include <algorithm>
@@ -221,6 +221,30 @@ void ceiling() {
   }
 }
 
+// Bluetooth headsets run at 16 and 24 kHz, where 1.5 ms is fewer frames than the averages' box: the detector window must
+// shrink with the delay instead of reaching past it.
+void lowRate() {
+  currentName = "lowrate";
+  const double ceilingDb = -1.0;
+  for (const double rate : {16000.0, 24000.0}) {
+    for (const Case &item : ceilingSignals(rate, ceilingDb)) {
+      if (std::strcmp(item.name, "white-noise +4 dB") == 0) continue;
+      Rig rig(rate);
+      rig.config.lookahead_ms = 1.5F;
+      rig.values.ceiling_dbtp = static_cast<float>(ceilingDb);
+      const double peak = truePeakDb(rig.run(item.signal));
+      char label[160];
+      std::snprintf(label, sizeof label, "%.0f Hz 1.5 ms %s true peak over ceiling dB", rate, item.name);
+      expectAtMost(label, peak - ceilingDb, 0.05);
+      // The square and the clicks reach past the band the detector reads; the band-limited sources must never need the clip.
+      if (std::strstr(item.name, "square") == nullptr && std::strstr(item.name, "clicks") == nullptr) {
+        std::snprintf(label, sizeof label, "%.0f Hz 1.5 ms %s safety clips", rate, item.name);
+        expectAtMost(label, static_cast<double>(rig.kernel.safety_clips()), 0.0);
+      }
+    }
+  }
+}
+
 void gain() {
   currentName = "gain";
   // The ceiling sits at -9 dBTP so that a -10 dBFS tone raised by 6 dB (-4 dBFS) needs exactly 5 dB of reduction.
@@ -368,7 +392,7 @@ void cpu() {
 
 int main(int argc, char **argv) {
   struct Group { const char *name; void (*run)(); };
-  const Group groups[] = {{"attack", attack}, {"ceiling", ceiling}, {"gain", gain}, {"auto", autoRelease}, {"latency", latency},
+  const Group groups[] = {{"attack", attack}, {"ceiling", ceiling}, {"lowrate", lowRate}, {"gain", gain}, {"auto", autoRelease}, {"latency", latency},
     {"clean", clean}, {"safety", safety}, {"cpu", cpu}};
   for (const Group &group : groups) {
     if (argc > 1 && std::strcmp(argv[1], group.name) != 0) continue;

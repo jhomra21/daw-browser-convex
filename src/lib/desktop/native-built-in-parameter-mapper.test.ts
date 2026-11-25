@@ -258,13 +258,13 @@ test('maps every continuous target for every live built-in family', () => {
         from: compressorFrom,
         to: {
           ...compressorFrom, thresholdDb: -12, ratio: 6, attackMs: 5, releaseMs: 100, makeupDb: 3, outputDb: -2, dryWet: 0.7,
-          kneeDb: 10, lookaheadMs: 5, sidechain: { ...compressorFrom.sidechain, frequencyHz: 180, q: 1.1 },
+          kneeDb: 10, sidechain: { ...compressorFrom.sidechain, frequencyHz: 180, q: 1.1 },
         },
       } satisfies EffectParamsCommitPayload<'compressor'>,
       expected: [
         ['compressor.thresholdDb', -12], ['compressor.ratio', 6], ['compressor.attackMs', 5], ['compressor.releaseMs', 100],
         ['compressor.makeupDb', 3], ['compressor.outputDb', -2], ['compressor.dryWet', 0.7], ['compressor.kneeDb', 10],
-        ['compressor.lookaheadMs', 5], ['compressor.sidechain.frequencyHz', 180], ['compressor.sidechain.q', 1.1],
+        ['compressor.sidechain.frequencyHz', 180], ['compressor.sidechain.q', 1.1],
       ],
     },
     {

@@ -1,3 +1,4 @@
+import { migrateCompressorParamsV1 } from './compressor-params-migration'
 import { migrateLimiterParamsV1 } from './limiter-params-migration'
 import { migrateAutoFilterEnvelopeAmountV1, migrateAutoFilterParamsV1, migrateAutoFilterResonanceV1 } from './auto-filter-params-migration'
 import { getAutomationParameterDescriptor } from './automation-parameters'
@@ -8,7 +9,7 @@ import { isJsonObject, type JsonValue } from './json-value'
 // Public contracts and in-memory params always use the current shape; readers migrate before use.
 export const AUDIO_EFFECT_PARAMS_VERSION: Readonly<Record<AudioEffectKind, number>> = {
   eq: 2,
-  compressor: 1,
+  compressor: 2,
   saturator: 1,
   delay: 1,
   reverb: 1,
@@ -55,6 +56,8 @@ export const AUDIO_EFFECT_PARAMS_VERSIONING: AudioEffectParamsVersioning = {
     // EQ Eight: curve B (a copy of curve A, so L/R and M/S start identical), Scale 100 %, Output 0 dB, Adaptive Q off and
     // Hi-Quality off. Band types, frequencies, gains and Qs and the channel mode (incl. 'mono') carry over unchanged.
     eq: { 1: migrateEqV1ToV2 },
+    // Compressor: Auto Makeup off, lookahead snapped to the nearest 0/1/10 ms step.
+    compressor: { 1: migrateCompressorParamsV1 },
     // Limiter: Gain 0 dB, Auto off, lookahead snapped to the nearest 1.5/3/6 ms step.
     limiter: { 1: migrateLimiterParamsV1 },
   },

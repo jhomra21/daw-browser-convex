@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import 'fake-indexeddb/auto'
 import { fileURLToPath } from 'node:url'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { createDefaultCompressorParams, type AutomationEnvelope, type JsonValue } from '@daw-browser/shared'
+import { AUDIO_EFFECT_PARAMS_VERSION, createDefaultCompressorParams, type AutomationEnvelope, type JsonValue } from '@daw-browser/shared'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { z } from 'zod'
 
@@ -194,6 +194,7 @@ const legacyClipDelete = { type: 'clip-delete', projectId, data: { items: [{ tra
 
 const legacyEnvelope = () => ({
   version: 6,
+  effectParamsVersions: AUDIO_EFFECT_PARAMS_VERSION,
   undo: [
     legacyClipDelete,
     { type: 'section-edit', projectId, data: { entries: [legacyClipDelete, z.json().parse(entryOfEveryType()['track-volume'])] } },

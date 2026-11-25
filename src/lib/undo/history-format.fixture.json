@@ -1,5 +1,25 @@
 {
-  "version": 7,
+  "version": 8,
+  "effectParamsVersions": {
+    "eq": 2,
+    "compressor": 2,
+    "saturator": 1,
+    "delay": 1,
+    "reverb": 1,
+    "autofilter": 2,
+    "gate": 2,
+    "limiter": 2,
+    "lofi": 1,
+    "chorus": 1,
+    "flanger": 1,
+    "phaser": 1,
+    "tremolo": 1,
+    "autopan": 1,
+    "ensemble": 1,
+    "spectral": 1,
+    "utility": 1,
+    "spectrum": 1
+  },
   "undo": [
     {
       "type": "section-edit",

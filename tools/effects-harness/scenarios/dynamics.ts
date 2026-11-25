@@ -1,6 +1,7 @@
 // Acceptance tests from dynamics.md section 3: T1 (parity), L1 (smooth attack), L2 (true peak, EBU Tech 3341), L5 (lookahead
-// latency), C1 (low-frequency THD+N), C2 (non-finite, shared), C3 (smoothing), C5 (zero latency), G1 (chatter), G3 (timing).
-import { countNonFinite, lowpass, peakAbs, peakDb, rmsDb, toneGainDb, truePeakDb } from '../dsp'
+// latency), C1 (low-frequency THD+N), C2 (non-finite, shared), C3 (smoothing), C5 (zero latency), G1 (chatter), G2 (non-finite),
+// G3 (timing), G4 (flip, key, key filter) and G5 (lookahead latency).
+import { countNonFinite, lowpass, maxAbsDiff, peakAbs, peakDb, rmsDb, toneGainDb, truePeakDb } from '../dsp'
 import { measureThdPlusNoise } from '../../../packages/audio-engine/src/dsp-characterization'
 import { ebuTruePeakCases } from '../ebu3341'
 import { fx } from '../effects'
@@ -372,8 +373,15 @@ const gateChatter: Scenario = {
   run: async (h) => {
     for (const frequency of [30, 60, 100, 200]) {
       const f = coherentFrequency(frequency, h.rate, h.rate)
-      const { output } = await h.render(fx.gate({ thresholdDb: -40, holdMs: 0, hysteresisDb: 6, rangeDb: -80 }), { input: [sine(3 * h.rate, f, h.rate, dbToLinear(-37))] })
+      const spec = fx.gate({ thresholdDb: -40, holdMs: 0, hysteresisDb: 6, rangeDb: -60 })
+      const { output } = await h.render(spec, { input: [sine(3 * h.rate, f, h.rate, dbToLinear(-37))] })
       h.atMost(`THD+N, ${f} Hz at threshold +3 dB, hold 0`, measureThdPlusNoise(output[0].slice(2 * h.rate), f, h.rate), -100, 'dB')
+
+      // A tone 10 dB under the threshold (4 dB under where the gate lets go) after a burst above it: once hold and release have run, the gate sits on the floor.
+      const quiet = sine(2 * h.rate, f, h.rate, dbToLinear(-50))
+      const input = concat(sine(h.rate / 2, f, h.rate, dbToLinear(-37)), quiet)
+      const closed = (await h.render(spec, { input: [input] })).output[0]
+      h.atMost(`gain once closed, ${f} Hz 10 dB under the threshold, floor -60`, toneGainDb(input, closed, f, h.rate, Math.round(1.5 * h.rate), 2 * h.rate), -59.5, 'dB')
     }
   },
 }
@@ -392,7 +400,6 @@ const envelopeDb = (input: Float32Array, output: Float32Array, latency: number, 
 const gateTiming: Scenario = {
   effect: 'gate',
   name: 'g3-attack-release-time',
-  rates: [48000],
   run: async (h) => {
     const spec = fx.gate({ thresholdDb: -40, attackMs: 10, releaseMs: 100, holdMs: 0, rangeDb: -60, hysteresisDb: 6 })
     const latency = await h.latencyFrames(spec)
@@ -406,12 +413,181 @@ const gateTiming: Scenario = {
     const opening = concat(tone(quiet), tone(loud))
     const attack = (await h.render(spec, { input: [opening] })).output[0]
     const open = envelopeDb(opening, attack, latency, half - 200, half + 4800, window, hop).find((p) => p.frame >= half && p.db >= linearToDb(0.9))
-    h.within('time from level step to 90 % gain, attack 10 ms', open ? (open.frame - half) / h.rate * 1000 : Infinity, 10, 1, 'ms', 'report G3: about 25 ms today')
+    h.within('time from level step to 90 % gain, attack 10 ms', open ? (open.frame - half) / h.rate * 1000 : Infinity, 10, 1, 'ms')
     const closing = concat(tone(loud), sine(2 * h.rate, 1000, h.rate, quiet))
     const release = (await h.render(spec, { input: [closing] })).output[0]
     const close = envelopeDb(closing, release, latency, half, half + 3 * h.rate / 2, window, hop).find((p) => p.db <= -59)
-    h.within('time from level step to -59 dB gain, release 100 ms, range -60 dB', close ? (close.frame - half) / h.rate * 1000 : Infinity, 100, 5, 'ms', 'report G3: about 700 ms today')
+    h.within('time from level step to -59 dB gain, release 100 ms, range -60 dB', close ? (close.frame - half) / h.rate * 1000 : Infinity, 100, 5, 'ms')
     await h.wav('release', [release])
+
+    // A DC step shows the gain sample by sample, with no tone to read it through.
+    const dc = concat(constant(half, quiet), constant(half, loud))
+    const dcOut = (await h.render(spec, { input: [dc] })).output[0]
+    let unity = Infinity
+
+    for (let n = half; n < dc.length; n += 1) if (dcOut[n + latency] / dc[n] >= 0.999) { unity = (n - half) / h.rate * 1000; break }
+
+    h.atMost('time from level step to 0 dB gain, attack 10 ms, floor -60 dB', unity, 10 + 1000 / h.rate, 'ms', 'attack 10 ms plus one frame')
+  },
+}
+
+const gateGuards: Scenario = {
+  effect: 'gate',
+  name: 'g2-non-finite',
+  run: async (h) => {
+    const f = coherentFrequency(1000, h.rate, h.rate)
+    const tone = sine(4 * h.rate, f, h.rate, 0.5)
+    const clean = concat(silence(h.rate), tone.subarray(h.rate))
+    const dirty = clean.slice()
+    const tiny = ramp(Math.round(0.5 * h.rate), 0, 1e-40)
+    dirty.set(tiny, 0)
+    clean.set(silence(tiny.length), 0)
+    ;[NaN, Infinity, -Infinity].forEach((value, index) => { dirty[Math.round(h.rate * (1.2 + index * 0.2))] = value })
+
+    for (const [source, filter] of [['main input', false], ['main input', true], ['sidechain input', false], ['sidechain input', true]] as const) {
+      const spec = fx.gate({ thresholdDb: -40, sidechain: { enabled: filter, filterType: 'highpass', frequencyHz: 120, q: 0.707, gainDb: 0, mix: 1 } })
+
+      const render = (poison: Float32Array) => source === 'main input'
+        ? h.render(spec, { input: [poison] }, { parity: false })
+        : h.render(spec, { input: [clean], key: [poison] }, { parity: false })
+
+      const [poisoned, reference] = await Promise.all([render(dirty), render(clean)])
+      const label = `${source}, sidechain filter ${filter ? 'on' : 'off'}`
+      h.atMost(`non-finite output samples, ${label}`, countNonFinite(poisoned.output[0]) + countNonFinite(poisoned.output[1]), 0, 'samples')
+      h.atMost(`steady-state level difference from the clean run after 3 s, ${label}`, Math.abs(rmsDb(poisoned.output[0], 3 * h.rate) - rmsDb(reference.output[0], 3 * h.rate)), 0.1, 'dB')
+    }
+  },
+}
+
+/** Level of the output relative to the input over each [start + from, start + to) window, in dB. */
+const windowGains = (input: Float32Array, output: Float32Array, starts: readonly number[], from: number, to: number) =>
+  starts.map((start) => rmsDb(output, start + from, start + to) - rmsDb(input, start + from, start + to))
+
+const gateFlip: Scenario = {
+  effect: 'gate',
+  name: 'g4-flip',
+  run: async (h) => {
+    const period = Math.round(0.25 * h.rate)
+    const burst = Math.round(0.06 * h.rate)
+    const bed = noise(2 * h.rate, dbToLinear(-70), 5).slice()
+    const starts = Array.from({ length: 7 }, (_, index) => (index + 1) * period)
+    const f = coherentFrequency(1000, h.rate, h.rate)
+
+    for (const start of starts) bed.set(sine(burst, f, h.rate, dbToLinear(-10)), start)
+    const ms = (value: number) => Math.round(value * h.rate / 1000)
+
+    for (const flip of [false, true]) {
+      const spec = fx.gate({ thresholdDb: -40, attackMs: 1, releaseMs: 20, holdMs: 0, hysteresisDb: 6, rangeDb: -60, flip })
+      const { output } = await h.render(spec, { input: [bed] })
+      const bursts = windowGains(bed, output[0], starts, ms(30), ms(55))
+      const gaps = windowGains(bed, output[0], starts, ms(200), ms(245))
+      const label = `flip ${flip ? 'on' : 'off'}`
+
+      if (flip) {
+        h.atMost(`worst burst gain, drum-like fixture, ${label}`, Math.max(...bursts), -55, 'dB', 'the burst is what the gate would pass, so it closes')
+        h.within(`worst gap gain, drum-like fixture, ${label}`, Math.max(...gaps.map(Math.abs)), 0, 0.5, 'dB', 'the bed is what the gate would close on, so it passes')
+      } else {
+        h.within(`worst burst gain, drum-like fixture, ${label}`, Math.max(...bursts.map(Math.abs)), 0, 0.5, 'dB')
+        h.atMost(`worst gap gain, drum-like fixture, ${label}`, Math.max(...gaps), -55, 'dB')
+      }
+    }
+  },
+}
+
+const gateKey: Scenario = {
+  effect: 'gate',
+  name: 'g4-external-key',
+  run: async (h) => {
+    const f = coherentFrequency(1000, h.rate, h.rate)
+    const frames = 3 * h.rate
+    const quiet = sine(frames, f, h.rate, dbToLinear(-60))
+    const from = 2 * h.rate
+    const gain = (input: Float32Array, output: Float32Array) => toneGainDb(input, output, f, h.rate, from, frames)
+    const loudKey = [noise(frames, dbToLinear(-10), 11)]
+    const spec = (sidechain: { gainDb?: number; mix?: number }) => fx.gate({ thresholdDb: -40, holdMs: 0, rangeDb: -60, sidechain: { enabled: false, filterType: 'highpass', frequencyHz: 80, q: 0.707, gainDb: 0, mix: 1, ...sidechain } })
+
+    const internal = await h.render(spec({ mix: 0 }), { input: [quiet] })
+    const mixedOut = await h.render(spec({ mix: 0 }), { input: [quiet], key: loudKey })
+    h.atMost('largest sample difference, external key at 0 % against no key', Math.max(maxAbsDiff(internal.output[0], mixedOut.output[0]), maxAbsDiff(internal.output[1], mixedOut.output[1])), 0, '', 'bit-exact')
+    const keyed = await h.render(spec({ mix: 1 }), { input: [quiet], key: loudKey })
+    h.within('gain with a loud key at 100 %, tone 20 dB under the threshold', gain(quiet, keyed.output[0]), 0, 0.5, 'dB')
+    // A gate that has heard nothing stays open, so the key under it is quiet and not silent.
+    const faint = await h.render(spec({ mix: 1 }), { input: [quiet], key: [sine(frames, f, h.rate, dbToLinear(-80))] })
+    h.atMost('gain with a -80 dBFS key at 100 %', gain(quiet, faint.output[0]), -55, 'dB')
+
+    const keyTone = [sine(frames, f, h.rate, dbToLinear(-50))]
+    const unity = await h.render(spec({ gainDb: 0 }), { input: [quiet], key: keyTone })
+    const boosted = await h.render(spec({ gainDb: 24 }), { input: [quiet], key: keyTone })
+    h.atMost('gain with a -50 dBFS key, key gain 0 dB (10 dB under the threshold)', gain(quiet, unity.output[0]), -55, 'dB')
+    h.within('gain with a -50 dBFS key, key gain +24 dB', gain(quiet, boosted.output[0]), 0, 0.5, 'dB')
+  },
+}
+
+/**
+ * Mean gain in dB over the samples of `input` that are not near a zero crossing. A low tone's RMS level ripples at twice its
+ * frequency and takes the gain with it; that ripple, multiplied into the tone, leaks into the fundamental and biases a gain read
+ * through the fundamental (by -0.3 dB for 60 Hz), while the mean of the dB values is not biased by it.
+ */
+const meanGainDb = (input: Float32Array, output: Float32Array, from: number, to: number, amplitude: number) => {
+  let sum = 0
+  let count = 0
+
+  for (let n = from; n < to; n += 1) {
+    if (Math.abs(input[n]) < 0.05 * amplitude) continue
+    sum += linearToDb(output[n] / input[n])
+    count += 1
+  }
+
+  return sum / count
+}
+
+const gateKeyFilter: Scenario = {
+  effect: 'gate',
+  name: 'g4-sidechain-filter-response',
+  run: async (h) => {
+    // An expander that never opens drops the gain by the detector level's distance under the threshold, so differences in
+    // output gain read as detector gain.
+    const gainDb = async (frequency: number, q: number) => {
+      const f = coherentFrequency(frequency, h.rate, h.rate)
+      const spec = fx.gate({ thresholdDb: -10, ratio: 2, mode: 'expander', detector: 'rms', attackMs: 5, releaseMs: 5, holdMs: 0, hysteresisDb: 0, rangeDb: -80, sidechain: { enabled: true, filterType: 'highpass', frequencyHz: 120, q, gainDb: 0, mix: 1 } })
+      const input = sine(4 * h.rate, f, h.rate, 0.1)
+      const { output } = await h.render(spec, { input: [input] }, { parity: false })
+
+      return meanGainDb(input, output[0], 3 * h.rate, 4 * h.rate, 0.1)
+    }
+
+    const detector = async (frequency: number, q: number) => await gainDb(frequency, q) - await gainDb(1000, q)
+    h.within('detector gain at 60 Hz, high-pass 120 Hz Q 0.707, vs 1 kHz', await detector(60, 0.707), -12, 0.5, 'dB')
+    h.within('detector gain at 120 Hz, high-pass 120 Hz Q 0.707, vs 1 kHz', await detector(120, 0.707), -3, 0.3, 'dB')
+    h.atLeast('detector gain at the corner, Q 4 minus Q 0.707', await detector(120, 4) - await detector(120, 0.707), 6, 'dB')
+  },
+}
+
+const gateParityKey: Scenario = {
+  effect: 'gate',
+  name: 'parity-external-key',
+  run: async (h) => {
+    const spec = fx.gate({ thresholdDb: -30, mode: 'expander', detector: 'rms', lookaheadMs: 1, flip: true, sidechain: { enabled: true, filterType: 'bandpass', frequencyHz: 800, q: 2, gainDb: 6, mix: 0.5 } })
+    await h.render(spec, { input: [noise(2 * h.rate, 0.5, 31)], key: [noise(2 * h.rate, 0.25, 32)] })
+  },
+}
+
+const gateLatency: Scenario = {
+  effect: 'gate',
+  name: 'g5-lookahead-latency',
+  run: async (h) => {
+    for (const lookaheadMs of [0, 1, 10] as const) {
+      h.within(`impulse delay, lookahead ${lookaheadMs} ms`, await h.latencyFrames(fx.gate({ lookaheadMs })), msFrames(lookaheadMs, h.rate), 1, 'frames')
+    }
+  },
+}
+
+const gateCpu: Scenario = {
+  effect: 'gate',
+  name: 'cpu',
+  run: async (h) => {
+    h.info('CPU, peak detector, threshold -20', await h.cpuNsPerFrame(fx.gate({ thresholdDb: -20 })), 'ns/frame')
+    h.info('CPU, RMS detector with the sidechain filter, threshold -20', await h.cpuNsPerFrame(fx.gate({ thresholdDb: -20, detector: 'rms', sidechain: { enabled: true, filterType: 'highpass', frequencyHz: 80, q: 0.707, gainDb: 0, mix: 1 } })), 'ns/frame')
   },
 }
 
@@ -430,15 +606,15 @@ export const dynamics: Family = {
     compressorThd('c1-thd-rms', 'rms', 10, 120, -55),
     compressorThd('c1-thd-rms-fast', 'rms', 1, 50, -45),
     compressorPeakSteady, compressorRmsConstant, compressorKeyFilter, compressorGuards, compressorAutoRelease, compressorCpu, compressorAutoMakeup,
-    makeupStep, compressorLatency, gateChatter, gateTiming,
+    makeupStep, compressorLatency, gateChatter, gateTiming, gateGuards, gateFlip, gateKey, gateKeyFilter, gateParityKey, gateLatency, gateCpu,
     ...familyOf('limiter', limiterSpec, (rate) => msFrames(3, rate)),
     ...familyOf('compressor', compressorSpec, () => 0),
     { ...parityScenario('compressor', fx.compressor({ thresholdDb: -30, ratio: 4, lookaheadMs: 10, detectorMode: 'peak', envelopeCurve: 'linear', autoMakeup: true, sidechain: { enabled: true, filterType: 'bandpass', frequencyHz: 800, q: 2 } })), name: 'parity-fixtures-peak-linear-lookahead' },
-    ...familyOf('gate', gateSpec, (rate) => msFrames(2, rate)),
+    ...familyOf('gate', gateSpec, () => 0),
   ],
   notEncoded: [
     'L2: the limiter\'s own detector reading on EBU 3341 cases 15 to 23 is internal; the harness instead validates its own true-peak meter against those cases and limits the signals above 0 dBTP.',
-    'L6 (Mode) and L8 (routing) are not part of this phase; G4 needs parameters or taps the core does not expose yet.',
+    'L6 (Mode) and L8 (routing) are not part of this phase.',
     'C2 10-minute silence CPU: covered by the shared denormal CPU ratio on 4 s renders.',
   ],
 }

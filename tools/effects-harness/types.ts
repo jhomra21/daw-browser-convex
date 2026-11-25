@@ -7,6 +7,8 @@ export type ParamStep = { frame: number; set: Readonly<Record<string, number>> }
 
 export type RenderOptions = {
   input: readonly Float32Array[]
+  /** A key from another track, routed to the effect's sidechain input. */
+  key?: readonly Float32Array[]
   steps?: readonly ParamStep[]
 }
 

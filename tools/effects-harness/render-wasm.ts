@@ -1,7 +1,7 @@
 // Renders one effect through the production audio-core wasm: external planar input -> source node -> processor -> master.
 // The source node reads input bus 0, the entry the portable host uses for live input (see graph envelope node field +20).
 import { audioCoreContractVersion, processorSchemaVersion } from '../../packages/audio-core-contract/src'
-import type { AudioCoreGraphSnapshot } from '../../packages/audio-core-contract/src'
+import type { AudioCoreGraphEdgeDto, AudioCoreGraphSnapshot } from '../../packages/audio-core-contract/src'
 import { processorContractHash } from '../../packages/audio-core-contract/src/generated/processor-contract-metadata'
 import { graphEnvelope } from '../../public/audio-worklets/daw-portable-graph-envelope-v3.js'
 import { declaredLatencyFrames, encodeSpec, kindIds, parameterTargets } from './effects'
@@ -14,6 +14,7 @@ export const wasmManifestPath = new URL('../../public/audio-core/daw-audio-core.
 
 const blockFrames = 128
 const processorInstanceId = 1
+const nodeBytes = 132
 const sourceBusOffset = 24 + 20
 const scratchBytes = 1 << 16
 
@@ -55,7 +56,11 @@ const bind = (instance: WebAssembly.Instance): Exports => {
   }
 }
 
-const snapshot = (spec: EffectSpec | null, targets: readonly number[]): AudioCoreGraphSnapshot => ({
+const keyEdge: AudioCoreGraphEdgeDto = {
+  version: audioCoreContractVersion, id: 'key', fromNodeId: 'k', toNodeId: 's', targetProcessorId: 'p', gain: 1, kind: 'output', tap: 'post-fader', sidechain: true, pdcDelayFrames: 0,
+}
+
+const snapshot = (spec: EffectSpec | null, targets: readonly number[], keyed: boolean): AudioCoreGraphSnapshot => ({
   version: audioCoreContractVersion,
   revision: 1,
   contractHash: processorContractHash,
@@ -71,8 +76,12 @@ const snapshot = (spec: EffectSpec | null, targets: readonly number[]): AudioCor
       }],
     },
     { id: 'm', kind: 'master', inputLayout: 'stereo', outputLayout: 'stereo', latencyFrames: 0, processorOrder: [] },
+    ...keyed ? [{ id: 'k', kind: 'source' as const, inputLayout: 'stereo' as const, outputLayout: 'stereo' as const, latencyFrames: 0, processorOrder: [] }] : [],
   ],
-  edges: [{ version: audioCoreContractVersion, id: 'e', fromNodeId: 's', toNodeId: 'm', gain: 1, kind: 'output', tap: 'post-fader', sidechain: false, pdcDelayFrames: 0 }],
+  edges: [
+    { version: audioCoreContractVersion, id: 'e', fromNodeId: 's', toNodeId: 'm', gain: 1, kind: 'output', tap: 'post-fader', sidechain: false, pdcDelayFrames: 0 },
+    ...keyed ? [keyEdge] : [],
+  ],
 })
 
 /** Per-block parameter envelope: u32 count, then (u64 id, u32 frames, u32 targets, targets, target-major f32 values). */
@@ -111,9 +120,17 @@ export const renderWasm = async (spec: EffectSpec | null, rate: number, options:
 
   const targets = stepped.map((entry) => entry.target)
 
-  if (exports.initialize(rate, blockFrames, 1, 2, 1) !== 0) throw new Error('audio-core initialize failed')
-  const graph = graphEnvelope(snapshot(spec, targets))
-  new DataView(graph.buffer, graph.byteOffset, graph.byteLength).setUint32(sourceBusOffset, 0, true)
+  const key = options.key
+  const buses = key ? 2 : 1
+
+  if (exports.initialize(rate, blockFrames, buses, 2, 1) !== 0) throw new Error('audio-core initialize failed')
+  const graph = graphEnvelope(snapshot(spec, targets, key !== undefined))
+  const graphView = new DataView(graph.buffer, graph.byteOffset, graph.byteLength)
+
+  graphView.setUint32(sourceBusOffset, 0, true)
+
+  // The key's node is the third, after the source and the master.
+  if (key) graphView.setUint32(sourceBusOffset + 2 * nodeBytes, 1, true)
   const graphPointer = exports.malloc(graph.byteLength)
   new Uint8Array(exports.memory.buffer, graphPointer, graph.byteLength).set(graph)
   const prepared = exports.prepare(graphPointer, graph.byteLength)
@@ -124,14 +141,16 @@ export const renderWasm = async (spec: EffectSpec | null, rate: number, options:
   exports.transport(1, 1, 0n)
 
   const planeBytes = blockFrames * 4
-  const base = exports.malloc(4 * planeBytes + 16 + scratchBytes)
-  const table = base + 4 * planeBytes
-  const parameterPointer = table + 16
+  const planes = 2 * (buses + 1)
+  const base = exports.malloc(planes * planeBytes + 4 * planes + scratchBytes)
+  const table = base + planes * planeBytes
+  const parameterPointer = table + 4 * planes
   const view = new DataView(exports.memory.buffer)
 
-  for (let plane = 0; plane < 4; plane += 1) view.setUint32(table + plane * 4, base + plane * planeBytes, true)
-  const inputPlanes = [0, 1].map((plane) => new Float32Array(exports.memory.buffer, base + plane * planeBytes, blockFrames))
-  const outputPlanes = [2, 3].map((plane) => new Float32Array(exports.memory.buffer, base + plane * planeBytes, blockFrames))
+  for (let plane = 0; plane < planes; plane += 1) view.setUint32(table + plane * 4, base + plane * planeBytes, true)
+  const planeAt = (plane: number) => new Float32Array(exports.memory.buffer, base + plane * planeBytes, blockFrames)
+  const inputPlanes = Array.from({ length: 2 * buses }, (_, plane) => planeAt(plane))
+  const outputPlanes = [2 * buses, 2 * buses + 1].map(planeAt)
   const parameterView = new DataView(exports.memory.buffer, parameterPointer, scratchBytes)
   const output: Planar = [new Float32Array(frames), new Float32Array(frames)]
 
@@ -151,6 +170,14 @@ export const renderWasm = async (spec: EffectSpec | null, rate: number, options:
     inputPlanes[1].fill(0)
     inputPlanes[0].set(options.input[0].subarray(offset, offset + count))
     inputPlanes[1].set((options.input[1] ?? options.input[0]).subarray(offset, offset + count))
+
+    if (key) {
+      inputPlanes[2].fill(0)
+      inputPlanes[3].fill(0)
+      inputPlanes[2].set(key[0].subarray(offset, offset + count))
+      inputPlanes[3].set((key[1] ?? key[0]).subarray(offset, offset + count))
+    }
+
     let parameterBytes = 0
 
     if (stepped.length > 0) {
@@ -165,7 +192,7 @@ export const renderWasm = async (spec: EffectSpec | null, rate: number, options:
     }
 
     const started = process.hrtime.bigint()
-    const code = exports.process(count, 1, 2, table, table + 8, 1, parameterBytes > 0 ? parameterPointer : 0, parameterBytes, 0, 0, 0, 0)
+    const code = exports.process(count, buses, 2, table, table + 8 * buses, 1, parameterBytes > 0 ? parameterPointer : 0, parameterBytes, 0, 0, 0, 0)
     elapsedNs += process.hrtime.bigint() - started
 
     if (code !== 0) throw new Error(`audio-core process failed with ${code}`)

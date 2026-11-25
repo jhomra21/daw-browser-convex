@@ -94,7 +94,8 @@ export const parameterTargets: Record<EffectKind, Record<string, number>> = {
   tremolo: range(92, amplitudeKeys),
   autopan: range(96, amplitudeKeys),
   ensemble: range(100, ['delayMs', 'depthMs', 'rateHz', 'spread', 'mix']),
-  gate: range(105, ['thresholdDb', 'ratio', 'attackMs', 'holdMs', 'releaseMs', 'hysteresisDb', 'rangeDb', 'lookaheadMs', 'link', 'sidechain.frequencyHz', 'sidechain.q']),
+  // 112 was the lookahead target; the lookahead is a 0/1/10 ms chooser held in the state now.
+  gate: { ...range(105, ['thresholdDb', 'ratio', 'attackMs', 'holdMs', 'releaseMs', 'hysteresisDb', 'rangeDb']), ...range(113, ['link', 'sidechain.frequencyHz', 'sidechain.q']), 'sidechain.gainDb': 171, 'sidechain.mix': 172 },
   // 124 was the lookahead target; the lookahead is a 0/1/10 ms chooser held in the state now.
   compressor: {
     ...range(116, ['thresholdDb', 'ratio', 'attackMs', 'releaseMs', 'makeupDb', 'outputDb', 'dryWet', 'kneeDb']),
@@ -165,7 +166,7 @@ export const fx = {
     kind: 'gate',
     state: {
       enabled: true, mode: 'gate', thresholdDb: -40, ratio: 4, attackMs: 1, holdMs: 20, releaseMs: 120, hysteresisDb: 6, rangeDb: -80,
-      lookaheadMs: 0, detector: 'peak', link: 1, sidechain: { enabled: false, frequencyHz: 80, q: 0.707 }, ...state,
+      lookaheadMs: 0, detector: 'peak', link: 1, flip: false, sidechain: { enabled: false, filterType: 'highpass', frequencyHz: 80, q: 0.707, gainDb: 0, mix: 1 }, ...state,
     },
   }),
   compressor: (state: Partial<CompressorProcessorState> = {}): EffectSpec => ({

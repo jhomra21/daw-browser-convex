@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { automationEnvelopeFromRow, automationEnvelopeValueRange, automationTargetKey, automationTargetKeysAfterReEnable, automationTargetKeysForManualOverride, automationTargetMatchesEffectInstance, createAutomationTarget, filterAutomationEnvelopesForScheduling, type AutomationEnvelope } from './automation'
+import { automationEnvelopeFromRow, automationEnvelopeValueRange, automationTargetKey, automationTargetKeysAfterReEnable, automationTargetKeysForManualOverride, automationTargetMatchesEffectInstance, createAutomationTarget, filterAutomationEnvelopesForScheduling, type AutomationEnvelope, type AutomationEnvelopeRow } from './automation'
 import { instrumentAutomationKey } from './sampler-automation'
 import { synthAutomationKey } from './synth-automation'
 import { automationRatioToValue, automationValueToRatio, builtInOverriddenAutomationTargetKeys, createEqBandParameterId, evaluatedAutomationValuesByTargetKey, externalAutomationParameterId, getAutomationParameterDescriptor, getAutomationParameterOptions, getAutomationParameterOptionsForTarget, normalizeAutomationPoints, parseExternalAutomationParameterId, valueAtAutomationTime, type AutomationEffectInstance } from './automation-parameters'
@@ -60,6 +60,23 @@ describe('automation helpers', () => {
 
     expect(first?.targetKey).not.toBe(second?.targetKey)
     expect(first?.target.effectInstanceId).toBe('delay-one')
+  })
+
+  test('drops a cloud lane saved for the retired Gate Lookahead parameter', () => {
+    const row: AutomationEnvelopeRow = {
+      _id: 'lane',
+      projectId: 'project',
+      targetKind: 'track',
+      trackId: 'track',
+      effectInstanceId: 'gate-one',
+      parameterId: 'gate.lookaheadMs',
+      enabled: true,
+      points: [],
+      updatedAt: 1,
+    }
+
+    expect(automationEnvelopeFromRow(row)).toBeNull()
+    expect(automationEnvelopeFromRow({ ...row, parameterId: 'gate.releaseMs' })?.parameterId).toBe('gate.releaseMs')
   })
 
   test('matches effect cleanup from structured identity without parsing target keys', () => {

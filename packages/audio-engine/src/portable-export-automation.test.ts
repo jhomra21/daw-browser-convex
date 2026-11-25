@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { automationTargetKey, type AutomationEnvelope } from '@daw-browser/shared'
+import { automationEnvelopeFromRow, automationTargetKey, type AutomationEnvelope } from '@daw-browser/shared'
 import {
   comparisonDurationSec,
   comparisonKickBursts,
@@ -150,6 +150,45 @@ describe('portable export automation, sidechains and graph latency', () => {
 
     expect(toneAmplitude(left, 1.2, 1.9)).toBeCloseTo(0.4 * 0.25, 2)
   }, timeout)
+
+  test('a saved cloud lane for a retired parameter does not make the session unsupported', () => {
+    const base = project({ effects: ['delay'], delayWet: true })
+    const retired = automationEnvelopeFromRow({
+      _id: 'retired',
+      projectId: 'project',
+      targetKind: 'track',
+      trackId: 'tone',
+      effectInstanceId: 'delay',
+      parameterId: 'gate.lookaheadMs',
+      enabled: true,
+      points: [{ id: 'p', timeSec: 0, value: 1, interpolation: 'linear' }],
+      updatedAt: 1,
+    })
+    const compile = (automationEnvelopes: readonly AutomationEnvelope[]) => compilePortableExportSnapshot({
+      tracks: base.tracks,
+      bpm: 120,
+      range: { mode: 'custom', startSec: 0, endSec: comparisonDurationSec },
+      sampleRateHz: comparisonSampleRate,
+      revision: 1,
+      epoch: 1,
+      firstSequence: 1,
+      fx: base.fx,
+      automationEnvelopes,
+    })
+
+    expect(retired).toBeNull()
+    expect(compile([...base.automationEnvelopes, ...retired === null ? [] : [retired]]).supported).toBe(true)
+    expect(compile([...base.automationEnvelopes, {
+      id: 'retired',
+      projectId: 'project',
+      target: { kind: 'track', trackId: 'tone', effectInstanceId: 'delay' },
+      targetKey: 'retired',
+      parameterId: 'gate.lookaheadMs',
+      enabled: true,
+      points: [{ id: 'p', timeSec: 0, value: 1, interpolation: 'linear' }],
+      updatedAt: 1,
+    }]).supported).toBe(false)
+  })
 
   test('automation that targets a parameter the graph does not expose is refused', () => {
     const base = project({ effects: ['delay'], delayWet: true })

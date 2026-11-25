@@ -1650,6 +1650,81 @@ void test_per_instance_history_isolation_and_republication() {
   }
 }
 
+// The renderers follow the sidechain filter's frequency live, so editing it must not replace the slot: the gate and the
+// compressor keep their gain, and the output on the other side of the edit stays where the unedited run has it.
+void test_sidechain_frequency_edit_keeps_gate_and_compressor_history() {
+  constexpr uint32_t frames = 2048;
+  const std::array<daw_audio_graph_edge_descriptor, 1> edges{{
+    {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F,
+      .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
+  }};
+  for (const uint32_t kind : {DAW_AUDIO_PROCESSOR_KIND_GATE, DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR}) {
+    // The sidechain filter's enabled flag and frequency offsets in the processor state.
+    const uint32_t enabled_offset = kind == DAW_AUDIO_PROCESSOR_KIND_GATE ? 48 : 60;
+    const uint32_t frequency_offset = kind == DAW_AUDIO_PROCESSOR_KIND_GATE ? 52 : 64;
+    const auto render = [&](bool edit) {
+      HistoryFixtureState state = history_fixture_state(kind);
+      const uint32_t on = 1;
+      std::memcpy(state.bytes.data() + enabled_offset, &on, sizeof(on));
+      float frequency = 80.0F;
+      std::memcpy(state.bytes.data() + frequency_offset, &frequency, sizeof(frequency));
+      const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
+        {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+          .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
+        {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+          .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = state.latency},
+      }};
+      const daw_audio_processor_descriptor processor{
+        .node_id = 2, .instance_id = 77, .kind = kind, .state_version = schema_version_of(kind), .state_size = state.size,
+        .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+        .latency_frames = state.latency, .tail_frames = 0, .parameter_count = 0,
+        .parameter_targets = nullptr, .state = state.bytes.data(),
+      };
+      daw_audio_core_handle core = create_core(frames, 2, 1);
+      daw_audio_graph_prepare_request request{
+        .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = 1, .node_count = 2, .edge_count = 1,
+        .processor_count = 1, .nodes = nodes.data(), .edges = edges.data(), .processors = &processor,
+      };
+      expect(daw_audio_core_prepare_graph(core, &request), DAW_AUDIO_CORE_OK);
+      expect(daw_audio_core_publish(core, 1), DAW_AUDIO_CORE_OK);
+      std::array<float, frames> left{}; std::array<float, frames> right{};
+      for (uint32_t frame = 0; frame < frames; ++frame) {
+        left[frame] = std::sin(static_cast<float>(frame) * 0.071F) * 0.75F;
+        right[frame] = left[frame];
+      }
+      const float *inputs[]{left.data(), right.data()};
+      std::array<float, frames> output_left{}; std::array<float, frames> output_right{};
+      float *outputs[]{output_left.data(), output_right.data()};
+      daw_audio_core_process_block block{
+        .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = frames / 2, .channel_count = 2,
+        .input_bus_count = 1, .inputs = inputs, .outputs = outputs,
+      };
+      expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+      if (edit) {
+        frequency = 100.0F;
+        std::memcpy(state.bytes.data() + frequency_offset, &frequency, sizeof(frequency));
+        request.graph_revision = 2;
+        expect(daw_audio_core_prepare_graph(core, &request), DAW_AUDIO_CORE_OK);
+        expect(daw_audio_core_publish(core, 2), DAW_AUDIO_CORE_OK);
+      }
+      block.graph_revision = edit ? 2 : 1;
+      const float *second_inputs[]{inputs[0] + frames / 2, inputs[1] + frames / 2};
+      float *second_outputs[]{outputs[0] + frames / 2, outputs[1] + frames / 2};
+      block.inputs = second_inputs;
+      block.outputs = second_outputs;
+      expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+      daw_audio_core_destroy(core);
+      return output_left;
+    };
+    const auto continuous = render(false);
+    const auto edited = render(true);
+    float largest = 0.0F;
+    for (uint32_t frame = frames / 2; frame < frames / 2 + 256; ++frame) largest = std::max(largest, std::abs(continuous[frame] - edited[frame]));
+    std::printf("sidechain edit kind %u: largest difference from the unedited run over the next 256 frames %.6f\n", kind, static_cast<double>(largest));
+    assert(largest <= 0.02F);
+  }
+}
+
 void test_same_core_processor_state_patch_preserves_revision() {
   const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
     {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
@@ -11388,6 +11463,7 @@ int main(int argc, char **argv) {
   test_portable_graph_accepts_a_full_effect_chain();
   test_portable_graph_utility_node();
   test_per_instance_history_isolation_and_republication();
+  test_sidechain_frequency_edit_keeps_gate_and_compressor_history();
   test_same_core_processor_state_patch_preserves_revision();
   test_utility_history_isolated_between_instances_and_standalone();
   test_pdc_delay_may_exceed_runtime_block_size_within_ring_capacity();

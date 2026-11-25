@@ -4,7 +4,7 @@ import { audioCoreContractVersion, processorSchemaVersion } from '../../packages
 import type { AudioCoreGraphEdgeDto, AudioCoreGraphSnapshot } from '../../packages/audio-core-contract/src'
 import { processorContractHash } from '../../packages/audio-core-contract/src/generated/processor-contract-metadata'
 import { graphEnvelope } from '../../public/audio-worklets/daw-portable-graph-envelope-v3.js'
-import { declaredLatencyFrames, encodeSpec, kindIds, parameterTargets } from './effects'
+import { declaredLatencyFrames, encodeSpec, kindIds, parameterTargets, withEnabled } from './effects'
 import type { EffectSpec } from './effects'
 import { getPath } from './state-path'
 import type { Planar, RenderOptions, Rendered } from './types'
@@ -186,7 +186,7 @@ export const renderWasm = async (spec: EffectSpec | null, rate: number, options:
 
     const toggled = enabledSteps.findIndex((step) => step.frame === offset)
 
-    if (spec !== null && toggled !== -1) publishGraph({ ...spec, state: { ...spec.state, enabled: enabledSteps[toggled].enabled } }, toggled + 2)
+    if (spec !== null && toggled !== -1) publishGraph(withEnabled(spec, enabledSteps[toggled].enabled), toggled + 2)
     let parameterBytes = 0
 
     if (stepped.length > 0) {

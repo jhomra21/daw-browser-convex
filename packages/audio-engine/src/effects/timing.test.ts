@@ -7,7 +7,13 @@ import {
   createDefaultReverbParams,
   createDefaultUtilityParams,
 } from '@daw-browser/shared'
-import { getEffectChainTimingWithExternal, getEffectTiming } from './timing'
+import {
+  gateCompressorLatencyFrames,
+  getEffectChainTimingWithExternal,
+  getEffectTiming,
+  limiterLatencyFrames,
+  type EffectTimingInput,
+} from './timing'
 
 describe('utility and gate timing', () => {
   test('keeps utility at zero latency and gate at the latency its lookahead chooses', () => {
@@ -30,39 +36,28 @@ describe('utility and gate timing', () => {
 
 // The native core refuses a Gate, Compressor or Limiter whose declared latency differs from its kernel's.
 describe('lookahead latency matches the native kernels', () => {
-  const limiterLatency = (lookaheadMs: number, rate: number) => getEffectTiming(
-    { id: 'limiter-1', kind: 'limiter', params: { version: 1, state: { ...createDefaultLimiterParams(), lookaheadMs } } },
-    rate,
-  ).latencyFrames
+  test('declares the lookahead of each device at the kernel rate', () => {
+    const declared = (input: EffectTimingInput, rate: number) => getEffectTiming(input, rate).latencyFrames
 
-  const compressorLatency = (lookaheadMs: number, rate: number) => getEffectTiming(
-    { id: 'compressor-1', kind: 'compressor', params: { ...createDefaultCompressorParams(), lookaheadMs } },
-    rate,
-  ).latencyFrames
-
-  const gateLatency = (lookaheadMs: number, rate: number) => getEffectTiming(
-    { id: 'gate-1', kind: 'gate', params: { version: 1, state: { ...createDefaultGateParams(), lookaheadMs } } },
-    rate,
-  ).latencyFrames
+    expect(declared({ id: 'limiter-1', kind: 'limiter', params: { version: 1, state: { ...createDefaultLimiterParams(), lookaheadMs: 1.5 } } }, 48_000)).toBe(72)
+    expect(declared({ kind: 'compressor', params: { ...createDefaultCompressorParams(), lookaheadMs: 10 } }, 48_000)).toBe(480)
+    expect(declared({ id: 'gate-1', kind: 'gate', params: { version: 1, state: { ...createDefaultGateParams(), lookaheadMs: 10 } } }, 48_000)).toBe(480)
+  })
 
   test('keeps the Limiter delay between the kernel minimum and its capacity', () => {
-    expect(limiterLatency(1.5, 48_000)).toBe(72)
-    expect(limiterLatency(1.5, 8_000)).toBe(14)
-    expect(limiterLatency(0, 48_000)).toBe(14)
-    expect(limiterLatency(1_000, 48_000)).toBe(2_000)
+    expect(limiterLatencyFrames(1.5, 8_000)).toBe(14)
+    expect(limiterLatencyFrames(0, 48_000)).toBe(14)
+    expect(limiterLatencyFrames(1_000, 48_000)).toBe(2_000)
   })
 
   test('caps the Gate and Compressor delay one frame under the kernel capacity', () => {
-    expect(compressorLatency(10, 48_000)).toBe(480)
-    expect(compressorLatency(1_000, 48_000)).toBe(2_047)
-    expect(gateLatency(10, 48_000)).toBe(480)
-    expect(gateLatency(1_000, 48_000)).toBe(2_047)
+    expect(gateCompressorLatencyFrames(1_000, 48_000)).toBe(2_047)
   })
 
   test('rounds a float32 lookahead like the kernel does', () => {
     // 0.1f is 0.10000000149, so at 48 kHz the kernel needs 4.8000000715 frames and rounds up to 5.
-    expect(compressorLatency(0.1, 48_000)).toBe(5)
-    expect(compressorLatency(-1, 48_000)).toBe(0)
+    expect(gateCompressorLatencyFrames(0.1, 48_000)).toBe(5)
+    expect(gateCompressorLatencyFrames(-1, 48_000)).toBe(0)
   })
 })
 

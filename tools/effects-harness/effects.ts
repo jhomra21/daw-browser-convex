@@ -63,6 +63,8 @@ export const encodeSpec = (spec: EffectSpec): Uint8Array => {
   }
 }
 
+export const withEnabled = <S extends EffectSpec>(spec: S, enabled: boolean): S => ({ ...spec, state: { ...spec.state, enabled } })
+
 /** Latency the graph validator requires a descriptor to declare (audio_core_validation.cpp); zero for everything else. */
 export const declaredLatencyFrames = (spec: EffectSpec, rate: number): number => {
   switch (spec.kind) {

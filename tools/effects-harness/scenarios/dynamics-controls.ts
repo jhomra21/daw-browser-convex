@@ -341,7 +341,11 @@ const limiterAutomation: Scenario = {
     const latency = await h.latencyFrames(spec)
 
     for (const [name, set, ceiling] of [['Ceiling -1 to -12 dBTP', { ceilingDbtp: -12 }, -12], ['Gain 0 to +12 dB on a -6 dBFS tone', { gainDb: 12 }, -1]] as const) {
-      const { output } = await h.render(spec, { input: [input], steps: [{ frame, set }] }, { parity: false })
+      const { output, legacy } = await h.render(spec, { input: [input], steps: [{ frame, set }] })
+
+      if (legacy === null) throw new Error('limiter has a legacy worklet')
+      // The worklet must make the same choice about which ceiling the audio already in the delay line is clipped at.
+      h.atMost(`parity across the step, ${name}`, maxAbsDiff(output[0], legacy[0]), parityLimit, 'abs')
       h.atMost(`max gain change per sample around the step, ${name}`, maxGainStepDb(input, output[0], latency, frame - 300, frame + latency + 4800), 0.3, 'dB', 'same bar as the l1 click')
       // The step must have taken effect, or the row would only be measuring a steady gain.
       h.atMost(`output peak after the step, ${name}`, peakDb(output[0].slice(frames - h.rate / 2)), ceiling, 'dBFS')

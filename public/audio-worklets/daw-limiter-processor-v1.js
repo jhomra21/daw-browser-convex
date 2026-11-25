@@ -167,6 +167,8 @@ class LimiterKernel {
     this.autoBuild = 0
     this.autoDecay = 0
     this.safetyClips = 0
+    // The ceiling each delay-line slot was detected under: its gain was made for that one, not the current ceiling.
+    this.ceilings = new Float32Array(CAPACITY)
     this.bypassFrames = Math.floor((sampleRate + 50) / 100)
     this.bypass = 0
     this.smootherCoefficient = 1 - Math.exp(-1000 / (10 * sampleRate))
@@ -346,6 +348,7 @@ class LimiterKernel {
     const input = [flushDenormal(f(inputLeft)), flushDenormal(f(inputRight))]
     const slot = this.write & MASK
     const target = [0, 0]
+    this.ceilings[slot] = this.ceiling
 
     for (let c = 0; c < 2; c++) {
       this.channels[c].dry[slot] = input[c]
@@ -368,10 +371,11 @@ class LimiterKernel {
 
       if (autoRelease) this.trackSustain(channel, smooth)
       let value = f(channel.gained[read] * channel.gain)
+      const ceiling = this.ceilings[read]
 
-      if (Math.abs(value) > this.ceiling) {
-        if (Math.abs(value) > f(this.ceiling * f(1.00001))) this.safetyClips++
-        value = Math.sign(value) * this.ceiling
+      if (Math.abs(value) > ceiling) {
+        if (Math.abs(value) > f(ceiling * f(1.00001))) this.safetyClips++
+        value = Math.sign(value) * ceiling
       }
 
       wet[c] = value

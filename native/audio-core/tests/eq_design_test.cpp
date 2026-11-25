@@ -1,6 +1,7 @@
 // Tests for the EQ band designs in src/dsp/eq_band.h against the analog prototypes (RBJ cookbook s-domain filters).
-// Run with a group name (accuracy, nearNyquistPoles, slopes, stability) or with no argument for all. Every check prints its measured value.
+// Run with a group name (accuracy, nearNyquistPoles, poleTable, slopes, stability) or with no argument for all. Every check prints its measured value.
 #include "../src/dsp/eq_band.h"
+#include "../tools/eq_pole_table_fit.h"
 
 #include <algorithm>
 #include <complex>
@@ -9,6 +10,7 @@
 #include <random>
 
 namespace dsp = daw::audio_core::dsp;
+namespace tools = daw::audio_core::dsp::tools;
 using Complex = std::complex<double>;
 using Type = dsp::EqBandType;
 
@@ -127,6 +129,21 @@ void nearNyquistPoles() {
   }
 }
 
+// The checked-in pole tables must be what the fit in tools/eq_pole_table_fit.h produces; regenerate them with
+// tools/eq_pole_table_generator.cpp after changing the fit or the prototypes. The tolerance covers libm differences between
+// platforms: the fit is deterministic, but a flat valley of the worst error can settle a little differently.
+void poleTable() {
+  const auto compare = [](const char *name, tools::Shape shape, const double *checkedIn) {
+    const std::vector<double> fitted = tools::fitTable(shape);
+    double worst = 0.0;
+    for (size_t i = 0; i < fitted.size(); ++i) worst = std::max(worst, std::fabs(fitted[i] - checkedIn[i]));
+    expectAtMost(name, worst, 2.0e-3);
+  };
+  compare("bell table, largest difference from a fresh fit", tools::Shape::Bell, dsp::detail::kBellPoleTable);
+  compare("low shelf table, largest difference from a fresh fit", tools::Shape::LowShelf, dsp::detail::kLowShelfPoleTable);
+  compare("low-pass table, largest difference from a fresh fit", tools::Shape::LowPass, dsp::detail::kLowPassPoleTable);
+}
+
 void slopes() {
   for (const bool high : {false, true}) {
     const Type type = high ? Type::Highpass48 : Type::Lowpass48;
@@ -169,7 +186,7 @@ void stability() {
 
 int main(int argc, char **argv) {
   const char *group = argc > 1 ? argv[1] : nullptr;
-  const struct { const char *name; void (*run)(); } cases[] = {{"accuracy", accuracy}, {"nearNyquistPoles", nearNyquistPoles}, {"slopes", slopes}, {"stability", stability}};
+  const struct { const char *name; void (*run)(); } cases[] = {{"accuracy", accuracy}, {"nearNyquistPoles", nearNyquistPoles}, {"poleTable", poleTable}, {"slopes", slopes}, {"stability", stability}};
   for (const auto &testCase : cases) {
     if (group != nullptr && std::strcmp(group, testCase.name) != 0) continue;
     std::printf("%s\n", testCase.name);

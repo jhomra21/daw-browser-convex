@@ -1,3 +1,4 @@
+import { BELL_POLE_TABLE, LOW_PASS_POLE_TABLE, LOW_SHELF_POLE_TABLE } from './eq-pole-table'
 import { clamp } from './numeric'
 import {
   EQ_BANDS_PER_CURVE,
@@ -59,6 +60,24 @@ const withNumerator = (poles: Poles, B0: number, B1: number, B2: number): Biquad
   return { b0, b1: 0.5 * (r0 - r1), b2: b0 > 0 ? -held / (4 * b0) : 0, a1: poles.a1, a2: poles.a2 }
 }
 
+// |H|^2 of the RBJ prototypes at x = Omega / Omega0.
+const bellMagnitudeSquared = (gain: number, q: number, x: number) => {
+  const plain = (1 - x * x) ** 2
+  const c = x / q
+
+  return (plain + gain * c * c) / (plain + c * c / gain)
+}
+
+const shelfMagnitudeSquared = (low: boolean, a: number, sqrtA: number, q: number, x: number) => {
+  const c = x * sqrtA / q
+  const plain = (a - x * x) ** 2 + c * c
+  const scaled = (1 - a * x * x) ** 2 + c * c
+
+  return a * a * (low ? plain / scaled : scaled / plain)
+}
+
+const lowPassMagnitudeSquared = (q: number, x: number) => 1 / ((1 - x * x) ** 2 + (x / q) ** 2)
+
 // Numerator for the analog |H|^2 (a function of x = Omega / Omega0). |H|^2 is linear in B0, B1, B2 once the poles are fixed.
 // DC (B0) and the corner are matched exactly, which leaves one degree of freedom: B2, with B1 following from the corner.
 // B2 is fitted from DC to `span` (0.45 of the project rate, the top of the EQ range) by least squares on the relative
@@ -73,131 +92,6 @@ const FIT_TOP = 0.45
 const FIT_POINTS = 48
 const FIT_PASSES = 3
 
-// Impulse-invariant poles sit where the analog poles do, which is wrong once they are near Nyquist: a shelf whose pole
-// frequency omega0 / sqrt(a) or omega0 * sqrt(a) reaches 0.45 fs, or a bell at 19 kHz, leaves 0.3 to 0.6 dB inside the band
-// whatever the numerator is. When the fit is further than POLISH_TRIGGER_DB from the prototype anywhere on a log grid over
-// the EQ range (20 Hz at 96 kHz up to 0.45 fs), the poles and B2 are moved by damped Gauss-Newton on the dB error, with
-// B0 and B1 still matching DC and the corner. Lawson weights as above, so a pass can raise the worst error before the next
-// lowers it; the best pass is kept, and the search stops if the poles leave the unit circle. Bands that fit already are
-// left exactly as fittedNumerator made them. Points where the prototype is below -60 dB are not judged. Counts match
-// kPolish* in biquad.h.
-const POLISH_POINTS = 256
-const POLISH_PASSES = 8
-const POLISH_TRIGGER_DB = 0.1
-const POLISH_DAMPING = 1e-3
-const POLISH_FLOOR_DB = -60
-
-const responseDb = (c: BiquadCoefficients, omega: number) => {
-  const c1 = Math.cos(omega)
-  const c2 = Math.cos(2 * omega)
-  const num = c.b0 * c.b0 + c.b1 * c.b1 + c.b2 * c.b2 + 2 * (c.b0 * c.b1 + c.b1 * c.b2) * c1 + 2 * c.b0 * c.b2 * c2
-  const den = 1 + c.a1 * c.a1 + c.a2 * c.a2 + 2 * (c.a1 + c.a1 * c.a2) * c1 + 2 * c.a2 * c2
-
-  return 10 * Math.log10(num / den)
-}
-
-// Gaussian elimination with partial pivoting.
-const solve = (a: number[][], b: number[]) => {
-  const n = b.length
-
-  for (let i = 0; i < n; i++) {
-    let pivot = i
-
-    for (let k = i + 1; k < n; k++) {
-      if (Math.abs(a[k][i]) > Math.abs(a[pivot][i])) pivot = k
-    }
-
-    ;[a[i], a[pivot]] = [a[pivot], a[i]]
-    ;[b[i], b[pivot]] = [b[pivot], b[i]]
-
-    for (let k = i + 1; k < n; k++) {
-      const m = a[k][i] / a[i][i]
-
-      for (let j = i; j < n; j++) a[k][j] -= m * a[i][j]
-
-      b[k] -= m * b[i]
-    }
-  }
-
-  const x = b.map(() => 0)
-
-  for (let i = n - 1; i >= 0; i--) {
-    let sum = b[i]
-
-    for (let j = i + 1; j < n; j++) sum -= a[i][j] * x[j]
-
-    x[i] = sum / a[i][i]
-  }
-
-  return x
-}
-
-// `design` maps (a1, a2, B2) to coefficients with B0 and B1 matched to the prototype at DC and the corner.
-const polished = (design: (x: number[]) => BiquadCoefficients, start: number[], omega0: number, span: number, analogSquared: (x: number) => number) => {
-  const omegas = Array.from({ length: POLISH_POINTS }, (_, i) => span * 4e-4 * 2500 ** (i / (POLISH_POINTS - 1)))
-  const targets = omegas.map((omega) => 10 * Math.log10(analogSquared(omega / omega0)))
-
-  const worst = (x: number[]) => {
-    const c = design(x)
-
-    return omegas.reduce((result, omega, i) => (targets[i] > POLISH_FLOOR_DB ? Math.max(result, Math.abs(responseDb(c, omega) - targets[i])) : result), 0)
-  }
-
-  let best = start
-  let bestError = worst(best)
-
-  if (bestError <= POLISH_TRIGGER_DB) return design(start)
-
-  let current = best
-  let weights: number[] = targets.map((target) => (target > POLISH_FLOOR_DB ? 1 : 0))
-
-  for (let pass = 0; pass < POLISH_PASSES; pass++) {
-    const normal = current.map(() => current.map(() => 0))
-    const gradient = current.map(() => 0)
-    const here = design(current)
-
-    omegas.forEach((omega, i) => {
-      const residual = responseDb(here, omega) - targets[i]
-
-      const row = current.map((value, k) => {
-        const step = 1e-6 * Math.max(Math.abs(value), 1e-3)
-        const moved = current.map((v, j) => (j === k ? v + step : v))
-
-        return (responseDb(design(moved), omega) - responseDb(here, omega)) / step
-      })
-
-      row.forEach((jj, j) => {
-        gradient[j] -= weights[i] * jj * residual
-        row.forEach((jk, k) => { normal[j][k] += weights[i] * jj * jk })
-      })
-    })
-
-    normal.forEach((row, j) => { row[j] *= 1 + POLISH_DAMPING })
-
-    const step = solve(normal, gradient)
-    const next = current.map((value, k) => value + step[k])
-
-    if (!(Math.abs(next[1]) < 0.9999 && Math.abs(next[0]) < 1 + next[1] - 1e-6)) break
-
-    current = next
-
-    const error = worst(current)
-
-    if (error < bestError) {
-      best = current
-      bestError = error
-    }
-
-    const c = design(current)
-    const scaled = weights.map((w, i) => w * Math.max(Math.abs(responseDb(c, omegas[i]) - targets[i]), 1e-4))
-    const total = scaled.reduce((sum, w) => sum + w, 0)
-
-    weights = scaled.map((w) => w * POLISH_POINTS / total)
-  }
-
-  return design(best)
-}
-
 const fittedNumerator = (poles: Poles, omega0: number, span: number, analogSquared: (x: number) => number) => {
   const den = denominator(poles)
   const B0 = den.c0 * analogSquared(0)
@@ -205,13 +99,24 @@ const fittedNumerator = (poles: Poles, omega0: number, span: number, analogSquar
   const corner2 = 4 * (1 - corner1) * corner1
   const corner = quadraticAt(den, omega0) * analogSquared(1) - B0 * (1 - corner1)
 
-  // Residual of point i is rest - B2 * slope, with B1 = (corner - B2 corner2) / corner1 substituted.
+  // Residual of point i is rest - B2 * slope, with B1 = (corner - B2 corner2) / corner1 substituted. The point sines come
+  // from the recurrence sin((k + 1) h) = 2 cos(h) sin(k h) - sin((k - 1) h), h = half the point spacing, as in biquad.h.
+  const half = 0.5 * span / FIT_POINTS
+  const twoCosHalf = 2 * Math.cos(half)
+  let sinPrevious = 0
+  let sinCurrent = Math.sin(half)
+
   const points = Array.from({ length: FIT_POINTS }, (_, index) => {
     const omega = span * (index + 1) / FIT_POINTS
-    const phi1 = Math.sin(0.5 * omega) ** 2
-    const scale = 1 / (quadraticAt(den, omega) * analogSquared(omega / omega0))
+    const phi1 = sinCurrent * sinCurrent
+    const phi0 = 1 - phi1
+    const scale = 1 / ((den.c0 * phi0 + den.c1 * phi1 + den.c2 * 4 * phi0 * phi1) * analogSquared(omega / omega0))
     const u1 = phi1 * scale
     const u2 = 4 * (1 - phi1) * phi1 * scale
+    const sinNext = twoCosHalf * sinCurrent - sinPrevious
+
+    sinPrevious = sinCurrent
+    sinCurrent = sinNext
 
     return { rest: 1 - B0 * (1 - phi1) * scale - u1 * corner / corner1, slope: u2 - u1 * corner2 / corner1 }
   })
@@ -231,37 +136,86 @@ const fittedNumerator = (poles: Poles, omega0: number, span: number, analogSquar
     weights = next.map((w) => w * FIT_POINTS / total)
   }
 
-  const design = ([a1, a2, b2]: number[]) => {
-    const p = { a1, a2 }
-    const d = denominator(p)
-    const dc = d.c0 * analogSquared(0)
-    const atCorner = quadraticAt(d, omega0) * analogSquared(1) - dc * (1 - corner1)
+  return withNumerator(poles, B0, (corner - B2 * corner2) / corner1, B2)
+}
 
-    return withNumerator(p, dc, (atCorner - b2 * corner2) / corner1, b2)
+// Impulse-invariant poles sit where the analog poles do, which is wrong once they are near Nyquist: a shelf whose pole
+// frequency omega0 / sqrt(a) or omega0 * sqrt(a) reaches 0.45 fs, or a bell at 19 kHz, leaves 0.3 to 3 dB inside the band
+// whatever the numerator is. A pole correction moves the denominator's values at DC, (1 + a1 + a2), and at Nyquist,
+// (1 - a1 + a2), by e^dc and e^nyquist, looked up in a table over (corner frequency, Q, gain) that
+// tools/eq_pole_table_generator.cpp fits offline (eq-pole-table.ts is its output, the same numbers eq_pole_table.h holds).
+// Everything below mirrors PoleCorrection and its table in biquad.h.
+type PoleCorrection = { dc: number; nyquist: number }
+
+const POLE_TABLE_OMEGA_NODES = 18
+const POLE_TABLE_Q_NODES = 10
+const POLE_TABLE_GAIN_NODES = 9
+const POLE_TABLE_OMEGA_TOP = 0.99
+const POLE_TABLE_MIN_Q = 0.2
+const POLE_TABLE_MAX_Q = 36
+const POLE_TABLE_MAX_GAIN_DB = 24
+
+// Hi-Quality designs (the EQ range is under 0.25 of the design rate) keep their poles: the table is fitted for the full range.
+const POLE_TABLE_MIN_SPAN = 0.99 * TWO_PI * FIT_TOP
+
+// Multilinear interpolation of `table` (nodes laid out omega, Q, gain, then the two corrections). A table without a gain
+// axis (the low-pass) has one gain node.
+const interpolatedCorrection = (table: readonly number[], gainNodes: number, omega0: number, q: number, gainDb: number, span: number): PoleCorrection => {
+  if (span < POLE_TABLE_MIN_SPAN) return { dc: 0, nyquist: 0 }
+
+  const position = (fraction: number, nodes: number) => {
+    const scaled = clamp(fraction, 0, 1) * (nodes - 1)
+    const index = Math.min(Math.floor(scaled), nodes - 2)
+
+    return { index, fraction: scaled - index }
   }
 
-  return polished(design, [poles.a1, poles.a2, B2], omega0, span, analogSquared)
+  const i = position(Math.sqrt(omega0 / Math.PI) / POLE_TABLE_OMEGA_TOP, POLE_TABLE_OMEGA_NODES)
+  const j = position(Math.log(q / POLE_TABLE_MIN_Q) / Math.log(POLE_TABLE_MAX_Q / POLE_TABLE_MIN_Q), POLE_TABLE_Q_NODES)
+  const k = gainNodes === 1 ? { index: 0, fraction: 0 } : position(0.5 + 0.5 * gainDb / POLE_TABLE_MAX_GAIN_DB, gainNodes)
+  const result = { dc: 0, nyquist: 0 }
+
+  for (let a = 0; a < 2; a++) {
+    for (let b = 0; b < 2; b++) {
+      for (let c = 0; c < (gainNodes === 1 ? 1 : 2); c++) {
+        const weight = (a ? i.fraction : 1 - i.fraction) * (b ? j.fraction : 1 - j.fraction) * (c ? k.fraction : 1 - k.fraction)
+        const node = 2 * (((i.index + a) * POLE_TABLE_Q_NODES + (j.index + b)) * gainNodes + (k.index + c))
+
+        result.dc += weight * table[node]
+        result.nyquist += weight * table[node + 1]
+      }
+    }
+  }
+
+  return result
+}
+
+const correctedPoles = (poles: Poles, correction: PoleCorrection): Poles => {
+  if (correction.dc === 0 && correction.nyquist === 0) return poles
+
+  const dc = (1 + poles.a1 + poles.a2) * Math.exp(correction.dc)
+  const nyquist = (1 - poles.a1 + poles.a2) * Math.exp(correction.nyquist)
+
+  // Both denominator values positive and a2 < 1 keep both poles inside the unit circle.
+  return dc > 0 && nyquist > 0 && dc + nyquist < 3.9999 ? { a1: 0.5 * (dc - nyquist), a2: 0.5 * (dc + nyquist) - 1 } : poles
 }
 
 const matchedBell = (frequency: number, sampleRate: number, span: number, q: number, gainDb: number) => {
   const omega0 = cornerOmega(frequency, sampleRate)
   const gain = 10 ** (gainDb / 20)
   const quality = Math.max(q, 0.01)
-  const poles = impulseInvariantPoles(0.5 / (Math.sqrt(gain) * quality), omega0)
+  const poles = correctedPoles(impulseInvariantPoles(0.5 / (Math.sqrt(gain) * quality), omega0), interpolatedCorrection(BELL_POLE_TABLE, POLE_TABLE_GAIN_NODES, omega0, quality, gainDb, span))
 
-  return fittedNumerator(poles, omega0, span, (x) => {
-    const plain = (1 - x * x) ** 2
-    const c = x / quality
-
-    return (plain + gain * c * c) / (plain + c * c / gain)
-  })
+  return fittedNumerator(poles, omega0, span, (x) => bellMagnitudeSquared(gain, quality, x))
 }
 
 const matchedLowPass = (frequency: number, sampleRate: number, span: number, q: number) => {
   const omega0 = cornerOmega(frequency, sampleRate)
   const quality = Math.max(q, 0.01)
 
-  return fittedNumerator(impulseInvariantPoles(0.5 / quality, omega0), omega0, span, (x) => 1 / ((1 - x * x) ** 2 + (x / quality) ** 2))
+  const poles = correctedPoles(impulseInvariantPoles(0.5 / quality, omega0), interpolatedCorrection(LOW_PASS_POLE_TABLE, 1, omega0, quality, 0, span))
+
+  return fittedNumerator(poles, omega0, span, (x) => lowPassMagnitudeSquared(quality, x))
 }
 
 const matchedHighPass = (frequency: number, sampleRate: number, q: number): BiquadCoefficients => {
@@ -274,21 +228,17 @@ const matchedHighPass = (frequency: number, sampleRate: number, q: number): Biqu
   return { b0, b1: -2 * b0, b2: b0, a1: poles.a1, a2: poles.a2 }
 }
 
-const shelfMagnitudeSquared = (low: boolean, a: number, q: number, x: number) => {
-  const c = x * Math.sqrt(a) / q
-  const plain = (a - x * x) ** 2 + c * c
-  const scaled = (1 - a * x * x) ** 2 + c * c
-
-  return a * a * (low ? plain / scaled : scaled / plain)
-}
-
+// A high shelf of gain g has the poles and the error of the low shelf of gain -g (their prototypes differ by the constant
+// a^4), so one table serves both.
 const matchedShelf = (low: boolean, frequency: number, sampleRate: number, span: number, q: number, gainDb: number) => {
   const omega0 = cornerOmega(frequency, sampleRate)
   const a = 10 ** (gainDb / 40)
+  const sqrtA = Math.sqrt(a)
   const quality = Math.max(q, 0.01)
-  const poles = impulseInvariantPoles(0.5 / quality, low ? omega0 / Math.sqrt(a) : omega0 * Math.sqrt(a))
+  const correction = interpolatedCorrection(LOW_SHELF_POLE_TABLE, POLE_TABLE_GAIN_NODES, omega0, quality, low ? gainDb : -gainDb, span)
+  const poles = correctedPoles(impulseInvariantPoles(0.5 / quality, low ? omega0 / sqrtA : omega0 * sqrtA), correction)
 
-  return fittedNumerator(poles, omega0, span, (x) => shelfMagnitudeSquared(low, a, quality, x))
+  return fittedNumerator(poles, omega0, span, (x) => shelfMagnitudeSquared(low, a, sqrtA, quality, x))
 }
 
 const rbjBiquad = (type: 'bandpass' | 'notch' | 'allpass', frequency: number, sampleRate: number, q: number): BiquadCoefficients => {

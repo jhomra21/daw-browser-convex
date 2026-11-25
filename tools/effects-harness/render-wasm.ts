@@ -144,7 +144,7 @@ export const renderWasm = async (spec: EffectSpec | null, rate: number, options:
   }
 
   publishGraph(spec, 1)
-  exports.transport(1, 1, 0n)
+  exports.transport(1, 1, BigInt(options.startFrame ?? 0))
 
   const planeBytes = blockFrames * 4
   const planes = 2 * (buses + 1)

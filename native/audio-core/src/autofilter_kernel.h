@@ -30,6 +30,15 @@ struct AutoFilterConfig {
   bool sync = false;          // LFO rate follows the tempo
 };
 
+// Where the song is at the current frame. With Sync on and the transport running, the LFO phase is a function of this
+// position, so the same bar always sweeps the same way whatever frame rendering started from. A stopped transport keeps
+// the LFO free-running at the tempo, so live input still moves.
+struct AutoFilterTransport {
+  double tempo_bpm = 0.0;  // 0 when the host carries no tempo (the portable wasm transport): kDefaultTempoBpm is used
+  int64_t frame = 0;       // song position in sample frames
+  bool running = false;
+};
+
 struct AutoFilterValues {
   float frequency_hz = 1000.0F;
   float resonance = 0.0F;
@@ -50,6 +59,7 @@ class AutoFilterKernel {
   static constexpr float kMinimumQ = 0.70710678F;
   static constexpr float kMaximumQ = 8.0F;
   static constexpr uint32_t kDivisionCount = 16;
+  static constexpr double kDefaultTempoBpm = 120.0;
   static constexpr uint32_t kHistoryFrames = 64;  // power of two above the oversampler latency
 
   void prepare(double sampleRate) {
@@ -69,18 +79,20 @@ class AutoFilterKernel {
   }
 
   // Discrete settings may change at any frame; filter type and slope crossfade, quality resets the oversampler.
-  void process(const AutoFilterValues &values, const AutoFilterConfig &config, double tempoBpm, float bypass,
+  void process(const AutoFilterValues &values, const AutoFilterConfig &config, const AutoFilterTransport &transport, float bypass,
     float inLeft, float inRight, float &outLeft, float &outRight) {
     if (!initialized_) initialize(values, config);
     apply_config(config);
     smooth(values);
     const float input[2] = {std::isfinite(inLeft) ? inLeft : 0.0F, std::isfinite(inRight) ? inRight : 0.0F};
     update_envelope(values, config, input);
-    const double base = config.sync ? sync_rate_hz(config.division, tempoBpm) : values.lfo_rate_hz;
+    const double base = config.sync ? sync_rate_hz(config.division, transport.tempo_bpm) : values.lfo_rate_hz;
+    const bool locked = config.sync && transport.running;
+    const double cycles = locked ? static_cast<double>(transport.frame) / sampleRate_ * base : 0.0;
     float output[2] = {0.0F, 0.0F};
     for (uint32_t c = 0; c < 2; ++c) {
-      const double rate = (c == 1 && config.stereo_mode == 1) ? base * (1.0 + values.lfo_stereo_phase) : base;
-      output[c] = render_channel(c, values, config, rate, input[c], bypass);
+      const double detune = (c == 1 && config.stereo_mode == 1) ? 1.0 + values.lfo_stereo_phase : 1.0;
+      output[c] = render_channel(c, values, config, base * detune, locked, cycles * detune, input[c], bypass);
     }
     if (fading_ && ++fade_position_ >= fade_frames_) fading_ = false;
     outLeft = output[0];
@@ -99,7 +111,7 @@ class AutoFilterKernel {
   static float sync_rate_hz(uint32_t division, double tempoBpm) {
     static constexpr std::array<float, kDivisionCount> kBeats{8.0F, 4.0F, 3.0F, 2.0F, 1.5F, 1.0F, 2.0F / 3.0F, 0.75F,
       0.5F, 1.0F / 3.0F, 0.375F, 0.25F, 1.0F / 6.0F, 0.1875F, 0.125F, 1.0F / 12.0F};
-    const double bpm = tempoBpm > 0.0 ? tempoBpm : 120.0;
+    const double bpm = tempoBpm > 0.0 ? tempoBpm : kDefaultTempoBpm;
     return static_cast<float>(bpm / 60.0 / kBeats[std::min(division, kDivisionCount - 1)]);
   }
 
@@ -324,18 +336,28 @@ class AutoFilterKernel {
     return hiQuality ? channel.clip_adaa.process(x) : std::tanh(x);
   }
 
+  // `locked` takes the LFO position from the song (`cycles` since song start) instead of the channel's own counter.
   float render_channel(uint32_t index, const AutoFilterValues &values, const AutoFilterConfig &config, double rate,
-    float input, float bypass) {
+    bool locked, double cycles, float input, float bypass) {
     Channel &channel = channels_[index];
-    double phase = channel.phase + values.lfo_phase_offset;
+    double phase = values.lfo_phase_offset;
     if (index == 1 && config.stereo_mode == 0) phase += values.lfo_stereo_phase;
+    uint32_t cycle = 0;
+    if (locked) {
+      phase += cycles;
+    } else {
+      phase += channel.phase;
+      cycle = channel.cycle;
+    }
     const double whole = std::floor(phase);
-    const float lfo = lfo_shape(config.waveform, phase - whole, channel.cycle + static_cast<uint32_t>(static_cast<int64_t>(whole)));
-    channel.phase += rate / sampleRate_;
-    if (channel.phase >= 1.0) {
-      const double wraps = std::floor(channel.phase);
-      channel.phase -= wraps;
-      channel.cycle += static_cast<uint32_t>(wraps);
+    const float lfo = lfo_shape(config.waveform, phase - whole, cycle + static_cast<uint32_t>(static_cast<int64_t>(whole)));
+    if (!locked) {
+      channel.phase += rate / sampleRate_;
+      if (channel.phase >= 1.0) {
+        const double wraps = std::floor(channel.phase);
+        channel.phase -= wraps;
+        channel.cycle += static_cast<uint32_t>(wraps);
+      }
     }
     const float env_unit = std::clamp((20.0F * std::log10(std::fmax(envelope_[index], 1.0e-6F)) + 60.0F) / 60.0F, 0.0F, 1.0F);
     const float octaves = values.env_amount_octaves * env_unit + values.lfo_depth_octaves * lfo;

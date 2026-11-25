@@ -10,6 +10,8 @@ export type RenderOptions = {
   /** A key from another track, routed to the effect's sidechain input. */
   key?: readonly Float32Array[]
   steps?: readonly ParamStep[]
+  /** Song position, in frames, of the first rendered frame; the transport runs from there (default 0). The legacy worklet has no song position. */
+  startFrame?: number
   /** Flips the processor's `enabled` state from `frame` onward (a block boundary); the core gets it as a republished graph. */
   enabledSteps?: readonly { frame: number; enabled: boolean }[]
 }

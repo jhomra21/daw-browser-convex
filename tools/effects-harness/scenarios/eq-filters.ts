@@ -355,12 +355,27 @@ const tempoSync: Scenario = {
   name: 'lfo-tempo-sync',
   rates: [48000],
   run: async (h) => {
-    const input = sine(2 * h.rate, coherentFrequency(2000, h.rate, h.rate), h.rate, 0.1)
-    const lfo = { ...autofilterLfo, depthOctaves: 2 }
-    const free = await h.render(fx.autofilter({ frequencyHz: 500, hiQuality: false, lfo: { ...lfo, rateHz: 2 } }), { input: [input] }, { parity: false })
-    const synced = await h.render(fx.autofilter({ frequencyHz: 500, hiQuality: false, lfo: { ...lfo, sync: true, division: 5 } }), { input: [input] }, { parity: false })
+    const input = sine(6 * h.rate, coherentFrequency(2000, h.rate, h.rate), h.rate, 0.1)
+    const lfo = { ...autofilterLfo, depthOctaves: 2, phaseOffset: 0.3 }
+    const render = (lfoState: typeof lfo, startFrame: number) => h.render(fx.autofilter({ frequencyHz: 500, hiQuality: false, lfo: lfoState }), { input: [input.subarray(startFrame)], startFrame }, { parity: false })
+    const bar = 2 * h.rate
+    const free = await render({ ...lfo, rateHz: 2 }, 0)
+    const fromBar1 = await render({ ...lfo, sync: true, division: 5 }, 0)
 
-    h.atMost('1/4 note at the core default 120 bpm against a 2 Hz free LFO', Math.max(...free.output[0].map((value, index) => Math.abs(value - synced.output[0][index]))), 1e-3, 'abs', 'A5: tempo sync')
+    // A 1/4 note is 2 Hz at 120 bpm, the tempo the wasm transport falls back to because it carries none. The 90 bpm rate is a native row (daw-autofilter-modulation).
+    h.atMost('1/4 note at the 120 bpm fallback against a 2 Hz free LFO started at bar 1', Math.max(...free.output[0].map((value, index) => Math.abs(value - fromBar1.output[0][index]))), 1e-3, 'abs', 'A5: tempo sync')
+
+    // Bar 3 starts at frame 2 * bar. Both renders have run for over a bar by then, so the filter state of the earlier start has settled.
+    // Division 0 is two bars, so a start at bar 2 sits half a cycle away from a start at bar 1.
+    const twoBars = { ...lfo, sync: true, division: 0 }
+    const fromBar1TwoBars = await render(twoBars, 0)
+    const fromBar2 = await render(twoBars, bar)
+    const bar3 = (rendered: { output: Float32Array[] }, from: number) => rendered.output[0].subarray(2 * bar - from + 2000, 3 * bar - from)
+    const resumedFrame = bar + h.rate / 8
+    const resumed = await render(twoBars, resumedFrame)
+
+    h.atMost('bar 3 of a 2-bar synced Auto Filter rendered from bar 1 against bar 3 rendered from bar 2', maxAbsDiff(bar3(fromBar1TwoBars, 0), bar3(fromBar2, bar)), 1e-3, 'abs', 'the synced LFO follows song position, not the render start')
+    h.atMost('bar 3 rendered from bar 1 against bar 3 rendered from an eighth of a second into bar 2', maxAbsDiff(bar3(fromBar1TwoBars, 0), bar3(resumed, resumedFrame)), 1e-3, 'abs', 'an arbitrary start frame gives the same sweep')
   },
 }
 

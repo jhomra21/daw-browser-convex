@@ -74,58 +74,57 @@ const FIT_POINTS = 48
 const FIT_PASSES = 3
 
 // Impulse-invariant poles sit where the analog poles do, which is wrong once they are near Nyquist: a shelf whose pole
-// frequency omega0 / sqrt(a) or omega0 * sqrt(a) reaches 0.9 fs, or a bell at 19 kHz, leaves 0.3 to 0.6 dB inside the
-// band whatever the numerator is. When the fit is further than POLISH_TRIGGER_DB from the prototype anywhere on a log grid
-// over the EQ range (20 Hz at 96 kHz up to 0.45 fs), all five coefficients are moved by damped Gauss-Newton on the dB error (Lawson weights, as above, so a
-// pass can raise the worst error before the next lowers it). The best pass is kept, and the search stops if the poles leave
-// the unit circle. Bands that fit already are
-// left exactly as fittedNumerator made them. Points where the prototype is below -60 dB are not judged. Counts match kPolish* in biquad.h.
-const POLISH_POINTS = 96
+// frequency omega0 / sqrt(a) or omega0 * sqrt(a) reaches 0.45 fs, or a bell at 19 kHz, leaves 0.3 to 0.6 dB inside the band
+// whatever the numerator is. When the fit is further than POLISH_TRIGGER_DB from the prototype anywhere on a log grid over
+// the EQ range (20 Hz at 96 kHz up to 0.45 fs), the poles and B2 are moved by damped Gauss-Newton on the dB error, with
+// B0 and B1 still matching DC and the corner. Lawson weights as above, so a pass can raise the worst error before the next
+// lowers it; the best pass is kept, and the search stops if the poles leave the unit circle. Bands that fit already are
+// left exactly as fittedNumerator made them. Points where the prototype is below -60 dB are not judged. Counts match
+// kPolish* in biquad.h.
+const POLISH_POINTS = 256
 const POLISH_PASSES = 8
 const POLISH_TRIGGER_DB = 0.1
 const POLISH_DAMPING = 1e-3
-const POLISH_FLOOR_DB = -60 // the stop band is not judged below this, as in the harness
+const POLISH_FLOOR_DB = -60
 
-type Coefficients5 = [number, number, number, number, number] // b0 b1 b2 a1 a2
-
-const responseDb = (c: Coefficients5, omega: number) => {
+const responseDb = (c: BiquadCoefficients, omega: number) => {
   const c1 = Math.cos(omega)
   const c2 = Math.cos(2 * omega)
-  const num = c[0] * c[0] + c[1] * c[1] + c[2] * c[2] + 2 * (c[0] * c[1] + c[1] * c[2]) * c1 + 2 * c[0] * c[2] * c2
-  const den = 1 + c[3] * c[3] + c[4] * c[4] + 2 * (c[3] + c[3] * c[4]) * c1 + 2 * c[4] * c2
+  const num = c.b0 * c.b0 + c.b1 * c.b1 + c.b2 * c.b2 + 2 * (c.b0 * c.b1 + c.b1 * c.b2) * c1 + 2 * c.b0 * c.b2 * c2
+  const den = 1 + c.a1 * c.a1 + c.a2 * c.a2 + 2 * (c.a1 + c.a1 * c.a2) * c1 + 2 * c.a2 * c2
 
   return 10 * Math.log10(num / den)
 }
 
-const polesInside = (c: Coefficients5) => Math.abs(c[4]) < 0.9999 && Math.abs(c[3]) < 1 + c[4] - 1e-6
+// Gaussian elimination with partial pivoting.
+const solve = (a: number[][], b: number[]) => {
+  const n = b.length
 
-// Gaussian elimination with partial pivoting on the 5 x 5 system a x = b.
-const solve5 = (a: number[][], b: number[]) => {
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < n; i++) {
     let pivot = i
 
-    for (let k = i + 1; k < 5; k++) {
+    for (let k = i + 1; k < n; k++) {
       if (Math.abs(a[k][i]) > Math.abs(a[pivot][i])) pivot = k
     }
 
     ;[a[i], a[pivot]] = [a[pivot], a[i]]
     ;[b[i], b[pivot]] = [b[pivot], b[i]]
 
-    for (let k = i + 1; k < 5; k++) {
+    for (let k = i + 1; k < n; k++) {
       const m = a[k][i] / a[i][i]
 
-      for (let j = i; j < 5; j++) a[k][j] -= m * a[i][j]
+      for (let j = i; j < n; j++) a[k][j] -= m * a[i][j]
 
       b[k] -= m * b[i]
     }
   }
 
-  const x = [0, 0, 0, 0, 0]
+  const x = b.map(() => 0)
 
-  for (let i = 4; i >= 0; i--) {
+  for (let i = n - 1; i >= 0; i--) {
     let sum = b[i]
 
-    for (let j = i + 1; j < 5; j++) sum -= a[i][j] * x[j]
+    for (let j = i + 1; j < n; j++) sum -= a[i][j] * x[j]
 
     x[i] = sum / a[i][i]
   }
@@ -133,33 +132,38 @@ const solve5 = (a: number[][], b: number[]) => {
   return x
 }
 
-const polished = (fitted: BiquadCoefficients, omega0: number, span: number, analogSquared: (x: number) => number): BiquadCoefficients => {
+// `design` maps (a1, a2, B2) to coefficients with B0 and B1 matched to the prototype at DC and the corner.
+const polished = (design: (x: number[]) => BiquadCoefficients, start: number[], omega0: number, span: number, analogSquared: (x: number) => number) => {
   const omegas = Array.from({ length: POLISH_POINTS }, (_, i) => span * 4e-4 * 2500 ** (i / (POLISH_POINTS - 1)))
   const targets = omegas.map((omega) => 10 * Math.log10(analogSquared(omega / omega0)))
-  const worst = (c: Coefficients5) => omegas.reduce((result, omega, i) => (targets[i] > POLISH_FLOOR_DB ? Math.max(result, Math.abs(responseDb(c, omega) - targets[i])) : result), 0)
 
-  let best: Coefficients5 = [fitted.b0, fitted.b1, fitted.b2, fitted.a1, fitted.a2]
+  const worst = (x: number[]) => {
+    const c = design(x)
+
+    return omegas.reduce((result, omega, i) => (targets[i] > POLISH_FLOOR_DB ? Math.max(result, Math.abs(responseDb(c, omega) - targets[i])) : result), 0)
+  }
+
+  let best = start
   let bestError = worst(best)
 
-  if (bestError <= POLISH_TRIGGER_DB) return fitted
+  if (bestError <= POLISH_TRIGGER_DB) return design(start)
 
   let current = best
-  let weights = targets.map((target) => (target > POLISH_FLOOR_DB ? 1 : 0))
+  let weights: number[] = targets.map((target) => (target > POLISH_FLOOR_DB ? 1 : 0))
 
   for (let pass = 0; pass < POLISH_PASSES; pass++) {
-    const normal = Array.from({ length: 5 }, () => [0, 0, 0, 0, 0])
-    const gradient = [0, 0, 0, 0, 0]
+    const normal = current.map(() => current.map(() => 0))
+    const gradient = current.map(() => 0)
+    const here = design(current)
 
     omegas.forEach((omega, i) => {
-      const residual = responseDb(current, omega) - targets[i]
+      const residual = responseDb(here, omega) - targets[i]
 
       const row = current.map((value, k) => {
         const step = 1e-6 * Math.max(Math.abs(value), 1e-3)
-        const moved: Coefficients5 = [...current]
+        const moved = current.map((v, j) => (j === k ? v + step : v))
 
-        moved[k] += step
-
-        return (responseDb(moved, omega) - responseDb(current, omega)) / step
+        return (responseDb(design(moved), omega) - responseDb(here, omega)) / step
       })
 
       row.forEach((jj, j) => {
@@ -168,12 +172,12 @@ const polished = (fitted: BiquadCoefficients, omega0: number, span: number, anal
       })
     })
 
-    for (let j = 0; j < 5; j++) normal[j][j] *= 1 + POLISH_DAMPING
+    normal.forEach((row, j) => { row[j] *= 1 + POLISH_DAMPING })
 
-    const step = solve5(normal, gradient)
-    const next: Coefficients5 = [current[0] + step[0], current[1] + step[1], current[2] + step[2], current[3] + step[3], current[4] + step[4]]
+    const step = solve(normal, gradient)
+    const next = current.map((value, k) => value + step[k])
 
-    if (!polesInside(next)) break
+    if (!(Math.abs(next[1]) < 0.9999 && Math.abs(next[0]) < 1 + next[1] - 1e-6)) break
 
     current = next
 
@@ -184,13 +188,14 @@ const polished = (fitted: BiquadCoefficients, omega0: number, span: number, anal
       bestError = error
     }
 
-    const scaled = weights.map((w, i) => w * Math.max(Math.abs(responseDb(current, omegas[i]) - targets[i]), 1e-4))
+    const c = design(current)
+    const scaled = weights.map((w, i) => w * Math.max(Math.abs(responseDb(c, omegas[i]) - targets[i]), 1e-4))
     const total = scaled.reduce((sum, w) => sum + w, 0)
 
     weights = scaled.map((w) => w * POLISH_POINTS / total)
   }
 
-  return { b0: best[0], b1: best[1], b2: best[2], a1: best[3], a2: best[4] }
+  return design(best)
 }
 
 const fittedNumerator = (poles: Poles, omega0: number, span: number, analogSquared: (x: number) => number) => {
@@ -226,7 +231,16 @@ const fittedNumerator = (poles: Poles, omega0: number, span: number, analogSquar
     weights = next.map((w) => w * FIT_POINTS / total)
   }
 
-  return polished(withNumerator(poles, B0, (corner - B2 * corner2) / corner1, B2), omega0, span, analogSquared)
+  const design = ([a1, a2, b2]: number[]) => {
+    const p = { a1, a2 }
+    const d = denominator(p)
+    const dc = d.c0 * analogSquared(0)
+    const atCorner = quadraticAt(d, omega0) * analogSquared(1) - dc * (1 - corner1)
+
+    return withNumerator(p, dc, (atCorner - b2 * corner2) / corner1, b2)
+  }
+
+  return polished(design, [poles.a1, poles.a2, B2], omega0, span, analogSquared)
 }
 
 const matchedBell = (frequency: number, sampleRate: number, span: number, q: number, gainDb: number) => {

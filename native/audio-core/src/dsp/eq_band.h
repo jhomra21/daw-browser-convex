@@ -68,7 +68,7 @@ inline constexpr std::array<double, kEqMaxSections> kButterworth8Q = {0.50979557
 // analog prototype, see biquad.h) for bells, shelves, low-pass and high-pass, RBJ for band-pass, notch and all-pass.
 // Worst error against the analog prototype between 20 Hz and 0.45 fs of the project rate (20 random bands, Q 0.2 to 18,
 // gain +-24 dB; tools/effects-harness, row band-response-vs-analog), before -> after:
-//   44.1 kHz  5.9 -> 0.15 dB     48 kHz  2.1 -> 0.15 dB     96 kHz  1.6 -> 0.18 dB
+//   44.1 kHz  5.9 -> 0.13 dB     48 kHz  2.1 -> 0.14 dB     96 kHz  1.6 -> 0.18 dB
 //   Hi-Quality (processing at twice the rate): 44.1 kHz 0.94 -> 0.06, 48 kHz 0.91 -> 0.06, 96 kHz 0.67 -> 0.04 dB.
 // The fitted numerator alone left 0.55, 0.57 and 0.46 dB on the same bands: the impulse-invariant poles are off when they
 // sit near Nyquist (low shelf 11.4 kHz Q 0.29 -22 dB, bell 19 kHz Q 0.45 +22 dB), which biquad.h's polish corrects.

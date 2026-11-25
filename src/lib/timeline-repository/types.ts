@@ -189,6 +189,7 @@ export type RestoreUngroupInput = {
 
 export type TimelineRepository = {
   loadSnapshot: () => Promise<TimelineSnapshot>
+  loadSidechainRoutes: () => Promise<ExternalSidechainRoute[]>
   createTrack: (input: CreateTrackInput) => Promise<TimelineTrackRow>
   updateTrack: (input: UpdateTrackInput) => Promise<TimelineTrackRow | null>
   createClip: (input: CreateClipInput) => Promise<TimelineClipRow>

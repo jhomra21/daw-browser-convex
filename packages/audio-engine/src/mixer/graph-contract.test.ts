@@ -184,7 +184,7 @@ describe('mixer routing plan', () => {
     }))
   })
 
-  test('strictly rejects sidechain targets without an executable legacy detector path', () => {
+  test('routes a sidechain to a Gate with or without its detector filter and rejects processors that are no detector', () => {
     const channels = createMixerChannels([
       { id: 'source', kind: 'audio', name: 'Source', clips: [], volume: 1 },
       { id: 'target', kind: 'audio', name: 'Target', clips: [], volume: 1 },
@@ -193,21 +193,6 @@ describe('mixer routing plan', () => {
     const route = { sourceTrackId: 'source', targetTrackId: 'target', effectInstanceId: 'target-effect' }
     const gate = createDefaultGateParams()
 
-    const gateGraph = resolveMixerGraph({
-      channels,
-      trackFx: {
-        target: {
-          instances: [{ id: 'target-effect', kind: 'gate', params: { version: 1, state: gate } }],
-        },
-      },
-    })
-
-    expect(() => createPortableGraphSnapshot({
-      graph: gateGraph,
-      revision: 1,
-      sampleRate: 48_000,
-      sidechainRoutes: [route],
-    })).toThrow('Portable Gate sidechain target "target-effect" requires its detector filter to be enabled for legacy parity.')
 
     const limiterGraph = resolveMixerGraph({
       channels,
@@ -229,28 +214,30 @@ describe('mixer routing plan', () => {
       sidechainRoutes: [route],
     })).toThrow('Portable sidechain target "target-effect" is not a supported detector processor.')
 
-    const filteredGateGraph = resolveMixerGraph({
-      channels,
-      trackFx: {
-        target: {
-          instances: [{
-            id: 'target-effect',
-            kind: 'gate',
-            params: { version: 1, state: { ...gate, sidechain: { ...gate.sidechain, enabled: true } } },
-          }],
+    for (const filter of [false, true]) {
+      const gateGraph = resolveMixerGraph({
+        channels,
+        trackFx: {
+          target: {
+            instances: [{
+              id: 'target-effect',
+              kind: 'gate',
+              params: { version: 1, state: { ...gate, sidechain: { ...gate.sidechain, enabled: filter } } },
+            }],
+          },
         },
-      },
-    })
+      })
 
-    expect(createPortableGraphSnapshot({
-      graph: filteredGateGraph,
-      revision: 1,
-      sampleRate: 48_000,
-      sidechainRoutes: [route],
-    }).edges).toContainEqual(expect.objectContaining({
-      sidechain: true,
-      targetProcessorId: 'target-effect',
-    }))
+      expect(createPortableGraphSnapshot({
+        graph: gateGraph,
+        revision: 1,
+        sampleRate: 48_000,
+        sidechainRoutes: [route],
+      }).edges).toContainEqual(expect.objectContaining({
+        sidechain: true,
+        targetProcessorId: 'target-effect',
+      }))
+    }
   })
 
   test('matches the routing timing authority across deterministic acyclic projections', () => {
@@ -442,7 +429,7 @@ describe('mixer routing plan', () => {
         { id: 'utility.balance', target: 3 },
         { id: 'utility.width', target: 4 },
       ]],
-      ['gate', 10, 60, 96, [
+      ['gate', 10, 76, 0, [
         { id: 'gate.thresholdDb', target: 105 },
         { id: 'gate.ratio', target: 106 },
         { id: 'gate.attackMs', target: 107 },
@@ -450,10 +437,11 @@ describe('mixer routing plan', () => {
         { id: 'gate.releaseMs', target: 109 },
         { id: 'gate.hysteresisDb', target: 110 },
         { id: 'gate.rangeDb', target: 111 },
-        { id: 'gate.lookaheadMs', target: 112 },
         { id: 'gate.link', target: 113 },
         { id: 'gate.sidechain.frequencyHz', target: 114 },
         { id: 'gate.sidechain.q', target: 115 },
+        { id: 'gate.sidechain.gainDb', target: 171 },
+        { id: 'gate.sidechain.mix', target: 172 },
       ]],
       ['compressor', 11, 76, 0, [
         { id: 'compressor.thresholdDb', target: 116 },

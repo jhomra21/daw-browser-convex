@@ -261,8 +261,11 @@ const legacyDynamicsParameters = (dynamics: PortableLegacyDynamicsFixture) => {
       'gate.releaseMs': Float32Array.of(state.releaseMs),
       'gate.hysteresisDb': Float32Array.of(state.hysteresisDb),
       'gate.rangeDb': Float32Array.of(state.rangeDb),
-      'gate.lookaheadMs': Float32Array.of(state.lookaheadMs),
       'gate.link': Float32Array.of(state.link),
+      'gate.sidechain.frequencyHz': Float32Array.of(state.sidechain.frequencyHz),
+      'gate.sidechain.q': Float32Array.of(state.sidechain.q),
+      'gate.sidechain.gainDb': Float32Array.of(state.sidechain.gainDb),
+      'gate.sidechain.mix': Float32Array.of(state.sidechain.mix),
     }
   }
 

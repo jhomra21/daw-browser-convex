@@ -1304,7 +1304,7 @@ const modulationFixtures = modulationDefinitions.flatMap((definition): PortableG
 type DynamicsFixtureDefinition = {
   kind: PortableDynamicsKind
   kindId: 10 | 11 | 12
-  latencyMs: 2 | 6 | 10
+  latencyMs: 1 | 6 | 10
   legacy: PortableLegacyDynamicsFixture
   portableEligible: boolean
 }
@@ -1313,7 +1313,7 @@ const dynamicsDefinitions: readonly DynamicsFixtureDefinition[] = [
   {
     kind: 'gate',
     kindId: 10,
-    latencyMs: 2,
+    latencyMs: 1,
     portableEligible: true,
     legacy: {
       kind: 'gate',
@@ -1330,7 +1330,8 @@ const dynamicsDefinitions: readonly DynamicsFixtureDefinition[] = [
         lookaheadMs: 1,
         detector: 'peak',
         link: 0.75,
-        sidechain: { enabled: false, frequencyHz: 80, q: 0.707 },
+        flip: false,
+        sidechain: { enabled: false, filterType: 'highpass', frequencyHz: 80, q: 0.707, gainDb: 0, mix: 1 },
       },
     },
   },
@@ -1390,7 +1391,7 @@ const encodeDynamicsState = (fixture: PortableLegacyDynamicsFixture) => {
 }
 
 const dynamicsParameterTargets = (kind: PortableDynamicsKind): readonly number[] => {
-  if (kind === 'gate') return Array.from({ length: 11 }, (_, index) => 105 + index)
+  if (kind === 'gate') return [105, 106, 107, 108, 109, 110, 111, 113, 114, 115, 171, 172]
 
   if (kind === 'compressor') return [116, 117, 118, 119, 120, 121, 122, 123, 125, 126]
 
@@ -1625,7 +1626,7 @@ const dynamicsFixtures = dynamicsDefinitions.flatMap((definition): PortableGraph
         blockPartitions: [31, 89, 120, 240, 480, 480],
       }),
       dynamicsParameterTargets(definition.kind)[0] ?? 0,
-      definition.kind === 'gate' ? -12 : definition.kind === 'compressor' ? -10 : -3,
+      definition.kind === 'gate' ? 0 : definition.kind === 'compressor' ? -10 : -3,
     ),
     dynamicsFixture(definition, 'sweep-96000', 'sampleRates', 96_000, sweepInput, {
       maxFramesPerBlock: 960,
@@ -1670,7 +1671,7 @@ const dynamicsSidechainFixtures: readonly PortableGraphParityFixture[] = dynamic
           kind: 'gate' as const,
           state: {
             ...definition.legacy.state,
-            sidechain: { enabled: true, frequencyHz: 80, q: 0.707 },
+            sidechain: { ...definition.legacy.state.sidechain, enabled: true },
           },
         }
       : definition.legacy

@@ -5,6 +5,10 @@ import {
 } from '@daw-browser/shared'
 
 const AUDIO_PARAM_STATE_PATHS = {
+  'gate.sidechain.frequencyHz': ['sidechain', 'frequencyHz'],
+  'gate.sidechain.q': ['sidechain', 'q'],
+  'gate.sidechain.gainDb': ['sidechain', 'gainDb'],
+  'gate.sidechain.mix': ['sidechain', 'mix'],
   'limiter.ceiling': ['ceilingDbtp'],
   'limiter.release': ['releaseMs'],
   'autofilter.envelope.amountOctaves': ['envelope', 'amountOctaves'],

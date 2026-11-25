@@ -57,7 +57,7 @@ export const getEffectTiming = (
   }
 
   if (input.kind === 'gate') {
-    return { latencyFrames: Math.ceil(2 * rate / 1000), tail: finite(0) }
+    return { latencyFrames: Math.ceil(input.params.state.lookaheadMs * rate / 1000), tail: finite(0) }
   }
 
   if (input.kind === 'spectral') {

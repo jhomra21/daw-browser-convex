@@ -242,13 +242,13 @@ test('maps every continuous target for every live built-in family', () => {
         from: envelope(gateFrom),
         to: envelope({
           ...gateFrom, thresholdDb: -18, ratio: gateFrom.ratio + 1, attackMs: 5, holdMs: gateFrom.holdMs + 10, releaseMs: 80, hysteresisDb: gateFrom.hysteresisDb + 1, rangeDb: -36,
-          lookaheadMs: 1.5, link: 0.6, sidechain: { ...gateFrom.sidechain, frequencyHz: 160, q: 1.2 },
+          link: 0.6, sidechain: { ...gateFrom.sidechain, frequencyHz: 160, q: 1.2, gainDb: -6, mix: 0.5 },
         }),
       } satisfies EffectParamsCommitPayload<'gate'>,
       expected: [
         ['gate.thresholdDb', -18], ['gate.ratio', gateFrom.ratio + 1], ['gate.attackMs', 5], ['gate.holdMs', gateFrom.holdMs + 10], ['gate.releaseMs', 80],
-        ['gate.hysteresisDb', gateFrom.hysteresisDb + 1], ['gate.rangeDb', -36], ['gate.lookaheadMs', 1.5], ['gate.link', 0.6],
-        ['gate.sidechain.frequencyHz', 160], ['gate.sidechain.q', 1.2],
+        ['gate.hysteresisDb', gateFrom.hysteresisDb + 1], ['gate.rangeDb', -36], ['gate.link', 0.6],
+        ['gate.sidechain.frequencyHz', 160], ['gate.sidechain.q', 1.2], ['gate.sidechain.gainDb', -6], ['gate.sidechain.mix', 0.5],
       ],
     },
     {
@@ -372,6 +372,10 @@ test('rejects every structural change atomically across live built-in families',
     {
       targetId: 'track-1', effect: 'gate', instanceId: 'gate-1',
       from: envelope(gate), to: envelope({ ...gate, mode: gate.mode === 'gate' ? 'expander' : 'gate', thresholdDb: gate.thresholdDb + 1 }),
+    } satisfies EffectParamsCommitPayload<'gate'>,
+    {
+      targetId: 'track-1', effect: 'gate', instanceId: 'gate-1',
+      from: envelope(gate), to: envelope({ ...gate, flip: !gate.flip, lookaheadMs: 10, thresholdDb: gate.thresholdDb + 1 }),
     } satisfies EffectParamsCommitPayload<'gate'>,
     {
       targetId: 'track-1', effect: 'compressor', instanceId: 'compressor-1',

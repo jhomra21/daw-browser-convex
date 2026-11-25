@@ -32,6 +32,8 @@ describe('owned processor descriptors', () => {
       filterType: 'highpass',
       frequencyHz: 2_000,
       q: 1,
+      gainDb: 0,
+      mix: 1,
     })
   })
 })

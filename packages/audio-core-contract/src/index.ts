@@ -152,10 +152,11 @@ export type GateProcessorState = {
   releaseMs: number
   hysteresisDb: number
   rangeDb: number
-  lookaheadMs: number
+  lookaheadMs: 0 | 1 | 10
   detector: 'peak' | 'rms'
   link: number
-  sidechain: { enabled: boolean; frequencyHz: number; q: number }
+  flip: boolean
+  sidechain: { enabled: boolean; filterType: 'lowpass' | 'highpass' | 'bandpass'; frequencyHz: number; q: number; gainDb: number; mix: number }
 }
 
 export type CompressorProcessorState = {
@@ -959,7 +960,7 @@ export const encodeEnsembleProcessorState = (state: EnsembleProcessorState): Uin
 }
 
 export const encodeGateProcessorState = (state: GateProcessorState): Uint8Array => {
-  const output = new Uint8Array(60)
+  const output = new Uint8Array(76)
   const view = new DataView(output.buffer)
   view.setUint32(0, state.enabled ? 1 : 0, true)
   view.setUint32(4, state.mode === 'expander' ? 1 : 0, true)
@@ -976,6 +977,10 @@ export const encodeGateProcessorState = (state: GateProcessorState): Uint8Array 
   view.setUint32(48, state.sidechain.enabled ? 1 : 0, true)
   view.setFloat32(52, state.sidechain.frequencyHz, true)
   view.setFloat32(56, state.sidechain.q, true)
+  view.setUint32(60, state.flip ? 1 : 0, true)
+  view.setUint32(64, state.sidechain.filterType === 'lowpass' ? 1 : state.sidechain.filterType === 'bandpass' ? 2 : 0, true)
+  view.setFloat32(68, state.sidechain.gainDb, true)
+  view.setFloat32(72, state.sidechain.mix, true)
 
   return output
 }

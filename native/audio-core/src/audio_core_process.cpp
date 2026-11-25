@@ -251,6 +251,7 @@ extern "C" daw_audio_core_result daw_audio_core_stage_processor_state_patch(
   staged.delay_slot = current->delay_slot;
   staged.reverb_slot = current->reverb_slot;
   staged.limiter_slot = current->limiter_slot;
+  staged.gate_slot = current->gate_slot;
   staged.compressor_slot = current->compressor_slot;
   staged.spectral_slot = current->spectral_slot;
   staged.state_size = patch->state_size;

@@ -29,6 +29,7 @@
 
 #include "autofilter_kernel.h"
 #include "compressor_kernel.h"
+#include "gate_kernel.h"
 #include "limiter_kernel.h"
 
 #if defined(DAW_AUDIO_CORE_TEST_INSTRUMENT_REJECTION)
@@ -63,10 +64,10 @@ constexpr uint64_t kTransitionNodeId = 1ULL << 63;
 constexpr uint32_t kMaximumGraphProcessors = kMaximumLiveProcessors + kMaximumGhostProcessors;
 constexpr uint32_t kMaximumInstrumentVoices = DAW_AUDIO_CORE_MAX_INSTRUMENT_VOICES;
 constexpr uint32_t kMaximumModulationDelayFrames = 4132;
-constexpr uint32_t kMaximumDynamicsDelayFrames = 1024;
 constexpr uint32_t kMaximumDelayProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
 constexpr uint32_t kMaximumReverbProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
 constexpr uint32_t kMaximumLimiterProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
+constexpr uint32_t kMaximumGateProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
 constexpr uint32_t kMaximumCompressorProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
 // A published plan and the plan being prepared may each reference every node,
 // so node runtime (instrument voices, fade progress) has two plans' worth of
@@ -318,6 +319,7 @@ struct GraphRevision {
     uint32_t delay_slot = kMaximumDelayProcessors;
     uint32_t reverb_slot = kMaximumReverbProcessors;
     uint32_t limiter_slot = kMaximumLimiterProcessors;
+    uint32_t gate_slot = kMaximumGateProcessors;
     uint32_t compressor_slot = kMaximumCompressorProcessors;
     uint32_t spectral_slot = kMaximumSpectralProcessors;
     uint32_t generation = 0;
@@ -417,20 +419,6 @@ struct EqHistory {
   // Dry signal delayed by the Hi-Quality latency so bypass crossfades between aligned paths.
   std::array<std::array<float, kDryDelay>, 2> dry{};
   uint32_t dry_index = 0;
-  float bypass = 0.0F;
-};
-struct DynamicsHistory {
-  std::array<float, kMaximumDynamicsDelayFrames> delay_left{};
-  std::array<float, kMaximumDynamicsDelayFrames> delay_right{};
-  std::array<float, kMaximumDynamicsDelayFrames> detector_left{};
-  std::array<float, kMaximumDynamicsDelayFrames> detector_right{};
-  uint32_t write = 0;
-  std::array<float, 2> gain{1.0F, 1.0F};
-  std::array<float, 2> rms{};
-  std::array<uint32_t, 2> hold{};
-  std::array<uint32_t, 2> open{1, 1};
-  std::array<uint32_t, 2> started{};
-  std::array<BiquadHistory, 2> sidechain{};
   float bypass = 0.0F;
 };
 
@@ -689,6 +677,17 @@ struct SpectralHistory {
   uint32_t analysis_frames = 0;
 };
 
+struct GateHistory {
+  daw::audio_core::GateKernel kernel;
+  uint32_t prepared_rate_hz = 0;
+  float filter_frequency_hz = 0.0F;
+  float filter_q = 0.0F;
+  uint32_t filter_type = 0;
+  float bypass = 0.0F;
+  // A key from another track is routed to the gate; Gain and Dry/Wet act on it.
+  bool external_key = false;
+};
+
 struct CompressorHistory {
   daw::audio_core::CompressorKernel kernel;
   uint32_t prepared_rate_hz = 0;
@@ -810,11 +809,11 @@ struct Core {
   std::array<UtilityHistory, kMaximumGraphProcessors> utility_histories{};
   std::array<SaturatorHistory, kMaximumGraphProcessors> saturator_histories{};
   std::array<EqHistory, kMaximumGraphProcessors> eq_histories{};
-  std::array<DynamicsHistory, kMaximumGraphProcessors> dynamics_histories{};
   std::array<ModulationHistory, kMaximumGraphProcessors> modulation_histories{};
   std::array<DelayHistory, kMaximumDelayProcessors> delay_histories{};
   std::array<ReverbHistory, kMaximumReverbProcessors> reverb_histories{};
   std::array<LimiterHistory, kMaximumLimiterProcessors> limiter_histories{};
+  std::array<GateHistory, kMaximumGateProcessors> gate_histories{};
   std::array<CompressorHistory, kMaximumCompressorProcessors> compressor_histories{};
   std::array<SpectralHistory, kMaximumSpectralProcessors> spectral_histories{};
   SpectralHistory spectral_state_snapshot{};
@@ -891,12 +890,13 @@ struct Core {
   std::array<AutoFilterHistory, kMaximumGraphProcessors> autofilter_histories{};
   std::array<LoFiHistory, kMaximumGraphProcessors> lofi_histories{};
   // Ownership ledgers. Processor slot i guards every history array at index i
-  // plus the delay/reverb/limiter/compressor/spectral history named by the owner tables below
+  // plus the delay/reverb/limiter/gate/compressor/spectral history named by the owner tables below
   // (index + 1 of the owning processor slot, 0 when free; control-owned).
   std::array<RuntimeSlot, kProcessorRuntimeSlots> processor_slots{};
   std::array<uint32_t, kMaximumDelayProcessors> delay_slot_owners{};
   std::array<uint32_t, kMaximumReverbProcessors> reverb_slot_owners{};
   std::array<uint32_t, kMaximumLimiterProcessors> limiter_slot_owners{};
+  std::array<uint32_t, kMaximumGateProcessors> gate_slot_owners{};
   std::array<uint32_t, kMaximumCompressorProcessors> compressor_slot_owners{};
   std::array<uint32_t, kMaximumSpectralProcessors> spectral_slot_owners{};
   std::array<RuntimeSlot, kNodeRuntimeSlots> node_slots{};
@@ -1154,6 +1154,10 @@ void render_utility_processor(
   float *output_left,
   float *output_right);
 BiquadCoefficients rbj_coefficients(uint32_t type, float frequency_hz, float q, float gain_db, uint32_t sample_rate_hz);
+// The detector filter type a Gate or Compressor state stores (0 high-pass, 1 low-pass, 2 band-pass) as the RBJ designer names it.
+inline uint32_t sidechain_band_type(uint32_t filter_type) {
+  return filter_type == 1 ? DAW_AUDIO_EQ_BAND_LOWPASS : filter_type == 2 ? DAW_AUDIO_EQ_BAND_BANDPASS : DAW_AUDIO_EQ_BAND_HIGHPASS;
+}
 void render_saturator_processor(
   Core &core, GraphRevision::Processor &processor, uint32_t frame,
   float input_left, float input_right, float, float, float *output_left, float *output_right);
@@ -1196,7 +1200,7 @@ void render_time_effect_processor(
   Core &core, GraphRevision::Processor &processor, uint32_t frame,
   float input_left, float input_right, float sidechain_left, float sidechain_right,
   float *output_left, float *output_right);
-void render_dynamics_processor(
+void render_gate_processor(
   Core &core, GraphRevision::Processor &processor, uint32_t frame,
   float input_left, float input_right, float sidechain_left, float sidechain_right, float *output_left, float *output_right);
 void render_spectral_processor(

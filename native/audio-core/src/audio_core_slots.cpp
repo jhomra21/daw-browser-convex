@@ -75,7 +75,9 @@ bool compatible_processor_history(
     case DAW_AUDIO_PROCESSOR_KIND_GATE:
       return current.gate.mode == next.gate.mode
         && current.gate.detector == next.gate.detector
+        && current.gate.flip == next.gate.flip
         && current.gate.sidechain_enabled == next.gate.sidechain_enabled
+        && current.gate.sidechain_filter_type == next.gate.sidechain_filter_type
         && same_float(current.gate.lookahead_ms, next.gate.lookahead_ms)
         && same_float(current.gate.sidechain_frequency_hz, next.gate.sidechain_frequency_hz)
         && same_float(current.gate.sidechain_q, next.gate.sidechain_q);
@@ -184,7 +186,6 @@ void initialize_processor_slot(Core &core, uint32_t slot) {
   core.utility_histories[slot] = {};
   core.saturator_histories[slot] = {};
   core.eq_histories[slot] = {};
-  core.dynamics_histories[slot] = {};
   core.modulation_histories[slot] = {};
   core.autofilter_histories[slot] = {};
   core.lofi_histories[slot] = {};
@@ -207,12 +208,13 @@ void initialize_node_slot(Core &core, uint32_t slot) {
   core.mixer_ramps[slot] = {};
 }
 
-// Delay, reverb, limiter, compressor and spectral histories live in small pools that follow the
+// Delay, reverb, limiter, gate, compressor and spectral histories live in small pools that follow the
 // lifecycle of the processor slot that owns them.
 void free_processor_slot_histories(Core &core, uint32_t slot) {
   for (uint32_t &owner : core.delay_slot_owners) if (owner == slot + 1) owner = 0;
   for (uint32_t &owner : core.reverb_slot_owners) if (owner == slot + 1) owner = 0;
   for (uint32_t &owner : core.limiter_slot_owners) if (owner == slot + 1) owner = 0;
+  for (uint32_t &owner : core.gate_slot_owners) if (owner == slot + 1) owner = 0;
   for (uint32_t &owner : core.compressor_slot_owners) if (owner == slot + 1) owner = 0;
   for (uint32_t &owner : core.spectral_slot_owners) if (owner == slot + 1) owner = 0;
 }

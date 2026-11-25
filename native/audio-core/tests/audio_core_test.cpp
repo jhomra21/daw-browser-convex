@@ -28,7 +28,7 @@
 #include "../src/processor_compressor.cpp"
 #include "../src/processor_limiter.cpp"
 #include "../src/processor_delay.cpp"
-#include "../src/processor_dynamics.cpp"
+#include "../src/processor_gate.cpp"
 #include "../src/processor_eq.cpp"
 #include "../src/processor_lofi.cpp"
 #include "../src/processor_modulation.cpp"
@@ -125,9 +125,10 @@ void native_instrument_source_hook(const daw::audio_core::NativeGraphNodeRender&
   }
 }
 
-// Every processor state is at schema version 1 except the EQ, whose layout was extended.
+// Every processor state is at schema version 1 except those whose layout was extended.
 uint32_t schema_version_of(uint32_t kind) {
   return kind == DAW_AUDIO_PROCESSOR_KIND_EQ ? DAW_AUDIO_CORE_PROCESSOR_EQ_SCHEMA_VERSION
+    : kind == DAW_AUDIO_PROCESSOR_KIND_GATE ? DAW_AUDIO_CORE_PROCESSOR_GATE_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR ? DAW_AUDIO_CORE_PROCESSOR_COMPRESSOR_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_LIMITER ? DAW_AUDIO_CORE_PROCESSOR_LIMITER_SCHEMA_VERSION : 1u;
 }
@@ -1532,11 +1533,12 @@ HistoryFixtureState history_fixture_state(uint32_t kind) {
       write_f32(offset + 16, 1.0F);
     }
   } else if (kind == DAW_AUDIO_PROCESSOR_KIND_GATE) {
-    fixture.size = 60; fixture.latency = 96;
+    fixture.size = 76; fixture.latency = 48;
     write_u32(0, 1); write_u32(4, 0); write_f32(8, -24.0F); write_f32(12, 3.0F);
     write_f32(16, 1.0F); write_f32(20, 8.0F); write_f32(24, 40.0F); write_f32(28, 4.0F);
     write_f32(32, -48.0F); write_f32(36, 1.0F); write_u32(40, 0); write_f32(44, 0.75F);
     write_u32(48, 0); write_f32(52, 80.0F); write_f32(56, 0.707F);
+    write_u32(60, 0); write_u32(64, 0); write_f32(68, 0.0F); write_f32(72, 1.0F);
   } else if (kind == DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR) {
     fixture.size = 76; fixture.latency = 480;
     write_u32(0, 1); write_f32(4, -18.0F); write_f32(8, 4.0F); write_f32(12, 3.0F);
@@ -2398,8 +2400,8 @@ void test_portable_dynamics_processor_characterization() {
   write_u32(state, 0, 1); write_u32(state, 4, 0); write_f32(state, 8, -20.0F); write_f32(state, 12, 4.0F);
   write_f32(state, 16, 0.1F); write_f32(state, 20, 0.0F); write_f32(state, 24, 5.0F); write_f32(state, 28, 0.0F);
   write_f32(state, 32, -40.0F); write_f32(state, 36, 0.0F); write_u32(state, 40, 0); write_f32(state, 44, 1.0F);
-  write_u32(state, 48, 1); write_f32(state, 52, 80.0F); write_f32(state, 56, 0.707F);
-  const float gate = render(DAW_AUDIO_PROCESSOR_KIND_GATE, 60, state, 96);
+  write_u32(state, 48, 1); write_f32(state, 52, 80.0F); write_f32(state, 56, 0.707F); write_f32(state, 72, 1.0F);
+  const float gate = render(DAW_AUDIO_PROCESSOR_KIND_GATE, 76, state, 0);
   assert(gate < 0.02F);
   state.fill(0); write_u32(state, 0, 1); write_f32(state, 4, -24.0F); write_f32(state, 8, 4.0F);
   write_f32(state, 12, 0.1F); write_f32(state, 16, 5.0F); write_u32(state, 20, 0); write_f32(state, 24, 0.0F);
@@ -8792,7 +8794,8 @@ void pristine_build(Phase3Rig &rig, const PristineVariant &variant) {
   if (variant.three) {
     const daw_audio_gate_state gate{.enabled = 1, .mode = 0, .threshold_db = -30.0F, .ratio = 2.0F, .attack_ms = 0.1F,
       .hold_ms = 0.0F, .release_ms = 5.0F, .hysteresis_db = 0.0F, .range_db = -30.0F, .lookahead_ms = 0.0F,
-      .detector = 0, .link = 1.0F, .sidechain_enabled = 0, .sidechain_frequency_hz = 100.0F, .sidechain_q = 0.707F};
+      .detector = 0, .link = 1.0F, .sidechain_enabled = 0, .sidechain_frequency_hz = 100.0F, .sidechain_q = 0.707F,
+      .flip = 0, .sidechain_filter_type = 0, .sidechain_gain_db = 0.0F, .sidechain_mix = 1.0F};
     rig.add_state(3, 20, DAW_AUDIO_PROCESSOR_KIND_GATE, gate);
     const daw_audio_limiter_state limiter{.enabled = 1, .ceiling_dbtp = -12.0F, .release_ms = 20.0F,
       .lookahead_ms = 1.5F, .link = 1.0F, .auto_release = 0, .gain_db = 0.0F};

@@ -298,7 +298,7 @@ test('processor registry preserves stable portable processor ids', () => {
     expect.objectContaining({ name: 'tremolo', id: 7, stateBytes: 24 }),
     expect.objectContaining({ name: 'autopan', id: 8, stateBytes: 24 }),
     expect.objectContaining({ name: 'ensemble', id: 9, stateBytes: 28 }),
-    expect.objectContaining({ name: 'gate', id: 10, stateBytes: 60 }),
+    expect.objectContaining({ name: 'gate', id: 10, schemaVersion: 2, stateBytes: 76 }),
     expect.objectContaining({ name: 'compressor', id: 11, schemaVersion: 2, stateBytes: 76 }),
     expect.objectContaining({ name: 'limiter', id: 12, schemaVersion: 2, stateBytes: 28 }),
     expect.objectContaining({ name: 'delay', id: 13, stateBytes: 32 }),
@@ -312,12 +312,17 @@ test('processor registry preserves stable portable processor ids', () => {
 test('dynamics codecs preserve portable little-endian state layouts', () => {
   const gate = encodeGateProcessorState({
     enabled: true, mode: 'expander', thresholdDb: -40, ratio: 4, attackMs: 1, holdMs: 20, releaseMs: 120,
-    hysteresisDb: 6, rangeDb: -80, lookaheadMs: 0, detector: 'rms', link: 1,
-    sidechain: { enabled: true, frequencyHz: 80, q: 0.707 },
+    hysteresisDb: 6, rangeDb: -80, lookaheadMs: 10, detector: 'rms', link: 1, flip: true,
+    sidechain: { enabled: true, filterType: 'bandpass', frequencyHz: 80, q: 0.707, gainDb: -6, mix: 0.5 },
   })
 
-  expect(gate.byteLength).toBe(60)
+  expect(gate.byteLength).toBe(76)
   expect(new DataView(gate.buffer).getUint32(4, true)).toBe(1)
+  expect(new DataView(gate.buffer).getFloat32(36, true)).toBe(10)
+  expect(new DataView(gate.buffer).getUint32(60, true)).toBe(1)
+  expect(new DataView(gate.buffer).getUint32(64, true)).toBe(2)
+  expect(new DataView(gate.buffer).getFloat32(68, true)).toBe(-6)
+  expect(new DataView(gate.buffer).getFloat32(72, true)).toBe(0.5)
 
   const compressor = encodeCompressorProcessorState({
     enabled: true, thresholdDb: -24, ratio: 4, attackMs: 10, releaseMs: 120, autoRelease: true,

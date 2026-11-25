@@ -202,6 +202,7 @@ void render_chain_frame(
   }
   float processed_left = 0.0F;
   float processed_right = 0.0F;
+  if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_GATE) core.gate_histories[processor.gate_slot].external_key = sidechain_range.count > 0;
   if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR) core.compressor_histories[processor.compressor_slot].external_key = sidechain_range.count > 0;
   if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL) record_spectral_input(core, processor.spectral_slot, left, right, sidechain_left, sidechain_right);
   if (processor.spectral_predecessor >= 0) {

@@ -25,8 +25,8 @@ set(DAW_AUDIO_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_autofilter.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_compressor.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_delay.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_dynamics.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_eq.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_gate.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_limiter.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_lofi.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_modulation.cpp
@@ -126,6 +126,17 @@ if(BUILD_TESTING)
   endif()
   foreach(group IN ITEMS detector safety smoothing sidechain latency release makeup cpu)
     add_test(NAME daw-compressor-${group} COMMAND daw-compressor-test ${group})
+  endforeach()
+  # Gate kernel (src/gate_kernel.h). One ctest per measurement group; the executable prints each value.
+  add_executable(daw-gate-test tests/gate_test.cpp)
+  target_compile_features(daw-gate-test PRIVATE cxx_std_20)
+  if(MSVC)
+    target_compile_options(daw-gate-test PRIVATE /W4 /WX /EHs-c- /GR-)
+  else()
+    target_compile_options(daw-gate-test PRIVATE -Wall -Wextra -Werror -fno-exceptions -fno-rtti)
+  endif()
+  foreach(group IN ITEMS detector timing hold expander controls sidechain safety latency cpu)
+    add_test(NAME daw-gate-${group} COMMAND daw-gate-test ${group})
   endforeach()
   # EQ band designs (src/dsp/eq_band.h) against the analog prototypes.
   add_executable(daw-eq-design-test tests/eq_design_test.cpp)

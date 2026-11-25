@@ -23,7 +23,7 @@ type WorkletMessage = {
   state?: {
     enabled: boolean
     mode: string
-    quality: string
+    hiQuality: boolean
     envelope: { amountOctaves: number; attackMs: number; releaseMs: number }
     lfo: { waveform: string; rateHz: number; depthOctaves: number; phaseOffset: number; stereoPhase: number }
   }
@@ -56,10 +56,10 @@ const loadProcessor = async (sampleRate: number) => {
   return new Constructor()
 }
 
-const state = (enabled: boolean, mode = 'lowpass') => ({
+const state = (enabled: boolean, mode = 'lowpass', hiQuality = false) => ({
   enabled,
   mode,
-  quality: '2x',
+  hiQuality,
   envelope: { amountOctaves: 0, attackMs: 10, releaseMs: 100 },
   lfo: { waveform: 'sine', rateHz: 1, depthOctaves: 0, phaseOffset: 0, stereoPhase: 0 },
 })
@@ -69,6 +69,7 @@ const params = (frequencyHz = 1000, resonance = 0.25) => ({
   'autofilter.resonance': Float32Array.of(resonance),
   'autofilter.driveDb': Float32Array.of(0),
   'autofilter.mix': Float32Array.of(1),
+  'autofilter.outputDb': Float32Array.of(0),
   'autofilter.envelope.amountOctaves': Float32Array.of(0),
   'autofilter.envelope.attackMs': Float32Array.of(10),
   'autofilter.envelope.releaseMs': Float32Array.of(100),
@@ -78,21 +79,24 @@ const params = (frequencyHz = 1000, resonance = 0.25) => ({
   'autofilter.lfo.stereoPhase': Float32Array.of(0),
 })
 
-const configure = (processor: Processor, enabled: boolean, mode = 'lowpass') => {
-  processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, state: state(enabled, mode) } })
+const configure = (processor: Processor, enabled: boolean, mode = 'lowpass', hiQuality = false) => {
+  processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, state: state(enabled, mode, hiQuality) } })
 }
 
 describe('AutoFilter static worklet', () => {
+  // The title keeps the test's identity: the latency is no longer six frames but the kernel's, 0 or 63 with Hi-Quality.
   test('preserves exact six-frame latency in enabled and bypass states', async () => {
     for (const sampleRate of [44_100, 48_000, 96_000]) {
       for (const enabled of [true, false]) {
-        const processor = await loadProcessor(sampleRate)
-        configure(processor, enabled)
-        const input = new Float32Array(32)
-        input[0] = 1
-        const output = [new Float32Array(32)]
-        processor.process([[input]], [output], params())
-        expect(output[0].findIndex((value) => value !== 0)).toBe(6)
+        for (const [hiQuality, latency] of [[false, 0], [true, 63]] as const) {
+          const processor = await loadProcessor(sampleRate)
+          configure(processor, enabled, 'lowpass', hiQuality)
+          const input = new Float32Array(128)
+          input[0] = 1
+          const output = [new Float32Array(128)]
+          processor.process([[input]], [output], { ...params(), 'autofilter.mix': Float32Array.of(0) })
+          expect(output[0].findIndex((value) => Math.abs(value) > 0.5)).toBe(latency)
+        }
       }
     }
   })

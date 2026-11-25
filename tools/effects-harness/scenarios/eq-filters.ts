@@ -8,7 +8,7 @@ import type { Family } from './index'
 import type { Scenario } from '../harness'
 import { coherentFrequency, concat, impulse, linearToDb, noise, seededRandom, sine, sineWithPeakAt, silence } from '../signals'
 import { createDefaultEqParams, designEqBand, eqCurveResponseDb } from '../../../packages/shared/src'
-import { parityFixtures, parityScenario, robustnessScenarios } from './shared'
+import { parityScenario, robustnessScenarios } from './shared'
 
 const bandTypes = ['peaking', 'lowshelf', 'highshelf', 'lowpass', 'highpass'] as const
 
@@ -424,22 +424,21 @@ const nanInputGuard: Scenario = {
   },
 }
 
-// The Web Audio fallback worklet keeps its own filter (tanh drive, six frames of delay, no limiter), so the core is no longer
-// expected to match it; the rows show how far the two sit apart for settings the fallback can express.
-const legacyFallbackComparison: Scenario = {
-  effect: 'autofilter',
-  name: 'legacy-fallback-difference',
-  run: async (h) => {
-    const spec = fx.autofilter({ frequencyHz: 800, resonance: 0.3, hiQuality: false, driveDb: 0, envelope: { amountOctaves: 1, attackMs: 10, releaseMs: 100, hold: false, link: false } })
+// The Web Audio fallback worklet is a port of the core's kernel, so the two must agree to the same 1e-5 as the dynamics family.
+// The fallback has no song position or tempo: its synced LFO free-runs from frame 0, which is where the harness transport starts.
+// The saw's jump must not land exactly on a sample: there the core's position-derived phase and the fallback's running sum differ by rounding noise, and one sample flips between the rails.
+const autofilterParity = (name: string, state: Parameters<typeof fx.autofilter>[0]): Scenario => ({ ...parityScenario('autofilter', fx.autofilter({ frequencyHz: 800, resonance: 0.3, ...state })), name })
 
-    for (const [name, input] of parityFixtures(h.rate)) {
-      const { output, legacy } = await h.render(spec, { input: [input] })
-
-      if (legacy === null) h.info(`legacy fallback difference, ${name}`, null, '', 'not measured: legacy implementation is a Web Audio node chain')
-      else h.info(`legacy fallback difference, ${name}`, Math.max(maxAbsDiff(output[0], legacy[0]), maxAbsDiff(output[1], legacy[1])), 'abs', 'by design: the fallback keeps its own filter')
-    }
-  },
-}
+const autofilterParityScenarios: Scenario[] = [
+  autofilterParity('parity-hi-quality-off', { hiQuality: false, driveDb: 6 }),
+  autofilterParity('parity-hi-quality-on', { hiQuality: true, driveDb: 6 }),
+  autofilterParity('parity-lfo', { hiQuality: false, mode: 'bandpass', slope: 24, lfo: { ...autofilterLfo, waveform: 'triangle', rateHz: 3, depthOctaves: 1.5, phaseOffset: 0.2, stereoPhase: 0.25 } }),
+  autofilterParity('parity-lfo-hi-quality-spin', { hiQuality: true, lfo: { ...autofilterLfo, waveform: 'sampleHold', rateHz: 5, depthOctaves: 2, stereoMode: 'spin', stereoPhase: 0.2 } }),
+  autofilterParity('parity-lfo-sync', { hiQuality: false, lfo: { ...autofilterLfo, waveform: 'sawUp', sync: true, division: 8, depthOctaves: 2, phaseOffset: 0.3711 } }),
+  autofilterParity('parity-envelope', { hiQuality: false, mode: 'highpass', envelope: { amountOctaves: 2, attackMs: 5, releaseMs: 80, hold: true, link: true } }),
+  autofilterParity('parity-envelope-hi-quality', { hiQuality: true, mode: 'notch', envelope: { amountOctaves: -1.5, attackMs: 20, releaseMs: 200, hold: false, link: false } }),
+  autofilterParity('parity-output-clip', { hiQuality: true, driveDb: 12, outputDb: 6, clip: true, mix: 0.7 }),
+]
 
 export const eqFilters: Family = {
   scenarios: [
@@ -447,7 +446,7 @@ export const eqFilters: Family = {
     autofilterDrive, driveZeroLinearity, resonanceLevel, lowpassSlope, sweepClick, hiQualityLatency, lfoWaveforms, tempoSync, envelopeLaw,
     parityScenario('eq', eqWith({ type: 'peaking', frequency: 1000, gainDb: 6, q: 2 })),
     ...robustnessScenarios('eq', eqWith({ type: 'peaking', frequency: 1000, gainDb: 6, q: 2 }), () => 0),
-    legacyFallbackComparison,
+    ...autofilterParityScenarios,
     ...robustnessScenarios('autofilter', fx.autofilter(), null),
   ],
   notEncoded: [

@@ -339,6 +339,23 @@ void switchClick() {
   }
 }
 
+// Hi-Quality runs the filter at twice the rate, so its coefficients must be redesigned when the setting flips, not only when the cutoff moves.
+void qualityToggleKeepsCutoff() {
+  for (const bool toHq : {false, true}) {
+    Rig toggled, reference;
+    toggled.config.hi_quality = !toHq;
+    reference.config.hi_quality = toHq;
+    for (Rig *rig : {&toggled, &reference}) rig->values.frequency_hz = 1000.0F;
+    toggled.run(noise(24000, 0.3, 9));
+    toggled.config.hi_quality = toHq;
+    const double f = coherent(4000.0, 24000, toggled.rate);
+    const auto tone = sine(48000, f, toggled.rate, 0.1);
+    const double after = toDb(fitTone(toggled.run(tone), 24000, f, toggled.rate).amplitude / 0.1);
+    const double expected = toDb(fitTone(reference.run(tone), 24000, f, reference.rate).amplitude / 0.1);
+    expectNear(toHq ? "gain at 4 kHz of a 1 kHz low-pass after switching Hi-Quality on, vs always on (dB)" : "gain at 4 kHz of a 1 kHz low-pass after switching Hi-Quality off, vs always off (dB)", after, expected, 0.3);
+  }
+}
+
 // ---- A4/A5: modulation ---------------------------------------------------------------------------------------------------------
 
 void lfoShapes() {
@@ -581,7 +598,7 @@ const Case kCases[] = {
   {"resonance", "resonanceMapping", resonanceMapping}, {"resonance", "resonanceLevel", resonanceLevel},
   {"resonance", "resonancePeakHeight", resonancePeakHeight}, {"resonance", "bandPassUnity", bandPassUnity},
   {"resonance", "clipAndOutput", clipAndOutput}, {"slope", "slopes", slopes},
-  {"switch", "cutoffStepClick", cutoffStepClick}, {"switch", "switchClick", switchClick},
+  {"switch", "cutoffStepClick", cutoffStepClick}, {"switch", "switchClick", switchClick}, {"switch", "qualityToggleKeepsCutoff", qualityToggleKeepsCutoff},
   {"modulation", "lfoShapes", lfoShapes}, {"modulation", "tempoSync", tempoSync}, {"modulation", "syncFollowsSongPosition", syncFollowsSongPosition}, {"modulation", "envelopeInDb", envelopeInDb},
   {"modulation", "envelopeLinkAndHold", envelopeLinkAndHold}, {"modulation", "stereoPhase", stereoPhase},
   {"safety", "safety", safety}, {"safety", "automationStability", automationStability}, {"cost", "cost", cost},

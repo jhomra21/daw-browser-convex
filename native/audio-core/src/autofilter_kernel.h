@@ -187,6 +187,7 @@ class AutoFilterKernel {
         channel.drive_adaa.reset();
         channel.clip_adaa.reset();
         channel.dry.fill(0.0F);
+        channel.valid.fill(false);  // the filter now runs at the other rate
       }
     }
     if (config.mode != applied_.mode || config.slope != applied_.slope) {

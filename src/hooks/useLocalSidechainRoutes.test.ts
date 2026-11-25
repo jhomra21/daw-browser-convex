@@ -62,6 +62,7 @@ test("shows the loaded snapshot's routes until the first read of the project lan
   const [snapshot, setSnapshot] = createSignal<{ projectId: string; sidechainRoutes: ExternalSidechainRoute[] } | null>(
     { projectId, sidechainRoutes: [perc] },
   )
+
   const routes = createRoot(() => useLocalSidechainRoutes(() => projectId, snapshot))
   flush()
   expect(routes()).toEqual([perc])

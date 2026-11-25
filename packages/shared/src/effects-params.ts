@@ -564,6 +564,7 @@ export const COMPRESSOR_RELEASE_MS_MIN = 5
 export const COMPRESSOR_RELEASE_MS_MAX = 1000
 export const COMPRESSOR_GAIN_DB_MIN = -36
 export const COMPRESSOR_GAIN_DB_MAX = 36
+
 // Neither Live's manual nor Cycling '74's abl.device.compressor~ reference documents a separate ratio range for Expand
 // mode, so the ratio keeps its 1 to 100 range and the gain that upward expansion adds stops at this limit. The
 // kernel and the worklet carry the same number.

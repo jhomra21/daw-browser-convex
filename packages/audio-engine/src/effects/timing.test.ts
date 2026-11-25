@@ -34,10 +34,12 @@ describe('lookahead latency matches the native kernels', () => {
     { id: 'limiter-1', kind: 'limiter', params: { version: 1, state: { ...createDefaultLimiterParams(), lookaheadMs } } },
     rate,
   ).latencyFrames
+
   const compressorLatency = (lookaheadMs: number, rate: number) => getEffectTiming(
     { id: 'compressor-1', kind: 'compressor', params: { ...createDefaultCompressorParams(), lookaheadMs } },
     rate,
   ).latencyFrames
+
   const gateLatency = (lookaheadMs: number, rate: number) => getEffectTiming(
     { id: 'gate-1', kind: 'gate', params: { version: 1, state: { ...createDefaultGateParams(), lookaheadMs } } },
     rate,

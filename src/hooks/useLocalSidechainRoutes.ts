@@ -46,6 +46,7 @@ export const useLocalSidechainRoutes = (
 
   return (): ExternalSidechainRoute[] => {
     const routes = read();
+
     if (routes) return routes;
     const seed = snapshot();
 

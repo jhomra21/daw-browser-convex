@@ -153,6 +153,7 @@ describe('portable export automation, sidechains and graph latency', () => {
 
   test('a saved cloud lane for a retired parameter does not make the session unsupported', () => {
     const base = project({ effects: ['delay'], delayWet: true })
+
     const retired = automationEnvelopeFromRow({
       _id: 'retired',
       projectId: 'project',
@@ -164,6 +165,7 @@ describe('portable export automation, sidechains and graph latency', () => {
       points: [{ id: 'p', timeSec: 0, value: 1, interpolation: 'linear' }],
       updatedAt: 1,
     })
+
     const compile = (automationEnvelopes: readonly AutomationEnvelope[]) => compilePortableExportSnapshot({
       tracks: base.tracks,
       bpm: 120,

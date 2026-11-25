@@ -78,8 +78,10 @@ export const automationEnvelopeFromRow = (
 ): AutomationEnvelope | null => {
   const effectInstanceId = row.effectInstanceId
 
-  if (effectInstanceId !== undefined && effectInstanceId.length === 0) return null
-  if (RETIRED_AUTOMATION_PARAMETER_IDS.has(row.parameterId)) return null
+  if (
+    (effectInstanceId !== undefined && effectInstanceId.length === 0)
+    || RETIRED_AUTOMATION_PARAMETER_IDS.has(row.parameterId)
+  ) return null
 
   const target: AutomationTarget | null = row.targetKind === 'master'
     ? createAutomationTarget({ kind: 'master' }, effectInstanceId)

@@ -14,6 +14,7 @@ const AUTO_DECAY_MS = 1000
 const ENGAGED_DB = -0.1
 const RECOVERED_DB = -0.5
 const FLOOR_DB = -120
+
 // Neither Live's manual nor Cycling '74's abl.device.compressor~ reference documents a separate ratio range for Expand
 // mode, so the ratio keeps its 1 to 100 range and the gain that upward expansion adds stops at this limit.
 const EXPAND_MAX_GAIN_DB = 24

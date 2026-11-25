@@ -3,7 +3,7 @@
 // Auto Filter DSP kernel, independent of the audio-core graph so it can be measured on its own.
 //
 // Signal path per channel: drive (tanh, antialiased at 2x in Hi-Quality) -> state-variable filter (12 or 24 dB, with a
-// soft limiter on the integrator states) -> output gain -> optional soft clip -> dry/wet mix. Hi-Quality runs the
+// runaway guard on the integrator states) -> output gain -> optional soft clip -> dry/wet mix. Hi-Quality runs the
 // drive, filter and clip at twice the rate between a half-band pair and delays the dry path by that pair's latency.
 #include "dsp/adaa.h"
 #include "dsp/half_band_oversampler.h"
@@ -250,10 +250,14 @@ class AutoFilterKernel {
     if (config.env_link) envelope_[1] = envelope_[0];
   }
 
+  // The state-variable filter is linear and stable at any fixed cutoff and Q, so with Drive 0 and Clip off it must not
+  // colour the signal. This guard only catches a runaway under extreme automation or non-finite input: it sits at 60 dB
+  // above full scale, far over the integrator states of a +6 dBFS input at Q 8 (about 30), and bends smoothly above it.
+  static constexpr float kStateGuard = 1024.0F;
   static float limit_state(float s) {
     const float a = std::fabs(s);
-    if (a <= 1.0F) return s;
-    return std::copysign(1.0F + 2.0F * std::tanh((a - 1.0F) * 0.5F), s);
+    if (a <= kStateGuard) return s;
+    return std::copysign(kStateGuard * (1.0F + 2.0F * std::tanh((a / kStateGuard - 1.0F) * 0.5F)), s);
   }
 
   static float stage_output(Stage &stage, const Coefficients &c, uint32_t mode, float x) {

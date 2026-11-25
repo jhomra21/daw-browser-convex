@@ -258,6 +258,29 @@ const autofilterDrive: Scenario = {
   },
 }
 
+// A filter with Drive 0 and Clip off has no nonlinearity in its path, so level and resonance must not add distortion.
+const driveZeroLinearity: Scenario = {
+  effect: 'autofilter',
+  name: 'drive-zero-linearity',
+  run: async (h) => {
+    const frames = h.rate
+    const thd = async (spec: EffectSpec, frequency: number, amplitude: number) => {
+      const f = coherentFrequency(frequency, frames / 2, h.rate)
+      const { output } = await h.render(spec, { input: [sine(frames, f, h.rate, amplitude)] }, { parity: false })
+
+      return measureThdPlusNoise(output[0].slice(frames / 2), f, h.rate)
+    }
+
+    for (const hiQuality of [false, true]) {
+      for (const dbfs of [-6, 0, 6]) {
+        h.atMost(`THD+N, 100 Hz at ${dbfs} dBFS, 1 kHz low-pass, resonance 0, Drive 0, Hi-Quality ${hiQuality ? 'on' : 'off'}`, await thd(fx.autofilter({ frequencyHz: 1000, resonance: 0, driveDb: 0, hiQuality }), 100, 10 ** (dbfs / 20)), -90, 'dB')
+      }
+    }
+
+    h.atMost('THD+N, 1 kHz at -12 dBFS at the cutoff, resonance 1 (Q 8), Drive 0', await thd(fx.autofilter({ frequencyHz: coherentFrequency(1000, frames / 2, h.rate), resonance: 1, driveDb: 0, hiQuality: false }), 1000, 10 ** (-12 / 20)), -90, 'dB')
+  },
+}
+
 const resonanceLevel: Scenario = {
   effect: 'autofilter',
   name: 'resonance-level',
@@ -406,7 +429,7 @@ const legacyFallbackComparison: Scenario = {
 export const eqFilters: Family = {
   scenarios: [
     bandResponseScenario, bandResponseHq, referenceBands, referenceBandsHq, slopes12, modes, graphMatchesRender, hqLatency, precision, gainStepClick, slopes, nanInputGuard,
-    autofilterDrive, resonanceLevel, lowpassSlope, sweepClick, hiQualityLatency, lfoWaveforms, tempoSync, envelopeLaw,
+    autofilterDrive, driveZeroLinearity, resonanceLevel, lowpassSlope, sweepClick, hiQualityLatency, lfoWaveforms, tempoSync, envelopeLaw,
     parityScenario('eq', eqWith({ type: 'peaking', frequency: 1000, gainDb: 6, q: 2 })),
     ...robustnessScenarios('eq', eqWith({ type: 'peaking', frequency: 1000, gainDb: 6, q: 2 }), () => 0),
     legacyFallbackComparison,

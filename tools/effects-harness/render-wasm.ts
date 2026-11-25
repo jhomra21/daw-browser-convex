@@ -60,9 +60,9 @@ const keyEdge: AudioCoreGraphEdgeDto = {
   version: audioCoreContractVersion, id: 'key', fromNodeId: 'k', toNodeId: 's', targetProcessorId: 'p', gain: 1, kind: 'output', tap: 'post-fader', sidechain: true, pdcDelayFrames: 0,
 }
 
-const snapshot = (spec: EffectSpec | null, targets: readonly number[], keyed: boolean): AudioCoreGraphSnapshot => ({
+const snapshot = (spec: EffectSpec | null, targets: readonly number[], keyed: boolean, revision: number): AudioCoreGraphSnapshot => ({
   version: audioCoreContractVersion,
-  revision: 1,
+  revision,
   contractHash: processorContractHash,
   masterNodeId: 'm',
   assets: [],
@@ -106,6 +106,7 @@ export const renderWasm = async (spec: EffectSpec | null, rate: number, options:
   const exports = bind(await WebAssembly.instantiate(await wasmModule()))
   const frames = options.input[0].length
   const steps = options.steps ?? []
+  const enabledSteps = options.enabledSteps ?? []
   const paths = [...new Set(steps.flatMap((step) => Object.keys(step.set)))]
 
   const targetTable = spec === null ? {} : parameterTargets[spec.kind]
@@ -124,20 +125,25 @@ export const renderWasm = async (spec: EffectSpec | null, rate: number, options:
   const buses = key ? 2 : 1
 
   if (exports.initialize(rate, blockFrames, buses, 2, 1) !== 0) throw new Error('audio-core initialize failed')
-  const graph = graphEnvelope(snapshot(spec, targets, key !== undefined))
-  const graphView = new DataView(graph.buffer, graph.byteOffset, graph.byteLength)
 
-  graphView.setUint32(sourceBusOffset, 0, true)
+  const publishGraph = (current: EffectSpec | null, revision: number) => {
+    const graph = graphEnvelope(snapshot(current, targets, key !== undefined, revision))
+    const graphView = new DataView(graph.buffer, graph.byteOffset, graph.byteLength)
 
-  // The key's node is the third, after the source and the master.
-  if (key) graphView.setUint32(sourceBusOffset + 2 * nodeBytes, 1, true)
-  const graphPointer = exports.malloc(graph.byteLength)
-  new Uint8Array(exports.memory.buffer, graphPointer, graph.byteLength).set(graph)
-  const prepared = exports.prepare(graphPointer, graph.byteLength)
+    graphView.setUint32(sourceBusOffset, 0, true)
 
-  if (prepared !== 0) throw new Error(`audio-core prepare failed with ${prepared}`)
+    // The key's node is the third, after the source and the master.
+    if (key) graphView.setUint32(sourceBusOffset + 2 * nodeBytes, 1, true)
+    const graphPointer = exports.malloc(graph.byteLength)
+    new Uint8Array(exports.memory.buffer, graphPointer, graph.byteLength).set(graph)
+    const prepared = exports.prepare(graphPointer, graph.byteLength)
 
-  if (exports.publish(1) !== 0) throw new Error('audio-core publish failed')
+    if (prepared !== 0) throw new Error(`audio-core prepare failed with ${prepared}`)
+
+    if (exports.publish(revision) !== 0) throw new Error('audio-core publish failed')
+  }
+
+  publishGraph(spec, 1)
   exports.transport(1, 1, 0n)
 
   const planeBytes = blockFrames * 4
@@ -178,6 +184,9 @@ export const renderWasm = async (spec: EffectSpec | null, rate: number, options:
       inputPlanes[3].set((key[1] ?? key[0]).subarray(offset, offset + count))
     }
 
+    const toggled = enabledSteps.findIndex((step) => step.frame === offset)
+
+    if (spec !== null && toggled !== -1) publishGraph({ ...spec, state: { ...spec.state, enabled: enabledSteps[toggled].enabled } }, toggled + 2)
     let parameterBytes = 0
 
     if (stepped.length > 0) {

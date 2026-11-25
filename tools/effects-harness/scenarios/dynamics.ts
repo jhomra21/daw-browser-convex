@@ -194,6 +194,23 @@ const limiterAuto: Scenario = {
   },
 }
 
+// The core crossfades the bypass over 10 ms; the worklet used to switch between wet and dry on a single sample.
+const limiterBypassToggle: Scenario = {
+  effect: 'limiter',
+  name: 'parity-enabled-toggle',
+  run: async (h) => {
+    const frames = 2 * h.rate
+    const off = Math.round(0.5 * h.rate / 128) * 128
+    const on = Math.round(1.25 * h.rate / 128) * 128
+    const spec = fx.limiter({ ceilingDbtp: -6 })
+    const input = sine(frames, 1000, h.rate, 0.8)
+    const { output, legacy } = await h.render(spec, { input: [input], enabledSteps: [{ frame: off, enabled: false }, { frame: on, enabled: true }] })
+
+    if (legacy === null) throw new Error('limiter has a legacy worklet')
+    h.atMost('parity, enabled off at 0.5 s and back on at 1.25 s', Math.max(maxAbsDiff(output[0], legacy[0]), maxAbsDiff(output[1], legacy[1])), 1e-5, 'abs')
+  },
+}
+
 const limiterGain: Scenario = {
   effect: 'limiter',
   name: 'l4-input-gain',
@@ -625,7 +642,7 @@ const familyOf = (effect: string, spec: EffectSpec, latency: (rate: number) => n
 
 export const dynamics: Family = {
   scenarios: [
-    limiterClick, limiterThd, limiterTruePeak, limiterLowRate, meterSelfCheck, limiterAuto, limiterGain, limiterLatency, limiterCpu,
+    limiterClick, limiterThd, limiterTruePeak, limiterLowRate, limiterBypassToggle, meterSelfCheck, limiterAuto, limiterGain, limiterLatency, limiterCpu,
     compressorThd('c1-thd-peak', 'peak', 10, 120, -55),
     compressorThd('c1-thd-rms', 'rms', 10, 120, -55),
     compressorThd('c1-thd-rms-fast', 'rms', 1, 50, -45),

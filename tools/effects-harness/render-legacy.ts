@@ -71,6 +71,7 @@ export const renderLegacy = async (spec: EffectSpec, rate: number, options: Rend
   const { worklet, descriptors } = await instantiate(spec, rate)
   const frames = options.input[0].length
   const steps = options.steps ?? []
+  const enabledSteps = options.enabledSteps ?? []
   let state = spec.state
   let revision = 0
 
@@ -94,6 +95,15 @@ export const renderLegacy = async (spec: EffectSpec, rate: number, options: Rend
 
       if (step.frame === offset) {
         state = withPaths(state, step.set)
+        configure()
+      }
+    }
+
+    for (const step of enabledSteps) {
+      if (step.frame % blockFrames !== 0) throw new Error('Legacy worklet steps must sit on a 128-frame block boundary')
+
+      if (step.frame === offset) {
+        state = { ...state, enabled: step.enabled }
         configure()
       }
     }

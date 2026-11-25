@@ -49,6 +49,14 @@ const f = Math.fround
 
 const flushDenormal = (value) => Math.abs(value) < DENORMAL_FLOOR ? 0 : value
 
+const bypassStep = (current, target, step) => {
+  if (target > current + step) return f(current + step)
+
+  if (target < current - step) return f(current - step)
+
+  return target
+}
+
 // Sliding minimum of the last window + 1 pushes, in O(1) per push.
 class SlidingMinimum {
   constructor() {
@@ -159,6 +167,8 @@ class LimiterKernel {
     this.autoBuild = 0
     this.autoDecay = 0
     this.safetyClips = 0
+    this.bypassFrames = Math.floor((sampleRate + 50) / 100)
+    this.bypass = 0
     this.smootherCoefficient = 1 - Math.exp(-1000 / (10 * sampleRate))
     this.smootherCurrent = 0
     this.smootherTarget = 0
@@ -325,9 +335,10 @@ class LimiterKernel {
     channel.sustain = flushDenormal(working ? f(channel.sustain + f(f(1 - channel.sustain) * f(1 - this.autoBuild))) : f(channel.sustain * this.autoDecay))
   }
 
-  // Writes the delayed, limited pair into out[0..1]; `enabled` false passes the delayed dry signal.
+  // Writes the delayed, limited pair into out[0..1]; `enabled` false crossfades to the delayed dry signal over 10 ms.
   process(values, lookaheadMs, autoRelease, enabled, inputLeft, inputRight, out) {
     this.configure(lookaheadMs)
+    this.bypass = bypassStep(this.bypass, enabled ? 0 : 1, f(1 / (this.bypassFrames === 0 ? 1 : this.bypassFrames)))
     const gainDb = this.nextInputGainDb(values.gainDb)
     this.inputGain = f(10 ** f(gainDb / 20))
     this.ceiling = f(10 ** f(values.ceilingDbtp / 20))
@@ -368,8 +379,8 @@ class LimiterKernel {
 
     this.write++
     const gainFault = !Number.isFinite(this.channels[0].gain) || !Number.isFinite(this.channels[1].gain)
-    const left = enabled ? wet[0] : this.channels[0].dry[read]
-    const right = enabled ? wet[1] : this.channels[1].dry[read]
+    const left = f(wet[0] + f(f(this.channels[0].dry[read] - wet[0]) * this.bypass))
+    const right = f(wet[1] + f(f(this.channels[1].dry[read] - wet[1]) * this.bypass))
     const finite = !gainFault && Number.isFinite(left) && Number.isFinite(right)
 
     if (!finite) this.reset()

@@ -56,7 +56,7 @@ void render_compressor_processor(
   const daw::audio_core::CompressorConfig config{
     .lookahead_ms = state.lookahead_ms,
     .auto_release = state.auto_release != 0,
-    .auto_makeup = state.auto_makeup != 0,
+    .auto_makeup = state.auto_makeup != 0 && !history.external_key,
     .rms = state.detector_mode != 0,
     .expand = state.dynamics_mode != 0,
     .linear = state.envelope_curve != 0,

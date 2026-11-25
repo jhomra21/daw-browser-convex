@@ -82,6 +82,7 @@ class CompressorKernel {
     auto_build_ = 1.0 - std::exp(-1.0 / (kAutoBuildMs * 0.001 * sample_rate));
     auto_decay_ = std::exp(-1.0 / (kAutoDecayMs * 0.001 * sample_rate));
     primed_ = false;
+    makeup_primed_ = false;
     cached_attack_ms_ = cached_release_ms_ = -1.0F;
     curve_ = Curve{};
     reset();
@@ -116,7 +117,6 @@ class CompressorKernel {
       threshold_.reset(values.threshold_db);
       ratio_.reset(values.ratio);
       knee_.reset(values.knee_db);
-      makeup_.reset(values.makeup_db);
       output_.reset(values.output_db);
       wet_.reset(values.dry_wet);
       primed_ = true;
@@ -124,18 +124,24 @@ class CompressorKernel {
     threshold_.setTarget(values.threshold_db);
     ratio_.setTarget(values.ratio);
     knee_.setTarget(values.knee_db);
-    makeup_.setTarget(values.makeup_db);
     output_.setTarget(values.output_db);
     wet_.setTarget(values.dry_wet);
     const float threshold = threshold_.next();
     const float ratio = std::max(ratio_.next(), 1.0F);
     const float knee = std::max(knee_.next(), 0.0F);
-    const float makeup = makeup_.next();
     const float output = output_.next();
     const float wet = wet_.next();
     if (threshold != curve_.threshold || ratio != curve_.ratio || knee != curve_.knee || config.expand != curve_.expand || config.rms != curve_.rms) {
       design_curve(threshold, ratio, knee, config.expand, config.rms);
     }
+    // Auto Makeup glides in and out through the same smoother as the knob, and follows the curve as it moves.
+    const float makeup_target = config.auto_makeup ? static_cast<float>(curve_.auto_makeup_db) : values.makeup_db;
+    if (!makeup_primed_) {
+      makeup_.reset(makeup_target);
+      makeup_primed_ = true;
+    }
+    makeup_.setTarget(makeup_target);
+    const float makeup = makeup_.next();
     if (values.attack_ms != cached_attack_ms_) {
       cached_attack_ms_ = values.attack_ms;
       attack_ = one_pole(values.attack_ms);
@@ -190,7 +196,7 @@ class CompressorKernel {
       else if (envelope_db_ > kRecoveredDb) sustain_ = dsp::flushDenormal(sustain_ * auto_decay_);
     }
 
-    const double gain_db = envelope_db_ + (config.auto_makeup ? curve_.auto_makeup_db : static_cast<double>(makeup)) + output;
+    const double gain_db = envelope_db_ + static_cast<double>(makeup) + output;
     if (gain_db != gain_db_) {
       gain_db_ = gain_db;
       gain_ = std::exp(gain_db * kDbToNeper);
@@ -278,6 +284,7 @@ class CompressorKernel {
   dsp::ParameterSmoother<> output_{};
   dsp::ParameterSmoother<> wet_{};
   bool primed_ = false;
+  bool makeup_primed_ = false;
   Curve curve_{};
   std::array<std::array<float, kCapacity>, 2> dry_{};
   uint32_t write_ = 0;

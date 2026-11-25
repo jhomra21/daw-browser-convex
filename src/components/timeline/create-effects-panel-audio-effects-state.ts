@@ -151,7 +151,9 @@ type EffectsPanelAudioDevice = {
     toggleBand: (bandId: string) => void;
     toggleEnabled: (enabled: boolean) => void;
   };
-  compressor: FlatAudioEffectBinding<CompressorParams>;
+  compressor: FlatAudioEffectBinding<CompressorParams> & {
+    setSidechainSource: (instanceId: string, sourceTrackId?: string) => Promise<void>;
+  };
   saturator: FlatAudioEffectBinding<SaturatorParams>;
   delay: FlatAudioEffectBinding<DelayParams>;
   spectral: {
@@ -1339,6 +1341,7 @@ export function createEffectsPanelAudioDevice(
     compressor: {
       add: addCompressor,
       ...instanceBindingByKind.compressor,
+      setSidechainSource,
       change: (updates) => updateCompressor((prev) => normalizeCompressorParams({ ...prev, ...updates })),
       reset: () => updateCompressor(() => AUDIO_EFFECT_CONTRACTS.compressor.createDefaultParams()),
       toggleEnabled: (enabled) => updateCompressor((prev) => ({ ...prev, enabled })),

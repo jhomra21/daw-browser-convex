@@ -695,6 +695,8 @@ struct CompressorHistory {
   float filter_frequency_hz = 0.0F;
   float filter_q = 0.0F;
   float bypass = 0.0F;
+  // A key from another track drives the detector; Auto Makeup is off then, as it only means something for the own signal.
+  bool external_key = false;
 };
 
 struct LimiterHistory {

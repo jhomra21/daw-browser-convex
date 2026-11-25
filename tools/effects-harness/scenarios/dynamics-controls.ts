@@ -91,7 +91,7 @@ type Step = Awaited<ReturnType<typeof stepGain>>
 const reach = (step: Step, fraction: number) => timeToFraction(step.gain, step.at, step.from, step.final, fraction, step.h.rate)
 
 /** Time spent between a quarter and three quarters of the way, and the first half of it over the second half. */
-const shape = (step: Step) => ({ span: reach(step, 0.75) - reach(step, 0.25), skew: (reach(step, 0.5) - reach(step, 0.25)) / (reach(step, 0.75) - reach(step, 0.5)) })
+const pathTiming = (step: Step) => ({ span: reach(step, 0.75) - reach(step, 0.25), skew: (reach(step, 0.5) - reach(step, 0.25)) / (reach(step, 0.75) - reach(step, 0.5)) })
 
 // A hard 100:1 curve 60 dB under full scale turns a DC level into a fixed gain, so the envelope's path to it is the whole curve.
 const envelopeSpec = (envelopeCurve: 'log' | 'linear', attackMs: number, releaseMs: number) =>
@@ -105,21 +105,21 @@ const compressorEnvelope: Scenario = {
     const firstOrderSkew = Math.log(0.75 / 0.5) / Math.log(2)
     const attackLog = await stepGain(h, envelopeSpec('log', 50, 120), 1e-4, 0.5, 0.5, 1)
     h.within('log attack 50 ms: time to 63.2 % of the gain reduction', reach(attackLog, 1 - Math.exp(-1)), 50, 2.5, 'ms')
-    h.within('log attack: time from 25 to 50 % over 50 to 75 % (first-order: 0.585)', shape(attackLog).skew, firstOrderSkew, 0.06)
+    h.within('log attack: time from 25 to 50 % over 50 to 75 % (first-order: 0.585)', pathTiming(attackLog).skew, firstOrderSkew, 0.06)
     const releaseLog = await stepGain(h, envelopeSpec('log', 10, 400), 0.5, 0.05, 3, 3)
     // The detector lets go of the old peak over the first 15 ms or so, which moves the path by about that much.
     h.within('log release 400 ms: time to 63.2 % of the way back', reach(releaseLog, 1 - Math.exp(-1)), 400, 20, 'ms')
-    h.within('log release: time from 25 to 50 % over 50 to 75 % (first-order: 0.585)', shape(releaseLog).skew, firstOrderSkew, 0.1)
+    h.within('log release: time from 25 to 50 % over 50 to 75 % (first-order: 0.585)', pathTiming(releaseLog).skew, firstOrderSkew, 0.1)
 
     // Linear: the gain moves at a constant dB per ms, so a quarter of the way takes as long as the next, and a slower setting scales the whole path.
     const attackSlow = await stepGain(h, envelopeSpec('linear', 100, 120), 1e-4, 0.5, 0.5, 1)
     const attackFast = await stepGain(h, envelopeSpec('linear', 50, 120), 1e-4, 0.5, 0.5, 1)
-    h.within('linear attack: time from 25 to 50 % over 50 to 75 % (constant slope: 1)', shape(attackFast).skew, 1, 0.06)
-    h.within('linear attack: 100 ms setting over 50 ms setting, time from 25 to 75 %', shape(attackSlow).span / shape(attackFast).span, 2, 0.1, 'x')
+    h.within('linear attack: time from 25 to 50 % over 50 to 75 % (constant slope: 1)', pathTiming(attackFast).skew, 1, 0.06)
+    h.within('linear attack: 100 ms setting over 50 ms setting, time from 25 to 75 %', pathTiming(attackSlow).span / pathTiming(attackFast).span, 2, 0.1, 'x')
     const releaseSlow = await stepGain(h, envelopeSpec('linear', 10, 400), 0.5, 0.05, 3, 3)
     const releaseFast = await stepGain(h, envelopeSpec('linear', 10, 200), 0.5, 0.05, 3, 3)
-    h.within('linear release: time from 25 to 50 % over 50 to 75 % (constant slope: 1)', shape(releaseFast).skew, 1, 0.15)
-    h.within('linear release: 400 ms setting over 200 ms setting, time from 25 to 75 %', shape(releaseSlow).span / shape(releaseFast).span, 2, 0.15, 'x')
+    h.within('linear release: time from 25 to 50 % over 50 to 75 % (constant slope: 1)', pathTiming(releaseFast).skew, 1, 0.15)
+    h.within('linear release: 400 ms setting over 200 ms setting, time from 25 to 75 %', pathTiming(releaseSlow).span / pathTiming(releaseFast).span, 2, 0.15, 'x')
   },
 }
 
@@ -130,6 +130,7 @@ const compressorOutputDryWet: Scenario = {
     const frames = 3 * h.rate
     const f = coherentFrequency(1000, h.rate, h.rate)
     const input = sine(frames, f, h.rate, 0.5)
+
     const gain = async (state: Parameters<typeof fx.compressor>[0]) => {
       const { output } = await h.render(keyedCompressor({ thresholdDb: -24, ...state }), { input: [input] })
 
@@ -160,7 +161,7 @@ const compressorLookaheadTransient: Scenario = {
     const at = seconds(h, 0.5)
     const input = impulse(seconds(h, 1), 1, at)
     // The detector holds the click for 5 ms and lets go with a 5 ms constant, so after 10 ms of lookahead it still reads -8.7 dBFS, 21 dB over the threshold.
-    const spec = (lookaheadMs: number) => fx.compressor({ thresholdDb: -30, ratio: 10, kneeDb: 0, attackMs: 0.1, releaseMs: 120, autoRelease: false, detectorMode: 'peak', lookaheadMs })
+    const spec = (lookaheadMs: 0 | 1 | 10) => fx.compressor({ thresholdDb: -30, ratio: 10, kneeDb: 0, attackMs: 0.1, releaseMs: 120, autoRelease: false, detectorMode: 'peak', lookaheadMs })
     const caught = await h.render(spec(10), { input: [input] })
     const latency = declaredLatencyFrames(spec(10), h.rate)
     h.atMost('lookahead 10 ms: output at the click\'s first sample, 0 dBFS in', linearToDb(Math.abs(caught.output[0][at + latency])), -15, 'dBFS', 'the gain is down before the click arrives')
@@ -312,6 +313,7 @@ const limiterLink: Scenario = {
     const frames = 3 * h.rate
     const f = coherentFrequency(1000, h.rate, h.rate)
     const input = [sine(frames, f, h.rate, 2), sine(frames, f, h.rate, dbToLinear(-30))]
+
     const gains = async (link: number) => {
       const { output } = await h.render(fx.limiter({ ceilingDbtp: -1, link }), { input })
 

@@ -162,19 +162,20 @@ describe('checked-in worklet assets', () => {
     expect(Array.from(output[1])).toEqual(Array.from(right))
   })
 
-  test('registers gate with fixed two millisecond delayed bypass', async () => {
+  test('registers gate with a delayed bypass equal to its lookahead', async () => {
     const evaluated = await evaluateAsset(gateWorklet.modulePath)
     const Processor = evaluated.registered.get(gateWorklet.processorName)
 
     if (!Processor) throw new Error('Gate processor was not registered.')
     const processor = new Processor()
-    processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, state: { enabled: false, mode: 'gate', detector: 'peak', sidechain: { enabled: false } } } })
+    processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, state: { enabled: false, mode: 'gate', detector: 'peak', lookaheadMs: 1, flip: false, sidechain: { enabled: false, filterType: 'highpass' } } } })
     const input = new Float32Array(98)
     input[0] = 1
     const output = new Float32Array(98)
-    const parameters = Object.fromEntries(namesForGateTest().map((name) => [name, Float32Array.of(name === 'gate.lookaheadMs' ? 0 : name === 'gate.rangeDb' ? -80 : name === 'gate.thresholdDb' ? -40 : name === 'gate.ratio' ? 4 : name === 'gate.attackMs' ? 1 : name === 'gate.holdMs' ? 20 : name === 'gate.releaseMs' ? 120 : name === 'gate.hysteresisDb' ? 6 : 1)]))
+    const parameters = Object.fromEntries(namesForGateTest().map((name) => [name, Float32Array.of(name === 'gate.rangeDb' ? -80 : name === 'gate.thresholdDb' ? -40 : name === 'gate.ratio' ? 4 : name === 'gate.attackMs' ? 1 : name === 'gate.holdMs' ? 20 : name === 'gate.releaseMs' ? 120 : name === 'gate.hysteresisDb' ? 6 : 1)]))
     expect(processor.process([[input]], [[output]], parameters)).toBe(true)
-    expect(output[96]).toBe(1)
+    expect(output[47]).toBe(0)
+    expect(output[48]).toBe(1)
   })
 
   test('registers limiter with a delayed bypass equal to its lookahead', async () => {
@@ -437,7 +438,7 @@ describe('checked-in worklet assets', () => {
   })
 })
 
-const namesForGateTest = () => ['gate.thresholdDb', 'gate.ratio', 'gate.attackMs', 'gate.holdMs', 'gate.releaseMs', 'gate.hysteresisDb', 'gate.rangeDb', 'gate.lookaheadMs', 'gate.link']
+const namesForGateTest = () => ['gate.thresholdDb', 'gate.ratio', 'gate.attackMs', 'gate.holdMs', 'gate.releaseMs', 'gate.hysteresisDb', 'gate.rangeDb', 'gate.link', 'gate.sidechain.frequencyHz', 'gate.sidechain.q', 'gate.sidechain.gainDb', 'gate.sidechain.mix']
 
 const spectralParameters = () => Object.fromEntries([
   ['spectral.freeze', 0], ['spectral.gateThresholdDb', -60], ['spectral.gateAttackMs', 10],

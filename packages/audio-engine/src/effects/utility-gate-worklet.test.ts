@@ -29,7 +29,9 @@ type GateState = {
   enabled: boolean
   mode: string
   detector: string
-  sidechain: { enabled: boolean; frequencyHz: number; q: number }
+  lookaheadMs: number
+  flip: boolean
+  sidechain: { enabled: boolean; filterType: string }
 }
 
 type WorkletMessage =
@@ -99,8 +101,11 @@ const gateParams = (updates: Partial<Record<string, number>> = {}) => ({
   'gate.releaseMs': Float32Array.of(updates['gate.releaseMs'] ?? 5),
   'gate.hysteresisDb': Float32Array.of(updates['gate.hysteresisDb'] ?? 6),
   'gate.rangeDb': Float32Array.of(updates['gate.rangeDb'] ?? -80),
-  'gate.lookaheadMs': Float32Array.of(updates['gate.lookaheadMs'] ?? 0),
   'gate.link': Float32Array.of(updates['gate.link'] ?? 1),
+  'gate.sidechain.frequencyHz': Float32Array.of(updates['gate.sidechain.frequencyHz'] ?? 80),
+  'gate.sidechain.q': Float32Array.of(updates['gate.sidechain.q'] ?? 0.707),
+  'gate.sidechain.gainDb': Float32Array.of(updates['gate.sidechain.gainDb'] ?? 0),
+  'gate.sidechain.mix': Float32Array.of(updates['gate.sidechain.mix'] ?? 1),
 })
 
 const utilityState = (updates: Partial<UtilityState> = {}) => ({
@@ -117,7 +122,9 @@ const gateState = (updates: Partial<GateState> = {}) => ({
   enabled: true,
   mode: 'gate',
   detector: 'peak',
-  sidechain: { enabled: false, frequencyHz: 80, q: 0.707 },
+  lookaheadMs: 0,
+  flip: false,
+  sidechain: { enabled: false, filterType: 'highpass' },
   ...updates,
 })
 
@@ -201,23 +208,26 @@ describe('utility static worklet numerical characterization', () => {
 })
 
 describe('gate static worklet numerical characterization', () => {
-  test('has fixed ceil two millisecond latency when enabled and bypassed at all sample rates', async () => {
+  test('delays by the ceil of its chosen lookahead when enabled and bypassed at all sample rates', async () => {
     for (const sampleRate of [44_100, 48_000, 96_000]) {
-      for (const enabled of [true, false]) {
-        const processor = await loadProcessor(gateWorklet.modulePath, gateWorklet.processorName, sampleRate)
-        configure(processor, gateState({ enabled }))
-        const latency = Math.ceil(0.002 * sampleRate)
-        const input = new Float32Array(latency + 2).fill(1)
-        const output = [new Float32Array(input.length), new Float32Array(input.length)]
-        processor.process([[input]], [output], gateParams({ 'gate.thresholdDb': -80 }))
-        expect(output[0][latency]).toBeCloseTo(1, 6)
+      for (const lookaheadMs of [0, 1, 10]) {
+        for (const enabled of [true, false]) {
+          const processor = await loadProcessor(gateWorklet.modulePath, gateWorklet.processorName, sampleRate)
+          configure(processor, gateState({ enabled, lookaheadMs }))
+          const latency = Math.ceil(lookaheadMs * sampleRate / 1000)
+          const input = new Float32Array(latency + 2).fill(1)
+          const output = [new Float32Array(input.length), new Float32Array(input.length)]
+          processor.process([[input]], [output], gateParams({ 'gate.thresholdDb': -80 }))
+
+          if (latency > 0) expect(output[0][latency - 1]).toBe(0)
+          expect(output[0][latency]).toBeCloseTo(1, 6)
+        }
       }
     }
   })
 
   test('open gain is within 0.1 dB and closed gain is within 0.5 dB of range', async () => {
     const sampleRate = 48_000
-    const latency = 96
     const processor = await loadProcessor(gateWorklet.modulePath, gateWorklet.processorName, sampleRate)
     configure(processor, gateState())
     const openInput = new Float32Array(sampleRate).fill(1)
@@ -227,7 +237,7 @@ describe('gate static worklet numerical characterization', () => {
     const closedInput = new Float32Array(sampleRate).fill(0.001)
     const closedOutput = [new Float32Array(sampleRate), new Float32Array(sampleRate)]
     processor.process([[closedInput]], [closedOutput], gateParams({ 'gate.thresholdDb': -20, 'gate.rangeDb': -40 }))
-    const closedGainDb = 20 * Math.log10((closedOutput[0].at(-1) ?? 0) / closedInput[latency])
+    const closedGainDb = 20 * Math.log10((closedOutput[0].at(-1) ?? 0) / closedInput[0])
     expect(closedGainDb).toBeCloseTo(-40, 0)
   })
 
@@ -242,15 +252,24 @@ describe('gate static worklet numerical characterization', () => {
     expect(output[0].every(Number.isFinite)).toBe(true)
   })
 
-  test('external sidechain changes gain reduction without leaking into output', async () => {
-    const processor = await loadProcessor(gateWorklet.modulePath, gateWorklet.processorName, 48_000)
-    configure(processor, gateState({ sidechain: { enabled: true, frequencyHz: 80, q: 0.707 } }))
-    const audio = new Float32Array(4_096).fill(0.25)
-    const sidechain = new Float32Array(4_096).fill(1)
-    const output = [new Float32Array(audio.length), new Float32Array(audio.length)]
-    processor.process([[audio], [sidechain]], [output], gateParams({ 'gate.thresholdDb': -6 }))
-    expect(Math.max(...output[0])).toBeLessThanOrEqual(0.25)
-    expect(output[0].includes(1)).toBe(false)
+  test('an external key opens or closes the gate without leaking into output', async () => {
+    const audio = new Float32Array(4_096).fill(0.001)
+
+    const render = async (key: number, params: Partial<Record<string, number>> = {}) => {
+      const processor = await loadProcessor(gateWorklet.modulePath, gateWorklet.processorName, 48_000)
+      configure(processor, gateState())
+      const output = [new Float32Array(audio.length), new Float32Array(audio.length)]
+      processor.process([[audio], [new Float32Array(audio.length).fill(key)]], [output], gateParams({ 'gate.thresholdDb': -20, ...params }))
+
+      return output[0]
+    }
+
+    const opened = await render(1)
+    expect(opened.at(-1)).toBeCloseTo(0.001, 6)
+    expect(opened.includes(1)).toBe(false)
+    expect(Math.abs(await render(0.0001).then((output) => output.at(-1) ?? 1))).toBeLessThan(1e-5)
+    // At 0 % the key is the gate's own input, which is 20 dB under the threshold.
+    expect(Math.abs((await render(1, { 'gate.sidechain.mix': 0 })).at(-1) ?? 1)).toBeLessThan(1e-5)
   })
 
   test('meter cadence is bounded, non-finite input faults, reset is deterministic, and stereo stays isolated', async () => {
@@ -264,9 +283,9 @@ describe('gate static worklet numerical characterization', () => {
     right.fill(0.5, 2)
     const output = [new Float32Array(left.length), new Float32Array(left.length)]
     processor.process([[left, right]], [output], gateParams({ 'gate.thresholdDb': -80 }))
-    expect(output[0][96]).toBe(0)
-    expect(output[0][97]).toBeCloseTo(1, 6)
-    expect(output[1][98]).toBeCloseTo(0.5, 6)
+    expect(output[0][0]).toBe(0)
+    expect(output[0][1]).toBeCloseTo(1, 6)
+    expect(output[1][2]).toBeCloseTo(0.5, 6)
     expect(processor.port.messages.filter((entry) => entry.type === 'meter')).toHaveLength(1)
     expect(processor.port.messages).toContainEqual({ type: 'fault', version: 1, code: 'nonfinite-input' })
     message(processor, { type: 'reset', version: 1 })

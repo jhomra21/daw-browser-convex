@@ -116,6 +116,121 @@ inline constexpr double kFitSpanDefault = 2.0 * kPi * kFitTop;
 inline constexpr int kFitPoints = 48;
 inline constexpr int kFitPasses = 3;
 
+// Impulse-invariant poles sit where the analog poles do, which is wrong once they are near Nyquist: a shelf whose pole
+// frequency omega0 / sqrt(a) or omega0 * sqrt(a) reaches 0.9 fs, or a bell at 19 kHz, leaves 0.3 to 0.6 dB inside the
+// band whatever the numerator is. When the fit is further than kPolishTriggerDb from the prototype anywhere on a log grid
+// over the EQ range (20 Hz at 96 kHz up to 0.45 fs), all five coefficients are moved by damped Gauss-Newton on the dB error (Lawson weights, as above, so a
+// pass can raise the worst error before the next lowers it). The best pass is kept, and the search stops if the poles leave
+// the unit circle. Bands that fit already are
+// left exactly as fittedNumerator made them. Points where the prototype is below -60 dB are not judged.
+inline constexpr int kPolishPoints = 96;
+inline constexpr int kPolishPasses = 8;
+inline constexpr double kPolishTriggerDb = 0.1;
+inline constexpr double kPolishDamping = 1.0e-3;
+inline constexpr double kPolishFloorDb = -60.0;  // the stop band is not judged below this, as in the harness
+
+using Coefficients5 = std::array<double, 5>;  // b0 b1 b2 a1 a2
+
+inline double responseDb(const Coefficients5 &c, double omega) {
+  const double c1 = std::cos(omega);
+  const double c2 = std::cos(2.0 * omega);
+  const double num = c[0] * c[0] + c[1] * c[1] + c[2] * c[2] + 2.0 * (c[0] * c[1] + c[1] * c[2]) * c1 + 2.0 * c[0] * c[2] * c2;
+  const double den = 1.0 + c[3] * c[3] + c[4] * c[4] + 2.0 * (c[3] + c[3] * c[4]) * c1 + 2.0 * c[4] * c2;
+  return 10.0 * std::log10(num / den);
+}
+
+inline bool polesInside(const Coefficients5 &c) { return std::abs(c[4]) < 0.9999 && std::abs(c[3]) < 1.0 + c[4] - 1.0e-6; }
+
+// Gaussian elimination with partial pivoting on the 5 x 5 system a x = b.
+inline Coefficients5 solve5(std::array<Coefficients5, 5> a, Coefficients5 b) {
+  for (int i = 0; i < 5; ++i) {
+    int pivot = i;
+    for (int k = i + 1; k < 5; ++k) {
+      if (std::abs(a[k][i]) > std::abs(a[pivot][i])) pivot = k;
+    }
+    std::swap(a[i], a[pivot]);
+    std::swap(b[i], b[pivot]);
+    for (int k = i + 1; k < 5; ++k) {
+      const double m = a[k][i] / a[i][i];
+      for (int j = i; j < 5; ++j) a[k][j] -= m * a[i][j];
+      b[k] -= m * b[i];
+    }
+  }
+  Coefficients5 x{};
+  for (int i = 4; i >= 0; --i) {
+    double sum = b[i];
+    for (int j = i + 1; j < 5; ++j) sum -= a[i][j] * x[j];
+    x[i] = sum / a[i][i];
+  }
+  return x;
+}
+
+template <class AnalogSquared>
+inline BiquadCoefficients polished(const BiquadCoefficients &fitted, double omega0, double span, AnalogSquared analogSquared) {
+  std::array<double, kPolishPoints> omegas{};
+  std::array<double, kPolishPoints> targets{};
+  std::array<double, kPolishPoints> weights{};
+  for (int i = 0; i < kPolishPoints; ++i) {
+    omegas[i] = span * 4.0e-4 * std::pow(2500.0, static_cast<double>(i) / (kPolishPoints - 1));
+    targets[i] = 10.0 * std::log10(analogSquared(omegas[i] / omega0));
+    weights[i] = targets[i] > kPolishFloorDb ? 1.0 : 0.0;
+  }
+  const auto worst = [&](const Coefficients5 &c) {
+    double result = 0.0;
+    for (int i = 0; i < kPolishPoints; ++i) {
+      if (targets[i] > kPolishFloorDb) result = std::max(result, std::abs(responseDb(c, omegas[i]) - targets[i]));
+    }
+    return result;
+  };
+
+  Coefficients5 best = {fitted.b0, fitted.b1, fitted.b2, fitted.a1, fitted.a2};
+  double bestError = worst(best);
+  if (bestError <= kPolishTriggerDb) return fitted;
+
+  Coefficients5 current = best;
+  for (int pass = 0; pass < kPolishPasses; ++pass) {
+    std::array<Coefficients5, kPolishPoints> jacobian{};
+    std::array<double, kPolishPoints> residual{};
+    for (int i = 0; i < kPolishPoints; ++i) {
+      residual[i] = responseDb(current, omegas[i]) - targets[i];
+      for (int k = 0; k < 5; ++k) {
+        Coefficients5 moved = current;
+        const double step = 1.0e-6 * std::max(std::abs(current[k]), 1.0e-3);
+        moved[k] += step;
+        jacobian[i][k] = (responseDb(moved, omegas[i]) - responseDb(current, omegas[i])) / step;
+      }
+    }
+    std::array<Coefficients5, 5> normal{};
+    Coefficients5 gradient{};
+    for (int i = 0; i < kPolishPoints; ++i) {
+      for (int j = 0; j < 5; ++j) {
+        gradient[j] -= weights[i] * jacobian[i][j] * residual[i];
+        for (int k = 0; k < 5; ++k) normal[j][k] += weights[i] * jacobian[i][j] * jacobian[i][k];
+      }
+    }
+    for (int j = 0; j < 5; ++j) normal[j][j] *= 1.0 + kPolishDamping;
+
+    Coefficients5 next = solve5(normal, gradient);
+    for (int k = 0; k < 5; ++k) next[k] += current[k];
+    if (!polesInside(next)) break;
+    current = next;
+
+    const double error = worst(current);
+    if (error < bestError) {
+      best = current;
+      bestError = error;
+    }
+
+    double total = 0.0;
+    for (int i = 0; i < kPolishPoints; ++i) {
+      weights[i] *= std::max(std::abs(responseDb(current, omegas[i]) - targets[i]), 1.0e-4);
+      total += weights[i];
+    }
+    for (int i = 0; i < kPolishPoints; ++i) weights[i] = weights[i] * kPolishPoints / total;
+  }
+  return BiquadCoefficients{best[0], best[1], best[2], best[3], best[4]};
+}
+
 template <class AnalogSquared>
 inline BiquadCoefficients fittedNumerator(const Poles &p, double omega0, double span, AnalogSquared analogSquared) {
   const Quadratic den = denominator(p);
@@ -157,7 +272,7 @@ inline BiquadCoefficients fittedNumerator(const Poles &p, double omega0, double 
     }
     for (int i = 0; i < kFitPoints; ++i) weights[i] = weights[i] * kFitPoints / total;
   }
-  return withNumerator(p, B0, (corner - B2 * corner2) / corner1, B2);
+  return polished(withNumerator(p, B0, (corner - B2 * corner2) / corner1, B2), omega0, span, analogSquared);
 }
 
 inline BiquadCoefficients designShelf(bool low, double frequency, double sampleRate, double span, double q, double gainDb) {

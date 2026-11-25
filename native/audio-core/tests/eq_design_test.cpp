@@ -1,5 +1,5 @@
 // Tests for the EQ band designs in src/dsp/eq_band.h against the analog prototypes (RBJ cookbook s-domain filters).
-// Run with a group name (accuracy, slopes, stability) or with no argument for all. Every check prints its measured value.
+// Run with a group name (accuracy, nearNyquistPoles, slopes, stability) or with no argument for all. Every check prints its measured value.
 #include "../src/dsp/eq_band.h"
 
 #include <algorithm>
@@ -116,6 +116,17 @@ void accuracy() {
   }
 }
 
+// Bands whose pole or corner is near Nyquist: the impulse-invariant poles alone leave 0.46 to 0.57 dB (low shelf pole at
+// omega0 / sqrt(a) = 1.9 omega0; bell at 0.4 fs). Limits are the ones of the harness row band-response-vs-analog.
+void nearNyquistPoles() {
+  for (const double rate : {44100.0, 48000.0, 96000.0}) {
+    const double limit = rate >= 96000.0 ? 0.25 : 0.5;
+    std::printf("  at %.0f Hz\n", rate);
+    expectAtMost("low shelf 11.4 kHz Q 0.29 -22 dB", worstError(Type::Lowshelf, 11401.0, 0.287, -22.04, rate, rate), limit);
+    expectAtMost("bell 19 kHz Q 0.45 +22.4 dB", worstError(Type::Peaking, 19050.0, 0.45, 22.4, rate, rate), limit);
+  }
+}
+
 void slopes() {
   for (const bool high : {false, true}) {
     const Type type = high ? Type::Highpass48 : Type::Lowpass48;
@@ -158,7 +169,7 @@ void stability() {
 
 int main(int argc, char **argv) {
   const char *group = argc > 1 ? argv[1] : nullptr;
-  const struct { const char *name; void (*run)(); } cases[] = {{"accuracy", accuracy}, {"slopes", slopes}, {"stability", stability}};
+  const struct { const char *name; void (*run)(); } cases[] = {{"accuracy", accuracy}, {"nearNyquistPoles", nearNyquistPoles}, {"slopes", slopes}, {"stability", stability}};
   for (const auto &testCase : cases) {
     if (group != nullptr && std::strcmp(group, testCase.name) != 0) continue;
     std::printf("%s\n", testCase.name);

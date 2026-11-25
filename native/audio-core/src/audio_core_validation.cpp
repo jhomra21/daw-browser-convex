@@ -245,7 +245,7 @@ bool valid_compressor_state(const daw_audio_compressor_state &state) {
     && std::isfinite(state.output_db) && state.output_db >= -36.0F && state.output_db <= 36.0F
     && std::isfinite(state.dry_wet) && state.dry_wet >= 0.0F && state.dry_wet <= 1.0F
     && std::isfinite(state.knee_db) && state.knee_db >= 0.0F && state.knee_db <= 24.0F
-    && std::isfinite(state.lookahead_ms) && state.lookahead_ms >= 0.0F && state.lookahead_ms <= 10.0F
+    && (state.lookahead_ms == 0.0F || state.lookahead_ms == 1.0F || state.lookahead_ms == 10.0F) && state.auto_makeup <= 1
     && state.detector_mode <= 1 && state.dynamics_mode <= 1 && state.envelope_curve <= 1 && state.sidechain_enabled <= 1
     && state.sidechain_filter_type <= 2 && std::isfinite(state.sidechain_frequency_hz)
     && state.sidechain_frequency_hz >= 20.0F && state.sidechain_frequency_hz <= 20000.0F
@@ -428,7 +428,7 @@ bool decode_processor_state(
     out_processor->gate = state;
     return true;
   }
-  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR && descriptor.state_size == 72) {
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR && descriptor.state_size == 76) {
     const daw_audio_compressor_state state{
       .enabled = read_u32_le(descriptor.state), .threshold_db = read_f32_le(descriptor.state + 4),
       .ratio = read_f32_le(descriptor.state + 8), .attack_ms = read_f32_le(descriptor.state + 12),
@@ -439,6 +439,7 @@ bool decode_processor_state(
       .dynamics_mode = read_u32_le(descriptor.state + 48), .envelope_curve = read_u32_le(descriptor.state + 52),
       .sidechain_enabled = read_u32_le(descriptor.state + 56), .sidechain_filter_type = read_u32_le(descriptor.state + 60),
       .sidechain_frequency_hz = read_f32_le(descriptor.state + 64), .sidechain_q = read_f32_le(descriptor.state + 68),
+      .auto_makeup = read_u32_le(descriptor.state + 72),
     };
     if (!valid_compressor_state(state)) return false;
     out_processor->compressor = state;
@@ -589,8 +590,10 @@ bool valid_processor_parameter_target(uint32_t kind, uint32_t target) {
       return target >= DAW_AUDIO_PROCESSOR_PARAMETER_GATE_THRESHOLD_DB
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_GATE_SIDECHAIN_Q;
     case DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR:
-      return target >= DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_THRESHOLD_DB
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_SIDECHAIN_Q;
+      return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_THRESHOLD_DB
+        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_KNEE_DB)
+        || target == DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_SIDECHAIN_FREQUENCY_HZ
+        || target == DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_SIDECHAIN_Q;
     case DAW_AUDIO_PROCESSOR_KIND_LIMITER:
       return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_CEILING
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_RELEASE)
@@ -747,7 +750,6 @@ bool valid_processor_parameter_value(uint32_t target, float value) {
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_OUTPUT_DB) return value >= DAW_AUDIO_CORE_COMPRESSOR_OUTPUT_DB_MIN && value <= DAW_AUDIO_CORE_COMPRESSOR_OUTPUT_DB_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_DRY_WET) return value >= DAW_AUDIO_CORE_COMPRESSOR_DRY_WET_MIN && value <= DAW_AUDIO_CORE_COMPRESSOR_DRY_WET_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_KNEE_DB) return value >= DAW_AUDIO_CORE_COMPRESSOR_KNEE_DB_MIN && value <= DAW_AUDIO_CORE_COMPRESSOR_KNEE_DB_MAX;
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_LOOKAHEAD_MS) return value >= DAW_AUDIO_CORE_COMPRESSOR_LOOKAHEAD_MS_MIN && value <= DAW_AUDIO_CORE_COMPRESSOR_LOOKAHEAD_MS_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_SIDECHAIN_FREQUENCY_HZ) return value >= DAW_AUDIO_CORE_COMPRESSOR_SIDECHAIN_FREQUENCY_HZ_MIN && value <= DAW_AUDIO_CORE_COMPRESSOR_SIDECHAIN_FREQUENCY_HZ_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_SIDECHAIN_Q) return value >= DAW_AUDIO_CORE_COMPRESSOR_SIDECHAIN_Q_MIN && value <= DAW_AUDIO_CORE_COMPRESSOR_SIDECHAIN_Q_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_CEILING) return value >= DAW_AUDIO_CORE_LIMITER_CEILING_MIN && value <= DAW_AUDIO_CORE_LIMITER_CEILING_MAX;

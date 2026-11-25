@@ -44,6 +44,15 @@ import {
 
 const repositoryRoot = resolve(import.meta.dir, '../../..')
 
+test('every native processor parameter target value is unique', async () => {
+  const header = await readFile(resolve(repositoryRoot, 'native/audio-core/include/daw/audio_core.h'), 'utf8')
+  const targets = [...header.matchAll(/^\s*(DAW_AUDIO_PROCESSOR_PARAMETER_[A-Z0-9_]+)\s*=\s*(\d+)/gm)].map(([, name, value]) => ({ name, value }))
+  const byValue = Map.groupBy(targets, (target) => target.value)
+
+  expect(targets.length).toBeGreaterThan(100)
+  expect([...byValue.values()].filter((group) => group.length > 1).map((group) => group.map((target) => target.name))).toEqual([])
+})
+
 test('generated processor contract artifacts are current and hash-identical', async () => {
   const output = Bun.spawnSync({
     cmd: ['bun', 'packages/audio-core-contract/scripts/generate-contract.ts', '--check'],
@@ -290,7 +299,7 @@ test('processor registry preserves stable portable processor ids', () => {
     expect.objectContaining({ name: 'autopan', id: 8, stateBytes: 24 }),
     expect.objectContaining({ name: 'ensemble', id: 9, stateBytes: 28 }),
     expect.objectContaining({ name: 'gate', id: 10, stateBytes: 60 }),
-    expect.objectContaining({ name: 'compressor', id: 11, stateBytes: 72 }),
+    expect.objectContaining({ name: 'compressor', id: 11, schemaVersion: 2, stateBytes: 76 }),
     expect.objectContaining({ name: 'limiter', id: 12, schemaVersion: 2, stateBytes: 28 }),
     expect.objectContaining({ name: 'delay', id: 13, stateBytes: 32 }),
     expect.objectContaining({ name: 'reverb', id: 14, stateBytes: 72 }),
@@ -312,13 +321,15 @@ test('dynamics codecs preserve portable little-endian state layouts', () => {
 
   const compressor = encodeCompressorProcessorState({
     enabled: true, thresholdDb: -24, ratio: 4, attackMs: 10, releaseMs: 120, autoRelease: true,
-    makeupDb: 0, outputDb: 0, dryWet: 1, kneeDb: 6, lookaheadMs: 0, detectorMode: 'rms',
+    makeupDb: 0, outputDb: 0, dryWet: 1, kneeDb: 6, lookaheadMs: 10, autoMakeup: true, detectorMode: 'rms',
     dynamicsMode: 'compress', envelopeCurve: 'log',
     sidechain: { enabled: true, filterType: 'bandpass', frequencyHz: 120, q: 0.707 },
   })
 
-  expect(compressor.byteLength).toBe(72)
+  expect(compressor.byteLength).toBe(76)
   expect(new DataView(compressor.buffer).getUint32(60, true)).toBe(2)
+  expect(new DataView(compressor.buffer).getFloat32(40, true)).toBe(10)
+  expect(new DataView(compressor.buffer).getUint32(72, true)).toBe(1)
   expect(encodeLimiterProcessorState({ enabled: true, gainDb: 0, ceilingDbtp: -1, releaseMs: 100, autoRelease: false, lookaheadMs: 6, link: 1 }).byteLength).toBe(28)
 })
 

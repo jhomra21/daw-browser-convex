@@ -75,12 +75,13 @@ const gate = (enabled: boolean): Instance => ({
 })
 
 // A hard compressor with full lookahead and a detector low-pass wide enough to pass
-// a steady key.
+// a steady key. The peak detector settles within the matrix test's 40 ms window; the RMS detector's 10 ms time
+// constant needs longer.
 const compressor = (enabled: boolean, thresholdDb: number): Instance => ({
   id: 'subject', kind: 'compressor',
   params: {
     ...createDefaultCompressorParams(), enabled, thresholdDb, ratio: 100, attackMs: 0.1, releaseMs: 5, autoRelease: false,
-    makeupDb: 0, outputDb: 0, dryWet: 1, kneeDb: 0, lookaheadMs: 10,
+    makeupDb: 0, outputDb: 0, dryWet: 1, kneeDb: 0, lookaheadMs: 10, detectorMode: 'peak',
     sidechain: { enabled: true, filterType: 'lowpass', frequencyHz: 20000, q: 0.707 },
   },
 })

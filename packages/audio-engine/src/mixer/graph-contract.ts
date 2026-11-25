@@ -443,7 +443,6 @@ const toPortableProcessor = (
         { id: 'compressor.outputDb', target: 121 },
         { id: 'compressor.dryWet', target: 122 },
         { id: 'compressor.kneeDb', target: 123 },
-        { id: 'compressor.lookaheadMs', target: 124 },
         { id: 'compressor.sidechain.frequencyHz', target: 125 },
         { id: 'compressor.sidechain.q', target: 126 },
       ], bypassed: !instance.params.enabled,

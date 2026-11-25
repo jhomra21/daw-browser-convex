@@ -23,6 +23,7 @@ set(DAW_AUDIO_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core_validation.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core_wasm.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_autofilter.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_compressor.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_delay.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_dynamics.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/processor_eq.cpp
@@ -114,6 +115,17 @@ if(BUILD_TESTING)
   endif()
   foreach(group IN ITEMS attack ceiling gain auto latency clean safety cpu)
     add_test(NAME daw-limiter-${group} COMMAND daw-limiter-test ${group})
+  endforeach()
+  # Compressor kernel (src/compressor_kernel.h). One ctest per measurement group; the executable prints each value.
+  add_executable(daw-compressor-test tests/compressor_test.cpp)
+  target_compile_features(daw-compressor-test PRIVATE cxx_std_20)
+  if(MSVC)
+    target_compile_options(daw-compressor-test PRIVATE /W4 /WX /EHs-c- /GR-)
+  else()
+    target_compile_options(daw-compressor-test PRIVATE -Wall -Wextra -Werror -fno-exceptions -fno-rtti)
+  endif()
+  foreach(group IN ITEMS detector safety smoothing sidechain latency release makeup cpu)
+    add_test(NAME daw-compressor-${group} COMMAND daw-compressor-test ${group})
   endforeach()
   # EQ band designs (src/dsp/eq_band.h) against the analog prototypes.
   add_executable(daw-eq-design-test tests/eq_design_test.cpp)

@@ -25,6 +25,7 @@
 #include "../src/audio_core_validation.cpp"
 #include "../src/audio_core_wasm.cpp"
 #include "../src/processor_autofilter.cpp"
+#include "../src/processor_compressor.cpp"
 #include "../src/processor_limiter.cpp"
 #include "../src/processor_delay.cpp"
 #include "../src/processor_dynamics.cpp"
@@ -127,6 +128,7 @@ void native_instrument_source_hook(const daw::audio_core::NativeGraphNodeRender&
 // Every processor state is at schema version 1 except the EQ, whose layout was extended.
 uint32_t schema_version_of(uint32_t kind) {
   return kind == DAW_AUDIO_PROCESSOR_KIND_EQ ? DAW_AUDIO_CORE_PROCESSOR_EQ_SCHEMA_VERSION
+    : kind == DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR ? DAW_AUDIO_CORE_PROCESSOR_COMPRESSOR_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_LIMITER ? DAW_AUDIO_CORE_PROCESSOR_LIMITER_SCHEMA_VERSION : 1u;
 }
 
@@ -1536,12 +1538,12 @@ HistoryFixtureState history_fixture_state(uint32_t kind) {
     write_f32(32, -48.0F); write_f32(36, 1.0F); write_u32(40, 0); write_f32(44, 0.75F);
     write_u32(48, 0); write_f32(52, 80.0F); write_f32(56, 0.707F);
   } else if (kind == DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR) {
-    fixture.size = 72; fixture.latency = 480;
+    fixture.size = 76; fixture.latency = 480;
     write_u32(0, 1); write_f32(4, -18.0F); write_f32(8, 4.0F); write_f32(12, 3.0F);
     write_f32(16, 60.0F); write_u32(20, 0); write_f32(24, 2.0F); write_f32(28, -1.0F);
-    write_f32(32, 0.8F); write_f32(36, 6.0F); write_f32(40, 4.0F); write_u32(44, 0);
+    write_f32(32, 0.8F); write_f32(36, 6.0F); write_f32(40, 10.0F); write_u32(44, 0);
     write_u32(48, 0); write_u32(52, 0); write_u32(56, 0); write_u32(60, 1);
-    write_f32(64, 120.0F); write_f32(68, 0.707F);
+    write_f32(64, 120.0F); write_f32(68, 0.707F); write_u32(72, 0);
   } else if (kind == DAW_AUDIO_PROCESSOR_KIND_LIMITER) {
     fixture.size = 28; fixture.latency = 288;
     write_u32(0, 1); write_f32(4, -6.0F); write_f32(8, 50.0F); write_f32(12, 6.0F);
@@ -2237,14 +2239,14 @@ void test_targeted_sidechain_routing() {
   daw_audio_core_handle core = create_core(512, 2, 1);
   const std::array<daw_audio_graph_node_descriptor, 3> nodes{{
     {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
-    {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 1, .latency_frames = 480},
+    {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 1, .latency_frames = 0},
     {.id = 3, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
   }};
   std::array<daw_audio_graph_edge_descriptor, 2> edges{{
     {.id = 1, .from_node_id = 2, .to_node_id = 3, .target_processor_id = 0, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
     {.id = 2, .from_node_id = 1, .to_node_id = 2, .target_processor_id = 77, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 1, .pdc_delay_frames = 0},
   }};
-  std::array<uint8_t, 72> state{};
+  std::array<uint8_t, 76> state{};
   const auto write_u32 = [&state](uint32_t offset, uint32_t value) {
     state[offset] = static_cast<uint8_t>(value); state[offset + 1] = static_cast<uint8_t>(value >> 8u);
     state[offset + 2] = static_cast<uint8_t>(value >> 16u); state[offset + 3] = static_cast<uint8_t>(value >> 24u);
@@ -2256,9 +2258,9 @@ void test_targeted_sidechain_routing() {
   write_u32(20, 0); write_f32(24, 0.0F); write_f32(28, 0.0F); write_f32(32, 1.0F); write_f32(36, 0.0F); write_f32(40, 0.0F);
   write_u32(44, 0); write_u32(48, 0); write_u32(52, 0); write_u32(56, 1); write_u32(60, 1); write_f32(64, 120.0F); write_f32(68, 0.707F);
   const daw_audio_processor_descriptor processor{
-    .node_id = 2, .instance_id = 99, .kind = DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR, .state_version = 1, .state_size = 72,
+    .node_id = 2, .instance_id = 99, .kind = DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR, .state_version = DAW_AUDIO_CORE_PROCESSOR_COMPRESSOR_SCHEMA_VERSION, .state_size = 76,
     .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
-    .latency_frames = 480, .tail_frames = 0, .parameter_count = 0, .parameter_targets = nullptr, .state = state.data(),
+    .latency_frames = 0, .tail_frames = 0, .parameter_count = 0, .parameter_targets = nullptr, .state = state.data(),
   };
   daw_audio_graph_prepare_request request{
     .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = 1, .node_count = 3, .edge_count = 2,
@@ -2354,14 +2356,14 @@ void test_portable_dynamics_processor_characterization() {
   const std::array<daw_audio_graph_edge_descriptor, 1> edges{{
     {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
   }};
-  const auto write_u32 = [](std::array<uint8_t, 72> &bytes, uint32_t offset, uint32_t value) {
+  const auto write_u32 = [](std::array<uint8_t, 76> &bytes, uint32_t offset, uint32_t value) {
     bytes[offset] = static_cast<uint8_t>(value); bytes[offset + 1] = static_cast<uint8_t>(value >> 8u);
     bytes[offset + 2] = static_cast<uint8_t>(value >> 16u); bytes[offset + 3] = static_cast<uint8_t>(value >> 24u);
   };
-  const auto write_f32 = [&write_u32](std::array<uint8_t, 72> &bytes, uint32_t offset, float value) {
+  const auto write_f32 = [&write_u32](std::array<uint8_t, 76> &bytes, uint32_t offset, float value) {
     uint32_t bits = 0; std::memcpy(&bits, &value, sizeof(bits)); write_u32(bytes, offset, bits);
   };
-  const auto render = [&](uint32_t kind, uint32_t state_size, const std::array<uint8_t, 72> &state, uint32_t latency) {
+  const auto render = [&](uint32_t kind, uint32_t state_size, const std::array<uint8_t, 76> &state, uint32_t latency) {
     daw_audio_core_handle core = create_core(4096, 2, 1);
     std::array<daw_audio_graph_node_descriptor, 2> processor_nodes = nodes;
     processor_nodes[1].latency_frames = latency;
@@ -2392,7 +2394,7 @@ void test_portable_dynamics_processor_characterization() {
     daw_audio_core_destroy(core);
     return last;
   };
-  std::array<uint8_t, 72> state{};
+  std::array<uint8_t, 76> state{};
   write_u32(state, 0, 1); write_u32(state, 4, 0); write_f32(state, 8, -20.0F); write_f32(state, 12, 4.0F);
   write_f32(state, 16, 0.1F); write_f32(state, 20, 0.0F); write_f32(state, 24, 5.0F); write_f32(state, 28, 0.0F);
   write_f32(state, 32, -40.0F); write_f32(state, 36, 0.0F); write_u32(state, 40, 0); write_f32(state, 44, 1.0F);
@@ -2404,7 +2406,7 @@ void test_portable_dynamics_processor_characterization() {
   write_f32(state, 28, 0.0F); write_f32(state, 32, 1.0F); write_f32(state, 36, 0.0F); write_f32(state, 40, 0.0F);
   write_u32(state, 44, 0); write_u32(state, 48, 0); write_u32(state, 52, 0); write_u32(state, 56, 0); write_u32(state, 60, 0);
   write_f32(state, 64, 120.0F); write_f32(state, 68, 0.707F);
-  const float compressor = render(DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR, 72, state, 480);
+  const float compressor = render(DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR, 76, state, 0);
   assert(compressor < 0.8F);
   state.fill(0); write_u32(state, 0, 1); write_f32(state, 4, -6.0F); write_f32(state, 8, 20.0F);
   write_f32(state, 12, 6.0F); write_f32(state, 16, 1.0F); write_u32(state, 20, 0); write_f32(state, 24, 0.0F);
@@ -6073,7 +6075,7 @@ struct Phase3Rig {
   std::vector<daw_audio_processor_descriptor> processors;
   std::deque<daw_audio_utility_state> utilities;
   std::deque<std::array<uint8_t, 32>> saturators;
-  std::deque<std::array<uint8_t, 72>> compressors;
+  std::deque<std::array<uint8_t, 76>> compressors;
   std::deque<std::vector<uint8_t>> states;
   // When set, the output of this node is captured on every render, whatever the
   // master mix does: an exact view of one object for isolation oracles.
@@ -6185,7 +6187,7 @@ struct Phase3Rig {
     };
     put(0, 1); put_float(4, threshold_db); put_float(8, 100.0F); put_float(12, 0.1F); put_float(16, 5.0F);
     put_float(32, 1.0F); put_float(40, 10.0F); put(56, 1); put(60, 1); put_float(64, 20000.0F); put_float(68, 0.707F);
-    add_processor(node, instance, DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR, 72, bytes.data(), false);
+    add_processor(node, instance, DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR, 76, bytes.data(), false);
   }
   // Any processor whose ABI state is a plain struct (EQ, gate, limiter, ...).
   template <typename State>

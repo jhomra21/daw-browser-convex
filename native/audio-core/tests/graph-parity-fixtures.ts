@@ -1352,7 +1352,8 @@ const dynamicsDefinitions: readonly DynamicsFixtureDefinition[] = [
         outputDb: -1,
         dryWet: 0.8,
         kneeDb: 6,
-        lookaheadMs: 4,
+        lookaheadMs: 10,
+        autoMakeup: false,
         detectorMode: 'peak',
         dynamicsMode: 'compress',
         envelopeCurve: 'log',
@@ -1391,7 +1392,7 @@ const encodeDynamicsState = (fixture: PortableLegacyDynamicsFixture) => {
 const dynamicsParameterTargets = (kind: PortableDynamicsKind): readonly number[] => {
   if (kind === 'gate') return Array.from({ length: 11 }, (_, index) => 105 + index)
 
-  if (kind === 'compressor') return Array.from({ length: 11 }, (_, index) => 116 + index)
+  if (kind === 'compressor') return [116, 117, 118, 119, 120, 121, 122, 123, 125, 126]
 
   return [127, 128, 130, 170]
 }

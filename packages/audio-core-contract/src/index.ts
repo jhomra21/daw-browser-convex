@@ -169,7 +169,8 @@ export type CompressorProcessorState = {
   outputDb: number
   dryWet: number
   kneeDb: number
-  lookaheadMs: number
+  lookaheadMs: 0 | 1 | 10
+  autoMakeup: boolean
   detectorMode: 'peak' | 'rms'
   dynamicsMode: 'compress' | 'expand'
   envelopeCurve: 'log' | 'linear'
@@ -980,7 +981,7 @@ export const encodeGateProcessorState = (state: GateProcessorState): Uint8Array 
 }
 
 export const encodeCompressorProcessorState = (state: CompressorProcessorState): Uint8Array => {
-  const output = new Uint8Array(72)
+  const output = new Uint8Array(76)
   const view = new DataView(output.buffer)
   view.setUint32(0, state.enabled ? 1 : 0, true)
   view.setFloat32(4, state.thresholdDb, true)
@@ -1000,6 +1001,7 @@ export const encodeCompressorProcessorState = (state: CompressorProcessorState):
   view.setUint32(60, state.sidechain.filterType === 'lowpass' ? 1 : state.sidechain.filterType === 'bandpass' ? 2 : 0, true)
   view.setFloat32(64, state.sidechain.frequencyHz, true)
   view.setFloat32(68, state.sidechain.q, true)
+  view.setUint32(72, state.autoMakeup ? 1 : 0, true)
 
   return output
 }

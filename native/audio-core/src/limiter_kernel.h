@@ -118,6 +118,9 @@ class LimiterKernel {
       dsp::flushDenormal(std::isfinite(input_left) ? input_left : 0.0F),
       dsp::flushDenormal(std::isfinite(input_right) ? input_right : 0.0F)};
     const uint32_t slot = write_ & kMask;
+    // The clip uses the ceiling a sample was detected under: the gain it leaves the delay line with was made for that one, and
+    // the current ceiling would clip the audio in the line when it steps down.
+    ceilings_[slot] = ceiling_;
     std::array<float, 2> target{};
     for (uint32_t c = 0; c < 2; ++c) {
       channels_[c].dry[slot] = input[c];
@@ -138,10 +141,11 @@ class LimiterKernel {
       channel.gain = std::min(smooth, 1.0F + release_coefficient(channel, config.auto_release) * (channel.gain - 1.0F));
       if (config.auto_release) track_sustain(channel, smooth);
       float out = channel.gained[read] * channel.gain;
-      if (std::fabs(out) > ceiling_) {
+      const float ceiling = ceilings_[read];
+      if (std::fabs(out) > ceiling) {
         // Rounding of the gain itself is not an event; anything past it is the detector's miss.
-        if (std::fabs(out) > ceiling_ * 1.00001F) ++safety_clips_;
-        out = std::copysign(ceiling_, out);
+        if (std::fabs(out) > ceiling * 1.00001F) ++safety_clips_;
+        out = std::copysign(ceiling, out);
       }
       wet[c] = out;
     }
@@ -350,6 +354,7 @@ class LimiterKernel {
   dsp::ParameterSmoother<> gain_{};
   bool primed_ = false;
   std::array<Channel, 2> channels_{};
+  std::array<float, kCapacity> ceilings_{};
   std::array<uint32_t, 2> box_lengths_{1, 1};
   Coefficients coefficients_{};
   uint32_t delay_ = 0;

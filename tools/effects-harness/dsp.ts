@@ -136,6 +136,28 @@ export const audibleAliasDb = (signal: ArrayLike<number>, fundamentalHz: number,
 export const toneGainDb = (input: ArrayLike<number>, output: ArrayLike<number>, frequencyHz: number, rate: number, from: number, to: number) =>
   linearToDb(toneFit(output, frequencyHz, rate, from, to).amplitude / toneFit(input, frequencyHz, rate, from, to).amplitude)
 
+/**
+ * Largest change of the gain in dB per sample over [from, to), reading the gain as output / input delayed by `latency`. Samples near a
+ * zero crossing carry no gain reading; the change across them is spread over the frames skipped.
+ */
+export const maxGainStepDb = (input: ArrayLike<number>, output: ArrayLike<number>, latency: number, from: number, to: number) => {
+  let previous: { gain: number; frame: number } | null = null
+  let jump = 0
+
+  for (let n = from; n < to; n += 1) {
+    const reference = input[n - latency]
+
+    if (Math.abs(reference) < 0.02) continue
+    const gain = linearToDb(Math.abs(output[n]) / Math.abs(reference))
+
+    if (previous) jump = Math.max(jump, Math.abs(gain - previous.gain) / (n - previous.frame))
+
+    previous = { gain, frame: n }
+  }
+
+  return jump
+}
+
 /** First frame of the largest magnitude: the impulse delay of the dry path. */
 export const peakFrame = (signal: ArrayLike<number>) => {
   let best = 0

@@ -5,7 +5,7 @@ import type { EffectSpec } from '../effects'
 import type { Scenario } from '../harness'
 import { clickTrain, concat, constant, noise, sine, silence } from '../signals'
 
-const parityLimit = 1e-5
+export const parityLimit = 1e-5
 
 /** Fixed fixtures, 2 s: tone, noise, step, isolated clicks and a near-Nyquist tone. */
 export const parityFixtures = (rate: number): [string, Float32Array][] => {

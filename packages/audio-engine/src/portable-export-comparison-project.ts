@@ -105,7 +105,7 @@ export const createComparisonProject = (
   const compressor = {
     id: 'comp',
     kind: 'compressor',
-    params: { ...createDefaultCompressorParams(), thresholdDb: -30, ratio: 8, attackMs: 2, releaseMs: 80 },
+    params: { ...createDefaultCompressorParams(), thresholdDb: -30, ratio: 8, attackMs: 2, releaseMs: 80, lookaheadMs: 10 },
   } as const
 
   const fx: ExportFx = {

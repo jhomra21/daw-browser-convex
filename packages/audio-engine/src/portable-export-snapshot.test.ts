@@ -807,7 +807,7 @@ test('projects fixture-proven processors for offline export while rejecting unsu
     ['autopan', 0, 0],
     ['ensemble', 0, 1_152],
     ['gate', 96, 0],
-    ['compressor', 480, 0],
+    ['compressor', 0, 0],
     ['limiter', 144, 0],
   ])
   expect(result.graph.nodes.find((node) => node.id === 'track-1')?.processorOrder[1]?.parameterTargets).toHaveLength(50)

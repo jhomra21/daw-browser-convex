@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { normalizeCompressorParams } from '@daw-browser/shared'
-import { computeCompressorWorkletCurveDb } from './effects/compressor-worklet'
+import { computeCompressorStaticCurveDb, normalizeCompressorParams } from '@daw-browser/shared'
 import { createRecorderSabRingBuffers, createRecorderSabRingConsumer } from './recording/sab-ring-buffer'
 import { compressorWorklet, gateWorklet, limiterWorklet, modulationWorklet, recorderWorklet, spectralWorklet, trackMeterWorklet, utilityWorklet } from './worklet-manifest'
 
@@ -207,7 +206,7 @@ describe('checked-in worklet assets', () => {
     const onmessage = processor.port.onmessage
 
     if (!onmessage) throw new Error('Compressor processor did not bind its message handler.')
-    onmessage({ data: { type: 'params', params: normalizeCompressorParams({ enabled: false, dryWet: 1 }) } })
+    onmessage({ data: { type: 'params', params: normalizeCompressorParams({ enabled: false, dryWet: 1, lookaheadMs: 10 }) } })
     const input = new Float32Array(482)
     input[0] = 0.25
     input[1] = -0.5
@@ -217,12 +216,18 @@ describe('checked-in worklet assets', () => {
     expect(output[480]).toBe(0.25)
     expect(output[481]).toBe(-0.5)
 
-    const params = normalizeCompressorParams({ thresholdDb: -18, ratio: 6, kneeDb: 8 })
+    const params = normalizeCompressorParams({ thresholdDb: -18, ratio: 6, kneeDb: 8, attackMs: 1, autoRelease: false, detectorMode: 'peak' })
 
     for (const inputDb of [-40, -20, -18, -12, 0]) {
-      expect(evaluated.exports.curveDb(inputDb, params)).toBeCloseTo(
-        computeCompressorWorkletCurveDb(inputDb, params),
-        12,
+      const fresh = new Processor()
+      fresh.port.onmessage?.({ data: { type: 'params', params } })
+      const level = 10 ** (inputDb / 20)
+      const steady = new Float32Array(9600).fill(level)
+      const settled = new Float32Array(steady.length)
+      fresh.process([[steady]], [[settled]])
+      expect(20 * Math.log10((settled[settled.length - 1] ?? 0) / level)).toBeCloseTo(
+        computeCompressorStaticCurveDb(inputDb, params) - inputDb,
+        2,
       )
     }
   })

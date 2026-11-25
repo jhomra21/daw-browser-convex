@@ -44,6 +44,23 @@ test('forwards a parsed restore-chain payload without transport-only fields', ()
   })
 })
 
+test('forwards the params version of each restored effect', () => {
+  const operation = parseSharedTimelineOperation({
+    kind: 'effects.restoreChain',
+    payload: {
+      trackId: 'track-1',
+      operationId: 'restore-1',
+      audioEffects: [{ id: 'limiter-1', kind: 'limiter', params: { version: 1, state: {} }, paramsVersion: 1 }],
+    },
+  })
+
+  if (!operation || operation.kind !== 'effects.restoreChain') {
+    throw new Error('Expected restore-chain operation to parse')
+  }
+
+  expect(buildRestoreChainMutationArgs('project-1', operation.payload).audioEffects.map((effect) => effect.paramsVersion)).toEqual([1])
+})
+
 test('forwards name and collapsed state when creating a track', () => {
   const operation = parseSharedTimelineOperation({
     kind: 'tracks.create',

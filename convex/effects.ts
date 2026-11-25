@@ -6,7 +6,7 @@ import { requireMasterBusWriteAccess, requireProjectAccess } from "./projectAcce
 import { requireAuthenticatedUserId } from "./identity";
 import { getTrackWriteAccess } from "./trackWrites";
 import { runSharedOperationOnce } from "./sharedOperationResults";
-import { currentEffectDocs, currentEffectRows } from "./effectRowParams";
+import { currentEffectDocs, currentEffectRows, writtenEffectParams } from "./effectRowParams";
 import { withProjectEdit, type ProjectEdit } from "./projectRows";
 import { arpeggiatorParamsValidator, legacySynthParamsValidator, literalUnion, synthParamsValidator, trackInstrumentValidator } from "./validators";
 import {
@@ -94,6 +94,7 @@ const compressorParamsValidator = v.object({
   dryWet: v.number(),
   kneeDb: v.number(),
   lookaheadMs: v.number(),
+  autoMakeup: v.optional(v.boolean()),
   detectorMode: v.union(v.literal('peak'), v.literal('rms')),
   dynamicsMode: v.union(v.literal('compress'), v.literal('expand')),
   envelopeCurve: v.union(v.literal('log'), v.literal('linear')),
@@ -129,6 +130,8 @@ const delayParamsValidator = v.object({
   highCutHz: v.number(),
 })
 
+// The params version the client wrote with; a write without one is read as version 1.
+const paramsVersionValidator = v.optional(v.number())
 const processorEnvelopeValidator = v.object({ version: v.literal(1), state: v.any() })
 const processorEffectValidator = literalUnion(audioEffectKindsWithOperation("processor"))
 const modulationEffectValidator = literalUnion(audioEffectKindsWithOperation("modulation"))
@@ -256,10 +259,15 @@ export const upsertTrackEffectRow = async (
     trackId: Id<'tracks'>
     type: TrackAudioEffectType
     params: any
+    // The version a client wrote `params` at; absent when this server's own code wrote them.
+    paramsVersion?: number
     instanceId?: string
   },
 ): Promise<EffectRowWriteResult> => {
   const revision = edit.revision
+  const written = writtenEffectParams(input.type, input.params, input.paramsVersion)
+
+  if (written === undefined) return invalidEffectWrite
 
   const existing = (await currentEffectDocs(ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()))
     .sort((left: EffectOrderRow, right: EffectOrderRow) => (
@@ -302,7 +310,7 @@ export const upsertTrackEffectRow = async (
   }
 
   if (row) {
-    const params = normalizeEffectParamsForUpdate(input.type, input.params, row.params)
+    const params = normalizeEffectParamsForUpdate(input.type, written, row.params)
 
     const sameContent = (row.type === input.type && stableEffectParams(row.params) === stableEffectParams(params))
       || (row.type === 'instrument' && row.instanceId === input.instanceId && areEffectParamsEqual(input.type, row.params, params))
@@ -329,7 +337,7 @@ export const upsertTrackEffectRow = async (
     return effectRowWriteResult('updated', row._id, revision)
   }
 
-  const params = normalizeEffectParamsForUpdate(input.type, input.params)
+  const params = normalizeEffectParamsForUpdate(input.type, written)
   edit.stamp()
 
   const effectId = await ctx.db.insert('effects', {
@@ -386,10 +394,14 @@ export const upsertMasterEffectRow = async (
     projectId: string
     type: MasterAudioEffectType
     params: any
+    paramsVersion?: number
     instanceId?: string
   },
 ): Promise<EffectRowWriteResult> => {
   const revision = edit.revision
+  const written = writtenEffectParams(input.type, input.params, input.paramsVersion)
+
+  if (written === undefined) return invalidEffectWrite
   const existing = await currentEffectDocs(ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect())
 
   if (input.instanceId) {
@@ -402,7 +414,7 @@ export const upsertMasterEffectRow = async (
     : existing.find((entry: EffectOrderRow) => entry.type === input.type && !entry.instanceId) ?? null
 
   if (row) {
-    const params = normalizeEffectParamsForUpdate(input.type, input.params, row.params)
+    const params = normalizeEffectParamsForUpdate(input.type, written, row.params)
 
     if (areEffectParamsEqual(input.type, row.params, params)) return effectRowWriteResult('noop', row._id, row.revision ?? 0)
     edit.stamp()
@@ -411,7 +423,7 @@ export const upsertMasterEffectRow = async (
     return effectRowWriteResult('updated', row._id, revision)
   }
 
-  const params = normalizeEffectParamsForUpdate(input.type, input.params)
+  const params = normalizeEffectParamsForUpdate(input.type, written)
   edit.stamp()
 
   const effectId = await ctx.db.insert('effects', {
@@ -437,6 +449,7 @@ const upsertTrackEffectForUser = async (
     trackId: any
     type: TrackAudioEffectType
     params: any
+    paramsVersion?: number
     instanceId?: string
   },
 ) => {
@@ -444,7 +457,7 @@ const upsertTrackEffectForUser = async (
 
   if (!access || access.track.projectId !== input.projectId) return invalidEffectWrite
 
-  return await withProjectEdit(ctx, input.projectId, (edit) => upsertTrackEffectRow(ctx, edit, input))
+  return await withProjectEdit(ctx, input.projectId, (edit) => upsertTrackEffectRow(ctx, edit, { ...input, paramsVersion: input.paramsVersion ?? 1 }))
 }
 
 const setTrackInstrumentForUser = async (
@@ -486,12 +499,13 @@ const upsertMasterEffectForUser = async (
     userId: string
     type: MasterAudioEffectType
     params: any
+    paramsVersion?: number
     instanceId?: string
   },
 ) => {
   await requireMasterBusWriteAccess(ctx, input.projectId, input.userId)
 
-  return await withProjectEdit(ctx, input.projectId, (edit) => upsertMasterEffectRow(ctx, edit, input))
+  return await withProjectEdit(ctx, input.projectId, (edit) => upsertMasterEffectRow(ctx, edit, { ...input, paramsVersion: input.paramsVersion ?? 1 }))
 }
 
 type EffectOrderRow = {
@@ -936,15 +950,15 @@ export const serverSetReverbParams = mutation({
     projectId: v.string(),
     trackId: v.string(),
     instanceId: v.optional(v.string()),
-    params: reverbParamsValidator,
+    params: reverbParamsValidator, paramsVersion: paramsVersionValidator,
   },
-  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
+  handler: async (ctx, { projectId, trackId, instanceId, params, paramsVersion }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
 
     if (!normalizedTrackId) return { status: 'invalid' as const }
 
-    return effectWriteOutcome(await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'reverb', instanceId, params }))
+    return effectWriteOutcome(await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'reverb', instanceId, params, paramsVersion }))
   },
 })
 
@@ -953,39 +967,39 @@ export const serverSetEqParams = mutation({
     projectId: v.string(),
     trackId: v.string(),
     instanceId: v.optional(v.string()),
-    params: eqParamsValidator,
+    params: eqParamsValidator, paramsVersion: paramsVersionValidator,
   },
-  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
+  handler: async (ctx, { projectId, trackId, instanceId, params, paramsVersion }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
 
     if (!normalizedTrackId) return { status: 'invalid' as const }
 
-    return effectWriteOutcome(await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'eq', instanceId, params }))
+    return effectWriteOutcome(await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'eq', instanceId, params, paramsVersion }))
   },
 })
 
 export const serverSetProcessorParams = mutation({
-  args: { projectId: v.string(), trackId: v.string(), effect: processorEffectValidator, instanceId: v.string(), params: processorEnvelopeValidator },
-  handler: async (ctx, { projectId, trackId, effect, instanceId, params }) => {
+  args: { projectId: v.string(), trackId: v.string(), effect: processorEffectValidator, instanceId: v.string(), params: processorEnvelopeValidator, paramsVersion: paramsVersionValidator },
+  handler: async (ctx, { projectId, trackId, effect, instanceId, params, paramsVersion }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
 
     if (!normalizedTrackId) return { status: 'invalid' as const }
 
-    return effectWriteOutcome(await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: effect, instanceId, params }))
+    return effectWriteOutcome(await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: effect, instanceId, params, paramsVersion }))
   },
 })
 
 export const serverSetModulationParams = mutation({
-  args: { projectId: v.string(), trackId: v.string(), effect: modulationEffectValidator, instanceId: v.string(), params: processorEnvelopeValidator },
-  handler: async (ctx, { projectId, trackId, effect, instanceId, params }) => {
+  args: { projectId: v.string(), trackId: v.string(), effect: modulationEffectValidator, instanceId: v.string(), params: processorEnvelopeValidator, paramsVersion: paramsVersionValidator },
+  handler: async (ctx, { projectId, trackId, effect, instanceId, params, paramsVersion }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
 
     if (!normalizedTrackId) return { status: 'invalid' as const }
 
-    return effectWriteOutcome(await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: effect, instanceId, params }))
+    return effectWriteOutcome(await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: effect, instanceId, params, paramsVersion }))
   },
 })
 
@@ -993,12 +1007,12 @@ export const serverSetMasterReverbParams = mutation({
   args: {
     projectId: v.string(),
     instanceId: v.optional(v.string()),
-    params: reverbParamsValidator,
+    params: reverbParamsValidator, paramsVersion: paramsVersionValidator,
   },
-  handler: async (ctx, { projectId, instanceId, params }) => {
+  handler: async (ctx, { projectId, instanceId, params, paramsVersion }) => {
     const userId = await requireAuthenticatedUserId(ctx)
 
-    return effectWriteOutcome(await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'reverb', instanceId, params }))
+    return effectWriteOutcome(await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'reverb', instanceId, params, paramsVersion }))
   },
 })
 
@@ -1006,93 +1020,93 @@ export const serverSetMasterEqParams = mutation({
   args: {
     projectId: v.string(),
     instanceId: v.optional(v.string()),
-    params: eqParamsValidator,
+    params: eqParamsValidator, paramsVersion: paramsVersionValidator,
   },
-  handler: async (ctx, { projectId, instanceId, params }) => {
+  handler: async (ctx, { projectId, instanceId, params, paramsVersion }) => {
     const userId = await requireAuthenticatedUserId(ctx)
 
-    return effectWriteOutcome(await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'eq', instanceId, params }))
+    return effectWriteOutcome(await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'eq', instanceId, params, paramsVersion }))
   },
 })
 
 export const serverSetMasterProcessorParams = mutation({
-  args: { projectId: v.string(), effect: processorEffectValidator, instanceId: v.string(), params: processorEnvelopeValidator },
-  handler: async (ctx, { projectId, effect, instanceId, params }) => {
+  args: { projectId: v.string(), effect: processorEffectValidator, instanceId: v.string(), params: processorEnvelopeValidator, paramsVersion: paramsVersionValidator },
+  handler: async (ctx, { projectId, effect, instanceId, params, paramsVersion }) => {
     const userId = await requireAuthenticatedUserId(ctx)
 
-    return effectWriteOutcome(await upsertMasterEffectForUser(ctx, { projectId, userId, type: effect, instanceId, params }))
+    return effectWriteOutcome(await upsertMasterEffectForUser(ctx, { projectId, userId, type: effect, instanceId, params, paramsVersion }))
   },
 })
 
 export const serverSetMasterModulationParams = mutation({
-  args: { projectId: v.string(), effect: modulationEffectValidator, instanceId: v.string(), params: processorEnvelopeValidator },
-  handler: async (ctx, { projectId, effect, instanceId, params }) => {
+  args: { projectId: v.string(), effect: modulationEffectValidator, instanceId: v.string(), params: processorEnvelopeValidator, paramsVersion: paramsVersionValidator },
+  handler: async (ctx, { projectId, effect, instanceId, params, paramsVersion }) => {
     const userId = await requireAuthenticatedUserId(ctx)
 
-    return effectWriteOutcome(await upsertMasterEffectForUser(ctx, { projectId, userId, type: effect, instanceId, params }))
+    return effectWriteOutcome(await upsertMasterEffectForUser(ctx, { projectId, userId, type: effect, instanceId, params, paramsVersion }))
   },
 })
 
 export const serverSetCompressorParams = mutation({
-  args: { projectId: v.string(), trackId: v.string(), instanceId: v.optional(v.string()), params: compressorParamsValidator },
-  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
+  args: { projectId: v.string(), trackId: v.string(), instanceId: v.optional(v.string()), params: compressorParamsValidator, paramsVersion: paramsVersionValidator },
+  handler: async (ctx, { projectId, trackId, instanceId, params, paramsVersion }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
 
     if (!normalizedTrackId) return { status: 'invalid' as const }
 
-    return effectWriteOutcome(await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'compressor', instanceId, params }))
+    return effectWriteOutcome(await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'compressor', instanceId, params, paramsVersion }))
   },
 })
 
 export const serverSetSaturatorParams = mutation({
-  args: { projectId: v.string(), trackId: v.string(), instanceId: v.optional(v.string()), params: saturatorParamsValidator },
-  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
+  args: { projectId: v.string(), trackId: v.string(), instanceId: v.optional(v.string()), params: saturatorParamsValidator, paramsVersion: paramsVersionValidator },
+  handler: async (ctx, { projectId, trackId, instanceId, params, paramsVersion }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
 
     if (!normalizedTrackId) return { status: 'invalid' as const }
 
-    return effectWriteOutcome(await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'saturator', instanceId, params }))
+    return effectWriteOutcome(await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'saturator', instanceId, params, paramsVersion }))
   },
 })
 
 export const serverSetDelayParams = mutation({
-  args: { projectId: v.string(), trackId: v.string(), instanceId: v.optional(v.string()), params: delayParamsValidator },
-  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
+  args: { projectId: v.string(), trackId: v.string(), instanceId: v.optional(v.string()), params: delayParamsValidator, paramsVersion: paramsVersionValidator },
+  handler: async (ctx, { projectId, trackId, instanceId, params, paramsVersion }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
 
     if (!normalizedTrackId) return { status: 'invalid' as const }
 
-    return effectWriteOutcome(await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'delay', instanceId, params }))
+    return effectWriteOutcome(await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'delay', instanceId, params, paramsVersion }))
   },
 })
 
 export const serverSetMasterCompressorParams = mutation({
-  args: { projectId: v.string(), instanceId: v.optional(v.string()), params: compressorParamsValidator },
-  handler: async (ctx, { projectId, instanceId, params }) => {
+  args: { projectId: v.string(), instanceId: v.optional(v.string()), params: compressorParamsValidator, paramsVersion: paramsVersionValidator },
+  handler: async (ctx, { projectId, instanceId, params, paramsVersion }) => {
     const userId = await requireAuthenticatedUserId(ctx)
 
-    return effectWriteOutcome(await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'compressor', instanceId, params }))
+    return effectWriteOutcome(await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'compressor', instanceId, params, paramsVersion }))
   },
 })
 
 export const serverSetMasterSaturatorParams = mutation({
-  args: { projectId: v.string(), instanceId: v.optional(v.string()), params: saturatorParamsValidator },
-  handler: async (ctx, { projectId, instanceId, params }) => {
+  args: { projectId: v.string(), instanceId: v.optional(v.string()), params: saturatorParamsValidator, paramsVersion: paramsVersionValidator },
+  handler: async (ctx, { projectId, instanceId, params, paramsVersion }) => {
     const userId = await requireAuthenticatedUserId(ctx)
 
-    return effectWriteOutcome(await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'saturator', instanceId, params }))
+    return effectWriteOutcome(await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'saturator', instanceId, params, paramsVersion }))
   },
 })
 
 export const serverSetMasterDelayParams = mutation({
-  args: { projectId: v.string(), instanceId: v.optional(v.string()), params: delayParamsValidator },
-  handler: async (ctx, { projectId, instanceId, params }) => {
+  args: { projectId: v.string(), instanceId: v.optional(v.string()), params: delayParamsValidator, paramsVersion: paramsVersionValidator },
+  handler: async (ctx, { projectId, instanceId, params, paramsVersion }) => {
     const userId = await requireAuthenticatedUserId(ctx)
 
-    return effectWriteOutcome(await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'delay', instanceId, params }))
+    return effectWriteOutcome(await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'delay', instanceId, params, paramsVersion }))
   },
 })
 
@@ -1129,6 +1143,7 @@ export const restoreChainArgsValidator = {
     id: v.string(),
     kind: canonicalAudioEffectKindValidator,
     params: v.any(),
+    paramsVersion: paramsVersionValidator,
   })),
   instrument: v.optional(trackInstrumentValidator),
   arpeggiator: v.optional(arpeggiatorParamsValidator),
@@ -1213,10 +1228,15 @@ export const serverRestoreChain = mutation({
 
     if (!normalizedTrackId) return notFoundStatus()
     const instanceIds = new Set<string>()
+    const writtenEffects: Array<{ id: string; kind: AudioEffectKind; params: JsonValue }> = []
 
     for (const effect of audioEffects) {
       if (!effect.id || instanceIds.has(effect.id)) throw new Error('Audio effect instance IDs must be unique.')
       instanceIds.add(effect.id)
+      const params = writtenEffectParams(effect.kind, effect.params, effect.paramsVersion ?? 1)
+
+      if (params === undefined) return { status: 'invalid' as const }
+      writtenEffects.push({ id: effect.id, kind: effect.kind, params })
     }
 
     return await runSharedOperationOnce(ctx, {
@@ -1236,7 +1256,7 @@ export const serverRestoreChain = mutation({
         if (await sameRestoreChainState(ctx, {
           projectId,
           trackId: normalizedTrackId,
-          audioEffects,
+          audioEffects: writtenEffects,
           instrument,
           arpeggiator: sanitizedArpeggiator,
         })) return { status: 'noop' as const }
@@ -1273,7 +1293,7 @@ export const serverRestoreChain = mutation({
             }
           }
 
-          for (const [index, effect] of audioEffects.entries()) {
+          for (const [index, effect] of writtenEffects.entries()) {
             const params = normalizeEffectParamsForUpdate(effect.kind, effect.params)
             await ctx.db.insert('effects', {
               projectId,

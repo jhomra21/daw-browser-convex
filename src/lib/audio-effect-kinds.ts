@@ -1,4 +1,5 @@
 import {
+  AUDIO_EFFECT_PARAMS_VERSION,
   buildEffectParamsOperation,
   isJsonObject,
   normalizeAudioEffectChange,
@@ -26,6 +27,6 @@ export const audioEffectForms = (kind: AudioEffectKind, from: JsonValue | undefi
   return {
     track: normalizeAudioEffectChange(kind, previous, next),
     master: normalizeMasterAudioEffectChange(kind, previous, next),
-    persist: (targetId, instanceId) => buildEffectParamsOperation(row, instanceId, targetId === "master" ? undefined : targetId),
+    persist: (targetId, instanceId) => buildEffectParamsOperation(row, instanceId, targetId === "master" ? undefined : targetId, AUDIO_EFFECT_PARAMS_VERSION[kind]),
   };
 };

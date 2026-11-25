@@ -119,6 +119,24 @@ export const migrateAudioEffectParams = (
   return migrated
 }
 
+/**
+ * Params a client wrote at `writtenVersion`, brought to this build's current shape. Undefined when this build cannot
+ * read that version (the client is newer, or the number is malformed), so the write must be refused: stamping it with
+ * the current version would pass newer params off as current. Kinds outside the catalog pass through.
+ */
+export const migrateWrittenAudioEffectParams = (
+  kind: string,
+  params: JsonValue,
+  writtenVersion: number,
+  versioning: AudioEffectParamsVersioning = AUDIO_EFFECT_PARAMS_VERSIONING,
+): JsonValue | undefined => {
+  if (!isAudioEffectKind(kind)) return params
+
+  if (!Number.isInteger(writtenVersion) || writtenVersion < 1 || writtenVersion > versioning.current[kind]) return undefined
+
+  return migrateAudioEffectParams(kind, params, writtenVersion, versioning)
+}
+
 /** The storage field to write with every persisted effect; empty for non-catalog rows such as instruments. */
 export const audioEffectParamsVersionStamp = (kind: string): { paramsVersion?: number } => (
   isAudioEffectKind(kind) ? { paramsVersion: AUDIO_EFFECT_PARAMS_VERSION[kind] } : {}

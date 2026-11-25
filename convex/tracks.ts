@@ -29,7 +29,7 @@ import {
   type NormalizedTrackControlStateV1,
 } from "@daw-browser/control-core";
 import { currentAutomationDocs } from "./automationRowValues";
-import { currentEffectDocs } from "./effectRowParams";
+import { currentEffectDocs, writtenRestoreEffects } from "./effectRowParams";
 import { AUDIO_EFFECT_KINDS, audioEffectParamsVersionStamp, automationTargetKey, automationValuesVersionStamp, canonicalTrackCreation, collectTrackDescendantIds, createDefaultSynthParams, createInstrumentInstanceId, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, isSidechainCapableKind, normalizeClipColor, normalizeMixerVolume, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, normalizeTrackColor, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sidechainEligibilityError, sidechainTargetEligibilityError, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
 
 type DeleteOwnedTrackOptions = {
@@ -1756,6 +1756,7 @@ export const serverRestoreUngroup = mutation({
       instanceId: v.optional(v.string()),
       index: v.optional(v.number()),
       params: v.any(),
+      paramsVersion: v.optional(v.number()),
     })),
     automation: v.array(v.object({
       effectInstanceId: v.optional(v.string()),
@@ -1789,7 +1790,8 @@ export const serverRestoreUngroup = mutation({
       ),
       run: async () => await withProjectEdit(ctx, input.projectId, async (edit) => {
         await requireProjectRole(ctx, input.projectId, userId, ["owner", "editor"]);
-        const effects = normalizeSharedUngroupRestoreEffects(input.effects);
+        const readEffects = normalizeSharedUngroupRestoreEffects(input.effects);
+        const effects = readEffects && writtenRestoreEffects(readEffects);
         const automation = normalizeSharedUngroupRestoreAutomation(input.automation);
 
         if (!effects || !automation) return { status: "rejected" as const };

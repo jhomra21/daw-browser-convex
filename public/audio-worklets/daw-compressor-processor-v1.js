@@ -14,8 +14,9 @@ const AUTO_DECAY_MS = 1000
 const ENGAGED_DB = -0.1
 const RECOVERED_DB = -0.5
 const FLOOR_DB = -120
-const DB_TO_NEPER = 0.1151292546497022842
+const DB_TO_NEPER = 0.11512925464970228
 const ENVELOPE_EPSILON_DB = 1e-9
+const TWO_PI = Math.fround(2 * Math.PI)
 const FLOAT_FLOOR = 1e-19
 const DOUBLE_FLOOR = 1e-154
 const METER_FRAMES = 2048
@@ -61,6 +62,7 @@ class Smoother {
     if (Math.abs(this.target - this.current) <= 1e-5) {
       this.current = this.target
       this.settling = false
+
       return this.targetValue
     }
 
@@ -71,7 +73,7 @@ class Smoother {
 // RBJ high-pass / low-pass / band-pass as the core's rbj_coefficients designs them: every step is a float operation.
 const designSidechain = (filterType, frequencyHz, q, rate) => {
   const frequency = Math.min(frequencyHz, f(rate * 0.49))
-  const omega = f(f(6.2831853071795864769 * frequency) / rate)
+  const omega = f(f(TWO_PI * frequency) / rate)
   const cosine = f(Math.cos(omega))
   const alpha = f(f(Math.sin(omega)) / f(2 * q))
   const a0 = f(1 + alpha)
@@ -194,6 +196,7 @@ class CompressorKernel {
       this.wet.reset(v.dryWet)
       this.primed = true
     }
+
     this.threshold.setTarget(v.thresholdDb)
     this.ratio.setTarget(v.ratio)
     this.knee.setTarget(v.kneeDb)
@@ -209,12 +212,14 @@ class CompressorKernel {
     if (threshold !== curve.threshold || ratio !== curve.ratio || knee !== curve.knee || c.expand !== curve.expand || c.rms !== curve.rms) {
       this.designCurve(threshold, ratio, knee, c.expand, c.rms)
     }
+
     const makeupTarget = c.autoMakeup ? f(curve.autoMakeupDb) : v.makeupDb
 
     if (!this.makeupPrimed) {
       this.makeup.reset(makeupTarget)
       this.makeupPrimed = true
     }
+
     this.makeup.setTarget(makeupTarget)
     const makeup = this.makeup.next()
 
@@ -247,6 +252,7 @@ class CompressorKernel {
       if (Number.isFinite(y)) key = y
       else { this.s1 = 0; this.s2 = 0; key = 0 }
     }
+
     const slot = this.write & MASK
 
     this.dryL[slot] = dryLeft
@@ -286,12 +292,14 @@ class CompressorKernel {
       if (target < ENGAGED_DB) this.sustain += (1 - this.sustain) * this.autoBuild
       else if (this.envelopeDb > RECOVERED_DB) this.sustain = flushDouble(this.sustain * this.autoDecay)
     }
+
     const gainDb = this.envelopeDb + makeup + outputDb
 
     if (gainDb !== this.gainDb) {
       this.gainDb = gainDb
       this.gain = Math.exp(gainDb * DB_TO_NEPER)
     }
+
     const mix = 1 + wet * (this.gain - 1)
     const dl = this.dryL[read]
     const dr = this.dryR[read]
@@ -347,10 +355,11 @@ class CompressorProcessor extends AudioWorkletProcessor {
         if (!data.enabled) this.resetMeter()
       }
     }
+
     this.configure({})
   }
   configure(p) {
-    const number = (value, fallback) => f(typeof value === 'number' && Number.isFinite(value) ? value : fallback)
+    const number = (value, fallback) => f(Number.isFinite(value) ? value : fallback)
     const sidechain = isObject(p.sidechain) ? p.sidechain : {}
 
     this.params = p
@@ -390,7 +399,7 @@ class CompressorProcessor extends AudioWorkletProcessor {
     if (!left) return true
     const right = input[1] || left
     const keyLeft = external[0] || left
-    const keyRight = external[1] || keyLeft
+    const keyRight = external[0] ? external[1] || keyLeft : right
     const outL = output[0]
     const outR = output[1] || outL
     const config = external[0] ? { ...this.config, autoMakeup: false } : this.config

@@ -1,7 +1,6 @@
 import EffectShell from '~/components/effects/EffectShell'
 import { DeviceToggleButton } from '~/components/ui/device-control'
 import AutomatedKnob from '~/components/effects/AutomatedKnob'
-import Knob from '~/components/ui/knob'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { For, createEffect, createSignal, createUniqueId } from 'solid-js'
 import type { AudioEngine, CompressorMeterFrame } from '@daw-browser/audio-engine/audio-engine'
@@ -55,11 +54,13 @@ const DEFAULT_PARAMS = createDefaultCompressorParams()
 const DETECTOR_MODES: CompressorDetectorMode[] = ['peak', 'rms']
 const DYNAMICS_MODES: CompressorDynamicsMode[] = ['compress', 'expand']
 const ENVELOPE_CURVES: CompressorEnvelopeCurve[] = ['log', 'linear']
+
 const SIDECHAIN_FILTER_TYPES: { type: CompressorSidechainFilterType; label: string }[] = [
   { type: 'highpass', label: 'HP' },
   { type: 'lowpass', label: 'LP' },
   { type: 'bandpass', label: 'BP' },
 ]
+
 const VIEW_MODES: ViewMode[] = ['transfer', 'gain-reduction', 'output']
 const HISTORY_SIZE = 96
 
@@ -134,9 +135,11 @@ function CompressorGraph(props: { params: CompressorParams; makeupDb: number; vi
 export default function Compressor(props: CompressorProps) {
   const externalKey = () => props.sourceTrackId !== undefined
   // Auto Makeup gives back what the curve takes at 0 dB in, so the level stays put as Threshold and Ratio move.
+
   const makeupDb = () => props.params.autoMakeup && !externalKey() && props.params.dynamicsMode === 'compress'
     ? -computeCompressorStaticCurveDb(0, props.params)
     : props.params.makeupDb
+
   const [viewMode, setViewMode] = createSignal<ViewMode>('transfer')
   const [meter, setMeter] = createSignal<CompressorMeterFrame | null>(null)
   const [history, setHistory] = createSignal<CompressorMeterFrame[]>([])

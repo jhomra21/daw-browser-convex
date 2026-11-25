@@ -266,6 +266,7 @@ const compressorRmsConstant: Scenario = {
     for (let n = start; n < input.length; n += 1) {
       if (linearToDb(output[0][n] / 0.25) - final <= slope * 10 * Math.log10(2)) { crossing = n; break }
     }
+
     h.within('RMS time constant measured from a level step', (crossing - start) / h.rate * 1000 / Math.LN2, 10, 0.2, 'ms')
   },
 }
@@ -283,6 +284,7 @@ const compressorKeyFilter: Scenario = {
       return toneGainDb(input, output[0], f, h.rate, 3 * h.rate, 4 * h.rate)
     }
     // Gain reduction is 0.75 of the detector level over the threshold, so differences in output gain read as detector gain.
+
     const detector = async (frequency: number, q: number) => (await gainDb(1000, q) - await gainDb(frequency, q)) / 0.75
     h.within('detector gain at 60 Hz, high-pass 120 Hz Q 0.707, vs 1 kHz', await detector(60, 0.707), -12, 0.5, 'dB')
     h.within('detector gain at 120 Hz, high-pass 120 Hz Q 0.707, vs 1 kHz', await detector(120, 0.707), -3, 0.3, 'dB')
@@ -326,6 +328,7 @@ const compressorAutoRelease: Scenario = {
       const gain = Array.from(output[0], (value, n) => linearToDb(value / input[n]))
       let low = burst
       // The deepest gain reduction after the burst ends: inside a long burst the gain only wobbles in the last float digit.
+
       for (let n = burst; n < burst + Math.round(0.1 * h.rate); n += 1) if (gain[n] < gain[low]) low = n
       const target = gain[low] * (1 - 0.632)
       let at = gain.length

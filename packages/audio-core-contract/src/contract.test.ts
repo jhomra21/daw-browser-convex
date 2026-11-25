@@ -50,7 +50,7 @@ test('every native processor parameter target value is unique', async () => {
   const byValue = Map.groupBy(targets, (target) => target.value)
 
   expect(targets.length).toBeGreaterThan(100)
-  expect([...byValue.values()].filter((group) => group.length > 1).map((group) => group.map((target) => target.name))).toEqual([])
+  expect([...byValue.values()].flatMap((group) => group.length > 1 ? [group.map((target) => target.name)] : [])).toEqual([])
 })
 
 test('generated processor contract artifacts are current and hash-identical', async () => {

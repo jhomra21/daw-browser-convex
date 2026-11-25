@@ -3715,6 +3715,30 @@
    }
   },
   {
+   "name": "x-effects-harness",
+   "group": "x",
+   "isolated": false,
+   "trigger": "always",
+   "command": {
+    "argv": [
+     "bun",
+     "--conditions=browser",
+     "run",
+     "effects:harness",
+     "--out",
+     "{{DIR}}/out"
+    ],
+    "alarmSeconds": 600,
+    "env": {},
+    "evidence": false,
+    "rc7Seconds": 120
+   },
+   "judge": {
+    "kind": "exit",
+    "exit": 0
+   }
+  },
+  {
    "name": "x-wasm-source-hash",
    "group": "x",
    "isolated": false,

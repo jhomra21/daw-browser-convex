@@ -2,12 +2,12 @@
 // Phaser, Tremolo and Auto Pan. Rows that need a voice-level tap the core does not expose are listed in notEncoded.
 /* oxlint-disable anti-slop/no-shape-in-symbol-names -- shape is a contract field name */
 import { fft, hann, logFrequencies, maxAbsDiff, maxStep, peakAbs, peakFrame, responseDb, rms } from '../dsp'
-import { fx } from '../effects'
+import { fx, type EffectSpec } from '../effects'
 import type { Family } from './index'
 import type { Harness, Scenario } from '../harness'
 import { throughZeroLatencyFrames } from '../../../packages/audio-engine/src/effects/timing'
 import { constant, gaussianNoise, impulse, linearToDb, noise, sine } from '../signals'
-import { parityScenario, robustnessScenarios } from './shared'
+import { parityLimit, parityScenario, robustnessScenarios } from './shared'
 
 const centred = (x: Float32Array) => {
   const mean = x.reduce((sum, v) => sum + v, 0) / x.length
@@ -360,6 +360,42 @@ const tremoloWaveforms: Scenario = {
   },
 }
 
+// Automation of one new control per effect (targets 177 to 193): the envelope's values reach the core as parameter targets and the
+// worklet as AudioParam values, block by block, and both must render the same output. Each sweep also has to change the output, or the
+// control would not be wired at all.
+const automatedControl: Scenario = {
+  effect: 'chorus',
+  name: 'm4-new-control-automation',
+  rates: [48000],
+  run: async (h) => {
+    const block = 128
+    const first = Math.round(h.rate / block) * block
+    const blocks = Math.round(2 * h.rate / block)
+    const left = sine(4 * h.rate, 440, h.rate, 0.3)
+    const right = sine(4 * h.rate, 660, h.rate, 0.3)
+    const flat = [constant(4 * h.rate, 1), constant(4 * h.rate, 1)]
+
+    const sweeps: [string, EffectSpec, Float32Array[], string, number, number][] = [
+      ['chorus width', fx.chorus({ mix: 1, width: 1 }), [left, right], 'width', 1, 0],
+      ['flanger output', fx.flanger({ mix: 1, outputDb: 0 }), [left, right], 'outputDb', 0, -12],
+      ['phaser spread', fx.phaser({ mix: 1, spreadOctaves: 0, depthOctaves: 0 }), [left, right], 'spreadOctaves', 0, 3],
+      ['tremolo stereo phase', fx.tremolo({ depth: 1, rateHz: 2, stereoPhase: 0 }), flat, 'stereoPhase', 0, 0.5],
+      ['auto pan stereo phase', fx.autopan({ depth: 1, rateHz: 2, stereoPhase: 0.5 }), flat, 'stereoPhase', 0.5, 0],
+      ['ensemble fast depth', fx.ensemble({ mix: 1, fastDepthMs: 0 }), [left, right], 'fastDepthMs', 0, 3],
+    ]
+
+    for (const [name, spec, input, path, from, to] of sweeps) {
+      const steps = Array.from({ length: blocks }, (_, index) => ({ frame: first + index * block, set: { [path]: from + (to - from) * (index + 1) / blocks } }))
+      const { output, legacy } = await h.render(spec, { input, steps }, { parity: true })
+      const still = (await h.render(spec, { input }, { parity: false })).output
+
+      if (legacy === null) throw new Error('the modulation worklet must render for parity')
+      h.atMost(`parity of the core and the worklet, ${name} automated block by block`, Math.max(maxAbsDiff(output[0], legacy[0]), maxAbsDiff(output[1], legacy[1])), parityLimit, 'abs', 'automation')
+      h.atLeast(`change the automated sweep makes to the output, ${name}`, Math.max(maxAbsDiff(output[0], still[0]), maxAbsDiff(output[1], still[1])), 1e-3, 'abs', 'automation')
+    }
+  },
+}
+
 const states = {
   chorus: fx.chorus(),
   flanger: fx.flanger(),
@@ -374,7 +410,7 @@ const throughZero = fx.flanger({ mode: 'throughZero', delayMs: 2, depthMs: 1 })
 export const modulation: Family = {
   scenarios: [
     delayStepClick, feedbackSpacing, throughZeroLatency, safeBass, vintageVoicing, ensembleSidebands, phaserFeedback, phaserResponse,
-    tremoloStereo, autopanLaw, tremoloSmoothing, tremoloWaveforms,
+    tremoloStereo, autopanLaw, tremoloSmoothing, tremoloWaveforms, automatedControl,
     parityScenario('chorus', states.chorus), parityScenario('chorus', fx.chorus({ mode: 'vintage', waveform: 'triangle' })),
     parityScenario('flanger', states.flanger), parityScenario('flanger', throughZero),
     parityScenario('phaser', states.phaser), parityScenario('phaser', fx.phaser({ stages: 12, feedback: 0.7, spreadOctaves: 1, blend: 0.5 })),

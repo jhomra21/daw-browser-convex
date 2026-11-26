@@ -187,54 +187,54 @@ test('maps every continuous target for every live built-in family', () => {
       payload: {
         targetId: 'track-1', effect: 'chorus', instanceId: 'chorus-1',
         from: envelope(chorusFrom),
-        to: envelope({ ...chorusFrom, delayMs: 20, depthMs: 6, rateHz: 2, feedback: 0.2, stereoPhase: -0.25, mix: 0.6 }),
+        to: envelope({ ...chorusFrom, delayMs: 20, depthMs: 6, rateHz: 2, feedback: 0.2, stereoPhase: -0.25, mix: 0.6, safeBassHz: 200, width: 1.5, outputDb: -3 }),
       } satisfies EffectParamsCommitPayload<'chorus'>,
-      expected: [['chorus.delayMs', 20], ['chorus.depthMs', 6], ['chorus.rateHz', 2], ['chorus.feedback', 0.2], ['chorus.stereoPhase', -0.25], ['chorus.mix', 0.6]],
+      expected: [['chorus.delayMs', 20], ['chorus.depthMs', 6], ['chorus.rateHz', 2], ['chorus.feedback', 0.2], ['chorus.stereoPhase', -0.25], ['chorus.mix', 0.6], ['chorus.safeBassHz', 200], ['chorus.width', 1.5], ['chorus.outputDb', -3]],
     },
     {
       name: 'flanger',
       payload: {
         targetId: 'track-1', effect: 'flanger', instanceId: 'flanger-1',
         from: envelope(flangerFrom),
-        to: envelope({ ...flangerFrom, delayMs: 3, depthMs: 2, rateHz: 4, feedback: -0.2, stereoPhase: 0.25, mix: 0.7 }),
+        to: envelope({ ...flangerFrom, delayMs: 3, depthMs: 2, rateHz: 4, feedback: -0.2, stereoPhase: 0.25, mix: 0.7, safeBassHz: 300, width: 0.5, outputDb: 2 }),
       } satisfies EffectParamsCommitPayload<'flanger'>,
-      expected: [['flanger.delayMs', 3], ['flanger.depthMs', 2], ['flanger.rateHz', 4], ['flanger.feedback', -0.2], ['flanger.stereoPhase', 0.25], ['flanger.mix', 0.7]],
+      expected: [['flanger.delayMs', 3], ['flanger.depthMs', 2], ['flanger.rateHz', 4], ['flanger.feedback', -0.2], ['flanger.stereoPhase', 0.25], ['flanger.mix', 0.7], ['flanger.safeBassHz', 300], ['flanger.width', 0.5], ['flanger.outputDb', 2]],
     },
     {
       name: 'phaser',
       payload: {
         targetId: 'track-1', effect: 'phaser', instanceId: 'phaser-1',
         from: envelope(phaserFrom),
-        to: envelope({ ...phaserFrom, centerHz: 2_000, depthOctaves: 2, rateHz: 1, feedback: 0.2, stereoPhase: -0.25, mix: 0.7 }),
+        to: envelope({ ...phaserFrom, centerHz: 2_000, depthOctaves: 2, rateHz: 1, feedback: 0.2, stereoPhase: -0.25, mix: 0.7, spreadOctaves: 2, blend: 0.4, safeBassHz: 150, outputDb: -6 }),
       } satisfies EffectParamsCommitPayload<'phaser'>,
-      expected: [['phaser.centerHz', 2_000], ['phaser.depthOctaves', 2], ['phaser.rateHz', 1], ['phaser.feedback', 0.2], ['phaser.stereoPhase', -0.25], ['phaser.mix', 0.7]],
+      expected: [['phaser.centerHz', 2_000], ['phaser.depthOctaves', 2], ['phaser.rateHz', 1], ['phaser.feedback', 0.2], ['phaser.stereoPhase', -0.25], ['phaser.mix', 0.7], ['phaser.spreadOctaves', 2], ['phaser.blend', 0.4], ['phaser.safeBassHz', 150], ['phaser.outputDb', -6]],
     },
     {
       name: 'tremolo',
       payload: {
         targetId: 'track-1', effect: 'tremolo', instanceId: 'tremolo-1',
         from: envelope(tremoloFrom),
-        to: envelope({ ...tremoloFrom, rateHz: 8, depth: 0.8, ["shape"]: 0.25, phase: 0.5 }),
+        to: envelope({ ...tremoloFrom, rateHz: 8, depth: 0.8, ["shape"]: 0.25, phase: 0.5, stereoPhase: 0.25 }),
       } satisfies EffectParamsCommitPayload<'tremolo'>,
-      expected: [['tremolo.rateHz', 8], ['tremolo.depth', 0.8], ['tremolo.shape', 0.25], ['tremolo.phase', 0.5]],
+      expected: [['tremolo.rateHz', 8], ['tremolo.depth', 0.8], ['tremolo.shape', 0.25], ['tremolo.phase', 0.5], ['tremolo.stereoPhase', 0.25]],
     },
     {
       name: 'autopan',
       payload: {
         targetId: 'track-1', effect: 'autopan', instanceId: 'autopan-1',
         from: envelope(autoPanFrom),
-        to: envelope({ ...autoPanFrom, rateHz: 5, depth: 0.75, ["shape"]: 0.2, phase: 0.4 }),
+        to: envelope({ ...autoPanFrom, rateHz: 5, depth: 0.75, ["shape"]: 0.2, phase: 0.4, stereoPhase: 0.1 }),
       } satisfies EffectParamsCommitPayload<'autopan'>,
-      expected: [['autopan.rateHz', 5], ['autopan.depth', 0.75], ['autopan.shape', 0.2], ['autopan.phase', 0.4]],
+      expected: [['autopan.rateHz', 5], ['autopan.depth', 0.75], ['autopan.shape', 0.2], ['autopan.phase', 0.4], ['autopan.stereoPhase', 0.1]],
     },
     {
       name: 'ensemble',
       payload: {
         targetId: 'track-1', effect: 'ensemble', instanceId: 'ensemble-1',
         from: envelope(ensembleFrom),
-        to: envelope({ ...ensembleFrom, delayMs: 24, depthMs: 8, rateHz: 1.2, spread: 0.7, mix: 0.6 }),
+        to: envelope({ ...ensembleFrom, delayMs: 24, depthMs: 8, rateHz: 1.2, spread: 0.7, mix: 0.6, fastDepthMs: 1, fastRateHz: 8, safeBassHz: 250, width: 1.2, outputDb: -2 }),
       } satisfies EffectParamsCommitPayload<'ensemble'>,
-      expected: [['ensemble.delayMs', 24], ['ensemble.depthMs', 8], ['ensemble.rateHz', 1.2], ['ensemble.spread', 0.7], ['ensemble.mix', 0.6]],
+      expected: [['ensemble.delayMs', 24], ['ensemble.depthMs', 8], ['ensemble.rateHz', 1.2], ['ensemble.spread', 0.7], ['ensemble.mix', 0.6], ['ensemble.fastDepthMs', 1], ['ensemble.fastRateHz', 8], ['ensemble.safeBassHz', 250], ['ensemble.width', 1.2], ['ensemble.outputDb', -2]],
     },
     {
       name: 'gate',

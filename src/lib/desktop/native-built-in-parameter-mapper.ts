@@ -377,6 +377,9 @@ const mapModulation = (
       { parameterId: `${prefix}.feedback`, from: from.feedback, to: to.feedback },
       { parameterId: `${prefix}.stereoPhase`, from: from.stereoPhase, to: to.stereoPhase },
       { parameterId: `${prefix}.mix`, from: from.mix, to: to.mix },
+      { parameterId: `${prefix}.safeBassHz`, from: from.safeBassHz, to: to.safeBassHz },
+      { parameterId: `${prefix}.width`, from: from.width, to: to.width },
+      { parameterId: `${prefix}.outputDb`, from: from.outputDb, to: to.outputDb },
     ],
     [{ from: from.enabled, to: to.enabled }],
   )
@@ -394,6 +397,10 @@ const mapPhaser = (payload: EffectChange<'phaser' | 'master-phaser'>) => {
       { parameterId: 'phaser.feedback', from: from.feedback, to: to.feedback },
       { parameterId: 'phaser.stereoPhase', from: from.stereoPhase, to: to.stereoPhase },
       { parameterId: 'phaser.mix', from: from.mix, to: to.mix },
+      { parameterId: 'phaser.spreadOctaves', from: from.spreadOctaves, to: to.spreadOctaves },
+      { parameterId: 'phaser.blend', from: from.blend, to: to.blend },
+      { parameterId: 'phaser.safeBassHz', from: from.safeBassHz, to: to.safeBassHz },
+      { parameterId: 'phaser.outputDb', from: from.outputDb, to: to.outputDb },
     ],
     [{ from: from.enabled, to: to.enabled }, { from: from.stages, to: to.stages }],
   )
@@ -412,6 +419,7 @@ const mapAmplitudeModulation = (
       { parameterId: `${prefix}.depth`, from: from.depth, to: to.depth },
       { parameterId: `${prefix}.shape`, from: from["shape"], to: to["shape"] },
       { parameterId: `${prefix}.phase`, from: from.phase, to: to.phase },
+      { parameterId: `${prefix}.stereoPhase`, from: from.stereoPhase, to: to.stereoPhase },
     ],
     [{ from: from.enabled, to: to.enabled }, { from: from.waveform, to: to.waveform }],
   )
@@ -428,6 +436,11 @@ const mapEnsemble = (payload: EffectChange<'ensemble' | 'master-ensemble'>) => {
       { parameterId: 'ensemble.rateHz', from: from.rateHz, to: to.rateHz },
       { parameterId: 'ensemble.spread', from: from.spread, to: to.spread },
       { parameterId: 'ensemble.mix', from: from.mix, to: to.mix },
+      { parameterId: 'ensemble.fastDepthMs', from: from.fastDepthMs, to: to.fastDepthMs },
+      { parameterId: 'ensemble.fastRateHz', from: from.fastRateHz, to: to.fastRateHz },
+      { parameterId: 'ensemble.safeBassHz', from: from.safeBassHz, to: to.safeBassHz },
+      { parameterId: 'ensemble.width', from: from.width, to: to.width },
+      { parameterId: 'ensemble.outputDb', from: from.outputDb, to: to.outputDb },
     ],
     [{ from: from.enabled, to: to.enabled }, { from: from.voices, to: to.voices }],
   )

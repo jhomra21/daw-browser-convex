@@ -3,7 +3,7 @@
   "effectParamsVersions": {
     "eq": 2,
     "compressor": 2,
-    "saturator": 1,
+    "saturator": 2,
     "delay": 2,
     "reverb": 2,
     "autofilter": 2,

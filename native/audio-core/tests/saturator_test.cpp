@@ -64,11 +64,11 @@ SaturatorConfig curve(uint32_t which, bool hi_quality = true) {
   return config;
 }
 
-const char *const kNames[] = {"soft", "medium", "hard", "clip", "analog", "sine", "bass", "fold", "waveshaper"};
+const char *const kNames[] = {"soft", "medium", "hard", "clip", "analog", "sine", "bass", "fold", "warp"};
 
 // S5: every curve passes a quiet 1 kHz tone at unity at Drive 0.
 void unity() {
-  for (uint32_t which = kSoft; which <= kWaveshaper; ++which) {
+  for (uint32_t which = kSoft; which <= kWarp; ++which) {
     for (const bool hi : {false, true}) {
       const std::vector<double> out = run(48000.0, drive(0.0), curve(which, hi), 9600, tone(1000.0, 48000.0, 0.01));
       char name[64];
@@ -85,7 +85,7 @@ void continuity() {
   shape.threshold = 0.1;
   shape.depth = 0.5;
   shape.period = 0.3;
-  for (uint32_t which = kSoft; which <= kWaveshaper; ++which) {
+  for (uint32_t which = kSoft; which <= kWarp; ++which) {
     double worst_step = 0.0, worst_slope_jump = 0.0, worst_antiderivative = 0.0;
     constexpr double kDelta = 1.0e-4;
     double previous_slope = 0.0;
@@ -211,7 +211,7 @@ void dry() {
 void safety() {
   SaturatorValues values = drive(36.0);
   values.color_high_db = 12.0F;
-  SaturatorConfig config = curve(kWaveshaper);
+  SaturatorConfig config = curve(kWarp);
   config.color = true;
   SaturatorKernel kernel;
   kernel.prepare(48000.0);

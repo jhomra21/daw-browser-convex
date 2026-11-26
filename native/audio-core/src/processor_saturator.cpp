@@ -15,8 +15,8 @@ daw::audio_core::SaturatorValues read_saturator_values(const Core &core, const G
     .color_low_db = value(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_LOW_DB, state.color_low_db),
     .color_high_db = value(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_HIGH_DB, state.color_high_db),
     .bass_threshold_db = value(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_BASS_THRESHOLD_DB, state.bass_threshold_db),
-    .waveshaper_depth = value(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WAVESHAPER_DEPTH, state.waveshaper_depth),
-    .waveshaper_period = value(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WAVESHAPER_PERIOD, state.waveshaper_period),
+    .warp_depth = value(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_DEPTH, state.warp_depth),
+    .warp_period = value(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_PERIOD, state.warp_period),
   };
 }
 

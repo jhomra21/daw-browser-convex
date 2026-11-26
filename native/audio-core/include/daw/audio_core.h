@@ -560,8 +560,8 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_LOW_DB = 204,
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_WIDTH = 205,
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_BASS_THRESHOLD_DB = 206,
-  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WAVESHAPER_DEPTH = 207,
-  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WAVESHAPER_PERIOD = 208
+  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_DEPTH = 207,
+  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_PERIOD = 208
 } daw_audio_processor_parameter;
 
 #define DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_0_FREQUENCY_HZ
@@ -724,7 +724,7 @@ typedef struct daw_audio_utility_state {
 
 /* Every curve has slope one at the origin and an asymptote near one. Soft is tanh, Medium the cubic that reaches its rail with
  * zero slope, Hard an arctangent, Clip (Live's Digital Clip) a hard clamp at one, Analog a clamp with a rounded knee, Sine a
- * clamped sine, Bass a rounded knee whose threshold is a control, Fold a sine that folds past one and Waveshaper a tanh with a
+ * clamped sine, Bass a rounded knee whose threshold is a control, Fold a sine that folds past one and Warp a tanh with a
  * superimposed sine (Depth and Period). */
 typedef enum daw_audio_saturator_curve {
   DAW_AUDIO_SATURATOR_CURVE_SOFT = 0,
@@ -735,7 +735,7 @@ typedef enum daw_audio_saturator_curve {
   DAW_AUDIO_SATURATOR_CURVE_SINE = 5,
   DAW_AUDIO_SATURATOR_CURVE_BASS = 6,
   DAW_AUDIO_SATURATOR_CURVE_FOLD = 7,
-  DAW_AUDIO_SATURATOR_CURVE_WAVESHAPER = 8
+  DAW_AUDIO_SATURATOR_CURVE_WARP = 8
 } daw_audio_saturator_curve;
 
 typedef enum daw_audio_saturator_post_clip {
@@ -759,8 +759,8 @@ typedef struct daw_audio_saturator_state {
   float color_low_db;
   float color_high_db;
   float bass_threshold_db;
-  float waveshaper_depth;
-  float waveshaper_period;
+  float warp_depth;
+  float warp_period;
 } daw_audio_saturator_state;
 
 typedef enum daw_audio_eq_band_type {

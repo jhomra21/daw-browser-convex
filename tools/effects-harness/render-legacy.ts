@@ -1,6 +1,6 @@
 // Renders an effect through the shipped browser AudioWorklet (public/audio-worklets/daw-*-processor-v1.js) under a stubbed
-// AudioWorkletProcessor. EQ and Saturator are Web Audio node chains in the browser; bun has no OfflineAudioContext,
-// so they report as not measured.
+// AudioWorkletProcessor. EQ is a Web Audio node chain in the browser; bun has no OfflineAudioContext,
+// so it reports as not measured.
 import type { EffectKind, EffectSpec } from './effects'
 import { getPath, withPaths } from './state-path'
 import type { Planar, RenderOptions } from './types'
@@ -11,7 +11,7 @@ const worklets = new URL('../../public/audio-worklets/', import.meta.url).pathna
 const files: Partial<Record<EffectKind, string>> = {
   utility: 'daw-utility-processor-v1.js', autofilter: 'daw-autofilter-processor-v1.js', lofi: 'daw-lofi-processor-v1.js',
   limiter: 'daw-limiter-processor-v1.js', gate: 'daw-gate-processor-v1.js', compressor: 'daw-compressor-processor-v1.js',
-  reverb: 'daw-reverb-processor-v1.js', delay: 'daw-delay-processor-v1.js', spectral: 'daw-spectral-processor-v1.js',
+  reverb: 'daw-reverb-processor-v1.js', delay: 'daw-delay-processor-v1.js', saturator: 'daw-saturator-processor-v1.js', spectral: 'daw-spectral-processor-v1.js',
   chorus: 'daw-modulation-processor-v1.js', flanger: 'daw-modulation-processor-v1.js', phaser: 'daw-modulation-processor-v1.js',
   tremolo: 'daw-modulation-processor-v1.js', autopan: 'daw-modulation-processor-v1.js', ensemble: 'daw-modulation-processor-v1.js',
 }

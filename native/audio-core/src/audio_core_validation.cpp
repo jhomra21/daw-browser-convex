@@ -156,7 +156,7 @@ namespace {
 bool saturator_parameter_target(uint32_t target) {
   return target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRIVE_DB || target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_FREQUENCY_HZ
     || target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_OUTPUT_DB || target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRY_WET
-    || (target >= DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_HIGH_DB && target <= DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WAVESHAPER_PERIOD);
+    || (target >= DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_HIGH_DB && target <= DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_PERIOD);
 }
 
 bool saturator_value_in_range(uint32_t target, float value) {
@@ -170,14 +170,14 @@ bool saturator_value_in_range(uint32_t target, float value) {
     case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_LOW_DB: return within(DAW_AUDIO_CORE_SATURATOR_COLOR_LOW_DB_MIN, DAW_AUDIO_CORE_SATURATOR_COLOR_LOW_DB_MAX);
     case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_WIDTH: return within(DAW_AUDIO_CORE_SATURATOR_COLOR_WIDTH_MIN, DAW_AUDIO_CORE_SATURATOR_COLOR_WIDTH_MAX);
     case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_BASS_THRESHOLD_DB: return within(DAW_AUDIO_CORE_SATURATOR_BASS_THRESHOLD_DB_MIN, DAW_AUDIO_CORE_SATURATOR_BASS_THRESHOLD_DB_MAX);
-    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WAVESHAPER_DEPTH: return within(DAW_AUDIO_CORE_SATURATOR_WAVESHAPER_DEPTH_MIN, DAW_AUDIO_CORE_SATURATOR_WAVESHAPER_DEPTH_MAX);
-    default: return within(DAW_AUDIO_CORE_SATURATOR_WAVESHAPER_PERIOD_MIN, DAW_AUDIO_CORE_SATURATOR_WAVESHAPER_PERIOD_MAX);
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_DEPTH: return within(DAW_AUDIO_CORE_SATURATOR_WARP_DEPTH_MIN, DAW_AUDIO_CORE_SATURATOR_WARP_DEPTH_MAX);
+    default: return within(DAW_AUDIO_CORE_SATURATOR_WARP_PERIOD_MIN, DAW_AUDIO_CORE_SATURATOR_WARP_PERIOD_MAX);
   }
 }
 
 bool valid_saturator_state(const daw_audio_saturator_state &state) {
   return state.enabled <= 1 && state.hi_quality <= 1 && state.color <= 1
-    && state.curve <= DAW_AUDIO_SATURATOR_CURVE_WAVESHAPER && state.post_clip <= DAW_AUDIO_SATURATOR_POST_CLIP_HARD
+    && state.curve <= DAW_AUDIO_SATURATOR_CURVE_WARP && state.post_clip <= DAW_AUDIO_SATURATOR_POST_CLIP_HARD
     && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRIVE_DB, state.drive_db)
     && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_OUTPUT_DB, state.output_db)
     && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRY_WET, state.dry_wet)
@@ -186,8 +186,8 @@ bool valid_saturator_state(const daw_audio_saturator_state &state) {
     && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_LOW_DB, state.color_low_db)
     && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_HIGH_DB, state.color_high_db)
     && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_BASS_THRESHOLD_DB, state.bass_threshold_db)
-    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WAVESHAPER_DEPTH, state.waveshaper_depth)
-    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WAVESHAPER_PERIOD, state.waveshaper_period);
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_DEPTH, state.warp_depth)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_PERIOD, state.warp_period);
 }
 
 bool valid_eq_band(const daw_audio_eq_band_state &band) {
@@ -428,7 +428,7 @@ bool decode_processor_state(
       .drive_db = read_f32_le(bytes + 20), .output_db = read_f32_le(bytes + 24), .dry_wet = read_f32_le(bytes + 28),
       .color_frequency_hz = read_f32_le(bytes + 32), .color_width = read_f32_le(bytes + 36),
       .color_low_db = read_f32_le(bytes + 40), .color_high_db = read_f32_le(bytes + 44),
-      .bass_threshold_db = read_f32_le(bytes + 48), .waveshaper_depth = read_f32_le(bytes + 52), .waveshaper_period = read_f32_le(bytes + 56),
+      .bass_threshold_db = read_f32_le(bytes + 48), .warp_depth = read_f32_le(bytes + 52), .warp_period = read_f32_le(bytes + 56),
     };
     if (!valid_saturator_state(state) || descriptor.latency_frames != 0
       || descriptor.tail_frames != 0) return false;

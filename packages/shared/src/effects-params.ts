@@ -367,7 +367,7 @@ export function serializeReverbParams(params: ReverbParams): string {
   ].join('|')
 }
 
-export type SaturatorCurve = 'soft' | 'medium' | 'hard' | 'clip' | 'analog' | 'sine' | 'bass' | 'fold' | 'waveshaper'
+export type SaturatorCurve = 'soft' | 'medium' | 'hard' | 'clip' | 'analog' | 'sine' | 'bass' | 'fold' | 'warp'
 
 export type SaturatorPostClip = 'off' | 'soft' | 'hard'
 
@@ -383,8 +383,8 @@ export type SaturatorParams = {
   colorLowDb: number
   colorHighDb: number
   bassThresholdDb: number
-  waveshaperDepth: number
-  waveshaperPeriod: number
+  warpDepth: number
+  warpPeriod: number
   postClip: SaturatorPostClip
   outputDb: number
   dryWet: number
@@ -408,10 +408,10 @@ export const SATURATOR_COLOR_DB_MIN = -12
 export const SATURATOR_COLOR_DB_MAX = 12
 export const SATURATOR_BASS_THRESHOLD_DB_MIN = -50
 export const SATURATOR_BASS_THRESHOLD_DB_MAX = 0
-export const SATURATOR_WAVESHAPER_DEPTH_MIN = 0
-export const SATURATOR_WAVESHAPER_DEPTH_MAX = 1
-export const SATURATOR_WAVESHAPER_PERIOD_MIN = 0.1
-export const SATURATOR_WAVESHAPER_PERIOD_MAX = 1
+export const SATURATOR_WARP_DEPTH_MIN = 0
+export const SATURATOR_WARP_DEPTH_MAX = 1
+export const SATURATOR_WARP_PERIOD_MIN = 0.1
+export const SATURATOR_WARP_PERIOD_MAX = 1
 
 export function createDefaultSaturatorParams(): SaturatorParams {
   return {
@@ -425,15 +425,15 @@ export function createDefaultSaturatorParams(): SaturatorParams {
     colorLowDb: 0,
     colorHighDb: 0,
     bassThresholdDb: -12,
-    waveshaperDepth: 0.5,
-    waveshaperPeriod: 0.5,
+    warpDepth: 0.5,
+    warpPeriod: 0.5,
     postClip: 'off',
     outputDb: 0,
     dryWet: 1,
   }
 }
 
-const SATURATOR_CURVES: readonly SaturatorCurve[] = ['soft', 'medium', 'hard', 'clip', 'analog', 'sine', 'bass', 'fold', 'waveshaper']
+const SATURATOR_CURVES: readonly SaturatorCurve[] = ['soft', 'medium', 'hard', 'clip', 'analog', 'sine', 'bass', 'fold', 'warp']
 
 const SATURATOR_POST_CLIPS: readonly SaturatorPostClip[] = ['off', 'soft', 'hard']
 
@@ -462,7 +462,7 @@ const saturatorKnee = (magnitude: number, threshold: number) => {
 export function evaluateSaturatorCurvePoint(
   curve: SaturatorCurve,
   input: number,
-  shape: Pick<SaturatorParams, 'bassThresholdDb' | 'waveshaperDepth' | 'waveshaperPeriod'> = createDefaultSaturatorParams(),
+  knobs: Pick<SaturatorParams, 'bassThresholdDb' | 'warpDepth' | 'warpPeriod'> = createDefaultSaturatorParams(),
 ): number {
   switch (curve) {
     case 'medium': {
@@ -470,19 +470,21 @@ export function evaluateSaturatorCurvePoint(
 
       return reach - reach * reach * reach / 6.75
     }
+
     case 'hard': return Math.atan(SATURATOR_HARD_SLOPE * input) / SATURATOR_HARD_SLOPE
     case 'clip': return clamp(input, -1, 1)
     case 'analog': return Math.sign(input) * saturatorKnee(Math.abs(input), SATURATOR_ANALOG_THRESHOLD)
     case 'sine': return Math.sin(clamp(input, -Math.PI / 2, Math.PI / 2))
-    case 'bass': return Math.sign(input) * saturatorKnee(Math.abs(input), 10 ** (shape.bassThresholdDb / 20))
+    case 'bass': return Math.sign(input) * saturatorKnee(Math.abs(input), 10 ** (knobs.bassThresholdDb / 20))
     case 'fold': return Math.sin(input)
-    case 'waveshaper': return (1 - shape.waveshaperDepth) * Math.tanh(input) + shape.waveshaperDepth * shape.waveshaperPeriod * Math.sin(input / shape.waveshaperPeriod)
+    case 'warp': return (1 - knobs.warpDepth) * Math.tanh(input) + knobs.warpDepth * knobs.warpPeriod * Math.sin(input / knobs.warpPeriod)
     default: return Math.tanh(input)
   }
 }
 
 export function normalizeSaturatorParams(input: SaturatorParamsInput = {}): SaturatorParams {
   const defaults = createDefaultSaturatorParams()
+
   const read = (value: number | undefined, fallback: number, min: number, max: number) => {
     const finite = readFiniteNumber(value)
 
@@ -500,8 +502,8 @@ export function normalizeSaturatorParams(input: SaturatorParamsInput = {}): Satu
     colorLowDb: read(input.colorLowDb, defaults.colorLowDb, SATURATOR_COLOR_DB_MIN, SATURATOR_COLOR_DB_MAX),
     colorHighDb: read(input.colorHighDb, defaults.colorHighDb, SATURATOR_COLOR_DB_MIN, SATURATOR_COLOR_DB_MAX),
     bassThresholdDb: read(input.bassThresholdDb, defaults.bassThresholdDb, SATURATOR_BASS_THRESHOLD_DB_MIN, SATURATOR_BASS_THRESHOLD_DB_MAX),
-    waveshaperDepth: read(input.waveshaperDepth, defaults.waveshaperDepth, SATURATOR_WAVESHAPER_DEPTH_MIN, SATURATOR_WAVESHAPER_DEPTH_MAX),
-    waveshaperPeriod: read(input.waveshaperPeriod, defaults.waveshaperPeriod, SATURATOR_WAVESHAPER_PERIOD_MIN, SATURATOR_WAVESHAPER_PERIOD_MAX),
+    warpDepth: read(input.warpDepth, defaults.warpDepth, SATURATOR_WARP_DEPTH_MIN, SATURATOR_WARP_DEPTH_MAX),
+    warpPeriod: read(input.warpPeriod, defaults.warpPeriod, SATURATOR_WARP_PERIOD_MIN, SATURATOR_WARP_PERIOD_MAX),
     postClip: isSaturatorPostClip(input.postClip) ? input.postClip : defaults.postClip,
     outputDb: read(input.outputDb, defaults.outputDb, SATURATOR_OUTPUT_DB_MIN, SATURATOR_OUTPUT_DB_MAX),
     dryWet: read(input.dryWet, defaults.dryWet, SATURATOR_DRY_WET_MIN, SATURATOR_DRY_WET_MAX),
@@ -519,9 +521,10 @@ export function serializeSaturatorParams(params: SaturatorParams): string {
 
   return [
     n.enabled ? 1 : 0, n.hiQuality ? 1 : 0, n.driveDb, n.curve, n.color ? 1 : 0, n.colorFrequencyHz, n.colorWidth, n.colorLowDb, n.colorHighDb,
-    n.bassThresholdDb, n.waveshaperDepth, n.waveshaperPeriod, n.postClip, n.outputDb, n.dryWet,
+    n.bassThresholdDb, n.warpDepth, n.warpPeriod, n.postClip, n.outputDb, n.dryWet,
   ].join('|')
 }
+
 export type DelaySmoothing = 'repitch' | 'fade' | 'jump'
 
 export type DelaySyncDivision = '1/32' | '1/16' | '1/8' | '1/4' | '1/2' | '1/1'

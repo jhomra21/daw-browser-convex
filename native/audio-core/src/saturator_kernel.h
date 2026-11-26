@@ -2,8 +2,8 @@
 
 // Saturator DSP kernel, independent of the audio-core graph so it can be measured on its own.
 //
-// Signal path per channel: Color pre-EQ (a low and a high shelf) -> Drive -> waveshaper -> Color post-EQ (the inverse shelves)
-// -> Post Clip -> Output -> dry/wet. Hi-Quality runs the waveshaper at twice the rate between a minimum-phase polyphase IIR
+// Signal path per channel: Color pre-EQ (a low and a high shelf) -> Drive -> warp -> Color post-EQ (the inverse shelves)
+// -> Post Clip -> Output -> dry/wet. Hi-Quality runs the warp at twice the rate between a minimum-phase polyphase IIR
 // half-band pair, with first-order antiderivative antialiasing (ADAA) on every shaped sample; without it the curve is evaluated
 // directly. The Color filters run at the base rate; Post Clip has a half-band pair of its own. The half-bands add no reported latency: the wet path
 // trails the dry path by their group delay (a little under three frames at low frequencies) and the dry/wet mix does not
@@ -24,7 +24,7 @@
 
 namespace daw::audio_core {
 
-enum SaturatorCurve : uint32_t { kSoft, kMedium, kHard, kClip, kAnalog, kSine, kBass, kFold, kWaveshaper };
+enum SaturatorCurve : uint32_t { kSoft, kMedium, kHard, kClip, kAnalog, kSine, kBass, kFold, kWarp };
 
 struct SaturatorConfig {
   uint32_t curve = kSoft;
@@ -42,8 +42,8 @@ struct SaturatorValues {
   float color_low_db = 0.0F;
   float color_high_db = 0.0F;
   float bass_threshold_db = -12.0F;
-  float waveshaper_depth = 0.5F;
-  float waveshaper_period = 0.5F;
+  float warp_depth = 0.5F;
+  float warp_period = 0.5F;
 };
 
 // The shaped curves, their antiderivatives (zero at the origin) and the knee they share.
@@ -88,7 +88,7 @@ struct SaturatorShape {
       case kSine: return std::sin(std::clamp(u, -0.5 * kPi, 0.5 * kPi));
       case kBass: return std::copysign(knee(std::fabs(u), threshold), u);
       case kFold: return std::sin(u);
-      case kWaveshaper: return (1.0 - depth) * std::tanh(u) + depth * period * std::sin(u / period);
+      case kWarp: return (1.0 - depth) * std::tanh(u) + depth * period * std::sin(u / period);
       default: return std::tanh(u);
     }
   }
@@ -103,7 +103,7 @@ struct SaturatorShape {
       case kSine: return a <= 0.5 * kPi ? 1.0 - std::cos(u) : a - 0.5 * kPi + 1.0;
       case kBass: return kneeIntegral(a, threshold);
       case kFold: return 1.0 - std::cos(u);
-      case kWaveshaper: return (1.0 - depth) * logcosh(u) + depth * period * period * (1.0 - std::cos(u / period));
+      case kWarp: return (1.0 - depth) * logcosh(u) + depth * period * period * (1.0 - std::cos(u / period));
       default: return logcosh(u);
     }
   }
@@ -249,8 +249,8 @@ class SaturatorKernel {
     low_.reset(config.color ? values.color_low_db : 0.0F);
     high_.reset(config.color ? values.color_high_db : 0.0F);
     threshold_.reset(values.bass_threshold_db);
-    depth_.reset(values.waveshaper_depth);
-    period_.reset(values.waveshaper_period);
+    depth_.reset(values.warp_depth);
+    period_.reset(values.warp_period);
     applied_ = config;
     initialized_ = true;
   }
@@ -273,8 +273,8 @@ class SaturatorKernel {
     low_.setTarget(config.color ? values.color_low_db : 0.0F);
     high_.setTarget(config.color ? values.color_high_db : 0.0F);
     threshold_.setTarget(values.bass_threshold_db);
-    depth_.setTarget(values.waveshaper_depth);
-    period_.setTarget(values.waveshaper_period);
+    depth_.setTarget(values.warp_depth);
+    period_.setTarget(values.warp_period);
   }
 
   // Redesigned only when a Color value moved; both shelves are skipped while the curve is flat and settled.

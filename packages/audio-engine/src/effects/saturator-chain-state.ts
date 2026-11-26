@@ -3,47 +3,48 @@ import { applySaturatorNodeChainParams, createSaturatorNodeChain, disconnectSatu
 
 export type SaturatorChainState = {
   chain: () => SaturatorNodeChain | null
-  set: (ctx: BaseAudioContext, params: SaturatorParamsLite) => { changed: boolean; requiresRoutingRebuild: boolean }
+  set: (ctx: BaseAudioContext, params: SaturatorParamsLite) => Promise<{ changed: boolean; requiresRoutingRebuild: boolean }>
   close: () => void
 }
 
 export function createSaturatorChainState(): SaturatorChainState {
   let saturator: SaturatorNodeChain | null = null
   let signature: string | null = null
-  let enabled: boolean | null = null
+  let generation = 0
 
   return {
     chain: () => saturator,
-    set: (ctx, params) => {
+    set: async (ctx, params) => {
+      // Every request outdates the construction an earlier one still awaits, an equal one that returns early included.
+      const current = ++generation
       const normalized = normalizeSaturatorParams(params)
       const nextSignature = serializeSaturatorParams(normalized)
 
-      if (signature === nextSignature) return { changed: false, requiresRoutingRebuild: false }
-      const requiresRoutingRebuild = enabled !== normalized.enabled && (enabled !== null || normalized.enabled)
-      signature = null
-
-      if (!normalized.enabled) {
-        if (saturator) {
-          disconnectSaturatorChain(saturator)
-          saturator = null
-        }
-
+      if (saturator) {
+        if (signature === nextSignature) return { changed: false, requiresRoutingRebuild: false }
+        signature = null
+        applySaturatorNodeChainParams(saturator, normalized)
         signature = nextSignature
-        enabled = false
 
-        return { changed: true, requiresRoutingRebuild }
+        return { changed: true, requiresRoutingRebuild: false }
       }
 
-      if (!saturator) saturator = createSaturatorNodeChain(ctx, normalized)
-      else applySaturatorNodeChainParams(saturator, normalized)
-      signature = nextSignature
-      enabled = true
+      const created = await createSaturatorNodeChain(ctx, normalized)
 
-      return { changed: true, requiresRoutingRebuild }
+      if (current !== generation) {
+        disconnectSaturatorChain(created)
+
+        return { changed: false, requiresRoutingRebuild: false }
+      }
+
+      saturator = created
+      signature = nextSignature
+
+      return { changed: true, requiresRoutingRebuild: true }
     },
     close: () => {
+      generation++
       signature = null
-      enabled = null
 
       if (saturator) {
         disconnectSaturatorChain(saturator)

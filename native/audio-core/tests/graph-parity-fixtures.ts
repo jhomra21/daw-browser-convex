@@ -65,6 +65,8 @@ export type PortableLegacyDelayFixture = {
   enabledEdits?: readonly { frame: number; enabled: boolean }[]
 }
 
+export type PortableLegacySaturatorFixture = { kind: 'saturator'; state: SaturatorProcessorState }
+
 export type PortableLegacySpectralFixture = {
   kind: 'spectral'
   state: SpectralProcessorState
@@ -103,6 +105,7 @@ export type PortableGraphParityFixture = {
   legacyReverb?: { state: ReverbProcessorState }
   legacyDynamics?: PortableLegacyDynamicsFixture
   legacyDelay?: PortableLegacyDelayFixture
+  legacySaturator?: PortableLegacySaturatorFixture
   legacySpectral?: PortableLegacySpectralFixture
   legacyTolerance?: number
   // The legacy worklets are constructed wet and ramp to a bypass requested up front;
@@ -795,8 +798,8 @@ const saturatorState = (overrides: Partial<SaturatorProcessorState> = {}) => enc
   colorLowDb: 0,
   colorHighDb: 6,
   bassThresholdDb: -12,
-  waveshaperDepth: 0.5,
-  waveshaperPeriod: 0.5,
+  warpDepth: 0.5,
+  warpPeriod: 0.5,
   postClip: 'off',
   outputDb: -3,
   dryWet: 0.75,
@@ -984,6 +987,7 @@ const liveControlPair = (
       legacyModulation: undefined,
       legacyDynamics: undefined,
       legacyDelay: undefined,
+      legacySaturator: undefined,
       legacyReverb: undefined,
       legacySpectral: undefined,
       legacyTolerance: undefined,
@@ -2815,6 +2819,74 @@ const autoFilterImpulseFixture = (hiQuality: boolean): PortableGraphParityFixtur
   }
 }
 
+const saturatorCurves = ['soft', 'medium', 'hard', 'clip', 'analog', 'sine', 'bass', 'fold', 'warp'] as const
+
+const saturatorVariant = (
+  name: string,
+  sampleRateHz: number,
+  overrides: Partial<SaturatorProcessorState>,
+): PortableGraphParityFixture => {
+  const state: SaturatorProcessorState = {
+    enabled: true,
+    hiQuality: true,
+    driveDb: 18,
+    curve: 'hard',
+    color: true,
+    colorFrequencyHz: 2_500,
+    colorWidth: 0.57,
+    colorLowDb: 0,
+    colorHighDb: 6,
+    bassThresholdDb: -12,
+    warpDepth: 0.5,
+    warpPeriod: 0.5,
+    postClip: 'off',
+    outputDb: -3,
+    dryWet: 0.75,
+    ...overrides,
+  }
+
+  const frames = 1_200
+  const input = stereo(sine(frames, 997, sampleRateHz, 0.8), sweep(frames, 80, 9_000, sampleRateHz, 0.6))
+
+  return {
+    name: `saturator-variant-${name}`,
+    capability: 'chains',
+    processorKind: 'saturator',
+    sampleRateHz,
+    maxFramesPerBlock: 480,
+    inputBusCount: 1,
+    channelCount: 2,
+    graph: processorSourceMaster({
+      nodeId: 2n,
+      instanceId: 11,
+      kindId: 2,
+      state: encodeSaturatorProcessorState(state),
+      parameterTargets: [69, 70, 72, 73, 203, 204, 205, 206, 207, 208],
+    }),
+    frames,
+    blockPartitions: [1, 63, 128, 288, 480, 240],
+    input,
+    assertReset: true,
+    legacySaturator: { kind: 'saturator', state },
+    legacyTolerance: 1e-5,
+    assertOutput: finite,
+  }
+}
+
+const saturatorVariantFixtures: readonly PortableGraphParityFixture[] = [
+  ...saturatorCurves.map((curve) => saturatorVariant(curve, 48_000, { curve })),
+  ...saturatorCurves.map((curve) => saturatorVariant(`${curve}-lofi`, 48_000, { curve, hiQuality: false, color: false })),
+  saturatorVariant('hard-44100', 44_100, {}),
+  saturatorVariant('soft-96000', 96_000, { curve: 'soft', colorLowDb: -6 }),
+  saturatorVariant('soft-postclip-soft', 48_000, { curve: 'soft', postClip: 'soft' }),
+  saturatorVariant('soft-postclip-hard', 48_000, { curve: 'soft', postClip: 'hard', driveDb: 30 }),
+  saturatorVariant('analog-postclip-hard-lofi', 48_000, { curve: 'analog', postClip: 'hard', hiQuality: false }),
+  saturatorVariant('warp-extreme', 48_000, { curve: 'warp', warpDepth: 1, warpPeriod: 0.1, driveDb: 36 }),
+  saturatorVariant('bass-threshold-floor', 48_000, { curve: 'bass', bassThresholdDb: -50 }),
+  saturatorVariant('dry', 48_000, { dryWet: 0 }),
+  saturatorVariant('color-extreme', 48_000, { colorLowDb: 12, colorHighDb: -12, colorFrequencyHz: 100, colorWidth: 1 }),
+]
+
 const autoFilterFixtures: readonly PortableGraphParityFixture[] = [
   autoFilterImpulseFixture(false),
   autoFilterImpulseFixture(true),
@@ -3044,7 +3116,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       instanceId: 11,
       kindId: 2,
       state: saturatorState(),
-      parameterTargets: [69, 70, 71, 72, 73],
+      parameterTargets: [69, 70, 203, 72, 73],
     }),
     frames: 64,
     blockPartitions: [1, 7, 16, 40],
@@ -3054,6 +3126,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       sine(64, 880, 48_000, 0.25),
     )),
   }, 69, 30),
+  ...saturatorVariantFixtures,
   {
     name: 'saturator-rejects-undeclared-automation',
     capability: 'fullBlockAutomation',

@@ -566,8 +566,8 @@ const readSaturatorParams = (value: JsonValue): SaturatorParams | null => {
     || !isJsonNumber(value.colorLowDb)
     || !isJsonNumber(value.colorHighDb)
     || !isJsonNumber(value.bassThresholdDb)
-    || !isJsonNumber(value.waveshaperDepth)
-    || !isJsonNumber(value.waveshaperPeriod)
+    || !isJsonNumber(value.warpDepth)
+    || !isJsonNumber(value.warpPeriod)
     || !isJsonNumber(value.outputDb)
     || !isJsonNumber(value.dryWet)
   ) return null
@@ -584,8 +584,8 @@ const readSaturatorParams = (value: JsonValue): SaturatorParams | null => {
     colorLowDb: value.colorLowDb,
     colorHighDb: value.colorHighDb,
     bassThresholdDb: value.bassThresholdDb,
-    waveshaperDepth: value.waveshaperDepth,
-    waveshaperPeriod: value.waveshaperPeriod,
+    warpDepth: value.warpDepth,
+    warpPeriod: value.warpPeriod,
     outputDb: value.outputDb,
     dryWet: value.dryWet,
   }

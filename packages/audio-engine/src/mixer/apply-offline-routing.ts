@@ -107,7 +107,7 @@ async function buildOfflineFxChain(
     }
 
     if (instance.kind === 'saturator') {
-      const saturator = createSaturatorNodeChain(ctx, normalizeSaturatorParams(instance.params))
+      const saturator = await createSaturatorNodeChain(ctx, normalizeSaturatorParams(instance.params))
       saturatorByInstanceId.set(instance.id, saturator)
       stages.push({ id: instance.id, kind: instance.kind, saturatorChain: saturator })
       continue

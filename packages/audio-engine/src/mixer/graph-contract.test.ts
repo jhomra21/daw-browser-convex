@@ -315,7 +315,7 @@ describe('mixer routing plan', () => {
 
     const snapshot = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 })
     expect(snapshot.nodes[0]?.processorOrder.map((processor) => [processor.kind, processor.kindId, processor.state.byteLength])).toEqual([
-      ['saturator', 2, 32],
+      ['saturator', 2, 60],
       ['eq', 3, 408],
     ])
     // Curve A keeps its targets 45-68; curve B (bands 9-16) sits at 144-167, then Scale and Output.
@@ -343,8 +343,8 @@ describe('mixer routing plan', () => {
       { id: 'saturator.colorLowDb', target: 204 },
       { id: 'saturator.colorWidth', target: 205 },
       { id: 'saturator.bassThresholdDb', target: 206 },
-      { id: 'saturator.waveshaperDepth', target: 207 },
-      { id: 'saturator.waveshaperPeriod', target: 208 },
+      { id: 'saturator.warpDepth', target: 207 },
+      { id: 'saturator.warpPeriod', target: 208 },
     ])
   })
 

@@ -448,7 +448,7 @@ test('spectral codec preserves bounded STFT state and generic automation metadat
 test('processor state envelopes are little-endian, bounded, and kind-neutral', () => {
   const state = encodeSaturatorProcessorState({
     enabled: true, hiQuality: true, driveDb: 6, curve: 'soft', color: false,
-    colorFrequencyHz: 1200, colorWidth: 0.57, colorLowDb: 0, colorHighDb: 0, bassThresholdDb: -12, waveshaperDepth: 0.5, waveshaperPeriod: 0.5, postClip: 'off', outputDb: 0, dryWet: 1,
+    colorFrequencyHz: 1200, colorWidth: 0.57, colorLowDb: 0, colorHighDb: 0, bassThresholdDb: -12, warpDepth: 0.5, warpPeriod: 0.5, postClip: 'off', outputDb: 0, dryWet: 1,
   })
 
   const wire = encodeAudioCoreProcessorStateEnvelope({
@@ -483,7 +483,7 @@ test('processor state envelopes allow the explicit generic automation capacity',
     schemaVersion: 1,
     state: encodeSaturatorProcessorState({
       enabled: true, hiQuality: true, driveDb: 6, curve: 'soft', color: false,
-      colorFrequencyHz: 1200, colorWidth: 0.57, colorLowDb: 0, colorHighDb: 0, bassThresholdDb: -12, waveshaperDepth: 0.5, waveshaperPeriod: 0.5, postClip: 'off', outputDb: 0, dryWet: 1,
+      colorFrequencyHz: 1200, colorWidth: 0.57, colorLowDb: 0, colorHighDb: 0, bassThresholdDb: -12, warpDepth: 0.5, warpPeriod: 0.5, postClip: 'off', outputDb: 0, dryWet: 1,
     }),
     instanceId: 9,
     bypassed: false,
@@ -506,7 +506,7 @@ test('processor state envelopes allow the explicit generic automation capacity',
 test('Saturator and eight-band EQ codecs preserve their portable state profiles', () => {
   const saturator = encodeSaturatorProcessorState({
     enabled: true, hiQuality: true, driveDb: 18, curve: 'hard', color: true,
-    colorFrequencyHz: 2500, colorWidth: 0.57, colorLowDb: 0, colorHighDb: 6, bassThresholdDb: -12, waveshaperDepth: 0.5, waveshaperPeriod: 0.5, postClip: 'off', outputDb: -3, dryWet: 0.75,
+    colorFrequencyHz: 2500, colorWidth: 0.57, colorLowDb: 0, colorHighDb: 6, bassThresholdDb: -12, warpDepth: 0.5, warpPeriod: 0.5, postClip: 'off', outputDb: -3, dryWet: 0.75,
   })
 
   expect(saturator.byteLength).toBe(60)

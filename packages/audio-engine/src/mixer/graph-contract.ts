@@ -276,8 +276,8 @@ const toPortableProcessor = (
         { id: 'saturator.colorLowDb', target: 204 },
         { id: 'saturator.colorWidth', target: 205 },
         { id: 'saturator.bassThresholdDb', target: 206 },
-        { id: 'saturator.waveshaperDepth', target: 207 },
-        { id: 'saturator.waveshaperPeriod', target: 208 },
+        { id: 'saturator.warpDepth', target: 207 },
+        { id: 'saturator.warpPeriod', target: 208 },
       ],
       bypassed: !instance.params.enabled,
     }

@@ -40,9 +40,9 @@ const reverb = z.object({
 
 const saturator = z.object({
   enabled: z.boolean(), hiQuality: z.boolean(), driveDb: finiteNumber,
-  curve: z.enum(['soft', 'medium', 'hard', 'clip', 'analog', 'sine', 'bass', 'fold', 'waveshaper']),
+  curve: z.enum(['soft', 'medium', 'hard', 'clip', 'analog', 'sine', 'bass', 'fold', 'warp']),
   color: z.boolean(), colorFrequencyHz: finiteNumber, colorWidth: finiteNumber, colorLowDb: finiteNumber, colorHighDb: finiteNumber,
-  bassThresholdDb: finiteNumber, waveshaperDepth: finiteNumber, waveshaperPeriod: finiteNumber,
+  bassThresholdDb: finiteNumber, warpDepth: finiteNumber, warpPeriod: finiteNumber,
   postClip: z.enum(['off', 'soft', 'hard']), outputDb: finiteNumber, dryWet: finiteNumber,
 }).strict()
 

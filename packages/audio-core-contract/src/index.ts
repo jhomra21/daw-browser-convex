@@ -71,7 +71,7 @@ export type LoFiProcessorState = {
 export type SaturatorProcessorState = {
   enabled: boolean
   hiQuality: boolean
-  curve: 'soft' | 'medium' | 'hard' | 'clip' | 'analog' | 'sine' | 'bass' | 'fold' | 'waveshaper'
+  curve: 'soft' | 'medium' | 'hard' | 'clip' | 'analog' | 'sine' | 'bass' | 'fold' | 'warp'
   color: boolean
   postClip: 'off' | 'soft' | 'hard'
   driveDb: number
@@ -82,8 +82,8 @@ export type SaturatorProcessorState = {
   colorLowDb: number
   colorHighDb: number
   bassThresholdDb: number
-  waveshaperDepth: number
-  waveshaperPeriod: number
+  warpDepth: number
+  warpPeriod: number
 }
 
 export type EqProcessorBandState = {
@@ -932,7 +932,7 @@ export const encodeLoFiProcessorState = (state: LoFiProcessorState): Uint8Array 
 }
 
 const saturatorCurveIds: Readonly<Record<SaturatorProcessorState['curve'], number>> = {
-  soft: 0, medium: 1, hard: 2, clip: 3, analog: 4, sine: 5, bass: 6, fold: 7, waveshaper: 8,
+  soft: 0, medium: 1, hard: 2, clip: 3, analog: 4, sine: 5, bass: 6, fold: 7, warp: 8,
 }
 
 export const encodeSaturatorProcessorState = (state: SaturatorProcessorState): Uint8Array => {
@@ -951,8 +951,8 @@ export const encodeSaturatorProcessorState = (state: SaturatorProcessorState): U
   view.setFloat32(40, state.colorLowDb, true)
   view.setFloat32(44, state.colorHighDb, true)
   view.setFloat32(48, state.bassThresholdDb, true)
-  view.setFloat32(52, state.waveshaperDepth, true)
-  view.setFloat32(56, state.waveshaperPeriod, true)
+  view.setFloat32(52, state.warpDepth, true)
+  view.setFloat32(56, state.warpPeriod, true)
 
   return output
 }

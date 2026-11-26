@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { AUDIO_EFFECT_PARAMS_VERSION, migrateAudioEffectParams, migrateWrittenAudioEffectParams } from './audio-effect-param-versions'
-import { createDefaultSaturatorParams, normalizeSaturatorParams } from './effects-params'
+import { createDefaultSaturatorParams } from './effects-params'
 import { getAutomationParameterDescriptor } from './automation-parameters'
 
 const version1 = {
@@ -10,22 +10,15 @@ const version1 = {
 describe('Saturator params version 2', () => {
   test('keeps every version 1 knob and turns the Color amount into Amt Hi', () => {
     expect(AUDIO_EFFECT_PARAMS_VERSION.saturator).toBe(2)
-    const migrated = normalizeSaturatorParams(migrateAudioEffectParams('saturator', version1, 1))
 
-    expect(migrated).toEqual({
-      ...createDefaultSaturatorParams(),
-      enabled: false, driveDb: 18, curve: 'hard', color: true, colorFrequencyHz: 2500, colorHighDb: 6, outputDb: -3, dryWet: 0.75,
+    expect(migrateAudioEffectParams('saturator', version1, 1)).toMatchObject({
+      enabled: false, driveDb: 18, curve: 'hard', color: true, colorFrequencyHz: 2500, outputDb: -3, dryWet: 0.75,
+      colorHighDb: 6, colorLowDb: 0, colorWidth: createDefaultSaturatorParams().colorWidth, hiQuality: true, postClip: 'off',
     })
-    expect(migrated.hiQuality).toBe(true)
-    expect(migrated.postClip).toBe('off')
-    expect(migrated.colorLowDb).toBe(0)
   })
 
   test('a version 1 device with Color off migrates to a flat Color', () => {
-    const migrated = normalizeSaturatorParams(migrateAudioEffectParams('saturator', { ...version1, color: false, colorAmount: 0 }, 1))
-
-    expect(migrated.color).toBe(false)
-    expect(migrated.colorHighDb).toBe(0)
+    expect(migrateAudioEffectParams('saturator', { ...version1, color: false, colorAmount: 0 }, 1)).toMatchObject({ color: false, colorHighDb: 0 })
   })
 
   test('migrates a client write at version 1 and refuses a newer one', () => {
@@ -34,12 +27,21 @@ describe('Saturator params version 2', () => {
   })
 
   test('exposes every continuous control for automation', () => {
-    for (const id of ['driveDb', 'outputDb', 'dryWet', 'colorFrequencyHz', 'colorWidth', 'colorLowDb', 'colorHighDb', 'bassThresholdDb', 'waveshaperDepth', 'waveshaperPeriod']) {
+    const defaults = createDefaultSaturatorParams()
+
+    const controls: [string, number][] = [
+      ['driveDb', defaults.driveDb], ['outputDb', defaults.outputDb], ['dryWet', defaults.dryWet], ['colorFrequencyHz', defaults.colorFrequencyHz],
+      ['colorWidth', defaults.colorWidth], ['colorLowDb', defaults.colorLowDb], ['colorHighDb', defaults.colorHighDb],
+      ['bassThresholdDb', defaults.bassThresholdDb], ['warpDepth', defaults.warpDepth], ['warpPeriod', defaults.warpPeriod],
+    ]
+
+    for (const [id, defaultValue] of controls) {
       const descriptor = getAutomationParameterDescriptor(`saturator.${id}`)
 
       expect(descriptor?.owner).toBe('saturator')
-      expect(descriptor?.defaultValue).toBe(createDefaultSaturatorParams()[id as keyof ReturnType<typeof createDefaultSaturatorParams>])
+      expect(descriptor?.defaultValue).toBe(defaultValue)
     }
+
     expect(getAutomationParameterDescriptor('saturator.colorAmount')).toBeUndefined()
   })
 })

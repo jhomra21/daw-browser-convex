@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { configureEqNodeChannels, createSaturatorCurve, getEqTopologySignature, resolveDelayTimeSec, resolveEqChannelCount } from './dsp'
-import { createDefaultDelayParams, createDefaultReverbParams, normalizeDelayParams, normalizeEqParams, normalizeReverbParams } from '@daw-browser/shared'
+import { configureEqNodeChannels, getEqTopologySignature, resolveDelayTimeSec, resolveEqChannelCount } from './dsp'
+import { createDefaultDelayParams, createDefaultReverbParams, evaluateSaturatorCurvePoint, normalizeDelayParams, normalizeEqParams, normalizeReverbParams } from '@daw-browser/shared'
 
 describe('EQ channel mode', () => {
   test('uses one channel for mono EQ nodes', () => {
@@ -41,12 +41,13 @@ describe('EQ channel mode', () => {
 })
 
 describe('saturator and delay helpers', () => {
-  test('creates finite distinct saturator curves', () => {
-    const soft = createSaturatorCurve('soft')
-    const hard = createSaturatorCurve('hard')
-    expect(soft.length).toBe(4096)
-    expect(Array.from(soft).every((value) => Number.isFinite(value) && value >= -1 && value <= 1)).toBe(true)
-    expect(soft[3000]).not.toBe(hard[3000])
+  test('evaluates finite distinct saturator curves', () => {
+    const curves = ['soft', 'medium', 'hard', 'clip', 'analog', 'sine', 'bass', 'fold', 'warp'] as const
+    const at = (curve: (typeof curves)[number]) => evaluateSaturatorCurvePoint(curve, 0.7)
+
+    expect(curves.every((curve) => Number.isFinite(at(curve)) && Math.abs(at(curve)) <= 1.5)).toBe(true)
+    // Sine and Fold share one shape until the input passes pi/2.
+    expect(new Set(curves.map(at)).size).toBe(curves.length - 1)
   })
 
   test('resolves sync delay time and clamps feedback', () => {

@@ -37,6 +37,7 @@ export const gaussianNoise = (frames: number, sigma: number, seed = 1) => {
 export const pinkNoise = (frames: number, rmsDb: number, seed = 1) => {
   const white = noise(frames, 1, seed)
   const b = new Float64Array(7)
+
   const pink = Float64Array.from(white, (w) => {
     b[0] = 0.99886 * b[0] + w * 0.0555179
     b[1] = 0.99332 * b[1] + w * 0.0750759
@@ -44,11 +45,14 @@ export const pinkNoise = (frames: number, rmsDb: number, seed = 1) => {
     b[3] = 0.8665 * b[3] + w * 0.3104856
     b[4] = 0.55 * b[4] + w * 0.5329522
     b[5] = -0.7616 * b[5] - w * 0.016898
+
     const value = b[0] + b[1] + b[2] + b[3] + b[4] + b[5] + b[6] + w * 0.5362
+
     b[6] = w * 0.115926
 
     return value
   })
+
   const current = Math.sqrt(pink.reduce((sum, value) => sum + value * value, 0) / frames)
 
   return Float32Array.from(pink, (value) => value * 10 ** (rmsDb / 20) / current)

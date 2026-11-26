@@ -5,10 +5,11 @@ import { normalizeAudioEffect } from '../../../packages/shared/src/audio-effect-
 import { migrateSaturatorParamsV1 } from '../../../packages/shared/src/saturator-params-migration'
 import { biquad, rbjCoefficients, rms, toneGainDb } from '../dsp'
 import { fx } from '../effects'
-import type { Harness, Scenario } from '../harness'
+import type { Scenario } from '../harness'
 import { dbToLinear, linearToDb, pinkNoise, sine } from '../signals'
 
 type OldCurve = 'soft' | 'medium' | 'hard' | 'clip'
+
 type OldState = { curve: OldCurve; driveDb: number; color: boolean; colorFrequencyHz: number; colorAmount: number; outputDb: number; dryWet: number }
 
 const oldCurves: readonly OldCurve[] = ['soft', 'medium', 'hard', 'clip']

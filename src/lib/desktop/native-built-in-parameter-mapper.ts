@@ -251,7 +251,7 @@ const mapLoFi = (payload: EffectChange<'lofi' | 'master-lofi'>) => {
   return mapFields(
     [
       { parameterId: 'lofi.bitDepth', from: from.bitDepth, to: to.bitDepth },
-      { parameterId: 'lofi.sampleRateRatio', from: from.sampleRateRatio, to: to.sampleRateRatio },
+      { parameterId: 'lofi.sampleRateHz', from: from.sampleRateHz, to: to.sampleRateHz },
       { parameterId: 'lofi.jitter', from: from.jitter, to: to.jitter },
       { parameterId: 'lofi.noiseDb', from: from.noiseDb, to: to.noiseDb },
       { parameterId: 'lofi.mix', from: from.mix, to: to.mix },

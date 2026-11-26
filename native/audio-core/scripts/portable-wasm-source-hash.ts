@@ -41,6 +41,7 @@ export const portableWasmBuildInputPaths = [
   'native/audio-core/src/ensemble_kernel.h',
   'native/audio-core/src/phaser_kernel.h',
   'native/audio-core/src/reverb_kernel.h',
+  'native/audio-core/src/lofi_kernel.h',
   'native/audio-core/src/saturator_kernel.h',
   'native/audio-core/src/compressor_kernel.h',
   'native/audio-core/src/gate_kernel.h',

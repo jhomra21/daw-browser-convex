@@ -319,13 +319,16 @@ const autoFilterState = (overrides: Partial<AutoFilterProcessorState> = {}): Aut
 const loFiState = (overrides: Partial<LoFiProcessorState> = {}): LoFiProcessorState => ({
   enabled: true,
   bitDepth: 8,
-  sampleRateRatio: 0.5,
+  sampleRateHz: 24_000,
   jitter: 0.35,
   noiseDb: -60,
   quantization: 'round',
   dither: 'triangular',
   mix: 1,
   seed: 123,
+  preFilter: true,
+  postFilter: true,
+  dcCorrection: false,
   ...overrides,
 })
 
@@ -2761,7 +2764,7 @@ const loFiFixtures: readonly PortableGraphParityFixture[] = [44_100, 48_000, 96_
     instanceId: 11,
     kindId: 17,
     state: encodeLoFiProcessorState(loFiState()),
-    parameterTargets: [41, 42, 43, 44, 131],
+    parameterTargets: [209, 42, 43, 44, 131],
   }),
   frames: 64,
   blockPartitions: [1, 7, 3, 17, 2, 11, 23],

@@ -607,7 +607,7 @@ describe('mixer routing plan', () => {
         { id: 'autofilter.outputDb', target: 143 },
       ],
       [
-        { id: 'lofi.sampleRateRatio', target: 41 },
+        { id: 'lofi.sampleRateHz', target: 209 },
         { id: 'lofi.jitter', target: 42 },
         { id: 'lofi.noiseDb', target: 43 },
         { id: 'lofi.mix', target: 44 },

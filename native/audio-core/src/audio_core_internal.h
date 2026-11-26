@@ -34,6 +34,7 @@
 #include "phaser_kernel.h"
 #include "reverb_kernel.h"
 #include "delay_kernel.h"
+#include "lofi_kernel.h"
 #include "saturator_kernel.h"
 #include "compressor_kernel.h"
 #include "gate_kernel.h"
@@ -683,15 +684,10 @@ struct AutoFilterHistory {
   float bypass = 0.0F;
 };
 
-struct LoFiChannelHistory {
-  float phase = 1.0F;
-  float held = 0.0F;
-  float interval = 1.0F;
-  uint32_t random_state = 0;
-};
-
 struct LoFiHistory {
-  std::array<LoFiChannelHistory, 2> channels{};
+  daw::audio_core::LoFiKernel kernel;
+  daw::audio_core::LoFiValues values;
+  daw::audio_core::LoFiConfig config;
   float bypass = 0.0F;
 };
 

@@ -59,13 +59,16 @@ const autoFilterWaveforms = ['sine', 'triangle', 'sawDown', 'sawUp', 'square', '
 export type LoFiProcessorState = {
   enabled: boolean
   bitDepth: number
-  sampleRateRatio: number
+  sampleRateHz: number
   jitter: number
   noiseDb: number
   quantization: 'round' | 'floor' | 'truncate'
   dither: 'off' | 'rectangular' | 'triangular'
   mix: number
   seed: number
+  preFilter: boolean
+  postFilter: boolean
+  dcCorrection: boolean
 }
 
 export type SaturatorProcessorState = {
@@ -916,17 +919,20 @@ export const encodeAutoFilterProcessorState = (state: AutoFilterProcessorState):
 }
 
 export const encodeLoFiProcessorState = (state: LoFiProcessorState): Uint8Array => {
-  const output = new Uint8Array(36)
+  const output = new Uint8Array(48)
   const view = new DataView(output.buffer)
   view.setUint32(0, state.enabled ? 1 : 0, true)
   view.setUint32(4, Math.round(state.bitDepth), true)
-  view.setFloat32(8, state.sampleRateRatio, true)
+  view.setFloat32(8, state.sampleRateHz, true)
   view.setFloat32(12, state.jitter, true)
   view.setFloat32(16, state.noiseDb, true)
   view.setUint32(20, state.quantization === 'floor' ? 1 : state.quantization === 'truncate' ? 2 : 0, true)
   view.setUint32(24, state.dither === 'rectangular' ? 1 : state.dither === 'triangular' ? 2 : 0, true)
   view.setFloat32(28, state.mix, true)
   view.setUint32(32, Math.max(1, Math.round(state.seed)) >>> 0, true)
+  view.setUint32(36, state.preFilter ? 1 : 0, true)
+  view.setUint32(40, state.postFilter ? 1 : 0, true)
+  view.setUint32(44, state.dcCorrection ? 1 : 0, true)
 
   return output
 }

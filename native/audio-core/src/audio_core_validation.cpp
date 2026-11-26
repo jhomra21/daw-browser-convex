@@ -387,7 +387,9 @@ bool valid_autofilter_state(const daw_audio_autofilter_state &state) {
 bool valid_lofi_state(const daw_audio_lofi_state &state) {
   return state.enabled <= 1
     && state.bit_depth >= 2 && state.bit_depth <= 24
-    && std::isfinite(state.sample_rate_ratio) && state.sample_rate_ratio >= 0.01F && state.sample_rate_ratio <= 1.0F
+    && std::isfinite(state.sample_rate_hz) && state.sample_rate_hz >= DAW_AUDIO_CORE_LOFI_SAMPLE_RATE_HZ_MIN
+    && state.sample_rate_hz <= DAW_AUDIO_CORE_LOFI_SAMPLE_RATE_HZ_MAX
+    && state.pre_filter <= 1 && state.post_filter <= 1 && state.dc_correction <= 1
     && std::isfinite(state.jitter) && state.jitter >= 0.0F && state.jitter <= 1.0F
     && std::isfinite(state.noise_db) && state.noise_db >= -120.0F && state.noise_db <= -24.0F
     && state.quantization <= DAW_AUDIO_LOFI_QUANTIZATION_TRUNCATE
@@ -617,13 +619,14 @@ bool decode_processor_state(
     out_processor->autofilter = state;
     return true;
   }
-  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_LOFI && descriptor.state_size == 36) {
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_LOFI && descriptor.state_size == DAW_AUDIO_CORE_PROCESSOR_LOFI_STATE_BYTES) {
     const daw_audio_lofi_state state{
       .enabled = read_u32_le(descriptor.state), .bit_depth = read_u32_le(descriptor.state + 4),
-      .sample_rate_ratio = read_f32_le(descriptor.state + 8), .jitter = read_f32_le(descriptor.state + 12),
+      .sample_rate_hz = read_f32_le(descriptor.state + 8), .jitter = read_f32_le(descriptor.state + 12),
       .noise_db = read_f32_le(descriptor.state + 16), .quantization = read_u32_le(descriptor.state + 20),
       .dither = read_u32_le(descriptor.state + 24), .mix = read_f32_le(descriptor.state + 28),
-      .seed = read_u32_le(descriptor.state + 32),
+      .seed = read_u32_le(descriptor.state + 32), .pre_filter = read_u32_le(descriptor.state + 36),
+      .post_filter = read_u32_le(descriptor.state + 40), .dc_correction = read_u32_le(descriptor.state + 44),
     };
     if (!valid_lofi_state(state) || descriptor.latency_frames != 0 || descriptor.tail_frames != 0) return false;
     out_processor->lofi = state;
@@ -722,9 +725,8 @@ bool valid_processor_parameter_target(uint32_t kind, uint32_t target) {
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE)
         || target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_OUTPUT_DB;
     case DAW_AUDIO_PROCESSOR_KIND_LOFI:
-      return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_RATIO
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_MIX)
-        || target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_BIT_DEPTH;
+      return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_JITTER && target <= DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_MIX)
+        || target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_BIT_DEPTH || target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_HZ;
     default:
       return false;
   }
@@ -778,7 +780,9 @@ bool valid_processor_parameter_value(uint32_t target, float value) {
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_PHASE_OFFSET) return value >= 0.0F && value <= 1.0F;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE) return value >= -0.5F && value <= 0.5F;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_OUTPUT_DB) return value >= -24.0F && value <= 24.0F;
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_RATIO) return value >= 0.01F && value <= 1.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_HZ) {
+    return value >= DAW_AUDIO_CORE_LOFI_SAMPLE_RATE_HZ_MIN && value <= DAW_AUDIO_CORE_LOFI_SAMPLE_RATE_HZ_MAX;
+  }
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_JITTER) return value >= 0.0F && value <= 1.0F;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_NOISE_DB) return value >= -120.0F && value <= -24.0F;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_MIX) return value >= 0.0F && value <= 1.0F;

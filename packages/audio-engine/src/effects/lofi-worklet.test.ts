@@ -53,7 +53,7 @@ const loadProcessor = async () => {
 describe('LoFi static worklet', () => {
   const parameters = () => ({
     'lofi.bitDepth': Float32Array.of(8),
-    'lofi.sampleRateRatio': Float32Array.of(0.5),
+    'lofi.sampleRateHz': Float32Array.of(24000),
     'lofi.jitter': Float32Array.of(0.35),
     'lofi.noiseDb': Float32Array.of(-60),
     'lofi.mix': Float32Array.of(1),
@@ -72,6 +72,25 @@ describe('LoFi static worklet', () => {
     })
   }
 
+  test('rounds a fractional bit depth to the nearest whole number, ties up', async () => {
+    const levelsAt = async (bitDepth: number) => {
+      const processor = await loadProcessor()
+      configure(processor)
+      const output = [new Float32Array(128), new Float32Array(128)]
+      const sweep = Float32Array.from({ length: 128 }, (_, frame) => frame / 127 * 1.8 - 0.9)
+      processor.process([[sweep, sweep]], [output], { ...parameters(), 'lofi.bitDepth': Float32Array.of(bitDepth), 'lofi.sampleRateHz': Float32Array.of(96000), 'lofi.noiseDb': Float32Array.of(-120), 'lofi.jitter': Float32Array.of(0) })
+
+      return output[0]
+    }
+
+    for (const [reported, expected] of [[11.4, 11], [11.5, 12], [11.9, 12]] as const) {
+      const whole = await levelsAt(expected)
+      const fractional = await levelsAt(reported)
+
+      expect(fractional).toEqual(whole)
+    }
+  })
+
   test('uses the same bypass transition for every channel', async () => {
     const processor = await loadProcessor()
     processor.port.onmessage?.({
@@ -89,7 +108,7 @@ describe('LoFi static worklet', () => {
       [output],
       {
         'lofi.bitDepth': Float32Array.of(2),
-        'lofi.sampleRateRatio': Float32Array.of(1),
+        'lofi.sampleRateHz': Float32Array.of(96000),
         'lofi.jitter': Float32Array.of(0),
         'lofi.noiseDb': Float32Array.of(-120),
         'lofi.mix': Float32Array.of(1),

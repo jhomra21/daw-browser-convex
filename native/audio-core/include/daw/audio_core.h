@@ -421,7 +421,8 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_DEPTH_OCTAVES = 38,
   DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_PHASE_OFFSET = 39,
   DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE = 40,
-  DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_RATIO = 41,
+  /* 41 was the Lo-Fi sample-rate ratio; the rate in Hz took id 209 and nothing is accepted at 41 any more. */
+  DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_RATIO_RETIRED = 41,
   DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_JITTER = 42,
   DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_NOISE_DB = 43,
   DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_MIX = 44,
@@ -561,7 +562,8 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_WIDTH = 205,
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_BASS_THRESHOLD_DB = 206,
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_DEPTH = 207,
-  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_PERIOD = 208
+  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_PERIOD = 208,
+  DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_HZ = 209
 } daw_audio_processor_parameter;
 
 #define DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_0_FREQUENCY_HZ
@@ -1091,16 +1093,22 @@ typedef enum daw_audio_lofi_dither {
   DAW_AUDIO_LOFI_DITHER_TRIANGULAR = 2
 } daw_audio_lofi_dither;
 
+/* The rate is in Hz, so the same setting sounds the same at every host rate; a rate at or above the host's passes every sample.
+ * pre_filter band-limits the input to the reduced rate before it is held (no aliasing), post_filter smooths the held steps, and
+ * dc_correction centres the Floor quantizer (its error averages minus half an LSB). Clipping at one applies only when the bit depth is under 24 or the rate is reduced. */
 typedef struct daw_audio_lofi_state {
   uint32_t enabled;
   uint32_t bit_depth;
-  float sample_rate_ratio;
+  float sample_rate_hz;
   float jitter;
   float noise_db;
   uint32_t quantization;
   uint32_t dither;
   float mix;
   uint32_t seed;
+  uint32_t pre_filter;
+  uint32_t post_filter;
+  uint32_t dc_correction;
 } daw_audio_lofi_state;
 
 typedef struct daw_audio_asset_descriptor {

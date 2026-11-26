@@ -307,7 +307,7 @@ test('processor registry preserves stable portable processor ids', () => {
     expect.objectContaining({ name: 'reverb', id: 14, schemaVersion: 2, stateBytes: 124 }),
     expect.objectContaining({ name: 'spectral', id: 15, stateBytes: 60 }),
     expect.objectContaining({ name: 'autofilter', id: 16, schemaVersion: 1, stateBytes: 92, tombstone: false }),
-    expect.objectContaining({ name: 'lofi', id: 17, stateBytes: 36, schemaVersion: 1, tombstone: false }),
+    expect.objectContaining({ name: 'lofi', id: 17, stateBytes: 48, schemaVersion: 2, tombstone: false }),
   ])
 })
 
@@ -418,12 +418,17 @@ test('delay and reverb codecs preserve portable state without claiming browser c
 
 test('LoFi codec preserves deterministic state and portable controls', () => {
   const lofi = encodeLoFiProcessorState({
-    enabled: true, bitDepth: 12, sampleRateRatio: 0.5, jitter: 0.25, noiseDb: -80,
+    enabled: true, bitDepth: 12, sampleRateHz: 24000, jitter: 0.25, noiseDb: -80,
     quantization: 'truncate', dither: 'triangular', mix: 0.75, seed: 123,
+    preFilter: true, postFilter: false, dcCorrection: true,
   })
 
-  expect(lofi.byteLength).toBe(36)
+  expect(lofi.byteLength).toBe(48)
   const view = new DataView(lofi.buffer)
+  expect(view.getFloat32(8, true)).toBe(24000)
+  expect(view.getUint32(36, true)).toBe(1)
+  expect(view.getUint32(40, true)).toBe(0)
+  expect(view.getUint32(44, true)).toBe(1)
   expect(view.getUint32(4, true)).toBe(12)
   expect(view.getUint32(20, true)).toBe(2)
   expect(view.getUint32(24, true)).toBe(2)

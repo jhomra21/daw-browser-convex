@@ -204,6 +204,18 @@ if(BUILD_TESTING)
     add_test(NAME daw-saturator-${group} COMMAND daw-saturator-test ${group})
   endforeach()
 
+  # Lo-Fi kernel (src/lofi_kernel.h). One ctest per measurement group; the executable prints each value.
+  add_executable(daw-lofi-test tests/lofi_test.cpp)
+  target_compile_features(daw-lofi-test PRIVATE cxx_std_20)
+  if(MSVC)
+    target_compile_options(daw-lofi-test PRIVATE /W4 /WX /EHs-c- /GR-)
+  else()
+    target_compile_options(daw-lofi-test PRIVATE -Wall -Wextra -Werror -fno-exceptions -fno-rtti)
+  endif()
+  foreach(group bits rate prefilter clip floor safety)
+    add_test(NAME daw-lofi-${group} COMMAND daw-lofi-test ${group})
+  endforeach()
+
   # Not a test: prints the cost of one Reverb per frame from graph fixtures (tools/reverb-bench-fixtures.ts).
   add_executable(daw-reverb-bench tools/reverb_bench.cpp tests/graph_fixture.cpp)
   target_compile_features(daw-reverb-bench PRIVATE cxx_std_20)

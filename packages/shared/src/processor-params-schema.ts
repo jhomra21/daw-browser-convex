@@ -146,9 +146,10 @@ const ensemble = envelope(z.object({
 const spectrum = envelope(z.object({ enabled: z.boolean(), view: z.enum(['spectrum', 'spectrogram', 'both']) }).strict())
 
 const lofi = envelope(z.object({
-  enabled: z.boolean(), bitDepth: finiteNumber, sampleRateRatio: finiteNumber, jitter: finiteNumber,
+  enabled: z.boolean(), bitDepth: finiteNumber, sampleRateHz: finiteNumber, jitter: finiteNumber,
   noiseDb: finiteNumber, quantization: z.enum(['round', 'floor', 'truncate']),
   dither: z.enum(['off', 'rectangular', 'triangular']), mix: finiteNumber, seed: finiteNumber,
+  preFilter: z.boolean(), postFilter: z.boolean(), dcCorrection: z.boolean(),
 }).strict())
 
 const spectral = envelope(z.object({

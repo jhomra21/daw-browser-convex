@@ -1459,16 +1459,25 @@ export type LoFiQuantization = 'round' | 'floor' | 'truncate'
 
 export type LoFiDither = 'off' | 'rectangular' | 'triangular'
 
+// The rate is in Hz so a setting sounds the same at every host rate; the top of the range is the highest host rate the engine runs,
+// where nothing is dropped. preFilter band-limits the input to the reduced rate before it is held, postFilter smooths the held steps,
+// and dcCorrection centres the Floor quantizer (its error averages minus half an LSB).
+export const LOFI_SAMPLE_RATE_HZ_MIN = 100
+export const LOFI_SAMPLE_RATE_HZ_MAX = 96000
+
 export type LoFiParams = {
   enabled: boolean
   bitDepth: number
-  sampleRateRatio: number
+  sampleRateHz: number
   jitter: number
   noiseDb: number
   quantization: LoFiQuantization
   dither: LoFiDither
   mix: number
   seed: number
+  preFilter: boolean
+  postFilter: boolean
+  dcCorrection: boolean
 }
 
 export type LoFiParamsEnvelope = ProcessorStateEnvelope<LoFiParams>
@@ -1476,13 +1485,16 @@ export type LoFiParamsEnvelope = ProcessorStateEnvelope<LoFiParams>
 export const createDefaultLoFiParams = (): LoFiParams => ({
   enabled: true,
   bitDepth: 12,
-  sampleRateRatio: 1,
+  sampleRateHz: LOFI_SAMPLE_RATE_HZ_MAX,
   jitter: 0,
   noiseDb: -80,
   quantization: 'round',
   dither: 'off',
   mix: 1,
   seed: 1,
+  preFilter: false,
+  postFilter: false,
+  dcCorrection: false,
 })
 
 export const normalizeLoFiParamsEnvelope = (value: JsonValue): LoFiParamsEnvelope => {
@@ -1496,13 +1508,16 @@ export const normalizeLoFiParamsEnvelope = (value: JsonValue): LoFiParamsEnvelop
     state: {
       enabled: isJsonBoolean(state.enabled) ? state.enabled : defaults.enabled,
       bitDepth: Math.round(normalizeNumber(state.bitDepth, defaults.bitDepth, 2, 24)),
-      sampleRateRatio: normalizeNumber(state.sampleRateRatio, defaults.sampleRateRatio, 0.01, 1),
+      sampleRateHz: normalizeNumber(state.sampleRateHz, defaults.sampleRateHz, LOFI_SAMPLE_RATE_HZ_MIN, LOFI_SAMPLE_RATE_HZ_MAX),
       jitter: normalizeNumber(state.jitter, defaults.jitter, 0, 1),
       noiseDb: normalizeNumber(state.noiseDb, defaults.noiseDb, -120, -24),
       quantization: state.quantization === 'floor' || state.quantization === 'truncate' ? state.quantization : 'round',
       dither: state.dither === 'rectangular' || state.dither === 'triangular' ? state.dither : 'off',
       mix: normalizeNumber(state.mix, defaults.mix, 0, 1),
       seed: Math.max(1, Math.round(seed)) >>> 0,
+      preFilter: isJsonBoolean(state.preFilter) ? state.preFilter : defaults.preFilter,
+      postFilter: isJsonBoolean(state.postFilter) ? state.postFilter : defaults.postFilter,
+      dcCorrection: isJsonBoolean(state.dcCorrection) ? state.dcCorrection : defaults.dcCorrection,
     },
   }
 }

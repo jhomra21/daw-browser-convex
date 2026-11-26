@@ -143,7 +143,8 @@ uint32_t schema_version_of(uint32_t kind) {
     : kind == DAW_AUDIO_PROCESSOR_KIND_TREMOLO ? DAW_AUDIO_CORE_PROCESSOR_TREMOLO_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_AUTOPAN ? DAW_AUDIO_CORE_PROCESSOR_AUTOPAN_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE ? DAW_AUDIO_CORE_PROCESSOR_ENSEMBLE_SCHEMA_VERSION
-    : kind == DAW_AUDIO_PROCESSOR_KIND_SATURATOR ? DAW_AUDIO_CORE_PROCESSOR_SATURATOR_SCHEMA_VERSION : 1u;
+    : kind == DAW_AUDIO_PROCESSOR_KIND_SATURATOR ? DAW_AUDIO_CORE_PROCESSOR_SATURATOR_SCHEMA_VERSION
+    : kind == DAW_AUDIO_PROCESSOR_KIND_LOFI ? DAW_AUDIO_CORE_PROCESSOR_LOFI_SCHEMA_VERSION : 1u;
 }
 
 void expect(daw_audio_core_result actual, daw_audio_core_result expected, int line = __builtin_LINE()) {
@@ -2212,7 +2213,7 @@ void test_processor_chain_prepare_and_dispatch() {
   saturator_request.graph_revision = 2;
   saturator_request.processors = &saturator;
   expect(daw_audio_core_prepare_graph(core, &saturator_request), DAW_AUDIO_CORE_OK);
-  std::array<uint8_t, 36> lofi_state{};
+  std::array<uint8_t, 48> lofi_state{};
   const auto write_lofi_u32 = [&lofi_state](uint32_t offset, uint32_t value) {
     lofi_state[offset] = static_cast<uint8_t>(value);
     lofi_state[offset + 1] = static_cast<uint8_t>(value >> 8u);
@@ -2226,17 +2227,18 @@ void test_processor_chain_prepare_and_dispatch() {
   };
   write_lofi_u32(0, 1);
   write_lofi_u32(4, 12);
-  write_lofi_f32(8, 0.5F);
+  write_lofi_f32(8, 24000.0F);
   write_lofi_f32(12, 0.2F);
   write_lofi_f32(16, -60.0F);
   write_lofi_u32(20, DAW_AUDIO_LOFI_QUANTIZATION_ROUND);
   write_lofi_u32(24, DAW_AUDIO_LOFI_DITHER_TRIANGULAR);
   write_lofi_f32(28, 1.0F);
   write_lofi_u32(32, 123);
-  const std::array<uint32_t, 5> lofi_targets{41, 42, 43, 44, 131};
+  write_lofi_u32(36, 1);
+  const std::array<uint32_t, 5> lofi_targets{209, 42, 43, 44, 131};
   const daw_audio_processor_descriptor lofi{
     .node_id = 2, .instance_id = 44, .kind = DAW_AUDIO_PROCESSOR_KIND_LOFI,
-    .state_version = 1, .state_size = static_cast<uint32_t>(lofi_state.size()), .bypassed = 0,
+    .state_version = 2, .state_size = static_cast<uint32_t>(lofi_state.size()), .bypassed = 0,
     .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
     .latency_frames = 0, .tail_frames = 0, .parameter_count = static_cast<uint32_t>(lofi_targets.size()),
     .parameter_targets = lofi_targets.data(), .state = lofi_state.data(),
@@ -8914,10 +8916,10 @@ Phase3RawState phase3_chorus_state() {
 
 Phase3RawState phase3_lofi_state() {
   Phase3RawState state;
-  state.size = 36;
-  state.u32(0, 1); state.u32(4, 12); state.f32(8, 0.5F); state.f32(12, 0.2F); state.f32(16, -60.0F);
+  state.size = 48;
+  state.u32(0, 1); state.u32(4, 12); state.f32(8, 24000.0F); state.f32(12, 0.2F); state.f32(16, -60.0F);
   state.u32(20, DAW_AUDIO_LOFI_QUANTIZATION_ROUND); state.u32(24, DAW_AUDIO_LOFI_DITHER_TRIANGULAR);
-  state.f32(28, 1.0F); state.u32(32, 123);
+  state.f32(28, 1.0F); state.u32(32, 123); state.u32(36, 1);
   return state;
 }
 

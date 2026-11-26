@@ -13,6 +13,7 @@
 #include "acceptance-observer.h"
 #include "audio-host-test-hooks.h"
 #include "audio-host-limits.h"
+#include "spectrum-analyzer.h"
 #include "audio-host-worker-path.h"
 #include "audio-host-bytes.h"
 #include "audio-host-plan-routing.h"
@@ -300,8 +301,7 @@ struct AudioHost::Impl {
   NativeTelemetryObserver telemetry_observer{};
   std::atomic<std::uint64_t> spectrum_selected_node{0};
   std::uint64_t spectrum_sequence = 0;
-  std::array<float, kMaximumSpectrumBins> spectrum_smoothed{};
-  bool spectrum_has_previous = false;
+  SpectrumAnalyzer spectrum_analyzer{kSpectrumFftSize};
   std::array<float, kSpectrumFftSize> spectrum_history_left{};
   std::array<float, kSpectrumFftSize> spectrum_history_right{};
   std::uint32_t spectrum_history_count = 0;

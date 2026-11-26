@@ -7,6 +7,7 @@
 #include "../src/revision-publication-wait.h"
 #include "../src/offline-failure-message.h"
 #include "../src/recording-spool.h"
+#include "../src/spectrum-analyzer.h"
 #include "worker-supervisor.h"
 #include "vst3-worker.h"
 #include <algorithm>
@@ -1232,6 +1233,61 @@ void TestProcessorStatePatchTimeoutCancelsAndReusesSlot() {
     == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);
   assert(host.RollbackGraphRevision(3).code == daw::audio_host_macos::GraphRevisionStatusCode::kRolledBack);
   host.Stop();
+}
+
+// Drives the host's spectrum frame with a sine through the real observation path and returns its display levels
+// as dBFS (display value 0..1 spans -90..0 dBFS).
+std::vector<double> SpectrumDecibelsAfter(const double hertz, const double amplitude, const std::uint32_t block,
+  const std::uint32_t blocks, const std::uint32_t silent_blocks = 0) {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({.device_uid = "diagnostic", .sample_rate_hz = 48000,
+    .max_frames_per_block = block, .channel_count = 2, .revision = 1}));
+  assert(host.PrepareAndPublishGraph(1, GraphSnapshot(1, 1.0F)));
+  assert(host.SetTransport(1, false, 0));
+  assert(host.StartDiagnosticMode());
+  assert(host.SetSpectrumNode(1));
+  std::vector<float> signal(block), left(block), right(block);
+  const std::array<const float*, 2> input{signal.data(), signal.data()};
+  const std::array<float*, 2> output{left.data(), right.data()};
+  std::uint64_t frame = 0;
+  std::optional<daw::audio_host_macos::SpectrumFrame> last;
+  for (std::uint32_t index = 0; index < silent_blocks + blocks; ++index) {
+    for (std::uint32_t sample = 0; sample < block; ++sample)
+      signal[sample] = index < silent_blocks ? 0.0F
+        : static_cast<float>(amplitude * std::sin(6.283185307179586 * hertz * (frame + sample) / 48000.0));
+    frame += block;
+    assert(host.ProcessPlanar(input, output, block));
+    last = host.DrainSpectrumFrame();
+    assert(last);
+  }
+  std::vector<double> decibels(last->bin_count);
+  for (std::uint32_t bin = 0; bin < last->bin_count; ++bin) decibels[bin] = last->data[bin] * 90.0 - 90.0;
+  return decibels;
+}
+
+void TestSpectrumLevelsAreCalibrated() {
+  for (const double hertz : {100.0, 1000.0, 10000.0}) {
+    for (const double level : {-6.0, -20.0, -60.0}) {
+      const auto decibels = SpectrumDecibelsAfter(hertz, std::pow(10.0, level / 20.0), 128, 300);
+      const auto peak = static_cast<std::uint32_t>(std::max_element(decibels.begin(), decibels.end()) - decibels.begin());
+      const auto [offset, peak_level] = daw::audio_host_macos::SpectrumAnalyzer::InterpolatedPeak(
+        decibels[peak - 1], decibels[peak], decibels[peak + 1]);
+      const double frequency = (peak + offset) * 48000.0 / 2048.0;
+      std::fprintf(stderr, "spectrum %.0f Hz %.0f dBFS: level %.3f dB, frequency %.3f Hz, raw peak %.3f dB\n",
+        hertz, level, peak_level, frequency, decibels[peak]);
+      assert(std::fabs(peak_level - level) <= 0.5);
+      assert(std::fabs(frequency - hertz) <= 48000.0 / 2048.0 / 2.0);
+    }
+  }
+}
+
+// The same audio delivered in 128- and 512-frame blocks reads the same after the same elapsed time.
+void TestSpectrumAveragingIgnoresDeliveryRate() {
+  const auto fine = SpectrumDecibelsAfter(1000.0, 0.5, 128, 36, 20);
+  const auto coarse = SpectrumDecibelsAfter(1000.0, 0.5, 512, 9, 5);
+  const auto peak = static_cast<std::size_t>(std::max_element(fine.begin(), fine.end()) - fine.begin());
+  std::fprintf(stderr, "spectrum step 0.096 s: %.3f dB at 128, %.3f dB at 512\n", fine[peak], coarse[peak]);
+  assert(std::fabs(fine[peak] - coarse[peak]) <= 0.5);
 }
 
 void TestCheckpoint4ObservationHandoff(const char mode) {
@@ -6970,6 +7026,8 @@ int main(const int argc, const char* const argv[]) {
     plugin::MeasureInserts();
     return 0;
   }
+  TestSpectrumLevelsAreCalibrated();
+  TestSpectrumAveragingIgnoresDeliveryRate();
   for (const char mode : {'a', 'b', 'c', 'd', 'e', 'f'}) TestCheckpoint4ObservationHandoff(mode);
   for (const unsigned mode : {0U, 1U, 2U, 3U, 4U}) TestCheckpoint3WireOrigin(mode);
   TestCheckpoint3RapidNodeReaddition();

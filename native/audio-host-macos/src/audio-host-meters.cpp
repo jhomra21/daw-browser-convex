@@ -47,14 +47,14 @@ bool AudioHost::SetSpectrumNode(const std::uint64_t node_id) {
   if (node_id == 0) {
     impl_->spectrum_selected_node.store(0, std::memory_order_release);
     impl_->spectrum_observer.Clear();
-    impl_->spectrum_has_previous = false;
+    impl_->spectrum_analyzer.Reset();
     impl_->spectrum_history_count = 0;
     return true;
   }
   if (!impl_->observation_lookups[impl_->active_observation_lookup.load(
     std::memory_order_acquire)].Contains(node_id)) return false;
   impl_->spectrum_observer.Clear();
-  impl_->spectrum_has_previous = false;
+  impl_->spectrum_analyzer.Reset();
   impl_->spectrum_history_count = 0;
   impl_->spectrum_selected_node.store(node_id, std::memory_order_release);
   return true;
@@ -73,8 +73,10 @@ std::optional<SpectrumFrame> AudioHost::DrainSpectrumFrame() {
   NativeSpectrumObserver::Event event{};
   NativeSpectrumObserver::Event latest{};
   bool has_event = false;
+  std::uint64_t drained_frames = 0;
   while (impl_->spectrum_observer.Pop(event)) {
     latest = event;
+    drained_frames += event.frame_count;
     has_event = true;
     const auto count = std::min<std::uint32_t>(event.frame_count, kSpectrumFftSize);
     const auto retained = std::min<std::uint32_t>(impl_->spectrum_history_count, kSpectrumFftSize - count);
@@ -95,59 +97,13 @@ std::optional<SpectrumFrame> AudioHost::DrainSpectrumFrame() {
     impl_->spectrum_history_count = retained + count;
   }
   if (!has_event) return std::nullopt;
-  std::array<double, kSpectrumFftSize> real{};
-  std::array<double, kSpectrumFftSize> imaginary{};
-  for (std::uint32_t frame = 0; frame < kSpectrumFftSize; ++frame) {
-    const double progress = static_cast<double>(frame) / static_cast<double>(kSpectrumFftSize - 1);
-    const double window = 0.42 - 0.5 * std::cos(6.2831853071795864769 * progress) + 0.08 * std::cos(12.566370614359172954 * progress);
-    const auto history_index = frame >= kSpectrumFftSize - impl_->spectrum_history_count
-      ? frame - (kSpectrumFftSize - impl_->spectrum_history_count)
-      : kSpectrumFftSize;
-    const double sample = history_index < impl_->spectrum_history_count
-      ? (static_cast<double>(impl_->spectrum_history_left[history_index]) + static_cast<double>(impl_->spectrum_history_right[history_index])) * 0.5
-      : 0.0;
-    real[frame] = sample * window;
+  std::vector<double> block(kSpectrumFftSize, 0.0);
+  const auto missing = kSpectrumFftSize - impl_->spectrum_history_count;
+  for (std::uint32_t index = 0; index < impl_->spectrum_history_count; ++index) {
+    block[missing + index] = (static_cast<double>(impl_->spectrum_history_left[index])
+      + static_cast<double>(impl_->spectrum_history_right[index])) * 0.5;
   }
-  for (std::uint32_t index = 1, reversed = 0; index < kSpectrumFftSize; ++index) {
-    std::uint32_t bit = kSpectrumFftSize >> 1U;
-    for (; reversed & bit; bit >>= 1U) reversed ^= bit;
-    reversed ^= bit;
-    if (index < reversed) {
-      std::swap(real[index], real[reversed]);
-      std::swap(imaginary[index], imaginary[reversed]);
-    }
-  }
-  for (std::uint32_t length = 2; length <= kSpectrumFftSize; length <<= 1U) {
-    const double angle = -6.2831853071795864769 / static_cast<double>(length);
-    const double step_real = std::cos(angle);
-    const double step_imaginary = std::sin(angle);
-    for (std::uint32_t start = 0; start < kSpectrumFftSize; start += length) {
-      double twiddle_real = 1.0;
-      double twiddle_imaginary = 0.0;
-      const auto half = length / 2U;
-      for (std::uint32_t offset = 0; offset < half; ++offset) {
-        const auto even = start + offset;
-        const auto odd = even + half;
-        const double product_real = twiddle_real * real[odd] - twiddle_imaginary * imaginary[odd];
-        const double product_imaginary = twiddle_real * imaginary[odd] + twiddle_imaginary * real[odd];
-        real[odd] = real[even] - product_real;
-        imaginary[odd] = imaginary[even] - product_imaginary;
-        real[even] += product_real;
-        imaginary[even] += product_imaginary;
-        const double next_twiddle_real = twiddle_real * step_real - twiddle_imaginary * step_imaginary;
-        twiddle_imaginary = twiddle_real * step_imaginary + twiddle_imaginary * step_real;
-        twiddle_real = next_twiddle_real;
-      }
-    }
-  }
-  for (std::uint32_t bin = 0; bin < kMaximumSpectrumBins; ++bin) {
-    const double scale = bin == 0 ? 1.0 / kSpectrumFftSize : 2.0 / kSpectrumFftSize;
-    const double current = std::hypot(real[bin], imaginary[bin]) * scale;
-    const double smoothed = impl_->spectrum_has_previous
-      ? 0.7 * impl_->spectrum_smoothed[bin] + 0.3 * current : current;
-    impl_->spectrum_smoothed[bin] = std::isfinite(smoothed) ? static_cast<float>(smoothed) : 0.0F;
-  }
-  impl_->spectrum_has_previous = true;
+  impl_->spectrum_analyzer.Analyze(block, static_cast<double>(drained_frames) / latest.sample_rate_hz);
   SpectrumFrame output{};
   output.graph_revision = latest.graph_revision;
   output.transport_epoch = latest.transport_epoch;
@@ -156,10 +112,7 @@ std::optional<SpectrumFrame> AudioHost::DrainSpectrumFrame() {
   output.sample_rate_hz = latest.sample_rate_hz;
   output.fft_size = kSpectrumFftSize;
   output.bin_count = kMaximumSpectrumBins;
-  for (std::uint32_t bin = 0; bin < kMaximumSpectrumBins; ++bin) {
-    const double db = std::clamp(20.0 * std::log10(std::max<double>(impl_->spectrum_smoothed[bin], std::numeric_limits<double>::min())), -100.0, -30.0);
-    output.data[bin] = static_cast<float>((db + 100.0) / 70.0);
-  }
+  for (std::uint32_t bin = 0; bin < kMaximumSpectrumBins; ++bin) output.data[bin] = impl_->spectrum_analyzer.Level(bin);
   return output;
 }
 

@@ -1,5 +1,5 @@
-// Acceptance tests from saturation-utility.md section 3: lo-fi (bit rounding,
-// rate in Hz), utility (gain click, DC blocker), spectral (threshold normalisation, freeze, identity).
+// Acceptance tests from saturation-utility.md section 3: utility (gain click, DC blocker), spectral (threshold normalisation, freeze,
+// identity). The Lo-Fi rows live in lofi.ts.
 import { maxAbsDiff, peakAbs, rms, toneGainDb } from '../dsp'
 import { fx } from '../effects'
 import type { Family } from './index'
@@ -8,25 +8,6 @@ import { linearToDb, noise, sine, sineWithPeakAt } from '../signals'
 import { parityScenario, robustnessScenarios } from './shared'
 
 const aligned = (frame: number) => Math.floor(frame / 128) * 128
-
-const lofiQuantisation: Scenario = {
-  effect: 'lofi',
-  name: 'lofi1-bit-depth-and-rate',
-  rates: [48000],
-  run: async (h) => {
-    const input = [sine(h.rate, 997, h.rate, 0.5)]
-    const levels = (output: Float32Array) => new Set(Array.from(output.subarray(1000), (v) => Math.round(v * 1e6))).size
-
-    for (const [bitDepth, expected] of [[11.4, 11], [11.5, 12], [11.9, 12]] as const) {
-      const reference = await h.render(fx.lofi({ bitDepth: expected }), { input }, { parity: false })
-      const { output } = await h.render(fx.lofi({ bitDepth }), { input }, { parity: false })
-      h.atMost(`bitDepth ${bitDepth} vs ${expected} bits, max difference`, maxAbsDiff(output[0], reference.output[0]), 1e-6, 'abs', 'reported fractional depth must round to an integer')
-    }
-
-    const held = await h.render(fx.lofi({ sampleRateRatio: 0.25, bitDepth: 24 }), { input }, { parity: false })
-    h.info('distinct output levels at ratio 0.25', levels(held.output[0]), 'levels')
-  },
-}
 
 const utilityClick: Scenario = {
   effect: 'utility',
@@ -71,20 +52,18 @@ const spectralScenarios: Scenario[] = [{
   },
 }]
 
-const lofiSpec = fx.lofi()
 const utilitySpec = fx.utility()
 const spectralSpec = fx.spectral()
 
 export const saturationUtility: Family = {
   scenarios: [
-    lofiQuantisation, utilityClick, ...spectralScenarios,
-    parityScenario('lofi', lofiSpec), parityScenario('utility', utilitySpec), parityScenario('spectral', spectralSpec),
-    ...robustnessScenarios('lofi', lofiSpec, null),
+    utilityClick, ...spectralScenarios,
+    parityScenario('utility', utilitySpec), parityScenario('spectral', spectralSpec),
     ...robustnessScenarios('utility', utilitySpec, null),
     ...robustnessScenarios('spectral', spectralSpec, () => 2048),
   ],
   notEncoded: [
     'Bass-mono crossover and phase-L tests: the utility has no bass-mono or per-channel phase control.',
-    'Lo-fi rate-in-Hz tests, spectral freeze ripple and HPSS neutral-gain tests: the core exposes no control for them yet.',
+    'Spectral freeze ripple and HPSS neutral-gain tests: the core exposes no control for them yet.',
   ],
 }

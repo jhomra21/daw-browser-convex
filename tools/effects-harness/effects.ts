@@ -129,7 +129,7 @@ export const parameterTargets: Record<EffectKind, Record<string, number>> = {
     ...range(30, ['frequencyHz', 'resonance', 'driveDb', 'mix', 'envelope.amountOctaves', 'envelope.attackMs', 'envelope.releaseMs', 'lfo.rateHz', 'lfo.depthOctaves', 'lfo.phaseOffset', 'lfo.stereoPhase']),
     outputDb: 143,
   },
-  lofi: { sampleRateRatio: 41, jitter: 42, noiseDb: 43, mix: 44, bitDepth: 131 },
+  lofi: { sampleRateHz: 209, jitter: 42, noiseDb: 43, mix: 44, bitDepth: 131 },
 }
 
 const idleBand: EqProcessorBandState = { enabled: false, type: 'peaking', frequency: 1000, gainDb: 0, q: 1 }
@@ -241,6 +241,9 @@ export const fx = {
   }),
   lofi: (state: Partial<LoFiProcessorState> = {}): EffectSpec => ({
     kind: 'lofi',
-    state: { enabled: true, bitDepth: 12, sampleRateRatio: 1, jitter: 0, noiseDb: -80, quantization: 'round', dither: 'off', mix: 1, seed: 1, ...state },
+    state: {
+      enabled: true, bitDepth: 12, sampleRateHz: 96000, jitter: 0, noiseDb: -80, quantization: 'round', dither: 'off', mix: 1, seed: 1,
+      preFilter: false, postFilter: false, dcCorrection: false, ...state,
+    },
   }),
 }

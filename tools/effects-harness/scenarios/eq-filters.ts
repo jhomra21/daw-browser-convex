@@ -351,7 +351,8 @@ const hiQualityLatency: Scenario = {
 
 const windowedDb = (signal: Float32Array, window: number) => Array.from({ length: Math.floor(signal.length / window) }, (_, index) => linearToDb(rms(signal.subarray(index * window, (index + 1) * window), 1) + 1e-9))
 
-// The LFO shapes of lfo_shape in autofilter_kernel.h, as a function of the cycle fraction.
+// The LFO shapes of lfoShape in dsp/lfo.h, as a function of the cycle fraction. The core sine is the parabolic fast sine
+// (largest error 1.1e-3), which the 0.5 dB path gaps below absorb.
 const lfoWaves = {
   sine: (fraction: number) => Math.sin(2 * Math.PI * fraction),
   triangle: (fraction: number) => 1 - 4 * Math.abs(fraction - 0.5),

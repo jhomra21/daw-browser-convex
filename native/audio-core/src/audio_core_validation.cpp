@@ -325,7 +325,7 @@ bool valid_spectral_state(const daw_audio_spectral_state &state) {
 bool valid_autofilter_state(const daw_audio_autofilter_state &state) {
   return state.enabled <= 1 && state.mode <= DAW_AUDIO_AUTOFILTER_MODE_PEAK && state.hi_quality <= 1
     && state.slope <= 1 && state.clip <= 1 && state.envelope_hold <= 1 && state.envelope_link <= 1 && state.lfo_sync <= 1
-    && state.lfo_division < daw::audio_core::AutoFilterKernel::kDivisionCount && state.lfo_stereo_mode <= 1
+    && state.lfo_division < daw::audio_core::dsp::kLfoDivisionCount && state.lfo_stereo_mode <= 1
     && std::isfinite(state.output_db) && state.output_db >= -24.0F && state.output_db <= 24.0F
     && std::isfinite(state.frequency_hz) && state.frequency_hz >= 20.0F && state.frequency_hz <= 20000.0F
     && std::isfinite(state.resonance) && state.resonance >= 0.0F && state.resonance <= 1.0F

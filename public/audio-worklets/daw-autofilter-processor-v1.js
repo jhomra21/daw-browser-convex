@@ -236,6 +236,27 @@ const qFromResonance = (resonance) => f(MINIMUM_Q * f(Math.pow(f(MAXIMUM_Q / MIN
 const syncRateHz = (division, tempoBpm) =>
   f((tempoBpm > 0 ? tempoBpm : DEFAULT_TEMPO_BPM) / 60 / BEATS[Math.min(division, DIVISION_COUNT - 1)])
 
+// Twin of dsp/lfo.h: the parabolic sine and the shared LFO shapes, step for step.
+const FAST_SINE_CORRECTION = f(0.225)
+
+const fastSineCycles = (phase) => {
+  const t = f(phase - Math.floor(f(phase + 0.5)))
+  const quadratic = f(f(16 * t) * Math.abs(t))
+  const d = f(f(8 * t) - quadratic)
+  const correction = f(f(d * Math.abs(d)) - d)
+
+  return f(f(FAST_SINE_CORRECTION * correction) + d)
+}
+
+const lfoRandom = (cycle) => {
+  let x = Math.imul(cycle, 2654435761) >>> 0
+  x = (x ^ (x >>> 16)) >>> 0
+  x = Math.imul(x, 0x45D9F3B) >>> 0
+  x = (x ^ (x >>> 16)) >>> 0
+
+  return f(f(f(x) * 2 ** -31) - 1)
+}
+
 // Bipolar value for one point of a cycle. `cycle` seeds sample and hold so left and right share one sequence.
 const lfoValue = (waveform, fraction, cycle) => {
   const phase = f(fraction)
@@ -245,16 +266,15 @@ const lfoValue = (waveform, fraction, cycle) => {
     case 2: return f(1 - f(2 * phase))
     case 3: return f(f(2 * phase) - 1)
     case 4: return phase < 0.5 ? 1 : -1
-    case 5: {
-      let x = Math.imul(cycle, 2654435761) >>> 0
-      x = (x ^ (x >>> 16)) >>> 0
-      x = Math.imul(x, 0x45D9F3B) >>> 0
-      x = (x ^ (x >>> 16)) >>> 0
+    case 5: return lfoRandom(cycle)
+    case 6: {
+      const eased = f(f(phase * phase) * f(3 - f(2 * phase)))
+      const from = lfoRandom(cycle)
 
-      return f(f(f(x) * 2 ** -31) - 1)
+      return f(from + f(f(lfoRandom(cycle + 1) - from) * eased))
     }
 
-    default: return f(Math.sin(f(f(2 * Math.PI) * phase)))
+    default: return fastSineCycles(phase)
   }
 }
 

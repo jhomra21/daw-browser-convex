@@ -12,6 +12,7 @@ export const portableWasmBuildInputPaths = [
   'native/audio-core/src/dsp/biquad.h',
   'native/audio-core/src/dsp/eq_band.h',
   'native/audio-core/src/dsp/latency.h',
+  'native/audio-core/src/dsp/lfo.h',
   'native/audio-core/src/dsp/numeric_safety.h',
   'native/audio-core/src/dsp/parameter_smoother.h',
   'native/audio-core/src/dsp/polyphase_iir_half_band.h',

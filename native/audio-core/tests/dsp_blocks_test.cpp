@@ -1,5 +1,5 @@
 // Tests for the shared DSP blocks in src/dsp. Every case prints the number it checks against its limit.
-// Run with a group name (smoother, safety, latency, delay, oversampler, adaa, filters) or with no argument for all.
+// Run with a group name (smoother, safety, latency, delay, oversampler, adaa, filters, lfo) or with no argument for all.
 // "bench" prints the cost per sample of each block; it is only meaningful in an optimised build.
 #include "../src/dsp/adaa.h"
 #include "../src/dsp/biquad.h"
@@ -7,6 +7,7 @@
 #include "../src/dsp/half_band_oversampler.h"
 #include "../src/dsp/polyphase_iir_half_band.h"
 #include "../src/dsp/latency.h"
+#include "../src/dsp/lfo.h"
 #include "../src/dsp/numeric_safety.h"
 #include "../src/dsp/parameter_smoother.h"
 #include "../src/dsp/svf.h"
@@ -1231,7 +1232,66 @@ void filtersSvfPerSampleUpdate() {
   expectAtMost("swept_resonant_svf_stays_bounded", peak, 100.0);
 }
 
+// ---- LFO -------------------------------------------------------------------------------------------------------
+
+void lfoFastSineAccuracy() {
+  double worst = 0.0;
+  for (int i = -4000; i <= 4000; ++i) {
+    const double phase = i / 1000.0;
+    worst = std::max(worst, std::fabs(static_cast<double>(dsp::fastSineCycles(static_cast<float>(phase))) - std::sin(2.0 * kPi * phase)));
+  }
+  expectAtMost("largest_error_over_negative_and_positive_phases", worst, 1.2e-3);
+  expectNear("zero_at_zero", dsp::fastSineCycles(0.0F), 0.0, 0.0);
+  expectNear("one_at_a_quarter", dsp::fastSineCycles(0.25F), 1.0, 1.0e-6);
+  expectNear("minus_one_at_three_quarters", dsp::fastSineCycles(0.75F), -1.0, 1.0e-6);
+  double seam = 0.0;
+  for (float offset : {1.0e-4F, 1.0e-3F}) seam = std::max(seam, static_cast<double>(std::fabs(dsp::fastSineCycles(0.5F - offset) - dsp::fastSineCycles(-0.5F - offset))));
+  expectAtMost("same_value_a_cycle_apart_across_the_rounding_seam", seam, 1.0e-6);
+  double power = 0.0;
+  for (int i = 0; i <= 100; ++i) {
+    const float cycles = static_cast<float>(i) / 800.0F;
+    const float left = dsp::fastSineCycles(cycles + 0.25F);
+    const float right = dsp::fastSineCycles(cycles);
+    power = std::max(power, std::fabs(static_cast<double>(left * left + right * right) - 1.0));
+  }
+  expectAtMost("cos_and_sin_pair_keeps_power_within_0_3_percent_over_the_pan_range", power, 3.0e-3);
+}
+
+void lfoShapes() {
+  for (uint32_t waveform = 0; waveform < dsp::kLfoWaveformCount; ++waveform) {
+    float low = 10.0F, high = -10.0F;
+    for (uint32_t cycle = 0; cycle < 200; ++cycle) {
+      for (int i = 0; i < 64; ++i) {
+        const float v = dsp::lfoShape(waveform, i / 64.0, cycle);
+        low = std::min(low, v);
+        high = std::max(high, v);
+      }
+    }
+    char label[48];
+    std::snprintf(label, sizeof label, "waveform_%u_stays_inside_the_rails", waveform);
+    expectTrue(label, low >= -1.0001F && high <= 1.0001F);
+  }
+  expectTrue("hold_is_constant_in_a_cycle_and_differs_between_cycles", dsp::lfoShape(5, 0.2, 9) == dsp::lfoShape(5, 0.8, 9) && dsp::lfoShape(5, 0.2, 9) != dsp::lfoShape(5, 0.2, 10));
+  expectNear("wander_is_continuous_across_a_cycle_boundary", dsp::lfoShape(6, 0.999999, 9), dsp::lfoShape(6, 0.0, 10), 1.0e-4);
+  expectNear("wander_starts_at_the_cycle_s_random_value", dsp::lfoShape(6, 0.0, 9), dsp::lfoRandom(9), 1.0e-6);
+}
+
+void lfoClockAndPhase() {
+  dsp::LfoClock clock;
+  for (int i = 0; i < 4800; ++i) clock.advance(2.5 / 48000.0);
+  expectNear("clock_phase_after_a_tenth_of_a_second_at_2_5_hz", clock.phase, 0.25, 1.0e-9);
+  for (int i = 0; i < 4800 * 9; ++i) clock.advance(2.5 / 48000.0);
+  expectTrue("clock_counts_completed_cycles", clock.cycle == 2 && std::fabs(clock.phase - 0.5) < 1.0e-7);
+  expectNear("a_negative_offset_reads_the_previous_cycle", clock.shape(5, -0.75), dsp::lfoRandom(clock.cycle - 1), 1.0e-9);
+  expectNear("phase_addressed_shape_matches_the_fraction_form", dsp::lfoAtPhase(3, 4.25, 0), dsp::lfoShape(3, 0.25, 4), 1.0e-9);
+  expectNear("sync_rate_of_a_quarter_note_at_90_bpm", dsp::lfoSyncRateHz(5, 90.0), 1.5, 1.0e-6);
+  expectNear("sync_rate_falls_back_to_120_bpm", dsp::lfoSyncRateHz(5, 0.0), 2.0, 1.0e-6);
+}
+
 constexpr Case kCases[] = {
+  {"lfo", "fast_sine_accuracy", lfoFastSineAccuracy},
+  {"lfo", "shapes", lfoShapes},
+  {"lfo", "clock_and_phase", lfoClockAndPhase},
   {"filters", "research_anchors", filtersAnchorsFromResearch},
   {"filters", "random_bells", filtersRandomBells},
   {"filters", "random_low_shelves", filtersRandomLowShelves},

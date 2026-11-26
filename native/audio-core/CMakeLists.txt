@@ -91,7 +91,7 @@ if(BUILD_TESTING)
   else()
     target_compile_options(daw-dsp-blocks-test PRIVATE -Wall -Wextra -Werror -fno-exceptions -fno-rtti)
   endif()
-  foreach(group IN ITEMS smoother safety latency delay oversampler adaa filters)
+  foreach(group IN ITEMS smoother safety latency delay oversampler adaa filters lfo)
     add_test(NAME daw-dsp-blocks-${group} COMMAND daw-dsp-blocks-test ${group})
   endforeach()
   # Auto Filter kernel (src/autofilter_kernel.h). One ctest per measurement group; the executable prints each value.

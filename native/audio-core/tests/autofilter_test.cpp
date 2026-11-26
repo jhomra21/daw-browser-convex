@@ -15,7 +15,7 @@ namespace {
 
 using daw::audio_core::AutoFilterConfig;
 using daw::audio_core::AutoFilterKernel;
-using daw::audio_core::AutoFilterTransport;
+using daw::audio_core::dsp::LfoTransport;
 using daw::audio_core::AutoFilterValues;
 
 constexpr double kPi = 3.14159265358979323846;
@@ -40,7 +40,7 @@ struct Rig {
   AutoFilterKernel kernel;
   AutoFilterValues values;
   AutoFilterConfig config;
-  AutoFilterTransport transport{.tempo_bpm = 120.0, .frame = 0, .running = false};
+  LfoTransport transport{.tempo_bpm = 120.0, .frame = 0, .running = false};
   explicit Rig(double sampleRate = 48000.0) : rate(sampleRate) {
     kernel.prepare(rate);
     values.frequency_hz = 20000.0F;
@@ -364,7 +364,7 @@ void lfoShapes() {
     const uint32_t steps = 4096, cycles = waveform == 5 ? 4000 : 1;
     for (uint32_t cycle = 0; cycle < cycles; ++cycle) {
       for (uint32_t i = 0; i < steps; ++i) {
-        const float v = AutoFilterKernel::lfo_shape(waveform, static_cast<double>(i) / steps, cycle);
+        const float v = daw::audio_core::dsp::lfoShape(waveform, static_cast<double>(i) / steps, cycle);
         sum += v;
         low = std::min<double>(low, v);
         high = std::max<double>(high, v);
@@ -376,20 +376,20 @@ void lfoShapes() {
     std::snprintf(label, sizeof label, "waveform %u reaches both rails", waveform);
     expectTrue(label, low >= -1.0001 && high <= 1.0001 && low < -0.9 && high > 0.9);
   }
-  expectNear("sine starts at 0 (legacy shape)", AutoFilterKernel::lfo_shape(0, 0.0, 0), 0.0, 1.0e-6);
-  expectNear("triangle starts at -1 (legacy shape)", AutoFilterKernel::lfo_shape(1, 0.0, 0), -1.0, 1.0e-6);
+  expectNear("sine starts at 0 (legacy shape)", daw::audio_core::dsp::lfoShape(0, 0.0, 0), 0.0, 1.0e-6);
+  expectNear("triangle starts at -1 (legacy shape)", daw::audio_core::dsp::lfoShape(1, 0.0, 0), -1.0, 1.0e-6);
   expectTrue("saw down falls, saw up rises",
-    AutoFilterKernel::lfo_shape(2, 0.25, 0) > AutoFilterKernel::lfo_shape(2, 0.75, 0)
-      && AutoFilterKernel::lfo_shape(3, 0.25, 0) < AutoFilterKernel::lfo_shape(3, 0.75, 0));
+    daw::audio_core::dsp::lfoShape(2, 0.25, 0) > daw::audio_core::dsp::lfoShape(2, 0.75, 0)
+      && daw::audio_core::dsp::lfoShape(3, 0.25, 0) < daw::audio_core::dsp::lfoShape(3, 0.75, 0));
   expectTrue("sample-and-hold is constant inside a cycle and changes between cycles",
-    AutoFilterKernel::lfo_shape(5, 0.1, 7) == AutoFilterKernel::lfo_shape(5, 0.9, 7)
-      && AutoFilterKernel::lfo_shape(5, 0.1, 7) != AutoFilterKernel::lfo_shape(5, 0.1, 8));
+    daw::audio_core::dsp::lfoShape(5, 0.1, 7) == daw::audio_core::dsp::lfoShape(5, 0.9, 7)
+      && daw::audio_core::dsp::lfoShape(5, 0.1, 7) != daw::audio_core::dsp::lfoShape(5, 0.1, 8));
 }
 
 void tempoSync() {
-  expectNear("1/4 note at 120 BPM is 2 Hz", AutoFilterKernel::sync_rate_hz(5, 120.0), 2.0, 1.0e-4);
-  expectNear("2 bars at 120 BPM is 0.25 Hz", AutoFilterKernel::sync_rate_hz(0, 120.0), 0.25, 1.0e-4);
-  expectNear("dotted 1/8 is 4/3 of the eighth rate", AutoFilterKernel::sync_rate_hz(7, 120.0) / AutoFilterKernel::sync_rate_hz(8, 120.0), 2.0 / 3.0 * 1.0, 1.0e-3);
+  expectNear("1/4 note at 120 BPM is 2 Hz", daw::audio_core::dsp::lfoSyncRateHz(5, 120.0), 2.0, 1.0e-4);
+  expectNear("2 bars at 120 BPM is 0.25 Hz", daw::audio_core::dsp::lfoSyncRateHz(0, 120.0), 0.25, 1.0e-4);
+  expectNear("dotted 1/8 is 4/3 of the eighth rate", daw::audio_core::dsp::lfoSyncRateHz(7, 120.0) / daw::audio_core::dsp::lfoSyncRateHz(8, 120.0), 2.0 / 3.0 * 1.0, 1.0e-3);
   Rig rig;
   rig.config.sync = true;
   rig.config.division = 5;
@@ -442,7 +442,7 @@ void syncFollowsSongPosition() {
   const auto at90 = rateAt(90.0);
   expectNear("90 BPM: a 1/4-note LFO is back after one beat of 0.667 s (cutoff Hz)", at90[1], at90[0], at90[0] * 0.002);
   expectTrue("90 BPM: a quarter of a beat later it has moved", std::fabs(at90[2] - at90[0]) > at90[0] * 0.2);
-  expectNear("tempo 90 gives 1.5 Hz for a 1/4 note", AutoFilterKernel::sync_rate_hz(5, 90.0), 1.5, 1.0e-4);
+  expectNear("tempo 90 gives 1.5 Hz for a 1/4 note", daw::audio_core::dsp::lfoSyncRateHz(5, 90.0), 1.5, 1.0e-4);
 
   Rig stopped;
   stopped.config.sync = true;

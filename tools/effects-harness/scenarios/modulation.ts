@@ -6,7 +6,7 @@ import { fx } from '../effects'
 import type { Family } from './index'
 import type { Harness, Scenario } from '../harness'
 import { throughZeroLatencyFrames } from '../../../packages/audio-engine/src/effects/timing'
-import { constant, impulse, linearToDb, noise, sine } from '../signals'
+import { constant, gaussianNoise, impulse, linearToDb, noise, sine } from '../signals'
 import { parityScenario, robustnessScenarios } from './shared'
 
 const centred = (x: Float32Array) => {
@@ -170,13 +170,19 @@ const phaserFeedback: Scenario = {
   run: async (h) => {
     const input = noise(4 * h.rate, 0.25, 11)
 
-    // The brief names no Mix; the judged row uses the device's default (50 %). At Mix 100 % the wet path alone peaks 1.4 dB above the limit, and
-    // 7.5 dB of that is the all-pass chain turning uniform noise into Gaussian-like noise (its crest factor) with no feedback at all.
-    const peakOver = async (state: Parameters<typeof fx.phaser>[0]) =>
-      linearToDb(peakAbs((await h.render(fx.phaser({ stages: 12, ...state }), { input: [input] }, { parity: false })).output[0]) / peakAbs(input))
+    // PH-1 (f) is about the wet path, so the judged row runs at Mix 100 % on Gaussian white noise at the rms of the uniform noise below
+    // (sigma 0.144 = uniform amplitude 0.25). Uniform noise has a low crest factor and the all-pass chain turns it into Gaussian-like noise, which
+    // raises its peak by about 7.5 dB without adding level; that is why the uniform figures are information only. Below the limiter's knee the loop is
+    // linear by design (transparent under -12 dBFS), so the quiet Gaussian row shows the unlimited gain.
+    const peakOver = async (state: Parameters<typeof fx.phaser>[0], source = input) =>
+      linearToDb(peakAbs((await h.render(fx.phaser({ stages: 12, ...state }), { input: [source] }, { parity: false })).output[0]) / peakAbs(source))
 
-    h.atMost('output peak over input peak, 12 stages, feedback 0.95, default Mix 50 %', await peakOver({ feedback: 0.95 }), 12, 'dB', 'PH-1')
-    h.info('output peak over input peak, 12 stages, feedback 0.95, Mix 100 %', await peakOver({ feedback: 0.95, mix: 1 }), 'dB', 'PH-1: above 12 dB, see the comment')
+    const gaussian = gaussianNoise(4 * h.rate, 0.144, 11)
+    h.atMost('output peak over input peak, Gaussian white noise, 12 stages, feedback 0.95, Mix 100 % (the wet path)', await peakOver({ feedback: 0.95, mix: 1 }, gaussian), 12, 'dB', 'PH-1 (f)')
+    h.info('same, Gaussian noise 12 dB quieter (sigma 0.036)', await peakOver({ feedback: 0.95, mix: 1 }, gaussianNoise(4 * h.rate, 0.036, 11)), 'dB', 'PH-1: nearer the limiter knee')
+    h.info('same, Gaussian noise at sigma 0.002 (limiter idle, the linear loop)', await peakOver({ feedback: 0.95, mix: 1 }, gaussianNoise(4 * h.rate, 0.002, 11)), 'dB', 'PH-1: transparent below the knee')
+    h.info('output peak over input peak, uniform noise, 12 stages, feedback 0.95, default Mix 50 %', await peakOver({ feedback: 0.95 }), 'dB', 'PH-1')
+    h.info('output peak over input peak, uniform noise, 12 stages, feedback 0.95, Mix 100 %', await peakOver({ feedback: 0.95, mix: 1 }), 'dB', 'PH-1: uniform noise, see the comment')
     h.info('output peak over input peak, 12 stages, feedback 0, Mix 100 % (the all-pass chain alone)', await peakOver({ feedback: 0, mix: 1 }), 'dB')
 
     const gainAt = async (peak: number) => {

@@ -765,7 +765,7 @@ class AmplitudeKernel {
     const gain = this.gain
 
     if (!config.autoPan) {
-      const average = f(f(1 - depth) + f(depth * this.mean))
+      const average = Math.max(f(f(1 - depth) + f(depth * this.mean)), 0.5)
 
       for (let c = 0; c < 2; c++) gain[c] = f(f(f(1 - depth) + f(depth * shaped[c])) / average)
     } else {

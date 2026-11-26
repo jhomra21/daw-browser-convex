@@ -244,7 +244,8 @@ void stereo() {
   expectTrue("phase_moves_the_start", std::fabs(shifted.left[0] - none.left[0]) > 0.1);
 }
 
-// Tremolo keeps its average gain at 1 whatever Depth and Shape are, for every waveform with a known distribution.
+// Tremolo keeps its average gain at 1 whatever Depth and Shape are, for every waveform with a known distribution, except
+// where the +6 dB peak cap engages (normaliser floor 0.5): there the average is the shape's mean over that floor.
 void average() {
   currentName = "average";
   AmplitudeValues values;
@@ -258,7 +259,9 @@ void average() {
         AmplitudeConfig config;
         config.waveform = waveform;
         const Envelope e = envelope(values, config, 48000);
-        worst = std::max(worst, std::fabs(mean(e.left) - 1.0));
+        const float normaliser = 1.0F - depth + depth * AmplitudeModulationKernel::mean_shaped(waveform, std::exp2(4.0F * (shape - 0.5F)));
+        const double expected = normaliser >= 0.5F ? 1.0 : normaliser / 0.5;
+        worst = std::max(worst, std::fabs(mean(e.left) - expected));
       }
     }
     static char label[48];
@@ -279,6 +282,22 @@ void average() {
   for (const float g : tri.left) { low = std::min(low, g); high = std::max(high, g); }
   expectAtMost("depth_one_reaches_silence", low, 0.01);
   expectNear("depth_one_peak_gain", high, 2.0, 0.01);
+  // The +6 dB cap: at Depth 1 no Shape lets the gain pass 2, and the default Shape keeps a mean gain of 1.
+  for (const uint32_t waveform : {0U, 1U, 2U, 3U}) {
+    double peak = 0.0;
+    for (const float shape : {0.0F, 1.0F}) {
+      values.shape = shape;
+      AmplitudeConfig config;
+      config.waveform = waveform;
+      for (const float g : envelope(values, config, 48000).left) peak = std::max<double>(peak, g);
+    }
+    static char label[48];
+    std::snprintf(label, sizeof label, "waveform_%u_extreme_shape_peak_gain", waveform);
+    expectAtMost(label, peak, 2.0 + 1.0e-6);
+  }
+  values.shape = 0.5F;
+  AmplitudeConfig sine;
+  expectNear("depth_one_default_shape_mean_gain", mean(envelope(values, sine, 48000).left), 1.0, 0.004);
 }
 
 // Auto Pan is equal power: left and right gains keep a constant power sum, -3 dB in the centre and 0 / -inf at the sides.

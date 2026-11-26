@@ -4,8 +4,10 @@
 //
 // One LFO per channel. Phase offsets both channels (where a synced LFO starts in the bar); Stereo Phase offsets the
 // right channel only. The LFO's unipolar value is bent by Shape (an exponent, 1 at Shape 0.5) and then drives
-//   Tremolo:  gain = (1 - depth + depth * shaped) / (1 - depth + depth * mean), where mean is the shape's average over
-//             one cycle, so the average gain is 1 whatever Depth is;
+//   Tremolo:  gain = (1 - depth + depth * shaped) / max(1 - depth + depth * mean, 0.5), where mean is the shape's average
+//             over one cycle, so the average gain is 1 whatever Depth is, except that the normaliser never drops below
+//             0.5: a skewed Shape (mean under 0.5) at high Depth would otherwise push peaks past +6 dB, so the gain is
+//             capped at 2 and the average falls below 1 there. At the default Shape (mean 0.5) the cap never engages;
 //   Auto Pan: each channel's gain is the equal-power curve (sine of a quarter-cycle angle) of its own LFO, as in Live's two
 //             LFOs driving the left and right amplitudes. At Stereo Phase 0.5 (180 degrees, Auto Pan's default) the LFOs are
 //             opposite, so the pair holds constant power and sits at -3 dB in the centre; at 0 both channels move together.
@@ -103,7 +105,7 @@ class AmplitudeModulationKernel {
 
     float gain[2];
     if (config.kind == AmplitudeKind::Tremolo) {
-      const float average = 1.0F - depth + depth * mean_;
+      const float average = std::max(1.0F - depth + depth * mean_, 0.5F);
       for (uint32_t c = 0; c < 2; ++c) gain[c] = (1.0F - depth + depth * shaped[c]) / average;
     } else {
       // Each channel's angle runs 0 (silent) to 0.25 (full) in cycles; opposite LFOs make the two angles sum to 0.25.

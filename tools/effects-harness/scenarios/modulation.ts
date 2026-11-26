@@ -301,6 +301,12 @@ const tremoloSmoothing: Scenario = {
       const { output: out } = await h.render(fx.tremolo({ rateHz: 1, depth }), { input: [constant(2 * h.rate, 1), constant(2 * h.rate, 1)] }, { parity: false })
       h.within(`mean gain over two cycles at Depth ${depth}`, out[0].reduce((s, v) => s + v, 0) / out[0].length, 1, 0.01, '', 'owner decision: average level kept')
     }
+
+    // Owner decision: the level normaliser never drops below 0.5, so no Shape pushes the gain past +6 dB.
+    for (const shape of [0, 1]) {
+      const { output: out } = await h.render(fx.tremolo({ rateHz: 1, depth: 1, shape }), { input: [constant(2 * h.rate, 1), constant(2 * h.rate, 1)] }, { parity: false })
+      h.atMost(`peak gain at Depth 100 %, Shape ${shape * 100} %`, peakAbs(out[0]), 2 + 1e-3, 'x', 'owner decision: +6 dB peak cap')
+    }
   },
 }
 

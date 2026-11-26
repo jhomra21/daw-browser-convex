@@ -2733,8 +2733,9 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
       { maxFramesPerBlock: 512, blockPartitions: [1, 31, 127, 512, 353] },
     )
 
+    // The kernel packs both channels into one complex FFT, so a silent channel carries rounding crosstalk near 1e-16.
     fixture.assertOutput = (output) => finite(output)
-      && output[1]?.every((sample) => sample === 0) === true
+      && output[1]?.every((sample) => Math.abs(sample) < 1e-9) === true
       && changedFromInput(output, fixture.input, 1e-5)
 
     return fixture

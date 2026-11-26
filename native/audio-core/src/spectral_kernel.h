@@ -128,12 +128,14 @@ class SpectralKernel {
   void prepare(uint32_t fft_size, uint32_t overlap) {
     size_ = fft_size;
     overlap_ = overlap;
-    double sum = 0.0;
+    double sum = 0.0, first_bin = 0.0;
 
     for (uint32_t index = 0; index < size_; ++index) {
       window_[index] = std::sqrt(0.5 - 0.5 * std::cos(2.0 * kSpectralPi * index / size_));
       sum += window_[index];
+      first_bin += window_[index] * std::cos(2.0 * kSpectralPi * index / size_);
     }
+    leakage_ = std::abs(first_bin / sum);
     normalization_ = 2.0 / sum;  // 2 / (N * coherent gain), the coherent gain being sum / N
     for (uint32_t index = 0; index < size_ / 2; ++index) {
       cosine_[index] = std::cos(2.0 * kSpectralPi * index / size_);
@@ -197,6 +199,7 @@ class SpectralKernel {
 
  private:
   struct ChannelState {
+    ChannelState() { noise_gain.fill(1.0); }
     std::array<double, kSpectralBinsMax> previous_phase{};
     std::array<double, kSpectralBinsMax> running_phase{};
     std::array<double, kSpectralBinsMax> noise_prior{};
@@ -517,7 +520,11 @@ class SpectralKernel {
     const double floor_gain = std::pow(10.0, controls.noise_floor_db / 20.0);
 
     for (uint32_t bin = 0; bin < bins; ++bin) {
-      const double noise_power = std::fmax(static_cast<double>(store.noise_profile[bin]) * store.noise_profile[bin], kTinyPower);
+      // A learned line leaks into the bins beside it by at least the window's first-bin response. A profile resampled to another
+      // FFT size keeps the line but not that leakage, so each bin is held to that floor from its neighbours.
+      const double profile = std::fmax(store.noise_profile[bin], leakage_ * std::fmax(
+        store.noise_profile[bin > 0 ? bin - 1 : bin], store.noise_profile[bin + 1 < bins ? bin + 1 : bin]));
+      const double noise_power = std::fmax(profile * profile, kTinyPower);
       const double ratio = (re[bin] * re[bin] + im[bin] * im[bin]) / noise_power;
       const double prior = kDecisionDirected * state.noise_prior[bin] + (1.0 - kDecisionDirected) * std::fmax(ratio - 1.0, 0.0);
       const double wiener = std::fmax(prior / (1.0 + prior), floor_gain);
@@ -540,6 +547,7 @@ class SpectralKernel {
   uint32_t size_ = 0;
   uint32_t overlap_ = 0;
   double normalization_ = 1.0;
+  double leakage_ = 0.0;  // window response one bin off a bin-centred sine, relative to its peak
   std::array<double, kSpectralFftMax> window_{};
   std::array<double, kSpectralFftMax / 2> cosine_{};
   std::array<double, kSpectralFftMax / 2> sine_{};

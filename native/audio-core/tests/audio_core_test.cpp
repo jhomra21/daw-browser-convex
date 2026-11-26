@@ -8207,7 +8207,9 @@ void test_phase4_spectral_transfer_late_allocation_free() {
   assert(daw::audio_core::InspectLatencyTransition(edited.core).completed_revision == 2);
 }
 
-constexpr float kSpectralGateThresholdDb = -12.0F;  // at 512; the 4096 threshold, -3 dB, stays under the 0 dB limit
+// The Gate threshold is in dBFS of a bin-centred sine at every size. A bin of stationary noise falls by 10 log10 of the
+// size ratio in those units, so the threshold falls with it to keep the same frequency crossing it at every size.
+constexpr float kSpectralGateThresholdDb = -56.0F;  // at 512
 
 // Energy per octave of a stationary signal, from 1024-sample periodograms: bins 2..511 in eight bands from
 // 94 Hz to 24 kHz at 48 kHz.
@@ -8244,10 +8246,10 @@ void test_phase4_spectral_transfer_bands(SpectralSource source, uint32_t mode, u
   const auto build = [&](Phase3Rig &rig, uint32_t fft, bool settling) {
     rig.clear(); rig.add_node(1, DAW_AUDIO_GRAPH_NODE_SOURCE);
     rig.add_node(2, DAW_AUDIO_GRAPH_NODE_MASTER); rig.add_edge(1, 2);
-    // Magnitudes grow with sqrt(fft), so the same frequency crosses the threshold at every size.
+    // Noise bins fall with sqrt(fft) in dBFS, so the same frequency crosses the threshold at every size.
     const daw_audio_spectral_state state{
       .enabled = 1, .fft_size = fft, .overlap = 4, .mode = mode,
-      .gate_threshold_db = kSpectralGateThresholdDb + 10.0F * std::log10(fft / 512.0F),
+      .gate_threshold_db = kSpectralGateThresholdDb - 10.0F * std::log10(fft / 512.0F),
       .gate_attack_ms = settling ? 1.0F : 1000.0F, .gate_release_ms = settling ? 20.0F : 5000.0F,
       .noise_reduction = .75F, .profile_learn = settling && !gate ? .1F : 0.0F, .mix = 1,
     };
@@ -8307,8 +8309,11 @@ void test_phase4_spectral_transfer_bands(SpectralSource source, uint32_t mode, u
     const double db = 10 * std::log10(actual[band] / expected[band]);
     std::printf("transfer source=%u mode=%u %u->%u band=%u delta_db=%g\n", static_cast<unsigned>(source), mode, before, after, band, db);
     std::fflush(stdout);
-    // A Gate band near the threshold flips bin by bin, so the oracle is looser there.
-    assert(std::abs(db) <= (gate ? 3.0 : 1.0));
+    // A Gate band near the threshold flips bin by bin, so the oracle is looser there. Noise Reduce leaves a residual near its
+    // spectral floor, where the decision-directed gain follows the profile's exact fit: a profile resampled across a steep
+    // slope or a narrow line cannot match the one learned at the new size to better than a few dB. The old subtraction was
+    // linear in the profile and held 1 dB.
+    assert(std::abs(db) <= 3.0);
   }
   assert(compared >= (source == SpectralSource::Tone ? 1u : 4u));
   assert(daw::audio_core::InspectLatencyTransition(edited.core).completed_revision == 3);

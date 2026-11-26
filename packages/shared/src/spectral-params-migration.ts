@@ -1,4 +1,4 @@
-import { isJsonNumber, isJsonObject, type JsonValue } from './json-value'
+import { isJsonNumber, isJsonObject, type JsonObject, type JsonValue } from './json-value'
 import { createDefaultSpectralParams } from './spectral-params'
 
 // Version 1 -> 2. Version 2 states the Gate threshold in dBFS, the level of a bin-centred sine, at every FFT size; version 1 compared
@@ -22,10 +22,19 @@ const clampThreshold = (db: number) => Math.min(0, Math.max(-120, db))
 export const migrateSpectralGateThresholdV1 = (thresholdDb: number, fftSize: number = DEFAULT_FFT_SIZE) =>
   clampThreshold(thresholdDb - spectralGateDbOffset(FFT_SIZES.includes(fftSize) ? fftSize : DEFAULT_FFT_SIZE))
 
+const spectralStateOf = (params: JsonObject): JsonObject => (isJsonObject(params.state) ? params.state : params)
+
+/** The FFT size an effect's stored params carry (the unwrapped or `state`-wrapped form), or undefined when it has none. */
+export const storedSpectralFftSize = (params: JsonValue | undefined): number | undefined => {
+  const fftSize = isJsonObject(params) ? spectralStateOf(params).fftSize : undefined
+
+  return isJsonNumber(fftSize) ? fftSize : undefined
+}
+
 export const migrateSpectralParamsV1 = (params: JsonValue): JsonValue => {
   if (!isJsonObject(params)) return params
   const wrapped = isJsonObject(params.state)
-  const old = wrapped && isJsonObject(params.state) ? params.state : params
+  const old = spectralStateOf(params)
   const defaults = createDefaultSpectralParams()
   const threshold = isJsonNumber(old.gateThresholdDb) && Number.isFinite(old.gateThresholdDb) ? old.gateThresholdDb : defaults.gateThresholdDb
   const learn = isJsonNumber(old.profileLearn) && old.profileLearn > 0
@@ -33,7 +42,7 @@ export const migrateSpectralParamsV1 = (params: JsonValue): JsonValue => {
   const state: JsonValue = {
     noiseFloorDb: defaults.noiseFloorDb,
     ...old,
-    gateThresholdDb: migrateSpectralGateThresholdV1(threshold, isJsonNumber(old.fftSize) ? old.fftSize : DEFAULT_FFT_SIZE),
+    gateThresholdDb: migrateSpectralGateThresholdV1(threshold, storedSpectralFftSize(params)),
     profileLearn: learn ? 1 : 0,
   }
 

@@ -11,6 +11,7 @@ import {
   projectControlSnapshotV2,
 } from '@daw-browser/control-core'
 import {
+  effectParamsByInstanceId,
   isJsonBoolean,
   isJsonNumber,
   isJsonObject,
@@ -299,6 +300,7 @@ const projectLocalControlSnapshot = <Snapshot>(
     })),
     automationEnvelopes: normalizeLocalAutomationEnvelopes(
       valueOfKind(input.entities, AUTOMATION_ROW_KIND, isAutomation),
+      effectParamsByInstanceId(effects),
     ).map((envelope) => ({
       _id: envelope.id,
       targetKind: envelope.target.kind,

@@ -2,7 +2,7 @@ import { normalizeLocalAutomationEnvelopes } from "~/lib/local-automation"
 import { currentLocalEffectRows, type LocalEffectRow } from "~/lib/local-effects"
 import { openLocalProjectDb } from "~/lib/local-project-db"
 import { AUTOMATION_ROW_KIND, EFFECT_ROW_KIND } from "~/lib/local-project-rows"
-import type { JsonValue } from "@daw-browser/shared"
+import { effectParamsByInstanceId, type JsonValue } from "@daw-browser/shared"
 
 type LocalExportRenderRowsSnapshot = {
   effects: LocalEffectRow<JsonValue>[]
@@ -23,8 +23,10 @@ export const captureLocalExportRenderRowsSnapshot = async (
 
   await tx.done
 
+  const effects = currentLocalEffectRows(effectRows)
+
   return {
-    effects: currentLocalEffectRows(effectRows),
-    automationEnvelopes: normalizeLocalAutomationEnvelopes(automationRows.map((row) => row.value)),
+    effects,
+    automationEnvelopes: normalizeLocalAutomationEnvelopes(automationRows.map((row) => row.value), effectParamsByInstanceId(effects)),
   }
 }

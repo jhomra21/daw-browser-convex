@@ -11,6 +11,8 @@ import {
   parseGranularAutomationKey,
   parseSynthAutomationKey,
   automationValuesVersionStamp,
+  effectParamsByInstanceId,
+  type JsonValue,
 } from "@daw-browser/shared";
 import { currentAutomationRow } from "./automationRowValues";
 import { requireProjectRole } from "./projectAccess";
@@ -115,6 +117,8 @@ const normalizeEnvelopeInput = async (
     }
   }
 
+  let ownerEffect: { instanceId?: string; params: JsonValue } | undefined;
+
   if (input.effectInstanceId) {
     const effects = input.targetKind === "master"
       ? await ctx.db.query("effects").withIndex("by_room_target", (q) => (
@@ -130,6 +134,7 @@ const normalizeEnvelopeInput = async (
     ));
 
     if (!effect) throw new Error("Automation effect instance does not belong to this target.");
+    ownerEffect = effect;
   }
 
   const targetKey = input.targetKind === "master"
@@ -139,6 +144,7 @@ const normalizeEnvelopeInput = async (
   return {
     trackId,
     targetKey,
+    ownerEffect,
     points: normalizeAutomationPoints(input.points, descriptor),
   };
 };
@@ -212,7 +218,7 @@ export const setAutomationEnvelopeRow = async (
   };
 
   if (existing) {
-    if (sameEnvelopeState(currentAutomationRow(existing), row)) {
+    if (sameEnvelopeState(currentAutomationRow(existing, effectParamsByInstanceId(normalized.ownerEffect ? [normalized.ownerEffect] : [])), row)) {
       return { changed: false, status: "noop", envelopeId: existing._id };
     }
 

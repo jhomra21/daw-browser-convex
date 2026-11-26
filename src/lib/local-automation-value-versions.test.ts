@@ -1,9 +1,9 @@
 import 'fake-indexeddb/auto'
 import { expect, test } from 'bun:test'
-import { AUDIO_EFFECT_PARAMS_VERSION, AUTO_FILTER_MAX_Q, AUTO_FILTER_MIN_Q, automationTargetKey, type AutomationEnvelope, type AutomationTarget } from '@daw-browser/shared'
+import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_PARAMS_VERSION, AUTO_FILTER_MAX_Q, AUTO_FILTER_MIN_Q, automationTargetKey, type AutomationEnvelope, type AutomationTarget } from '@daw-browser/shared'
 import { captureLocalExportRenderRowsSnapshot } from '~/lib/export/capture-local-export-render-rows'
 import { createLocalProject, createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
-import { AUTOMATION_ROW_KIND } from '~/lib/local-project-rows'
+import { AUTOMATION_ROW_KIND, EFFECT_ROW_KIND } from '~/lib/local-project-rows'
 import { loadLocalAutomationEnvelopes, setLocalAutomationEnvelope } from './local-automation'
 
 const qOf = (resonance: number) => AUTO_FILTER_MIN_Q * (AUTO_FILTER_MAX_Q / AUTO_FILTER_MIN_Q) ** resonance
@@ -39,6 +39,28 @@ test('an unversioned resonance lane reads back migrated by load and export captu
   expect(qOf(loaded?.points[0]?.value ?? -1)).toBeCloseTo(0.5 + 19.5 * 0.25, 6)
   expect(captured?.points[0]?.value).toBe(loaded?.points[0]?.value)
   expect(loaded).not.toHaveProperty('valuesVersion')
+})
+
+test('a version 1 Spectral threshold lane reads back at its own effect threshold at 512 and 4096 (load and export capture)', async () => {
+  for (const fftSize of [512, 4096]) {
+    const project = await createLocalProject(`Spectral lane ${fftSize} ${crypto.randomUUID()}`)
+    const params = { fftSize, gateThresholdDb: -20 }
+    const target: AutomationTarget = { kind: 'track', trackId: 'track-1', effectInstanceId: 'spectral-1' }
+    const db = await openLocalProjectDb(project.id)
+    await db.put('entities', createLocalProjectEntityRow(EFFECT_ROW_KIND, 'track-1:effect:spectral-1', {
+      id: 'track-1:effect:spectral-1', targetId: 'track-1', effect: 'spectral', instanceId: 'spectral-1', params, updatedAt: 1,
+    }, 1))
+    await putRaw(project.id, lane(project.id, target, 'spectral.gateThresholdDb', -20), 1)
+
+    const [loaded] = await loadLocalAutomationEnvelopes(project.id)
+    const captured = await captureLocalExportRenderRowsSnapshot(project.id)
+    const own = AUDIO_EFFECT_CONTRACTS.spectral.normalizeParams(captured.effects[0]?.params).state.gateThresholdDb
+    const asAt2048 = -20 - 20 * Math.log10(1 / Math.tan(Math.PI / 4096) / 2)
+
+    expect(loaded?.points[0]?.value).toBeCloseTo(own, 9)
+    expect(captured.automationEnvelopes[0]?.points[0]?.value).toBeCloseTo(own, 9)
+    expect(Math.abs(own - asAt2048)).toBeGreaterThan(5)
+  }
 })
 
 test('a current lane and a mixer lane are unchanged', async () => {

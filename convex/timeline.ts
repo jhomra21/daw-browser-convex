@@ -5,6 +5,7 @@ import { getProjectMixerSettings } from "./projectMixerSettings";
 import { requireProjectAccess } from "./projectAccess";
 import { requireAuthenticatedUserId } from "./identity";
 import { requireProjectRow } from "./projectRows";
+import { effectParamsByInstanceId } from "@daw-browser/shared";
 import { currentAutomationRows } from "./automationRowValues";
 import { currentEffectRows } from "./effectRowParams";
 
@@ -54,7 +55,7 @@ const readFullTimelineView = async (
     tracks,
     clips,
     mixerSettings,
-    automationEnvelopes: currentAutomationRows(automationEnvelopes),
+    automationEnvelopes: currentAutomationRows(automationEnvelopes, effectParamsByInstanceId(effects)),
     effects: currentEffectRows(effects),
     sidechainRoutes,
   };

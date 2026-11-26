@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { AUDIO_EFFECT_PARAMS_VERSION, migrateAudioEffectParams, migrateAutomationPointValues } from './audio-effect-param-versions'
+import { AUDIO_EFFECT_PARAMS_VERSION, effectParamsByInstanceId, migrateAudioEffectParams, migrateAutomationPointValues } from './audio-effect-param-versions'
 import { AUDIO_EFFECT_CONTRACTS } from './effects-params'
+import type { JsonValue } from './json-value'
 import { spectralGateDbOffset } from './spectral-params-migration'
 
 const v1 = {
@@ -53,6 +54,38 @@ describe('Spectral params version 1 -> 2', () => {
     expect(migrateAutomationPointValues('spectral.gateThresholdDb', points, 1)[0]?.value).toBeCloseTo(-60 - rawPeakDb(2048), 9)
     expect(migrateAutomationPointValues('spectral.gateThresholdDb', points, 2)).toBe(points)
     expect(migrateAutomationPointValues('spectral.mix', points, 1)).toBe(points)
+  })
+
+  test('a threshold lane moves to the same dBFS as its effect at 512 and 4096, bare or state-wrapped', () => {
+    const lane = [{ time: 0, value: -20 }]
+
+    for (const size of [512, 4096]) {
+      const owner = { ...v1, fftSize: size }
+      const effect = AUDIO_EFFECT_CONTRACTS.spectral.normalizeParams(migrateAudioEffectParams('spectral', owner, 1)).state.gateThresholdDb
+
+      for (const ownerParams of [owner, { version: 1, state: owner }]) {
+        expect(migrateAutomationPointValues('spectral.gateThresholdDb', lane, 1, undefined, ownerParams)[0]?.value).toBeCloseTo(effect, 9)
+      }
+      expect(effect).toBeCloseTo(-20 - rawPeakDb(size), 9)
+    }
+    expect(rawPeakDb(4096) - rawPeakDb(2048)).toBeGreaterThan(5)
+  })
+
+  test('a lane whose owner is unknown or has no legal FFT size moves as at 2048', () => {
+    const lane = [{ time: 0, value: -60 }]
+    const asDefault = -60 - rawPeakDb(2048)
+
+    const owners: (JsonValue | undefined)[] = [undefined, 'broken', {}, { fftSize: 777 }]
+
+    for (const ownerParams of owners) {
+      expect(migrateAutomationPointValues('spectral.gateThresholdDb', lane, 1, undefined, ownerParams)[0]?.value).toBeCloseTo(asDefault, 9)
+    }
+  })
+
+  test('effectParamsByInstanceId maps instance ids and skips rows without one', () => {
+    const owners = effectParamsByInstanceId([{ instanceId: 'a', params: { fftSize: 512 } }, { params: { fftSize: 1024 } }])
+
+    expect([...owners.keys()]).toEqual(['a'])
   })
 
   test('a non-object stays as stored', () => {

@@ -96,7 +96,7 @@ const run = async () => {
     && valueText('Left Time knob') === '250 ms' && valueText('Right Time knob') === '250 ms' && named('Left 1/4') === undefined
   key(slider('Left Time knob'), 'ArrowUp')
   scenarios['a-time-knob-writes-its-time-and-reports-a-manual-override'] = lastChange()?.timeLeftMs === 251 && overrides.at(-1) === 'delay.timeMs'
-  scenarios['the-offset-is-off-in-time-mode'] = slider('Left Offset')?.getAttribute('aria-disabled') === 'true'
+  scenarios['the-offset-is-off-in-time-mode'] = slider('Left Offset') === null && slider('Right Offset') === null
   named('Left Sync')?.click()
   named('Right Sync')?.click()
   await settle()
@@ -142,11 +142,12 @@ const run = async () => {
 
   const dotted = () => automatable.flatMap(([name]) => slider(name)?.querySelector('.bg-red-500') ? [name] : [])
   scenarios['no-knob-shows-automation-without-an-envelope'] = dotted().length === 0
-  named('Left Time')?.click()
-  await settle()
   setRanges(new Map(automatable.map(([, field]) => [`delay.${field}`, { min: 0, max: 1 }])))
   await settle()
-  scenarios['every-automatable-knob-shows-its-automation'] = dotted().length === automatable.length
+  const syncDotted = dotted()
+  named('Left Time')?.click()
+  await settle()
+  scenarios['every-automatable-knob-shows-its-automation'] = syncDotted.length === automatable.length - 1 && dotted().includes('Left Time knob')
 
   // Every enabled control shows a focus ring when it takes focus.
   const unringed = [...host.querySelectorAll<HTMLElement>('button:not([disabled]), [role="slider"]:not([aria-disabled="true"])')].filter((element) => {

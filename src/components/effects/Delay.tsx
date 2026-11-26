@@ -129,9 +129,12 @@ function DelayChannel(props: ChannelProps) {
           <ChoiceMenu label={`${props.title} Feel`} choices={FEEL_CHOICES} value={props.feel} disabled={props.disabled} onSelect={props.onFeel} />
         </div>
       </Show>
-      <div class="flex justify-center">
-        <AutomatedKnob size={26} label="Offset" ariaLabel={`${props.title} Offset`} valueLabel={percentOffset(props.offsetPercent)} value={props.offsetPercent} resetValue={0} min={DELAY_OFFSET_PERCENT_MIN} max={DELAY_OFFSET_PERCENT_MAX} step={1} bipolar disabled={props.disabled || !props.sync} parameterId={props.offsetParameterId} automation={props.automation} onValueChange={props.onOffset} />
-      </div>
+      {/* Offset nudges the synced sixteenths, so it only exists in Sync mode, as in Live. */}
+      <Show when={props.sync}>
+        <div class="flex justify-center">
+          <AutomatedKnob size={26} label="Offset" ariaLabel={`${props.title} Offset`} valueLabel={percentOffset(props.offsetPercent)} value={props.offsetPercent} resetValue={0} min={DELAY_OFFSET_PERCENT_MIN} max={DELAY_OFFSET_PERCENT_MAX} step={1} bipolar disabled={props.disabled} parameterId={props.offsetParameterId} automation={props.automation} onValueChange={props.onOffset} />
+        </div>
+      </Show>
     </section>
   )
 }

@@ -152,15 +152,42 @@ bool valid_utility_state(const daw_audio_utility_state &state) {
 
 namespace {
 
+// 71 carried the Color amount before the Color shelves had their own ids; nothing is accepted there.
+bool saturator_parameter_target(uint32_t target) {
+  return target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRIVE_DB || target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_FREQUENCY_HZ
+    || target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_OUTPUT_DB || target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRY_WET
+    || (target >= DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_HIGH_DB && target <= DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WAVESHAPER_PERIOD);
+}
+
+bool saturator_value_in_range(uint32_t target, float value) {
+  const auto within = [value](float minimum, float maximum) { return std::isfinite(value) && value >= minimum && value <= maximum; };
+  switch (target) {
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRIVE_DB: return within(DAW_AUDIO_CORE_SATURATOR_DRIVE_DB_MIN, DAW_AUDIO_CORE_SATURATOR_DRIVE_DB_MAX);
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_FREQUENCY_HZ: return within(DAW_AUDIO_CORE_SATURATOR_COLOR_FREQUENCY_HZ_MIN, DAW_AUDIO_CORE_SATURATOR_COLOR_FREQUENCY_HZ_MAX);
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_HIGH_DB: return within(DAW_AUDIO_CORE_SATURATOR_COLOR_HIGH_DB_MIN, DAW_AUDIO_CORE_SATURATOR_COLOR_HIGH_DB_MAX);
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_OUTPUT_DB: return within(DAW_AUDIO_CORE_SATURATOR_OUTPUT_DB_MIN, DAW_AUDIO_CORE_SATURATOR_OUTPUT_DB_MAX);
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRY_WET: return within(DAW_AUDIO_CORE_SATURATOR_DRY_WET_MIN, DAW_AUDIO_CORE_SATURATOR_DRY_WET_MAX);
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_LOW_DB: return within(DAW_AUDIO_CORE_SATURATOR_COLOR_LOW_DB_MIN, DAW_AUDIO_CORE_SATURATOR_COLOR_LOW_DB_MAX);
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_WIDTH: return within(DAW_AUDIO_CORE_SATURATOR_COLOR_WIDTH_MIN, DAW_AUDIO_CORE_SATURATOR_COLOR_WIDTH_MAX);
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_BASS_THRESHOLD_DB: return within(DAW_AUDIO_CORE_SATURATOR_BASS_THRESHOLD_DB_MIN, DAW_AUDIO_CORE_SATURATOR_BASS_THRESHOLD_DB_MAX);
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WAVESHAPER_DEPTH: return within(DAW_AUDIO_CORE_SATURATOR_WAVESHAPER_DEPTH_MIN, DAW_AUDIO_CORE_SATURATOR_WAVESHAPER_DEPTH_MAX);
+    default: return within(DAW_AUDIO_CORE_SATURATOR_WAVESHAPER_PERIOD_MIN, DAW_AUDIO_CORE_SATURATOR_WAVESHAPER_PERIOD_MAX);
+  }
+}
+
 bool valid_saturator_state(const daw_audio_saturator_state &state) {
-  return (state.enabled == 0 || state.enabled == 1)
-    && std::isfinite(state.drive_db) && state.drive_db >= 0.0F && state.drive_db <= 36.0F
-    && state.curve <= DAW_AUDIO_SATURATOR_CURVE_CLIP
-    && (state.color == 0 || state.color == 1)
-    && std::isfinite(state.color_frequency_hz) && state.color_frequency_hz >= 100.0F && state.color_frequency_hz <= 10000.0F
-    && std::isfinite(state.color_amount) && state.color_amount >= 0.0F && state.color_amount <= 1.0F
-    && std::isfinite(state.output_db) && state.output_db >= -24.0F && state.output_db <= 12.0F
-    && std::isfinite(state.dry_wet) && state.dry_wet >= 0.0F && state.dry_wet <= 1.0F;
+  return state.enabled <= 1 && state.hi_quality <= 1 && state.color <= 1
+    && state.curve <= DAW_AUDIO_SATURATOR_CURVE_WAVESHAPER && state.post_clip <= DAW_AUDIO_SATURATOR_POST_CLIP_HARD
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRIVE_DB, state.drive_db)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_OUTPUT_DB, state.output_db)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRY_WET, state.dry_wet)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_FREQUENCY_HZ, state.color_frequency_hz)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_WIDTH, state.color_width)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_LOW_DB, state.color_low_db)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_HIGH_DB, state.color_high_db)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_BASS_THRESHOLD_DB, state.bass_threshold_db)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WAVESHAPER_DEPTH, state.waveshaper_depth)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WAVESHAPER_PERIOD, state.waveshaper_period);
 }
 
 bool valid_eq_band(const daw_audio_eq_band_state &band) {
@@ -393,12 +420,15 @@ bool decode_processor_state(
     out_processor->utility = state;
     return true;
   }
-  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_SATURATOR && descriptor.state_size == 32) {
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_SATURATOR && descriptor.state_size == 60) {
+    const uint8_t *bytes = descriptor.state;
     const daw_audio_saturator_state state{
-      .enabled = read_u32_le(descriptor.state), .drive_db = read_f32_le(descriptor.state + 4),
-      .curve = read_u32_le(descriptor.state + 8), .color = read_u32_le(descriptor.state + 12),
-      .color_frequency_hz = read_f32_le(descriptor.state + 16), .color_amount = read_f32_le(descriptor.state + 20),
-      .output_db = read_f32_le(descriptor.state + 24), .dry_wet = read_f32_le(descriptor.state + 28),
+      .enabled = read_u32_le(bytes), .hi_quality = read_u32_le(bytes + 4), .curve = read_u32_le(bytes + 8),
+      .color = read_u32_le(bytes + 12), .post_clip = read_u32_le(bytes + 16),
+      .drive_db = read_f32_le(bytes + 20), .output_db = read_f32_le(bytes + 24), .dry_wet = read_f32_le(bytes + 28),
+      .color_frequency_hz = read_f32_le(bytes + 32), .color_width = read_f32_le(bytes + 36),
+      .color_low_db = read_f32_le(bytes + 40), .color_high_db = read_f32_le(bytes + 44),
+      .bass_threshold_db = read_f32_le(bytes + 48), .waveshaper_depth = read_f32_le(bytes + 52), .waveshaper_period = read_f32_le(bytes + 56),
     };
     if (!valid_saturator_state(state) || descriptor.latency_frames != 0
       || descriptor.tail_frames != 0) return false;
@@ -629,8 +659,7 @@ bool valid_processor_parameter_target(uint32_t kind, uint32_t target) {
       return target >= DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_WIDTH;
     case DAW_AUDIO_PROCESSOR_KIND_SATURATOR:
-      return target >= DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRIVE_DB
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRY_WET;
+      return saturator_parameter_target(target);
     case DAW_AUDIO_PROCESSOR_KIND_EQ:
       return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE
           && target <= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_LAST)
@@ -758,26 +787,7 @@ bool valid_processor_parameter_value(uint32_t target, float value) {
       && value <= DAW_AUDIO_CORE_LOFI_BIT_DEPTH_MAX
       && std::floor(value) == value;
   }
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRIVE_DB) {
-    return value >= DAW_AUDIO_CORE_SATURATOR_DRIVE_DB_MIN
-      && value <= DAW_AUDIO_CORE_SATURATOR_DRIVE_DB_MAX;
-  }
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_FREQUENCY_HZ) {
-    return value >= DAW_AUDIO_CORE_SATURATOR_COLOR_FREQUENCY_HZ_MIN
-      && value <= DAW_AUDIO_CORE_SATURATOR_COLOR_FREQUENCY_HZ_MAX;
-  }
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_AMOUNT) {
-    return value >= DAW_AUDIO_CORE_SATURATOR_COLOR_AMOUNT_MIN
-      && value <= DAW_AUDIO_CORE_SATURATOR_COLOR_AMOUNT_MAX;
-  }
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_OUTPUT_DB) {
-    return value >= DAW_AUDIO_CORE_SATURATOR_OUTPUT_DB_MIN
-      && value <= DAW_AUDIO_CORE_SATURATOR_OUTPUT_DB_MAX;
-  }
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRY_WET) {
-    return value >= DAW_AUDIO_CORE_SATURATOR_DRY_WET_MIN
-      && value <= DAW_AUDIO_CORE_SATURATOR_DRY_WET_MAX;
-  }
+  if (saturator_parameter_target(target)) return saturator_value_in_range(target, value);
   if (target >= DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_DELAY_MS && target <= DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_MIX) {
     if (target == DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_DELAY_MS) return value >= DAW_AUDIO_CORE_CHORUS_DELAY_MS_MIN && value <= DAW_AUDIO_CORE_CHORUS_DELAY_MS_MAX;
     if (target == DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_DEPTH_MS) return value >= DAW_AUDIO_CORE_CHORUS_DEPTH_MS_MIN && value <= DAW_AUDIO_CORE_CHORUS_DEPTH_MS_MAX;

@@ -94,22 +94,29 @@
           "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
           "properties": {
             "id": { "const": 2 },
-            "schemaVersion": { "const": 1 },
-            "stateBytes": { "const": 32 },
+            "schemaVersion": { "const": 2 },
+            "stateBytes": { "const": 60 },
             "tombstone": { "const": false },
             "state": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["enabled", "driveDb", "curve", "color", "colorFrequencyHz", "colorAmount", "outputDb", "dryWet"],
+              "required": ["enabled", "hiQuality", "curve", "color", "postClip", "driveDb", "outputDb", "dryWet", "colorFrequencyHz", "colorWidth", "colorLowDb", "colorHighDb", "bassThresholdDb", "waveshaperDepth", "waveshaperPeriod"],
               "properties": {
                 "enabled": { "type": "boolean" },
-                "driveDb": { "type": "number", "default": 6, "minimum": 0, "maximum": 36, "portableParameter": true},
-                "curve": { "enum": ["soft", "medium", "hard", "clip"] },
+                "hiQuality": { "type": "boolean" },
+                "curve": { "enum": ["soft", "medium", "hard", "clip", "analog", "sine", "bass", "fold", "waveshaper"] },
                 "color": { "type": "boolean" },
-                "colorFrequencyHz": { "type": "number", "default": 1200, "minimum": 100, "maximum": 10000, "portableParameter": true},
-                "colorAmount": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "postClip": { "enum": ["off", "soft", "hard"] },
+                "driveDb": { "type": "number", "default": 6, "minimum": 0, "maximum": 36, "portableParameter": true},
                 "outputDb": { "type": "number", "default": 0, "minimum": -24, "maximum": 12, "portableParameter": true},
-                "dryWet": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true}
+                "dryWet": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "colorFrequencyHz": { "type": "number", "default": 1200, "minimum": 100, "maximum": 10000, "portableParameter": true},
+                "colorWidth": { "type": "number", "default": 0.57, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "colorLowDb": { "type": "number", "default": 0, "minimum": -12, "maximum": 12, "portableParameter": true},
+                "colorHighDb": { "type": "number", "default": 0, "minimum": -12, "maximum": 12, "portableParameter": true},
+                "bassThresholdDb": { "type": "number", "default": -12, "minimum": -50, "maximum": 0, "portableParameter": true},
+                "waveshaperDepth": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "waveshaperPeriod": { "type": "number", "default": 0.5, "minimum": 0.1, "maximum": 1, "portableParameter": true}
               }
             }
           }

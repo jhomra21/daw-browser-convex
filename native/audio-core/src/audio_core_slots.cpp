@@ -63,8 +63,9 @@ bool compatible_processor_history(
         && current.utility.swap == next.utility.swap;
     case DAW_AUDIO_PROCESSOR_KIND_SATURATOR:
       return current.saturator.curve == next.saturator.curve
+        && current.saturator.hi_quality == next.saturator.hi_quality
         && current.saturator.color == next.saturator.color
-        && same_float(current.saturator.color_frequency_hz, next.saturator.color_frequency_hz);
+        && current.saturator.post_clip == next.saturator.post_clip;
     case DAW_AUDIO_PROCESSOR_KIND_EQ:
       if (current.eq.mode != next.eq.mode || current.eq.high_quality != next.eq.high_quality) return false;
       for (uint32_t band = 0; band < DAW_AUDIO_CORE_EQ_BAND_COUNT; ++band) {

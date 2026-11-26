@@ -451,7 +451,8 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_7_Q = 68,
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRIVE_DB = 69,
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_FREQUENCY_HZ = 70,
-  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_AMOUNT = 71,
+  /* 71 was the Color amount; the Color shelves took ids 203..204 and nothing is accepted at 71 any more. */
+  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_AMOUNT_RETIRED = 71,
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_OUTPUT_DB = 72,
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRY_WET = 73,
   DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_DELAY_MS = 74,
@@ -553,7 +554,14 @@ typedef enum daw_audio_processor_parameter {
   /* Delay targets 5..9 sit with the other early ids; the ones added by the rebuild start at 200 so they never meet another effect's. */
   DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_RIGHT_MS = 200,
   DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_OFFSET_LEFT_PERCENT = 201,
-  DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_OFFSET_RIGHT_PERCENT = 202
+  DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_OFFSET_RIGHT_PERCENT = 202,
+  /* 203..229 are shared by the Saturator, Lo-Fi and Utility rebuilds; the Saturator takes the low end. */
+  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_HIGH_DB = 203,
+  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_LOW_DB = 204,
+  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_WIDTH = 205,
+  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_BASS_THRESHOLD_DB = 206,
+  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WAVESHAPER_DEPTH = 207,
+  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WAVESHAPER_PERIOD = 208
 } daw_audio_processor_parameter;
 
 #define DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_0_FREQUENCY_HZ
@@ -714,22 +722,45 @@ typedef struct daw_audio_utility_state {
   uint32_t dc_block;
 } daw_audio_utility_state;
 
+/* Every curve has slope one at the origin and an asymptote near one. Soft is tanh, Medium the cubic that reaches its rail with
+ * zero slope, Hard an arctangent, Clip (Live's Digital Clip) a hard clamp at one, Analog a clamp with a rounded knee, Sine a
+ * clamped sine, Bass a rounded knee whose threshold is a control, Fold a sine that folds past one and Waveshaper a tanh with a
+ * superimposed sine (Depth and Period). */
 typedef enum daw_audio_saturator_curve {
   DAW_AUDIO_SATURATOR_CURVE_SOFT = 0,
   DAW_AUDIO_SATURATOR_CURVE_MEDIUM = 1,
   DAW_AUDIO_SATURATOR_CURVE_HARD = 2,
-  DAW_AUDIO_SATURATOR_CURVE_CLIP = 3
+  DAW_AUDIO_SATURATOR_CURVE_CLIP = 3,
+  DAW_AUDIO_SATURATOR_CURVE_ANALOG = 4,
+  DAW_AUDIO_SATURATOR_CURVE_SINE = 5,
+  DAW_AUDIO_SATURATOR_CURVE_BASS = 6,
+  DAW_AUDIO_SATURATOR_CURVE_FOLD = 7,
+  DAW_AUDIO_SATURATOR_CURVE_WAVESHAPER = 8
 } daw_audio_saturator_curve;
 
+typedef enum daw_audio_saturator_post_clip {
+  DAW_AUDIO_SATURATOR_POST_CLIP_OFF = 0,
+  DAW_AUDIO_SATURATOR_POST_CLIP_SOFT = 1,
+  DAW_AUDIO_SATURATOR_POST_CLIP_HARD = 2
+} daw_audio_saturator_post_clip;
+
+/* Color is a pre-EQ (a low and a high shelf around the frequency; width sets their Q) before the curve and its exact inverse after it. */
 typedef struct daw_audio_saturator_state {
   uint32_t enabled;
-  float drive_db;
+  uint32_t hi_quality;
   uint32_t curve;
   uint32_t color;
-  float color_frequency_hz;
-  float color_amount;
+  uint32_t post_clip;
+  float drive_db;
   float output_db;
   float dry_wet;
+  float color_frequency_hz;
+  float color_width;
+  float color_low_db;
+  float color_high_db;
+  float bass_threshold_db;
+  float waveshaper_depth;
+  float waveshaper_period;
 } daw_audio_saturator_state;
 
 typedef enum daw_audio_eq_band_type {

@@ -142,7 +142,8 @@ uint32_t schema_version_of(uint32_t kind) {
     : kind == DAW_AUDIO_PROCESSOR_KIND_PHASER ? DAW_AUDIO_CORE_PROCESSOR_PHASER_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_TREMOLO ? DAW_AUDIO_CORE_PROCESSOR_TREMOLO_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_AUTOPAN ? DAW_AUDIO_CORE_PROCESSOR_AUTOPAN_SCHEMA_VERSION
-    : kind == DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE ? DAW_AUDIO_CORE_PROCESSOR_ENSEMBLE_SCHEMA_VERSION : 1u;
+    : kind == DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE ? DAW_AUDIO_CORE_PROCESSOR_ENSEMBLE_SCHEMA_VERSION
+    : kind == DAW_AUDIO_PROCESSOR_KIND_SATURATOR ? DAW_AUDIO_CORE_PROCESSOR_SATURATOR_SCHEMA_VERSION : 1u;
 }
 
 void expect(daw_audio_core_result actual, daw_audio_core_result expected, int line = __builtin_LINE()) {
@@ -1545,10 +1546,11 @@ HistoryFixtureState history_fixture_state(uint32_t kind) {
     write_f32(20, 0.0F); write_f32(24, 1.0F); write_u32(28, DAW_AUDIO_UTILITY_MATRIX_STEREO);
     write_u32(32, 0); write_u32(36, 1);
   } else if (kind == DAW_AUDIO_PROCESSOR_KIND_SATURATOR) {
-    fixture.size = 32;
-    write_u32(0, 1); write_f32(4, 18.0F); write_u32(8, DAW_AUDIO_SATURATOR_CURVE_HARD);
-    write_u32(12, 1); write_f32(16, 2500.0F); write_f32(20, 0.5F);
-    write_f32(24, -3.0F); write_f32(28, 0.75F);
+    fixture.size = 60;
+    write_u32(0, 1); write_u32(4, 1); write_u32(8, DAW_AUDIO_SATURATOR_CURVE_HARD);
+    write_u32(12, 1); write_u32(16, DAW_AUDIO_SATURATOR_POST_CLIP_SOFT); write_f32(20, 18.0F);
+    write_f32(24, -3.0F); write_f32(28, 0.75F); write_f32(32, 2500.0F); write_f32(36, 0.57F);
+    write_f32(40, 0.0F); write_f32(44, 6.0F); write_f32(48, -12.0F); write_f32(52, 0.5F); write_f32(56, 0.5F);
   } else if (kind == DAW_AUDIO_PROCESSOR_KIND_EQ) {
     fixture.size = 408;
     write_u32(0, 1); write_u32(4, 0); write_f32(16, 1.0F);
@@ -2168,7 +2170,7 @@ void test_processor_chain_prepare_and_dispatch() {
   duplicate_targets_request.graph_revision = 2;
   duplicate_targets_request.processors = &duplicate_targets_descriptor;
   expect(daw_audio_core_prepare_graph(core, &duplicate_targets_request), DAW_AUDIO_CORE_INVALID_ARGUMENT);
-  std::array<uint8_t, 32> saturator_state{};
+  std::array<uint8_t, 60> saturator_state{};
   const auto write_saturator_u32 = [&saturator_state](uint32_t offset, uint32_t value) {
     saturator_state[offset] = static_cast<uint8_t>(value);
     saturator_state[offset + 1] = static_cast<uint8_t>(value >> 8u);
@@ -2181,16 +2183,23 @@ void test_processor_chain_prepare_and_dispatch() {
     write_saturator_u32(offset, bits);
   };
   write_saturator_u32(0, 1);
-  write_saturator_f32(4, 6.0F);
+  write_saturator_u32(4, 1);
   write_saturator_u32(8, DAW_AUDIO_SATURATOR_CURVE_SOFT);
   write_saturator_u32(12, 0);
-  write_saturator_f32(16, 1200.0F);
-  write_saturator_f32(20, 0.0F);
+  write_saturator_u32(16, DAW_AUDIO_SATURATOR_POST_CLIP_OFF);
+  write_saturator_f32(20, 6.0F);
   write_saturator_f32(24, 0.0F);
   write_saturator_f32(28, 1.0F);
+  write_saturator_f32(32, 1200.0F);
+  write_saturator_f32(36, 0.57F);
+  write_saturator_f32(40, 0.0F);
+  write_saturator_f32(44, 0.0F);
+  write_saturator_f32(48, -12.0F);
+  write_saturator_f32(52, 0.5F);
+  write_saturator_f32(56, 0.5F);
   const daw_audio_processor_descriptor saturator{
     .node_id = 2, .instance_id = 43, .kind = DAW_AUDIO_PROCESSOR_KIND_SATURATOR,
-    .state_version = 1, .state_size = static_cast<uint32_t>(saturator_state.size()), .bypassed = 0,
+    .state_version = 2, .state_size = static_cast<uint32_t>(saturator_state.size()), .bypassed = 0,
     .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
     .latency_frames = 0, .tail_frames = 0, .parameter_count = 0,
     .parameter_targets = nullptr, .state = saturator_state.data(),
@@ -2282,16 +2291,18 @@ void test_portable_saturator_and_eq_characterization() {
   };
   std::array<uint8_t, 408> state{};
   write_u32(state, 0, 1);
-  write_f32(state, 4, 18.0F);
+  write_u32(state, 4, 1);
   write_u32(state, 8, DAW_AUDIO_SATURATOR_CURVE_HARD);
-  write_u32(state, 12, 0);
-  write_f32(state, 16, 1200.0F);
-  write_f32(state, 20, 0.0F);
-  write_f32(state, 24, 0.0F);
+  write_f32(state, 20, 18.0F);
   write_f32(state, 28, 1.0F);
+  write_f32(state, 32, 1200.0F);
+  write_f32(state, 36, 0.57F);
+  write_f32(state, 48, -12.0F);
+  write_f32(state, 52, 0.5F);
+  write_f32(state, 56, 0.5F);
   daw_audio_processor_descriptor saturator{
     .node_id = 2, .instance_id = 1, .kind = DAW_AUDIO_PROCESSOR_KIND_SATURATOR,
-    .state_version = 1, .state_size = 32, .bypassed = 0,
+    .state_version = 2, .state_size = 60, .bypassed = 0,
     .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
     .latency_frames = 0, .tail_frames = 0, .parameter_count = 0, .parameter_targets = nullptr, .state = state.data(),
   };
@@ -6235,7 +6246,7 @@ struct Phase3Rig {
   std::vector<daw_audio_graph_edge_descriptor> edges;
   std::vector<daw_audio_processor_descriptor> processors;
   std::deque<daw_audio_utility_state> utilities;
-  std::deque<std::array<uint8_t, 32>> saturators;
+  std::deque<std::array<uint8_t, 60>> saturators;
   std::deque<std::array<uint8_t, 76>> compressors;
   std::deque<std::vector<uint8_t>> states;
   // When set, the output of this node is captured on every render, whatever the
@@ -6331,9 +6342,10 @@ struct Phase3Rig {
       std::memcpy(&bits, &value, sizeof(bits));
       put(offset, bits);
     };
-    put(0, 1); put_float(4, 18.0F); put(8, DAW_AUDIO_SATURATOR_CURVE_HARD); put(12, 1);
-    put_float(16, 2500.0F); put_float(20, 0.5F); put_float(24, -3.0F); put_float(28, 0.75F);
-    add_processor(node, instance, DAW_AUDIO_PROCESSOR_KIND_SATURATOR, 32, bytes.data(), false);
+    put(0, 1); put(4, 0); put(8, DAW_AUDIO_SATURATOR_CURVE_HARD); put(12, 1); put(16, DAW_AUDIO_SATURATOR_POST_CLIP_OFF);
+    put_float(20, 18.0F); put_float(24, -3.0F); put_float(28, 0.75F); put_float(32, 2500.0F); put_float(36, 0.57F);
+    put_float(40, 0.0F); put_float(44, 6.0F); put_float(48, -12.0F); put_float(52, 0.5F); put_float(56, 0.5F);
+    add_processor(node, instance, DAW_AUDIO_PROCESSOR_KIND_SATURATOR, 60, bytes.data(), false);
   }
   // A hard compressor whose detector reacts at once, and a
   // detector low-pass wide enough to pass a steady key: with the key on a second

@@ -70,13 +70,20 @@ export type LoFiProcessorState = {
 
 export type SaturatorProcessorState = {
   enabled: boolean
-  driveDb: number
-  curve: 'soft' | 'medium' | 'hard' | 'clip'
+  hiQuality: boolean
+  curve: 'soft' | 'medium' | 'hard' | 'clip' | 'analog' | 'sine' | 'bass' | 'fold' | 'waveshaper'
   color: boolean
-  colorFrequencyHz: number
-  colorAmount: number
+  postClip: 'off' | 'soft' | 'hard'
+  driveDb: number
   outputDb: number
   dryWet: number
+  colorFrequencyHz: number
+  colorWidth: number
+  colorLowDb: number
+  colorHighDb: number
+  bassThresholdDb: number
+  waveshaperDepth: number
+  waveshaperPeriod: number
 }
 
 export type EqProcessorBandState = {
@@ -924,17 +931,28 @@ export const encodeLoFiProcessorState = (state: LoFiProcessorState): Uint8Array 
   return output
 }
 
+const saturatorCurveIds: Readonly<Record<SaturatorProcessorState['curve'], number>> = {
+  soft: 0, medium: 1, hard: 2, clip: 3, analog: 4, sine: 5, bass: 6, fold: 7, waveshaper: 8,
+}
+
 export const encodeSaturatorProcessorState = (state: SaturatorProcessorState): Uint8Array => {
-  const output = new Uint8Array(32)
+  const output = new Uint8Array(60)
   const view = new DataView(output.buffer)
   view.setUint32(0, state.enabled ? 1 : 0, true)
-  view.setFloat32(4, state.driveDb, true)
-  view.setUint32(8, state.curve === 'medium' ? 1 : state.curve === 'hard' ? 2 : state.curve === 'clip' ? 3 : 0, true)
+  view.setUint32(4, state.hiQuality ? 1 : 0, true)
+  view.setUint32(8, saturatorCurveIds[state.curve], true)
   view.setUint32(12, state.color ? 1 : 0, true)
-  view.setFloat32(16, state.colorFrequencyHz, true)
-  view.setFloat32(20, state.colorAmount, true)
+  view.setUint32(16, state.postClip === 'soft' ? 1 : state.postClip === 'hard' ? 2 : 0, true)
+  view.setFloat32(20, state.driveDb, true)
   view.setFloat32(24, state.outputDb, true)
   view.setFloat32(28, state.dryWet, true)
+  view.setFloat32(32, state.colorFrequencyHz, true)
+  view.setFloat32(36, state.colorWidth, true)
+  view.setFloat32(40, state.colorLowDb, true)
+  view.setFloat32(44, state.colorHighDb, true)
+  view.setFloat32(48, state.bassThresholdDb, true)
+  view.setFloat32(52, state.waveshaperDepth, true)
+  view.setFloat32(56, state.waveshaperPeriod, true)
 
   return output
 }

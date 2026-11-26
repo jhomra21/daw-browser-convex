@@ -595,6 +595,9 @@ daw_audio_core_result prepare_runtime_ownership(Core &core) {
       if (!core.reverb_histories[owned].kernel.prepare(static_cast<double>(core.config.sample_rate_hz), processor.reverb.density)) {
         return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
       }
+    } else if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_SATURATOR) {
+      core.saturator_histories[processor.history_slot] = {};
+      core.saturator_histories[processor.history_slot].kernel.prepare(static_cast<double>(core.config.sample_rate_hz));
     } else if (is_modulation_kind(processor.kind)) {
       prepare_modulation_history(core.modulation_histories[processor.history_slot], processor.kind, core.config.sample_rate_hz);
     } else if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_LIMITER) {

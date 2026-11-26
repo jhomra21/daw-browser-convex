@@ -34,6 +34,7 @@
 #include "phaser_kernel.h"
 #include "reverb_kernel.h"
 #include "delay_kernel.h"
+#include "saturator_kernel.h"
 #include "compressor_kernel.h"
 #include "gate_kernel.h"
 #include "limiter_kernel.h"
@@ -383,10 +384,9 @@ struct UtilityHistory {
 };
 
 struct SaturatorHistory {
-  BiquadHistory color_left{};
-  BiquadHistory color_right{};
-  float previous_left = 0.0F;
-  float previous_right = 0.0F;
+  daw::audio_core::SaturatorKernel kernel;
+  daw::audio_core::SaturatorValues values;
+  daw::audio_core::SaturatorConfig config;
   float bypass = 0.0F;
 };
 

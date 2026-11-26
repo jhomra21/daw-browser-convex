@@ -45,8 +45,9 @@ const utility = (overrides: Partial<ReturnType<typeof createDefaultUtilityParams
 const saturator = (enabled: boolean): Instance => ({
   id: 'subject', kind: 'saturator',
   params: {
-    ...createDefaultSaturatorParams(), enabled, driveDb: 18, curve: 'hard', color: true,
-    colorFrequencyHz: 2500, colorAmount: 0.5, outputDb: -3, dryWet: 0.75,
+    // The half-bands remember their input, and the transition matrix only holds memoryless edits.
+    ...createDefaultSaturatorParams(), enabled, hiQuality: false, driveDb: 18, curve: 'hard', color: true,
+    colorFrequencyHz: 2500, colorHighDb: 6, outputDb: -3, dryWet: 0.75,
   },
 })
 

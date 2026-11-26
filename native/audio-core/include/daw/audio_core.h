@@ -533,6 +533,23 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_CHORUS_RATE_HZ = 174,
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_LOW_SHELF_DB = 175,
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_HIGH_SHELF_DB = 176,
+  DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_SAFE_BASS_HZ = 177,
+  DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_WIDTH = 178,
+  DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_OUTPUT_DB = 179,
+  DAW_AUDIO_PROCESSOR_PARAMETER_FLANGER_SAFE_BASS_HZ = 180,
+  DAW_AUDIO_PROCESSOR_PARAMETER_FLANGER_WIDTH = 181,
+  DAW_AUDIO_PROCESSOR_PARAMETER_FLANGER_OUTPUT_DB = 182,
+  DAW_AUDIO_PROCESSOR_PARAMETER_PHASER_SPREAD_OCTAVES = 183,
+  DAW_AUDIO_PROCESSOR_PARAMETER_PHASER_BLEND = 184,
+  DAW_AUDIO_PROCESSOR_PARAMETER_PHASER_SAFE_BASS_HZ = 185,
+  DAW_AUDIO_PROCESSOR_PARAMETER_PHASER_OUTPUT_DB = 186,
+  DAW_AUDIO_PROCESSOR_PARAMETER_TREMOLO_STEREO_PHASE = 187,
+  DAW_AUDIO_PROCESSOR_PARAMETER_AUTOPAN_STEREO_PHASE = 188,
+  DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_FAST_DEPTH_MS = 189,
+  DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_FAST_RATE_HZ = 190,
+  DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_SAFE_BASS_HZ = 191,
+  DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_WIDTH = 192,
+  DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_OUTPUT_DB = 193,
   /* Delay targets 5..9 sit with the other early ids; the ones added by the rebuild start at 200 so they never meet another effect's. */
   DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_RIGHT_MS = 200,
   DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_OFFSET_LEFT_PERCENT = 201,
@@ -766,44 +783,70 @@ typedef struct daw_audio_eq_state {
   daw_audio_eq_band_state bands[16];
 } daw_audio_eq_state;
 
+/* Chorus and Flanger. mode: Chorus 0 Chorus, 1 Vibrato, 2 Vintage; Flanger 0 Flanger, 1 Through-zero (declares
+ * the dry-path delay as latency). waveform is a dsp::lfoShape index (0 sine ... 6 wander). */
 typedef struct daw_audio_delay_modulation_state {
   uint32_t enabled;
+  uint32_t mode;
+  uint32_t waveform;
+  uint32_t safe_bass;
   float delay_ms;
   float depth_ms;
   float rate_hz;
   float feedback;
   float stereo_phase;
   float mix;
+  float safe_bass_hz;
+  float width;
+  float output_db;
 } daw_audio_delay_modulation_state;
 
 typedef struct daw_audio_phaser_state {
   uint32_t enabled;
   uint32_t stages;
+  uint32_t waveform;
+  uint32_t safe_bass;
   float center_hz;
   float depth_octaves;
   float rate_hz;
   float feedback;
   float stereo_phase;
   float mix;
+  float spread_octaves;
+  float blend;
+  float safe_bass_hz;
+  float output_db;
 } daw_audio_phaser_state;
 
+/* Tremolo and Auto Pan. phase offsets both channels' LFOs, stereo_phase the right one only. */
 typedef struct daw_audio_amplitude_modulation_state {
   uint32_t enabled;
   uint32_t waveform;
+  uint32_t sync;
+  uint32_t division;
+  uint32_t invert;
   float rate_hz;
   float depth;
   float shape;
   float phase;
+  float stereo_phase;
 } daw_audio_amplitude_modulation_state;
 
 typedef struct daw_audio_ensemble_state {
   uint32_t enabled;
   uint32_t voices;
+  uint32_t waveform;
+  uint32_t safe_bass;
   float delay_ms;
   float depth_ms;
   float rate_hz;
   float spread;
   float mix;
+  float fast_depth_ms;
+  float fast_rate_hz;
+  float safe_bass_hz;
+  float width;
+  float output_db;
 } daw_audio_ensemble_state;
 
 typedef struct daw_audio_gate_state {

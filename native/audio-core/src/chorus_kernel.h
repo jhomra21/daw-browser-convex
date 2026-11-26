@@ -5,7 +5,8 @@
 // Per channel the input and the feedback go into one delay line (Hermite reads). The feedback tap is read before the
 // new sample is written, so the loop is exactly as long as the tap's delay (2 frames at the shortest). The audible tap
 // may go down to zero delay. Through-zero flanging delays the dry path by a fixed time, so the wet tap sweeps from
-// before the dry signal to after it; that fixed time is the effect's declared latency. Vintage runs the line like a
+// before the dry signal to after it; that fixed time is the effect's declared latency. In that mode Delay and Depth
+// are measured from the delayed dry path, so a Depth larger than Delay crosses it. Vintage runs the line like a
 // bucket-brigade device: a low-pass before and after it at the clock's Nyquist, with a soft saturation going in.
 #include "dsp/fractional_delay.h"
 #include "dsp/latency.h"
@@ -98,6 +99,7 @@ class ChorusKernel {
     if ((frame_++ & (kControlFrames - 1U)) == 0U) bbd_coefficient_ = bbd_coefficient(delayMs);
 
     const float framesPerMs = static_cast<float>(sampleRate_ * 0.001);
+    const float tapMs = delayMs + (throughZero ? kThroughZeroDryMs : 0.0F);
     const uint32_t dryFrames = latency_frames(ChorusMode::ThroughZero, sampleRate_);
     const float input[2] = {std::isfinite(inLeft) ? inLeft : 0.0F, std::isfinite(inRight) ? inRight : 0.0F};
     float wet[2];
@@ -106,7 +108,7 @@ class ChorusKernel {
       Channel &channel = channels_[c];
       const float lfo = clock_.shape(config.waveform, c == 1 ? static_cast<double>(stereo) : 0.0);
       const float limit = static_cast<float>(channel.line.capacity() - 4U);
-      const float frames = std::clamp((delayMs + depthMs * lfo) * framesPerMs, 0.0F, limit);
+      const float frames = std::clamp((tapMs + depthMs * lfo) * framesPerMs, 0.0F, limit);
       const float loop = std::max(frames, kMinimumLoopFrames);
       const float fed = channel.line.readHermite(loop - 1.0F);
       float written = input[c] + feedback * fed;

@@ -329,6 +329,9 @@ const toPortableProcessor = (
           { id: 'chorus.feedback', target: 77 },
           { id: 'chorus.stereoPhase', target: 78 },
           { id: 'chorus.mix', target: 79 },
+          { id: 'chorus.safeBassHz', target: 177 },
+          { id: 'chorus.width', target: 178 },
+          { id: 'chorus.outputDb', target: 179 },
         ]
         : [
           { id: 'flanger.delayMs', target: 80 },
@@ -337,6 +340,9 @@ const toPortableProcessor = (
           { id: 'flanger.feedback', target: 83 },
           { id: 'flanger.stereoPhase', target: 84 },
           { id: 'flanger.mix', target: 85 },
+          { id: 'flanger.safeBassHz', target: 180 },
+          { id: 'flanger.width', target: 181 },
+          { id: 'flanger.outputDb', target: 182 },
         ],
       bypassed: !instance.params.state.enabled,
     }
@@ -352,6 +358,10 @@ const toPortableProcessor = (
         { id: 'phaser.feedback', target: 89 },
         { id: 'phaser.stereoPhase', target: 90 },
         { id: 'phaser.mix', target: 91 },
+        { id: 'phaser.spreadOctaves', target: 183 },
+        { id: 'phaser.blend', target: 184 },
+        { id: 'phaser.safeBassHz', target: 185 },
+        { id: 'phaser.outputDb', target: 186 },
       ], bypassed: !instance.params.state.enabled,
     }
   }
@@ -370,12 +380,14 @@ const toPortableProcessor = (
           { id: 'tremolo.depth', target: 93 },
           { id: 'tremolo.shape', target: 94 },
           { id: 'tremolo.phase', target: 95 },
+          { id: 'tremolo.stereoPhase', target: 187 },
         ]
         : [
           { id: 'autopan.rateHz', target: 96 },
           { id: 'autopan.depth', target: 97 },
           { id: 'autopan.shape', target: 98 },
           { id: 'autopan.phase', target: 99 },
+          { id: 'autopan.stereoPhase', target: 188 },
         ], bypassed: !instance.params.state.enabled,
     }
   }
@@ -389,6 +401,11 @@ const toPortableProcessor = (
         { id: 'ensemble.rateHz', target: 102 },
         { id: 'ensemble.spread', target: 103 },
         { id: 'ensemble.mix', target: 104 },
+        { id: 'ensemble.fastDepthMs', target: 189 },
+        { id: 'ensemble.fastRateHz', target: 190 },
+        { id: 'ensemble.safeBassHz', target: 191 },
+        { id: 'ensemble.width', target: 192 },
+        { id: 'ensemble.outputDb', target: 193 },
       ], bypassed: !instance.params.state.enabled,
     }
   }

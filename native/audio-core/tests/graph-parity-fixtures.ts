@@ -1037,7 +1037,10 @@ const modulationDefinitions: readonly ModulationFixtureDefinition[] = [
     kindId: 4,
     legacy: {
       kind: 'chorus',
-      state: { enabled: true, delayMs: 12, depthMs: 4, rateHz: 0.8, feedback: 0, stereoPhase: 0.25, mix: 0.35 },
+      state: {
+        enabled: true, mode: 'chorus', waveform: 'sine', safeBass: false, delayMs: 12, depthMs: 4, rateHz: 0.8, feedback: 0, stereoPhase: 0.25, mix: 0.35,
+        safeBassHz: 100, width: 1, outputDb: 0,
+      },
     },
   },
   {
@@ -1045,7 +1048,10 @@ const modulationDefinitions: readonly ModulationFixtureDefinition[] = [
     kindId: 5,
     legacy: {
       kind: 'flanger',
-      state: { enabled: true, delayMs: 1.5, depthMs: 1, rateHz: 0.2, feedback: 0.35, stereoPhase: 0.5, mix: 0.5 },
+      state: {
+        enabled: true, mode: 'flanger', waveform: 'sine', safeBass: false, delayMs: 1.5, depthMs: 1, rateHz: 0.2, feedback: 0.35, stereoPhase: 0.5, mix: 0.5,
+        safeBassHz: 100, width: 1, outputDb: 0,
+      },
     },
   },
   {
@@ -1053,7 +1059,10 @@ const modulationDefinitions: readonly ModulationFixtureDefinition[] = [
     kindId: 6,
     legacy: {
       kind: 'phaser',
-      state: { enabled: true, stages: 6, centerHz: 1_000, depthOctaves: 3, rateHz: 0.3, feedback: 0.3, stereoPhase: 0.5, mix: 0.5 },
+      state: {
+        enabled: true, stages: 6, waveform: 'sine', safeBass: false, centerHz: 1_000, depthOctaves: 3, rateHz: 0.3, feedback: 0.3, stereoPhase: 0.5, mix: 0.5,
+        spreadOctaves: 0, blend: 0, safeBassHz: 100, outputDb: 0,
+      },
     },
   },
   {
@@ -1061,7 +1070,7 @@ const modulationDefinitions: readonly ModulationFixtureDefinition[] = [
     kindId: 7,
     legacy: {
       kind: 'tremolo',
-      state: { enabled: true, waveform: 'sine', rateHz: 4, depth: 0.5, 'shape': 0.5, phase: 0 },
+      state: { enabled: true, waveform: 'sine', sync: false, division: 5, invert: false, rateHz: 4, depth: 0.5, 'shape': 0.5, phase: 0, stereoPhase: 0 },
     },
   },
   {
@@ -1069,7 +1078,7 @@ const modulationDefinitions: readonly ModulationFixtureDefinition[] = [
     kindId: 8,
     legacy: {
       kind: 'autopan',
-      state: { enabled: true, waveform: 'sine', rateHz: 1, depth: 1, 'shape': 0.5, phase: 0 },
+      state: { enabled: true, waveform: 'sine', sync: false, division: 5, invert: false, rateHz: 1, depth: 1, 'shape': 0.5, phase: 0, stereoPhase: 0 },
     },
   },
   {
@@ -1077,7 +1086,10 @@ const modulationDefinitions: readonly ModulationFixtureDefinition[] = [
     kindId: 9,
     legacy: {
       kind: 'ensemble',
-      state: { enabled: true, voices: 3, delayMs: 18, depthMs: 6, rateHz: 0.6, spread: 1, mix: 0.5 },
+      state: {
+        enabled: true, voices: 3, waveform: 'sine', safeBass: false, delayMs: 18, depthMs: 6, rateHz: 0.6, spread: 1, mix: 0.5,
+        fastDepthMs: 0, fastRateHz: 6, safeBassHz: 100, width: 1, outputDb: 0,
+      },
     },
   },
 ]
@@ -1097,17 +1109,17 @@ const encodeModulationState = (fixture: PortableLegacyModulationFixture) => {
 }
 
 const modulationParameterTargets = (kind: PortableModulationKind): readonly number[] => {
-  if (kind === 'chorus') return [74, 75, 76, 77, 78, 79]
+  if (kind === 'chorus') return [74, 75, 76, 77, 78, 79, 177, 178, 179]
 
-  if (kind === 'flanger') return [80, 81, 82, 83, 84, 85]
+  if (kind === 'flanger') return [80, 81, 82, 83, 84, 85, 180, 181, 182]
 
-  if (kind === 'phaser') return [86, 87, 88, 89, 90, 91]
+  if (kind === 'phaser') return [86, 87, 88, 89, 90, 91, 183, 184, 185, 186]
 
-  if (kind === 'tremolo') return [92, 93, 94, 95]
+  if (kind === 'tremolo') return [92, 93, 94, 95, 187]
 
-  if (kind === 'autopan') return [96, 97, 98, 99]
+  if (kind === 'autopan') return [96, 97, 98, 99, 188]
 
-  return [100, 101, 102, 103, 104]
+  return [100, 101, 102, 103, 104, 189, 190, 191, 192, 193]
 }
 
 const modulationStateWith = (

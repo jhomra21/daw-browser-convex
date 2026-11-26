@@ -140,11 +140,12 @@ export const eqWith = (band: Partial<EqProcessorBandState>, extra: Partial<EqPro
 })
 
 const modulation = (state: Partial<DelayModulationProcessorState>): DelayModulationProcessorState => ({
-  enabled: true, delayMs: 12, depthMs: 4, rateHz: 0.8, feedback: 0, stereoPhase: 0.25, mix: 0.35, ...state,
+  enabled: true, mode: 'chorus', waveform: 'sine', safeBass: false, delayMs: 12, depthMs: 4, rateHz: 0.8, feedback: 0, stereoPhase: 0.25, mix: 0.35,
+  safeBassHz: 100, width: 1, outputDb: 0, ...state,
 })
 
 const amplitude = (state: Partial<AmplitudeModulationProcessorState>): AmplitudeModulationProcessorState => ({
-  enabled: true, waveform: 'sine', rateHz: 4, depth: 0.5, shape: 0.5, phase: 0, ...state,
+  enabled: true, waveform: 'sine', sync: false, division: 5, invert: false, rateHz: 4, depth: 0.5, shape: 0.5, phase: 0, stereoPhase: 0, ...state,
 })
 
 /** Product-default states with per-scenario overrides; nested groups are replaced whole. */
@@ -163,16 +164,22 @@ export const fx = {
   }),
   chorus: (state: Partial<DelayModulationProcessorState> = {}): EffectSpec => ({ kind: 'chorus', state: modulation(state) }),
   flanger: (state: Partial<DelayModulationProcessorState> = {}): EffectSpec => ({
-    kind: 'flanger', state: modulation({ delayMs: 1.5, depthMs: 1, rateHz: 0.2, feedback: 0.35, stereoPhase: 0.5, mix: 0.5, ...state }),
+    kind: 'flanger', state: modulation({ mode: 'flanger', delayMs: 1.5, depthMs: 1, rateHz: 0.2, feedback: 0.35, stereoPhase: 0.5, mix: 0.5, ...state }),
   }),
   phaser: (state: Partial<PhaserProcessorState> = {}): EffectSpec => ({
     kind: 'phaser',
-    state: { enabled: true, stages: 6, centerHz: 1000, depthOctaves: 3, rateHz: 0.3, feedback: 0.3, stereoPhase: 0.5, mix: 0.5, ...state },
+    state: {
+      enabled: true, stages: 6, waveform: 'sine', safeBass: false, centerHz: 1000, depthOctaves: 3, rateHz: 0.3, feedback: 0.3, stereoPhase: 0.5, mix: 0.5,
+      spreadOctaves: 0, blend: 0, safeBassHz: 100, outputDb: 0, ...state,
+    },
   }),
   tremolo: (state: Partial<AmplitudeModulationProcessorState> = {}): EffectSpec => ({ kind: 'tremolo', state: amplitude(state) }),
   autopan: (state: Partial<AmplitudeModulationProcessorState> = {}): EffectSpec => ({ kind: 'autopan', state: amplitude({ rateHz: 1, depth: 1, ...state }) }),
   ensemble: (state: Partial<EnsembleProcessorState> = {}): EffectSpec => ({
-    kind: 'ensemble', state: { enabled: true, voices: 3, delayMs: 18, depthMs: 6, rateHz: 0.6, spread: 1, mix: 0.5, ...state },
+    kind: 'ensemble', state: {
+      enabled: true, voices: 3, waveform: 'sine', safeBass: false, delayMs: 18, depthMs: 6, rateHz: 0.6, spread: 1, mix: 0.5,
+      fastDepthMs: 0, fastRateHz: 6, safeBassHz: 100, width: 1, outputDb: 0, ...state,
+    },
   }),
   gate: (state: Partial<GateProcessorState> = {}): EffectSpec => ({
     kind: 'gate',

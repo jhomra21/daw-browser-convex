@@ -378,35 +378,59 @@ describe('mixer routing plan', () => {
       processor.tailFrames,
       processor.parameterTargets,
     ])).toEqual([
-      ['chorus', 4, 28, 0, 768, [
+      ['chorus', 4, 52, 0, 768, [
         { id: 'chorus.delayMs', target: 74 }, { id: 'chorus.depthMs', target: 75 },
         { id: 'chorus.rateHz', target: 76 }, { id: 'chorus.feedback', target: 77 },
         { id: 'chorus.stereoPhase', target: 78 }, { id: 'chorus.mix', target: 79 },
+        { id: 'chorus.safeBassHz', target: 177 }, { id: 'chorus.width', target: 178 }, { id: 'chorus.outputDb', target: 179 },
       ]],
-      ['flanger', 5, 28, 0, 1_080, [
+      ['flanger', 5, 52, 0, 1_080, [
         { id: 'flanger.delayMs', target: 80 }, { id: 'flanger.depthMs', target: 81 },
         { id: 'flanger.rateHz', target: 82 }, { id: 'flanger.feedback', target: 83 },
         { id: 'flanger.stereoPhase', target: 84 }, { id: 'flanger.mix', target: 85 },
+        { id: 'flanger.safeBassHz', target: 180 }, { id: 'flanger.width', target: 181 }, { id: 'flanger.outputDb', target: 182 },
       ]],
-      ['phaser', 6, 32, 0, 48, [
+      ['phaser', 6, 56, 0, 48, [
         { id: 'phaser.centerHz', target: 86 }, { id: 'phaser.depthOctaves', target: 87 },
         { id: 'phaser.rateHz', target: 88 }, { id: 'phaser.feedback', target: 89 },
         { id: 'phaser.stereoPhase', target: 90 }, { id: 'phaser.mix', target: 91 },
+        { id: 'phaser.spreadOctaves', target: 183 }, { id: 'phaser.blend', target: 184 },
+        { id: 'phaser.safeBassHz', target: 185 }, { id: 'phaser.outputDb', target: 186 },
       ]],
-      ['tremolo', 7, 24, 0, 0, [
+      ['tremolo', 7, 40, 0, 0, [
         { id: 'tremolo.rateHz', target: 92 }, { id: 'tremolo.depth', target: 93 },
         { id: 'tremolo.shape', target: 94 }, { id: 'tremolo.phase', target: 95 },
+        { id: 'tremolo.stereoPhase', target: 187 },
       ]],
-      ['autopan', 8, 24, 0, 0, [
+      ['autopan', 8, 40, 0, 0, [
         { id: 'autopan.rateHz', target: 96 }, { id: 'autopan.depth', target: 97 },
         { id: 'autopan.shape', target: 98 }, { id: 'autopan.phase', target: 99 },
+        { id: 'autopan.stereoPhase', target: 188 },
       ]],
-      ['ensemble', 9, 28, 0, 1_152, [
+      ['ensemble', 9, 56, 0, 1_152, [
         { id: 'ensemble.delayMs', target: 100 }, { id: 'ensemble.depthMs', target: 101 },
         { id: 'ensemble.rateHz', target: 102 }, { id: 'ensemble.spread', target: 103 },
         { id: 'ensemble.mix', target: 104 },
+        { id: 'ensemble.fastDepthMs', target: 189 }, { id: 'ensemble.fastRateHz', target: 190 },
+        { id: 'ensemble.safeBassHz', target: 191 }, { id: 'ensemble.width', target: 192 }, { id: 'ensemble.outputDb', target: 193 },
       ]],
     ])
+  })
+
+  test('declares the Through-zero Flanger dry-path delay as latency, bypassed or not, and no other mode', () => {
+    const projected = (mode: 'flanger' | 'throughZero', enabled: boolean) => createPortableGraphSnapshot({
+      graph: resolveMixerGraph({
+        channels: createMixerChannels([{ id: 'source', kind: 'audio', name: 'Source', clips: [], volume: 1 }]),
+        trackFx: { source: { instances: [{ id: 'flanger', kind: 'flanger', params: { version: 1, state: { ...createDefaultFlangerParams(), mode, enabled } } }] } },
+      }),
+      revision: 1,
+      sampleRate: 48_000,
+    }).nodes[0]?.processorOrder.map((processor) => processor.latencyFrames)
+
+    // ChorusKernel::kThroughZeroDryMs = 5 ms: 240 frames at 48 kHz, declared even while the device is off so the core's own check agrees.
+    expect(projected('throughZero', true)).toEqual([240])
+    expect(projected('throughZero', false)).toEqual([240])
+    expect(projected('flanger', true)).toEqual([0])
   })
 
   test('projects normalized dynamics processor envelopes without changing persisted forms', () => {

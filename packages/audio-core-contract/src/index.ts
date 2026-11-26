@@ -102,44 +102,74 @@ export type EqProcessorState = {
   bands: readonly EqProcessorBandState[]
 }
 
+export type ModulationWaveform = 'sine' | 'triangle' | 'sawDown' | 'sawUp' | 'square' | 'sampleHold' | 'wander'
+
+const modulationWaveforms: readonly ModulationWaveform[] = ['sine', 'triangle', 'sawDown', 'sawUp', 'square', 'sampleHold', 'wander']
+
+const modulationWaveformId = (waveform: ModulationWaveform): number => Math.max(0, modulationWaveforms.indexOf(waveform))
+
+/** Chorus modes are chorus, vibrato and vintage; Flanger modes are flanger and throughZero (it declares the dry-path delay as latency). */
 export type DelayModulationProcessorState = {
   enabled: boolean
+  mode: 'chorus' | 'vibrato' | 'vintage' | 'flanger' | 'throughZero'
+  waveform: ModulationWaveform
+  safeBass: boolean
   delayMs: number
   depthMs: number
   rateHz: number
   feedback: number
   stereoPhase: number
   mix: number
+  safeBassHz: number
+  width: number
+  outputDb: number
 }
 
 export type PhaserProcessorState = {
   enabled: boolean
   stages: 4 | 6 | 8 | 12
+  waveform: ModulationWaveform
+  safeBass: boolean
   centerHz: number
   depthOctaves: number
   rateHz: number
   feedback: number
   stereoPhase: number
   mix: number
+  spreadOctaves: number
+  blend: number
+  safeBassHz: number
+  outputDb: number
 }
 
 export type AmplitudeModulationProcessorState = {
   enabled: boolean
-  waveform: 'sine' | 'triangle'
+  waveform: ModulationWaveform
+  sync: boolean
+  division: number
+  invert: boolean
   rateHz: number
   depth: number
   'shape': number
   phase: number
+  stereoPhase: number
 }
 
 export type EnsembleProcessorState = {
   enabled: boolean
   voices: 3
+  waveform: ModulationWaveform
+  safeBass: boolean
   delayMs: number
   depthMs: number
   rateHz: number
   spread: number
   mix: number
+  fastDepthMs: number
+  fastRateHz: number
+  safeBassHz: number
+  width: number
+  outputDb: number
 }
 
 export type GateProcessorState = {
@@ -931,8 +961,8 @@ export const encodeEqProcessorState = (state: EqProcessorState): Uint8Array => {
   return output
 }
 
-const encodeDelayModulationProcessorState = (state: DelayModulationProcessorState): Uint8Array => {
-  const output = new Uint8Array(28)
+const encodeDelayModulationProcessorState = (state: DelayModulationProcessorState, modeId: number): Uint8Array => {
+  const output = new Uint8Array(52)
   const view = new DataView(output.buffer)
   view.setUint32(0, state.enabled ? 1 : 0, true)
   view.setFloat32(4, state.delayMs, true)
@@ -941,15 +971,24 @@ const encodeDelayModulationProcessorState = (state: DelayModulationProcessorStat
   view.setFloat32(16, state.feedback, true)
   view.setFloat32(20, state.stereoPhase, true)
   view.setFloat32(24, state.mix, true)
+  view.setUint32(28, modeId, true)
+  view.setUint32(32, modulationWaveformId(state.waveform), true)
+  view.setUint32(36, state.safeBass ? 1 : 0, true)
+  view.setFloat32(40, state.safeBassHz, true)
+  view.setFloat32(44, state.width, true)
+  view.setFloat32(48, state.outputDb, true)
 
   return output
 }
 
-export const encodeChorusProcessorState = encodeDelayModulationProcessorState
-export const encodeFlangerProcessorState = encodeDelayModulationProcessorState
+export const encodeChorusProcessorState = (state: DelayModulationProcessorState): Uint8Array =>
+  encodeDelayModulationProcessorState(state, state.mode === 'vibrato' ? 1 : state.mode === 'vintage' ? 2 : 0)
+
+export const encodeFlangerProcessorState = (state: DelayModulationProcessorState): Uint8Array =>
+  encodeDelayModulationProcessorState(state, state.mode === 'throughZero' ? 1 : 0)
 
 export const encodePhaserProcessorState = (state: PhaserProcessorState): Uint8Array => {
-  const output = new Uint8Array(32)
+  const output = new Uint8Array(56)
   const view = new DataView(output.buffer)
   view.setUint32(0, state.enabled ? 1 : 0, true)
   view.setUint32(4, state.stages, true)
@@ -959,19 +998,29 @@ export const encodePhaserProcessorState = (state: PhaserProcessorState): Uint8Ar
   view.setFloat32(20, state.feedback, true)
   view.setFloat32(24, state.stereoPhase, true)
   view.setFloat32(28, state.mix, true)
+  view.setUint32(32, modulationWaveformId(state.waveform), true)
+  view.setUint32(36, state.safeBass ? 1 : 0, true)
+  view.setFloat32(40, state.spreadOctaves, true)
+  view.setFloat32(44, state.blend, true)
+  view.setFloat32(48, state.safeBassHz, true)
+  view.setFloat32(52, state.outputDb, true)
 
   return output
 }
 
 const encodeAmplitudeModulationProcessorState = (state: AmplitudeModulationProcessorState): Uint8Array => {
-  const output = new Uint8Array(24)
+  const output = new Uint8Array(40)
   const view = new DataView(output.buffer)
   view.setUint32(0, state.enabled ? 1 : 0, true)
-  view.setUint32(4, state.waveform === 'triangle' ? 1 : 0, true)
+  view.setUint32(4, modulationWaveformId(state.waveform), true)
   view.setFloat32(8, state.rateHz, true)
   view.setFloat32(12, state.depth, true)
   view.setFloat32(16, state['shape'], true)
   view.setFloat32(20, state.phase, true)
+  view.setUint32(24, state.sync ? 1 : 0, true)
+  view.setUint32(28, state.division, true)
+  view.setUint32(32, state.invert ? 1 : 0, true)
+  view.setFloat32(36, state.stereoPhase, true)
 
   return output
 }
@@ -980,7 +1029,7 @@ export const encodeTremoloProcessorState = encodeAmplitudeModulationProcessorSta
 export const encodeAutoPanProcessorState = encodeAmplitudeModulationProcessorState
 
 export const encodeEnsembleProcessorState = (state: EnsembleProcessorState): Uint8Array => {
-  const output = new Uint8Array(28)
+  const output = new Uint8Array(56)
   const view = new DataView(output.buffer)
   view.setUint32(0, state.enabled ? 1 : 0, true)
   view.setUint32(4, state.voices, true)
@@ -989,6 +1038,13 @@ export const encodeEnsembleProcessorState = (state: EnsembleProcessorState): Uin
   view.setFloat32(16, state.rateHz, true)
   view.setFloat32(20, state.spread, true)
   view.setFloat32(24, state.mix, true)
+  view.setUint32(28, modulationWaveformId(state.waveform), true)
+  view.setUint32(32, state.safeBass ? 1 : 0, true)
+  view.setFloat32(36, state.fastDepthMs, true)
+  view.setFloat32(40, state.fastRateHz, true)
+  view.setFloat32(44, state.safeBassHz, true)
+  view.setFloat32(48, state.width, true)
+  view.setFloat32(52, state.outputDb, true)
 
   return output
 }

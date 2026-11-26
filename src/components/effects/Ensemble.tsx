@@ -21,7 +21,7 @@ export default function Ensemble(props: EnsembleProps) {
   const off = () => !props.params.enabled
 
   return (
-    <EffectShell title="Ensemble" typeLabel="3 Voices" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="w-[360px] min-w-[360px]">
+    <EffectShell title="Ensemble" typeLabel="3 Voices" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="w-[380px] min-w-[380px]">
       <div class="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_4.5rem] gap-3 px-3 py-2">
         <div class="flex min-w-0 flex-col gap-2">
           <div class="grid grid-cols-[minmax(0,1fr)_4.5rem] gap-1">
@@ -33,10 +33,10 @@ export default function Ensemble(props: EnsembleProps) {
             <AutomatedKnob size={32} label="Depth" valueLabel={formatDeviceMilliseconds(props.params.depthMs, 1)} value={props.params.depthMs} resetValue={defaults.depthMs} min={1} max={12} step={0.1} disabled={off()} parameterId="ensemble.depthMs" automation={props} onValueChange={(depthMs) => props.onChange({ depthMs })} />
             <AutomatedKnob size={32} label="Rate" valueLabel={formatDeviceHertz(props.params.rateHz, 2)} value={props.params.rateHz} resetValue={defaults.rateHz} min={0.05} max={5} step={0.01} logarithmic disabled={off()} parameterId="ensemble.rateHz" automation={props} onValueChange={(rateHz) => props.onChange({ rateHz })} />
             <AutomatedKnob size={32} label="Spread" valueLabel={formatDevicePercent(props.params.spread)} value={props.params.spread} resetValue={defaults.spread} min={0} max={1} step={0.01} disabled={off()} parameterId="ensemble.spread" automation={props} onValueChange={(spread) => props.onChange({ spread })} />
-            <AutomatedKnob size={32} label="Fast Depth" valueLabel={formatDeviceMilliseconds(props.params.fastDepthMs, 1)} value={props.params.fastDepthMs} resetValue={defaults.fastDepthMs} min={0} max={4} step={0.1} disabled={off()} parameterId="ensemble.fastDepthMs" automation={props} onValueChange={(fastDepthMs) => props.onChange({ fastDepthMs })} />
+            <AutomatedKnob size={32} class="[&>div:first-child]:whitespace-nowrap" label="Fast Depth" valueLabel={formatDeviceMilliseconds(props.params.fastDepthMs, 1)} value={props.params.fastDepthMs} resetValue={defaults.fastDepthMs} min={0} max={4} step={0.1} disabled={off()} parameterId="ensemble.fastDepthMs" automation={props} onValueChange={(fastDepthMs) => props.onChange({ fastDepthMs })} />
             {/* The fast LFO is silent at zero depth, so its rate only exists once Fast Depth is up. */}
             <Show when={props.params.fastDepthMs > 0} fallback={<div />}>
-              <AutomatedKnob size={32} label="Fast Rate" valueLabel={formatDeviceHertz(props.params.fastRateHz, 2)} value={props.params.fastRateHz} resetValue={defaults.fastRateHz} min={0.5} max={12} step={0.01} logarithmic disabled={off()} parameterId="ensemble.fastRateHz" automation={props} onValueChange={(fastRateHz) => props.onChange({ fastRateHz })} />
+              <AutomatedKnob size={32} class="[&>div:first-child]:whitespace-nowrap" label="Fast Rate" valueLabel={formatDeviceHertz(props.params.fastRateHz, 2)} value={props.params.fastRateHz} resetValue={defaults.fastRateHz} min={0.5} max={12} step={0.01} logarithmic disabled={off()} parameterId="ensemble.fastRateHz" automation={props} onValueChange={(fastRateHz) => props.onChange({ fastRateHz })} />
             </Show>
             <WidthKnob parameterPrefix="ensemble" params={props.params} onChange={props.onChange} automation={props} />
             <SafeBassKnob parameterPrefix="ensemble" params={props.params} onChange={props.onChange} automation={props} />

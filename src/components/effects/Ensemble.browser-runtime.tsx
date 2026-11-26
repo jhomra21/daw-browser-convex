@@ -6,7 +6,7 @@ import { mountModulationPanel, publishScenarios, settle } from '~/test-support/m
 const run = async () => {
   const scenarios: Record<string, boolean> = {}
 
-  const panel = await mountModulationPanel(createDefaultEnsembleParams(), 360, (state) => (
+  const panel = await mountModulationPanel(createDefaultEnsembleParams(), 380, (state) => (
     <Ensemble params={state.params()} onChange={state.onChange} onToggleEnabled={() => {}} onReset={() => {}} automationRangesByParameterId={state.ranges()} onManualAutomationOverride={state.onOverride} />
   ))
 
@@ -14,7 +14,7 @@ const run = async () => {
 
   const layout = panel.layout()
 
-  scenarios['the-panel-stays-360-px-wide-and-fits-the-device'] = layout.width === 360 && layout.fits
+  scenarios['the-panel-stays-380-px-wide-and-fits-the-device'] = layout.width === 380 && layout.fits
   scenarios['no-label-or-value-is-wider-than-its-box'] = layout.clipped
   scenarios['no-label-or-value-crowds-another-control'] = layout.crowded
   scenarios['every-control-has-an-accessible-name'] = panel.everyControlIsNamed()
@@ -64,7 +64,7 @@ const run = async () => {
   key(slider('Bass Freq'), 'ArrowUp')
   scenarios['the-bass-frequency-writes-its-param'] = lastChange()?.safeBassHz === 101 && panel.overrides.at(-1) === 'ensemble.safeBassHz'
   const full = panel.layout()
-  scenarios['every-control-visible-still-fits'] = full.width === 360 && full.fits && full.clipped && full.crowded
+  scenarios['every-control-visible-still-fits'] = full.width === 380 && full.fits && full.clipped && full.crowded
 
   const fields = ['delayMs', 'depthMs', 'rateHz', 'spread', 'fastDepthMs', 'fastRateHz', 'width', 'safeBassHz', 'outputDb', 'mix']
   scenarios['no-knob-shows-automation-without-an-envelope'] = panel.dotted().length === 0

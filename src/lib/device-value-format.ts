@@ -14,4 +14,9 @@ export const formatDeviceMilliseconds = (value: number, precision: number) => (
   `${value.toFixed(precision)} ms`
 )
 
+/** A processing delay in milliseconds at the engine's real sample rate; just the frame count while the engine has none. */
+export const formatDeviceLatency = (frames: number, sampleRate: number | null) => (
+  sampleRate === null ? `${frames} samples` : `${formatDeviceMilliseconds(frames / sampleRate * 1000, 1)} @ ${sampleRate / 1000} kHz`
+)
+
 export const formatDevicePercent = (value: number) => `${Math.round(value * 100)}%`

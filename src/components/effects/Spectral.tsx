@@ -1,4 +1,4 @@
-import { For } from 'solid-js'
+import { For, createSignal, onSettled } from 'solid-js'
 import {
   createDefaultSpectralParams,
   getSpectralLatencyFrames,
@@ -12,7 +12,8 @@ import type { Track } from '@daw-browser/timeline-core/types'
 import EffectShell from '~/components/effects/EffectShell'
 import { DeviceToggleButton } from '~/components/ui/device-control'
 import AutomatedKnob from '~/components/effects/AutomatedKnob'
-import { formatDeviceDb, formatDeviceMilliseconds, formatDevicePercent } from '~/lib/device-value-format'
+import { getAudioEngine } from '~/lib/audio-engine-singleton'
+import { formatDeviceDb, formatDeviceLatency, formatDeviceMilliseconds, formatDevicePercent } from '~/lib/device-value-format'
 
 type SpectralProps = {
   params: SpectralParams
@@ -40,13 +41,17 @@ const modeLabels = {
 } satisfies Record<SpectralMode, string>
 
 const percent = formatDevicePercent
-const formatLatency = (frames: number) => `${formatDeviceMilliseconds(frames / 48, 1)} @ 48 kHz`
 
 export default function Spectral(props: SpectralProps) {
+  const audioEngine = getAudioEngine()
+  const [sampleRate, setSampleRate] = createSignal(audioEngine.getRuntimeSnapshot().sampleRate)
+
+  onSettled(() => audioEngine.subscribeRuntimeSnapshot(() => setSampleRate(audioEngine.getRuntimeSnapshot().sampleRate)))
+
   return (
     <EffectShell
       title="Spectral"
-      typeLabel={formatLatency(getSpectralLatencyFrames(props.params.fftSize, props.params.overlap))}
+      typeLabel={formatDeviceLatency(getSpectralLatencyFrames(props.params.fftSize, props.params.overlap), sampleRate())}
       enabled={props.params.enabled}
       onToggleEnabled={props.onToggleEnabled}
       onReset={props.onReset}
@@ -124,7 +129,7 @@ export default function Spectral(props: SpectralProps) {
         </div>
         <div class="flex items-center justify-between border-t border-border pt-2 text-2xs text-muted-foreground">
           <span>HPSS kernel {31} bins, history {31} frames max</span>
-          <span>Latency {formatLatency(getSpectralLatencyFrames(props.params.fftSize, props.params.overlap))}</span>
+          <span>Latency {formatDeviceLatency(getSpectralLatencyFrames(props.params.fftSize, props.params.overlap), sampleRate())}</span>
         </div>
       </div>
     </EffectShell>

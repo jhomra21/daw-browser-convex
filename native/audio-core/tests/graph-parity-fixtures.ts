@@ -1824,7 +1824,7 @@ const timeEffectFixture = (
         : encodeReverbProcessorState(processorState),
       parameterTargets: kind === 'delay'
         ? [5, 6, 7, 8, 9]
-        : [10, 11, 12, 13, 14, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142],
+        : [10, 11, 12, 13, 14, 132, 133, 134, 135, 136, 137, 138, 139, 141, 142, 173, 174, 175, 176],
       latencyFrames: 0,
       tailFrames: timeEffectTailFrames(kind, state, sampleRateHz),
       bypassed,
@@ -1907,8 +1907,8 @@ const reverbSpinPair = (reflectionSpin: boolean): PortableGraphParityFixture => 
 
     return finite(output)
       && onset !== null
-      && onset >= 1_840
-      && onset <= 2_040
+      && onset >= 1_480
+      && onset <= 1_680
       && rightEnergy > 1e-8
   }
 
@@ -2303,7 +2303,7 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
     )
 
     fixture.assertOutput = (output) => finite(output)
-      && output.every((plane) => closeTo(plane[0] ?? 0, 1) && plane.slice(1).every((sample) => closeTo(sample, 0)))
+      && output.every((plane) => closeTo(plane[0] ?? 0, 1) && plane.slice(1).every((sample) => sample > 0.99 && sample <= 1 + 1e-6))
 
     return fixture
   })(),

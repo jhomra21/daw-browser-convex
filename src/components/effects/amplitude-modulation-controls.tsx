@@ -40,7 +40,10 @@ export default function AmplitudeModulationControls(props: {
         <AutomatedKnob size={32} label="Depth" valueLabel={formatDevicePercent(props.params.depth)} value={props.params.depth} resetValue={props.defaults.depth} min={0} max={1} step={0.01} disabled={off()} parameterId={`${props.parameterPrefix}.depth`} automation={props.automation} onValueChange={(depth) => props.onChange({ depth })} />
         <AutomatedKnob size={32} label="Shape" valueLabel={formatDevicePercent(props.params['shape'])} value={props.params['shape']} resetValue={props.defaults['shape']} min={0} max={1} step={0.01} disabled={off()} parameterId={`${props.parameterPrefix}.shape`} automation={props.automation} onValueChange={(amount) => props.onChange({ ['shape']: amount })} />
         <StereoPhaseKnob parameterPrefix={props.parameterPrefix} params={props.params} resetValue={props.defaults.stereoPhase} onChange={props.onChange} automation={props.automation} />
-        <AutomatedKnob size={32} label="Offset" valueLabel={formatDegrees(props.params.phase)} value={props.params.phase} resetValue={props.defaults.phase} min={0} max={1} step={0.01} disabled={off()} parameterId={`${props.parameterPrefix}.phase`} automation={props.automation} onValueChange={(phase) => props.onChange({ phase })} />
+        {/* Offset shifts where the synced LFO sits against the beat grid, so it only exists in Sync, as in Live. */}
+        <Show when={props.params.sync}>
+          <AutomatedKnob size={32} label="Offset" valueLabel={formatDegrees(props.params.phase)} value={props.params.phase} resetValue={props.defaults.phase} min={0} max={1} step={0.01} disabled={off()} parameterId={`${props.parameterPrefix}.phase`} automation={props.automation} onValueChange={(phase) => props.onChange({ phase })} />
+        </Show>
       </div>
     </div>
   )

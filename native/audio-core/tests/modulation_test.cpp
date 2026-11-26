@@ -75,10 +75,11 @@ void loop() {
   }
 }
 
-// White noise through a mix=1 Ensemble keeps its level (uncorrelated voices, 1/sqrt(3) per voice). Hermite reads at
-// fractional delays low-pass white noise slightly, which is the remaining 0.86 dB.
-void level() {
-  currentName = "level";
+// Uncorrelated voices at 1/sqrt(3) each keep the input's level at mix=1 (the old 1/3 sum was -4.8 dB, research MOD-5 / E-b).
+// What a fractional-delay read still costs is a high-frequency droop, so the level depends on how much of the signal lies
+// near Nyquist: full-band white noise (worst case, half its power above 12 kHz) reads -0.86 dB, programme-like noise
+// band-limited to about 3 kHz reads +0.12 dB (the voices are partly correlated at low frequencies, so they add a little above 1/sqrt(3)). The Output control (outputDb) carries any taste correction.
+double ensembleLevelDb(bool bandLimited) {
   EnsembleKernel kernel;
   kernel.prepare(48000.0);
   EnsembleValues values;
@@ -86,13 +87,25 @@ void level() {
   EnsembleConfig config;
   Noise noise;
   double wet = 0.0, dry = 0.0;
+  float low1 = 0.0F, low2 = 0.0F;
   for (int i = 0; i < 48000 * 6; ++i) {
-    const float x = 0.3F * noise.next();
+    float x = 0.3F * noise.next();
+    if (bandLimited) {
+      low1 += 0.35F * (x - low1);
+      low2 += 0.35F * (low1 - low2);
+      x = low2 * 3.0F;
+    }
     float left, right;
     kernel.process(values, config, 0.0F, x, x, left, right);
     if (i > 4800) { wet += left * left; dry += x * x; }
   }
-  expectNear("noise_level_db", toDb(std::sqrt(wet / dry)), 0.0, 1.0);
+  return toDb(std::sqrt(wet / dry));
+}
+
+void level() {
+  currentName = "level";
+  expectNear("noise_level_db", ensembleLevelDb(false), 0.0, 1.0);
+  expectNear("band_limited_noise_level_db", ensembleLevelDb(true), 0.0, 0.25);
 }
 
 // Phaser feedback near 1 stays within 12 dB of the input.

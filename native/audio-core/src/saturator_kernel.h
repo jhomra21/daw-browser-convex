@@ -5,9 +5,13 @@
 // Signal path per channel: Color pre-EQ (a low and a high shelf) -> Drive -> warp -> Color post-EQ (the inverse shelves)
 // -> Post Clip -> Output -> dry/wet. Hi-Quality runs the warp at twice the rate between a minimum-phase polyphase IIR
 // half-band pair, with first-order antiderivative antialiasing (ADAA) on every shaped sample; without it the curve is evaluated
-// directly. The Color filters run at the base rate; Post Clip has a half-band pair of its own. The half-bands add no reported latency: the wet path
-// trails the dry path by their group delay (a little under three frames at low frequencies) and the dry/wet mix does not
-// compensate for it.
+// directly. The Color filters run at the base rate; Post Clip has a half-band pair of its own.
+//
+// With Hi-Quality the wet path trails the input by about three frames per half-band pair (2.6 at low frequencies, rising to
+// 14 at 20 kHz at 44.1 kHz), which a partial Dry/Wet would turn into a comb. The device declares latency_frames() and holds the dry
+// path back by that many frames. Because a pure delay still parts from the wet path's phase near the band edge, the dry term of a
+// mix also runs through a linear twin of the half-band stages (the same up, average, down and droop compensation, without the
+// curve), crossfaded in as Dry/Wet leaves 0: at 0 the output is the input delayed by exactly latency_frames().
 //
 // Every curve has a slope of one at the origin and an asymptote near one, so switching curves does not change the level
 // of a quiet signal and Drive 0 passes it through. Arithmetic runs in double; only the smoothers round to float, so the legacy
@@ -142,6 +146,14 @@ class SaturatorKernel {
  public:
   static constexpr uint32_t kControlFrames = 8;
   static constexpr double kPi = 3.14159265358979323846;
+  static constexpr uint32_t kStageLatencyFrames = dsp::PolyphaseIirHalfBand2x::latencyFrames();
+  // Dry/Wet at which the twin has fully replaced the pure delay.
+  static constexpr double kTwinFullMix = 1.0 / 16.0;
+
+  // The latency the device declares: one half-band pair for the curve, and another for Post Clip.
+  static constexpr uint32_t latency_frames(bool hi_quality, uint32_t post_clip) {
+    return hi_quality ? kStageLatencyFrames * (post_clip != 0 ? 2U : 1U) : 0U;
+  }
 
   void prepare(double sample_rate) {
     rate_ = sample_rate;
@@ -229,6 +241,21 @@ class SaturatorKernel {
   static double color_q(double width) { return 2.0 * std::pow(0.2, std::clamp(width, 0.0, 1.0)); }
 
  private:
+  // A half-band stage with the curve taken out: what the wet path does to a signal too small to shape.
+  struct LinearStage {
+    dsp::PolyphaseIirHalfBand2x oversampler;
+    dsp::Biquad<double> droop;
+    double previous = 0.0;
+
+    double process(double x) {
+      const dsp::PolyphaseIirHalfBand2x::Pair pair = oversampler.up(x);
+      const double first = 0.5 * (pair.first + previous);
+      const double second = 0.5 * (pair.second + pair.first);
+      previous = pair.second;
+      return droop.process(oversampler.down(first, second), kDroopCompensation);
+    }
+  };
+
   struct Channel {
     std::array<dsp::Biquad<double>, 2> pre{};
     std::array<dsp::Biquad<double>, 2> post{};
@@ -238,6 +265,17 @@ class SaturatorKernel {
     dsp::Biquad<double> clip_droop;
     SaturatorAdaa shaper;
     SaturatorAdaa clip;
+    std::array<double, 8> dry_history{};
+    uint32_t dry_position = 0;
+    std::array<LinearStage, 2> twin{};
+
+    // The input from `frames` samples ago (frames < 8), after storing x.
+    double delayed(double x, uint32_t frames) {
+      dry_history[dry_position] = x;
+      const double out = dry_history[(dry_position + dry_history.size() - frames) % dry_history.size()];
+      dry_position = (dry_position + 1) % dry_history.size();
+      return out;
+    }
   };
 
   void initialize(const SaturatorValues &values, const SaturatorConfig &config) {
@@ -264,6 +302,7 @@ class SaturatorKernel {
         channel.clip.reset();
       }
     }
+    if (config.hi_quality != applied_.hi_quality || config.post_clip != applied_.post_clip) for (Channel &channel : channels_) channel.twin = {};
     applied_ = config;
     drive_.setTarget(values.drive_db);
     output_.setTarget(values.output_db);
@@ -330,7 +369,14 @@ class SaturatorKernel {
       channel = Channel{};
       wet = 0.0;
     }
-    return dsp::flushDenormal(dry + (wet - dry) * wet_mix);
+    double dry_path = dry;
+    if (config.hi_quality) {
+      dry_path = channel.delayed(dry, latency_frames(true, config.post_clip));
+      double twin = dry;
+      for (uint32_t stage = 0; stage < (config.post_clip != 0 ? 2U : 1U); ++stage) twin = channel.twin[stage].process(twin);
+      dry_path += (twin - dry_path) * std::min(1.0, wet_mix * (1.0 / kTwinFullMix));
+    }
+    return dsp::flushDenormal(dry_path + (wet - dry_path) * wet_mix);
   }
 
   double rate_ = 48000.0;

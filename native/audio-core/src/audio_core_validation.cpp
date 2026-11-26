@@ -430,7 +430,7 @@ bool decode_processor_state(
       .color_low_db = read_f32_le(bytes + 40), .color_high_db = read_f32_le(bytes + 44),
       .bass_threshold_db = read_f32_le(bytes + 48), .warp_depth = read_f32_le(bytes + 52), .warp_period = read_f32_le(bytes + 56),
     };
-    if (!valid_saturator_state(state) || descriptor.latency_frames != 0
+    if (!valid_saturator_state(state) || descriptor.latency_frames != daw::audio_core::SaturatorKernel::latency_frames(state.hi_quality != 0, state.post_clip)
       || descriptor.tail_frames != 0) return false;
     out_processor->saturator = state;
     return true;

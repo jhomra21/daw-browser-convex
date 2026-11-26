@@ -37,7 +37,7 @@ import {
   type SpectralProcessorState,
 } from '../../../packages/audio-core-contract/src/index'
 import { processorRegistry } from '../../../packages/audio-core-contract/src/generated/processor-contract-metadata'
-import { AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES, EQ_HIGH_QUALITY_LATENCY_FRAMES } from '../../../packages/shared/src/effects-params'
+import { AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES, EQ_HIGH_QUALITY_LATENCY_FRAMES, saturatorLatencyFrames } from '../../../packages/shared/src/effects-params'
 
 export type PortableModulationKind = 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble'
 
@@ -805,6 +805,8 @@ const saturatorState = (overrides: Partial<SaturatorProcessorState> = {}) => enc
   dryWet: 0.75,
   ...overrides,
 })
+
+const saturatorLatency = (overrides: Partial<SaturatorProcessorState> = {}) => saturatorLatencyFrames(overrides.hiQuality ?? true, overrides.postClip ?? 'off')
 
 const eqState = (overrides: Partial<EqProcessorState> = {}): EqProcessorState => ({
   enabled: true,
@@ -2861,6 +2863,7 @@ const saturatorVariant = (
       instanceId: 11,
       kindId: 2,
       state: encodeSaturatorProcessorState(state),
+      latencyFrames: saturatorLatencyFrames(state.hiQuality, state.postClip),
       parameterTargets: [69, 70, 72, 73, 203, 204, 205, 206, 207, 208],
     }),
     frames,
@@ -3010,6 +3013,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       instanceId: 11,
       kindId: 2,
       state: saturatorState(),
+      latencyFrames: saturatorLatency(),
       parameterTargets: [],
     }),
     frames: 64,
@@ -3033,6 +3037,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       instanceId: 11,
       kindId: 2,
       state: saturatorState({ color: false, colorHighDb: 0, dryWet: 1 }),
+      latencyFrames: saturatorLatency({ color: false, colorHighDb: 0, dryWet: 1 }),
       parameterTargets: [],
     }),
     frames: 32,
@@ -3056,6 +3061,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       instanceId: 11,
       kindId: 2,
       state: saturatorState({ curve: 'soft' }),
+      latencyFrames: saturatorLatency({ curve: 'soft' }),
       parameterTargets: [],
     }),
     frames: 96,
@@ -3077,6 +3083,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       instanceId: 11,
       kindId: 2,
       state: saturatorState(),
+      latencyFrames: saturatorLatency(),
       parameterTargets: [],
       bypassed: true,
     }),
@@ -3097,6 +3104,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       instanceId: 11,
       kindId: 2,
       state: saturatorState(),
+      latencyFrames: saturatorLatency(),
       parameterTargets: [],
     }),
     frames: 4,
@@ -3116,6 +3124,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       instanceId: 11,
       kindId: 2,
       state: saturatorState(),
+      latencyFrames: saturatorLatency(),
       parameterTargets: [69, 70, 203, 72, 73],
     }),
     frames: 64,
@@ -3140,6 +3149,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       instanceId: 11,
       kindId: 2,
       state: saturatorState(),
+      latencyFrames: saturatorLatency(),
       parameterTargets: [],
     }),
     frames: 4,

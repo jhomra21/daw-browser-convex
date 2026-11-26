@@ -327,7 +327,33 @@ const shelf = (low, hz, q, gainDb, rate) => {
 
 const colorQ = (width) => 2 * 0.2 ** clamp(width, 0, 1)
 
+// The half-band stage with the curve taken out: what the wet path does to a signal too small to shape.
+class LinearStage {
+  constructor() {
+    this.oversampler = new HalfBand()
+    this.droop = new Biquad()
+    this.previous = 0
+  }
+  process(x) {
+    const pair = this.oversampler.up(x)
+    const first = 0.5 * (pair[0] + this.previous)
+    const second = 0.5 * (pair[1] + pair[0])
+
+    this.previous = pair[1]
+
+    return this.droop.process(this.oversampler.down(first, second), DROOP)
+  }
+}
+
+const STAGE_LATENCY_FRAMES = 3
+const TWIN_FULL_MIX = 1 / 16
+
+const latencyFrames = (hiQuality, postClip) => hiQuality ? STAGE_LATENCY_FRAMES * (postClip !== 0 ? 2 : 1) : 0
+
 const createChannel = () => ({
+  dryHistory: new Float64Array(8),
+  dryPosition: 0,
+  twin: [new LinearStage(), new LinearStage()],
   pre: [new Biquad(), new Biquad()],
   post: [new Biquad(), new Biquad()],
   oversampler: new HalfBand(),
@@ -337,6 +363,16 @@ const createChannel = () => ({
   curveStage: new Adaa(),
   clip: new Adaa(),
 })
+
+// The input from `frames` samples ago (frames < 8), after storing x.
+const delayed = (channel, x, frames) => {
+  channel.dryHistory[channel.dryPosition] = x
+  const out = channel.dryHistory[(channel.dryPosition + channel.dryHistory.length - frames) % channel.dryHistory.length]
+
+  channel.dryPosition = (channel.dryPosition + 1) % channel.dryHistory.length
+
+  return out
+}
 
 class SaturatorKernel {
   constructor(rate) {
@@ -406,6 +442,10 @@ class SaturatorKernel {
         channel.curveStage.reset()
         channel.clip.reset()
       }
+    }
+
+    if (config.hiQuality !== this.applied.hiQuality || config.postClip !== this.applied.postClip) {
+      for (const channel of this.channels) channel.twin = [new LinearStage(), new LinearStage()]
     }
 
     this.applied = { ...config }
@@ -494,7 +534,18 @@ class SaturatorKernel {
       wet = 0
     }
 
-    return flushDouble(dry + (wet - dry) * wetMix)
+    const current = this.channels[index]
+    let dryPath = dry
+
+    if (config.hiQuality) {
+      dryPath = delayed(current, dry, latencyFrames(true, config.postClip))
+      let twin = dry
+
+      for (let stage = 0; stage < (config.postClip !== 0 ? 2 : 1); stage += 1) twin = current.twin[stage].process(twin)
+      dryPath += (twin - dryPath) * Math.min(1, wetMix * (1 / TWIN_FULL_MIX))
+    }
+
+    return flushDouble(dryPath + (wet - dryPath) * wetMix)
   }
 
   process(values, config, inputLeft, inputRight, out) {

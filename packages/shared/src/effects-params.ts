@@ -1162,6 +1162,13 @@ export const AUTO_FILTER_MAX_Q = 8
 // Latency of the Hi-Quality half-band pair at the project rate, in frames; the native kernel reports the same number.
 export const AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES = 63
 
+// The Saturator's Hi-Quality wet path trails the input by one 2x half-band pair for the curve and one for Post Clip; the dry path is held
+// back by the same frames (SaturatorKernel::latency_frames).
+const SATURATOR_HALF_BAND_LATENCY_FRAMES = 3
+
+export const saturatorLatencyFrames = (hiQuality: boolean, postClip: SaturatorPostClip) =>
+  hiQuality ? SATURATOR_HALF_BAND_LATENCY_FRAMES * (postClip === 'off' ? 1 : 2) : 0
+
 // One LFO cycle per entry, in the order of the native tempo table (2 bars, 1 bar, then straight/dotted/triplet to 1/32).
 export const AUTO_FILTER_LFO_DIVISIONS = ['2 bars', '1 bar', '1/2.', '1/2', '1/4.', '1/4', '1/4T', '1/8.', '1/8', '1/8T', '1/16.', '1/16', '1/16T', '1/32.', '1/32', '1/32T'] as const
 

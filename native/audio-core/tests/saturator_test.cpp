@@ -197,14 +197,19 @@ void step() {
   expect(largest <= own * 1.01, "drive step jump / own slope", largest / own);
 }
 
-// S1: Dry/Wet 0 returns the input exactly.
+// S1: Dry/Wet 0 returns the input delayed by exactly the declared latency; with Post Clip that is two half-band pairs.
 void dry() {
   SaturatorValues values = drive(24.0);
   values.dry_wet = 0.0F;
-  const std::vector<double> out = run(48000.0, values, curve(kHard), 4800, tone(1234.0, 48000.0, 0.7));
-  double worst = 0.0;
-  for (size_t i = 0; i < out.size(); ++i) worst = std::fmax(worst, std::fabs(out[i] - static_cast<double>(static_cast<float>(tone(1234.0, 48000.0, 0.7)(i)))));
-  expect(worst == 0.0, "dry/wet 0 differs from the input by", worst);
+  for (const uint32_t post_clip : {0U, 2U}) {
+    SaturatorConfig config = curve(kHard);
+    config.post_clip = post_clip;
+    const uint32_t latency = SaturatorKernel::latency_frames(config.hi_quality, post_clip);
+    const std::vector<double> out = run(48000.0, values, config, 4800, tone(1234.0, 48000.0, 0.7));
+    double worst = 0.0;
+    for (size_t i = latency; i < out.size(); ++i) worst = std::fmax(worst, std::fabs(out[i] - static_cast<double>(static_cast<float>(tone(1234.0, 48000.0, 0.7)(i - latency)))));
+    expect(worst == 0.0 && latency == (post_clip == 0 ? 3U : 6U), "dry/wet 0 differs from the delayed input by", worst);
+  }
 }
 
 // A non-finite input leaves no non-finite output, and silence stays silent.

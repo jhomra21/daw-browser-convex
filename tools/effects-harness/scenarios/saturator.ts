@@ -4,7 +4,7 @@
 import { measureAliasingEnergyDb } from '../../../packages/audio-engine/src/dsp-characterization'
 import { evaluateSaturatorCurvePoint, type SaturatorCurve } from '../../../packages/shared/src/effects-params'
 import { biquad, countNonFinite, maxAbsDiff, peakDb, rbjCoefficients, toneFit, toneGainDb } from '../dsp'
-import { fx } from '../effects'
+import { declaredLatencyFrames, fx } from '../effects'
 import type { Family } from './index'
 import type { Harness, Scenario } from '../harness'
 import { coherentFrequency, concat, constant, dbToLinear, linearToDb, noise, ramp, sine, sineWithPeakAt, sweep } from '../signals'
@@ -94,9 +94,11 @@ const dryNull: Scenario = {
   run: async (h) => {
     const input = noise(h.rate, 0.5, 21)
 
-    for (const [name, state] of [['Hi-Quality', {}], ['Color on, Post Clip hard', { color: true, colorHighDb: 9, postClip: 'hard' as const }]] as const) {
-      const { output } = await h.render(fx.saturator({ dryWet: 0, driveDb: 24, ...state }), { input: [input] }, { parity: false })
-      h.atMost(`dry/wet 0 residual against the input, ${name}`, linearToDb(maxAbsDiff(output[0], input)), -120, 'dB FS', 'the wet path is not summed in; no latency to apply; before (a49d9c57): -600 dB, also exact')
+    for (const [name, state] of [['Hi-Quality', {}], ['Color on, Post Clip hard', { color: true, colorHighDb: 9, postClip: 'hard' as const }], ['Hi-Quality off', { hiQuality: false }]] as const) {
+      const spec = fx.saturator({ dryWet: 0, driveDb: 24, ...state })
+      const { output } = await h.render(spec, { input: [input] }, { parity: false })
+      const latency = declaredLatencyFrames(spec, h.rate)
+      h.atMost(`dry/wet 0 residual against the input delayed by the declared ${latency} frames, ${name}`, linearToDb(maxAbsDiff(output[0].subarray(latency), input.subarray(0, input.length - latency))), -120, 'dB FS', 'the wet path is not summed in; before (a49d9c57): -600 dB against the undelayed input, also exact')
     }
   },
 }
@@ -239,8 +241,44 @@ const wetDelay: Scenario = {
 
     for (let n = 1; n < 400; n += 1) if (Math.abs(output[0][n]) > Math.abs(output[0][at])) at = n
 
-    h.info('Hi-Quality wet path delay of the half-band pair (no latency is declared)', at - 100, 'frames')
+    h.info('Hi-Quality wet path delay of the half-band pair', at - 100, 'frames', 'before (a49d9c57, no half-band): 0')
     h.atMost('non-finite output samples with an impulse', countNonFinite(output[0]), 0, 'samples')
+  },
+}
+
+/** The measured impulse delay of the device is the declared latency, with and without Post Clip, and 0 with Hi-Quality off. */
+const declaredDelay: Scenario = {
+  effect: 'saturator',
+  name: 'sat8-declared-latency',
+  run: async (h) => {
+    for (const [name, state] of [['Hi-Quality', {}], ['Hi-Quality, Post Clip hard', { postClip: 'hard' as const }], ['Hi-Quality off', { hiQuality: false }]] as const) {
+      for (const dryWet of [1, 0.5]) {
+        const spec = fx.saturator({ driveDb: 0, curve: 'clip', dryWet, ...state })
+        h.within(`impulse peak delay vs declared latency, ${name}, Dry/Wet ${dryWet * 100} %`, await h.latencyFrames(spec), declaredLatencyFrames(spec, h.rate), 0, 'frames', 'before (a49d9c57): 0 declared, 0 measured')
+      }
+    }
+  },
+}
+
+/** A partial Dry/Wet adds the dry path to the wet path; the dry path is delayed and phased like the wet one, so the sum has no comb. */
+const partialMix: Scenario = {
+  effect: 'saturator',
+  name: 'sat9-partial-dry-wet-ripple',
+  run: async (h) => {
+    const frames = 2 * h.rate
+    const frequencies = Array.from({ length: 48 }, (_, i) => 20 * 1000 ** (i / 47))
+
+    for (const [name, state] of [['Hi-Quality', {}], ['Hi-Quality, Post Clip hard', { postClip: 'hard' as const }]] as const) {
+      const gains: number[] = []
+
+      for (const frequency of frequencies) {
+        const input = sine(frames, frequency, h.rate, dbToLinear(-40))
+        const { output } = await h.render(fx.saturator({ driveDb: 0, dryWet: 0.5, ...state }), { input: [input] }, { parity: false })
+        gains.push(toneGainDb(input, output[0], frequency, h.rate, h.rate, frames))
+      }
+
+      h.atMost(`magnitude ripple at Dry/Wet 50 %, drive 0 dB, -40 dBFS, 20 Hz to 20 kHz, ${name}`, Math.max(...gains) - Math.min(...gains), 0.5, 'dB', 'a pure 3-frame dry delay alone gives a 51 dB notch at 19.2 kHz at 44.1 kHz and -8.5 dB at 20 kHz at 48 kHz (the half-band group delay reaches 14 frames there); before (a49d9c57): 0, no half-band')
+    }
   },
 }
 
@@ -248,9 +286,9 @@ const saturatorSpec = fx.saturator()
 
 export const saturator: Family = {
   scenarios: [
-    alias, fundamental, dryNull, color, continuity, driveClick, unity, postClip, legacyParity, wetDelay, ...saturatorMigration,
+    alias, fundamental, dryNull, color, continuity, driveClick, unity, postClip, legacyParity, wetDelay, declaredDelay, partialMix, ...saturatorMigration,
     parityScenario('saturator', saturatorSpec),
-    ...robustnessScenarios('saturator', saturatorSpec, null),
+    ...robustnessScenarios('saturator', saturatorSpec, (rate) => declaredLatencyFrames(saturatorSpec, rate)),
   ],
   notEncoded: [
     'Live\'s Waveshaper Drive/Curve/Linear/Damp sub-controls: only Depth and Period (Warp) are exposed.',

@@ -1551,6 +1551,7 @@ HistoryFixtureState history_fixture_state(uint32_t kind) {
     write_u32(12, 1); write_u32(16, DAW_AUDIO_SATURATOR_POST_CLIP_SOFT); write_f32(20, 18.0F);
     write_f32(24, -3.0F); write_f32(28, 0.75F); write_f32(32, 2500.0F); write_f32(36, 0.57F);
     write_f32(40, 0.0F); write_f32(44, 6.0F); write_f32(48, -12.0F); write_f32(52, 0.5F); write_f32(56, 0.5F);
+    fixture.latency = 6;  // Hi-Quality with Post Clip: two half-band pairs
   } else if (kind == DAW_AUDIO_PROCESSOR_KIND_EQ) {
     fixture.size = 408;
     write_u32(0, 1); write_u32(4, 0); write_f32(16, 1.0F);
@@ -2201,10 +2202,13 @@ void test_processor_chain_prepare_and_dispatch() {
     .node_id = 2, .instance_id = 43, .kind = DAW_AUDIO_PROCESSOR_KIND_SATURATOR,
     .state_version = 2, .state_size = static_cast<uint32_t>(saturator_state.size()), .bypassed = 0,
     .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
-    .latency_frames = 0, .tail_frames = 0, .parameter_count = 0,
+    .latency_frames = 3, .tail_frames = 0, .parameter_count = 0,
     .parameter_targets = nullptr, .state = saturator_state.data(),
   };
+  auto saturator_nodes = nodes;
+  saturator_nodes[1].latency_frames = 3;  // Hi-Quality declares one half-band pair
   daw_audio_graph_prepare_request saturator_request = request;
+  saturator_request.nodes = saturator_nodes.data();
   saturator_request.graph_revision = 2;
   saturator_request.processors = &saturator;
   expect(daw_audio_core_prepare_graph(core, &saturator_request), DAW_AUDIO_CORE_OK);
@@ -2304,17 +2308,19 @@ void test_portable_saturator_and_eq_characterization() {
     .node_id = 2, .instance_id = 1, .kind = DAW_AUDIO_PROCESSOR_KIND_SATURATOR,
     .state_version = 2, .state_size = 60, .bypassed = 0,
     .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
-    .latency_frames = 0, .tail_frames = 0, .parameter_count = 0, .parameter_targets = nullptr, .state = state.data(),
+    .latency_frames = 3, .tail_frames = 0, .parameter_count = 0, .parameter_targets = nullptr, .state = state.data(),
   };
+  auto saturator_nodes = nodes;
+  saturator_nodes[1].latency_frames = 3;  // Hi-Quality declares one half-band pair
   daw_audio_graph_prepare_request prepare{
     .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = 1,
     .node_count = 2, .edge_count = 1, .processor_count = 1,
-    .nodes = nodes.data(), .edges = edges.data(), .processors = &saturator,
+    .nodes = saturator_nodes.data(), .edges = edges.data(), .processors = &saturator,
   };
   const uint32_t undeclared_target = DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB;
   saturator.latency_frames = 1;
   expect(daw_audio_core_prepare_graph(core, &prepare), DAW_AUDIO_CORE_INVALID_ARGUMENT);
-  saturator.latency_frames = 0;
+  saturator.latency_frames = 3;
   saturator.tail_frames = 1;
   expect(daw_audio_core_prepare_graph(core, &prepare), DAW_AUDIO_CORE_INVALID_ARGUMENT);
   saturator.tail_frames = 0;
@@ -2373,6 +2379,7 @@ void test_portable_saturator_and_eq_characterization() {
     .latency_frames = 0, .tail_frames = 0, .parameter_count = 0, .parameter_targets = nullptr, .state = state.data(),
   };
   prepare.graph_revision = 3;
+  prepare.nodes = nodes.data();
   prepare.processors = &eq;
   eq.latency_frames = 1;
   expect(daw_audio_core_prepare_graph(core, &prepare), DAW_AUDIO_CORE_INVALID_ARGUMENT);

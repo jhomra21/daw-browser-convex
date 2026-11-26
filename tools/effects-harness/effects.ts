@@ -7,6 +7,7 @@ import {
   encodeReverbProcessorState, encodeSaturatorProcessorState, encodeSpectralProcessorState, encodeTremoloProcessorState,
   encodeUtilityProcessorState,
 } from '../../packages/audio-core-contract/src'
+import { saturatorLatencyFrames } from '../../packages/shared/src/effects-params'
 import { gateCompressorLatencyFrames, limiterLatencyFrames, throughZeroLatencyFrames } from '../../packages/audio-engine/src/effects/timing'
 import type {
   AmplitudeModulationProcessorState, AutoFilterProcessorState, CompressorProcessorState, DelayModulationProcessorState,
@@ -70,6 +71,7 @@ export const declaredLatencyFrames = (spec: EffectSpec, rate: number): number =>
   switch (spec.kind) {
     case 'autofilter': return spec.state.hiQuality ? 63 : 0
     case 'eq': return spec.state.highQuality ? 3 : 0
+    case 'saturator': return saturatorLatencyFrames(spec.state.hiQuality, spec.state.postClip)
     case 'spectral': return spec.state.fftSize
     case 'gate':
     case 'compressor': return gateCompressorLatencyFrames(spec.state.lookaheadMs, rate)

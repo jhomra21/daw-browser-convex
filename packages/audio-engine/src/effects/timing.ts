@@ -3,6 +3,7 @@ import {
   AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES,
   EQ_HIGH_QUALITY_LATENCY_FRAMES,
   getSpectralLatencyFrames,
+  saturatorLatencyFrames,
   normalizeDelayParams,
   normalizeReverbParams,
   type CompressorParamsLite,
@@ -71,6 +72,10 @@ export const getEffectTiming = (
 
   if (input.kind === 'autofilter') {
     return { latencyFrames: input.params.state.hiQuality ? AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES : 0, tail: finite(0) }
+  }
+
+  if (input.kind === 'saturator') {
+    return { latencyFrames: saturatorLatencyFrames(input.params.hiQuality, input.params.postClip), tail: finite(0) }
   }
 
   if (input.kind === 'eq') {

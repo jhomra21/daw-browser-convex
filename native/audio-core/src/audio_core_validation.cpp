@@ -294,7 +294,7 @@ bool valid_reverb_state(const daw_audio_reverb_state &state) {
     && state.smooth <= DAW_AUDIO_REVERB_SMOOTH_FAST && state.freeze <= 1 && state.flat <= 1 && state.cut <= 1 && state.chorus <= 1
     && std::isfinite(state.chorus_amount_ms) && state.chorus_amount_ms >= 0.0F && state.chorus_amount_ms <= 5.0F
     && std::isfinite(state.chorus_rate_hz) && state.chorus_rate_hz >= 0.01F && state.chorus_rate_hz <= 5.0F
-    && state.low_shelf_on <= 1 && state.high_shelf_on <= 1
+    && state.low_shelf_on <= 1 && state.high_shelf_on <= 1 && state.low_cut_on <= 1 && state.high_cut_on <= 1
     && std::isfinite(state.low_shelf_db) && state.low_shelf_db >= -24.0F && state.low_shelf_db <= 12.0F
     && std::isfinite(state.high_shelf_db) && state.high_shelf_db >= -24.0F && state.high_shelf_db <= 12.0F;
 }
@@ -483,7 +483,7 @@ bool decode_processor_state(
     out_processor->delay = state;
     return true;
   }
-  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB && descriptor.state_size == 116) {
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB && descriptor.state_size == 124) {
     const daw_audio_reverb_state state{
       .enabled = read_u32_le(descriptor.state), .wet = read_f32_le(descriptor.state + 4),
       .decay_sec = read_f32_le(descriptor.state + 8), .pre_delay_ms = read_f32_le(descriptor.state + 12),
@@ -499,7 +499,8 @@ bool decode_processor_state(
       .chorus = read_u32_le(descriptor.state + 88), .chorus_amount_ms = read_f32_le(descriptor.state + 92),
       .chorus_rate_hz = read_f32_le(descriptor.state + 96), .low_shelf_on = read_u32_le(descriptor.state + 100),
       .high_shelf_on = read_u32_le(descriptor.state + 104), .low_shelf_db = read_f32_le(descriptor.state + 108),
-      .high_shelf_db = read_f32_le(descriptor.state + 112),
+      .high_shelf_db = read_f32_le(descriptor.state + 112), .low_cut_on = read_u32_le(descriptor.state + 116),
+      .high_cut_on = read_u32_le(descriptor.state + 120),
     };
     if (!valid_reverb_state(state)) return false;
     out_processor->reverb = state;

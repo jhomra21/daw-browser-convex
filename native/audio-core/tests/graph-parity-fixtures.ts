@@ -1770,6 +1770,8 @@ const reverbState: ReverbProcessorState = {
   highShelfOn: true,
   lowShelfDb: 0,
   highShelfDb: 0,
+  lowCutOn: false,
+  highCutOn: false,
 }
 
 const timeEffectTailFrames = (

@@ -68,7 +68,7 @@ const decayAccuracy: Scenario = {
     }
 
     const plain = t30Bands(await impulseResponse(h, { decaySec: 2.2 }, 8), h.rate)
-    const cut = t30Bands(await impulseResponse(h, { decaySec: 2.2, lowCutHz: 1000 }, 8), h.rate)
+    const cut = t30Bands(await impulseResponse(h, { decaySec: 2.2, lowCutHz: 1000, lowCutOn: true }, 8), h.rate)
     h.atMost('8 kHz T30 change from an input low cut at 1 kHz', Math.abs(cut[6] / plain[6] - 1) * 100, 5, '%', 'M1: input filters must not shorten the decay')
   },
 }
@@ -429,6 +429,29 @@ const migratedCuts: Scenario = {
   },
 }
 
+// An input cut that is off is pass-through and keeps its frequency: with the frequencies parked it renders what open cuts render, in the
+// core and in the worklet, and switching one on at that frequency changes the tail.
+const inputCutSwitches: Scenario = {
+  effect: 'reverb',
+  name: 'input-cut-switches',
+  rates: [48000],
+  run: async (h) => {
+    const input = [noise(2 * h.rate, 0.25, 11)]
+    const open = await h.render(fx.reverb({ wet: 1 }), { input })
+    const parked = await h.render(fx.reverb({ wet: 1, lowCutHz: 1000, highCutHz: 4000 }), { input })
+
+    if (open.legacy === null || parked.legacy === null) throw new Error('the reverb worklet must render for parity')
+
+    h.atMost('core output with both cuts off at 1 kHz and 4 kHz against open cuts', Math.max(maxAbsDiff(parked.output[0], open.output[0]), maxAbsDiff(parked.output[1], open.output[1])), 0, 'abs')
+    h.atMost('worklet output with both cuts off at 1 kHz and 4 kHz against open cuts', Math.max(maxAbsDiff(parked.legacy[0], open.legacy[0]), maxAbsDiff(parked.legacy[1], open.legacy[1])), 0, 'abs')
+
+    for (const [name, state] of [['Lo Cut', { lowCutHz: 1000, lowCutOn: true }], ['Hi Cut', { highCutHz: 4000, highCutOn: true }]] as const) {
+      const on = await h.render(fx.reverb({ wet: 1, ...state }), { input })
+      h.atLeast(`${name} switched on at its parked frequency: largest change of the core output against off`, maxAbsDiff(on.output[0], open.output[0]), 1e-3, 'abs')
+    }
+  },
+}
+
 const dcBlock: Scenario = {
   effect: 'reverb',
   name: 'c5-dc-blocker',
@@ -447,7 +470,8 @@ const paritySets: [string, Parameters<typeof fx.reverb>[0]][] = [
   ['freeze with shelves', { wet: 1, freeze: true, density: 'low', highShelfDb: -6, lowShelfDb: 4, highShelfHz: 3000 }],
   ['chorus extremes', { wet: 0.7, chorusAmountMs: 3, chorusRateHz: 2, density: 'sparse', smooth: 'slow' }],
   ['spin and shape', { wet: 0.6, reflections: 1, reflectionModAmountMs: 25, reflectionModRateHz: 2, 'reflectionShape': 0.2, preDelayMs: 120, smooth: 'none' }],
-  ['cuts, small room, narrow', { wet: 0.8, lowCutHz: 300, highCutHz: 4000, size: 0.2, stereoWidth: 30, diffusion: 0.2, decaySec: 0.4, chorus: false }],
+  ['cuts set but off', { wet: 0.8, lowCutHz: 300, highCutHz: 4000, size: 0.2, stereoWidth: 30, diffusion: 0.2, decaySec: 0.4, chorus: false }],
+  ['cuts, small room, narrow', { wet: 0.8, lowCutHz: 300, highCutHz: 4000, lowCutOn: true, highCutOn: true, size: 0.2, stereoWidth: 30, diffusion: 0.2, decaySec: 0.4, chorus: false }],
 ]
 
 const parity: Scenario = {
@@ -476,7 +500,7 @@ const spec = fx.reverb({ wet: 0.5, reflections: 0.5 })
 export const reverb: Family = {
   scenarios: [
     decayAccuracy, shelfDecay, chorusDecay, decayAcrossRates, density, earlyReflections, earlyReflectionsHighRates, stepClicks, sizeSweep, automationSweep,
-    width, sizeLoudness, migratedLoudness, migratedCuts, predelayClamp, spinPitch, freezeDrift, dcBlock, parity,
+    width, sizeLoudness, migratedLoudness, migratedCuts, inputCutSwitches, predelayClamp, spinPitch, freezeDrift, dcBlock, parity,
     ...robustnessScenarios('reverb', spec, null),
   ],
   notEncoded: [

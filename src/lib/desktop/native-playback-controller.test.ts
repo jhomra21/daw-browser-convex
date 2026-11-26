@@ -14720,7 +14720,7 @@ test("allows native reverb alongside a native VST attachment", async () => {
   const nodeBytes = view.getUint32(12, true) === 4 ? 136 : 132
   const processorOffset = 12 + 24 + 2 * nodeBytes + 48
   expect(view.getUint32(processorOffset + 8, true)).toBe(14)
-  expect(view.getUint32(processorOffset + 16, true)).toBe(116)
+  expect(view.getUint32(processorOffset + 16, true)).toBe(124)
   expect(view.getUint32(processorOffset + 48, true)).toBe(1)
   await controller.dispose()
 })

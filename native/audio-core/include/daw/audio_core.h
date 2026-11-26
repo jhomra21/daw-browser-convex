@@ -914,6 +914,8 @@ typedef struct daw_audio_reverb_state {
   uint32_t high_shelf_on;
   float low_shelf_db;
   float high_shelf_db;
+  uint32_t low_cut_on;
+  uint32_t high_cut_on;
 } daw_audio_reverb_state;
 
 typedef enum daw_audio_spectral_mode {

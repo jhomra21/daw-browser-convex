@@ -56,7 +56,8 @@ const run = async () => {
     return shell !== undefined && box.width > 0 && (box.right > shell.right + 0.5 || box.bottom > shell.bottom + 0.5 || box.left < shell.left - 0.5 || box.top < shell.top - 0.5)
   })
 
-  const clipped = [...host.querySelectorAll<HTMLElement>('*')].filter((element) => element.clientWidth > 0 && element.scrollWidth > element.clientWidth)
+  // A graph handle parked at the end of its range is centred on the graph edge, which clips half of it by design.
+  const clipped = [...host.querySelectorAll<HTMLElement>('*:not(.touch-none)')].filter((element) => element.clientWidth > 0 && element.scrollWidth > element.clientWidth)
 
   scenarios['the-panel-stays-720-px-wide'] = shell?.width === 720
   scenarios['every-control-sits-inside-the-300-px-device'] = shell !== undefined && outside.length === 0
@@ -124,17 +125,25 @@ const run = async () => {
   await settle()
   scenarios['only-the-knob-with-an-envelope-shows-automation'] = dotted().join() === 'Decay'
 
-  // The cuts switch on at a start frequency and then move with their handles.
-  scenarios['the-cut-handles-are-absent-until-the-cut-is-on'] = named('Lo Cut frequency') === undefined
+  // The cuts switch on at a start frequency and then move with their handles. A cut that is off keeps its handle, dimmed.
+  const dimmedHandle = (name: string) => named(name)?.classList.contains('opacity-40')
+  scenarios['the-cut-handles-are-dimmed-until-the-cut-is-on'] = dimmedHandle('Lo Cut frequency') === true && dimmedHandle('Hi Cut frequency') === true
   named('Lo Cut')?.click()
   await settle()
-  scenarios['lo-cut-switches-on-at-830-hz'] = lastChange()?.lowCutHz === 830 && pressed('Lo Cut') === 'true'
+  scenarios['lo-cut-switches-on-at-830-hz'] = lastChange()?.lowCutHz === 830 && lastChange()?.lowCutOn === true && pressed('Lo Cut') === 'true' && dimmedHandle('Lo Cut frequency') === false
   key(named('Lo Cut frequency'), 'ArrowRight')
   scenarios['the-lo-cut-handle-moves-the-frequency'] = lastChange()?.lowCutHz === 872
   scenarios['a-dragged-handle-reports-a-manual-override'] = overrides.at(-1) === 'reverb.lowCutHz'
   named('Hi Cut')?.click()
   await settle()
-  scenarios['hi-cut-switches-on-at-6-khz'] = lastChange()?.highCutHz === 6000 && named('Hi Cut frequency') !== undefined
+  scenarios['hi-cut-switches-on-at-6-khz'] = lastChange()?.highCutHz === 6000 && lastChange()?.highCutOn === true && dimmedHandle('Hi Cut frequency') === false
+  named('Lo Cut')?.click()
+  await settle()
+  scenarios['switching-a-cut-off-keeps-its-frequency-and-dims-its-handle'] = lastChange()?.lowCutOn === false && lastChange()?.lowCutHz === undefined
+    && changes.some((change) => change.lowCutHz === 872) && pressed('Lo Cut') === 'false' && dimmedHandle('Lo Cut frequency') === true && stripTexts('Input Filter')[0] === '872 Hz'
+  named('Lo Cut')?.click()
+  await settle()
+  scenarios['switching-the-cut-back-on-resumes-at-the-kept-frequency'] = lastChange()?.lowCutOn === true && lastChange()?.lowCutHz === undefined && changes.some((change) => change.lowCutHz === 872)
 
   // The graphs draw the kernel's curves: a flat decay curve with flat shelves, and a cut that rolls the input off.
   const flatDecay = curveYs('Diffusion Network')

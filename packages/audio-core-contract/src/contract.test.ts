@@ -302,7 +302,7 @@ test('processor registry preserves stable portable processor ids', () => {
     expect.objectContaining({ name: 'compressor', id: 11, schemaVersion: 2, stateBytes: 76 }),
     expect.objectContaining({ name: 'limiter', id: 12, schemaVersion: 2, stateBytes: 28 }),
     expect.objectContaining({ name: 'delay', id: 13, stateBytes: 32 }),
-    expect.objectContaining({ name: 'reverb', id: 14, schemaVersion: 2, stateBytes: 116 }),
+    expect.objectContaining({ name: 'reverb', id: 14, schemaVersion: 2, stateBytes: 124 }),
     expect.objectContaining({ name: 'spectral', id: 15, stateBytes: 60 }),
     expect.objectContaining({ name: 'autofilter', id: 16, schemaVersion: 1, stateBytes: 92, tombstone: false }),
     expect.objectContaining({ name: 'lofi', id: 17, stateBytes: 36, schemaVersion: 1, tombstone: false }),
@@ -364,13 +364,15 @@ test('delay and reverb codecs preserve portable state without claiming browser c
     'reflectionShape': 0.5, diffuse: 1, size: 0.65, diffusion: 0.75, density: 'high',
     lowCutHz: 20, highCutHz: 20_000, lowShelfHz: 200, highShelfHz: 5_000, stereoWidth: 100,
     smooth: 'fast', freeze: false, flat: false, cut: false, chorus: true, chorusAmountMs: 0.3, chorusRateHz: 0.4,
-    lowShelfOn: true, highShelfOn: true, lowShelfDb: 0, highShelfDb: -6,
+    lowShelfOn: true, highShelfOn: true, lowShelfDb: 0, highShelfDb: -6, lowCutOn: false, highCutOn: true,
   })
 
-  expect(reverb.byteLength).toBe(116)
+  expect(reverb.byteLength).toBe(124)
   expect(new DataView(reverb.buffer).getUint32(48, true)).toBe(3)
   expect(new DataView(reverb.buffer).getUint32(72, true)).toBe(2)
   expect(new DataView(reverb.buffer).getFloat32(112, true)).toBe(-6)
+  expect(new DataView(reverb.buffer).getUint32(116, true)).toBe(0)
+  expect(new DataView(reverb.buffer).getUint32(120, true)).toBe(1)
   expect(new DataView(reverb.buffer).getFloat32(8, true)).toBeCloseTo(2.2)
 })
 

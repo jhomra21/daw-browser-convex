@@ -15,6 +15,8 @@ type DeviceGraphHandle = {
   y: () => number
   onDrag: (point: { x: number, y: number }) => void
   onKeyDown?: (event: KeyboardEvent) => void
+  /** A handle of a section that is off stays where it is, dimmed. */
+  dimmed?: () => boolean
 }
 
 const clampGraphValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
@@ -125,6 +127,7 @@ export function DraggableDeviceGraph(props: {
             class={cn(
               'absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-cyan-300 bg-background',
               props.disabled ? 'cursor-not-allowed opacity-60' : 'cursor-grab active:cursor-grabbing',
+              handle.dimmed?.() && 'opacity-40',
             )}
             style={{
               left: `${(handle.x() / GRAPH_WIDTH) * 100}%`,

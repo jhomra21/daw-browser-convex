@@ -750,7 +750,7 @@ class DawReverbProcessor extends AudioWorkletProcessor {
       size: 0.65, diffusion: 0.75, lowCutHz: 20, highCutHz: 20000, lowShelfHz: 200, highShelfHz: 5000, lowShelfDb: 0, highShelfDb: 0,
       chorusAmountMs: 0.6, chorusRateHz: 0.6, stereoDegrees: 100,
     }
-    this.config = { smooth: 2, spin: true, chorus: true, highShelf: true, lowShelf: true, freeze: false, flat: false, cut: false }
+    this.config = { smooth: 2, spin: true, chorus: true, highShelf: true, lowShelf: true, lowCut: false, highCut: false, freeze: false, flat: false, cut: false }
     this.out = new Float64Array(2)
     this.bypassFrames = Math.floor((sampleRate + 50) / 100)
     this.bypass = 0
@@ -793,6 +793,8 @@ class DawReverbProcessor extends AudioWorkletProcessor {
       chorus: state.chorus !== false,
       highShelf: state.highShelfOn !== false,
       lowShelf: state.lowShelfOn !== false,
+      lowCut: state.lowCutOn === true,
+      highCut: state.highCutOn === true,
       freeze: state.freeze === true,
       flat: state.flat === true,
       cut: state.cut === true,
@@ -830,8 +832,9 @@ class DawReverbProcessor extends AudioWorkletProcessor {
         values.diffuse = at('reverb.diffuse', frame)
         values.size = at('reverb.size', frame)
         values.diffusion = at('reverb.diffusion', frame)
-        values.lowCutHz = at('reverb.lowCutHz', frame)
-        values.highCutHz = at('reverb.highCutHz', frame)
+        // An off cut is the open end of its range, which the kernel does not run; its frequency and automation stay as they are.
+        values.lowCutHz = this.config.lowCut ? at('reverb.lowCutHz', frame) : 20
+        values.highCutHz = this.config.highCut ? at('reverb.highCutHz', frame) : 20000
         values.lowShelfHz = at('reverb.lowShelfHz', frame)
         values.highShelfHz = at('reverb.highShelfHz', frame)
         values.lowShelfDb = at('reverb.lowShelfDb', frame)

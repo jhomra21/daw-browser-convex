@@ -64,7 +64,7 @@ const capitalize = (value: string) => value[0].toUpperCase() + value.slice(1)
 const DENSITY_CHOICES = REVERB_DENSITIES.map((value) => ({ value, label: capitalize(value) }))
 const SMOOTH_CHOICES = REVERB_SMOOTHS.map((value) => ({ value, label: capitalize(value) }))
 
-// The Lo and Hi Cut have no switch of their own: a cut at the end of its range is open. Switching one on starts it here.
+// A cut switched on while its frequency still sits at the open end of its range starts here instead, where it filters something.
 const LOW_CUT_START_HZ = 830
 const HIGH_CUT_START_HZ = 6000
 
@@ -128,20 +128,22 @@ function InputFilterGraph(props: { params: ReverbParams; disabled: boolean; lowA
       stroke="#22d3ee"
       path={() => curvePath(inputDbAt, inputY)}
       handles={[
-        ...(props.lowActive ? [{
+        {
           label: 'Lo Cut frequency',
+          dimmed: () => !props.lowActive,
           x: () => hzToX(props.params.lowCutHz),
           y: () => CUT_CORNER_Y,
           onDrag: (point: { x: number; y: number }) => setLow(xToHz(point.x)),
           onKeyDown: frequencyKeys(() => props.params.lowCutHz, setLow, REVERB_LOW_CUT_HZ_MIN, REVERB_LOW_CUT_HZ_MAX),
-        }] : []),
-        ...(props.highActive ? [{
+        },
+        {
           label: 'Hi Cut frequency',
+          dimmed: () => !props.highActive,
           x: () => hzToX(props.params.highCutHz),
           y: () => CUT_CORNER_Y,
           onDrag: (point: { x: number; y: number }) => setHigh(xToHz(point.x)),
           onKeyDown: frequencyKeys(() => props.params.highCutHz, setHigh, REVERB_HIGH_CUT_HZ_MIN, REVERB_HIGH_CUT_HZ_MAX),
-        }] : []),
+        },
       ]}
     />
   )
@@ -185,9 +187,22 @@ function DecayGraph(props: { params: ReverbParams; disabled: boolean; onChange: 
 
 export default function Reverb(props: ReverbProps) {
   const off = () => !props.params.enabled
-  const lowCutActive = () => props.params.lowCutHz > REVERB_LOW_CUT_HZ_MIN
-  const highCutActive = () => props.params.highCutHz < REVERB_HIGH_CUT_HZ_MAX
   const change = (updates: Partial<ReverbParams>) => props.onChange(updates)
+
+  // Switching a cut on from the end of its range moves it to a start frequency that filters; switching it off writes only the flag.
+  const toggleLowCut = () => {
+    if (props.params.lowCutOn) return change({ lowCutOn: false })
+
+    if (props.params.lowCutHz === REVERB_LOW_CUT_HZ_MIN) return change({ lowCutOn: true, lowCutHz: LOW_CUT_START_HZ })
+    change({ lowCutOn: true })
+  }
+
+  const toggleHighCut = () => {
+    if (props.params.highCutOn) return change({ highCutOn: false })
+
+    if (props.params.highCutHz === REVERB_HIGH_CUT_HZ_MAX) return change({ highCutOn: true, highCutHz: HIGH_CUT_START_HZ })
+    change({ highCutOn: true })
+  }
 
   // A handle drag moves automatable params without going through a knob, so it reports the override itself.
   const changeFromGraph = (updates: Partial<ReverbParams>) => {
@@ -209,10 +224,10 @@ export default function Reverb(props: ReverbProps) {
           <div class="grid min-h-0 grid-cols-[9.5rem_7rem_15.5rem_4.75rem] gap-2">
             <DeviceSection title="Input Filter">
               <div class="grid grid-cols-2 gap-1 pb-1">
-                <DeviceToggleButton label="Lo Cut" active={lowCutActive()} disabled={off()} onClick={() => change({ lowCutHz: lowCutActive() ? REVERB_LOW_CUT_HZ_MIN : LOW_CUT_START_HZ })} />
-                <DeviceToggleButton label="Hi Cut" active={highCutActive()} disabled={off()} onClick={() => change({ highCutHz: highCutActive() ? REVERB_HIGH_CUT_HZ_MAX : HIGH_CUT_START_HZ })} />
+                <DeviceToggleButton label="Lo Cut" active={props.params.lowCutOn} disabled={off()} onClick={toggleLowCut} />
+                <DeviceToggleButton label="Hi Cut" active={props.params.highCutOn} disabled={off()} onClick={toggleHighCut} />
               </div>
-              <InputFilterGraph params={props.params} disabled={off()} lowActive={lowCutActive()} highActive={highCutActive()} onChange={changeFromGraph} />
+              <InputFilterGraph params={props.params} disabled={off()} lowActive={props.params.lowCutOn} highActive={props.params.highCutOn} onChange={changeFromGraph} />
               <div class="grid grid-cols-2 gap-1 pt-1">
                 <DeviceValueStrip value={formatDeviceFrequency(props.params.lowCutHz, 2)} />
                 <DeviceValueStrip value={formatDeviceFrequency(props.params.highCutHz, 2)} />

@@ -365,8 +365,8 @@
           "type": "object", "additionalProperties": false,
           "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
           "properties": {
-            "id": { "const": 14 }, "schemaVersion": { "const": 2 }, "stateBytes": { "const": 116 }, "tombstone": { "const": false },
-            "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "wet", "decaySec", "preDelayMs", "reflections", "reflectionSpin", "reflectionModAmountMs", "reflectionModRateHz", "reflectionShape", "diffuse", "size", "diffusion", "density", "lowCutHz", "highCutHz", "lowShelfHz", "highShelfHz", "stereoWidth", "smooth", "freeze", "flat", "cut", "chorus", "chorusAmountMs", "chorusRateHz", "lowShelfOn", "highShelfOn", "lowShelfDb", "highShelfDb"], "properties": {
+            "id": { "const": 14 }, "schemaVersion": { "const": 2 }, "stateBytes": { "const": 124 }, "tombstone": { "const": false },
+            "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "wet", "decaySec", "preDelayMs", "reflections", "reflectionSpin", "reflectionModAmountMs", "reflectionModRateHz", "reflectionShape", "diffuse", "size", "diffusion", "density", "lowCutHz", "highCutHz", "lowShelfHz", "highShelfHz", "stereoWidth", "smooth", "freeze", "flat", "cut", "chorus", "chorusAmountMs", "chorusRateHz", "lowShelfOn", "highShelfOn", "lowShelfDb", "highShelfDb", "lowCutOn", "highCutOn"], "properties": {
               "enabled": { "type": "boolean" }, "wet": { "type": "number", "default": 0.25, "minimum": 0, "maximum": 1, "portableParameter": true },
               "decaySec": { "type": "number", "default": 2.2, "minimum": 0.05, "maximum": 12, "portableParameter": true},
               "preDelayMs": { "type": "number", "default": 20, "minimum": 0, "maximum": 250, "portableParameter": true },
@@ -389,7 +389,8 @@
               "chorusRateHz": { "type": "number", "default": 0.6, "minimum": 0.01, "maximum": 5, "portableParameter": true },
               "lowShelfOn": { "type": "boolean" }, "highShelfOn": { "type": "boolean" },
               "lowShelfDb": { "type": "number", "default": 0, "minimum": -24, "maximum": 12, "portableParameter": true },
-              "highShelfDb": { "type": "number", "default": 0, "minimum": -24, "maximum": 12, "portableParameter": true }
+              "highShelfDb": { "type": "number", "default": 0, "minimum": -24, "maximum": 12, "portableParameter": true },
+              "lowCutOn": { "type": "boolean" }, "highCutOn": { "type": "boolean" }
             }}
           }
         },

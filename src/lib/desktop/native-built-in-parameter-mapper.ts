@@ -325,6 +325,8 @@ const mapReverb = (payload: EffectChange<'reverb' | 'master-reverb'>) => {
       { from: from.flat, to: to.flat },
       { from: from.cut, to: to.cut },
       { from: from.chorus, to: to.chorus },
+      { from: from.lowCutOn, to: to.lowCutOn },
+      { from: from.highCutOn, to: to.highCutOn },
       { from: from.lowShelfOn, to: to.lowShelfOn },
       { from: from.highShelfOn, to: to.highShelfOn },
     ],

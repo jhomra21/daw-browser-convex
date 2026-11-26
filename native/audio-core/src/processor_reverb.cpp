@@ -8,6 +8,10 @@ daw::audio_core::ReverbValues read_reverb_values(const Core &core, const GraphRe
   const auto value = [&](uint32_t target, float fallback) {
     return processor_parameter_value(core, processor, target, frame, fallback);
   };
+  // An off input cut is the open end of its range, which the kernel does not run; its frequency and automation stay as they are.
+  const auto cut_hz = [&](uint32_t on, uint32_t target, float fallback, float open) {
+    return on != 0 ? value(target, fallback) : open;
+  };
   return {
     .wet = value(DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_WET, state.wet),
     .decay_sec = value(DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DECAY_SEC, state.decay_sec),
@@ -19,8 +23,8 @@ daw::audio_core::ReverbValues read_reverb_values(const Core &core, const GraphRe
     .diffuse = value(DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSE, state.diffuse),
     .size = value(DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_SIZE, state.size),
     .diffusion = value(DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION, state.diffusion),
-    .low_cut_hz = value(DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_LOW_CUT_HZ, state.low_cut_hz),
-    .high_cut_hz = value(DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_HIGH_CUT_HZ, state.high_cut_hz),
+    .low_cut_hz = cut_hz(state.low_cut_on, DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_LOW_CUT_HZ, state.low_cut_hz, DAW_AUDIO_CORE_REVERB_LOW_CUT_HZ_MIN),
+    .high_cut_hz = cut_hz(state.high_cut_on, DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_HIGH_CUT_HZ, state.high_cut_hz, DAW_AUDIO_CORE_REVERB_HIGH_CUT_HZ_MAX),
     .low_shelf_hz = value(DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_LOW_SHELF_HZ, state.low_shelf_hz),
     .high_shelf_hz = value(DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_HIGH_SHELF_HZ, state.high_shelf_hz),
     .low_shelf_db = value(DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_LOW_SHELF_DB, state.low_shelf_db),

@@ -6,7 +6,7 @@ import { fitReverbCutShelves } from './reverb-cut-migration'
 // "diffusion" cuts took the stricter of each pair), a Width of 0 to 2 and no Chorus, Smooth, Freeze or shelves. Everything
 // below keeps those sounds where the new design can reproduce them:
 // - the old cuts (and the "diffusion" cuts, the stricter of each pair) filtered inside the loop, so they become the pair of Diffusion
-//   Network shelves nearest the decay curve they made (reverb-cut-migration.ts); the new input Lo and Hi cuts start open;
+//   Network shelves nearest the decay curve they made (reverb-cut-migration.ts); the new input Lo and Hi cuts start off;
 // - the 8-line network stays (Density Sparse); the old Density and Diffusion levels (the old output gain was diffuse * density * (0.5 + 0.5 * diffusion)) fold into Diffuse, scaled by the
 //   loudness the two engines differ by (see newOverOldDb), so the tail is as loud;
 // - Width becomes the Stereo angle with the same left/right correlation, and Width above 1 (which went anti-phase) stops at 120°.
@@ -58,6 +58,8 @@ export const migrateReverbParamsV1 = (params: JsonValue): JsonValue => {
     diffuse: clamp(oldGain * 10 ** ((-newOverOldDb(decaySec, size) - (spinned ? OLD_SPIN_TAIL_LOSS_DB : 0)) / 20) * Math.sqrt(oldWidthEnergy(clamp(finite(old.stereoWidth, 1), 0, 2))), 0, 1),
     lowCutHz: 20,
     highCutHz: 20000,
+    lowCutOn: false,
+    highCutOn: false,
     lowShelfHz: shelves && shelves.low.db < 0 ? shelves.low.hz : defaults.lowShelfHz,
     highShelfHz: shelves && shelves.high.db < 0 ? shelves.high.hz : defaults.highShelfHz,
     lowShelfOn: shelves !== null && shelves.low.db < 0,

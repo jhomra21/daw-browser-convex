@@ -203,7 +203,7 @@ export const fx = {
       reflectionModRateHz: 0.3, reflectionShape: 0.5, diffuse: 0.7, size: 0.65, diffusion: 0.75, density: 'high', lowCutHz: 20,
       highCutHz: 20000, lowShelfHz: 200, highShelfHz: 5000, stereoWidth: 100, smooth: 'fast', freeze: false, flat: false,
       cut: false, chorus: true, chorusAmountMs: 0.6, chorusRateHz: 0.6, lowShelfOn: true, highShelfOn: true, lowShelfDb: 0,
-      highShelfDb: 0, ...state,
+      highShelfDb: 0, lowCutOn: false, highCutOn: false, ...state,
     },
   }),
   spectral: (state: Partial<SpectralProcessorState> = {}): EffectSpec => ({

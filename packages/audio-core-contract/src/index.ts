@@ -234,6 +234,8 @@ export type ReverbProcessorState = {
   highShelfOn: boolean
   lowShelfDb: number
   highShelfDb: number
+  lowCutOn: boolean
+  highCutOn: boolean
 }
 
 export type SpectralProcessorState = {
@@ -1053,7 +1055,7 @@ export const encodeDelayProcessorState = (state: DelayProcessorState): Uint8Arra
 }
 
 export const encodeReverbProcessorState = (state: ReverbProcessorState): Uint8Array => {
-  const output = new Uint8Array(116)
+  const output = new Uint8Array(124)
   const view = new DataView(output.buffer)
   view.setUint32(0, state.enabled ? 1 : 0, true)
   view.setFloat32(4, state.wet, true)
@@ -1084,6 +1086,8 @@ export const encodeReverbProcessorState = (state: ReverbProcessorState): Uint8Ar
   view.setUint32(104, state.highShelfOn ? 1 : 0, true)
   view.setFloat32(108, state.lowShelfDb, true)
   view.setFloat32(112, state.highShelfDb, true)
+  view.setUint32(116, state.lowCutOn ? 1 : 0, true)
+  view.setUint32(120, state.highCutOn ? 1 : 0, true)
 
   return output
 }

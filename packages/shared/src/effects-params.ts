@@ -211,9 +211,11 @@ export type ReverbParams = {
   size: number
   diffusion: number
   density: ReverbDensity
-  /** Input Lo and Hi cut, ahead of the pre-delay, early reflections and diffuser. 20 Hz and 20 kHz are off. */
+  /** Input Lo and Hi cut, ahead of the pre-delay, early reflections and diffuser. A cut that is off keeps its frequency and passes the input. */
   lowCutHz: number
   highCutHz: number
+  lowCutOn: boolean
+  highCutOn: boolean
   /** The Diffusion Network shelves move the decay time at the band edges; the Decay knob is the mid-band RT60. */
   lowShelfHz: number
   highShelfHz: number
@@ -282,6 +284,8 @@ export function createDefaultReverbParams(): ReverbParams {
     density: 'high',
     lowCutHz: 20,
     highCutHz: 20000,
+    lowCutOn: false,
+    highCutOn: false,
     lowShelfHz: 200,
     highShelfHz: 5000,
     lowShelfOn: true,
@@ -326,6 +330,8 @@ export function normalizeReverbParams(input: ReverbParamsInput): ReverbParams {
     density: REVERB_DENSITIES.find((density) => density === input.density) ?? defaults.density,
     lowCutHz: readReverbNumber(input.lowCutHz, defaults.lowCutHz, REVERB_LOW_CUT_HZ_MIN, REVERB_LOW_CUT_HZ_MAX),
     highCutHz: readReverbNumber(input.highCutHz, defaults.highCutHz, REVERB_HIGH_CUT_HZ_MIN, REVERB_HIGH_CUT_HZ_MAX),
+    lowCutOn: readReverbBoolean(input.lowCutOn, defaults.lowCutOn),
+    highCutOn: readReverbBoolean(input.highCutOn, defaults.highCutOn),
     lowShelfHz: readReverbNumber(input.lowShelfHz, defaults.lowShelfHz, REVERB_LOW_SHELF_HZ_MIN, REVERB_LOW_SHELF_HZ_MAX),
     highShelfHz: readReverbNumber(input.highShelfHz, defaults.highShelfHz, REVERB_HIGH_SHELF_HZ_MIN, REVERB_HIGH_SHELF_HZ_MAX),
     lowShelfOn: readReverbBoolean(input.lowShelfOn, defaults.lowShelfOn),
@@ -355,7 +361,7 @@ export function serializeReverbParams(params: ReverbParams): string {
 
   return [
     flag(n.enabled), n.wet, n.decaySec, n.preDelayMs, n.reflections, flag(n.reflectionSpin), n.reflectionModAmountMs, n.reflectionModRateHz,
-    n['reflectionShape'], n.diffuse, n.size, n.diffusion, n.density, n.lowCutHz, n.highCutHz, n.lowShelfHz, n.highShelfHz,
+    n['reflectionShape'], n.diffuse, n.size, n.diffusion, n.density, n.lowCutHz, n.highCutHz, flag(n.lowCutOn), flag(n.highCutOn), n.lowShelfHz, n.highShelfHz,
     flag(n.lowShelfOn), flag(n.highShelfOn), n.lowShelfDb, n.highShelfDb, n.stereoWidth, n.smooth, flag(n.freeze), flag(n.flat),
     flag(n.cut), flag(n.chorus), n.chorusAmountMs, n.chorusRateHz,
   ].join('|')

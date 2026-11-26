@@ -470,6 +470,8 @@ const readReverbParams = (value: JsonValue): SharedReverbParams | null => {
     density: REVERB_DENSITIES.find((density) => density === value.density),
     lowCutHz: readOptionalNumber(value.lowCutHz),
     highCutHz: readOptionalNumber(value.highCutHz),
+    lowCutOn: readOptionalBoolean(value.lowCutOn),
+    highCutOn: readOptionalBoolean(value.highCutOn),
     lowShelfHz: readOptionalNumber(value.lowShelfHz),
     highShelfHz: readOptionalNumber(value.highShelfHz),
     lowShelfOn: readOptionalBoolean(value.lowShelfOn),

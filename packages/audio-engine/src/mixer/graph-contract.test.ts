@@ -514,7 +514,7 @@ describe('mixer routing plan', () => {
         { id: 'delay.lowCutHz', target: 8 },
         { id: 'delay.highCutHz', target: 9 },
       ]],
-      ['reverb', 14, 116, 0, [
+      ['reverb', 14, 124, 0, [
         { id: 'reverb.wet', target: 10 },
         { id: 'reverb.preDelayMs', target: 11 },
         { id: 'reverb.lowCutHz', target: 12 },

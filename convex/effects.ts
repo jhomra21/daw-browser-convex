@@ -48,6 +48,8 @@ const reverbParamsValidator = v.object({
   density: v.optional(v.union(v.number(), v.literal("sparse"), v.literal("low"), v.literal("mid"), v.literal("high"))),
   lowCutHz: v.optional(v.number()),
   highCutHz: v.optional(v.number()),
+  lowCutOn: v.optional(v.boolean()),
+  highCutOn: v.optional(v.boolean()),
   diffusionLowCutHz: v.optional(v.number()),
   diffusionHighCutHz: v.optional(v.number()),
   lowShelfHz: v.optional(v.number()),

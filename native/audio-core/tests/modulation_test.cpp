@@ -1,5 +1,6 @@
-// Measurements for the Chorus/Flanger, Ensemble and Phaser kernels. Every case prints the number it checks.
-// Run with a group name (loop, level, feedback, latency, safety) or with none for all.
+// Measurements for the Chorus/Flanger, Ensemble, Phaser, Tremolo and Auto Pan kernels. Every case prints the number it checks.
+// Run with a group name (loop, level, feedback, latency, safety, stereo, average, pan, sync, click) or with none for all.
+#include "../src/amplitude_modulation_kernel.h"
 #include "../src/chorus_kernel.h"
 #include "../src/ensemble_kernel.h"
 #include "../src/phaser_kernel.h"
@@ -164,11 +165,217 @@ void safety() {
   expectTrue("output_stays_finite_with_infinite_input", finite);
 }
 
+// Gain envelopes of a Tremolo or Auto Pan: the kernel fed a constant 1 on both channels.
+struct Envelope {
+  std::vector<float> left, right;
+};
+
+Envelope envelope(const AmplitudeValues &values, const AmplitudeConfig &config, int frames, double rate = 48000.0,
+  const dsp::LfoTransport &transport = {}) {
+  AmplitudeModulationKernel kernel;
+  kernel.prepare(rate);
+  Envelope out;
+  for (int i = 0; i < frames; ++i) {
+    dsp::LfoTransport at = transport;
+    at.frame += i;
+    float left, right;
+    kernel.process(values, config, at, 0.0F, 1.0F, 1.0F, left, right);
+    out.left.push_back(left);
+    out.right.push_back(right);
+  }
+  return out;
+}
+
+double correlation(const std::vector<float> &a, const std::vector<float> &b) {
+  double meanA = 0.0, meanB = 0.0;
+  for (size_t i = 0; i < a.size(); ++i) { meanA += a[i]; meanB += b[i]; }
+  meanA /= a.size();
+  meanB /= b.size();
+  double ab = 0.0, aa = 0.0, bb = 0.0;
+  for (size_t i = 0; i < a.size(); ++i) {
+    ab += (a[i] - meanA) * (b[i] - meanB);
+    aa += (a[i] - meanA) * (a[i] - meanA);
+    bb += (b[i] - meanB) * (b[i] - meanB);
+  }
+  return ab / std::sqrt(aa * bb);
+}
+
+double mean(const std::vector<float> &x) {
+  double sum = 0.0;
+  for (const float v : x) sum += v;
+  return sum / x.size();
+}
+
+// Stereo Phase moves the right LFO only: half a cycle puts the two gain envelopes in antiphase, none leaves them equal,
+// and Phase moves both channels together.
+void stereo() {
+  currentName = "stereo";
+  AmplitudeValues values;
+  values.rate_hz = 4.0F;
+  values.depth = 1.0F;
+  AmplitudeConfig config;
+  const int frames = 48000;
+  values.stereo_phase = 0.5F;
+  Envelope half = envelope(values, config, frames);
+  expectAtMost("antiphase_correlation", correlation(half.left, half.right), -0.99);
+  values.stereo_phase = 0.0F;
+  Envelope none = envelope(values, config, frames);
+  double worst = 0.0;
+  for (int i = 0; i < frames; ++i) worst = std::max<double>(worst, std::fabs(none.left[i] - none.right[i]));
+  expectAtMost("zero_stereo_phase_max_difference", worst, 1.0e-6);
+  values.phase = 0.3F;
+  Envelope shifted = envelope(values, config, frames);
+  worst = 0.0;
+  for (int i = 0; i < frames; ++i) worst = std::max<double>(worst, std::fabs(shifted.left[i] - shifted.right[i]));
+  expectAtMost("phase_moves_both_channels_max_difference", worst, 1.0e-6);
+  expectTrue("phase_moves_the_start", std::fabs(shifted.left[0] - none.left[0]) > 0.1);
+}
+
+// Tremolo keeps its average gain at 1 whatever Depth and Shape are, for every waveform with a known distribution.
+void average() {
+  currentName = "average";
+  AmplitudeValues values;
+  values.rate_hz = 4.0F;
+  for (const uint32_t waveform : {0U, 1U, 2U, 3U}) {
+    double worst = 0.0;
+    for (const float depth : {0.0F, 0.25F, 0.5F, 1.0F}) {
+      for (const float shape : {0.2F, 0.5F, 0.8F}) {
+        values.depth = depth;
+        values.shape = shape;
+        AmplitudeConfig config;
+        config.waveform = waveform;
+        const Envelope e = envelope(values, config, 48000);
+        worst = std::max(worst, std::fabs(mean(e.left) - 1.0));
+      }
+    }
+    static char label[48];
+    std::snprintf(label, sizeof label, "waveform_%u_mean_gain_error", waveform);
+    expectAtMost(label, worst, 0.004);
+  }
+  values.depth = 0.0F;
+  const Envelope off = envelope(values, AmplitudeConfig{}, 4800);
+  double worst = 0.0;
+  for (const float g : off.left) worst = std::max<double>(worst, std::fabs(g - 1.0F));
+  expectAtMost("depth_zero_is_unity", worst, 1.0e-6);
+  values.depth = 1.0F;
+  values.shape = 0.5F;
+  AmplitudeConfig triangle;
+  triangle.waveform = 1;
+  const Envelope tri = envelope(values, triangle, 12000);
+  float low = 10.0F, high = 0.0F;
+  for (const float g : tri.left) { low = std::min(low, g); high = std::max(high, g); }
+  expectAtMost("depth_one_reaches_silence", low, 0.01);
+  expectNear("depth_one_peak_gain", high, 2.0, 0.01);
+}
+
+// Auto Pan is equal power: left and right gains keep a constant power sum, -3 dB in the centre and 0 / -inf at the sides.
+void pan() {
+  currentName = "pan";
+  AmplitudeConfig config;
+  config.kind = AmplitudeKind::AutoPan;
+  AmplitudeValues values;
+  values.depth = 0.0F;
+  Envelope centre = envelope(values, config, 100);
+  expectNear("centre_gain_db_left", toDb(centre.left.back()), -3.0103, 0.02);
+  expectNear("centre_gain_db_right", toDb(centre.right.back()), -3.0103, 0.02);
+  values.depth = 1.0F;
+  values.rate_hz = 1.0F;
+  config.waveform = 1;
+  Envelope sweep = envelope(values, config, 48000);
+  double worst = 0.0, lowest = 10.0, highest = 0.0, hardest = 10.0;
+  for (size_t i = 0; i < sweep.left.size(); ++i) {
+    const double power = sweep.left[i] * sweep.left[i] + sweep.right[i] * sweep.right[i];
+    worst = std::max(worst, std::fabs(toDb(std::sqrt(power))));
+    lowest = std::min<double>(lowest, sweep.left[i]);
+    highest = std::max<double>(highest, sweep.left[i]);
+    hardest = std::min<double>(hardest, sweep.right[i]);
+  }
+  expectAtMost("power_sum_deviation_db", worst, 0.02);
+  expectNear("hard_right_left_gain", lowest, 0.0, 1.0e-3);
+  expectNear("hard_left_left_gain", highest, 1.0, 1.0e-3);
+  expectNear("hard_left_right_gain", hardest, 0.0, 1.0e-3);
+  // Half a cycle of Stereo Phase mirrors the right LFO, which makes both channels' pan angles mirror images: equal gains.
+  values.stereo_phase = 0.5F;
+  const Envelope mirrored = envelope(values, config, 48000);
+  worst = 0.0;
+  for (size_t i = 0; i < mirrored.left.size(); ++i) worst = std::max<double>(worst, std::fabs(mirrored.left[i] - mirrored.right[i]));
+  expectAtMost("half_cycle_stereo_phase_gives_equal_gains", worst, 1.0e-3);
+}
+
+// A synced LFO's phase is a function of the song position: a fresh kernel started at a frame and one that has been running
+// agree there, and the same beat of the next bar gives the same gain.
+void sync() {
+  currentName = "sync";
+  AmplitudeValues values;
+  values.depth = 1.0F;
+  AmplitudeConfig config;
+  config.waveform = 1;
+  config.sync = true;
+  config.division = 5;  // a quarter note
+  dsp::LfoTransport transport;
+  transport.tempo_bpm = 120.0;
+  transport.running = true;
+  transport.frame = 7000;
+  const Envelope fresh = envelope(values, config, 200, 48000.0, transport);
+  dsp::LfoTransport earlier = transport;
+  earlier.frame = 0;
+  const Envelope running = envelope(values, config, 7200, 48000.0, earlier);
+  double worst = 0.0;
+  for (int i = 0; i < 200; ++i) worst = std::max<double>(worst, std::fabs(fresh.left[i] - running.left[7000 + i]));
+  expectAtMost("same_frame_same_gain", worst, 1.0e-5);
+  dsp::LfoTransport next = transport;
+  next.frame += 24000;  // one beat at 120 bpm
+  const Envelope later = envelope(values, config, 200, 48000.0, next);
+  worst = 0.0;
+  for (int i = 0; i < 200; ++i) worst = std::max<double>(worst, std::fabs(fresh.left[i] - later.left[i]));
+  expectAtMost("next_beat_same_gain", worst, 1.0e-5);
+}
+
+// Steps and parameter changes do not click: a Square LFO is slewed and a Depth step is smoothed.
+void click() {
+  currentName = "click";
+  AmplitudeValues values;
+  values.depth = 1.0F;
+  values.rate_hz = 2.0F;
+  AmplitudeConfig square;
+  square.waveform = 4;
+  const Envelope stepped = envelope(values, square, 48000);
+  double largest = 0.0;
+  for (size_t i = 1; i < stepped.left.size(); ++i) largest = std::max<double>(largest, std::fabs(stepped.left[i] - stepped.left[i - 1]));
+  expectAtMost("square_max_step_per_frame", largest, 0.03);
+
+  AmplitudeModulationKernel kernel;
+  kernel.prepare(48000.0);
+  AmplitudeConfig sine;
+  values.depth = 0.0F;
+  values.rate_hz = 4.0F;
+  float previous = 1.0F;
+  largest = 0.0;
+  for (int i = 0; i < 4800; ++i) {
+    if (i == 2400) values.depth = 1.0F;
+    float left, right;
+    kernel.process(values, sine, {}, 0.0F, 1.0F, 1.0F, left, right);
+    if (i > 0) largest = std::max<double>(largest, std::fabs(left - previous));
+    previous = left;
+  }
+  expectAtMost("depth_step_max_step_per_frame", largest, 0.02);
+
+  AmplitudeConfig pan;
+  pan.kind = AmplitudeKind::AutoPan;
+  float a, b;
+  bool finite = true;
+  for (int i = 0; i < 4800; ++i) {
+    kernel.process(values, pan, {}, 0.0F, i == 100 ? INFINITY : 0.5F, 0.5F, a, b);
+    finite = finite && std::isfinite(a) && std::isfinite(b);
+  }
+  expectTrue("infinite_input_stays_finite", finite);
+}
 }  // namespace
 
 int main(int argc, char **argv) {
   struct Group { const char *name; void (*run)(); };
-  const Group groups[] = {{"loop", loop}, {"level", level}, {"feedback", feedback}, {"latency", latency}, {"safety", safety}};
+  const Group groups[] = {{"loop", loop}, {"level", level}, {"feedback", feedback}, {"latency", latency}, {"safety", safety},
+    {"stereo", stereo}, {"average", average}, {"pan", pan}, {"sync", sync}, {"click", click}};
   for (const Group &group : groups) {
     if (argc > 1 && std::strcmp(argv[1], group.name) != 0) continue;
     group.run();

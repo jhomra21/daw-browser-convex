@@ -113,7 +113,7 @@ if(BUILD_TESTING)
   else()
     target_compile_options(daw-modulation-test PRIVATE -Wall -Wextra -Werror -fno-exceptions -fno-rtti)
   endif()
-  foreach(group IN ITEMS loop level feedback latency safety)
+  foreach(group IN ITEMS loop level feedback latency safety stereo average pan sync click)
     add_test(NAME daw-modulation-${group} COMMAND daw-modulation-test ${group})
   endforeach()
   # Limiter kernel (src/limiter_kernel.h). One ctest per measurement group; the executable prints each value.

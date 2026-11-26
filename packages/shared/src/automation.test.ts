@@ -241,7 +241,7 @@ describe('automation helpers', () => {
   })
 
   test('maps log automation values to ratios and back', () => {
-    const descriptor = getAutomationParameterDescriptor('delay.lowCutHz')
+    const descriptor = getAutomationParameterDescriptor('delay.filterHz')
     expect(descriptor).toBeDefined()
 
     if (!descriptor) return
@@ -350,8 +350,11 @@ describe('automation helpers', () => {
       'delay.timeMs',
       'delay.feedback',
       'delay.dryWet',
-      'delay.lowCutHz',
-      'delay.highCutHz',
+      'delay.timeRightMs',
+      'delay.offsetLeftPercent',
+      'delay.offsetRightPercent',
+      'delay.filterHz',
+      'delay.filterWidth',
       'reverb.wet',
       'reverb.preDelayMs',
       'reverb.stereoWidth',

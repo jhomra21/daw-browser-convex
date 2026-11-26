@@ -22,7 +22,7 @@ import {
   encodeTremoloProcessorState,
   encodeUtilityProcessorState,
 } from '@daw-browser/audio-core-contract'
-import { resolvePortableDelayMs, compilePortableSynthState } from '@daw-browser/audio-engine/mixer/graph-contract'
+import { compilePortableSynthState } from '@daw-browser/audio-engine/mixer/graph-contract'
 import { SYNTH_LIVE_FIELDS, type EffectChange, type NativeBuiltInParameterPayload } from '~/lib/processor-edit-semantics'
 
 type NativeBuiltInParameterValue = {
@@ -265,27 +265,36 @@ const mapLoFi = (payload: EffectChange<'lofi' | 'master-lofi'>) => {
   )
 }
 
-// Without a tempo only the field ids can be asked of the mapping: a tempo-synced time has no value to give.
-const mapDelay = (
-  payload: EffectChange<'delay' | 'master-delay'>,
-  bpm: number | undefined,
-) => {
+// A synced time is not a live parameter: the core resolves its division against the transport tempo, so a division or feel
+// change rewrites the state like the other discrete fields do.
+const mapDelay = (payload: EffectChange<'delay' | 'master-delay'>) => {
   const from = normalizeDelayParams(payload.from)
   const to = normalizeDelayParams(payload.to)
-  const timeMs = (params: typeof from) => bpm === undefined ? Number.NaN : resolvePortableDelayMs(params, bpm)
 
   return mapFields(
     [
-      { parameterId: 'delay.timeMs', from: timeMs(from), to: timeMs(to) },
+      { parameterId: 'delay.timeMs', from: from.timeLeftMs, to: to.timeLeftMs },
+      { parameterId: 'delay.timeRightMs', from: from.timeRightMs, to: to.timeRightMs },
+      { parameterId: 'delay.offsetLeftPercent', from: from.offsetLeftPercent, to: to.offsetLeftPercent },
+      { parameterId: 'delay.offsetRightPercent', from: from.offsetRightPercent, to: to.offsetRightPercent },
       { parameterId: 'delay.feedback', from: from.feedback, to: to.feedback },
       { parameterId: 'delay.dryWet', from: from.dryWet, to: to.dryWet },
-      { parameterId: 'delay.lowCutHz', from: from.lowCutHz, to: to.lowCutHz },
-      { parameterId: 'delay.highCutHz', from: from.highCutHz, to: to.highCutHz },
+      { parameterId: 'delay.filterHz', from: from.filterHz, to: to.filterHz },
+      { parameterId: 'delay.filterWidth', from: from.filterWidth, to: to.filterWidth },
     ],
     [
       { from: from.enabled, to: to.enabled },
+      { from: from.link, to: to.link },
       { from: from.pingPong, to: to.pingPong },
+      { from: from.freeze, to: to.freeze },
       { from: from.filterEnabled, to: to.filterEnabled },
+      { from: from.smoothing, to: to.smoothing },
+      { from: from.syncLeft, to: to.syncLeft },
+      { from: from.syncRight, to: to.syncRight },
+      { from: from.divisionLeft, to: to.divisionLeft },
+      { from: from.divisionRight, to: to.divisionRight },
+      { from: from.feelLeft, to: to.feelLeft },
+      { from: from.feelRight, to: to.feelRight },
     ],
   )
 }
@@ -572,7 +581,7 @@ const mapSpectral = (payload: EffectChange<'spectral' | 'master-spectral'>) => {
 
 const mapParameterFields = (
   payload: EffectChange,
-  bpm: number | undefined,
+  _bpm: number | undefined,
 ): readonly ParameterField[] | undefined => {
   let values: readonly ParameterField[] | undefined
 
@@ -594,7 +603,7 @@ const mapParameterFields = (
       break
     case 'delay':
     case 'master-delay':
-      values = mapDelay(payload, bpm)
+      values = mapDelay(payload)
       break
     case 'reverb':
     case 'master-reverb':
@@ -737,7 +746,7 @@ export const captureNativeBuiltInStateCommit = (
 
 export const encodeNativeBuiltInStateCommit = (
   payload: EffectParamsCommitPayload,
-  bpm: number,
+  _bpm: number,
 ): NativeBuiltInStateCommit | undefined => {
   const instanceId = instanceIdOf(payload)
 
@@ -779,20 +788,7 @@ export const encodeNativeBuiltInStateCommit = (
       break
     case 'delay':
     case 'master-delay':
-      {
-        const normalized = normalizeDelayParams(payload.to)
-        state = encodeDelayProcessorState({
-          enabled: normalized.enabled,
-          delayMs: resolvePortableDelayMs(normalized, bpm),
-          feedback: normalized.feedback,
-          dryWet: normalized.dryWet,
-          pingPong: normalized.pingPong,
-          filterEnabled: normalized.filterEnabled,
-          lowCutHz: normalized.lowCutHz,
-          highCutHz: normalized.highCutHz,
-        })
-      }
-
+      state = encodeDelayProcessorState(normalizeDelayParams(payload.to))
       break
     case 'reverb':
     case 'master-reverb':

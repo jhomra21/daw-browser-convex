@@ -454,83 +454,130 @@ export function serializeSaturatorParams(params: SaturatorParams): string {
   return `${normalized.enabled ? 1 : 0}|${normalized.driveDb}|${normalized.curve}|${normalized.color ? 1 : 0}|${normalized.colorFrequencyHz}|${normalized.colorAmount}|${normalized.outputDb}|${normalized.dryWet}`
 }
 
-export type DelayMode = 'sync' | 'time'
+export type DelaySmoothing = 'repitch' | 'fade' | 'jump'
 
-export type DelaySyncDivision = '1/16' | '1/8' | '1/4' | '1/2' | '1/1'
+export type DelaySyncDivision = '1/32' | '1/16' | '1/8' | '1/4' | '1/2' | '1/1'
 
+export type DelayFeel = 'straight' | 'dotted' | 'triplet'
+
+// The shape is the portable processor's state: each channel has its own time (free, or a division with a feel and an offset);
+// with Link on the right channel follows the left one.
 export type DelayParams = {
   enabled: boolean
-  mode: DelayMode
-  timeMs: number
-  syncDivision: DelaySyncDivision
+  link: boolean
+  pingPong: boolean
+  freeze: boolean
+  filterEnabled: boolean
+  smoothing: DelaySmoothing
+  syncLeft: boolean
+  syncRight: boolean
+  divisionLeft: DelaySyncDivision
+  divisionRight: DelaySyncDivision
+  feelLeft: DelayFeel
+  feelRight: DelayFeel
+  timeLeftMs: number
+  timeRightMs: number
+  offsetLeftPercent: number
+  offsetRightPercent: number
   feedback: number
   dryWet: number
-  pingPong: boolean
-  filterEnabled: boolean
-  lowCutHz: number
-  highCutHz: number
+  filterHz: number
+  filterWidth: number
 }
 
 export type DelayParamsLite = DelayParams
 
-export type DelayParamsInput = Partial<Omit<DelayParams, 'mode' | 'syncDivision'>> & { mode?: JsonValue; syncDivision?: JsonValue }
+export type DelayParamsInput = Partial<Omit<DelayParams, 'smoothing' | 'divisionLeft' | 'divisionRight' | 'feelLeft' | 'feelRight'>> & {
+  smoothing?: JsonValue
+  divisionLeft?: JsonValue
+  divisionRight?: JsonValue
+  feelLeft?: JsonValue
+  feelRight?: JsonValue
+}
 
 export const DELAY_TIME_MS_MIN = 1
-export const DELAY_TIME_MS_MAX = 2000
-export const DELAY_MAX_DELAY_TIME_SEC = 3
+export const DELAY_TIME_MS_MAX = 5000
+export const DELAY_MAX_DELAY_TIME_SEC = 5
+export const DELAY_OFFSET_PERCENT_MIN = -33
+export const DELAY_OFFSET_PERCENT_MAX = 33
 export const DELAY_FEEDBACK_MIN = 0
-export const DELAY_FEEDBACK_MAX = 0.95
+export const DELAY_FEEDBACK_MAX = 1
 export const DELAY_DRY_WET_MIN = 0
 export const DELAY_DRY_WET_MAX = 1
-export const DELAY_LOW_CUT_HZ_MIN = 20
-export const DELAY_LOW_CUT_HZ_MAX = 2000
-export const DELAY_HIGH_CUT_HZ_MIN = 1000
-export const DELAY_HIGH_CUT_HZ_MAX = 20000
+export const DELAY_FILTER_HZ_MIN = 20
+export const DELAY_FILTER_HZ_MAX = 20000
+export const DELAY_FILTER_WIDTH_MIN = 0.5
+export const DELAY_FILTER_WIDTH_MAX = 9
 
 export function createDefaultDelayParams(): DelayParams {
   return {
     enabled: true,
-    mode: 'sync',
-    timeMs: 250,
-    syncDivision: '1/8',
+    link: true,
+    pingPong: false,
+    freeze: false,
+    filterEnabled: false,
+    smoothing: 'repitch',
+    syncLeft: true,
+    syncRight: true,
+    divisionLeft: '1/8',
+    divisionRight: '1/8',
+    feelLeft: 'straight',
+    feelRight: 'straight',
+    timeLeftMs: 250,
+    timeRightMs: 250,
+    offsetLeftPercent: 0,
+    offsetRightPercent: 0,
     feedback: 0.25,
     dryWet: 0.2,
-    pingPong: false,
-    filterEnabled: false,
-    lowCutHz: 120,
-    highCutHz: 8000,
+    filterHz: 1000,
+    filterWidth: 5,
   }
 }
 
-export function isDelayMode(value: JsonValue | undefined): value is DelayMode {
-  return value === 'sync' || value === 'time'
+export function isDelaySmoothing(value: JsonValue | undefined): value is DelaySmoothing {
+  return value === 'repitch' || value === 'fade' || value === 'jump'
 }
 
 export function isDelaySyncDivision(value: JsonValue | undefined): value is DelaySyncDivision {
-  return value === '1/16' || value === '1/8' || value === '1/4' || value === '1/2' || value === '1/1'
+  return value === '1/32' || value === '1/16' || value === '1/8' || value === '1/4' || value === '1/2' || value === '1/1'
+}
+
+export function isDelayFeel(value: JsonValue | undefined): value is DelayFeel {
+  return value === 'straight' || value === 'dotted' || value === 'triplet'
 }
 
 export function normalizeDelayParams(input: DelayParamsInput = {}): DelayParams {
   const defaults = createDefaultDelayParams()
-  const timeMs = readFiniteNumber(input.timeMs)
-  const feedback = readFiniteNumber(input.feedback)
-  const dryWet = readFiniteNumber(input.dryWet)
-  const lowCutInput = readFiniteNumber(input.lowCutHz)
-  const highCutInput = readFiniteNumber(input.highCutHz)
-  const lowCutHz = lowCutInput === undefined ? defaults.lowCutHz : clamp(lowCutInput, DELAY_LOW_CUT_HZ_MIN, DELAY_LOW_CUT_HZ_MAX)
-  const highCutHz = highCutInput === undefined ? defaults.highCutHz : clamp(highCutInput, Math.max(DELAY_HIGH_CUT_HZ_MIN, lowCutHz + 1), DELAY_HIGH_CUT_HZ_MAX)
+
+  const number = (value: number | undefined, fallback: number, min: number, max: number) => {
+    const finite = readFiniteNumber(value)
+
+    return finite === undefined ? fallback : clamp(finite, min, max)
+  }
+
+  const flag = (value: boolean | undefined, fallback: boolean) => (isJsonBoolean(value) ? value : fallback)
 
   return {
-    enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
-    mode: isDelayMode(input.mode) ? input.mode : defaults.mode,
-    timeMs: timeMs === undefined ? defaults.timeMs : clamp(timeMs, DELAY_TIME_MS_MIN, DELAY_TIME_MS_MAX),
-    syncDivision: isDelaySyncDivision(input.syncDivision) ? input.syncDivision : defaults.syncDivision,
-    feedback: feedback === undefined ? defaults.feedback : clamp(feedback, DELAY_FEEDBACK_MIN, DELAY_FEEDBACK_MAX),
-    dryWet: dryWet === undefined ? defaults.dryWet : clamp(dryWet, DELAY_DRY_WET_MIN, DELAY_DRY_WET_MAX),
-    pingPong: isJsonBoolean(input.pingPong) ? input.pingPong : defaults.pingPong,
-    filterEnabled: isJsonBoolean(input.filterEnabled) ? input.filterEnabled : defaults.filterEnabled,
-    lowCutHz,
-    highCutHz,
+    enabled: flag(input.enabled, defaults.enabled),
+    link: flag(input.link, defaults.link),
+    pingPong: flag(input.pingPong, defaults.pingPong),
+    freeze: flag(input.freeze, defaults.freeze),
+    filterEnabled: flag(input.filterEnabled, defaults.filterEnabled),
+    smoothing: isDelaySmoothing(input.smoothing) ? input.smoothing : defaults.smoothing,
+    syncLeft: flag(input.syncLeft, defaults.syncLeft),
+    syncRight: flag(input.syncRight, defaults.syncRight),
+    divisionLeft: isDelaySyncDivision(input.divisionLeft) ? input.divisionLeft : defaults.divisionLeft,
+    divisionRight: isDelaySyncDivision(input.divisionRight) ? input.divisionRight : defaults.divisionRight,
+    feelLeft: isDelayFeel(input.feelLeft) ? input.feelLeft : defaults.feelLeft,
+    feelRight: isDelayFeel(input.feelRight) ? input.feelRight : defaults.feelRight,
+    timeLeftMs: number(input.timeLeftMs, defaults.timeLeftMs, DELAY_TIME_MS_MIN, DELAY_TIME_MS_MAX),
+    timeRightMs: number(input.timeRightMs, defaults.timeRightMs, DELAY_TIME_MS_MIN, DELAY_TIME_MS_MAX),
+    offsetLeftPercent: number(input.offsetLeftPercent, defaults.offsetLeftPercent, DELAY_OFFSET_PERCENT_MIN, DELAY_OFFSET_PERCENT_MAX),
+    offsetRightPercent: number(input.offsetRightPercent, defaults.offsetRightPercent, DELAY_OFFSET_PERCENT_MIN, DELAY_OFFSET_PERCENT_MAX),
+    feedback: number(input.feedback, defaults.feedback, DELAY_FEEDBACK_MIN, DELAY_FEEDBACK_MAX),
+    dryWet: number(input.dryWet, defaults.dryWet, DELAY_DRY_WET_MIN, DELAY_DRY_WET_MAX),
+    filterHz: number(input.filterHz, defaults.filterHz, DELAY_FILTER_HZ_MIN, DELAY_FILTER_HZ_MAX),
+    filterWidth: number(input.filterWidth, defaults.filterWidth, DELAY_FILTER_WIDTH_MIN, DELAY_FILTER_WIDTH_MAX),
   }
 }
 
@@ -543,7 +590,7 @@ export function normalizeDelayParamsForUpdate(input: DelayParamsInput, existing?
 export function serializeDelayParams(params: DelayParams): string {
   const normalized = normalizeDelayParams(params)
 
-  return `${normalized.enabled ? 1 : 0}|${normalized.mode}|${normalized.timeMs}|${normalized.syncDivision}|${normalized.feedback}|${normalized.dryWet}|${normalized.pingPong ? 1 : 0}|${normalized.filterEnabled ? 1 : 0}|${normalized.lowCutHz}|${normalized.highCutHz}`
+  return Object.values(normalized).map((value) => (isJsonBoolean(value) ? (value ? 1 : 0) : value)).join('|')
 }
 
 

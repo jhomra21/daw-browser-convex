@@ -133,17 +133,30 @@ const saturatorParamsValidator = v.object({
   dryWet: v.number(),
 })
 
+const delayDivisionValidator = v.union(v.literal("1/32"), v.literal("1/16"), v.literal("1/8"), v.literal("1/4"), v.literal("1/2"), v.literal("1/1"))
+const delayFeelValidator = v.union(v.literal("straight"), v.literal("dotted"), v.literal("triplet"))
+
 const delayParamsValidator = v.object({
   enabled: v.boolean(),
-  mode: v.union(v.literal("sync"), v.literal("time")),
-  timeMs: v.number(),
-  syncDivision: v.union(v.literal("1/16"), v.literal("1/8"), v.literal("1/4"), v.literal("1/2"), v.literal("1/1")),
+  link: v.boolean(),
+  pingPong: v.boolean(),
+  freeze: v.boolean(),
+  filterEnabled: v.boolean(),
+  smoothing: v.union(v.literal("repitch"), v.literal("fade"), v.literal("jump")),
+  syncLeft: v.boolean(),
+  syncRight: v.boolean(),
+  divisionLeft: delayDivisionValidator,
+  divisionRight: delayDivisionValidator,
+  feelLeft: delayFeelValidator,
+  feelRight: delayFeelValidator,
+  timeLeftMs: v.number(),
+  timeRightMs: v.number(),
+  offsetLeftPercent: v.number(),
+  offsetRightPercent: v.number(),
   feedback: v.number(),
   dryWet: v.number(),
-  pingPong: v.boolean(),
-  filterEnabled: v.boolean(),
-  lowCutHz: v.number(),
-  highCutHz: v.number(),
+  filterHz: v.number(),
+  filterWidth: v.number(),
 })
 
 // The params version the client wrote with; a write without one is read as version 1.

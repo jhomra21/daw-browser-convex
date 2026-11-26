@@ -25,7 +25,8 @@ import {
   isCompressorDynamicsMode,
   isCompressorEnvelopeCurve,
   isCompressorSidechainFilterType,
-  isDelayMode,
+  isDelayFeel,
+  isDelaySmoothing,
   isDelaySyncDivision,
   isEqBandType,
   isSaturatorCurve,
@@ -581,28 +582,38 @@ const readDelayParams = (value: JsonValue): DelayParams | null => {
   if (!isJsonObject(value) || !isJsonBoolean(value.enabled)) return null
 
   if (
-    !isDelayMode(value.mode)
-    || !isJsonNumber(value.timeMs)
-    || !isDelaySyncDivision(value.syncDivision)
-    || !isJsonNumber(value.feedback)
-    || !isJsonNumber(value.dryWet)
-    || !isJsonBoolean(value.pingPong)
-    || !isJsonBoolean(value.filterEnabled)
-    || !isJsonNumber(value.lowCutHz)
-    || !isJsonNumber(value.highCutHz)
+    !isJsonBoolean(value.link) || !isJsonBoolean(value.pingPong) || !isJsonBoolean(value.freeze) || !isJsonBoolean(value.filterEnabled)
+    || !isDelaySmoothing(value.smoothing)
+    || !isJsonBoolean(value.syncLeft) || !isJsonBoolean(value.syncRight)
+    || !isDelaySyncDivision(value.divisionLeft) || !isDelaySyncDivision(value.divisionRight)
+    || !isDelayFeel(value.feelLeft) || !isDelayFeel(value.feelRight)
+    || !isJsonNumber(value.timeLeftMs) || !isJsonNumber(value.timeRightMs)
+    || !isJsonNumber(value.offsetLeftPercent) || !isJsonNumber(value.offsetRightPercent)
+    || !isJsonNumber(value.feedback) || !isJsonNumber(value.dryWet)
+    || !isJsonNumber(value.filterHz) || !isJsonNumber(value.filterWidth)
   ) return null
 
   const params: DelayParamsInput = {
     enabled: value.enabled,
-    mode: value.mode,
-    timeMs: value.timeMs,
-    syncDivision: value.syncDivision,
+    link: value.link,
+    pingPong: value.pingPong,
+    freeze: value.freeze,
+    filterEnabled: value.filterEnabled,
+    smoothing: value.smoothing,
+    syncLeft: value.syncLeft,
+    syncRight: value.syncRight,
+    divisionLeft: value.divisionLeft,
+    divisionRight: value.divisionRight,
+    feelLeft: value.feelLeft,
+    feelRight: value.feelRight,
+    timeLeftMs: value.timeLeftMs,
+    timeRightMs: value.timeRightMs,
+    offsetLeftPercent: value.offsetLeftPercent,
+    offsetRightPercent: value.offsetRightPercent,
     feedback: value.feedback,
     dryWet: value.dryWet,
-    pingPong: value.pingPong,
-    filterEnabled: value.filterEnabled,
-    lowCutHz: value.lowCutHz,
-    highCutHz: value.highCutHz,
+    filterHz: value.filterHz,
+    filterWidth: value.filterWidth,
   }
 
   return normalizeDelayParams(params)

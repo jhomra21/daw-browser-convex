@@ -69,9 +69,10 @@ export const automationTargetKey = (target: AutomationTarget, parameterId: strin
  * Lanes saved for parameters a later release removed. A stored lane is never rewritten on read, so readers drop it:
  * its id is in no descriptor, so no processor exposes it and a portable session that scheduled it would be refused.
  * Gate Lookahead (gate.lookaheadMs) was automatable until lookahead became a stepped button; the Compressor and
- * Limiter lookahead were never automation parameters, so no lane of theirs can exist.
+ * Limiter lookahead were never automation parameters, so no lane of theirs can exist. The Delay Low Cut and High Cut
+ * (delay.lowCutHz, delay.highCutHz) went with the band-pass filter, whose Frequency and Width are new parameters.
  */
-const RETIRED_AUTOMATION_PARAMETER_IDS: ReadonlySet<string> = new Set(['gate.lookaheadMs'])
+const RETIRED_AUTOMATION_PARAMETER_IDS: ReadonlySet<string> = new Set(['gate.lookaheadMs', 'delay.lowCutHz', 'delay.highCutHz'])
 
 export const automationEnvelopeFromRow = (
   row: AutomationEnvelopeRow,

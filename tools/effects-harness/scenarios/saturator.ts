@@ -8,6 +8,7 @@ import { fx } from '../effects'
 import type { Family } from './index'
 import type { Harness, Scenario } from '../harness'
 import { coherentFrequency, concat, constant, dbToLinear, linearToDb, noise, ramp, sine, sineWithPeakAt, sweep } from '../signals'
+import { saturatorMigration } from './saturator-migration'
 import { parityLimit, parityScenario, robustnessScenarios } from './shared'
 
 const curves: readonly SaturatorCurve[] = ['soft', 'medium', 'hard', 'clip', 'analog', 'sine', 'bass', 'fold', 'warp']
@@ -247,7 +248,7 @@ const saturatorSpec = fx.saturator()
 
 export const saturator: Family = {
   scenarios: [
-    alias, fundamental, dryNull, color, continuity, driveClick, unity, postClip, legacyParity, wetDelay,
+    alias, fundamental, dryNull, color, continuity, driveClick, unity, postClip, legacyParity, wetDelay, ...saturatorMigration,
     parityScenario('saturator', saturatorSpec),
     ...robustnessScenarios('saturator', saturatorSpec, null),
   ],

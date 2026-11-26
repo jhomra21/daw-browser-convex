@@ -70,7 +70,7 @@ export const AUDIO_EFFECT_PARAMS_VERSIONING: AudioEffectParamsVersioning = {
     // Delay: one time per channel (Mode and division carry to both, linked), the filter pair becomes the band-pass whose edges they were,
     // time smoothing Repitch, Freeze and offsets off.
     delay: { 1: migrateDelayParamsV1 },
-    // Saturator: Color Amount becomes Amt Hi (x 12 dB), Hi-Quality on, Post Clip off; the curves are now level-matched (saturator-params-migration.ts).
+    // Saturator: Color Amount becomes Amt Hi (x 12 dB), Hi-Quality on, Post Clip off; each old curve's small-signal gain moves into Drive so levels hold (saturator-params-migration.ts).
     saturator: { 1: migrateSaturatorParamsV1 },
     // Reverb: Density Sparse (the old 8 lines), the old in-loop cuts as shelves, Width as the Stereo angle, Chorus on, Smooth Fast.
     reverb: { 1: migrateReverbParamsV1 },

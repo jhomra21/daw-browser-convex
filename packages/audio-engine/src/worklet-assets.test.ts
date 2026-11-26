@@ -136,8 +136,9 @@ describe('checked-in worklet assets', () => {
     const input = Float32Array.of(0.5)
     const output = [new Float32Array(1), new Float32Array(1)]
     expect(processor.process([[input]], [output])).toBe(true)
-    expect(output[0][0]).toBeCloseTo(0.5, 6)
-    expect(output[1][0]).toBeCloseTo(0.5, 6)
+    // The Tremolo keeps its average level at any Depth: at Depth 1 the sine's crest (phase 0.25) has twice the average gain, so 0.5 in is 1 out.
+    expect(output[0][0]).toBeCloseTo(1, 6)
+    expect(output[1][0]).toBeCloseTo(1, 6)
     processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 2, processorKind: 'chorus', state: {} } })
     expect(processor.port.messages).toContainEqual({ type: 'fault', version: 1, code: 'immutable-processor-kind' })
   })

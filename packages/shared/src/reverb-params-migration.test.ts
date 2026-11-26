@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { AUDIO_EFFECT_PARAMS_VERSION, AUDIO_EFFECT_PARAMS_VERSIONING, migrateAudioEffectParams } from './audio-effect-param-versions'
-import { createDefaultReverbParams, AUDIO_EFFECT_CONTRACTS } from './effects-params'
+import { normalizeAudioEffect } from './audio-effect-normalization'
+import { createDefaultReverbParams } from './effects-params'
 import { isJsonObject, type JsonValue } from './json-value'
 import { migrateReverbParamsV1, migrateReverbStereoWidthV1 } from './reverb-params-migration'
 
@@ -39,8 +40,21 @@ describe('Reverb params version 1 -> 2', () => {
   })
 
   test('folds the old output gain (Diffuse, Density and Diffusion) into Diffuse so the tail is as loud', () => {
-    expect(fieldsOf(migrateReverbParamsV1(version1)).diffuse).toBeCloseTo(0.9 * 0.5 * 0.8, 12)
-    expect(fieldsOf(migrateReverbParamsV1({ ...version1, diffuse: 1, density: 1, diffusion: 1 })).diffuse).toBe(1)
+    const defaults = { ...version1, decaySec: 2.2, size: 0.65, reflections: 0, diffuse: 1, density: 0.8, diffusion: 0.75 }
+
+    // The old default output gain was 0.7; the engines differ by -0.14 dB at the default Decay and Size.
+    expect(Number(fieldsOf(migrateReverbParamsV1(defaults)).diffuse)).toBeCloseTo(0.7, 1)
+    expect(fieldsOf(migrateReverbParamsV1({ ...defaults, diffuse: 1, density: 1, diffusion: 1 })).diffuse).toBe(1)
+  })
+
+  test('the Diffuse it folds into follows what the old engine did to the tail', () => {
+    const diffuse = (old: Record<string, JsonValue>) => Number(fieldsOf(migrateReverbParamsV1({ ...version1, reflections: 0, ...old })).diffuse)
+
+    expect(diffuse({ reflections: 0.2 })).toBeLessThan(diffuse({}))
+    expect(diffuse({ reflections: 0.2, reflectionSpin: false })).toBeCloseTo(diffuse({}), 12)
+    expect(diffuse({ stereoWidth: 2 })).toBeGreaterThan(diffuse({ stereoWidth: 1 }))
+    expect(diffuse({ stereoWidth: 0 })).toBeLessThan(diffuse({ stereoWidth: 1 }))
+    expect(diffuse({ decaySec: 0.5 })).toBeLessThan(diffuse({ decaySec: 0.5, size: 0 }))
   })
 
   test('the old in-loop cuts become shelves with the loss they cost and the input cuts start open', () => {
@@ -85,7 +99,7 @@ describe('Reverb params version 1 -> 2', () => {
   })
 
   test('migrates stored rows through the registry and normalizes to a valid state', () => {
-    const normalized = AUDIO_EFFECT_CONTRACTS.reverb.normalizeParams(migrateAudioEffectParams('reverb', version1, 1))
+    const normalized = normalizeAudioEffect('reverb', migrateAudioEffectParams('reverb', version1, 1)).params
 
     expect(normalized).toMatchObject({ density: 'sparse', decaySec: 3, stereoWidth: 120 })
     expect(Object.keys(normalized)).toEqual(Object.keys(createDefaultReverbParams()))

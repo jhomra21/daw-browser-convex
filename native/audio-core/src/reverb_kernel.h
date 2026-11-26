@@ -79,9 +79,10 @@ class ReverbKernel {
     {1.3, 2.3, 3.9, 6.1, 9.7, 13.9, 18.9, 24.1}, {1.5, 2.7, 4.3, 6.7, 10.3, 14.5, 19.7, 25.3}}};
   static constexpr std::array<double, 4> kChorusRateRatio{1.0, 1.071, 0.937, 1.123};
   static constexpr double kPi = 3.14159265358979323846;
-  // Gain of the early reflections at Reflect 1 over the cascade normalised to the dry level. It puts their energy 6 dB under the
-  // tail's (measured: 11.9 dB under without it), so the default Reflect of 0.5 sits 12 dB under.
-  static constexpr double kReflectionLevel = 2.0;
+  // Gain of the early reflections at Reflect 1 over the cascade normalised to the dry level. The previous network's reflections
+  // had the same Reflect and Shape law at 4.9 to 5.6 times the energy (measured on its worklet, impulse, 6 s, Diffuse 0), so
+  // this keeps a migrated Reflect as loud as it was; Reflect 1 then sits 5 dB over the tail at the migrated default Diffuse.
+  static constexpr double kReflectionLevel = 4.5;
   // Largest change of the longest line, in frames per frame, while Size glides: Fast moves the pitch of the lines by 1 % at most.
   static constexpr double kFastGlide = 0.01;
   static constexpr double kSlowGlide = 0.002;

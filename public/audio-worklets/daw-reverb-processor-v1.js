@@ -17,7 +17,7 @@ const DIFFUSER_BASE_MS = 4
 const REFLECTION_STAGE_MS = [[1.3, 2.3, 3.9, 6.1, 9.7, 13.9, 18.9, 24.1], [1.5, 2.7, 4.3, 6.7, 10.3, 14.5, 19.7, 25.3]]
 const CHORUS_RATE_RATIO = [1, 1.071, 0.937, 1.123]
 const PI = Math.PI
-const REFLECTION_LEVEL = 2
+const REFLECTION_LEVEL = 4.5
 const FAST_GLIDE = 0.01
 const SLOW_GLIDE = 0.002
 const PRE_DELAY_GLIDE = 0.1
@@ -734,7 +734,7 @@ class DawReverbProcessor extends AudioWorkletProcessor {
     this.enabled = true
     this.state = {}
     this.values = {
-      wet: 0.25, decaySec: 2.2, preDelayMs: 20, reflections: 0.5, spinAmountMs: 17.5, spinRateHz: 0.3, contour: 0.5, diffuse: 1,
+      wet: 0.25, decaySec: 2.2, preDelayMs: 20, reflections: 0.25, spinAmountMs: 17.5, spinRateHz: 0.3, contour: 0.5, diffuse: 0.7,
       size: 0.65, diffusion: 0.75, lowCutHz: 20, highCutHz: 20000, lowShelfHz: 200, highShelfHz: 5000, lowShelfDb: 0, highShelfDb: 0,
       chorusAmountMs: 0.6, chorusRateHz: 0.6, stereoDegrees: 100,
     }

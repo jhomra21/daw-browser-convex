@@ -62,7 +62,8 @@ describe('reverb parameter normalization', () => {
     expect(defaults.reflectionModAmountMs).toBe(17.5)
     expect(defaults.reflectionModRateHz).toBe(0.3)
     expect(defaults['reflectionShape']).toBe(0.5)
-    expect(defaults.diffuse).toBe(1)
+    expect(defaults.diffuse).toBe(0.7)
+    expect(defaults.reflections).toBe(0.25)
   })
 
   test('clamps the canonical control ranges', () => {

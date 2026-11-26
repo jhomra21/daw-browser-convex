@@ -199,8 +199,8 @@ export const fx = {
   reverb: (state: Partial<ReverbProcessorState> = {}): EffectSpec => ({
     kind: 'reverb',
     state: {
-      enabled: true, wet: 0.25, decaySec: 2.2, preDelayMs: 20, reflections: 0.5, reflectionSpin: true, reflectionModAmountMs: 17.5,
-      reflectionModRateHz: 0.3, reflectionShape: 0.5, diffuse: 1, size: 0.65, diffusion: 0.75, density: 'high', lowCutHz: 20,
+      enabled: true, wet: 0.25, decaySec: 2.2, preDelayMs: 20, reflections: 0.25, reflectionSpin: true, reflectionModAmountMs: 17.5,
+      reflectionModRateHz: 0.3, reflectionShape: 0.5, diffuse: 0.7, size: 0.65, diffusion: 0.75, density: 'high', lowCutHz: 20,
       highCutHz: 20000, lowShelfHz: 200, highShelfHz: 5000, stereoWidth: 100, smooth: 'fast', freeze: false, flat: false,
       cut: false, chorus: true, chorusAmountMs: 0.6, chorusRateHz: 0.6, lowShelfOn: true, highShelfOn: true, lowShelfDb: 0,
       highShelfDb: 0, ...state,

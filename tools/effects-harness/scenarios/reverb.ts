@@ -1,6 +1,8 @@
 // Acceptance tests from reverb.md section 3: M1 (per-band T30, independent input filter), M2 (click-free parameter moves),
 // M3 (fine structure, Spin pitch), M4 (parity), S1/S2 (echo density, autocorrelation), S3 (Freeze), S4 (width), S5 (early
 // reflections), S6 (Chorus), S8 (sample-rate-aware buffers), C4 (level versus size), C5 (DC).
+import { normalizeAudioEffect } from '../../../packages/shared/src/audio-effect-normalization'
+import { migrateReverbParamsV1 } from '../../../packages/shared/src/reverb-params-migration'
 import { autocorrelationPeak, bandpass, correlation, echoDensity, fineStructure, maxAbsDiff, nextPowerOfTwo, peakAbs, maxStep, pitchDeviationCents, rms, schroederT30, spectrum } from '../dsp'
 import { fx } from '../effects'
 import type { Family } from './index'
@@ -314,6 +316,57 @@ const freezeDrift: Scenario = {
   },
 }
 
+// The version 1 state every reference below was measured with, wet 1 (the base commit's defaults except for Wet).
+const oldState = {
+  enabled: true, wet: 1, decaySec: 2.2, preDelayMs: 20, reflections: 0, reflectionSpin: true, reflectionModAmountMs: 17.5, reflectionModRateHz: 0.3,
+  'reflectionShape': 0.5, diffuse: 1, size: 0.65, diffusion: 0.75, density: 0.8, lowCutHz: 20, highCutHz: 20000, diffusionLowCutHz: 20, diffusionHighCutHz: 20000, stereoWidth: 1,
+}
+
+const migrated = (old: Partial<typeof oldState>) => normalizeAudioEffect('reverb', migrateReverbParamsV1({ ...oldState, ...old })).params
+
+// Total wet energy of the old engine (impulse, wet 1, 6 s, both channels) and of its first 300 ms, measured on the base commit's
+// worklet: git show 61600d21:public/audio-worklets/daw-reverb-processor-v1.js, rendered at 48 kHz with the research script
+// acceptance-reports/effects-research-2026-11-23/reverb-measure/lib.cjs pointed at that copy.
+const oldLoudness: [string, Partial<typeof oldState>, number, number][] = [
+  ['old defaults', {}, 0.4715, 0.4135],
+  ['size 0', { size: 0 }, 0.6428, 0.5773],
+  ['size 1', { size: 1 }, 0.4077, 0.3536],
+  ['decay 0.5 s', { decaySec: 0.5 }, 0.0850, 0.0850],
+  ['decay 8 s', { decaySec: 8 }, 1.2102, 0.6898],
+  ['width 0', { stereoWidth: 0 }, 0.2604, 0.2271],
+  ['width 2', { stereoWidth: 2 }, 1.1051, 0.9727],
+  ['reflections 1, shape 0.2', { reflections: 1, 'reflectionShape': 0.2 }, 1.2173, 1.1875],
+]
+
+const energyBetween = (output: readonly Float32Array[], from: number, to: number) => {
+  let sum = 0
+
+  for (let n = from; n < to; n += 1) sum += output[0][n] ** 2 + output[1][n] ** 2
+
+  return sum
+}
+
+const loudnessDb = (output: readonly Float32Array[], from: number, to: number, reference: number) => 10 * Math.log10(energyBetween(output, from, to) / reference)
+
+const migratedLoudness: Scenario = {
+  effect: 'reverb',
+  name: 'migration-loudness',
+  rates: [48000],
+  run: async (h) => {
+    const early = Math.round(0.3 * h.rate)
+
+    for (const [name, old, total, first] of oldLoudness) {
+      const output = await impulseResponse(h, migrated(old), 6)
+      h.atMost(`total wet energy of a migrated project against the old engine, ${name}`, Math.abs(loudnessDb(output, 0, output[0].length, total)), 1.5, 'dB', `old ${total} (impulse, wet 1, 6 s)`)
+      h.atMost(`first 300 ms of a migrated project against the old engine, ${name}`, Math.abs(loudnessDb(output, 0, early, first)), 2, 'dB', `old ${first}`)
+    }
+
+    const output = await impulseResponse(h, {}, 6)
+    h.atMost('total wet energy of a new device (High, Chorus, Reflect) against the old defaults', Math.abs(loudnessDb(output, 0, output[0].length, 0.4715)), 1.5, 'dB', 'old 0.4715')
+    h.atMost('first 300 ms of a new device against the old defaults', Math.abs(loudnessDb(output, 0, early, 0.4135)), 2, 'dB', 'old 0.4135')
+  },
+}
+
 const dcBlock: Scenario = {
   effect: 'reverb',
   name: 'c5-dc-blocker',
@@ -361,7 +414,7 @@ const spec = fx.reverb({ wet: 0.5, reflections: 0.5 })
 export const reverb: Family = {
   scenarios: [
     decayAccuracy, shelfDecay, chorusDecay, decayAcrossRates, density, earlyReflections, earlyReflectionsHighRates, stepClicks, sizeSweep,
-    width, sizeLoudness, predelayClamp, spinPitch, freezeDrift, dcBlock, parity,
+    width, sizeLoudness, migratedLoudness, predelayClamp, spinPitch, freezeDrift, dcBlock, parity,
     ...robustnessScenarios('reverb', spec, null),
   ],
   notEncoded: [

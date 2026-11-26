@@ -1071,7 +1071,7 @@ const modulationDefinitions: readonly ModulationFixtureDefinition[] = [
 // Several parameter sets per effect, so the worklet is held to the core on every mode, waveform and control extreme the
 // effects have, not just their defaults. Each runs about 85 ms of low-pitched sweeps in uneven blocks: the delay reads of the native
 // and the Wasm core differ by float contraction, and a high-pitched input would measure that, not the worklet.
-type ModulationVariant = { name: string; sampleRateHz?: number; legacy: PortableLegacyModulationFixture }
+type ModulationVariant = { name: string; sampleRateHz?: number; legacy: PortableLegacyModulationFixture; tolerance?: number }
 
 const chorusVariant = (name: string, state: Partial<DelayModulationProcessorState>, sampleRateHz?: number): ModulationVariant =>
   ({ name, sampleRateHz, legacy: { kind: 'chorus', state: { ...chorusState, ...state } } })
@@ -1079,8 +1079,8 @@ const chorusVariant = (name: string, state: Partial<DelayModulationProcessorStat
 const flangerVariant = (name: string, state: Partial<DelayModulationProcessorState>, sampleRateHz?: number): ModulationVariant =>
   ({ name, sampleRateHz, legacy: { kind: 'flanger', state: { ...flangerState, ...state } } })
 
-const phaserVariant = (name: string, state: Partial<PhaserProcessorState>, sampleRateHz?: number): ModulationVariant =>
-  ({ name, sampleRateHz, legacy: { kind: 'phaser', state: { ...phaserState, ...state } } })
+const phaserVariant = (name: string, state: Partial<PhaserProcessorState>, sampleRateHz?: number, tolerance?: number): ModulationVariant =>
+  ({ name, sampleRateHz, tolerance, legacy: { kind: 'phaser', state: { ...phaserState, ...state } } })
 
 const tremoloVariant = (name: string, state: Partial<AmplitudeModulationProcessorState>, sampleRateHz?: number): ModulationVariant =>
   ({ name, sampleRateHz, legacy: { kind: 'tremolo', state: { ...tremoloState, ...state } } })
@@ -1110,9 +1110,12 @@ const modulationVariants: readonly ModulationVariant[] = [
   phaserVariant('four-stages-negative-feedback', { stages: 4, feedback: -0.95, rateHz: 6 }),
   phaserVariant('twelve-stages-max-feedback', { stages: 12, feedback: 0.95, centerHz: 1_000, depthOctaves: 3, rateHz: 8 }),
   phaserVariant('twelve-stages-negative-feedback-wide-sweep', { stages: 12, feedback: -0.95, centerHz: 1_000, depthOctaves: 5, rateHz: 8 }, 96_000),
-  // 12 stages at feedback +0.95 with the sweep reaching both ends of the range is left out on purpose: the loop gain 1 / (1 - fb G)
-  // is then about 5, and the native and the Wasm core (same source, different libm and float contraction) already differ by
-  // 1.4e-5 to 1.8e-5 there, above the 1e-5 bar, so the row would measure the maths library and not the worklet.
+  // 12 stages at feedback +0.95 with the sweep reaching both ends of the range: the loop gain 1 / (1 - fb G) is about 5 there, so the
+  // native and the Wasm core (same source, different libm and float contraction) drift apart more than anywhere else. Each row states
+  // its own tolerance, set above the largest difference measured (native vs Wasm, worklet vs Wasm): 5.4e-6 and 4.7e-6 at 48 kHz, which
+  // keeps the 1e-5 bar; 1.27e-5 and 1.04e-5 at 96 kHz, where the loop runs twice as many samples per second, so 2e-5.
+  phaserVariant('twelve-stages-max-feedback-wide-sweep', { stages: 12, feedback: 0.95, centerHz: 1_000, depthOctaves: 5, rateHz: 8 }, undefined, 1e-5),
+  phaserVariant('twelve-stages-max-feedback-wide-sweep-96000', { stages: 12, feedback: 0.95, centerHz: 1_000, depthOctaves: 5, rateHz: 8 }, 96_000, 2e-5),
   phaserVariant('spread-blend', { stages: 8, spreadOctaves: 2, blend: 0.5, rateHz: 7 }),
   phaserVariant('spread-only-44100', { stages: 6, spreadOctaves: 4, blend: 0, rateHz: 7, feedback: 0.6 }, 44_100),
   phaserVariant('square-safe-bass', { waveform: 'square', rateHz: 15, safeBass: true, safeBassHz: 300, outputDb: -3, mix: 1 }),
@@ -1195,6 +1198,7 @@ const modulationFixture = (
     blockPartitions?: readonly number[]
     assertReset?: boolean
     bypassed?: boolean
+    tolerance?: number
   } = {},
 ): PortableGraphParityFixture => {
   const legacy = options.legacy ?? definition.legacy
@@ -1224,9 +1228,9 @@ const modulationFixture = (
     input,
     assertReset: options.assertReset,
     expectedLatencyFrames: latencyFrames,
-    nativeWasmTolerance: 1e-5,
+    nativeWasmTolerance: options.tolerance ?? 1e-5,
     legacyModulation: legacy,
-    legacyTolerance: 1e-5,
+    legacyTolerance: options.tolerance ?? 1e-5,
     assertOutput: (output) => finite(output) && changedFromInput(output, input, 1e-5),
   }
 }
@@ -1244,7 +1248,7 @@ const modulationVariantFixtures = modulationVariants.map((variant): PortableGrap
     'chains',
     rate,
     stereo(sweep(frames, 80, 1_500, rate), sweep(frames, 120, 1_200, rate, 0.4)),
-    { legacy: variant.legacy, maxFramesPerBlock: 480, blockPartitions: [31, 449, ...Array.from({ length: 7 }, () => 480), 256] },
+    { legacy: variant.legacy, tolerance: variant.tolerance, maxFramesPerBlock: 480, blockPartitions: [31, 449, ...Array.from({ length: 7 }, () => 480), 256] },
   )
 })
 

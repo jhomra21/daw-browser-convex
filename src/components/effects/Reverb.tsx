@@ -1,33 +1,48 @@
+import { Show } from 'solid-js'
 import type { JSX } from '@solidjs/web'
 import EffectShell from '~/components/effects/EffectShell'
+import AutomatedKnob from '~/components/effects/AutomatedKnob'
 import { DraggableDeviceGraph, handleGraphKeyDelta } from '~/components/effects/draggable-device-graph'
-import { DeviceToggleButton, DeviceValueStrip } from '~/components/ui/device-control'
+import { ChoiceMenu, DeviceToggleButton, DeviceValueStrip } from '~/components/ui/device-control'
 import Knob from '~/components/ui/knob'
 import {
   createDefaultReverbParams,
+  REVERB_CHORUS_AMOUNT_MS_MAX,
+  REVERB_CHORUS_AMOUNT_MS_MIN,
+  REVERB_CHORUS_RATE_HZ_MAX,
+  REVERB_CHORUS_RATE_HZ_MIN,
   REVERB_DECAY_SEC_MAX,
   REVERB_DECAY_SEC_MIN,
   REVERB_DENSITIES,
   REVERB_HIGH_CUT_HZ_MAX,
   REVERB_HIGH_CUT_HZ_MIN,
+  REVERB_HIGH_SHELF_HZ_MAX,
+  REVERB_HIGH_SHELF_HZ_MIN,
   REVERB_LOW_CUT_HZ_MAX,
   REVERB_LOW_CUT_HZ_MIN,
+  REVERB_LOW_SHELF_HZ_MAX,
+  REVERB_LOW_SHELF_HZ_MIN,
   REVERB_PRE_DELAY_MS_MAX,
   REVERB_PRE_DELAY_MS_MIN,
   REVERB_REFLECTION_MOD_AMOUNT_MS_MAX,
   REVERB_REFLECTION_MOD_AMOUNT_MS_MIN,
   REVERB_REFLECTION_MOD_RATE_HZ_MAX,
   REVERB_REFLECTION_MOD_RATE_HZ_MIN,
-  type ReverbParams,
+  REVERB_SHELF_DB_MAX,
+  REVERB_SHELF_DB_MIN,
+  REVERB_SMOOTHS,
   REVERB_STEREO_WIDTH_MAX,
   REVERB_STEREO_WIDTH_MIN,
   REVERB_UNIT_PARAM_MAX,
   REVERB_UNIT_PARAM_MIN,
   REVERB_WET_MAX,
   REVERB_WET_MIN,
+  reverbDecaySec,
+  reverbInputCutDb,
+  type ReverbParams,
 } from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
-import { formatDeviceFrequency, formatDeviceHertz, formatDeviceMilliseconds, formatDevicePercent } from '~/lib/device-value-format'
+import { formatDeviceDb, formatDeviceFrequency, formatDeviceMilliseconds, formatDevicePercent } from '~/lib/device-value-format'
 
 type ReverbProps = {
   params: ReverbParams
@@ -40,493 +55,140 @@ type ReverbProps = {
   onManualAutomationOverride?: (parameterId: string) => void
 }
 
+const defaults = createDefaultReverbParams()
+const percent = formatDevicePercent
+const seconds = (value: number) => `${value.toFixed(2)} s`
+const hertz = (value: number) => `${value.toFixed(2)} Hz`
+const degrees = (value: number) => `${Math.round(value)}°`
+const capitalize = (value: string) => value[0].toUpperCase() + value.slice(1)
+
+const DENSITY_CHOICES = REVERB_DENSITIES.map((value) => ({ value, label: capitalize(value) }))
+const SMOOTH_CHOICES = REVERB_SMOOTHS.map((value) => ({ value, label: capitalize(value) }))
+
+// The Lo and Hi Cut have no switch of their own: a cut at the end of its range is open. Switching one on starts it here.
+const LOW_CUT_START_HZ = 830
+const HIGH_CUT_START_HZ = 6000
+
+// Both graphs share one log frequency axis, 20 Hz to 20 kHz, over the 180 by 58 units of DraggableDeviceGraph.
+const GRAPH_WIDTH = 180
+const GRAPH_HEIGHT = 58
+const AXIS_MIN_HZ = 20
+const AXIS_MAX_HZ = 20000
+const CURVE_STEPS = 48
+
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
-const normalizeWet = (value: number) => Math.round(clamp(value, REVERB_WET_MIN, REVERB_WET_MAX) * 100) / 100
-const normalizeDecay = (value: number) => Math.round(clamp(value, REVERB_DECAY_SEC_MIN, REVERB_DECAY_SEC_MAX) * 10) / 10
-const normalizePreDelay = (value: number) => Math.round(clamp(value, REVERB_PRE_DELAY_MS_MIN, REVERB_PRE_DELAY_MS_MAX))
-const normalizeReflectionModAmount = (value: number) => Math.round(clamp(value, REVERB_REFLECTION_MOD_AMOUNT_MS_MIN, REVERB_REFLECTION_MOD_AMOUNT_MS_MAX) * 10) / 10
-const normalizeReflectionModRate = (value: number) => Math.round(clamp(value, REVERB_REFLECTION_MOD_RATE_HZ_MIN, REVERB_REFLECTION_MOD_RATE_HZ_MAX) * 100) / 100
-const normalizeUnitParam = (value: number) => Math.round(clamp(value, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX) * 100) / 100
-const normalizeLowCut = (value: number) => Math.round(clamp(value, REVERB_LOW_CUT_HZ_MIN, REVERB_LOW_CUT_HZ_MAX))
-const normalizeHighCut = (value: number) => Math.round(clamp(value, REVERB_HIGH_CUT_HZ_MIN, REVERB_HIGH_CUT_HZ_MAX) / 100) * 100
-const normalizeStereoWidth = (value: number) => Math.round(clamp(value, REVERB_STEREO_WIDTH_MIN, REVERB_STEREO_WIDTH_MAX))
+const hzToX = (hz: number) => Math.log(hz / AXIS_MIN_HZ) / Math.log(AXIS_MAX_HZ / AXIS_MIN_HZ) * GRAPH_WIDTH
+const xToHz = (x: number) => AXIS_MIN_HZ * (AXIS_MAX_HZ / AXIS_MIN_HZ) ** (x / GRAPH_WIDTH)
 
-const formatPercent = (value: number) => formatDevicePercent(normalizeWet(value))
-const formatUnitPercent = (value: number) => formatDevicePercent(normalizeUnitParam(value))
-const formatSeconds = (value: number) => `${normalizeDecay(value).toFixed(1)}s`
-const formatMilliseconds = (value: number) => formatDeviceMilliseconds(normalizePreDelay(value), 0)
-const formatReflectionMilliseconds = (value: number) => formatDeviceMilliseconds(normalizeReflectionModAmount(value), 1)
-const formatHertz = (value: number) => formatDeviceHertz(normalizeReflectionModRate(value), 2)
-const formatFrequencyWithUnit = (value: number) => formatDeviceFrequency(value, 1)
-const formatStereoWidth = (value: number) => `${normalizeStereoWidth(value)}°`
-const LOW_CUT_TOGGLE_HZ = 830
-const HIGH_CUT_TOGGLE_HZ = 6000
-const DEFAULT_REVERB_PARAMS = createDefaultReverbParams()
+const curvePath = (valueAtHz: (hz: number) => number, yOfValue: (value: number) => number) =>
+  Array.from({ length: CURVE_STEPS + 1 }, (_, step) => {
+    const x = step / CURVE_STEPS * GRAPH_WIDTH
 
-function DeviceSection(props: {
-  title: string
-  class?: string
-  children: JSX.Element
-}) {
+    return `${step === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${yOfValue(valueAtHz(xToHz(x))).toFixed(2)}`
+  }).join(' ')
+
+const INPUT_DB_TOP = 3
+const INPUT_DB_BOTTOM = -36
+const inputY = (db: number) => (INPUT_DB_TOP - clamp(db, INPUT_DB_BOTTOM, INPUT_DB_TOP)) / (INPUT_DB_TOP - INPUT_DB_BOTTOM) * GRAPH_HEIGHT
+const CUT_CORNER_Y = inputY(-3)
+
+// The decay axis is the T60 against the Decay knob in dB, over the range the shelves can move it.
+const decayY = (db: number) => (REVERB_SHELF_DB_MAX - clamp(db, REVERB_SHELF_DB_MIN, REVERB_SHELF_DB_MAX)) / (REVERB_SHELF_DB_MAX - REVERB_SHELF_DB_MIN) * GRAPH_HEIGHT
+const yToShelfDb = (y: number) => clamp(Math.round((REVERB_SHELF_DB_MAX - y / GRAPH_HEIGHT * (REVERB_SHELF_DB_MAX - REVERB_SHELF_DB_MIN)) * 2) / 2, REVERB_SHELF_DB_MIN, REVERB_SHELF_DB_MAX)
+
+function DeviceSection(props: { title: string; class?: string; children: JSX.Element }) {
   return (
-    <div class={cn('flex min-h-0 min-w-0 flex-col bg-transparent', props.class)}>
-      <div
-        class="mb-1 shrink-0 overflow-hidden whitespace-nowrap pt-1 text-xs font-semibold tracking-wide text-muted-foreground"
-        style={{ height: '20px' }}
-      >
-        {props.title}
-      </div>
+    <section class={cn('flex min-h-0 min-w-0 flex-col', props.class)} aria-label={props.title}>
+      <h3 class="mb-1 h-5 shrink-0 overflow-hidden whitespace-nowrap pt-1 text-xs font-semibold tracking-wide text-muted-foreground">{props.title}</h3>
       {props.children}
-    </div>
+    </section>
   )
 }
 
-function ReverbGraphSection(props: {
-  title: string
-  class?: string
-  topControls: JSX.Element
-  graph: JSX.Element
-  bottomControls: JSX.Element
-  side?: JSX.Element
-  bottomKnobs?: JSX.Element
-}) {
-  return (
-    <DeviceSection title={props.title} class={props.class}>
-      <div class={cn('grid gap-3', props.side ? 'grid-cols-[minmax(0,1fr)_4.25rem]' : 'grid-cols-1')}>
-        <div class="flex min-w-0 flex-col gap-2">
-          {props.topControls}
-          {props.graph}
-          {props.bottomControls}
-        </div>
-        {props.side}
-      </div>
-      {props.bottomKnobs}
-    </DeviceSection>
-  )
-}
+// Arrow keys move a frequency 5% and Page keys 50%, as on the Auto Filter; a gain moves 0.5 dB per arrow press.
+const frequencyKeys = (hz: () => number, setHz: (hz: number) => void, min: number, max: number, gain?: { db: () => number; setDb: (db: number) => void }) => (event: KeyboardEvent) => handleGraphKeyDelta(event, {
+  ArrowRight: () => setHz(hz() * 1.05),
+  ArrowLeft: () => setHz(hz() / 1.05),
+  ArrowUp: () => gain ? gain.setDb(gain.db() + 0.5) : setHz(hz() * 1.05),
+  ArrowDown: () => gain ? gain.setDb(gain.db() - 0.5) : setHz(hz() / 1.05),
+  PageUp: () => setHz(hz() * 1.5),
+  PageDown: () => setHz(hz() / 1.5),
+  Home: () => setHz(min),
+  End: () => setHz(max),
+})
 
-function DiffusionNetworkReadout(props: { label: string, value: string }) {
-  return (
-    <div class="flex flex-col gap-1 text-[11px] leading-none">
-      <span class="text-muted-foreground">{props.label}</span>
-      <span class="font-mono text-amber-300">{props.value}</span>
-    </div>
-  )
-}
-
-function FilterGraph(props: {
-  params: ReverbParams
-  disabled: boolean
-  lowCutActive: boolean
-  highCutActive: boolean
-  onLowCutChange: (value: number) => void
-  onHighCutChange: (value: number) => void
-}) {
-  const lowCutX = () => 8 + clamp((props.params.lowCutHz - REVERB_LOW_CUT_HZ_MIN) / (REVERB_LOW_CUT_HZ_MAX - REVERB_LOW_CUT_HZ_MIN), 0, 1) * 46
-  const highCutX = () => 74 + clamp((props.params.highCutHz - REVERB_HIGH_CUT_HZ_MIN) / (REVERB_HIGH_CUT_HZ_MAX - REVERB_HIGH_CUT_HZ_MIN), 0, 1) * 88
-  const pointToLowCut = (x: number) => REVERB_LOW_CUT_HZ_MIN + (clamp((x - 8) / 46, 0, 1) * (REVERB_LOW_CUT_HZ_MAX - REVERB_LOW_CUT_HZ_MIN))
-  const pointToHighCut = (x: number) => REVERB_HIGH_CUT_HZ_MIN + (clamp((x - 74) / 88, 0, 1) * (REVERB_HIGH_CUT_HZ_MAX - REVERB_HIGH_CUT_HZ_MIN))
-
-  const onLowCutKeyDown = (event: KeyboardEvent) => handleGraphKeyDelta(event, {
-    ArrowRight: () => props.onLowCutChange(props.params.lowCutHz + 10),
-    ArrowUp: () => props.onLowCutChange(props.params.lowCutHz + 10),
-    ArrowLeft: () => props.onLowCutChange(props.params.lowCutHz - 10),
-    ArrowDown: () => props.onLowCutChange(props.params.lowCutHz - 10),
-    PageUp: () => props.onLowCutChange(props.params.lowCutHz + 100),
-    PageDown: () => props.onLowCutChange(props.params.lowCutHz - 100),
-    Home: () => props.onLowCutChange(REVERB_LOW_CUT_HZ_MIN),
-    End: () => props.onLowCutChange(REVERB_LOW_CUT_HZ_MAX),
-  })
-
-  const onHighCutKeyDown = (event: KeyboardEvent) => handleGraphKeyDelta(event, {
-    ArrowRight: () => props.onHighCutChange(props.params.highCutHz + 100),
-    ArrowUp: () => props.onHighCutChange(props.params.highCutHz + 100),
-    ArrowLeft: () => props.onHighCutChange(props.params.highCutHz - 100),
-    ArrowDown: () => props.onHighCutChange(props.params.highCutHz - 100),
-    PageUp: () => props.onHighCutChange(props.params.highCutHz + 1000),
-    PageDown: () => props.onHighCutChange(props.params.highCutHz - 1000),
-    Home: () => props.onHighCutChange(REVERB_HIGH_CUT_HZ_MIN),
-    End: () => props.onHighCutChange(REVERB_HIGH_CUT_HZ_MAX),
-  })
-
-  const filterPath = () => {
-    const startY = props.lowCutActive ? 42 : 30
-    const endY = props.highCutActive ? 48 : 30
-
-    const lowCurve = props.lowCutActive
-      ? `M 0 ${startY} C ${lowCutX()} ${startY} ${lowCutX()} 30 ${lowCutX() + 24} 30`
-      : 'M 0 30 L 54 30'
-
-    const highCurve = props.highCutActive
-      ? `L ${highCutX() - 22} 30 C ${highCutX()} 30 ${highCutX()} ${endY} 180 ${endY}`
-      : 'L 180 30'
-
-    return `${lowCurve} ${highCurve}`
-  }
-
-  const handles = () => [
-    ...(props.lowCutActive ? [{ label: 'Low cut frequency', x: lowCutX, y: () => 31, onDrag: (point: { x: number, y: number }) => props.onLowCutChange(pointToLowCut(point.x)), onKeyDown: onLowCutKeyDown }] : []),
-    ...(props.highCutActive ? [{ label: 'High cut frequency', x: highCutX, y: () => 32, onDrag: (point: { x: number, y: number }) => props.onHighCutChange(pointToHighCut(point.x)), onKeyDown: onHighCutKeyDown }] : []),
-  ]
+function InputFilterGraph(props: { params: ReverbParams; disabled: boolean; lowActive: boolean; highActive: boolean; onChange: (updates: Partial<ReverbParams>) => void }) {
+  const setLow = (hz: number) => props.onChange({ lowCutHz: Math.round(clamp(hz, REVERB_LOW_CUT_HZ_MIN, REVERB_LOW_CUT_HZ_MAX)) })
+  const setHigh = (hz: number) => props.onChange({ highCutHz: Math.round(clamp(hz, REVERB_HIGH_CUT_HZ_MIN, REVERB_HIGH_CUT_HZ_MAX)) })
+  const inputDbAt = (hz: number) => (props.lowActive ? reverbInputCutDb(true, props.params.lowCutHz, hz) : 0) + (props.highActive ? reverbInputCutDb(false, props.params.highCutHz, hz) : 0)
 
   return (
     <DraggableDeviceGraph
       disabled={props.disabled}
-      path={filterPath}
-      handles={handles()}
-    />
-  )
-}
-
-function SpaceGraph(props: {
-  params: ReverbParams
-  disabled: boolean
-  onSpaceChange: (updates: Pick<ReverbParams, 'size' | 'decaySec' | 'diffusion'>) => void
-}) {
-  const size = () => normalizeUnitParam(props.params.size)
-  const decay = () => clamp(props.params.decaySec / REVERB_DECAY_SEC_MAX, 0, 1)
-  const diffusion = () => normalizeUnitParam(props.params.diffusion)
-  const firstX = () => 42 + size() * 52
-  const firstY = () => 36 - diffusion() * 18
-  const secondX = () => 112 + decay() * 42
-  const secondY = () => 28 + diffusion() * 18
-  const pointToSize = (x: number) => clamp((x - 42) / 52, 0, 1)
-  const pointToDecay = (x: number) => REVERB_DECAY_SEC_MIN + (clamp((x - 112) / 42, 0, 1) * (REVERB_DECAY_SEC_MAX - REVERB_DECAY_SEC_MIN))
-  const firstPointToDiffusion = (y: number) => clamp((36 - y) / 18, 0, 1)
-  const secondPointToDiffusion = (y: number) => clamp((y - 28) / 18, 0, 1)
-
-  const updateSpace = (updates: Partial<Pick<ReverbParams, 'size' | 'decaySec' | 'diffusion'>>) => props.onSpaceChange({
-    size: props.params.size,
-    decaySec: props.params.decaySec,
-    diffusion: props.params.diffusion,
-    ...updates,
-  })
-
-  const onFirstHandleKeyDown = (event: KeyboardEvent) => handleGraphKeyDelta(event, {
-    ArrowRight: () => updateSpace({ size: props.params.size + 0.02 }),
-    ArrowLeft: () => updateSpace({ size: props.params.size - 0.02 }),
-    PageUp: () => updateSpace({ size: props.params.size + 0.1 }),
-    PageDown: () => updateSpace({ size: props.params.size - 0.1 }),
-    ArrowUp: () => updateSpace({ diffusion: props.params.diffusion + 0.02 }),
-    ArrowDown: () => updateSpace({ diffusion: props.params.diffusion - 0.02 }),
-  })
-
-  const onSecondHandleKeyDown = (event: KeyboardEvent) => handleGraphKeyDelta(event, {
-    ArrowRight: () => updateSpace({ decaySec: props.params.decaySec + 0.1 }),
-    ArrowLeft: () => updateSpace({ decaySec: props.params.decaySec - 0.1 }),
-    PageUp: () => updateSpace({ decaySec: props.params.decaySec + 1 }),
-    PageDown: () => updateSpace({ decaySec: props.params.decaySec - 1 }),
-    ArrowUp: () => updateSpace({ diffusion: props.params.diffusion + 0.02 }),
-    ArrowDown: () => updateSpace({ diffusion: props.params.diffusion - 0.02 }),
-  })
-
-  return (
-    <DraggableDeviceGraph
-      disabled={props.disabled}
-      path={() => `M 0 ${42 - size() * 12} C 38 ${28 - diffusion() * 8} 72 ${26 + size() * 10} 104 ${30 - decay() * 8} C 132 ${34 + diffusion() * 8} 152 ${40 - decay() * 8} 180 ${38 + size() * 8}`}
+      class="h-[84px]"
+      stroke="#22d3ee"
+      path={() => curvePath(inputDbAt, inputY)}
       handles={[
-        {
-          label: 'Reverb size and diffusion',
-          x: firstX,
-          y: firstY,
-          onKeyDown: onFirstHandleKeyDown,
-          onDrag: (point) => {
-            props.onSpaceChange({
-              size: pointToSize(point.x),
-              decaySec: props.params.decaySec,
-              diffusion: firstPointToDiffusion(point.y),
-            })
-          },
-        },
-        {
-          label: 'Reverb decay and diffusion',
-          x: secondX,
-          y: secondY,
-          onKeyDown: onSecondHandleKeyDown,
-          onDrag: (point) => {
-            props.onSpaceChange({
-              size: props.params.size,
-              decaySec: pointToDecay(point.x),
-              diffusion: secondPointToDiffusion(point.y),
-            })
-          },
-        },
+        ...(props.lowActive ? [{
+          label: 'Lo Cut frequency',
+          x: () => hzToX(props.params.lowCutHz),
+          y: () => CUT_CORNER_Y,
+          onDrag: (point: { x: number; y: number }) => setLow(xToHz(point.x)),
+          onKeyDown: frequencyKeys(() => props.params.lowCutHz, setLow, REVERB_LOW_CUT_HZ_MIN, REVERB_LOW_CUT_HZ_MAX),
+        }] : []),
+        ...(props.highActive ? [{
+          label: 'Hi Cut frequency',
+          x: () => hzToX(props.params.highCutHz),
+          y: () => CUT_CORNER_Y,
+          onDrag: (point: { x: number; y: number }) => setHigh(xToHz(point.x)),
+          onKeyDown: frequencyKeys(() => props.params.highCutHz, setHigh, REVERB_HIGH_CUT_HZ_MIN, REVERB_HIGH_CUT_HZ_MAX),
+        }] : []),
       ]}
     />
   )
 }
 
-function DiffusionNetworkPanel(props: {
-  params: ReverbParams
-  disabled: boolean
-  class?: string
-  highCutActive: boolean
-  lowCutActive: boolean
-  onHighCutToggle: () => void
-  onLowCutToggle: () => void
-  onSpaceChange: (updates: Pick<ReverbParams, 'size' | 'decaySec' | 'diffusion'>) => void
-  onDecayChange: (value: number) => void
-  onDiffusionChange: (value: number) => void
-  onDensityChange: (value: number) => void
-}) {
-  return (
-    <ReverbGraphSection
-      class={props.class}
-      title="Diffusion Network"
-      topControls={
-        <div class="grid grid-cols-[3rem_minmax(5.75rem,1fr)_2.9rem] gap-1">
-          <DeviceToggleButton label="High" active={props.highCutActive} disabled={props.disabled} onClick={props.onHighCutToggle} />
-          <DeviceValueStrip value={formatFrequencyWithUnit(props.params.highShelfHz)} />
-          <DeviceValueStrip value={props.params.density} />
-        </div>
-      }
-      graph={
-        <SpaceGraph
-          params={props.params}
-          disabled={props.disabled}
-          onSpaceChange={props.onSpaceChange}
-        />
-      }
-      bottomControls={
-        <div class="grid grid-cols-[3rem_minmax(7.5rem,1fr)_2.9rem] gap-1">
-          <DeviceToggleButton label="Low" active={props.lowCutActive} disabled={props.disabled} onClick={props.onLowCutToggle} />
-          <DeviceValueStrip value={formatFrequencyWithUnit(props.params.lowShelfHz)} />
-          <DeviceValueStrip value={props.params.size.toFixed(2)} />
-        </div>
-      }
-      side={
-        <div class="flex flex-col justify-center gap-4">
-          <DiffusionNetworkReadout label="Diffusion" value={formatUnitPercent(props.params.diffusion)} />
-          <DiffusionNetworkReadout label="Scale" value={formatUnitPercent(props.params.size)} />
-        </div>
-      }
-      bottomKnobs={
-        <div class="mt-auto grid shrink-0 grid-cols-[minmax(0,1fr)_4.25rem] gap-3 pb-2 pt-3">
-          <div class="-mx-2.5 flex items-center justify-between">
-            <Knob
-              class="w-12 px-0 py-1"
-              label="Decay"
-              valueLabel={formatSeconds(props.params.decaySec)}
-              value={props.params.decaySec}
-              resetValue={DEFAULT_REVERB_PARAMS.decaySec}
-              min={REVERB_DECAY_SEC_MIN}
-              max={REVERB_DECAY_SEC_MAX}
-              step={0.1}
-              unit="s"
-              disabled={props.disabled}
-              onValueChange={props.onDecayChange}
-            />
-            <Knob
-              class="w-12 px-0 py-1"
-              label="Diff"
-              valueLabel={formatUnitPercent(props.params.diffusion)}
-              value={props.params.diffusion}
-              resetValue={DEFAULT_REVERB_PARAMS.diffusion}
-              min={REVERB_UNIT_PARAM_MIN}
-              max={REVERB_UNIT_PARAM_MAX}
-              step={0.01}
-              disabled={props.disabled}
-              onValueChange={props.onDiffusionChange}
-            />
-            <Knob
-              class="w-12 px-0 py-1"
-              label="Dens"
-              valueLabel={props.params.density}
-              value={REVERB_DENSITIES.indexOf(props.params.density)}
-              resetValue={REVERB_DENSITIES.indexOf(DEFAULT_REVERB_PARAMS.density)}
-              min={0}
-              max={REVERB_DENSITIES.length - 1}
-              step={1}
-              disabled={props.disabled}
-              onValueChange={props.onDensityChange}
-            />
-          </div>
-          <div />
-        </div>
-      }
-    />
-  )
-}
+// The tail's T60 over frequency. A shelf handle sits at its frequency and at the gain it moves the edge decay by.
+function DecayGraph(props: { params: ReverbParams; disabled: boolean; onChange: (updates: Partial<ReverbParams>) => void }) {
+  const setLowHz = (hz: number) => props.onChange({ lowShelfHz: Math.round(clamp(hz, REVERB_LOW_SHELF_HZ_MIN, REVERB_LOW_SHELF_HZ_MAX)) })
+  const setHighHz = (hz: number) => props.onChange({ highShelfHz: Math.round(clamp(hz, REVERB_HIGH_SHELF_HZ_MIN, REVERB_HIGH_SHELF_HZ_MAX)) })
+  const setLowDb = (db: number) => props.onChange({ lowShelfDb: clamp(db, REVERB_SHELF_DB_MIN, REVERB_SHELF_DB_MAX) })
+  const setHighDb = (db: number) => props.onChange({ highShelfDb: clamp(db, REVERB_SHELF_DB_MIN, REVERB_SHELF_DB_MAX) })
+  const decayDbAt = (hz: number) => 20 * Math.log10(reverbDecaySec(props.params, hz) / props.params.decaySec)
 
-function EarlyReflectionsPanel(props: {
-  params: ReverbParams
-  disabled: boolean
-  class?: string
-  onSpinToggle: () => void
-  onReflectChange: (value: number) => void
-  onReflectionAmountChange: (value: number) => void
-  onModAmountChange: (value: number) => void
-  onModRateChange: (value: number) => void
-}) {
   return (
-    <DeviceSection title="Early Reflections" class={props.class}>
-      <div class="flex pb-2">
-        <DeviceToggleButton label="Spin" active={props.params.reflectionSpin} disabled={props.disabled} onClick={props.onSpinToggle} />
-      </div>
-      <div class="grid grid-cols-2 gap-1">
-        <Knob
-          class="px-1 py-1"
-          label="Reflect"
-          valueLabel={formatUnitPercent(props.params.reflections)}
-          value={props.params.reflections}
-          resetValue={DEFAULT_REVERB_PARAMS.reflections}
-          min={REVERB_UNIT_PARAM_MIN}
-          max={REVERB_UNIT_PARAM_MAX}
-          step={0.01}
-          disabled={props.disabled}
-          onValueChange={props.onReflectChange}
-        />
-        <Knob
-          class="px-1 py-1"
-          label="Shape"
-          valueLabel={formatUnitPercent(props.params["reflectionShape"])}
-          value={props.params["reflectionShape"]}
-          resetValue={DEFAULT_REVERB_PARAMS["reflectionShape"]}
-          min={REVERB_UNIT_PARAM_MIN}
-          max={REVERB_UNIT_PARAM_MAX}
-          step={0.01}
-          disabled={props.disabled}
-          onValueChange={props.onReflectionAmountChange}
-        />
-        <Knob
-          class="px-1 py-1"
-          label="Amount"
-          valueLabel={formatReflectionMilliseconds(props.params.reflectionModAmountMs)}
-          value={props.params.reflectionModAmountMs}
-          resetValue={DEFAULT_REVERB_PARAMS.reflectionModAmountMs}
-          min={REVERB_REFLECTION_MOD_AMOUNT_MS_MIN}
-          max={REVERB_REFLECTION_MOD_AMOUNT_MS_MAX}
-          step={0.1}
-          unit="ms"
-          disabled={props.disabled}
-          onValueChange={props.onModAmountChange}
-        />
-        <Knob
-          class="px-1 py-1"
-          label="Rate"
-          valueLabel={formatHertz(props.params.reflectionModRateHz)}
-          value={props.params.reflectionModRateHz}
-          resetValue={DEFAULT_REVERB_PARAMS.reflectionModRateHz}
-          min={REVERB_REFLECTION_MOD_RATE_HZ_MIN}
-          max={REVERB_REFLECTION_MOD_RATE_HZ_MAX}
-          step={0.01}
-          logarithmic
-          unit="Hz"
-          disabled={props.disabled}
-          onValueChange={props.onModRateChange}
-        />
-      </div>
-    </DeviceSection>
+    <DraggableDeviceGraph
+      disabled={props.disabled}
+      class={cn('h-[84px]', props.params.freeze && 'opacity-50')}
+      stroke="#22d3ee"
+      path={() => curvePath(decayDbAt, decayY)}
+      handles={[
+        ...(props.params.lowShelfOn ? [{
+          label: 'Low shelf frequency and gain',
+          x: () => hzToX(props.params.lowShelfHz),
+          y: () => decayY(props.params.lowShelfDb),
+          onDrag: (point: { x: number; y: number }) => props.onChange({ lowShelfHz: Math.round(clamp(xToHz(point.x), REVERB_LOW_SHELF_HZ_MIN, REVERB_LOW_SHELF_HZ_MAX)), lowShelfDb: yToShelfDb(point.y) }),
+          onKeyDown: frequencyKeys(() => props.params.lowShelfHz, setLowHz, REVERB_LOW_SHELF_HZ_MIN, REVERB_LOW_SHELF_HZ_MAX, { db: () => props.params.lowShelfDb, setDb: setLowDb }),
+        }] : []),
+        ...(props.params.highShelfOn ? [{
+          label: 'High shelf frequency and gain',
+          x: () => hzToX(props.params.highShelfHz),
+          y: () => decayY(props.params.highShelfDb),
+          onDrag: (point: { x: number; y: number }) => props.onChange({ highShelfHz: Math.round(clamp(xToHz(point.x), REVERB_HIGH_SHELF_HZ_MIN, REVERB_HIGH_SHELF_HZ_MAX)), highShelfDb: yToShelfDb(point.y) }),
+          onKeyDown: frequencyKeys(() => props.params.highShelfHz, setHighHz, REVERB_HIGH_SHELF_HZ_MIN, REVERB_HIGH_SHELF_HZ_MAX, { db: () => props.params.highShelfDb, setDb: setHighDb }),
+        }] : []),
+      ]}
+    >
+      <line x1="0" x2={GRAPH_WIDTH} y1={decayY(0)} y2={decayY(0)} stroke="#525252" stroke-width="1" vector-effect="non-scaling-stroke" />
+    </DraggableDeviceGraph>
   )
 }
 
 export default function Reverb(props: ReverbProps) {
-  const automationRange = (parameterId: string) => props.automationRangesByParameterId?.get(parameterId)
-  const touchAutomation = (parameterId: string) => props.onAutomationParameterTouch?.(parameterId)
-
-  const updateWet = (value: number) => {
-    const wet = normalizeWet(value)
-
-    if (wet !== props.params.wet) {
-      props.onManualAutomationOverride?.('reverb.wet')
-      props.onChange({ wet })
-    }
-  }
-
-  const updateDecay = (value: number) => {
-    const decaySec = normalizeDecay(value)
-
-    if (decaySec !== props.params.decaySec) props.onChange({ decaySec })
-  }
-
-  const updatePreDelay = (value: number) => {
-    const preDelayMs = normalizePreDelay(value)
-
-    if (preDelayMs !== props.params.preDelayMs) {
-      props.onManualAutomationOverride?.('reverb.preDelayMs')
-      props.onChange({ preDelayMs })
-    }
-  }
-
-  const updateReflections = (value: number) => {
-    const reflections = normalizeUnitParam(value)
-
-    if (reflections !== props.params.reflections) props.onChange({ reflections })
-  }
-
-  const updateReflectionAmount = (value: number) => {
-    const reflectionAmount = normalizeUnitParam(value)
-
-    if (reflectionAmount !== props.params["reflectionShape"]) props.onChange({ ["reflectionShape"]: reflectionAmount })
-  }
-
-  const updateReflectionModAmount = (value: number) => {
-    const reflectionModAmountMs = normalizeReflectionModAmount(value)
-
-    if (reflectionModAmountMs !== props.params.reflectionModAmountMs) props.onChange({ reflectionModAmountMs })
-  }
-
-  const updateReflectionModRate = (value: number) => {
-    const reflectionModRateHz = normalizeReflectionModRate(value)
-
-    if (reflectionModRateHz !== props.params.reflectionModRateHz) props.onChange({ reflectionModRateHz })
-  }
-
-  const updateDiffuse = (value: number) => {
-    const diffuse = normalizeUnitParam(value)
-
-    if (diffuse !== props.params.diffuse) props.onChange({ diffuse })
-  }
-
-  const updateDiffusion = (value: number) => {
-    const diffusion = normalizeUnitParam(value)
-
-    if (diffusion !== props.params.diffusion) props.onChange({ diffusion })
-  }
-
-  const updateDensity = (value: number) => {
-    const density = REVERB_DENSITIES[Math.round(clamp(value, 0, REVERB_DENSITIES.length - 1))]
-
-    if (density !== undefined && density !== props.params.density) props.onChange({ density })
-  }
-
-  const updateLowCut = (value: number) => {
-    const lowCutHz = normalizeLowCut(value)
-
-    if (lowCutHz !== props.params.lowCutHz) props.onChange({ lowCutHz })
-  }
-
-  const updateHighCut = (value: number) => {
-    const highCutHz = normalizeHighCut(value)
-
-    if (highCutHz !== props.params.highCutHz) props.onChange({ highCutHz })
-  }
-
-  const updateStereoWidth = (value: number) => {
-    const stereoWidth = normalizeStereoWidth(value)
-
-    if (stereoWidth !== props.params.stereoWidth) {
-      props.onManualAutomationOverride?.('reverb.stereoWidth')
-      props.onChange({ stereoWidth })
-    }
-  }
-
-  const updateSpace = (updates: Pick<ReverbParams, 'size' | 'decaySec' | 'diffusion'>) => {
-    const size = normalizeUnitParam(updates.size)
-    const decaySec = normalizeDecay(updates.decaySec)
-    const diffusion = normalizeUnitParam(updates.diffusion)
-
-    if (size === props.params.size && decaySec === props.params.decaySec && diffusion === props.params.diffusion) return
-    props.onChange({ size, decaySec, diffusion })
-  }
-
+  const off = () => !props.params.enabled
   const lowCutActive = () => props.params.lowCutHz > REVERB_LOW_CUT_HZ_MIN
   const highCutActive = () => props.params.highCutHz < REVERB_HIGH_CUT_HZ_MAX
-  const toggleLowCut = () => updateLowCut(lowCutActive() ? REVERB_LOW_CUT_HZ_MIN : LOW_CUT_TOGGLE_HZ)
-  const toggleHighCut = () => updateHighCut(highCutActive() ? REVERB_HIGH_CUT_HZ_MAX : HIGH_CUT_TOGGLE_HZ)
-  const toggleLowShelf = () => props.onChange({ lowShelfOn: !props.params.lowShelfOn })
-  const toggleHighShelf = () => props.onChange({ highShelfOn: !props.params.highShelfOn })
-  const toggleReflectionSpin = () => props.onChange({ reflectionSpin: !props.params.reflectionSpin })
+  const change = (updates: Partial<ReverbParams>) => props.onChange(updates)
 
   return (
     <EffectShell
@@ -535,127 +197,93 @@ export default function Reverb(props: ReverbProps) {
       enabled={props.params.enabled}
       onToggleEnabled={props.onToggleEnabled}
       onReset={props.onReset}
-      class={cn('w-[637px] min-w-[637px]', props.class)}
+      class={cn('w-[720px] min-w-[720px]', props.class)}
     >
-      <div class={cn('grid min-h-0 flex-1 grid-cols-[115px_12px_320px_2px_112px_2px_56px] items-stretch px-2 py-3', !props.params.enabled && 'opacity-70')}>
-        <ReverbGraphSection
-          class="col-start-1"
-          title="Input Processing"
-          topControls={
-            <div class="grid grid-cols-2 gap-1">
-              <DeviceToggleButton label="Lo Cut" active={lowCutActive()} disabled={!props.params.enabled} onClick={toggleLowCut} />
-              <DeviceToggleButton label="Hi Cut" active={highCutActive()} disabled={!props.params.enabled} onClick={toggleHighCut} />
-            </div>
-          }
-          graph={
-            <FilterGraph
-              params={props.params}
-              disabled={!props.params.enabled}
-              lowCutActive={lowCutActive()}
-              highCutActive={highCutActive()}
-              onLowCutChange={updateLowCut}
-              onHighCutChange={updateHighCut}
-            />
-          }
-          bottomControls={
-            <div class="grid grid-cols-2 gap-1">
-              <DeviceValueStrip value={formatFrequencyWithUnit(props.params.lowCutHz)} />
-              <DeviceValueStrip value={formatFrequencyWithUnit(props.params.highCutHz)} />
-            </div>
-          }
-          bottomKnobs={
-            <div class="mt-auto w-24 self-center pb-2 pt-3">
-              <Knob
-                class="px-1 py-1"
-                label="Predelay"
-                valueLabel={formatMilliseconds(props.params.preDelayMs)}
-                value={props.params.preDelayMs}
-                resetValue={DEFAULT_REVERB_PARAMS.preDelayMs}
-                min={REVERB_PRE_DELAY_MS_MIN}
-                max={REVERB_PRE_DELAY_MS_MAX}
-                step={1}
-                unit="ms"
-                disabled={!props.params.enabled}
-                automationRange={automationRange('reverb.preDelayMs')}
-                automated={!!automationRange('reverb.preDelayMs')}
-                onAutomationSelect={() => touchAutomation('reverb.preDelayMs')}
-                onValueChange={updatePreDelay}
-              />
-            </div>
-          }
-        />
+      <div class={cn('grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_4.5rem] gap-x-2 px-3 py-2', off() && 'opacity-70')}>
+        <div class="grid min-h-0 min-w-0 grid-rows-[1fr_auto] gap-2">
+          <div class="grid min-h-0 grid-cols-[9.5rem_7rem_15.5rem_4.75rem] gap-2">
+            <DeviceSection title="Input Filter">
+              <div class="grid grid-cols-2 gap-1 pb-1">
+                <DeviceToggleButton label="Lo Cut" active={lowCutActive()} disabled={off()} onClick={() => change({ lowCutHz: lowCutActive() ? REVERB_LOW_CUT_HZ_MIN : LOW_CUT_START_HZ })} />
+                <DeviceToggleButton label="Hi Cut" active={highCutActive()} disabled={off()} onClick={() => change({ highCutHz: highCutActive() ? REVERB_HIGH_CUT_HZ_MAX : HIGH_CUT_START_HZ })} />
+              </div>
+              <InputFilterGraph params={props.params} disabled={off()} lowActive={lowCutActive()} highActive={highCutActive()} onChange={change} />
+              <div class="grid grid-cols-2 gap-1 pt-1">
+                <DeviceValueStrip value={formatDeviceFrequency(props.params.lowCutHz, 2)} />
+                <DeviceValueStrip value={formatDeviceFrequency(props.params.highCutHz, 2)} />
+              </div>
+            </DeviceSection>
 
-        <DiffusionNetworkPanel
-          class="col-start-3"
-          params={props.params}
-          disabled={!props.params.enabled}
-          highCutActive={props.params.highShelfOn}
-          lowCutActive={props.params.lowShelfOn}
-          onHighCutToggle={toggleHighShelf}
-          onLowCutToggle={toggleLowShelf}
-          onSpaceChange={updateSpace}
-          onDecayChange={updateDecay}
-          onDiffusionChange={updateDiffusion}
-          onDensityChange={updateDensity}
-        />
+            <DeviceSection title="Early Reflections">
+              <DeviceToggleButton label="Spin" active={props.params.reflectionSpin} disabled={off()} onClick={() => change({ reflectionSpin: !props.params.reflectionSpin })} />
+              <div class="grid grid-cols-2 justify-items-center">
+                <Knob size={26} label="Amount" ariaLabel="Early Reflections Amount" valueLabel={formatDeviceMilliseconds(props.params.reflectionModAmountMs, 1)} value={props.params.reflectionModAmountMs} resetValue={defaults.reflectionModAmountMs} min={REVERB_REFLECTION_MOD_AMOUNT_MS_MIN} max={REVERB_REFLECTION_MOD_AMOUNT_MS_MAX} step={0.1} disabled={off() || !props.params.reflectionSpin} onValueChange={(reflectionModAmountMs) => change({ reflectionModAmountMs })} />
+                <Knob size={26} label="Rate" ariaLabel="Early Reflections Rate" valueLabel={hertz(props.params.reflectionModRateHz)} value={props.params.reflectionModRateHz} resetValue={defaults.reflectionModRateHz} min={REVERB_REFLECTION_MOD_RATE_HZ_MIN} max={REVERB_REFLECTION_MOD_RATE_HZ_MAX} step={0.01} logarithmic disabled={off() || !props.params.reflectionSpin} onValueChange={(reflectionModRateHz) => change({ reflectionModRateHz })} />
+                <Knob class="col-span-2" size={26} label="Shape" valueLabel={percent(props.params['reflectionShape'])} value={props.params['reflectionShape']} resetValue={defaults['reflectionShape']} min={REVERB_UNIT_PARAM_MIN} max={REVERB_UNIT_PARAM_MAX} step={0.01} disabled={off()} onValueChange={(value) => change({ ['reflectionShape']: value })} />
+              </div>
+            </DeviceSection>
 
-        <EarlyReflectionsPanel
-          class="col-start-5"
-          params={props.params}
-          disabled={!props.params.enabled}
-          onSpinToggle={toggleReflectionSpin}
-          onReflectChange={updateReflections}
-          onReflectionAmountChange={updateReflectionAmount}
-          onModAmountChange={updateReflectionModAmount}
-          onModRateChange={updateReflectionModRate}
-        />
+            <DeviceSection title="Diffusion Network">
+              <div class="grid min-h-0 grid-cols-[minmax(0,1fr)_3.75rem] gap-2">
+                <div class="flex min-w-0 flex-col gap-1">
+                  <div class="grid grid-cols-[2.5rem_minmax(0,1fr)_minmax(0,1fr)] gap-1">
+                    <DeviceToggleButton label="High" ariaLabel="High shelf" active={props.params.highShelfOn} disabled={off()} onClick={() => change({ highShelfOn: !props.params.highShelfOn })} />
+                    <DeviceValueStrip value={formatDeviceFrequency(props.params.highShelfHz, 2)} />
+                    <DeviceValueStrip value={formatDeviceDb(props.params.highShelfDb, 1, true)} />
+                  </div>
+                  <div class="relative">
+                    <DecayGraph params={props.params} disabled={off()} onChange={change} />
+                    <Show when={props.params.freeze}>
+                      <span class="pointer-events-none absolute left-1 top-1 text-2xs font-semibold uppercase leading-none text-cyan-300">Frozen</span>
+                    </Show>
+                  </div>
+                  <div class="grid grid-cols-[2.5rem_minmax(0,1fr)_minmax(0,1fr)] gap-1">
+                    <DeviceToggleButton label="Low" ariaLabel="Low shelf" active={props.params.lowShelfOn} disabled={off()} onClick={() => change({ lowShelfOn: !props.params.lowShelfOn })} />
+                    <DeviceValueStrip value={formatDeviceFrequency(props.params.lowShelfHz, 2)} />
+                    <DeviceValueStrip value={formatDeviceDb(props.params.lowShelfDb, 1, true)} />
+                  </div>
+                </div>
+                <div class="flex items-center justify-center">
+                  <Knob size={26} label="Diffusion" valueLabel={percent(props.params.diffusion)} value={props.params.diffusion} resetValue={defaults.diffusion} min={REVERB_UNIT_PARAM_MIN} max={REVERB_UNIT_PARAM_MAX} step={0.01} disabled={off()} onValueChange={(diffusion) => change({ diffusion })} />
+                </div>
+              </div>
+            </DeviceSection>
 
-        <div class="col-start-7 flex min-h-0 min-w-0 translate-x-[7px] flex-col bg-transparent">
-          <div class="flex min-h-0 flex-1 flex-col justify-end gap-5">
-            <Knob
-              class="w-14 px-0 py-1"
-              label="Diffuse"
-              valueLabel={formatUnitPercent(props.params.diffuse)}
-              value={props.params.diffuse}
-              resetValue={DEFAULT_REVERB_PARAMS.diffuse}
-              min={REVERB_UNIT_PARAM_MIN}
-              max={REVERB_UNIT_PARAM_MAX}
-              step={0.01}
-              disabled={!props.params.enabled}
-              onValueChange={updateDiffuse}
-            />
-            <Knob
-              class="w-14 px-0 py-1"
-              label="Width"
-              valueLabel={formatStereoWidth(props.params.stereoWidth)}
-              value={props.params.stereoWidth}
-              resetValue={DEFAULT_REVERB_PARAMS.stereoWidth}
-              min={REVERB_STEREO_WIDTH_MIN}
-              max={REVERB_STEREO_WIDTH_MAX}
-              step={0.01}
-              disabled={!props.params.enabled}
-              automationRange={automationRange('reverb.stereoWidth')}
-              automated={!!automationRange('reverb.stereoWidth')}
-              onAutomationSelect={() => touchAutomation('reverb.stereoWidth')}
-              onValueChange={updateStereoWidth}
-            />
-            <Knob
-              class="w-14 px-0 py-1"
-              label="Dry/Wet"
-              valueLabel={formatPercent(props.params.wet)}
-              value={props.params.wet}
-              resetValue={DEFAULT_REVERB_PARAMS.wet}
-              min={REVERB_WET_MIN}
-              max={REVERB_WET_MAX}
-              step={0.01}
-              disabled={!props.params.enabled}
-              automationRange={automationRange('reverb.wet')}
-              automated={!!automationRange('reverb.wet')}
-              onAutomationSelect={() => touchAutomation('reverb.wet')}
-              onValueChange={updateWet}
-            />
+            <section class="flex min-h-0 min-w-0 flex-col gap-1 pt-1" aria-label="Chorus">
+              <DeviceToggleButton label="Chorus" ariaLabel="Chorus on" active={props.params.chorus} disabled={off()} onClick={() => change({ chorus: !props.params.chorus })} />
+              <Knob size={26} label="Amount" ariaLabel="Chorus Amount" valueLabel={formatDeviceMilliseconds(props.params.chorusAmountMs, 2)} value={props.params.chorusAmountMs} resetValue={defaults.chorusAmountMs} min={REVERB_CHORUS_AMOUNT_MS_MIN} max={REVERB_CHORUS_AMOUNT_MS_MAX} step={0.01} disabled={off() || !props.params.chorus} onValueChange={(chorusAmountMs) => change({ chorusAmountMs })} />
+              <Knob size={26} label="Rate" ariaLabel="Chorus Rate" valueLabel={hertz(props.params.chorusRateHz)} value={props.params.chorusRateHz} resetValue={defaults.chorusRateHz} min={REVERB_CHORUS_RATE_HZ_MIN} max={REVERB_CHORUS_RATE_HZ_MAX} step={0.01} logarithmic disabled={off() || !props.params.chorus} onValueChange={(chorusRateHz) => change({ chorusRateHz })} />
+            </section>
           </div>
+
+          <section aria-label="Global" data-frozen={props.params.freeze ? 'true' : 'false'} class={cn('flex items-center justify-between gap-2 border border-transparent bg-muted/40 px-2', props.params.freeze && 'border-cyan-400')}>
+            <AutomatedKnob size={26} label="Predelay" valueLabel={formatDeviceMilliseconds(props.params.preDelayMs, 0)} value={props.params.preDelayMs} resetValue={defaults.preDelayMs} min={REVERB_PRE_DELAY_MS_MIN} max={REVERB_PRE_DELAY_MS_MAX} step={1} disabled={off()} parameterId="reverb.preDelayMs" automation={props} onValueChange={(preDelayMs) => change({ preDelayMs })} />
+            <div class="flex w-16 flex-col gap-1">
+              <span class="text-2xs leading-none text-muted-foreground">Smooth</span>
+              <ChoiceMenu label="Smooth" choices={SMOOTH_CHOICES} value={props.params.smooth} disabled={off()} onSelect={(smooth) => change({ smooth })} />
+            </div>
+            <Knob size={26} label="Size" valueLabel={percent(props.params.size)} value={props.params.size} resetValue={defaults.size} min={REVERB_UNIT_PARAM_MIN} max={REVERB_UNIT_PARAM_MAX} step={0.01} disabled={off()} onValueChange={(size) => change({ size })} />
+            <Knob size={26} label="Decay" valueLabel={seconds(props.params.decaySec)} value={props.params.decaySec} resetValue={defaults.decaySec} min={REVERB_DECAY_SEC_MIN} max={REVERB_DECAY_SEC_MAX} step={0.05} disabled={off()} onValueChange={(decaySec) => change({ decaySec })} />
+            <div class="flex w-20 flex-col gap-1">
+              <DeviceToggleButton label="Freeze" active={props.params.freeze} disabled={off()} onClick={() => change({ freeze: !props.params.freeze })} />
+              <div class="grid grid-cols-2 gap-1">
+                <DeviceToggleButton label="Flat" ariaLabel="Freeze Flat" active={props.params.flat} disabled={off() || !props.params.freeze} onClick={() => change({ flat: !props.params.flat })} />
+                <DeviceToggleButton label="Cut" ariaLabel="Freeze Cut" active={props.params.cut} disabled={off() || !props.params.freeze} onClick={() => change({ cut: !props.params.cut })} />
+              </div>
+            </div>
+            <AutomatedKnob size={26} label="Stereo" valueLabel={degrees(props.params.stereoWidth)} value={props.params.stereoWidth} resetValue={defaults.stereoWidth} min={REVERB_STEREO_WIDTH_MIN} max={REVERB_STEREO_WIDTH_MAX} step={1} disabled={off()} parameterId="reverb.stereoWidth" automation={props} onValueChange={(stereoWidth) => change({ stereoWidth })} />
+            <div class="flex w-16 flex-col gap-1">
+              <span class="text-2xs leading-none text-muted-foreground">Density</span>
+              <ChoiceMenu label="Density" choices={DENSITY_CHOICES} value={props.params.density} disabled={off()} onSelect={(density) => change({ density })} />
+            </div>
+          </section>
         </div>
+
+        <section class="flex min-h-0 flex-col items-center justify-around border-l border-border pl-2" aria-label="Output">
+          <Knob size={32} label="Reflect" valueLabel={percent(props.params.reflections)} value={props.params.reflections} resetValue={defaults.reflections} min={REVERB_UNIT_PARAM_MIN} max={REVERB_UNIT_PARAM_MAX} step={0.01} disabled={off()} onValueChange={(reflections) => change({ reflections })} />
+          <Knob size={32} label="Diffuse" valueLabel={percent(props.params.diffuse)} value={props.params.diffuse} resetValue={defaults.diffuse} min={REVERB_UNIT_PARAM_MIN} max={REVERB_UNIT_PARAM_MAX} step={0.01} disabled={off()} onValueChange={(diffuse) => change({ diffuse })} />
+          <AutomatedKnob size={32} label="Dry/Wet" valueLabel={percent(props.params.wet)} value={props.params.wet} resetValue={defaults.wet} min={REVERB_WET_MIN} max={REVERB_WET_MAX} step={0.01} disabled={off()} parameterId="reverb.wet" automation={props} onValueChange={(wet) => change({ wet })} />
+        </section>
       </div>
     </EffectShell>
   )

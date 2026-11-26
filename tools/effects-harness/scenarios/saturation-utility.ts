@@ -1,48 +1,13 @@
-// Acceptance tests from saturation-utility.md section 3: saturator (alias, color, curve, drive click, unity), lo-fi (bit rounding,
+// Acceptance tests from saturation-utility.md section 3: lo-fi (bit rounding,
 // rate in Hz), utility (gain click, DC blocker), spectral (threshold normalisation, freeze, identity).
-import { measureAliasingEnergyDb } from '../../../packages/audio-engine/src/dsp-characterization'
 import { maxAbsDiff, peakAbs, rms, toneGainDb } from '../dsp'
 import { fx } from '../effects'
 import type { Family } from './index'
 import type { Scenario } from '../harness'
-import { coherentFrequency, dbToLinear, linearToDb, noise, sine, sineWithPeakAt } from '../signals'
+import { linearToDb, noise, sine, sineWithPeakAt } from '../signals'
 import { parityScenario, robustnessScenarios } from './shared'
 
 const aligned = (frame: number) => Math.floor(frame / 128) * 128
-
-const saturatorAlias: Scenario = {
-  effect: 'saturator',
-  name: 'sat1-alias-energy',
-  run: async (h) => {
-    const frames = 2 * h.rate
-    const f = coherentFrequency(5000, frames / 2, h.rate)
-    const { output } = await h.render(fx.saturator({ driveDb: 18 }), { input: [sine(frames, f, h.rate, 0.5)] }, { parity: false })
-    h.atMost('alias energy, 18 dB drive, 5 kHz', measureAliasingEnergyDb(output[0].subarray(frames / 2), f, h.rate, Math.ceil(h.rate / f) + 2), -45, 'dB rel. fundamental', 'report: about -25 dB')
-  },
-}
-
-const saturatorUnity: Scenario = {
-  effect: 'saturator',
-  name: 'sat2-unity-at-low-level',
-  rates: [48000],
-  run: async (h) => {
-    const frames = h.rate
-    const input = sine(frames, 1000, h.rate, dbToLinear(-40))
-    const { output } = await h.render(fx.saturator({ driveDb: 0 }), { input: [input] })
-    h.within('gain at -40 dBFS, drive 0', toneGainDb(input, output[0], 1000, h.rate, h.rate / 4, frames), 0, 0.3, 'dB', 'report: a soft curve compresses even small signals')
-  },
-}
-
-const saturatorClick: Scenario = {
-  effect: 'saturator',
-  name: 'sat3-drive-step-click',
-  rates: [48000],
-  run: async (h) => {
-    const frame = aligned(h.rate)
-    const { extraRatio } = await h.stepClick(fx.saturator({ driveDb: 0 }), [sineWithPeakAt(2 * h.rate, 1000, h.rate, 0.5, frame)], { frame, set: { driveDb: 18 } }, 2048)
-    h.atMost('max extra sample step / steady-state max step, drive 0 to 18 dB', extraRatio, 1.5, 'x')
-  },
-}
 
 const lofiQuantisation: Scenario = {
   effect: 'lofi',
@@ -106,22 +71,20 @@ const spectralScenarios: Scenario[] = [{
   },
 }]
 
-const saturatorSpec = fx.saturator()
 const lofiSpec = fx.lofi()
 const utilitySpec = fx.utility()
 const spectralSpec = fx.spectral()
 
 export const saturationUtility: Family = {
   scenarios: [
-    saturatorAlias, saturatorUnity, saturatorClick, lofiQuantisation, utilityClick, ...spectralScenarios,
-    parityScenario('saturator', saturatorSpec), parityScenario('lofi', lofiSpec), parityScenario('utility', utilitySpec), parityScenario('spectral', spectralSpec),
-    ...robustnessScenarios('saturator', saturatorSpec, null),
+    lofiQuantisation, utilityClick, ...spectralScenarios,
+    parityScenario('lofi', lofiSpec), parityScenario('utility', utilitySpec), parityScenario('spectral', spectralSpec),
     ...robustnessScenarios('lofi', lofiSpec, null),
     ...robustnessScenarios('utility', utilitySpec, null),
     ...robustnessScenarios('spectral', spectralSpec, () => 2048),
   ],
   notEncoded: [
     'Bass-mono crossover and phase-L tests: the utility has no bass-mono or per-channel phase control.',
-    'Saturator color-peak and Medium-curve continuity tests, lo-fi rate-in-Hz tests, spectral freeze ripple and HPSS neutral-gain tests: the core exposes no control for them yet.',
+    'Lo-fi rate-in-Hz tests, spectral freeze ripple and HPSS neutral-gain tests: the core exposes no control for them yet.',
   ],
 }

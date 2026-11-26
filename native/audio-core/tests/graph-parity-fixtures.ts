@@ -1128,6 +1128,7 @@ const modulationVariants: readonly ModulationVariant[] = [
   autoPanVariant('wander-half-depth', { waveform: 'wander', rateHz: 9, depth: 0.5, 'shape': 0.9, phase: 0.4 }, 96_000),
   autoPanVariant('saw-quarter-phase', { waveform: 'sawUp', rateHz: 5, stereoPhase: 0.25 }),
 ]
+
 const encodeModulationState = (fixture: PortableLegacyModulationFixture) => {
   if (fixture.kind === 'chorus') return encodeChorusProcessorState(fixture.state)
 

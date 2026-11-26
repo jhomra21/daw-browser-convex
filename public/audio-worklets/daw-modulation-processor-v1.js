@@ -7,6 +7,7 @@
 // free-runs from the first frame at 120 bpm (the core's own fallback when its transport carries no tempo) instead of
 // locking to the bar. Where the shared engine plays the project the core does lock it.
 // Continuous controls are AudioParams named kind.key; when a block carries no array for one, the configured state's value is used.
+/* oxlint-disable anti-slop/no-shape-in-symbol-names -- lfoShape, shape and shaped keep the names of the core kernels and of the contract's Shape control */
 const f = Math.fround
 
 const KINDS = new Set(['chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble'])
@@ -38,7 +39,7 @@ const DIVISION_COUNT = 16
 const DEFAULT_TEMPO_BPM = 120
 const BEATS = [8, 4, 3, 2, 1.5, 1, 2 / 3, 0.75, 0.5, 1 / 3, 0.375, 0.25, 1 / 6, 0.1875, 0.125, 1 / 12].map(f)
 const DENORMAL_FLOOR = f(1e-19)
-const TWO_PI = f(6.2831853071795864769)
+const TWO_PI = f(6.283185307179586)
 const SMOOTH_MS = 12
 const CONTROL_FRAMES = 8
 
@@ -52,7 +53,7 @@ const MAXIMUM_CHORUS_LINE_MS = 40.5
 const MINIMUM_LOOP_FRAMES = 2
 const BBD_STAGES = 1024
 const MAXIMUM_ENSEMBLE_LINE_MS = 46
-const VOICE_GAIN = f(0.57735026918962576451)
+const VOICE_GAIN = f(0.5773502691896258)
 const LIMITER_KNEE = f(0.25)
 const LIMITER_CEILING = f(0.5)
 const MAXIMUM_STAGES = 12
@@ -688,7 +689,7 @@ const logGamma = (x) => {
 // Average of the shaped unipolar LFO over a cycle: the sine's is the Beta-function integral, the stepped square only
 // visits 0 and 1, the other shapes are uniform on [0, 1].
 const meanShaped = (waveform, exponent) => {
-  if (waveform === 0) return f(f(Math.exp(f(f(logGamma(f(exponent + 0.5))) - f(logGamma(f(exponent + 1)))))) * f(0.56418958354775628695))
+  if (waveform === 0) return f(f(Math.exp(f(f(logGamma(f(exponent + 0.5))) - f(logGamma(f(exponent + 1)))))) * f(0.5641895835477563))
 
   if (waveform === SQUARE) return 0.5
 
@@ -810,7 +811,7 @@ class DawModulationProcessor extends AudioWorkletProcessor {
     this.processorKind = KINDS.has(requestedKind) ? requestedKind : null
     this.params = this.processorKind ? PARAMS[this.processorKind] : []
     this.names = this.params.map(([key]) => this.processorKind + '.' + key)
-    this.sources = new Array(this.params.length)
+    this.sources = Array.from({ length: this.params.length })
     this.fallbacks = this.params.map(([, defaultValue]) => defaultValue)
     this.values = Object.fromEntries(this.params.map(([key, defaultValue]) => [key, f(defaultValue)]))
     this.revision = -1

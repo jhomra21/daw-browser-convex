@@ -40,6 +40,8 @@ export * from './eq-design'
 
 export * from './audio-effect-param-versions'
 
+export { reverbDecaySec, reverbInputCutDb } from './reverb-decay'
+
 export * from './export-audio-formats'
 
 export * from './instrument-params'

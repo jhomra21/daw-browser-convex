@@ -160,7 +160,7 @@ const spectral = envelope(z.object({
   mode: z.enum(['freeze', 'gate', 'morph', 'shift-blur', 'hpss', 'noise-reduce']),
   freeze: finiteNumber, gateThresholdDb: finiteNumber, gateAttackMs: finiteNumber,
   gateReleaseMs: finiteNumber, morph: finiteNumber, binShift: finiteNumber, blur: finiteNumber,
-  harmonicPercussiveBalance: finiteNumber, noiseReduction: finiteNumber, profileLearn: finiteNumber,
+  harmonicPercussiveBalance: finiteNumber, noiseReduction: finiteNumber, noiseFloorDb: finiteNumber, profileLearn: finiteNumber,
   mix: finiteNumber,
 }).strict())
 

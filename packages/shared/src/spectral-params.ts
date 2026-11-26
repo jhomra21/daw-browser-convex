@@ -24,6 +24,9 @@ export type SpectralParams = {
   blur: number
   harmonicPercussiveBalance: number
   noiseReduction: number
+  /** The lowest gain Noise Reduce lets a bin reach, in dB. */
+  noiseFloorDb: number
+  /** Noise Reduce Learn: any value above 0 captures the noise profile; the lane is a toggle. */
   profileLearn: number
   mix: number
 }
@@ -52,6 +55,7 @@ export const createDefaultSpectralParams = (): SpectralParams => ({
   blur: 0,
   harmonicPercussiveBalance: 0,
   noiseReduction: 0,
+  noiseFloorDb: -30,
   profileLearn: 0,
   mix: 1,
 })
@@ -96,6 +100,7 @@ export const normalizeSpectralParamsEnvelope = (value: JsonValue): SpectralParam
       blur: numberValue(state.blur, defaults.blur, 0, 1),
       harmonicPercussiveBalance: numberValue(state.harmonicPercussiveBalance, defaults.harmonicPercussiveBalance, -1, 1),
       noiseReduction: numberValue(state.noiseReduction, defaults.noiseReduction, 0, 1),
+      noiseFloorDb: numberValue(state.noiseFloorDb, defaults.noiseFloorDb, -60, -6),
       profileLearn: numberValue(state.profileLearn, defaults.profileLearn, 0, 1),
       mix: numberValue(state.mix, defaults.mix, 0, 1),
     },

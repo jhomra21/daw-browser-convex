@@ -593,6 +593,7 @@ const mapSpectral = (payload: EffectChange<'spectral' | 'master-spectral'>) => {
       { parameterId: 'spectral.blur', from: from.blur, to: to.blur },
       { parameterId: 'spectral.harmonicPercussiveBalance', from: from.harmonicPercussiveBalance, to: to.harmonicPercussiveBalance },
       { parameterId: 'spectral.noiseReduction', from: from.noiseReduction, to: to.noiseReduction },
+      { parameterId: 'spectral.noiseFloorDb', from: from.noiseFloorDb, to: to.noiseFloorDb },
       { parameterId: 'spectral.profileLearn', from: from.profileLearn, to: to.profileLearn },
       { parameterId: 'spectral.mix', from: from.mix, to: to.mix },
     ],

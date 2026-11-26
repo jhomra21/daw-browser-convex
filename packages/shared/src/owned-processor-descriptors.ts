@@ -29,7 +29,7 @@ export const OWNED_PROCESSOR_PARAMETER_IDS = {
   tremolo: ['tremolo.rateHz', 'tremolo.depth', 'tremolo.shape', 'tremolo.phase', 'tremolo.stereoPhase'],
   autopan: ['autopan.rateHz', 'autopan.depth', 'autopan.shape', 'autopan.phase', 'autopan.stereoPhase'],
   ensemble: ['ensemble.delayMs', 'ensemble.depthMs', 'ensemble.rateHz', 'ensemble.spread', 'ensemble.mix', 'ensemble.fastDepthMs', 'ensemble.fastRateHz', 'ensemble.safeBassHz', 'ensemble.width', 'ensemble.outputDb'],
-  spectral: ['spectral.freeze', 'spectral.gateThresholdDb', 'spectral.gateAttackMs', 'spectral.gateReleaseMs', 'spectral.morph', 'spectral.binShift', 'spectral.blur', 'spectral.harmonicPercussiveBalance', 'spectral.noiseReduction', 'spectral.profileLearn', 'spectral.mix'],
+  spectral: ['spectral.freeze', 'spectral.gateThresholdDb', 'spectral.gateAttackMs', 'spectral.gateReleaseMs', 'spectral.morph', 'spectral.binShift', 'spectral.blur', 'spectral.harmonicPercussiveBalance', 'spectral.noiseReduction', 'spectral.noiseFloorDb', 'spectral.profileLearn', 'spectral.mix'],
 } as const satisfies Record<OwnedProcessorKind, readonly string[]>
 
 const descriptor = (

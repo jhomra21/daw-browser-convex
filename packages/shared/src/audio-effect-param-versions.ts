@@ -6,6 +6,7 @@ import { migrateAutoPanParamsV1, migrateChorusParamsV1, migrateEnsembleParamsV1,
 import { migrateLoFiParamsV1 } from './lofi-params-migration'
 import { migrateUtilityParamsV1 } from './utility-params-migration'
 import { migrateSaturatorParamsV1 } from './saturator-params-migration'
+import { migrateSpectralGateThresholdV1, migrateSpectralParamsV1 } from './spectral-params-migration'
 import { migrateReverbParamsV1, migrateReverbStereoWidthV1 } from './reverb-params-migration'
 import { migrateAutoFilterEnvelopeAmountV1, migrateAutoFilterParamsV1, migrateAutoFilterResonanceV1 } from './auto-filter-params-migration'
 import { getAutomationParameterDescriptor } from './automation-parameters'
@@ -30,7 +31,7 @@ export const AUDIO_EFFECT_PARAMS_VERSION: Readonly<Record<AudioEffectKind, numbe
   tremolo: 2,
   autopan: 2,
   ensemble: 2,
-  spectral: 1,
+  spectral: 2,
   utility: 2,
   spectrum: 1,
 }
@@ -87,9 +88,13 @@ export const AUDIO_EFFECT_PARAMS_VERSIONING: AudioEffectParamsVersioning = {
     tremolo: { 1: migrateTremoloParamsV1 },
     autopan: { 1: migrateAutoPanParamsV1 },
     ensemble: { 1: migrateEnsembleParamsV1 },
+    // Spectral: Gate threshold in dBFS (exact for the stored FFT size), Learn a toggle, Noise Reduce floor -30 dB (spectral-params-migration.ts).
+    spectral: { 1: migrateSpectralParamsV1 },
   },
   parameterValues: {
     reverb: { 1: { 'reverb.stereoWidth': migrateReverbStereoWidthV1 } },
+    // A lane does not carry the effect's FFT size, so it is moved as at the default 2048; the effect's own threshold uses its stored size.
+    spectral: { 1: { 'spectral.gateThresholdDb': (value) => migrateSpectralGateThresholdV1(value) } },
     autofilter: {
       1: {
         'autofilter.resonance': migrateAutoFilterResonanceV1,

@@ -18,7 +18,8 @@ export type RenderOptions = {
   enabledSteps?: readonly { frame: number; enabled: boolean }[]
 }
 
-export type Rendered = { output: Planar; nsPerSample: number }
+/** `worstBlockNs` is the slowest single 128-frame process call, where a hop's whole FFT work lands. */
+export type Rendered = { output: Planar; nsPerSample: number; worstBlockNs: number }
 
 export type LegacyRenderer = (spec: EffectSpec, rate: number, options: RenderOptions) => Promise<Planar | null>
 

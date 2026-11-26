@@ -169,6 +169,7 @@ export const renderWasm = async (spec: EffectSpec | null, rate: number, options:
   })
 
   let elapsedNs = 0n
+  let worstBlockNs = 0n
 
   for (let offset = 0; offset < frames; offset += blockFrames) {
     const count = Math.min(blockFrames, frames - offset)
@@ -202,12 +203,15 @@ export const renderWasm = async (spec: EffectSpec | null, rate: number, options:
 
     const started = process.hrtime.bigint()
     const code = exports.process(count, buses, 2, table, table + 8 * buses, 1, parameterBytes > 0 ? parameterPointer : 0, parameterBytes, 0, 0, 0, 0)
-    elapsedNs += process.hrtime.bigint() - started
+    const blockNs = process.hrtime.bigint() - started
+    elapsedNs += blockNs
+
+    if (blockNs > worstBlockNs) worstBlockNs = blockNs
 
     if (code !== 0) throw new Error(`audio-core process failed with ${code}`)
     output[0].set(outputPlanes[0].subarray(0, count), offset)
     output[1].set(outputPlanes[1].subarray(0, count), offset)
   }
 
-  return { output, nsPerSample: Number(elapsedNs) / frames }
+  return { output, nsPerSample: Number(elapsedNs) / frames, worstBlockNs: Number(worstBlockNs) }
 }

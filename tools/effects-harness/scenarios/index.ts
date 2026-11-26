@@ -9,6 +9,7 @@ import { reverb } from './reverb'
 import { saturationUtility } from './saturation-utility'
 import { saturator } from './saturator'
 import { utility } from './utility'
+import { spectral } from './spectral'
 
 export type Family = { scenarios: Scenario[]; notEncoded: readonly string[] }
 
@@ -23,7 +24,8 @@ export const families = {
   lofi,
   utility,
   'saturation-utility': saturationUtility,
+  spectral,
 }
 
 /** Families whose effects are rebuilt: certification fails on any of their rows. Add a family here once its effects pass. */
-export const gatedFamilies: readonly (keyof typeof families)[] = ['dynamics', 'eq-filters', 'reverb', 'delay', 'modulation', 'saturator', 'lofi', 'utility']
+export const gatedFamilies: readonly (keyof typeof families)[] = ['dynamics', 'eq-filters', 'reverb', 'delay', 'modulation', 'saturator', 'lofi', 'utility', 'spectral']

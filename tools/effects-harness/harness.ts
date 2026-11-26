@@ -73,6 +73,18 @@ export const createHarness = (context: { effect: string; scenario: string; rate:
     return Math.min(...runs.map((run) => run.nsPerSample)) - base
   }
 
+  /**
+   * The slowest single 128-frame process call of a graph with the processor, best of nine 2 s renders so a preempted run does not count,
+   * in ns. The empty graph's own worst call is a few microseconds and stays in the number.
+   */
+  const worstBlockNs = async (spec: EffectSpec, input: readonly Float32Array[] = [noise(rate * 2, 0.25, 3)]) => {
+    let best = Infinity
+
+    for (let run = 0; run < 9; run += 1) best = Math.min(best, (await renderWasm(spec, rate, { input })).worstBlockNs)
+
+    return best
+  }
+
   /** Frame of the largest output sample for a unit impulse at frame 0 (the dry or wet path delay of the processor). */
   const latencyFrames = async (spec: EffectSpec, frames = Math.round(0.4 * rate)) => {
     const { output } = await render(spec, { input: [impulse(frames, 0.5)] }, { parity: false })
@@ -112,7 +124,7 @@ export const createHarness = (context: { effect: string; scenario: string; rate:
 
   return {
     rate, effect, scenario, checks, parity, wavs,
-    render, cpuNsPerFrame, latencyFrames, stepClick, wav,
+    render, cpuNsPerFrame, worstBlockNs, latencyFrames, stepClick, wav,
     atMost: (metric: string, value: number, limit: number, unit = '', note?: string) =>
       push(metric, value, unit, `≤ ${limit} ${unit}`.trim(), value <= limit, note),
     atLeast: (metric: string, value: number, limit: number, unit = '', note?: string) =>

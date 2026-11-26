@@ -106,15 +106,18 @@ const color: Scenario = {
   run: async (h) => {
     const frames = h.rate
     const q = 2 * 0.2 ** 0.57
+
+    const through = (signal: ArrayLike<number>, stages: readonly ReturnType<typeof rbjCoefficients>[]) =>
+      stages.reduce<ArrayLike<number>>((current, coefficients) => biquad(current, coefficients), signal)
+
     const shelves = [rbjCoefficients('lowshelf', 1200, q, 6, h.rate), rbjCoefficients('highshelf', 1200, q, 12, h.rate)]
     const inverse = [rbjCoefficients('lowshelf', 1200, q, -6, h.rate), rbjCoefficients('highshelf', 1200, q, -12, h.rate)]
 
     for (const frequency of [200, 1200, 5000]) {
       // Clip at 1x: the shelves, the hard ceiling and the inverse shelves, with no oversampling in between, rendered in float64 as the reference.
       const input = sine(frames, frequency, h.rate, 0.5)
-      const boosted = shelves.reduce((signal, coefficients) => biquad(signal, coefficients), input)
-      const clipped = boosted.map((value) => Math.max(-1, Math.min(1, value)))
-      const expected = inverse.reduce((signal, coefficients) => biquad(signal, coefficients), clipped)
+      const clipped = Float64Array.from(through(input, shelves), (value) => Math.max(-1, Math.min(1, value)))
+      const expected = through(clipped, inverse)
       const { output } = await h.render(fx.saturator({ hiQuality: false, curve: 'clip', driveDb: 0, color: true, colorFrequencyHz: 1200, colorLowDb: 6, colorHighDb: 12 }), { input: [input] }, { parity: false })
       h.atMost(`Color at ${frequency} Hz: shelves at 1.2 kHz, clip, inverse shelves, error against the float64 reference`, maxAbsDiff(output[0], expected, h.rate / 2), 2e-3, 'abs', 'before (a49d9c57): Color on, amount 1 at 1.2 kHz: +16.7 dB at 4.8 kHz, +5.2 dB at 200 Hz; now two shelves that cancel')
     }

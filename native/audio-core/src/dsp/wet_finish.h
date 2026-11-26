@@ -8,8 +8,8 @@
 
 namespace daw::audio_core::dsp {
 
-// What every modulation effect does to its wet signal before the dry/wet mix: a one-pole high-pass (Safe Bass) so the
-// bass is not modulated, Width on the mid/side balance of the wet signal, and the Output gain. Width, Output and the
+// What every modulation effect does to its wet signal before the dry/wet mix: two one-pole high-passes in cascade (Safe Bass, 12 dB per octave, -6 dB at the set frequency) so
+// the bass is not modulated, Width on the mid/side balance of the wet signal, and the Output gain. Width, Output and the
 // high-pass frequency are smoothed. Call next() once per frame, then apply() per frame.
 class WetFinish {
  public:
@@ -21,7 +21,7 @@ class WetFinish {
     reset();
   }
 
-  void reset() { low_[0] = low_[1] = 0.0F; }
+  void reset() { low_[0] = low_[1] = low_[2] = low_[3] = 0.0F; }
 
   void next(float bassHz, float width, float outputDb) {
     if (!initialized_) {
@@ -52,6 +52,10 @@ class WetFinish {
       low_[1] = flushDenormal(low_[1] + coefficient_ * (right - low_[1]));
       left -= low_[0];
       right -= low_[1];
+      low_[2] = flushDenormal(low_[2] + coefficient_ * (left - low_[2]));
+      low_[3] = flushDenormal(low_[3] + coefficient_ * (right - low_[3]));
+      left -= low_[2];
+      right -= low_[3];
     }
     const float mid = 0.5F * (left + right);
     const float side = 0.5F * (left - right) * width_value_;
@@ -66,7 +70,7 @@ class WetFinish {
 
   double sampleRate_ = 48000.0;
   bool initialized_ = false;
-  float low_[2] = {0.0F, 0.0F};
+  float low_[4] = {0.0F, 0.0F, 0.0F, 0.0F};
   ParameterSmoother<SmoothDomain::Log> bass_;
   ParameterSmoother<> width_, output_;
   float coefficient_ = 0.0F;

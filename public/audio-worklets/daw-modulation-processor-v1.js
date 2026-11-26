@@ -238,7 +238,7 @@ class DelayRing {
   }
 }
 
-// WetFinish: Safe Bass one-pole high-pass, Width on the wet mid/side balance, Output gain.
+// WetFinish: Safe Bass two-pole high-pass (two one-poles in cascade), Width on the wet mid/side balance, Output gain.
 class WetFinish {
   constructor(rate) {
     this.rate = f(rate)
@@ -246,7 +246,7 @@ class WetFinish {
     this.width = new Smoother(false, rate)
     this.output = new Smoother(false, rate)
     this.initialized = false
-    this.low = new Float32Array(2)
+    this.low = new Float32Array(4)
     this.coefficient = 0
     this.lastBassHz = -1
     this.widthValue = 1
@@ -289,6 +289,10 @@ class WetFinish {
       this.low[1] = flushDenormal(f(this.low[1] + f(this.coefficient * f(right - this.low[1]))))
       left = f(left - this.low[0])
       right = f(right - this.low[1])
+      this.low[2] = flushDenormal(f(this.low[2] + f(this.coefficient * f(left - this.low[2]))))
+      this.low[3] = flushDenormal(f(this.low[3] + f(this.coefficient * f(right - this.low[3]))))
+      left = f(left - this.low[2])
+      right = f(right - this.low[3])
     }
 
     const mid = f(0.5 * f(left + right))

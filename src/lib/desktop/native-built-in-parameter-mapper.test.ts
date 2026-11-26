@@ -178,9 +178,9 @@ test('maps every continuous target for every live built-in family', () => {
       payload: {
         targetId: 'track-1', effect: 'saturator', instanceId: 'saturator-1',
         from: saturatorFrom,
-        to: { ...saturatorFrom, driveDb: 24, colorFrequencyHz: 4_000, colorAmount: 0.7, outputDb: 2, dryWet: 0.5 },
+        to: { ...saturatorFrom, driveDb: 24, colorFrequencyHz: 4_000, colorHighDb: 7, outputDb: 2, dryWet: 0.5 },
       } satisfies EffectParamsCommitPayload<'saturator'>,
-      expected: [['saturator.driveDb', 24], ['saturator.colorFrequencyHz', 4_000], ['saturator.colorAmount', 0.7], ['saturator.outputDb', 2], ['saturator.dryWet', 0.5]],
+      expected: [['saturator.driveDb', 24], ['saturator.colorFrequencyHz', 4_000], ['saturator.colorHighDb', 7], ['saturator.outputDb', 2], ['saturator.dryWet', 0.5]],
     },
     {
       name: 'chorus',

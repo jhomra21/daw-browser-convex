@@ -350,14 +350,21 @@ const mapSaturator = (payload: EffectChange<'saturator' | 'master-saturator'>) =
     [
       { parameterId: 'saturator.driveDb', from: from.driveDb, to: to.driveDb },
       { parameterId: 'saturator.colorFrequencyHz', from: from.colorFrequencyHz, to: to.colorFrequencyHz },
-      { parameterId: 'saturator.colorAmount', from: from.colorAmount, to: to.colorAmount },
+      { parameterId: 'saturator.colorWidth', from: from.colorWidth, to: to.colorWidth },
+      { parameterId: 'saturator.colorLowDb', from: from.colorLowDb, to: to.colorLowDb },
+      { parameterId: 'saturator.colorHighDb', from: from.colorHighDb, to: to.colorHighDb },
+      { parameterId: 'saturator.bassThresholdDb', from: from.bassThresholdDb, to: to.bassThresholdDb },
+      { parameterId: 'saturator.waveshaperDepth', from: from.waveshaperDepth, to: to.waveshaperDepth },
+      { parameterId: 'saturator.waveshaperPeriod', from: from.waveshaperPeriod, to: to.waveshaperPeriod },
       { parameterId: 'saturator.outputDb', from: from.outputDb, to: to.outputDb },
       { parameterId: 'saturator.dryWet', from: from.dryWet, to: to.dryWet },
     ],
     [
       { from: from.enabled, to: to.enabled },
+      { from: from.hiQuality, to: to.hiQuality },
       { from: from.curve, to: to.curve },
       { from: from.color, to: to.color },
+      { from: from.postClip, to: to.postClip },
     ],
   )
 }

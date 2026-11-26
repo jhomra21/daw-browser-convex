@@ -30,6 +30,7 @@ import {
   isDelaySyncDivision,
   isEqBandType,
   isSaturatorCurve,
+  isSaturatorPostClip,
   normalizeCompressorParams,
   normalizeDelayParams,
   normalizeEqParams,
@@ -555,22 +556,36 @@ const readSaturatorParams = (value: JsonValue): SaturatorParams | null => {
   if (!isJsonObject(value) || !isJsonBoolean(value.enabled)) return null
 
   if (
-    !isJsonNumber(value.driveDb)
+    !isJsonBoolean(value.hiQuality)
+    || !isJsonNumber(value.driveDb)
     || !isSaturatorCurve(value.curve)
     || !isJsonBoolean(value.color)
+    || !isSaturatorPostClip(value.postClip)
     || !isJsonNumber(value.colorFrequencyHz)
-    || !isJsonNumber(value.colorAmount)
+    || !isJsonNumber(value.colorWidth)
+    || !isJsonNumber(value.colorLowDb)
+    || !isJsonNumber(value.colorHighDb)
+    || !isJsonNumber(value.bassThresholdDb)
+    || !isJsonNumber(value.waveshaperDepth)
+    || !isJsonNumber(value.waveshaperPeriod)
     || !isJsonNumber(value.outputDb)
     || !isJsonNumber(value.dryWet)
   ) return null
 
   const params: SaturatorParamsInput = {
     enabled: value.enabled,
+    hiQuality: value.hiQuality,
     driveDb: value.driveDb,
     curve: value.curve,
     color: value.color,
+    postClip: value.postClip,
     colorFrequencyHz: value.colorFrequencyHz,
-    colorAmount: value.colorAmount,
+    colorWidth: value.colorWidth,
+    colorLowDb: value.colorLowDb,
+    colorHighDb: value.colorHighDb,
+    bassThresholdDb: value.bassThresholdDb,
+    waveshaperDepth: value.waveshaperDepth,
+    waveshaperPeriod: value.waveshaperPeriod,
     outputDb: value.outputDb,
     dryWet: value.dryWet,
   }

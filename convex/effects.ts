@@ -124,11 +124,21 @@ const compressorParamsValidator = v.object({
 
 const saturatorParamsValidator = v.object({
   enabled: v.boolean(),
+  hiQuality: v.boolean(),
   driveDb: v.number(),
-  curve: v.union(v.literal("soft"), v.literal("medium"), v.literal("hard"), v.literal("clip")),
+  curve: v.union(
+    v.literal("soft"), v.literal("medium"), v.literal("hard"), v.literal("clip"), v.literal("analog"),
+    v.literal("sine"), v.literal("bass"), v.literal("fold"), v.literal("waveshaper"),
+  ),
   color: v.boolean(),
   colorFrequencyHz: v.number(),
-  colorAmount: v.number(),
+  colorWidth: v.number(),
+  colorLowDb: v.number(),
+  colorHighDb: v.number(),
+  bassThresholdDb: v.number(),
+  waveshaperDepth: v.number(),
+  waveshaperPeriod: v.number(),
+  postClip: v.union(v.literal("off"), v.literal("soft"), v.literal("hard")),
   outputDb: v.number(),
   dryWet: v.number(),
 })

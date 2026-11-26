@@ -127,7 +127,7 @@ export function applySaturatorNodeParams(nodes: {
   nodes.colorFilter.type = 'peaking'
   nodes.colorFilter.frequency.value = normalized.colorFrequencyHz
   nodes.colorFilter.Q.value = 0.8
-  nodes.colorFilter.gain.value = normalized.color ? normalized.colorAmount * 12 : 0
+  nodes.colorFilter.gain.value = normalized.color ? normalized.colorHighDb : 0
   nodes.waveNode.curve = getSaturatorCurve(normalized.curve)
   nodes.waveNode.oversample = '4x'
   nodes.dryGain.gain.value = 1 - normalized.dryWet

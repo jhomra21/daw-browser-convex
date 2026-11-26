@@ -128,11 +128,18 @@ const synthParamsSchema = z.object({
 
 const saturatorParamsSchema = z.object({
   enabled: z.literal(true),
+  hiQuality: z.literal(true),
   driveDb: z.literal(6),
   curve: z.literal("soft"),
   color: z.literal(false),
   colorFrequencyHz: z.literal(1200),
-  colorAmount: z.literal(0),
+  colorWidth: z.literal(0.57),
+  colorLowDb: z.literal(0),
+  colorHighDb: z.literal(0),
+  bassThresholdDb: z.literal(-12),
+  waveshaperDepth: z.literal(0.5),
+  waveshaperPeriod: z.literal(0.5),
+  postClip: z.literal("off"),
   outputDb: z.literal(0),
   dryWet: z.literal(1),
 }).strict()

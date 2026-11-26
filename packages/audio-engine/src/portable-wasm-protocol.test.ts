@@ -625,8 +625,8 @@ test('accepts bounded versioned processor chains and rejects duplicate instances
   })).toBeNull()
 
   const saturatorState = encodeSaturatorProcessorState({
-    enabled: true, driveDb: 6, curve: 'soft', color: false,
-    colorFrequencyHz: 1200, colorAmount: 0, outputDb: 0, dryWet: 1,
+    enabled: true, hiQuality: true, driveDb: 6, curve: 'soft', color: false,
+    colorFrequencyHz: 1200, colorWidth: 0.57, colorLowDb: 0, colorHighDb: 0, bassThresholdDb: -12, waveshaperDepth: 0.5, waveshaperPeriod: 0.5, postClip: 'off', outputDb: 0, dryWet: 1,
   })
 
   const saturatorSnapshot = {
@@ -673,8 +673,8 @@ test('requires sidechain edges to target a processor in their destination chain'
     instanceId: 2,
     stateVersion: audioCoreContractVersion,
     state: encodeSaturatorProcessorState({
-      enabled: true, driveDb: 6, curve: 'soft', color: false,
-      colorFrequencyHz: 1200, colorAmount: 0, outputDb: 0, dryWet: 1,
+      enabled: true, hiQuality: true, driveDb: 6, curve: 'soft', color: false,
+      colorFrequencyHz: 1200, colorWidth: 0.57, colorLowDb: 0, colorHighDb: 0, bassThresholdDb: -12, waveshaperDepth: 0.5, waveshaperPeriod: 0.5, postClip: 'off', outputDb: 0, dryWet: 1,
     }),
     parameterTargets: [],
     latencyFrames: 0,
@@ -725,8 +725,8 @@ test('transports registered Saturator and EQ envelopes without utility parsing',
     kindId: 2,
     schemaVersion: 1,
     state: encodeSaturatorProcessorState({
-      enabled: true, driveDb: 6, curve: 'soft', color: false,
-      colorFrequencyHz: 1200, colorAmount: 0, outputDb: 0, dryWet: 1,
+      enabled: true, hiQuality: true, driveDb: 6, curve: 'soft', color: false,
+      colorFrequencyHz: 1200, colorWidth: 0.57, colorLowDb: 0, colorHighDb: 0, bassThresholdDb: -12, waveshaperDepth: 0.5, waveshaperPeriod: 0.5, postClip: 'off', outputDb: 0, dryWet: 1,
     }),
     instanceId: 9,
     bypassed: false,

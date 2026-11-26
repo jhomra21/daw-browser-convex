@@ -3,6 +3,7 @@ import { migrateDelayParamsV1 } from './delay-params-migration'
 import { migrateGateParamsV1 } from './gate-params-migration'
 import { migrateLimiterParamsV1 } from './limiter-params-migration'
 import { migrateAutoPanParamsV1, migrateChorusParamsV1, migrateEnsembleParamsV1, migrateFlangerParamsV1, migratePhaserParamsV1, migrateTremoloParamsV1 } from './modulation-params-migration'
+import { migrateSaturatorParamsV1 } from './saturator-params-migration'
 import { migrateReverbParamsV1, migrateReverbStereoWidthV1 } from './reverb-params-migration'
 import { migrateAutoFilterEnvelopeAmountV1, migrateAutoFilterParamsV1, migrateAutoFilterResonanceV1 } from './auto-filter-params-migration'
 import { getAutomationParameterDescriptor } from './automation-parameters'
@@ -14,7 +15,7 @@ import { isJsonObject, type JsonValue } from './json-value'
 export const AUDIO_EFFECT_PARAMS_VERSION: Readonly<Record<AudioEffectKind, number>> = {
   eq: 2,
   compressor: 2,
-  saturator: 1,
+  saturator: 2,
   delay: 2,
   reverb: 2,
   autofilter: 2,
@@ -69,6 +70,8 @@ export const AUDIO_EFFECT_PARAMS_VERSIONING: AudioEffectParamsVersioning = {
     // Delay: one time per channel (Mode and division carry to both, linked), the filter pair becomes the band-pass whose edges they were,
     // time smoothing Repitch, Freeze and offsets off.
     delay: { 1: migrateDelayParamsV1 },
+    // Saturator: Color Amount becomes Amt Hi (x 12 dB), Hi-Quality on, Post Clip off; the curves are now level-matched (saturator-params-migration.ts).
+    saturator: { 1: migrateSaturatorParamsV1 },
     // Reverb: Density Sparse (the old 8 lines), the old in-loop cuts as shelves, Width as the Stereo angle, Chorus on, Smooth Fast.
     reverb: { 1: migrateReverbParamsV1 },
     // Chorus, Flanger, Ensemble, Phaser, Tremolo, Auto Pan: each added control starts at the value that keeps the old setting (modulation-params-migration.ts).

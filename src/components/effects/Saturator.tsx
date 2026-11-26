@@ -4,8 +4,8 @@ import Knob from '~/components/ui/knob'
 import { For, createUniqueId } from 'solid-js'
 import {
   createDefaultSaturatorParams,
-  SATURATOR_COLOR_AMOUNT_MAX,
-  SATURATOR_COLOR_AMOUNT_MIN,
+  SATURATOR_COLOR_DB_MAX,
+  SATURATOR_COLOR_DB_MIN,
   SATURATOR_COLOR_FREQUENCY_HZ_MAX,
   SATURATOR_COLOR_FREQUENCY_HZ_MIN,
   SATURATOR_DRIVE_DB_MAX,
@@ -52,13 +52,6 @@ const createSaturatorCurvePoints = (curve: SaturatorCurve) => {
   return points.join(' ')
 }
 
-const SATURATOR_CURVE_POINTS = {
-  soft: createSaturatorCurvePoints('soft'),
-  medium: createSaturatorCurvePoints('medium'),
-  hard: createSaturatorCurvePoints('hard'),
-  clip: createSaturatorCurvePoints('clip'),
-} satisfies Record<SaturatorCurve, string>
-
 function SaturatorCurveGraph(props: { curve: SaturatorCurve }) {
   const patternId = createUniqueId()
 
@@ -79,7 +72,7 @@ function SaturatorCurveGraph(props: { curve: SaturatorCurve }) {
         <rect x="52" y="0" width="76" height="100" fill="var(--device-graph-accent)" opacity="0.24" />
         <line x1="0" y1="50" x2="180" y2="50" stroke="var(--device-graph-grid)" stroke-width="1" />
         <line x1="90" y1="0" x2="90" y2="100" stroke="var(--device-graph-grid)" stroke-width="1" />
-        <polyline points={SATURATOR_CURVE_POINTS[props.curve]} fill="none" stroke="var(--device-graph-accent)" stroke-width="2.25" vector-effect="non-scaling-stroke" />
+        <polyline points={createSaturatorCurvePoints(props.curve)} fill="none" stroke="var(--device-graph-accent)" stroke-width="2.25" vector-effect="non-scaling-stroke" />
       </svg>
     </div>
   )
@@ -120,7 +113,7 @@ export default function Saturator(props: SaturatorProps) {
           <div class="grid grid-cols-[4.2rem_repeat(2,minmax(0,1fr))] items-end gap-2">
             <DeviceToggleButton label="Color" active={props.params.color} disabled={!props.params.enabled} onClick={() => props.onChange({ color: !props.params.color })} />
             <Knob class="px-0 py-0" size={28} label="Freq" valueLabel={formatFrequency(props.params.colorFrequencyHz)} value={props.params.colorFrequencyHz} resetValue={DEFAULT_PARAMS.colorFrequencyHz} min={SATURATOR_COLOR_FREQUENCY_HZ_MIN} max={SATURATOR_COLOR_FREQUENCY_HZ_MAX} step={1} logarithmic disabled={!props.params.enabled || !props.params.color} automationRange={automationRange('saturator.colorFrequencyHz')} automated={!!automationRange('saturator.colorFrequencyHz')} onAutomationSelect={() => props.onAutomationParameterTouch?.('saturator.colorFrequencyHz')} onValueChange={(colorFrequencyHz) => changeAutomated('saturator.colorFrequencyHz', { colorFrequencyHz })} />
-            <Knob class="px-0 py-0" size={28} label="Amt" valueLabel={formatPercent(props.params.colorAmount)} value={props.params.colorAmount} resetValue={DEFAULT_PARAMS.colorAmount} min={SATURATOR_COLOR_AMOUNT_MIN} max={SATURATOR_COLOR_AMOUNT_MAX} step={0.01} disabled={!props.params.enabled || !props.params.color} onValueChange={(colorAmount) => props.onChange({ colorAmount })} />
+            <Knob class="px-0 py-0" size={28} label="Amt Hi" valueLabel={formatDb(props.params.colorHighDb)} value={props.params.colorHighDb} resetValue={DEFAULT_PARAMS.colorHighDb} min={SATURATOR_COLOR_DB_MIN} max={SATURATOR_COLOR_DB_MAX} step={0.1} bipolar disabled={!props.params.enabled || !props.params.color} automationRange={automationRange('saturator.colorHighDb')} automated={!!automationRange('saturator.colorHighDb')} onAutomationSelect={() => props.onAutomationParameterTouch?.('saturator.colorHighDb')} onValueChange={(colorHighDb) => changeAutomated('saturator.colorHighDb', { colorHighDb })} />
           </div>
         </div>
 

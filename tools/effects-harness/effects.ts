@@ -99,7 +99,8 @@ const amplitudeKeys = ['rateHz', 'depth', 'shape', 'phase']
 /** Parameter targets by state path; the same path patches the legacy worklet's state. */
 export const parameterTargets: Record<EffectKind, Record<string, number>> = {
   utility: range(1, ['gainDb', 'pan', 'balance', 'width']),
-  saturator: range(69, ['driveDb', 'colorFrequencyHz', 'colorAmount', 'outputDb', 'dryWet']),
+  // 71 was the Color amount; the shelves took 203 and up.
+  saturator: { driveDb: 69, colorFrequencyHz: 70, outputDb: 72, dryWet: 73, ...range(203, ['colorHighDb', 'colorLowDb', 'colorWidth', 'bassThresholdDb', 'waveshaperDepth', 'waveshaperPeriod']) },
   eq: eqTargets,
   chorus: { ...range(74, modulationKeys), ...range(177, ['safeBassHz', 'width', 'outputDb']) },
   flanger: { ...range(80, modulationKeys), ...range(180, ['safeBassHz', 'width', 'outputDb']) },
@@ -161,7 +162,10 @@ export const fx = {
   }),
   saturator: (state: Partial<SaturatorProcessorState> = {}): EffectSpec => ({
     kind: 'saturator',
-    state: { enabled: true, driveDb: 6, curve: 'soft', color: false, colorFrequencyHz: 1200, colorAmount: 0, outputDb: 0, dryWet: 1, ...state },
+    state: {
+      enabled: true, hiQuality: true, driveDb: 6, curve: 'soft', color: false, colorFrequencyHz: 1200, colorWidth: 0.57, colorLowDb: 0, colorHighDb: 0,
+      bassThresholdDb: -12, waveshaperDepth: 0.5, waveshaperPeriod: 0.5, postClip: 'off', outputDb: 0, dryWet: 1, ...state,
+    },
   }),
   chorus: (state: Partial<DelayModulationProcessorState> = {}): EffectSpec => ({ kind: 'chorus', state: modulation(state) }),
   flanger: (state: Partial<DelayModulationProcessorState> = {}): EffectSpec => ({

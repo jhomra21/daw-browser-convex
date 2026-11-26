@@ -270,9 +270,14 @@ const toPortableProcessor = (
       parameterTargets: [
         { id: 'saturator.driveDb', target: 69 },
         { id: 'saturator.colorFrequencyHz', target: 70 },
-        { id: 'saturator.colorAmount', target: 71 },
         { id: 'saturator.outputDb', target: 72 },
         { id: 'saturator.dryWet', target: 73 },
+        { id: 'saturator.colorHighDb', target: 203 },
+        { id: 'saturator.colorLowDb', target: 204 },
+        { id: 'saturator.colorWidth', target: 205 },
+        { id: 'saturator.bassThresholdDb', target: 206 },
+        { id: 'saturator.waveshaperDepth', target: 207 },
+        { id: 'saturator.waveshaperPeriod', target: 208 },
       ],
       bypassed: !instance.params.enabled,
     }

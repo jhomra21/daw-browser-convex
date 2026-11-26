@@ -12,6 +12,7 @@ export type PortableSession = Pick<
   PortableWasmPlaybackSession,
   | "connectInput" | "dispose" | "installSchedule" | "markActive" | "onFault" | "onRecordingStatus" | "postRecordingControl" | "prepareGraph" | "publishGraph" | "registerAsset" | "scheduleSources" | "setTransport"
 > & {
+  setTempo?: PortableWasmPlaybackSession["setTempo"]
   releaseAsset?: PortableWasmPlaybackSession["releaseAsset"]
   pagedCapabilities?: PortableWasmPlaybackSession["pagedCapabilities"]
   registerPagedAsset?: PortableWasmPlaybackSession["registerPagedAsset"]

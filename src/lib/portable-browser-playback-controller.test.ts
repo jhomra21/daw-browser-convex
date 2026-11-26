@@ -2647,6 +2647,7 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
   const publishes: B6f5Publish[] = []
   const installs: PortableFrameSchedule[] = []
   const epochs: number[] = []
+  const tempos: number[] = []
   const faults: string[] = []
   const scheduledSources: { sequence: number; startFrame: number }[][] = []
   let sessions = 0
@@ -2697,6 +2698,7 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
       }) }
 
       return { ...withInstall, prepareGraph: base.prepareGraph, publishGraph: base.publishGraph,
+        setTempo: (bpm: number) => { tempos.push(bpm) },
         scheduleSources: async (_revision: number, _epoch: number, events: readonly { sequence: number; startFrame: number }[]) => {
           calls.push('schedule-sources')
           scheduledSources.push(events.map((event) => ({ sequence: event.sequence, startFrame: event.startFrame })))
@@ -2723,7 +2725,7 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
 
   const position = (frame: number, epoch = 1, sequence = 1) => positionListener?.({ version: 2, type: 'transport-position', sessionId: 1, epoch, sequence, running: true, frame })
 
-  return { state, controller, transport, noLoop, calls, graphs, publishes, installs, epochs, faults, scheduledSources, sessions: () => sessions, adoptionCompiles: () => adoptionCompiles, adopt, noteEvents, position }
+  return { state, controller, transport, noLoop, calls, graphs, publishes, installs, epochs, tempos, faults, scheduledSources, sessions: () => sessions, adoptionCompiles: () => adoptionCompiles, adopt, noteEvents, position }
 }
 
 const w8ShippedStarts = (f: { publishes: readonly B6f5Publish[] }) =>
@@ -3090,6 +3092,24 @@ test('W-UD7p-4 a paused tempo edit and a paused loop edit are adopted in place a
       sessions: f.sessions(), disposed: f.calls.includes('dispose') })
       .toEqual({ tempo: 'adopted', tempoBpm: 100, located: 'started', seeked: { bpm: 100, origin: 12_000, calls: ['stop-transport'] },
         loop: 'adopted', loopNoteOns: [12_000, 60_000], sessions: 1, disposed: false })
+  } finally { f.controller.dispose() }
+})
+
+// The portable core plays tempo-synced effects at the tempo the session was sent: the project's at the start, and an adopted
+// tempo edit's from then on. An edit that leaves the tempo alone sends nothing.
+test('W-UD7p-4b the session is sent the project tempo at the start and each adopted tempo edit', async () => {
+  const f = await w8Fixture({ bpm: 90 })
+
+  try {
+    expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
+    const atStart = [...f.tempos]
+    f.state.notes = [w8Note('note', 0), w8Note('later', 4)]
+    await f.adopt(f.noLoop)
+    const afterNoteEdit = [...f.tempos]
+    f.state.bpm = 140
+    const tempo = await f.adopt(f.noLoop)
+    expect({ atStart, afterNoteEdit, tempo, tempos: f.tempos, sessions: f.sessions() })
+      .toEqual({ atStart: [90], afterNoteEdit: [90], tempo: 'adopted', tempos: [90, 140], sessions: 1 })
   } finally { f.controller.dispose() }
 })
 

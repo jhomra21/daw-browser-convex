@@ -428,13 +428,19 @@ const tempoSync: Scenario = {
   run: async (h) => {
     const input = sine(6 * h.rate, coherentFrequency(2000, h.rate, h.rate), h.rate, 0.1)
     const lfo = { ...autofilterLfo, depthOctaves: 2, phaseOffset: 0.3 }
-    const render = (lfoState: typeof lfo, startFrame: number) => h.render(fx.autofilter({ frequencyHz: 500, hiQuality: false, lfo: lfoState }), { input: [input.subarray(startFrame)], startFrame }, { parity: false })
+    const render = (lfoState: typeof lfo, startFrame: number, tempoBpm?: number) => h.render(fx.autofilter({ frequencyHz: 500, hiQuality: false, lfo: lfoState }), { input: [input.subarray(startFrame)], startFrame, tempoBpm }, { parity: false })
     const bar = 2 * h.rate
     const free = await render({ ...lfo, rateHz: 2 }, 0)
     const fromBar1 = await render({ ...lfo, sync: true, division: 5 }, 0)
 
-    // A 1/4 note is 2 Hz at 120 bpm, the tempo the wasm transport falls back to because it carries none. The 90 bpm rate is a native row (daw-autofilter-modulation).
+    // A 1/4 note is 2 Hz at 120 bpm, the tempo the core falls back to when the transport carries none (the renders above send none).
     h.atMost('1/4 note at the 120 bpm fallback against a 2 Hz free LFO started at bar 1', Math.max(...free.output[0].map((value, index) => Math.abs(value - fromBar1.output[0][index]))), 1e-3, 'abs', 'A5: tempo sync')
+
+    // The transport's tempo reaches the sync: 1/4 note is 1.5 Hz at 90 bpm, the rate native's daw-autofilter-modulation row checks.
+    const free90 = await render({ ...lfo, rateHz: 1.5 }, 0)
+    const synced90 = await render({ ...lfo, sync: true, division: 5 }, 0, 90)
+
+    h.atMost('1/4 note at the 90 bpm the transport carries against a 1.5 Hz free LFO started at bar 1', maxAbsDiff(free90.output[0], synced90.output[0]), 1e-3, 'abs', 'A5: tempo sync follows the project tempo')
 
     // Bar 3 starts at frame 2 * bar. Both renders have run for over a bar by then, so the filter state of the earlier start has settled.
     // Division 0 is two bars, so a start at bar 2 sits half a cycle away from a start at bar 1.

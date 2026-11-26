@@ -129,6 +129,12 @@ test("requires acknowledged portable preparation before marking playback active"
   expect(fixture.session.isActive).toBeTrue()
 })
 
+test("posts the project tempo to the worklet without a reply", () => {
+  const fixture = createSession()
+  fixture.session.setTempo(90)
+  expect(fixture.calls).toEqual(["tempo"])
+})
+
 test("mutes and reports an active worklet fault", () => {
   const fixture = createSession()
   const faults: string[] = []

@@ -104,7 +104,7 @@ test('the v2 host replays pending and applied parameter values under a new epoch
 })
 
 const createTransportHost = async (
-  graphSetTransport: (epoch: number, running: number, frame: bigint) => number,
+  graphSetTransport: (epoch: number, running: number, frame: bigint, tempoBpm: number) => number,
 ) => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
@@ -280,6 +280,27 @@ test('the v2 host acknowledges transport only after its rendered quantum reaches
     epoch: 1,
     result: 'applied',
   })
+})
+
+test('the v2 host gives the core the project tempo with every transport, and restates it at the frame reached when it changes', async () => {
+  const calls: [number, number, bigint, number][] = []
+
+  const { host, messages } = await createTransportHost((epoch, running, frame, tempoBpm) => {
+    calls.push([epoch, running, frame, tempoBpm])
+
+    return 0
+  })
+
+  host.handleMessage({ version: 2, type: 'tempo', bpm: 90 })
+  expect(calls).toEqual([])
+  host.handleMessage({ version: 2, type: 'transport', requestId: 1, epoch: 1, running: true, frame: 0 })
+  host.process([], [[new Float32Array(8), new Float32Array(8)]])
+  host.handleMessage({ version: 2, type: 'tempo', bpm: 140 })
+  expect(host.framesProcessed).toBeGreaterThan(0)
+  expect(calls).toEqual([[1, 1, 0n, 90], [1, 1, BigInt(host.framesProcessed), 140]])
+  expect(host.transportEpoch).toBe(1)
+  host.handleMessage({ version: 2, type: 'tempo', bpm: 0 })
+  expect(messages).toContainEqual(expect.objectContaining({ type: 'fault', code: 'malformed-message' }))
 })
 
 test('the v2 host lets the latest successful transport command supersede a pending acknowledgement', async () => {

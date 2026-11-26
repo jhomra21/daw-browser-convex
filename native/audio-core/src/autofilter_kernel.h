@@ -34,7 +34,7 @@ struct AutoFilterConfig {
 // position, so the same bar always sweeps the same way whatever frame rendering started from. A stopped transport keeps
 // the LFO free-running at the tempo, so live input still moves.
 struct AutoFilterTransport {
-  double tempo_bpm = 0.0;  // 0 when the host carries no tempo (the portable wasm transport): kDefaultTempoBpm is used
+  double tempo_bpm = 0.0;  // 0 when the host has not sent a tempo yet: kDefaultTempoBpm is used
   int64_t frame = 0;       // song position in sample frames
   bool running = false;
 };

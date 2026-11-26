@@ -795,6 +795,8 @@ test('accepts bounded epoch-scoped synth state and ordered MIDI events', () => {
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion, type: 'transport', requestId: 1, epoch: 2, running: true, frame: 0,
   })).toMatchObject({ type: 'transport', epoch: 2 })
+  expect(parsePortableWasmControlMessage({ version: portableWasmProtocolVersion, type: 'tempo', bpm: 90 })).toEqual({ version: portableWasmProtocolVersion, type: 'tempo', bpm: 90 })
+  expect([0, -120, Number.NaN, Number.POSITIVE_INFINITY].map((bpm) => parsePortableWasmControlMessage({ version: portableWasmProtocolVersion, type: 'tempo', bpm }))).toEqual([null, null, null, null])
 
   const events = [
     { nodeId: 'synth-1', noteId: 2, sequence: 1, frameOffset: 3, type: 'note-on', channel: 0, note: 60, value: 1 },

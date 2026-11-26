@@ -1386,7 +1386,8 @@ daw_audio_core_result daw_audio_core_wasm_graph_process_planar(
 daw_audio_core_result daw_audio_core_wasm_graph_set_transport(
   uint32_t epoch,
   uint32_t running,
-  int64_t frame);
+  int64_t frame,
+  double tempo_bpm);
 daw_audio_core_result daw_audio_core_wasm_graph_schedule_sample_source(
   uint32_t epoch,
   uint64_t sequence,

@@ -344,7 +344,7 @@ extern "C" daw_audio_core_result daw_audio_core_run_graph_fixture(
     const uint32_t partition_frames = partitions[partition];
     if (transport_frame > std::numeric_limits<int64_t>::max() - frame_offset) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
     result = daw_audio_core_wasm_graph_set_transport(
-      transport_epoch, transport_running, transport_frame + static_cast<int64_t>(frame_offset));
+      transport_epoch, transport_running, transport_frame + static_cast<int64_t>(frame_offset), 0.0);
     if (result != DAW_AUDIO_CORE_OK) break;
     std::array<const float *, 128> inputs{};
     std::array<float *, 2> partition_outputs{};

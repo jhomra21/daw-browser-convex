@@ -167,6 +167,8 @@ export class DawPortableAudioCoreHost {
     this.malloc = null
     this.free = null
     this.transportEpoch = 0
+    // The project tempo; 0 until the session sends one, which the core plays at 120 bpm.
+    this.tempoBpm = 0
     this.transportRunning = false
     this.transportFrame = 0
     this.transportProcessOrigin = 0
@@ -597,7 +599,7 @@ export class DawPortableAudioCoreHost {
       this.rejectPendingPublication()
       const resetSchedule = message.epoch !== this.transportEpoch || message.frame !== this.currentTransportFrame()
 
-      if (message.epoch < this.transportEpoch || !this.graphSetTransport || this.graphSetTransport(message.epoch, message.running ? 1 : 0, BigInt(message.frame)) !== 0) {
+      if (message.epoch < this.transportEpoch || !this.graphSetTransport || this.graphSetTransport(message.epoch, message.running ? 1 : 0, BigInt(message.frame), this.tempoBpm) !== 0) {
         this.postMessage({ version: PROTOCOL_VERSION, type: 'transport-applied', requestId: message.requestId, epoch: message.epoch, result: 'rejected' })
 
         return
@@ -617,6 +619,19 @@ export class DawPortableAudioCoreHost {
       this.pendingTransportRequestId = message.requestId
       this.pendingTransportEpoch = message.epoch
       this.pendingTransportRendered = false
+
+      return
+    }
+
+    if (message.type === 'tempo') {
+      if (!Number.isFinite(message.bpm) || message.bpm <= 0) return this.fault('malformed-message')
+      this.tempoBpm = message.bpm
+
+      // A transport that is already set carries the new tempo from the next block, at the frame it has reached.
+      if (this.transportEpoch > 0 && this.graphSetTransport
+        && this.graphSetTransport(this.transportEpoch, this.transportRunning ? 1 : 0, BigInt(this.currentTransportFrame()), this.tempoBpm) !== 0) {
+        return this.fault('core-error')
+      }
 
       return
     }

@@ -552,6 +552,7 @@ const toPortableProcessor = (
         { id: 'spectral.noiseReduction', target: 23 },
         { id: 'spectral.profileLearn', target: 24 },
         { id: 'spectral.mix', target: 25 },
+        { id: 'spectral.noiseFloorDb', target: 230 },
       ],
       bypassed: !params.enabled,
     }

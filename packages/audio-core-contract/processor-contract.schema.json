@@ -459,8 +459,8 @@
           "type": "object", "additionalProperties": false,
           "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
           "properties": {
-            "id": { "const": 15 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 60 }, "tombstone": { "const": false },
-            "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "fftSize", "overlap", "mode", "freeze", "gateThresholdDb", "gateAttackMs", "gateReleaseMs", "morph", "binShift", "blur", "harmonicPercussiveBalance", "noiseReduction", "profileLearn", "mix"], "properties": {
+            "id": { "const": 15 }, "schemaVersion": { "const": 2 }, "stateBytes": { "const": 64 }, "tombstone": { "const": false },
+            "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "fftSize", "overlap", "mode", "freeze", "gateThresholdDb", "gateAttackMs", "gateReleaseMs", "morph", "binShift", "blur", "harmonicPercussiveBalance", "noiseReduction", "profileLearn", "mix", "noiseFloorDb"], "properties": {
               "enabled": { "type": "boolean" },
               "fftSize": { "enum": [512, 1024, 2048, 4096] },
               "overlap": { "enum": [2, 4] },
@@ -475,7 +475,8 @@
               "harmonicPercussiveBalance": { "type": "number", "default": 0, "minimum": -1, "maximum": 1, "portableParameter": true },
               "noiseReduction": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true },
               "profileLearn": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true },
-              "mix": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true }
+              "mix": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true },
+              "noiseFloorDb": { "type": "number", "default": -30, "minimum": -60, "maximum": -6, "portableParameter": true }
             }}
           }
         }

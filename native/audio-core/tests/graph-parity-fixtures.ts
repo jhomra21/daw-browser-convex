@@ -2440,6 +2440,7 @@ const spectralState = (
   noiseReduction: 0,
   profileLearn: 0,
   mix: 1,
+  noiseFloorDb: -30,
   ...overrides,
 })
 
@@ -2453,7 +2454,7 @@ const spectralGraph = (
       instanceId: 11,
       kindId: 15,
       state: encodeSpectralProcessorState(state),
-      parameterTargets: [15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25],
+      parameterTargets: [15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 230],
       latencyFrames: state.fftSize,
       tailFrames: 0,
       bypassed,
@@ -2466,7 +2467,7 @@ const spectralGraph = (
         instanceId: 11,
         kindId: 15,
         state: encodeSpectralProcessorState(state),
-        parameterTargets: [15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25],
+        parameterTargets: [15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 230],
         latencyFrames: state.fftSize,
         tailFrames: 0,
         bypassed,

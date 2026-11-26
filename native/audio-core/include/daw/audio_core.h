@@ -566,7 +566,9 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_PERIOD = 208,
   DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_HZ = 209,
   DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BASS_MONO_HZ = 210,
-  DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_MID_SIDE = 211
+  DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_MID_SIDE = 211,
+  /* Spectral targets 15..25 sit with the early ids; the ones added by the rebuild start at 230. */
+  DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_NOISE_FLOOR_DB = 230
 } daw_audio_processor_parameter;
 
 #define DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_0_FREQUENCY_HZ
@@ -1061,6 +1063,7 @@ typedef struct daw_audio_spectral_state {
   float noise_reduction;
   float profile_learn;
   float mix;
+  float noise_floor_db;
 } daw_audio_spectral_state;
 
 typedef enum daw_audio_autofilter_mode {

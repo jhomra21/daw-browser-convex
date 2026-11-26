@@ -660,7 +660,7 @@ describe('mixer routing plan', () => {
 
     const processor = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 }).nodes[0]?.processorOrder[0]
     expect(processor).toMatchObject({ kind: 'spectral', kindId: 15, latencyFrames: 512, tailFrames: 0 })
-    expect(processor?.state.byteLength).toBe(60)
+    expect(processor?.state.byteLength).toBe(64)
     expect(processor?.parameterTargets).toEqual([
       { id: 'spectral.freeze', target: 15 },
       { id: 'spectral.gateThresholdDb', target: 16 },
@@ -673,6 +673,7 @@ describe('mixer routing plan', () => {
       { id: 'spectral.noiseReduction', target: 23 },
       { id: 'spectral.profileLearn', target: 24 },
       { id: 'spectral.mix', target: 25 },
+      { id: 'spectral.noiseFloorDb', target: 230 },
     ])
   })
 

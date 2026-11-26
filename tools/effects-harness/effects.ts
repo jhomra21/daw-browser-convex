@@ -124,7 +124,7 @@ export const parameterTargets: Record<EffectKind, Record<string, number>> = {
     reflectionModAmountMs: 134, reflectionModRateHz: 135, reflectionShape: 136, diffuse: 137, size: 138, diffusion: 139,
     lowShelfHz: 141, highShelfHz: 142, chorusAmountMs: 173, chorusRateHz: 174, lowShelfDb: 175, highShelfDb: 176,
   },
-  spectral: range(15, ['freeze', 'gateThresholdDb', 'gateAttackMs', 'gateReleaseMs', 'morph', 'binShift', 'blur', 'harmonicPercussiveBalance', 'noiseReduction', 'profileLearn', 'mix']),
+  spectral: { ...range(15, ['freeze', 'gateThresholdDb', 'gateAttackMs', 'gateReleaseMs', 'morph', 'binShift', 'blur', 'harmonicPercussiveBalance', 'noiseReduction', 'profileLearn', 'mix']), noiseFloorDb: 230 },
   autofilter: {
     ...range(30, ['frequencyHz', 'resonance', 'driveDb', 'mix', 'envelope.amountOctaves', 'envelope.attackMs', 'envelope.releaseMs', 'lfo.rateHz', 'lfo.depthOctaves', 'lfo.phaseOffset', 'lfo.stereoPhase']),
     outputDb: 143,
@@ -228,7 +228,7 @@ export const fx = {
     kind: 'spectral',
     state: {
       enabled: true, fftSize: 2048, overlap: 4, mode: 'gate', freeze: 0, gateThresholdDb: -60, gateAttackMs: 10, gateReleaseMs: 100,
-      morph: 0, binShift: 0, blur: 0, harmonicPercussiveBalance: 0, noiseReduction: 0, profileLearn: 0, mix: 1, ...state,
+      morph: 0, binShift: 0, blur: 0, harmonicPercussiveBalance: 0, noiseReduction: 0, noiseFloorDb: -30, profileLearn: 0, mix: 1, ...state,
     },
   }),
   autofilter: (state: Partial<AutoFilterProcessorState> = {}): EffectSpec => ({

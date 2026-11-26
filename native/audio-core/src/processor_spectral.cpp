@@ -38,6 +38,7 @@ void process_spectral_frame(Core &core, GraphRevision::Processor &processor, Spe
   controls.blur = spectral_parameter(core, processor, 21, frame, state.blur);
   controls.hpss_balance = spectral_parameter(core, processor, 22, frame, state.harmonic_percussive_balance);
   controls.noise_reduction = spectral_parameter(core, processor, 23, frame, state.noise_reduction);
+  controls.noise_floor_db = spectral_parameter(core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_NOISE_FLOOR_DB, frame, state.noise_floor_db);
   daw::audio_core::SpectralFrameIo io;
   io.input = {history.input[0].data(), history.input[1].data()};
   io.sidechain = {history.sidechain[0].data(), history.sidechain[1].data()};

@@ -450,5 +450,5 @@ const spectralParameters = () => Object.fromEntries([
   ['spectral.freeze', 0], ['spectral.gateThresholdDb', -60], ['spectral.gateAttackMs', 10],
   ['spectral.gateReleaseMs', 100], ['spectral.morph', 0], ['spectral.binShift', 0],
   ['spectral.blur', 0], ['spectral.harmonicPercussiveBalance', 0], ['spectral.noiseReduction', 0],
-  ['spectral.profileLearn', 0], ['spectral.mix', 1],
+  ['spectral.profileLearn', 0], ['spectral.mix', 1], ['spectral.noiseFloorDb', -30],
 ].map(([name, value]) => [name, Float32Array.of(Number(value))]))

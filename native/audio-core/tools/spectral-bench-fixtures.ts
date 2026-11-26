@@ -1,7 +1,6 @@
 // Writes the graph fixtures daw-spectral-bench times at 48 kHz: one source -> master graph without a processor, and the Spectral
 // modes at the FFT sizes the cost depends on, in 1024-frame blocks (a fixture holds at most 64 blocks): at overlap 4 a 4096 hop is one block, so the worst block is one analysis frame.
 // Usage: bun native/audio-core/tools/spectral-bench-fixtures.ts <out dir>
-/* oxlint-disable anti-slop/no-shape-in-symbol-names -- shape is a contract field name */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { graphEnvelope } from '../../../public/audio-worklets/daw-portable-graph-envelope-v3.js'
 import { fx } from '../../../tools/effects-harness/effects'

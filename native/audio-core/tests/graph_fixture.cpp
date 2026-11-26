@@ -1,7 +1,9 @@
 #include "graph_fixture.h"
 
 #include <array>
+#if !defined(__EMSCRIPTEN__)
 #include <chrono>
+#endif
 #include <limits>
 
 #include "daw/audio_core_instrument_wire.h"
@@ -356,15 +358,20 @@ extern "C" daw_audio_core_result daw_audio_core_run_graph_fixture_timed(
     for (uint32_t channel = 0; channel < channel_count; ++channel) {
       partition_outputs[channel] = outputs[channel] + frame_offset;
     }
+#if !defined(__EMSCRIPTEN__)
+    // The standalone Wasm harness has no clock import; only the native bench times partitions.
     const auto started = std::chrono::steady_clock::now();
+#endif
     result = daw_audio_core_wasm_graph_process_planar(
       partition_frames, input_bus_count, channel_count, input_bus_count == 0 ? nullptr : inputs.data(), partition_outputs.data(),
       active_revision, parameter_bytes == 0 ? nullptr : parameters, parameter_bytes,
       event_bytes == 0 ? nullptr : events, event_bytes,
       instrument_event_bytes == 0 ? nullptr : instrument_events, instrument_event_bytes);
+#if !defined(__EMSCRIPTEN__)
     if (partition_nanoseconds != nullptr) {
       partition_nanoseconds[partition] = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - started).count();
     }
+#endif
     frame_offset += partition_frames;
   }
   // An edit that names no partition boundary never ran, which is a malformed fixture.

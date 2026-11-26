@@ -381,7 +381,7 @@ const legacySpectralParameters = (spectral: PortableLegacySpectralFixture) => {
     'spectral.harmonicPercussiveBalance': Float32Array.of(state.harmonicPercussiveBalance),
     'spectral.noiseReduction': Float32Array.of(state.noiseReduction),
     'spectral.noiseFloorDb': Float32Array.of(state.noiseFloorDb),
-    'spectral.profileLearn': Float32Array.of(state.profileLearn),
+    'spectral.profileLearn': spectral.learnValues ?? Float32Array.of(state.profileLearn),
     'spectral.mix': spectral.mixValues ?? Float32Array.of(state.mix),
   }
 }

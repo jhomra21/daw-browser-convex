@@ -71,6 +71,7 @@ export type PortableLegacySpectralFixture = {
   kind: 'spectral'
   state: SpectralProcessorState
   mixValues?: Float32Array
+  learnValues?: Float32Array
   // The worklet is told at each of these frames, as the host does on a toggle.
   enabledEdits?: readonly { frame: number; enabled: boolean }[]
 }
@@ -2486,6 +2487,8 @@ const spectralFixture = (
     blockPartitions?: readonly number[]
     parameters?: Uint8Array
     mixValues?: Float32Array
+    // Per-frame Learn automation (target 24); the state's own profileLearn applies when absent.
+    learnValues?: Float32Array
     assertReset?: boolean
     bypassed?: boolean
     // Toggles of the stage, each compiled the way the product does: the plan's
@@ -2512,17 +2515,13 @@ const spectralFixture = (
     frames,
     blockPartitions: options.blockPartitions,
     input,
-    parameters: options.parameters,
+    parameters: options.parameters ?? (options.learnValues ? parameterEnvelopeForTarget(24, [...options.learnValues]) : undefined),
     assertReset: options.assertReset,
     expectedLatencyFrames: state.fftSize,
     expectedTailFrames: 0,
-    // A 512-point FFT accumulates native-libm versus Wasm-libm rounding across
-    // nine butterfly stages; this remains below one ten-thousandth full scale.
-    nativeWasmTolerance: 1e-4,
-    legacySpectral: { kind: 'spectral', state, mixValues: options.mixValues, enabledEdits: options.enabledEdits },
-    // The shipped worklet computes FFT state in Float64Array while the portable
-    // core stores it as float; keep the bound below five ten-thousandths FS.
-    legacyTolerance: 5e-4,
+    nativeWasmTolerance: 1e-5,
+    legacySpectral: { kind: 'spectral', state, mixValues: options.mixValues, learnValues: options.learnValues, enabledEdits: options.enabledEdits },
+    legacyTolerance: 1e-5,
     portableEligible: true,
     assertOutput: (output) => finite(output) && changedFromInput(output, input.subarray(0, frames * 2), 1e-5),
   }
@@ -2758,6 +2757,52 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
     return fixture
   })(),
 ]
+
+// Every mode at each sample rate and at the smallest and largest FFT size. A fixture runs within one 8192-frame block (the reference
+// render of a partitioned fixture is a single block), so FFT 4096 sees four analysis frames after its latency. The 512 HPSS rows are long
+// enough for the sliding medians to start replacing the oldest of their 31 frames; the median code does not depend on the rate.
+const spectralModeFixtures: readonly PortableGraphParityFixture[] = [44_100, 48_000, 96_000].flatMap((sampleRateHz) =>
+  [512, 4_096].flatMap((fftSize) => {
+    const tag = `${sampleRateHz}-fft${fftSize}`
+    const frames = Math.min(fftSize * 6, 8_192)
+    const hpssFrames = Math.min(fftSize * 2 + (31 + 1) * (fftSize / 4), 8_192)
+    const blocks = (count: number) => Array.from({ length: Math.ceil(count / 1_024) }, (_, index) => Math.min(1_024, count - index * 1_024))
+    const plus = (left: readonly number[], right: readonly number[]) => left.map((sample, frame) => sample + (right[frame] ?? 0))
+
+    const mixed = (count: number, seed: number, toneAmplitude = 0.4) =>
+      plus(seededNoise(count, seed, 0.1), sine(count, 997, sampleRateHz, toneAmplitude))
+
+    const withSidechain = (count: number, main: readonly number[], mainRight: readonly number[]) => new Float32Array([
+      ...stereo(main, mainRight),
+      ...stereo(plus(sine(count, 1_493, sampleRateHz, 0.3), seededNoise(count, 31, 0.05)), seededNoise(count, 37, 0.2)),
+    ])
+
+    const options = (count: number) => ({ maxFramesPerBlock: 1_024, blockPartitions: blocks(count) })
+
+    return [
+      spectralFixture(`gate-${tag}`, 'chains', sampleRateHz, stereo(
+        mixed(frames, 41).map((sample, frame) => sample * (frame < frames / 3 || frame >= frames * 2 / 3 ? 1 : 0.003)),
+        mixed(frames, 43).map((sample, frame) => sample * (frame < frames / 2 ? 1 : 0.01)),
+      ), spectralState({ mode: 'gate', fftSize, gateThresholdDb: -40, gateAttackMs: 5, gateReleaseMs: 50 }), options(frames)),
+      spectralFixture(`hpss-${tag}`, 'chains', sampleRateHz, stereo(mixed(hpssFrames, 47, 0.3), seededNoise(hpssFrames, 53, 0.3)),
+        spectralState({ mode: 'hpss', fftSize, harmonicPercussiveBalance: fftSize === 512 ? 0.4 : -0.4 }), options(hpssFrames)),
+      spectralFixture(`freeze-${tag}`, 'chains', sampleRateHz, stereo(mixed(frames, 59), mixed(frames, 61, 0.2)),
+        spectralState({ mode: 'freeze', fftSize, freeze: 1 }), options(frames)),
+      spectralFixture(`noise-reduce-learn-${tag}`, 'sidechains', sampleRateHz, withSidechain(
+        frames,
+        plus(seededNoise(frames, 67, 0.05), sine(frames, 997, sampleRateHz, 0.4).map((sample, frame) => frame < frames / 2 ? 0 : sample)),
+        seededNoise(frames, 71, 0.05),
+      ), spectralState({ mode: 'noise-reduce', fftSize, noiseReduction: 0.8, noiseFloorDb: -40 }), {
+        // Automation arrives as one per-frame envelope, so the whole render is one block.
+        inputBusCount: 2,
+        learnValues: Float32Array.from({ length: frames }, (_, frame) => frame < frames / 4 ? 1 : 0),
+      }),
+      spectralFixture(`shift-blur-${tag}`, 'chains', sampleRateHz, stereo(mixed(frames, 73), mixed(frames, 79, 0.2)),
+        spectralState({ mode: 'shift-blur', fftSize, binShift: fftSize === 512 ? 2.5 : -7.25, blur: 0.3 }), options(frames)),
+      spectralFixture(`morph-${tag}`, 'sidechains', sampleRateHz, withSidechain(frames, mixed(frames, 83), mixed(frames, 89, 0.2)),
+        spectralState({ mode: 'morph', fftSize, morph: 0.6 }), { ...options(frames), inputBusCount: 2 }),
+    ]
+  }))
 
 const loFiFixtures: readonly PortableGraphParityFixture[] = [44_100, 48_000, 96_000].flatMap((sampleRateHz) => {
   const fixture: PortableGraphParityFixture = {
@@ -3347,6 +3392,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
   ...dynamicsSidechainFixtures,
   ...timeEffectFixtures,
   ...spectralFixtures,
+  ...spectralModeFixtures,
   ...loFiFixtures,
   ...autoFilterFixtures,
   {

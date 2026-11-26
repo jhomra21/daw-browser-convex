@@ -473,7 +473,8 @@ class SpectralKernel {
     state.hpss_index = (slot + 1) % kSpectralMedianFrames;
     const double harmonic_gain = controls.hpss_balance < 0.0 ? 1.0 + controls.hpss_balance : 1.0;
     const double percussive_gain = controls.hpss_balance > 0.0 ? 1.0 - controls.hpss_balance : 1.0;
-    std::array<float, kSpectralMedianBins> window{};
+    // The entering bin is inserted before the leaving one is erased, so the window briefly holds one more than its width.
+    std::array<float, kSpectralMedianBins + 1> window{};
     uint32_t count = 0;
 
     for (uint32_t bin = 0; bin < std::min(bins, kSpectralMedianBins / 2 + 1); ++bin) spectral_sorted_insert(window.data(), count++, current_[bin]);

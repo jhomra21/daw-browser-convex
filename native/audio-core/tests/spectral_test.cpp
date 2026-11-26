@@ -1,5 +1,6 @@
 // Measurements for the Spectral kernel (src/spectral_kernel.h). Every case prints the number it checks.
-// Run with a group name (gate, threshold, neutral, hpss, freeze, noise, shift, morph, cost) or with none for all.
+// Run with a group name (gate, threshold, neutral, hpss, hpss-window, freeze, noise, shift, morph, cost) or with none for all.
+#define DAW_SPECTRAL_TRACK_HPSS_WINDOW 1
 #include "../src/spectral_kernel.h"
 
 #include <algorithm>
@@ -305,6 +306,25 @@ void hpss() {
   expectAtMost("stems_sum_error_db", toDb(worst), -130.0);
 }
 
+// The percussive median window holds one value more than its width while the entering bin is inserted. Every FFT size has more
+// bins than the window is wide, so each one reaches the window's edge. Under AddressSanitizer an overrun aborts the run.
+void hpssWindow() {
+  currentName = "hpss_window";
+  for (const uint32_t size : kSizes) {
+    Rig rig(size, 4);
+    SpectralControls controls;
+    controls.mode = SpectralMode::Hpss;
+    const size_t total = size + static_cast<size_t>(size / 4) * 4;
+    const Stereo noise = stereoNoise(total, 0.1);
+    rig.run(noise, noise, controls);
+    char name[48];
+    std::snprintf(name, sizeof name, "window_peak_N%u", size);
+    expectAtMost(name, rig.kernel->hpss_window_peak(), kSpectralHpssWindowCapacity);
+    std::snprintf(name, sizeof name, "window_reaches_capacity_N%u", size);
+    expectAtLeast(name, rig.kernel->hpss_window_peak(), kSpectralHpssWindowCapacity);
+  }
+}
+
 // P3: a frozen sine stays one steady partial at its own frequency.
 void freeze() {
   currentName = "freeze";
@@ -482,7 +502,7 @@ void cost() {
 
 int main(int argc, char **argv) {
   struct Group { const char *name; void (*run)(); };
-  const Group groups[] = {{"gate", gate}, {"threshold", threshold}, {"neutral", neutral}, {"hpss", hpss}, {"freeze", freeze},
+  const Group groups[] = {{"gate", gate}, {"threshold", threshold}, {"neutral", neutral}, {"hpss", hpss}, {"hpss-window", hpssWindow}, {"freeze", freeze},
     {"noise", noise}, {"shift", shift}, {"morph", morph}, {"cost", cost}};
   bool ran = false;
   for (const Group &group : groups) {

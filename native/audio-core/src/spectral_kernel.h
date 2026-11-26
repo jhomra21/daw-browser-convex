@@ -37,6 +37,8 @@ inline constexpr uint32_t kSpectralFftMax = 4096;
 inline constexpr uint32_t kSpectralBinsMax = kSpectralFftMax / 2 + 1;
 inline constexpr uint32_t kSpectralMedianFrames = 31;
 inline constexpr uint32_t kSpectralMedianBins = 31;
+// The entering bin is inserted before the leaving one is erased, so the window briefly holds one more than its width.
+inline constexpr uint32_t kSpectralHpssWindowCapacity = kSpectralMedianBins + 1;
 inline constexpr double kSpectralPi = 3.14159265358979323846264338327950288;
 
 enum class SpectralMode : uint32_t { Freeze = 0, Gate = 1, Morph = 2, ShiftBlur = 3, Hpss = 4, NoiseReduce = 5 };
@@ -123,6 +125,10 @@ inline double spectral_wrap_phase(double phase) {
 class SpectralKernel {
  public:
   uint32_t fft_size() const { return size_; }
+#ifdef DAW_SPECTRAL_TRACK_HPSS_WINDOW
+  // Test builds only: the most values the percussive window has held at once.
+  uint32_t hpss_window_peak() const { return hpss_window_peak_; }
+#endif
 
   // Builds the window and FFT tables. Control side: it evaluates trigonometry for every table entry.
   void prepare(uint32_t fft_size, uint32_t overlap) {
@@ -473,8 +479,7 @@ class SpectralKernel {
     state.hpss_index = (slot + 1) % kSpectralMedianFrames;
     const double harmonic_gain = controls.hpss_balance < 0.0 ? 1.0 + controls.hpss_balance : 1.0;
     const double percussive_gain = controls.hpss_balance > 0.0 ? 1.0 - controls.hpss_balance : 1.0;
-    // The entering bin is inserted before the leaving one is erased, so the window briefly holds one more than its width.
-    std::array<float, kSpectralMedianBins + 1> window{};
+    std::array<float, kSpectralHpssWindowCapacity> window{};
     uint32_t count = 0;
 
     for (uint32_t bin = 0; bin < std::min(bins, kSpectralMedianBins / 2 + 1); ++bin) spectral_sorted_insert(window.data(), count++, current_[bin]);
@@ -492,6 +497,9 @@ class SpectralKernel {
       const uint32_t entering = bin + kSpectralMedianBins / 2 + 1;
 
       if (entering < bins) spectral_sorted_insert(window.data(), count++, current_[entering]);
+#ifdef DAW_SPECTRAL_TRACK_HPSS_WINDOW
+      hpss_window_peak_ = std::max(hpss_window_peak_, count);
+#endif
       if (bin >= kSpectralMedianBins / 2) spectral_sorted_erase(window.data(), count--, current_[bin - kSpectralMedianBins / 2]);
     }
   }
@@ -545,6 +553,9 @@ class SpectralKernel {
     }
   }
 
+#ifdef DAW_SPECTRAL_TRACK_HPSS_WINDOW
+  uint32_t hpss_window_peak_ = 0;
+#endif
   uint32_t size_ = 0;
   uint32_t overlap_ = 0;
   double normalization_ = 1.0;

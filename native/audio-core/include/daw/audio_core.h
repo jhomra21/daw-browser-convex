@@ -517,9 +517,9 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSE = 137,
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_SIZE = 138,
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION = 139,
-  DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DENSITY = 140,
-  DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION_LOW_CUT_HZ = 141,
-  DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION_HIGH_CUT_HZ = 142,
+  /* 140 was the Reverb Density knob; Density is now a chooser that rebuilds the network. */
+  DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_LOW_SHELF_HZ = 141,
+  DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_HIGH_SHELF_HZ = 142,
   DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_OUTPUT_DB = 143,
   /* Bands 8 to 15 (the second curve of the L/R and M/S modes) follow the same frequency, gain, Q order as bands 0 to 7. */
   DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_8_FREQUENCY_HZ = 144,
@@ -528,7 +528,11 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_EQ_OUTPUT_DB = 169,
   DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_GAIN_DB = 170,
   DAW_AUDIO_PROCESSOR_PARAMETER_GATE_SIDECHAIN_GAIN_DB = 171,
-  DAW_AUDIO_PROCESSOR_PARAMETER_GATE_SIDECHAIN_MIX = 172
+  DAW_AUDIO_PROCESSOR_PARAMETER_GATE_SIDECHAIN_MIX = 172,
+  DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_CHORUS_AMOUNT_MS = 173,
+  DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_CHORUS_RATE_HZ = 174,
+  DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_LOW_SHELF_DB = 175,
+  DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_HIGH_SHELF_DB = 176
 } daw_audio_processor_parameter;
 
 #define DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_0_FREQUENCY_HZ
@@ -865,8 +869,21 @@ typedef struct daw_audio_delay_state {
   float high_cut_hz;
 } daw_audio_delay_state;
 
-/* Deterministic bounded feedback-delay profile shared by native, Wasm, and
- * browser AudioWorklet processing. */
+typedef enum daw_audio_reverb_density {
+  DAW_AUDIO_REVERB_DENSITY_SPARSE = 0,
+  DAW_AUDIO_REVERB_DENSITY_LOW = 1,
+  DAW_AUDIO_REVERB_DENSITY_MID = 2,
+  DAW_AUDIO_REVERB_DENSITY_HIGH = 3
+} daw_audio_reverb_density;
+
+typedef enum daw_audio_reverb_smooth {
+  DAW_AUDIO_REVERB_SMOOTH_NONE = 0,
+  DAW_AUDIO_REVERB_SMOOTH_SLOW = 1,
+  DAW_AUDIO_REVERB_SMOOTH_FAST = 2
+} daw_audio_reverb_smooth;
+
+/* Deterministic feedback-delay-network reverb shared by native, Wasm, and
+ * browser AudioWorklet processing. stereo_width is the Stereo angle in degrees. */
 typedef struct daw_audio_reverb_state {
   uint32_t enabled;
   float wet;
@@ -880,12 +897,23 @@ typedef struct daw_audio_reverb_state {
   float diffuse;
   float size;
   float diffusion;
-  float density;
+  uint32_t density;
   float low_cut_hz;
   float high_cut_hz;
-  float diffusion_low_cut_hz;
-  float diffusion_high_cut_hz;
+  float low_shelf_hz;
+  float high_shelf_hz;
   float stereo_width;
+  uint32_t smooth;
+  uint32_t freeze;
+  uint32_t flat;
+  uint32_t cut;
+  uint32_t chorus;
+  float chorus_amount_ms;
+  float chorus_rate_hz;
+  uint32_t low_shelf_on;
+  uint32_t high_shelf_on;
+  float low_shelf_db;
+  float high_shelf_db;
 } daw_audio_reverb_state;
 
 typedef enum daw_audio_spectral_mode {

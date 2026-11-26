@@ -285,12 +285,18 @@ bool valid_reverb_state(const daw_audio_reverb_state &state) {
     && std::isfinite(state.diffuse) && state.diffuse >= 0.0F && state.diffuse <= 1.0F
     && std::isfinite(state.size) && state.size >= 0.0F && state.size <= 1.0F
     && std::isfinite(state.diffusion) && state.diffusion >= 0.0F && state.diffusion <= 1.0F
-    && std::isfinite(state.density) && state.density >= 0.0F && state.density <= 1.0F
+    && state.density <= DAW_AUDIO_REVERB_DENSITY_HIGH
     && std::isfinite(state.low_cut_hz) && state.low_cut_hz >= 20.0F && state.low_cut_hz <= 1200.0F
     && std::isfinite(state.high_cut_hz) && state.high_cut_hz >= 1200.0F && state.high_cut_hz <= 20000.0F
-    && std::isfinite(state.diffusion_low_cut_hz) && state.diffusion_low_cut_hz >= 20.0F && state.diffusion_low_cut_hz <= 1200.0F
-    && std::isfinite(state.diffusion_high_cut_hz) && state.diffusion_high_cut_hz >= 1200.0F && state.diffusion_high_cut_hz <= 20000.0F
-    && std::isfinite(state.stereo_width) && state.stereo_width >= 0.0F && state.stereo_width <= 2.0F;
+    && std::isfinite(state.low_shelf_hz) && state.low_shelf_hz >= 20.0F && state.low_shelf_hz <= 1200.0F
+    && std::isfinite(state.high_shelf_hz) && state.high_shelf_hz >= 1200.0F && state.high_shelf_hz <= 20000.0F
+    && std::isfinite(state.stereo_width) && state.stereo_width >= 0.0F && state.stereo_width <= 120.0F
+    && state.smooth <= DAW_AUDIO_REVERB_SMOOTH_FAST && state.freeze <= 1 && state.flat <= 1 && state.cut <= 1 && state.chorus <= 1
+    && std::isfinite(state.chorus_amount_ms) && state.chorus_amount_ms >= 0.0F && state.chorus_amount_ms <= 5.0F
+    && std::isfinite(state.chorus_rate_hz) && state.chorus_rate_hz >= 0.01F && state.chorus_rate_hz <= 5.0F
+    && state.low_shelf_on <= 1 && state.high_shelf_on <= 1
+    && std::isfinite(state.low_shelf_db) && state.low_shelf_db >= -24.0F && state.low_shelf_db <= 12.0F
+    && std::isfinite(state.high_shelf_db) && state.high_shelf_db >= -24.0F && state.high_shelf_db <= 12.0F;
 }
 
 bool valid_spectral_state(const daw_audio_spectral_state &state) {
@@ -477,7 +483,7 @@ bool decode_processor_state(
     out_processor->delay = state;
     return true;
   }
-  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB && descriptor.state_size == 72) {
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB && descriptor.state_size == 116) {
     const daw_audio_reverb_state state{
       .enabled = read_u32_le(descriptor.state), .wet = read_f32_le(descriptor.state + 4),
       .decay_sec = read_f32_le(descriptor.state + 8), .pre_delay_ms = read_f32_le(descriptor.state + 12),
@@ -485,9 +491,15 @@ bool decode_processor_state(
       .reflection_mod_amount_ms = read_f32_le(descriptor.state + 24), .reflection_mod_rate_hz = read_f32_le(descriptor.state + 28),
       .reflection_shape = read_f32_le(descriptor.state + 32), .diffuse = read_f32_le(descriptor.state + 36),
       .size = read_f32_le(descriptor.state + 40), .diffusion = read_f32_le(descriptor.state + 44),
-      .density = read_f32_le(descriptor.state + 48), .low_cut_hz = read_f32_le(descriptor.state + 52),
-      .high_cut_hz = read_f32_le(descriptor.state + 56), .diffusion_low_cut_hz = read_f32_le(descriptor.state + 60),
-      .diffusion_high_cut_hz = read_f32_le(descriptor.state + 64), .stereo_width = read_f32_le(descriptor.state + 68),
+      .density = read_u32_le(descriptor.state + 48), .low_cut_hz = read_f32_le(descriptor.state + 52),
+      .high_cut_hz = read_f32_le(descriptor.state + 56), .low_shelf_hz = read_f32_le(descriptor.state + 60),
+      .high_shelf_hz = read_f32_le(descriptor.state + 64), .stereo_width = read_f32_le(descriptor.state + 68),
+      .smooth = read_u32_le(descriptor.state + 72), .freeze = read_u32_le(descriptor.state + 76),
+      .flat = read_u32_le(descriptor.state + 80), .cut = read_u32_le(descriptor.state + 84),
+      .chorus = read_u32_le(descriptor.state + 88), .chorus_amount_ms = read_f32_le(descriptor.state + 92),
+      .chorus_rate_hz = read_f32_le(descriptor.state + 96), .low_shelf_on = read_u32_le(descriptor.state + 100),
+      .high_shelf_on = read_u32_le(descriptor.state + 104), .low_shelf_db = read_f32_le(descriptor.state + 108),
+      .high_shelf_db = read_f32_le(descriptor.state + 112),
     };
     if (!valid_reverb_state(state)) return false;
     out_processor->reverb = state;
@@ -620,7 +632,11 @@ bool valid_processor_parameter_target(uint32_t kind, uint32_t target) {
       return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_WET
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_STEREO_WIDTH)
         || (target >= DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DECAY_SEC
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION_HIGH_CUT_HZ);
+        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION)
+        || target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_LOW_SHELF_HZ
+        || target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_HIGH_SHELF_HZ
+        || (target >= DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_CHORUS_AMOUNT_MS
+        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_HIGH_SHELF_DB);
     case DAW_AUDIO_PROCESSOR_KIND_SPECTRAL:
       return target >= DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_FREEZE
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_MIX;
@@ -663,7 +679,7 @@ bool valid_processor_parameter_value(uint32_t target, float value) {
   if (target == 11) return value >= 0.0F && value <= 250.0F;
   if (target == 12) return value >= 20.0F && value <= 1200.0F;
   if (target == 13) return value >= 1000.0F && value <= 20000.0F;
-  if (target == 14) return value >= 0.0F && value <= 2.0F;
+  if (target == 14) return value >= 0.0F && value <= 120.0F;
   if (target == 15 || target == 19 || target == 21 || target == 23 || target == 24 || target == 25) return value >= 0.0F && value <= 1.0F;
   if (target == 16) return value >= -120.0F && value <= 0.0F;
   if (target == 17) return value >= 0.1F && value <= 1000.0F;
@@ -777,11 +793,14 @@ bool valid_processor_parameter_value(uint32_t target, float value) {
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSE) return value >= DAW_AUDIO_CORE_REVERB_DIFFUSE_MIN && value <= DAW_AUDIO_CORE_REVERB_DIFFUSE_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_SIZE) return value >= DAW_AUDIO_CORE_REVERB_SIZE_MIN && value <= DAW_AUDIO_CORE_REVERB_SIZE_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION) return value >= DAW_AUDIO_CORE_REVERB_DIFFUSION_MIN && value <= DAW_AUDIO_CORE_REVERB_DIFFUSION_MAX;
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DENSITY) return value >= DAW_AUDIO_CORE_REVERB_DENSITY_MIN && value <= DAW_AUDIO_CORE_REVERB_DENSITY_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_REFLECTION_MOD_AMOUNT_MS) return value >= DAW_AUDIO_CORE_REVERB_REFLECTION_MOD_AMOUNT_MS_MIN && value <= DAW_AUDIO_CORE_REVERB_REFLECTION_MOD_AMOUNT_MS_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_REFLECTION_MOD_RATE_HZ) return value >= DAW_AUDIO_CORE_REVERB_REFLECTION_MOD_RATE_HZ_MIN && value <= DAW_AUDIO_CORE_REVERB_REFLECTION_MOD_RATE_HZ_MAX;
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION_LOW_CUT_HZ) return value >= DAW_AUDIO_CORE_REVERB_DIFFUSION_LOW_CUT_HZ_MIN && value <= DAW_AUDIO_CORE_REVERB_DIFFUSION_LOW_CUT_HZ_MAX;
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION_HIGH_CUT_HZ) return value >= DAW_AUDIO_CORE_REVERB_DIFFUSION_HIGH_CUT_HZ_MIN && value <= DAW_AUDIO_CORE_REVERB_DIFFUSION_HIGH_CUT_HZ_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_LOW_SHELF_HZ) return value >= DAW_AUDIO_CORE_REVERB_LOW_SHELF_HZ_MIN && value <= DAW_AUDIO_CORE_REVERB_LOW_SHELF_HZ_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_HIGH_SHELF_HZ) return value >= DAW_AUDIO_CORE_REVERB_HIGH_SHELF_HZ_MIN && value <= DAW_AUDIO_CORE_REVERB_HIGH_SHELF_HZ_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_CHORUS_AMOUNT_MS) return value >= DAW_AUDIO_CORE_REVERB_CHORUS_AMOUNT_MS_MIN && value <= DAW_AUDIO_CORE_REVERB_CHORUS_AMOUNT_MS_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_CHORUS_RATE_HZ) return value >= DAW_AUDIO_CORE_REVERB_CHORUS_RATE_HZ_MIN && value <= DAW_AUDIO_CORE_REVERB_CHORUS_RATE_HZ_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_LOW_SHELF_DB) return value >= DAW_AUDIO_CORE_REVERB_LOW_SHELF_DB_MIN && value <= DAW_AUDIO_CORE_REVERB_LOW_SHELF_DB_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_HIGH_SHELF_DB) return value >= DAW_AUDIO_CORE_REVERB_HIGH_SHELF_DB_MIN && value <= DAW_AUDIO_CORE_REVERB_HIGH_SHELF_DB_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_EQ_SCALE) return value >= 0.0F && value <= DAW_AUDIO_CORE_EQ_SCALE_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_EQ_OUTPUT_DB) return std::fabs(value) <= DAW_AUDIO_CORE_EQ_OUTPUT_DB_MAX;
   if ((target >= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE && target <= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_LAST)

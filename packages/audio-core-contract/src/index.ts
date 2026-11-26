@@ -216,12 +216,24 @@ export type ReverbProcessorState = {
   diffuse: number
   size: number
   diffusion: number
-  density: number
+  density: 'sparse' | 'low' | 'mid' | 'high'
   lowCutHz: number
   highCutHz: number
-  diffusionLowCutHz: number
-  diffusionHighCutHz: number
+  lowShelfHz: number
+  highShelfHz: number
+  /** The Stereo angle in degrees: 0 is mono, 120 is two independent channels. */
   stereoWidth: number
+  smooth: 'none' | 'slow' | 'fast'
+  freeze: boolean
+  flat: boolean
+  cut: boolean
+  chorus: boolean
+  chorusAmountMs: number
+  chorusRateHz: number
+  lowShelfOn: boolean
+  highShelfOn: boolean
+  lowShelfDb: number
+  highShelfDb: number
 }
 
 export type SpectralProcessorState = {
@@ -1041,7 +1053,7 @@ export const encodeDelayProcessorState = (state: DelayProcessorState): Uint8Arra
 }
 
 export const encodeReverbProcessorState = (state: ReverbProcessorState): Uint8Array => {
-  const output = new Uint8Array(72)
+  const output = new Uint8Array(116)
   const view = new DataView(output.buffer)
   view.setUint32(0, state.enabled ? 1 : 0, true)
   view.setFloat32(4, state.wet, true)
@@ -1055,12 +1067,23 @@ export const encodeReverbProcessorState = (state: ReverbProcessorState): Uint8Ar
   view.setFloat32(36, state.diffuse, true)
   view.setFloat32(40, state.size, true)
   view.setFloat32(44, state.diffusion, true)
-  view.setFloat32(48, state.density, true)
+  view.setUint32(48, state.density === 'low' ? 1 : state.density === 'mid' ? 2 : state.density === 'high' ? 3 : 0, true)
   view.setFloat32(52, state.lowCutHz, true)
   view.setFloat32(56, state.highCutHz, true)
-  view.setFloat32(60, state.diffusionLowCutHz, true)
-  view.setFloat32(64, state.diffusionHighCutHz, true)
+  view.setFloat32(60, state.lowShelfHz, true)
+  view.setFloat32(64, state.highShelfHz, true)
   view.setFloat32(68, state.stereoWidth, true)
+  view.setUint32(72, state.smooth === 'slow' ? 1 : state.smooth === 'fast' ? 2 : 0, true)
+  view.setUint32(76, state.freeze ? 1 : 0, true)
+  view.setUint32(80, state.flat ? 1 : 0, true)
+  view.setUint32(84, state.cut ? 1 : 0, true)
+  view.setUint32(88, state.chorus ? 1 : 0, true)
+  view.setFloat32(92, state.chorusAmountMs, true)
+  view.setFloat32(96, state.chorusRateHz, true)
+  view.setUint32(100, state.lowShelfOn ? 1 : 0, true)
+  view.setUint32(104, state.highShelfOn ? 1 : 0, true)
+  view.setFloat32(108, state.lowShelfDb, true)
+  view.setFloat32(112, state.highShelfDb, true)
 
   return output
 }

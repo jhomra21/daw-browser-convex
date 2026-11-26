@@ -94,6 +94,8 @@ bool compatible_processor_history(
         && current.spectral.overlap == next.spectral.overlap;
     case DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER:
       return current.autofilter.hi_quality == next.autofilter.hi_quality;
+    case DAW_AUDIO_PROCESSOR_KIND_REVERB:
+      return current.reverb.density == next.reverb.density;
     case DAW_AUDIO_PROCESSOR_KIND_LOFI:
       return current.lofi.bit_depth == next.lofi.bit_depth
         && current.lofi.quantization == next.lofi.quantization
@@ -101,7 +103,6 @@ bool compatible_processor_history(
         && current.lofi.seed == next.lofi.seed;
     default:
       return current.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY
-        || current.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB
         || current.kind == DAW_AUDIO_PROCESSOR_KIND_CHORUS
         || current.kind == DAW_AUDIO_PROCESSOR_KIND_FLANGER
         || current.kind == DAW_AUDIO_PROCESSOR_KIND_PHASER

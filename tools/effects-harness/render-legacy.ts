@@ -1,5 +1,5 @@
 // Renders an effect through the shipped browser AudioWorklet (public/audio-worklets/daw-*-processor-v1.js) under a stubbed
-// AudioWorkletProcessor. EQ, Saturator and Delay are Web Audio node chains in the browser; bun has no OfflineAudioContext,
+// AudioWorkletProcessor. EQ and Saturator are Web Audio node chains in the browser; bun has no OfflineAudioContext,
 // so they report as not measured.
 import type { EffectKind, EffectSpec } from './effects'
 import { getPath, withPaths } from './state-path'
@@ -11,13 +11,13 @@ const worklets = new URL('../../public/audio-worklets/', import.meta.url).pathna
 const files: Partial<Record<EffectKind, string>> = {
   utility: 'daw-utility-processor-v1.js', autofilter: 'daw-autofilter-processor-v1.js', lofi: 'daw-lofi-processor-v1.js',
   limiter: 'daw-limiter-processor-v1.js', gate: 'daw-gate-processor-v1.js', compressor: 'daw-compressor-processor-v1.js',
-  reverb: 'daw-reverb-processor-v1.js', spectral: 'daw-spectral-processor-v1.js',
+  reverb: 'daw-reverb-processor-v1.js', delay: 'daw-delay-processor-v1.js', spectral: 'daw-spectral-processor-v1.js',
   chorus: 'daw-modulation-processor-v1.js', flanger: 'daw-modulation-processor-v1.js', phaser: 'daw-modulation-processor-v1.js',
   tremolo: 'daw-modulation-processor-v1.js', autopan: 'daw-modulation-processor-v1.js', ensemble: 'daw-modulation-processor-v1.js',
 }
 
 /** Worklet AudioParam names that differ from the contract state key. */
-const parameterAliases = new Map([['limiter.ceiling', 'ceilingDbtp'], ['limiter.release', 'releaseMs']])
+const parameterAliases = new Map([['limiter.ceiling', 'ceilingDbtp'], ['limiter.release', 'releaseMs'], ['delay.timeMs', 'timeLeftMs']])
 
 type Descriptor = { name: string; defaultValue?: number }
 
@@ -84,6 +84,7 @@ export const renderLegacy = async (spec: EffectSpec, rate: number, options: Rend
     })
   }
 
+  if (spec.kind === 'delay' && options.tempoBpm !== undefined) worklet.port.onmessage?.({ data: { type: 'tempo', version: 1, bpm: options.tempoBpm } })
   configure()
   const output: Planar = [new Float32Array(frames), new Float32Array(frames)]
 

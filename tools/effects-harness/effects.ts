@@ -114,7 +114,7 @@ export const parameterTargets: Record<EffectKind, Record<string, number>> = {
     'sidechain.frequencyHz': 125, 'sidechain.q': 126,
   },
   limiter: { ceilingDbtp: 127, releaseMs: 128, link: 130, gainDb: 170 },
-  delay: range(5, ['delayMs', 'feedback', 'dryWet', 'lowCutHz', 'highCutHz']),
+  delay: { ...range(5, ['timeLeftMs', 'feedback', 'dryWet', 'filterHz', 'filterWidth']), ...range(200, ['timeRightMs', 'offsetLeftPercent', 'offsetRightPercent']) },
   reverb: {
     wet: 10, preDelayMs: 11, lowCutHz: 12, highCutHz: 13, stereoWidth: 14, decaySec: 132, reflections: 133,
     reflectionModAmountMs: 134, reflectionModRateHz: 135, reflectionShape: 136, diffuse: 137, size: 138, diffusion: 139,
@@ -194,7 +194,11 @@ export const fx = {
   }),
   delay: (state: Partial<DelayProcessorState> = {}): EffectSpec => ({
     kind: 'delay',
-    state: { enabled: true, delayMs: 250, feedback: 0.25, dryWet: 0.2, pingPong: false, filterEnabled: false, lowCutHz: 120, highCutHz: 8000, ...state },
+    state: {
+      enabled: true, link: true, pingPong: false, freeze: false, filterEnabled: false, smoothing: 'repitch', syncLeft: false, syncRight: false,
+      divisionLeft: '1/8', divisionRight: '1/8', feelLeft: 'straight', feelRight: 'straight', timeLeftMs: 250, timeRightMs: 250,
+      offsetLeftPercent: 0, offsetRightPercent: 0, feedback: 0.25, dryWet: 0.2, filterHz: 1000, filterWidth: 5, ...state,
+    },
   }),
   reverb: (state: Partial<ReverbProcessorState> = {}): EffectSpec => ({
     kind: 'reverb',

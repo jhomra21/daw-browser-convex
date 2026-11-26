@@ -237,6 +237,11 @@ if(BUILD_TESTING)
   add_executable(daw-modulation-bench tools/modulation_bench.cpp tests/graph_fixture.cpp)
   target_compile_features(daw-modulation-bench PRIVATE cxx_std_20)
   target_link_libraries(daw-modulation-bench PRIVATE daw-audio-core)
+
+  # Not a test: prints the cost per frame and the worst block of each Spectral setting from graph fixtures (tools/spectral-bench-fixtures.ts).
+  add_executable(daw-spectral-bench tools/spectral_bench.cpp tests/graph_fixture.cpp)
+  target_compile_features(daw-spectral-bench PRIVATE cxx_std_20)
+  target_link_libraries(daw-spectral-bench PRIVATE daw-audio-core)
 endif()
 
 if(DAW_AUDIO_CORE_BUILD_WASM OR DAW_AUDIO_CORE_BUILD_WASM_HARNESS)

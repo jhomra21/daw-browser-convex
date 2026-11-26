@@ -56,6 +56,8 @@ export const gateCompressorLatencyFrames = (lookaheadMs: number, rate: number) =
 /** The Through-zero Flanger holds its dry path back by the kernel's fixed 5 ms (ChorusKernel::kThroughZeroDryMs), whatever the other controls say. */
 const THROUGH_ZERO_DRY_MS = 5
 
+export const throughZeroLatencyFrames = (rate: number) => lookaheadFrames(THROUGH_ZERO_DRY_MS, rate)
+
 export const getEffectTiming = (
   input: EffectTimingInput,
   sampleRate: number,
@@ -120,7 +122,7 @@ export const getEffectTiming = (
   }
 
   if (input.kind === 'chorus' || input.kind === 'flanger') {
-    const latencyFrames = input.kind === 'flanger' && input.params.state.mode === 'throughZero' ? lookaheadFrames(THROUGH_ZERO_DRY_MS, rate) : 0
+    const latencyFrames = input.kind === 'flanger' && input.params.state.mode === 'throughZero' ? throughZeroLatencyFrames(rate) : 0
 
     if (!input.params.state.enabled || input.params.state.mix === 0) return { latencyFrames, tail: finite(0) }
     const delayFrames = (input.params.state.delayMs + input.params.state.depthMs) * rate / 1000

@@ -59,7 +59,10 @@ const autopanPhase: Scenario = {
     const left = centre(output[0])
     const right = centre(output[1])
     const [ml, mr] = [mean(left), mean(right)]
-    h.atMost('L/R gain-envelope correlation of the autopan', correlation(left.map((v) => v - ml), right.map((v) => v - mr)), -0.99, '', 'TR-1')
+    // Auto Pan now follows Live: two LFOs a half cycle apart (the default Stereo Phase) drive equal-power gains, sine against cosine of a
+    // quarter-cycle angle, whose envelopes correlate at about -0.92, not -1. The linear antiphase check (-0.99) moved to the Tremolo
+    // row of the modulation family; the equal-power law has its own row there.
+    h.atMost('L/R gain-envelope correlation of the autopan', correlation(left.map((v) => v - ml), right.map((v) => v - mr)), -0.9, '', 'TR-1')
   },
 }
 
@@ -78,7 +81,7 @@ export const delayModulation: Family = {
     ...robustnessScenarios('ensemble', fx.ensemble(), null),
   ],
   notEncoded: [
-    'TR-1 stereoPhase 0.5 on the tremolo: the amplitude-modulation state has no stereoPhase; the autopan envelopes are measured instead.',
+    'TR-1 on the tremolo (Stereo Phase 0.5 antiphase) and the Auto Pan equal-power law: judged in the modulation family.',
     'Ensemble sideband and per-voice tests, chorus stereo-width tests: need a voice-level tap the core does not expose.',
   ],
 }

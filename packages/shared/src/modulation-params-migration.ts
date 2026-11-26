@@ -14,8 +14,8 @@ import { isJsonObject, type JsonObject, type JsonValue } from './json-value'
 // - Chorus, Flanger and Ensemble: sine LFO, Safe Bass off (100 Hz), Width 1, Output 0 dB; Chorus mode Chorus, Flanger mode
 //   Flanger; Ensemble fast modulation (Depth 0 ms, Rate 6 Hz) off;
 // - Phaser: sine LFO, Safe Bass off, Spread 0 and Blend 0 (the old all-pass cascade and mix), Output 0 dB;
-// - Tremolo and Auto Pan: the old 'sine' or 'triangle' stays, Sync off, Invert off, Stereo Phase 0; Phase stays the offset of
-//   both channels' LFOs.
+// - Tremolo and Auto Pan: the old 'sine' or 'triangle' stays, Sync off, Invert off; Phase stays the offset of both channels'
+//   LFOs. Stereo Phase is 0 for Tremolo and 0.5 (180 degrees, the old panner's opposite sweeps and Live's default) for Auto Pan.
 // What does not carry over by design (owner decisions, applies to every project): the delay loop of Chorus and Flanger is now exactly
 // the set delay so the comb notches sit where the knob says; Auto Pan is equal-power (-3 dB at centre, 0 dB at the sides, where
 // the old one was 0 dB at centre and +3 dB at the sides); Tremolo keeps its average level at any Depth (the old one only ducked).

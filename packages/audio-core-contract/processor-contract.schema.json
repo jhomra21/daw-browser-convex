@@ -275,7 +275,7 @@
                 "depth": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true},
                 "shape": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true},
                 "phase": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true},
-                "stereoPhase": { "type": "number", "default": 0, "minimum": -0.5, "maximum": 0.5, "portableParameter": true}
+                "stereoPhase": { "type": "number", "default": 0.5, "minimum": -0.5, "maximum": 0.5, "portableParameter": true}
               }
             }
           }

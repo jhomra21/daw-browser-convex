@@ -293,6 +293,7 @@ void pan() {
   expectNear("centre_gain_db_right", toDb(centre.right.back()), -3.0103, 0.02);
   values.depth = 1.0F;
   values.rate_hz = 1.0F;
+  values.stereo_phase = 0.5F;  // 180 degrees: the two LFOs are opposite, which is what makes the pair equal power
   config.waveform = 1;
   Envelope sweep = envelope(values, config, 48000);
   double worst = 0.0, lowest = 10.0, highest = 0.0, hardest = 10.0;
@@ -307,12 +308,23 @@ void pan() {
   expectNear("hard_right_left_gain", lowest, 0.0, 1.0e-3);
   expectNear("hard_left_left_gain", highest, 1.0, 1.0e-3);
   expectNear("hard_left_right_gain", hardest, 0.0, 1.0e-3);
-  // Half a cycle of Stereo Phase mirrors the right LFO, which makes both channels' pan angles mirror images: equal gains.
-  values.stereo_phase = 0.5F;
-  const Envelope mirrored = envelope(values, config, 48000);
+  // A sine LFO at 180 degrees crosses the centre with both channels at -3 dB.
+  config.waveform = 0;
+  const Envelope sine = envelope(values, config, 48000);
+  size_t crossing = 0;
+  for (size_t i = 1; i < sine.left.size(); ++i)
+    if (std::fabs(sine.left[i] - sine.right[i]) < std::fabs(sine.left[crossing] - sine.right[crossing])) crossing = i;
+  expectNear("sine_crossing_gain_db_left", toDb(sine.left[crossing]), -3.0103, 0.1);
+  expectNear("sine_crossing_gain_db_right", toDb(sine.right[crossing]), -3.0103, 0.1);
   worst = 0.0;
-  for (size_t i = 0; i < mirrored.left.size(); ++i) worst = std::max<double>(worst, std::fabs(mirrored.left[i] - mirrored.right[i]));
-  expectAtMost("half_cycle_stereo_phase_gives_equal_gains", worst, 1.0e-3);
+  for (size_t i = 0; i < sine.left.size(); ++i) worst = std::max(worst, std::fabs(toDb(std::hypot(sine.left[i], sine.right[i]))));
+  expectAtMost("sine_power_sum_deviation_db", worst, 0.02);
+  // At 0 degrees both channels move together.
+  values.stereo_phase = 0.0F;
+  const Envelope together = envelope(values, config, 48000);
+  worst = 0.0;
+  for (size_t i = 0; i < together.left.size(); ++i) worst = std::max<double>(worst, std::fabs(together.left[i] - together.right[i]));
+  expectAtMost("zero_stereo_phase_gives_identical_gains", worst, 1.0e-6);
 }
 
 // A synced LFO's phase is a function of the song position: a fresh kernel started at a frame and one that has been running

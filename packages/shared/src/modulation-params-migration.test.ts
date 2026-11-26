@@ -47,6 +47,12 @@ describe('modulation params v1 to v2', () => {
     })
   }
 
+  test('auto pan keeps panning at 180 degrees and tremolo stays in phase', () => {
+    expect(AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(migrateAudioEffectParams('autopan', v1.autopan, 1)).state.stereoPhase).toBe(0.5)
+    expect(AUDIO_EFFECT_CONTRACTS.autopan.createDefaultParams().state.stereoPhase).toBe(0.5)
+    expect(AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(migrateAudioEffectParams('tremolo', v1.tremolo, 1)).state.stereoPhase).toBe(0)
+  })
+
   test('a non-object stays as stored', () => {
     expect(migrateAudioEffectParams('chorus', 'broken', 1)).toBe('broken')
   })

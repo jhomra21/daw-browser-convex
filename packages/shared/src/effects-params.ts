@@ -1346,7 +1346,7 @@ export const createDefaultChorusParams = (): ChorusParams => ({ enabled: true, m
 export const createDefaultFlangerParams = (): FlangerParams => ({ enabled: true, mode: 'flanger', waveform: 'sine', safeBass: false, delayMs: 1.5, depthMs: 1, rateHz: 0.2, feedback: 0.35, stereoPhase: 0.5, mix: 0.5, safeBassHz: 100, width: 1, outputDb: 0 })
 export const createDefaultPhaserParams = (): PhaserParams => ({ enabled: true, stages: 6, waveform: 'sine', safeBass: false, centerHz: 1000, depthOctaves: 3, rateHz: 0.3, feedback: 0.3, stereoPhase: 0.5, mix: 0.5, spreadOctaves: 0, blend: 0, safeBassHz: 100, outputDb: 0 })
 export const createDefaultTremoloParams = (): TremoloParams => ({ enabled: true, waveform: 'sine', sync: false, division: 5, invert: false, rateHz: 4, depth: 0.5, 'shape': 0.5, phase: 0, stereoPhase: 0 })
-export const createDefaultAutoPanParams = (): AutoPanParams => ({ enabled: true, waveform: 'sine', sync: false, division: 5, invert: false, rateHz: 1, depth: 1, 'shape': 0.5, phase: 0, stereoPhase: 0 })
+export const createDefaultAutoPanParams = (): AutoPanParams => ({ enabled: true, waveform: 'sine', sync: false, division: 5, invert: false, rateHz: 1, depth: 1, 'shape': 0.5, phase: 0, stereoPhase: 0.5 })
 export const createDefaultEnsembleParams = (): EnsembleParams => ({ enabled: true, voices: 3, waveform: 'sine', safeBass: false, delayMs: 18, depthMs: 6, rateHz: 0.6, spread: 1, mix: 0.5, fastDepthMs: 0, fastRateHz: 6, safeBassHz: 100, width: 1, outputDb: 0 })
 
 export const normalizeChorusParamsEnvelope = (value: JsonValue): ChorusParamsEnvelope => normalizeModulationEnvelope(value, (state) => {

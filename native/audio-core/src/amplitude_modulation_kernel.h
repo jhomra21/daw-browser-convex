@@ -6,8 +6,9 @@
 // right channel only. The LFO's unipolar value is bent by Shape (an exponent, 1 at Shape 0.5) and then drives
 //   Tremolo:  gain = (1 - depth + depth * shaped) / (1 - depth + depth * mean), where mean is the shape's average over
 //             one cycle, so the average gain is 1 whatever Depth is;
-//   Auto Pan: each channel's gain is the cosine (left) or sine (right) of its own pan angle, so the two channels
-//             hold constant power and sit at -3 dB in the centre.
+//   Auto Pan: each channel's gain is the equal-power curve (sine of a quarter-cycle angle) of its own LFO, as in Live's two
+//             LFOs driving the left and right amplitudes. At Stereo Phase 0.5 (180 degrees, Auto Pan's default) the LFOs are
+//             opposite, so the pair holds constant power and sits at -3 dB in the centre; at 0 both channels move together.
 // Square and random shapes are slewed for a couple of milliseconds so their steps do not click.
 // With Sync on and the transport running, the LFO phase comes from the song position.
 #include "dsp/lfo.h"
@@ -105,10 +106,10 @@ class AmplitudeModulationKernel {
       const float average = 1.0F - depth + depth * mean_;
       for (uint32_t c = 0; c < 2; ++c) gain[c] = (1.0F - depth + depth * shaped[c]) / average;
     } else {
-      // Pan angle in cycles, 0 (hard left) to 0.25 (hard right): the left gain is its cosine, the right gain its sine.
+      // Each channel's angle runs 0 (silent) to 0.25 (full) in cycles; opposite LFOs make the two angles sum to 0.25.
       const float angleLeft = (depth * (2.0F * shaped[0] - 1.0F) + 1.0F) * 0.125F;
       const float angleRight = (depth * (2.0F * shaped[1] - 1.0F) + 1.0F) * 0.125F;
-      gain[0] = dsp::fastSineCycles(0.25F - angleLeft);
+      gain[0] = dsp::fastSineCycles(angleLeft);
       gain[1] = dsp::fastSineCycles(angleRight);
     }
     float out[2];

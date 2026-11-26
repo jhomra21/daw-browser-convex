@@ -16,4 +16,4 @@ export const families = {
 }
 
 /** Families whose effects are rebuilt: certification fails on any of their rows. Add a family here once its effects pass. */
-export const gatedFamilies: readonly (keyof typeof families)[] = ['dynamics', 'eq-filters']
+export const gatedFamilies: readonly (keyof typeof families)[] = ['dynamics', 'eq-filters', 'reverb']

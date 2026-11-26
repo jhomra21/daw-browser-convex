@@ -7,10 +7,7 @@ import {
   createDefaultReverbParams,
   REVERB_DECAY_SEC_MAX,
   REVERB_DECAY_SEC_MIN,
-  REVERB_DIFFUSION_HIGH_CUT_HZ_MAX,
-  REVERB_DIFFUSION_HIGH_CUT_HZ_MIN,
-  REVERB_DIFFUSION_LOW_CUT_HZ_MAX,
-  REVERB_DIFFUSION_LOW_CUT_HZ_MIN,
+  REVERB_DENSITIES,
   REVERB_HIGH_CUT_HZ_MAX,
   REVERB_HIGH_CUT_HZ_MIN,
   REVERB_LOW_CUT_HZ_MAX,
@@ -52,9 +49,7 @@ const normalizeReflectionModRate = (value: number) => Math.round(clamp(value, RE
 const normalizeUnitParam = (value: number) => Math.round(clamp(value, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX) * 100) / 100
 const normalizeLowCut = (value: number) => Math.round(clamp(value, REVERB_LOW_CUT_HZ_MIN, REVERB_LOW_CUT_HZ_MAX))
 const normalizeHighCut = (value: number) => Math.round(clamp(value, REVERB_HIGH_CUT_HZ_MIN, REVERB_HIGH_CUT_HZ_MAX) / 100) * 100
-const normalizeDiffusionLowCut = (value: number) => Math.round(clamp(value, REVERB_DIFFUSION_LOW_CUT_HZ_MIN, REVERB_DIFFUSION_LOW_CUT_HZ_MAX))
-const normalizeDiffusionHighCut = (value: number) => Math.round(clamp(value, REVERB_DIFFUSION_HIGH_CUT_HZ_MIN, REVERB_DIFFUSION_HIGH_CUT_HZ_MAX) / 100) * 100
-const normalizeStereoWidth = (value: number) => Math.round(clamp(value, REVERB_STEREO_WIDTH_MIN, REVERB_STEREO_WIDTH_MAX) * 100) / 100
+const normalizeStereoWidth = (value: number) => Math.round(clamp(value, REVERB_STEREO_WIDTH_MIN, REVERB_STEREO_WIDTH_MAX))
 
 const formatPercent = (value: number) => formatDevicePercent(normalizeWet(value))
 const formatUnitPercent = (value: number) => formatDevicePercent(normalizeUnitParam(value))
@@ -63,11 +58,9 @@ const formatMilliseconds = (value: number) => formatDeviceMilliseconds(normalize
 const formatReflectionMilliseconds = (value: number) => formatDeviceMilliseconds(normalizeReflectionModAmount(value), 1)
 const formatHertz = (value: number) => formatDeviceHertz(normalizeReflectionModRate(value), 2)
 const formatFrequencyWithUnit = (value: number) => formatDeviceFrequency(value, 1)
-const formatStereoWidth = (value: number) => `${normalizeStereoWidth(value).toFixed(2)}x`
+const formatStereoWidth = (value: number) => `${normalizeStereoWidth(value)}°`
 const LOW_CUT_TOGGLE_HZ = 830
 const HIGH_CUT_TOGGLE_HZ = 6000
-const DIFFUSION_LOW_CUT_TOGGLE_HZ = 830
-const DIFFUSION_HIGH_CUT_TOGGLE_HZ = 6000
 const DEFAULT_REVERB_PARAMS = createDefaultReverbParams()
 
 function DeviceSection(props: {
@@ -283,8 +276,8 @@ function DiffusionNetworkPanel(props: {
       topControls={
         <div class="grid grid-cols-[3rem_minmax(5.75rem,1fr)_2.9rem] gap-1">
           <DeviceToggleButton label="High" active={props.highCutActive} disabled={props.disabled} onClick={props.onHighCutToggle} />
-          <DeviceValueStrip value={formatFrequencyWithUnit(props.params.diffusionHighCutHz)} />
-          <DeviceValueStrip value={props.params.density.toFixed(2)} />
+          <DeviceValueStrip value={formatFrequencyWithUnit(props.params.highShelfHz)} />
+          <DeviceValueStrip value={props.params.density} />
         </div>
       }
       graph={
@@ -297,7 +290,7 @@ function DiffusionNetworkPanel(props: {
       bottomControls={
         <div class="grid grid-cols-[3rem_minmax(7.5rem,1fr)_2.9rem] gap-1">
           <DeviceToggleButton label="Low" active={props.lowCutActive} disabled={props.disabled} onClick={props.onLowCutToggle} />
-          <DeviceValueStrip value={formatFrequencyWithUnit(props.params.diffusionLowCutHz)} />
+          <DeviceValueStrip value={formatFrequencyWithUnit(props.params.lowShelfHz)} />
           <DeviceValueStrip value={props.params.size.toFixed(2)} />
         </div>
       }
@@ -338,12 +331,12 @@ function DiffusionNetworkPanel(props: {
             <Knob
               class="w-12 px-0 py-1"
               label="Dens"
-              valueLabel={formatUnitPercent(props.params.density)}
-              value={props.params.density}
-              resetValue={DEFAULT_REVERB_PARAMS.density}
-              min={REVERB_UNIT_PARAM_MIN}
-              max={REVERB_UNIT_PARAM_MAX}
-              step={0.01}
+              valueLabel={props.params.density}
+              value={REVERB_DENSITIES.indexOf(props.params.density)}
+              resetValue={REVERB_DENSITIES.indexOf(DEFAULT_REVERB_PARAMS.density)}
+              min={0}
+              max={REVERB_DENSITIES.length - 1}
+              step={1}
               disabled={props.disabled}
               onValueChange={props.onDensityChange}
             />
@@ -492,9 +485,9 @@ export default function Reverb(props: ReverbProps) {
   }
 
   const updateDensity = (value: number) => {
-    const density = normalizeUnitParam(value)
+    const density = REVERB_DENSITIES[Math.round(clamp(value, 0, REVERB_DENSITIES.length - 1))]
 
-    if (density !== props.params.density) props.onChange({ density })
+    if (density !== undefined && density !== props.params.density) props.onChange({ density })
   }
 
   const updateLowCut = (value: number) => {
@@ -507,18 +500,6 @@ export default function Reverb(props: ReverbProps) {
     const highCutHz = normalizeHighCut(value)
 
     if (highCutHz !== props.params.highCutHz) props.onChange({ highCutHz })
-  }
-
-  const updateDiffusionLowCut = (value: number) => {
-    const diffusionLowCutHz = normalizeDiffusionLowCut(value)
-
-    if (diffusionLowCutHz !== props.params.diffusionLowCutHz) props.onChange({ diffusionLowCutHz })
-  }
-
-  const updateDiffusionHighCut = (value: number) => {
-    const diffusionHighCutHz = normalizeDiffusionHighCut(value)
-
-    if (diffusionHighCutHz !== props.params.diffusionHighCutHz) props.onChange({ diffusionHighCutHz })
   }
 
   const updateStereoWidth = (value: number) => {
@@ -543,10 +524,8 @@ export default function Reverb(props: ReverbProps) {
   const highCutActive = () => props.params.highCutHz < REVERB_HIGH_CUT_HZ_MAX
   const toggleLowCut = () => updateLowCut(lowCutActive() ? REVERB_LOW_CUT_HZ_MIN : LOW_CUT_TOGGLE_HZ)
   const toggleHighCut = () => updateHighCut(highCutActive() ? REVERB_HIGH_CUT_HZ_MAX : HIGH_CUT_TOGGLE_HZ)
-  const diffusionLowCutActive = () => props.params.diffusionLowCutHz > REVERB_DIFFUSION_LOW_CUT_HZ_MIN
-  const diffusionHighCutActive = () => props.params.diffusionHighCutHz < REVERB_DIFFUSION_HIGH_CUT_HZ_MAX
-  const toggleDiffusionLowCut = () => updateDiffusionLowCut(diffusionLowCutActive() ? REVERB_DIFFUSION_LOW_CUT_HZ_MIN : DIFFUSION_LOW_CUT_TOGGLE_HZ)
-  const toggleDiffusionHighCut = () => updateDiffusionHighCut(diffusionHighCutActive() ? REVERB_DIFFUSION_HIGH_CUT_HZ_MAX : DIFFUSION_HIGH_CUT_TOGGLE_HZ)
+  const toggleLowShelf = () => props.onChange({ lowShelfOn: !props.params.lowShelfOn })
+  const toggleHighShelf = () => props.onChange({ highShelfOn: !props.params.highShelfOn })
   const toggleReflectionSpin = () => props.onChange({ reflectionSpin: !props.params.reflectionSpin })
 
   return (
@@ -610,10 +589,10 @@ export default function Reverb(props: ReverbProps) {
           class="col-start-3"
           params={props.params}
           disabled={!props.params.enabled}
-          highCutActive={diffusionHighCutActive()}
-          lowCutActive={diffusionLowCutActive()}
-          onHighCutToggle={toggleDiffusionHighCut}
-          onLowCutToggle={toggleDiffusionLowCut}
+          highCutActive={props.params.highShelfOn}
+          lowCutActive={props.params.lowShelfOn}
+          onHighCutToggle={toggleHighShelf}
+          onLowCutToggle={toggleLowShelf}
           onSpaceChange={updateSpace}
           onDecayChange={updateDecay}
           onDiffusionChange={updateDiffusion}

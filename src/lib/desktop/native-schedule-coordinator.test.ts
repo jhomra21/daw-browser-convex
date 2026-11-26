@@ -2028,7 +2028,7 @@ test("extends finite scheduling through built-in reverb metadata", () => {
   }
 
   expect(scheduleEndFrameFor(reverbSnapshot, 48_000, nativeGraphFor(reverbSnapshot)))
-    .toBe(48_001 + 3.1 * 48_000)
+    .toBe(48_001 + 3.25 * 48_000)
 })
 
 test("extends finite scheduling through a declared VST tail", () => {

@@ -991,7 +991,7 @@ test('projects native-owned reverb state instead of applying portable fixture ga
       id: 'native-reverb',
       kind: 'reverb',
       kindId: 14,
-      stateVersion: 1,
+      stateVersion: 2,
       state: expect.any(Uint8Array),
       latencyFrames: 0,
       tailFrames: expect.any(Number),
@@ -999,7 +999,7 @@ test('projects native-owned reverb state instead of applying portable fixture ga
   ])
   const reverb = result.graph.nodes.find((node) => node.id === '$master')?.processorOrder[0]
   expect(reverb?.tailFrames).toBeGreaterThan(0)
-  expect(reverb?.state.byteLength).toBe(72)
+  expect(reverb?.state.byteLength).toBe(116)
 })
 
 test('projects a default synth for instrument tracks without instrument state', () => {

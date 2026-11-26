@@ -189,6 +189,14 @@ export function serializeEqParams(params: EqParams): string {
   return serializeNormalizedEqParams(normalizeEqParams(params))
 }
 
+export const REVERB_DENSITIES = ['sparse', 'low', 'mid', 'high'] as const
+
+export type ReverbDensity = typeof REVERB_DENSITIES[number]
+
+export const REVERB_SMOOTHS = ['none', 'slow', 'fast'] as const
+
+export type ReverbSmooth = typeof REVERB_SMOOTHS[number]
+
 export type ReverbParams = {
   enabled: boolean
   wet: number
@@ -202,12 +210,26 @@ export type ReverbParams = {
   diffuse: number
   size: number
   diffusion: number
-  density: number
+  density: ReverbDensity
+  /** Input Lo and Hi cut, ahead of the pre-delay, early reflections and diffuser. 20 Hz and 20 kHz are off. */
   lowCutHz: number
   highCutHz: number
-  diffusionLowCutHz: number
-  diffusionHighCutHz: number
+  /** The Diffusion Network shelves move the decay time at the band edges; the Decay knob is the mid-band RT60. */
+  lowShelfHz: number
+  highShelfHz: number
+  lowShelfOn: boolean
+  highShelfOn: boolean
+  lowShelfDb: number
+  highShelfDb: number
+  /** The Stereo angle in degrees: 0 is mono, 120 is two independent channels. */
   stereoWidth: number
+  smooth: ReverbSmooth
+  freeze: boolean
+  flat: boolean
+  cut: boolean
+  chorus: boolean
+  chorusAmountMs: number
+  chorusRateHz: number
 }
 
 export type ReverbParamsLite = ReverbParams
@@ -230,12 +252,18 @@ export const REVERB_LOW_CUT_HZ_MIN = 20
 export const REVERB_LOW_CUT_HZ_MAX = 1200
 export const REVERB_HIGH_CUT_HZ_MIN = 1200
 export const REVERB_HIGH_CUT_HZ_MAX = 20000
-export const REVERB_DIFFUSION_LOW_CUT_HZ_MIN = 20
-export const REVERB_DIFFUSION_LOW_CUT_HZ_MAX = 1200
-export const REVERB_DIFFUSION_HIGH_CUT_HZ_MIN = 1200
-export const REVERB_DIFFUSION_HIGH_CUT_HZ_MAX = 20000
+export const REVERB_LOW_SHELF_HZ_MIN = 20
+export const REVERB_LOW_SHELF_HZ_MAX = 1200
+export const REVERB_HIGH_SHELF_HZ_MIN = 1200
+export const REVERB_HIGH_SHELF_HZ_MAX = 20000
+export const REVERB_SHELF_DB_MIN = -24
+export const REVERB_SHELF_DB_MAX = 12
 export const REVERB_STEREO_WIDTH_MIN = 0
-export const REVERB_STEREO_WIDTH_MAX = 2
+export const REVERB_STEREO_WIDTH_MAX = 120
+export const REVERB_CHORUS_AMOUNT_MS_MIN = 0
+export const REVERB_CHORUS_AMOUNT_MS_MAX = 5
+export const REVERB_CHORUS_RATE_HZ_MIN = 0.01
+export const REVERB_CHORUS_RATE_HZ_MAX = 5
 
 export function createDefaultReverbParams(): ReverbParams {
   return {
@@ -243,7 +271,7 @@ export function createDefaultReverbParams(): ReverbParams {
     wet: 0.25,
     decaySec: 2.2,
     preDelayMs: 20,
-    reflections: 0,
+    reflections: 0.5,
     reflectionSpin: true,
     reflectionModAmountMs: 17.5,
     reflectionModRateHz: 0.3,
@@ -251,57 +279,67 @@ export function createDefaultReverbParams(): ReverbParams {
     diffuse: 1,
     size: 0.65,
     diffusion: 0.75,
-    density: 0.8,
+    density: 'high',
     lowCutHz: 20,
     highCutHz: 20000,
-    diffusionLowCutHz: 20,
-    diffusionHighCutHz: 20000,
-    stereoWidth: 1,
+    lowShelfHz: 200,
+    highShelfHz: 5000,
+    lowShelfOn: true,
+    highShelfOn: true,
+    lowShelfDb: 0,
+    highShelfDb: 0,
+    stereoWidth: 100,
+    smooth: 'fast',
+    freeze: false,
+    flat: false,
+    cut: false,
+    chorus: true,
+    chorusAmountMs: 0.6,
+    chorusRateHz: 0.6,
   }
 }
 
+const readReverbNumber = (value: JsonValue | undefined, fallback: number, min: number, max: number) => {
+  const number = readFiniteNumber(value)
+
+  return number === undefined ? fallback : clamp(number, min, max)
+}
+
+const readReverbBoolean = (value: JsonValue | undefined, fallback: boolean) => isJsonBoolean(value) ? value : fallback
+
 export function normalizeReverbParams(input: ReverbParamsInput): ReverbParams {
   const defaults = createDefaultReverbParams()
-  const wet = readFiniteNumber(input.wet)
-  const decaySec = readFiniteNumber(input.decaySec)
-  const preDelayMs = readFiniteNumber(input.preDelayMs)
-  const reflections = readFiniteNumber(input.reflections)
-  const reflectionModAmountMs = readFiniteNumber(input.reflectionModAmountMs)
-  const reflectionModRateHz = readFiniteNumber(input.reflectionModRateHz)
-  const reflectionProfile = readFiniteNumber(input['reflectionShape'])
-  const diffuse = readFiniteNumber(input.diffuse)
-  const size = readFiniteNumber(input.size)
-  const diffusion = readFiniteNumber(input.diffusion)
-  const density = readFiniteNumber(input.density)
-  const lowCutInput = readFiniteNumber(input.lowCutHz)
-  const highCutInput = readFiniteNumber(input.highCutHz)
-  const diffusionLowCutInput = readFiniteNumber(input.diffusionLowCutHz)
-  const diffusionHighCutInput = readFiniteNumber(input.diffusionHighCutHz)
-  const stereoWidth = readFiniteNumber(input.stereoWidth)
-  const lowCutHz = lowCutInput === undefined ? defaults.lowCutHz : clamp(lowCutInput, REVERB_LOW_CUT_HZ_MIN, REVERB_LOW_CUT_HZ_MAX)
-  const highCutHz = highCutInput === undefined ? defaults.highCutHz : clamp(highCutInput, REVERB_HIGH_CUT_HZ_MIN, REVERB_HIGH_CUT_HZ_MAX)
-  const diffusionLowCutHz = diffusionLowCutInput === undefined ? defaults.diffusionLowCutHz : clamp(diffusionLowCutInput, REVERB_DIFFUSION_LOW_CUT_HZ_MIN, REVERB_DIFFUSION_LOW_CUT_HZ_MAX)
-  const diffusionHighCutHz = diffusionHighCutInput === undefined ? defaults.diffusionHighCutHz : clamp(diffusionHighCutInput, REVERB_DIFFUSION_HIGH_CUT_HZ_MIN, REVERB_DIFFUSION_HIGH_CUT_HZ_MAX)
 
   return {
-    enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
-    wet: wet === undefined ? defaults.wet : clamp(wet, REVERB_WET_MIN, REVERB_WET_MAX),
-    decaySec: decaySec === undefined ? defaults.decaySec : clamp(decaySec, REVERB_DECAY_SEC_MIN, REVERB_DECAY_SEC_MAX),
-    preDelayMs: preDelayMs === undefined ? defaults.preDelayMs : clamp(preDelayMs, REVERB_PRE_DELAY_MS_MIN, REVERB_PRE_DELAY_MS_MAX),
-    reflections: reflections === undefined ? defaults.reflections : clamp(reflections, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
-    reflectionSpin: isJsonBoolean(input.reflectionSpin) ? input.reflectionSpin : defaults.reflectionSpin,
-    reflectionModAmountMs: reflectionModAmountMs === undefined ? defaults.reflectionModAmountMs : clamp(reflectionModAmountMs, REVERB_REFLECTION_MOD_AMOUNT_MS_MIN, REVERB_REFLECTION_MOD_AMOUNT_MS_MAX),
-    reflectionModRateHz: reflectionModRateHz === undefined ? defaults.reflectionModRateHz : clamp(reflectionModRateHz, REVERB_REFLECTION_MOD_RATE_HZ_MIN, REVERB_REFLECTION_MOD_RATE_HZ_MAX),
-    'reflectionShape': reflectionProfile === undefined ? defaults['reflectionShape'] : clamp(reflectionProfile, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
-    diffuse: diffuse === undefined ? defaults.diffuse : clamp(diffuse, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
-    size: size === undefined ? defaults.size : clamp(size, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
-    diffusion: diffusion === undefined ? defaults.diffusion : clamp(diffusion, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
-    density: density === undefined ? defaults.density : clamp(density, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
-    lowCutHz,
-    highCutHz,
-    diffusionLowCutHz,
-    diffusionHighCutHz,
-    stereoWidth: stereoWidth === undefined ? defaults.stereoWidth : clamp(stereoWidth, REVERB_STEREO_WIDTH_MIN, REVERB_STEREO_WIDTH_MAX),
+    enabled: readReverbBoolean(input.enabled, defaults.enabled),
+    wet: readReverbNumber(input.wet, defaults.wet, REVERB_WET_MIN, REVERB_WET_MAX),
+    decaySec: readReverbNumber(input.decaySec, defaults.decaySec, REVERB_DECAY_SEC_MIN, REVERB_DECAY_SEC_MAX),
+    preDelayMs: readReverbNumber(input.preDelayMs, defaults.preDelayMs, REVERB_PRE_DELAY_MS_MIN, REVERB_PRE_DELAY_MS_MAX),
+    reflections: readReverbNumber(input.reflections, defaults.reflections, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
+    reflectionSpin: readReverbBoolean(input.reflectionSpin, defaults.reflectionSpin),
+    reflectionModAmountMs: readReverbNumber(input.reflectionModAmountMs, defaults.reflectionModAmountMs, REVERB_REFLECTION_MOD_AMOUNT_MS_MIN, REVERB_REFLECTION_MOD_AMOUNT_MS_MAX),
+    reflectionModRateHz: readReverbNumber(input.reflectionModRateHz, defaults.reflectionModRateHz, REVERB_REFLECTION_MOD_RATE_HZ_MIN, REVERB_REFLECTION_MOD_RATE_HZ_MAX),
+    'reflectionShape': readReverbNumber(input['reflectionShape'], defaults['reflectionShape'], REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
+    diffuse: readReverbNumber(input.diffuse, defaults.diffuse, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
+    size: readReverbNumber(input.size, defaults.size, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
+    diffusion: readReverbNumber(input.diffusion, defaults.diffusion, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
+    density: REVERB_DENSITIES.find((density) => density === input.density) ?? defaults.density,
+    lowCutHz: readReverbNumber(input.lowCutHz, defaults.lowCutHz, REVERB_LOW_CUT_HZ_MIN, REVERB_LOW_CUT_HZ_MAX),
+    highCutHz: readReverbNumber(input.highCutHz, defaults.highCutHz, REVERB_HIGH_CUT_HZ_MIN, REVERB_HIGH_CUT_HZ_MAX),
+    lowShelfHz: readReverbNumber(input.lowShelfHz, defaults.lowShelfHz, REVERB_LOW_SHELF_HZ_MIN, REVERB_LOW_SHELF_HZ_MAX),
+    highShelfHz: readReverbNumber(input.highShelfHz, defaults.highShelfHz, REVERB_HIGH_SHELF_HZ_MIN, REVERB_HIGH_SHELF_HZ_MAX),
+    lowShelfOn: readReverbBoolean(input.lowShelfOn, defaults.lowShelfOn),
+    highShelfOn: readReverbBoolean(input.highShelfOn, defaults.highShelfOn),
+    lowShelfDb: readReverbNumber(input.lowShelfDb, defaults.lowShelfDb, REVERB_SHELF_DB_MIN, REVERB_SHELF_DB_MAX),
+    highShelfDb: readReverbNumber(input.highShelfDb, defaults.highShelfDb, REVERB_SHELF_DB_MIN, REVERB_SHELF_DB_MAX),
+    stereoWidth: readReverbNumber(input.stereoWidth, defaults.stereoWidth, REVERB_STEREO_WIDTH_MIN, REVERB_STEREO_WIDTH_MAX),
+    smooth: REVERB_SMOOTHS.find((smooth) => smooth === input.smooth) ?? defaults.smooth,
+    freeze: readReverbBoolean(input.freeze, defaults.freeze),
+    flat: readReverbBoolean(input.flat, defaults.flat),
+    cut: readReverbBoolean(input.cut, defaults.cut),
+    chorus: readReverbBoolean(input.chorus, defaults.chorus),
+    chorusAmountMs: readReverbNumber(input.chorusAmountMs, defaults.chorusAmountMs, REVERB_CHORUS_AMOUNT_MS_MIN, REVERB_CHORUS_AMOUNT_MS_MAX),
+    chorusRateHz: readReverbNumber(input.chorusRateHz, defaults.chorusRateHz, REVERB_CHORUS_RATE_HZ_MIN, REVERB_CHORUS_RATE_HZ_MAX),
   }
 }
 
@@ -312,9 +350,15 @@ export function normalizeReverbParamsForUpdate(input: ReverbParamsInput, existin
 }
 
 export function serializeReverbParams(params: ReverbParams): string {
-  const normalized = normalizeReverbParams(params)
+  const n = normalizeReverbParams(params)
+  const flag = (value: boolean) => value ? 1 : 0
 
-  return `${normalized.enabled ? 1 : 0}|${normalized.wet}|${normalized.decaySec}|${normalized.preDelayMs}|${normalized.reflections}|${normalized.reflectionSpin ? 1 : 0}|${normalized.reflectionModAmountMs}|${normalized.reflectionModRateHz}|${normalized['reflectionShape']}|${normalized.diffuse}|${normalized.size}|${normalized.diffusion}|${normalized.density}|${normalized.lowCutHz}|${normalized.highCutHz}|${normalized.diffusionLowCutHz}|${normalized.diffusionHighCutHz}|${normalized.stereoWidth}`
+  return [
+    flag(n.enabled), n.wet, n.decaySec, n.preDelayMs, n.reflections, flag(n.reflectionSpin), n.reflectionModAmountMs, n.reflectionModRateHz,
+    n['reflectionShape'], n.diffuse, n.size, n.diffusion, n.density, n.lowCutHz, n.highCutHz, n.lowShelfHz, n.highShelfHz,
+    flag(n.lowShelfOn), flag(n.highShelfOn), n.lowShelfDb, n.highShelfDb, n.stereoWidth, n.smooth, flag(n.freeze), flag(n.flat),
+    flag(n.cut), flag(n.chorus), n.chorusAmountMs, n.chorusRateHz,
+  ].join('|')
 }
 
 export type SaturatorCurve = 'soft' | 'medium' | 'hard' | 'clip'

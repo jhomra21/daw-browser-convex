@@ -33,6 +33,8 @@ import {
   normalizeDelayParams,
   normalizeEqParams,
   normalizeSaturatorParams,
+  REVERB_DENSITIES,
+  REVERB_SMOOTHS,
 } from './effects-params'
 import { normalizeSpectralParamsEnvelope, type SpectralParamsEnvelope } from './spectral-params'
 import { normalizeAudioWarp, normalizeClipGain, type AudioWarpPayload } from './audio-warp'
@@ -465,12 +467,23 @@ const readReverbParams = (value: JsonValue): SharedReverbParams | null => {
     diffuse: readOptionalNumber(value.diffuse),
     size: readOptionalNumber(value.size),
     diffusion: readOptionalNumber(value.diffusion),
-    density: readOptionalNumber(value.density),
+    density: REVERB_DENSITIES.find((density) => density === value.density),
     lowCutHz: readOptionalNumber(value.lowCutHz),
     highCutHz: readOptionalNumber(value.highCutHz),
-    diffusionLowCutHz: readOptionalNumber(value.diffusionLowCutHz),
-    diffusionHighCutHz: readOptionalNumber(value.diffusionHighCutHz),
+    lowShelfHz: readOptionalNumber(value.lowShelfHz),
+    highShelfHz: readOptionalNumber(value.highShelfHz),
+    lowShelfOn: readOptionalBoolean(value.lowShelfOn),
+    highShelfOn: readOptionalBoolean(value.highShelfOn),
+    lowShelfDb: readOptionalNumber(value.lowShelfDb),
+    highShelfDb: readOptionalNumber(value.highShelfDb),
     stereoWidth: readOptionalNumber(value.stereoWidth),
+    smooth: REVERB_SMOOTHS.find((smooth) => smooth === value.smooth),
+    freeze: readOptionalBoolean(value.freeze),
+    flat: readOptionalBoolean(value.flat),
+    cut: readOptionalBoolean(value.cut),
+    chorus: readOptionalBoolean(value.chorus),
+    chorusAmountMs: readOptionalNumber(value.chorusAmountMs),
+    chorusRateHz: readOptionalNumber(value.chorusRateHz),
   }
 
   if (params.wet === undefined || params.decaySec === undefined || params.preDelayMs === undefined) return null

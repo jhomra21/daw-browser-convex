@@ -10,6 +10,7 @@ test('the Reverb panel fits the 300 px device, reads every control, gates Flat a
   const results = await runBrowserFixture(new URL('./Reverb.browser-runtime.tsx', import.meta.url), { screenshot: `${artifacts}/reverb-device.png`, styled: true })
   expect(Object.keys(results).sort()).toEqual([
     'a-dragged-handle-reports-a-manual-override',
+    'a-keyed-shelf-handle-keeps-focus',
     'a-knob-change-writes-its-param',
     'an-automatable-knob-reports-a-manual-override',
     'every-automatable-knob-shows-its-automation',

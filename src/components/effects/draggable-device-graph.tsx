@@ -1,4 +1,4 @@
-import { createSignal, createUniqueId, For, untrack } from 'solid-js'
+import { createSignal, createUniqueId, For, Show, untrack } from 'solid-js'
 import type { JSX } from '@solidjs/web'
 import { useDrag } from '~/hooks/useDrag'
 import { useParameterGesture } from '~/components/effects/effect-parameter-interaction'
@@ -17,6 +17,8 @@ type DeviceGraphHandle = {
   onKeyDown?: (event: KeyboardEvent) => void
   /** A handle of a section that is off stays where it is, dimmed. */
   dimmed?: () => boolean
+  /** Hides the handle without rebuilding the list; a rebuilt handle object would replace its button and drop focus. */
+  hidden?: () => boolean
 }
 
 const clampGraphValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
@@ -121,55 +123,57 @@ export function DraggableDeviceGraph(props: {
       </svg>
       <For each={props.handles}>
         {(handle) => (
-          <button
-            type="button"
-            aria-label={handle.label}
-            class={cn(
-              'absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-cyan-300 bg-background',
-              props.disabled ? 'cursor-not-allowed opacity-60' : 'cursor-grab active:cursor-grabbing',
-              handle.dimmed?.() && 'opacity-40',
-            )}
-            style={{
-              left: `${(handle.x() / GRAPH_WIDTH) * 100}%`,
-              top: `${(handle.y() / GRAPH_HEIGHT) * 100}%`,
-            }}
-            disabled={props.disabled}
-            onPointerDown={(event) => {
-              if (props.disabled || drag.isDragging()) return
-              dragBounds = graphRef?.getBoundingClientRect()
-              setActiveHandle(handle)
-              gesture.open()
-              gesture.tick(() => handle.onDrag(graphPoint({ x: event.clientX, y: event.clientY })))
-              drag.onPointerDown(event)
-            }}
-            onKeyDown={(event) => {
-              if (props.disabled || event.metaKey || event.ctrlKey || event.altKey) return
+          <Show when={!handle.hidden?.()}>
+            <button
+              type="button"
+              aria-label={handle.label}
+              class={cn(
+                'absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-cyan-300 bg-background',
+                props.disabled ? 'cursor-not-allowed opacity-60' : 'cursor-grab active:cursor-grabbing',
+                handle.dimmed?.() && 'opacity-40',
+              )}
+              style={{
+                left: `${(handle.x() / GRAPH_WIDTH) * 100}%`,
+                top: `${(handle.y() / GRAPH_HEIGHT) * 100}%`,
+              }}
+              disabled={props.disabled}
+              onPointerDown={(event) => {
+                if (props.disabled || drag.isDragging()) return
+                dragBounds = graphRef?.getBoundingClientRect()
+                setActiveHandle(handle)
+                gesture.open()
+                gesture.tick(() => handle.onDrag(graphPoint({ x: event.clientX, y: event.clientY })))
+                drag.onPointerDown(event)
+              }}
+              onKeyDown={(event) => {
+                if (props.disabled || event.metaKey || event.ctrlKey || event.altKey) return
 
-              if (event.key === 'Escape' && gesture.isOpen()) {
-                event.preventDefault()
-                event.stopPropagation()
-                gesture.cancel()
+                if (event.key === 'Escape' && gesture.isOpen()) {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  gesture.cancel()
 
-                return
-              }
+                  return
+                }
 
-              if (graphKey(event.key) === undefined) return
+                if (graphKey(event.key) === undefined) return
 
-              // Auto-repeat only continues a hold: after Escape or an owner close it must not open a new gesture.
-              if (event.repeat && !gesture.isOpen()) {
-                event.preventDefault()
+                // Auto-repeat only continues a hold: after Escape or an owner close it must not open a new gesture.
+                if (event.repeat && !gesture.isOpen()) {
+                  event.preventDefault()
 
-                return
-              }
+                  return
+                }
 
-              gesture.open()
-              gesture.tick(() => handle.onKeyDown?.(event))
-            }}
-            onKeyUp={(event) => {
-              if (graphKey(event.key) !== undefined) gesture.end()
-            }}
-            onBlur={() => gesture.end()}
-          />
+                gesture.open()
+                gesture.tick(() => handle.onKeyDown?.(event))
+              }}
+              onKeyUp={(event) => {
+                if (graphKey(event.key) !== undefined) gesture.end()
+              }}
+              onBlur={() => gesture.end()}
+            />
+          </Show>
         )}
       </For>
     </div>

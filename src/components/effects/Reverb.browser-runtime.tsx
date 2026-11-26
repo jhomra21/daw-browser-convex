@@ -155,6 +155,13 @@ const run = async () => {
   const inputYs = curveYs('Input Filter')
   scenarios['the-input-curve-rolls-off-below-the-lo-cut-and-above-the-hi-cut'] = inputYs[0] > inputYs[24] + 5 && inputYs[48] > inputYs[24] + 5
 
+  // A keyed shelf move must leave the same handle focused, so held or repeated keys keep moving it.
+  const shelfHandle = named('High shelf frequency and gain')
+  shelfHandle?.focus()
+  key(shelfHandle, 'ArrowDown')
+  await settle()
+  scenarios['a-keyed-shelf-handle-keeps-focus'] = lastChange()?.highShelfDb === -12.5 && shelfHandle?.isConnected === true && document.activeElement === shelfHandle
+
   // Every enabled control shows a focus ring when it takes focus.
   const unringed = [...host.querySelectorAll<HTMLElement>('button:not([disabled]), [role="slider"]:not([aria-disabled="true"])')].filter((element) => {
     element.focus()

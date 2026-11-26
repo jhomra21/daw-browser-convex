@@ -164,20 +164,22 @@ function DecayGraph(props: { params: ReverbParams; disabled: boolean; onChange: 
       stroke="#22d3ee"
       path={() => curvePath(decayDbAt, decayY)}
       handles={[
-        ...(props.params.lowShelfOn ? [{
+        {
           label: 'Low shelf frequency and gain',
+          hidden: () => !props.params.lowShelfOn,
           x: () => hzToX(props.params.lowShelfHz),
           y: () => decayY(props.params.lowShelfDb),
           onDrag: (point: { x: number; y: number }) => props.onChange({ lowShelfHz: Math.round(clamp(xToHz(point.x), REVERB_LOW_SHELF_HZ_MIN, REVERB_LOW_SHELF_HZ_MAX)), lowShelfDb: yToShelfDb(point.y) }),
           onKeyDown: frequencyKeys(() => props.params.lowShelfHz, setLowHz, REVERB_LOW_SHELF_HZ_MIN, REVERB_LOW_SHELF_HZ_MAX, { db: () => props.params.lowShelfDb, setDb: setLowDb }),
-        }] : []),
-        ...(props.params.highShelfOn ? [{
+        },
+        {
           label: 'High shelf frequency and gain',
+          hidden: () => !props.params.highShelfOn,
           x: () => hzToX(props.params.highShelfHz),
           y: () => decayY(props.params.highShelfDb),
           onDrag: (point: { x: number; y: number }) => props.onChange({ highShelfHz: Math.round(clamp(xToHz(point.x), REVERB_HIGH_SHELF_HZ_MIN, REVERB_HIGH_SHELF_HZ_MAX)), highShelfDb: yToShelfDb(point.y) }),
           onKeyDown: frequencyKeys(() => props.params.highShelfHz, setHighHz, REVERB_HIGH_SHELF_HZ_MIN, REVERB_HIGH_SHELF_HZ_MAX, { db: () => props.params.highShelfDb, setDb: setHighDb }),
-        }] : []),
+        },
       ]}
     >
       <line x1="0" x2={GRAPH_WIDTH} y1={decayY(0)} y2={decayY(0)} stroke="#525252" stroke-width="1" vector-effect="non-scaling-stroke" />

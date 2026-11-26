@@ -301,7 +301,7 @@ test('processor registry preserves stable portable processor ids', () => {
     expect.objectContaining({ name: 'gate', id: 10, schemaVersion: 2, stateBytes: 76 }),
     expect.objectContaining({ name: 'compressor', id: 11, schemaVersion: 2, stateBytes: 76 }),
     expect.objectContaining({ name: 'limiter', id: 12, schemaVersion: 2, stateBytes: 28 }),
-    expect.objectContaining({ name: 'delay', id: 13, stateBytes: 32 }),
+    expect.objectContaining({ name: 'delay', id: 13, schemaVersion: 2, stateBytes: 80 }),
     expect.objectContaining({ name: 'reverb', id: 14, schemaVersion: 2, stateBytes: 124 }),
     expect.objectContaining({ name: 'spectral', id: 15, stateBytes: 60 }),
     expect.objectContaining({ name: 'autofilter', id: 16, schemaVersion: 1, stateBytes: 92, tombstone: false }),
@@ -351,12 +351,14 @@ test('modulation codecs preserve the native little-endian state layouts', () => 
 
 test('delay and reverb codecs preserve portable state without claiming browser convolution parity', () => {
   const delay = encodeDelayProcessorState({
-    enabled: true, delayMs: 250, feedback: 0.25, dryWet: 0.2, pingPong: false,
-    filterEnabled: false, lowCutHz: 120, highCutHz: 8000,
+    enabled: true, link: true, pingPong: false, freeze: false, filterEnabled: false, smoothing: 'fade', syncLeft: false, syncRight: false,
+    divisionLeft: '1/8', divisionRight: '1/8', feelLeft: 'straight', feelRight: 'straight', timeLeftMs: 250, timeRightMs: 250,
+    offsetLeftPercent: 0, offsetRightPercent: 0, feedback: 0.25, dryWet: 0.2, filterHz: 1000, filterWidth: 5,
   })
 
-  expect(delay.byteLength).toBe(32)
-  expect(new DataView(delay.buffer).getFloat32(4, true)).toBe(250)
+  expect(delay.byteLength).toBe(80)
+  expect(new DataView(delay.buffer).getUint32(20, true)).toBe(1)
+  expect(new DataView(delay.buffer).getFloat32(48, true)).toBe(250)
 
   const reverb = encodeReverbProcessorState({
     enabled: true, wet: 0.25, decaySec: 2.2, preDelayMs: 20, reflections: 0,

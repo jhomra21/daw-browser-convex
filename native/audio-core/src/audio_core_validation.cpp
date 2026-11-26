@@ -264,13 +264,18 @@ bool valid_limiter_state(const daw_audio_limiter_state &state) {
 }
 
 bool valid_delay_state(const daw_audio_delay_state &state) {
-  return state.enabled <= 1 && std::isfinite(state.delay_ms) && state.delay_ms >= DAW_AUDIO_CORE_DELAY_TIME_MS_MIN && state.delay_ms <= DAW_AUDIO_CORE_DELAY_TIME_MS_MAX
-    && std::isfinite(state.feedback) && state.feedback >= 0.0F && state.feedback <= 0.95F
-    && std::isfinite(state.dry_wet) && state.dry_wet >= 0.0F && state.dry_wet <= 1.0F
-    && state.ping_pong <= 1 && state.filter_enabled <= 1
-    && std::isfinite(state.low_cut_hz) && state.low_cut_hz >= 20.0F && state.low_cut_hz <= 2000.0F
-    && std::isfinite(state.high_cut_hz) && state.high_cut_hz >= 1000.0F && state.high_cut_hz <= 20000.0F
-    && state.high_cut_hz >= state.low_cut_hz;
+  const auto within = [](float value, float minimum, float maximum) { return std::isfinite(value) && value >= minimum && value <= maximum; };
+  return state.enabled <= 1 && state.link <= 1 && state.ping_pong <= 1 && state.freeze <= 1 && state.filter_enabled <= 1
+    && state.smoothing <= DAW_AUDIO_DELAY_SMOOTHING_JUMP && state.sync_left <= 1 && state.sync_right <= 1
+    && state.division_left <= 5 && state.division_right <= 5 && state.feel_left <= 2 && state.feel_right <= 2
+    && within(state.time_left_ms, DAW_AUDIO_CORE_DELAY_TIME_MS_MIN, DAW_AUDIO_CORE_DELAY_TIME_MS_MAX)
+    && within(state.time_right_ms, DAW_AUDIO_CORE_DELAY_TIME_RIGHT_MS_MIN, DAW_AUDIO_CORE_DELAY_TIME_RIGHT_MS_MAX)
+    && within(state.offset_left_percent, DAW_AUDIO_CORE_DELAY_OFFSET_LEFT_PERCENT_MIN, DAW_AUDIO_CORE_DELAY_OFFSET_LEFT_PERCENT_MAX)
+    && within(state.offset_right_percent, DAW_AUDIO_CORE_DELAY_OFFSET_RIGHT_PERCENT_MIN, DAW_AUDIO_CORE_DELAY_OFFSET_RIGHT_PERCENT_MAX)
+    && within(state.feedback, DAW_AUDIO_CORE_DELAY_FEEDBACK_MIN, DAW_AUDIO_CORE_DELAY_FEEDBACK_MAX)
+    && within(state.dry_wet, DAW_AUDIO_CORE_DELAY_DRY_WET_MIN, DAW_AUDIO_CORE_DELAY_DRY_WET_MAX)
+    && within(state.filter_hz, DAW_AUDIO_CORE_DELAY_FILTER_HZ_MIN, DAW_AUDIO_CORE_DELAY_FILTER_HZ_MAX)
+    && within(state.filter_width, DAW_AUDIO_CORE_DELAY_FILTER_WIDTH_MIN, DAW_AUDIO_CORE_DELAY_FILTER_WIDTH_MAX);
 }
 
 bool valid_reverb_state(const daw_audio_reverb_state &state) {
@@ -472,12 +477,18 @@ bool decode_processor_state(
     out_processor->limiter = state;
     return true;
   }
-  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY && descriptor.state_size == 32) {
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY && descriptor.state_size == 80) {
+    const uint8_t *bytes = descriptor.state;
     const daw_audio_delay_state state{
-      .enabled = read_u32_le(descriptor.state), .delay_ms = read_f32_le(descriptor.state + 4),
-      .feedback = read_f32_le(descriptor.state + 8), .dry_wet = read_f32_le(descriptor.state + 12),
-      .ping_pong = read_u32_le(descriptor.state + 16), .filter_enabled = read_u32_le(descriptor.state + 20),
-      .low_cut_hz = read_f32_le(descriptor.state + 24), .high_cut_hz = read_f32_le(descriptor.state + 28),
+      .enabled = read_u32_le(bytes), .link = read_u32_le(bytes + 4), .ping_pong = read_u32_le(bytes + 8),
+      .freeze = read_u32_le(bytes + 12), .filter_enabled = read_u32_le(bytes + 16), .smoothing = read_u32_le(bytes + 20),
+      .sync_left = read_u32_le(bytes + 24), .sync_right = read_u32_le(bytes + 28),
+      .division_left = read_u32_le(bytes + 32), .division_right = read_u32_le(bytes + 36),
+      .feel_left = read_u32_le(bytes + 40), .feel_right = read_u32_le(bytes + 44),
+      .time_left_ms = read_f32_le(bytes + 48), .time_right_ms = read_f32_le(bytes + 52),
+      .offset_left_percent = read_f32_le(bytes + 56), .offset_right_percent = read_f32_le(bytes + 60),
+      .feedback = read_f32_le(bytes + 64), .dry_wet = read_f32_le(bytes + 68),
+      .filter_hz = read_f32_le(bytes + 72), .filter_width = read_f32_le(bytes + 76),
     };
     if (!valid_delay_state(state)) return false;
     out_processor->delay = state;
@@ -627,8 +638,10 @@ bool valid_processor_parameter_target(uint32_t kind, uint32_t target) {
         || target == DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_LINK
         || target == DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_GAIN_DB;
     case DAW_AUDIO_PROCESSOR_KIND_DELAY:
-      return target >= DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_MS
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_HIGH_CUT_HZ;
+      return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_LEFT_MS
+        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_FILTER_WIDTH)
+        || (target >= DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_RIGHT_MS
+        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_OFFSET_RIGHT_PERCENT);
     case DAW_AUDIO_PROCESSOR_KIND_REVERB:
       return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_WET
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_STEREO_WIDTH)
@@ -672,11 +685,15 @@ bool valid_processor_parameter_value(uint32_t target, float value) {
   if (target == 1) return value >= -60.0F && value <= 24.0F;
   if (target == 2 || target == 3) return value >= -1.0F && value <= 1.0F;
   if (target == 4) return value >= 0.0F && value <= 2.0F;
-  if (target == 5) return value >= 1.0F && value <= 3000.0F;
-  if (target == 6) return value >= 0.0F && value <= 0.95F;
-  if (target == 7 || target == 10) return value >= 0.0F && value <= 1.0F;
-  if (target == 8) return value >= 20.0F && value <= 2000.0F;
-  if (target == 9 || target == 13) return value >= 1000.0F && value <= 20000.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_LEFT_MS || target == DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_RIGHT_MS) {
+    return value >= DAW_AUDIO_CORE_DELAY_TIME_MS_MIN && value <= DAW_AUDIO_CORE_DELAY_TIME_MS_MAX;
+  }
+  if (target == 6 || target == 7 || target == 10) return value >= 0.0F && value <= 1.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_FILTER_HZ) return value >= 20.0F && value <= 20000.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_FILTER_WIDTH) return value >= 0.5F && value <= 9.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_OFFSET_LEFT_PERCENT || target == DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_OFFSET_RIGHT_PERCENT) {
+    return value >= -33.0F && value <= 33.0F;
+  }
   if (target == 11) return value >= 0.0F && value <= 250.0F;
   if (target == 12) return value >= 20.0F && value <= 1200.0F;
   if (target == 13) return value >= 1000.0F && value <= 20000.0F;

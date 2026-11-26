@@ -32,6 +32,7 @@ export const portableWasmBuildInputPaths = [
   'native/audio-core/src/audio_core_validation.cpp',
   'native/audio-core/src/audio_core_wasm.cpp',
   'native/audio-core/src/autofilter_kernel.h',
+  'native/audio-core/src/delay_kernel.h',
   'native/audio-core/src/reverb_kernel.h',
   'native/audio-core/src/compressor_kernel.h',
   'native/audio-core/src/gate_kernel.h',

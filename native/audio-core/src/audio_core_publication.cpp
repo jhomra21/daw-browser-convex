@@ -583,6 +583,9 @@ daw_audio_core_result prepare_runtime_ownership(Core &core) {
       processor.delay_slot = static_cast<uint32_t>(owned);
       std::destroy_at(&core.delay_histories[owned]);
       std::construct_at(&core.delay_histories[owned]);
+      if (!core.delay_histories[owned].kernel.prepare(static_cast<double>(core.config.sample_rate_hz))) {
+        return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+      }
     } else if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB) {
       const int32_t owned = acquire_history_owner(core.reverb_slot_owners, processor.history_slot);
       if (owned < 0) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;

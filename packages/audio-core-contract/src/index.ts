@@ -188,16 +188,36 @@ export type LimiterProcessorState = {
   link: number
 }
 
+export type DelaySmoothing = 'repitch' | 'fade' | 'jump'
+
+export type DelayDivision = '1/32' | '1/16' | '1/8' | '1/4' | '1/2' | '1/1'
+
+export type DelayFeel = 'straight' | 'dotted' | 'triplet'
+
 export type DelayProcessorState = {
   enabled: boolean
-  delayMs: number
+  link: boolean
+  pingPong: boolean
+  freeze: boolean
+  filterEnabled: boolean
+  smoothing: DelaySmoothing
+  syncLeft: boolean
+  syncRight: boolean
+  divisionLeft: DelayDivision
+  divisionRight: DelayDivision
+  feelLeft: DelayFeel
+  feelRight: DelayFeel
+  timeLeftMs: number
+  timeRightMs: number
+  offsetLeftPercent: number
+  offsetRightPercent: number
   feedback: number
   dryWet: number
-  pingPong: boolean
-  filterEnabled: boolean
-  lowCutHz: number
-  highCutHz: number
+  filterHz: number
+  filterWidth: number
 }
+
+const delayDivisions: readonly DelayDivision[] = ['1/32', '1/16', '1/8', '1/4', '1/2', '1/1']
 
 /**
  * Reverb uses the deterministic bounded feedback-delay profile shared by
@@ -1040,16 +1060,29 @@ export const encodeLimiterProcessorState = (state: LimiterProcessorState): Uint8
 }
 
 export const encodeDelayProcessorState = (state: DelayProcessorState): Uint8Array => {
-  const output = new Uint8Array(32)
+  const output = new Uint8Array(80)
   const view = new DataView(output.buffer)
+  const feel = (value: DelayFeel) => (value === 'dotted' ? 1 : value === 'triplet' ? 2 : 0)
   view.setUint32(0, state.enabled ? 1 : 0, true)
-  view.setFloat32(4, state.delayMs, true)
-  view.setFloat32(8, state.feedback, true)
-  view.setFloat32(12, state.dryWet, true)
-  view.setUint32(16, state.pingPong ? 1 : 0, true)
-  view.setUint32(20, state.filterEnabled ? 1 : 0, true)
-  view.setFloat32(24, state.lowCutHz, true)
-  view.setFloat32(28, state.highCutHz, true)
+  view.setUint32(4, state.link ? 1 : 0, true)
+  view.setUint32(8, state.pingPong ? 1 : 0, true)
+  view.setUint32(12, state.freeze ? 1 : 0, true)
+  view.setUint32(16, state.filterEnabled ? 1 : 0, true)
+  view.setUint32(20, state.smoothing === 'fade' ? 1 : state.smoothing === 'jump' ? 2 : 0, true)
+  view.setUint32(24, state.syncLeft ? 1 : 0, true)
+  view.setUint32(28, state.syncRight ? 1 : 0, true)
+  view.setUint32(32, delayDivisions.indexOf(state.divisionLeft), true)
+  view.setUint32(36, delayDivisions.indexOf(state.divisionRight), true)
+  view.setUint32(40, feel(state.feelLeft), true)
+  view.setUint32(44, feel(state.feelRight), true)
+  view.setFloat32(48, state.timeLeftMs, true)
+  view.setFloat32(52, state.timeRightMs, true)
+  view.setFloat32(56, state.offsetLeftPercent, true)
+  view.setFloat32(60, state.offsetRightPercent, true)
+  view.setFloat32(64, state.feedback, true)
+  view.setFloat32(68, state.dryWet, true)
+  view.setFloat32(72, state.filterHz, true)
+  view.setFloat32(76, state.filterWidth, true)
 
   return output
 }

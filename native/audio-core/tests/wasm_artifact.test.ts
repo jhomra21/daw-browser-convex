@@ -15,7 +15,6 @@ import {
   type PortableModulationKind,
 } from './graph-parity-fixtures'
 import type { ReverbProcessorState } from '../../../packages/audio-core-contract/src/index'
-import { createDelayChainState } from '../../../packages/audio-engine/src/effects/delay-chain-state'
 import { portableWasmCapabilityMatrix } from '../../../packages/audio-engine/src/backends/portable-wasm-capabilities'
 import type { JsonValue } from '../../../packages/shared/src/json-value'
 import { computePortableWasmSourceHash } from '../scripts/portable-wasm-source-hash'
@@ -28,6 +27,7 @@ const publicArtifactUrl = new URL('../../../public/audio-core/daw-audio-core.was
 const publicManifestUrl = new URL('../../../public/audio-core/daw-audio-core.manifest.json', import.meta.url)
 const nativeFixtureRunnerUrl = new URL('../../build/audio-core-debug/audio-core/daw-audio-core-graph-fixture', import.meta.url)
 const legacyModulationWorkletUrl = new URL('../../../public/audio-worklets/daw-modulation-processor-v1.js', import.meta.url)
+const legacyDelayWorkletUrl = new URL('../../../public/audio-worklets/daw-delay-processor-v1.js', import.meta.url)
 const legacyReverbWorkletUrl = new URL('../../../public/audio-worklets/daw-reverb-processor-v1.js', import.meta.url)
 const legacySpectralWorkletUrl = new URL('../../../public/audio-worklets/daw-spectral-processor-v1.js', import.meta.url)
 
@@ -461,60 +461,6 @@ const renderLegacySpectralFixture = async (
   return output
 }
 
-type BiquadState = {
-  x1: number
-  x2: number
-  y1: number
-  y2: number
-}
-
-type BiquadCoefficients = {
-  b0: number
-  b1: number
-  b2: number
-  a1: number
-  a2: number
-}
-
-const legacyBiquadCoefficients = (
-  type: 'lowpass' | 'highpass',
-  frequencyHz: number,
-  sampleRateHz: number,
-): BiquadCoefficients => {
-  const omega = 2 * Math.PI * Math.min(frequencyHz, sampleRateHz * 0.5) / sampleRateHz
-  const cosine = Math.cos(omega)
-  const alpha = Math.sin(omega) / (2 * 0.707)
-  const a0 = 1 + alpha
-  const highpass = type === 'highpass'
-
-  return {
-    b0: (highpass ? (1 + cosine) / 2 : (1 - cosine) / 2) / a0,
-    b1: (highpass ? -(1 + cosine) : 1 - cosine) / a0,
-    b2: (highpass ? (1 + cosine) / 2 : (1 - cosine) / 2) / a0,
-    a1: -2 * cosine / a0,
-    a2: (1 - alpha) / a0,
-  }
-}
-
-const renderLegacyBiquad = (
-  input: number,
-  coefficients: BiquadCoefficients,
-  state: BiquadState,
-) => {
-  const output = coefficients.b0 * input
-    + coefficients.b1 * state.x1
-    + coefficients.b2 * state.x2
-    - coefficients.a1 * state.y1
-    - coefficients.a2 * state.y2
-
-  state.x2 = state.x1
-  state.x1 = input
-  state.y2 = state.y1
-  state.y1 = output
-
-  return output
-}
-
 const delayParameterValues = (
   fixture: PortableGraphParityFixture,
   target: number,
@@ -540,131 +486,71 @@ const delayParameterValues = (
   return undefined
 }
 
-// Just enough of a BaseAudioContext for the shipped delay chain to be built from.
-const legacyDelayContext = () => {
-  const param = () => ({ value: 0 })
-  const node = () => Object.create(null)
+// The native parameter target of every automatable Delay control, which the worklet reads as the AudioParam of the same name.
+const delayParameterTargets = [
+  ['timeMs', 5, 'timeLeftMs'], ['feedback', 6, 'feedback'], ['dryWet', 7, 'dryWet'], ['filterHz', 8, 'filterHz'], ['filterWidth', 9, 'filterWidth'],
+  ['timeRightMs', 200, 'timeRightMs'], ['offsetLeftPercent', 201, 'offsetLeftPercent'], ['offsetRightPercent', 202, 'offsetRightPercent'],
+] as const
 
-  return Object.assign(Object.create(null), {
-    createGain: () => Object.assign(node(), { gain: param() }),
-    createDelay: () => Object.assign(node(), { delayTime: param() }),
-    createBiquadFilter: () => Object.assign(node(), { frequency: param(), Q: param(), gain: param() }),
-    createChannelSplitter: node,
-    createChannelMerger: node,
-  })
-}
-
-/**
- * Test-only reference for the shipped Web Audio DelayNode -> highpass Biquad ->
- * lowpass Biquad graph. Toggles go through the shipped chain state, whose chain is
- * the graph that is running (or none), so what a disable or enable does to the
- * delay's history is the product's, not this reference's.
- */
-const renderLegacyDelayFixture = (
+/** Renders the fixture through the shipped Delay worklet, the browser's fallback for the same kernel. */
+const renderLegacyDelayFixture = async (
   fixture: PortableGraphParityFixture,
   delay: PortableLegacyDelayFixture,
+  reset = false,
 ) => {
-  const state = delay.state
-  const context = legacyDelayContext()
-  const lifecycle = createDelayChainState()
+  const source = await Bun.file(legacyDelayWorkletUrl).text()
+  const registered = new Map<string, LegacyReverbProcessorConstructor>()
 
-  const setEnabled = (enabled: boolean) => lifecycle.set(context, {
-    enabled,
-    mode: 'time',
-    timeMs: state.delayMs,
-    syncDivision: '1/8',
-    feedback: state.feedback,
-    dryWet: state.dryWet,
-    pingPong: state.pingPong,
-    filterEnabled: state.filterEnabled,
-    lowCutHz: state.lowCutHz,
-    highCutHz: state.highCutHz,
-  }, 120)
+  class FakeAudioWorkletProcessor {
+    port: LegacyModulationPort = {
+      onmessage: null,
+      postMessage: () => {},
+      close: () => {},
+    }
+  }
 
-  setEnabled(state.enabled)
-  const delayValues = delayParameterValues(fixture, 5)
-  const feedbackValues = delayParameterValues(fixture, 6)
-  const dryWetValues = delayParameterValues(fixture, 7)
-  const lowCutValues = delayParameterValues(fixture, 8)
-  const highCutValues = delayParameterValues(fixture, 9)
-  const maximumDelayMs = Math.max(state.delayMs, ...(delayValues ?? []))
-  const bufferLength = Math.ceil(Math.min(3_000, maximumDelayMs) * fixture.sampleRateHz / 1_000) + 2
+  new Function('AudioWorkletProcessor', 'registerProcessor', 'sampleRate', source)(
+    FakeAudioWorkletProcessor,
+    (name: string, processor: LegacyReverbProcessorConstructor) => registered.set(name, processor),
+    fixture.sampleRateHz,
+  )
+  const Processor = registered.get('daw-delay-processor')
 
-  const emptyHistory = () => ({
-    buffers: Array.from({ length: fixture.channelCount }, () => new Float64Array(bufferLength)),
-    highpassStates: Array.from({ length: fixture.channelCount }, (): BiquadState => ({ x1: 0, x2: 0, y1: 0, y2: 0 })),
-    lowpassStates: Array.from({ length: fixture.channelCount }, (): BiquadState => ({ x1: 0, x2: 0, y1: 0, y2: 0 })),
-  })
+  if (!Processor) throw new Error('Delay worklet did not register.')
+  const processor = new Processor()
+  let revision = 1
+  let state = delay.state
+  processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision, state } })
 
-  let running = lifecycle.chain()
-  let { buffers, highpassStates, lowpassStates } = emptyHistory()
+  if (reset) processor.port.onmessage?.({ data: { type: 'reset', version: 1 } })
   const output = Array.from({ length: fixture.channelCount }, () => new Float32Array(fixture.frames))
-  let write = 0
+  const blockPartitions = fixture.blockPartitions ?? [fixture.frames]
+  let offset = 0
 
-  for (let frame = 0; frame < fixture.frames; frame += 1) {
+  for (const blockFrames of blockPartitions) {
     for (const edit of delay.enabledEdits ?? []) {
-      if (edit.frame === frame) setEnabled(edit.enabled)
+      if (edit.frame !== offset) continue
+      revision += 1
+      state = { ...state, enabled: edit.enabled }
+      processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision, state } })
     }
 
-    const chain = lifecycle.chain()
+    const block = (plane: Float32Array) => plane.subarray(offset, offset + blockFrames)
 
-    // A chain the state built anew starts from empty lines.
-    if (chain !== running) {
-      running = chain
-      ;({ buffers, highpassStates, lowpassStates } = emptyHistory())
-      write = 0
-    }
+    const parameters = Object.fromEntries(delayParameterTargets.map(([name, target, field]) => {
+      const values = delayParameterValues(fixture, target)
 
-    if (!chain) {
-      for (let channel = 0; channel < fixture.channelCount; channel += 1) {
-        const plane = output[channel]
+      return [`delay.${name}`, values === undefined
+        ? new Float32Array(blockFrames).fill(state[field])
+        : values.length === 1 ? Float32Array.from(values) : Float32Array.from(values.slice(offset, offset + blockFrames))]
+    }))
 
-        if (plane) plane[frame] = fixture.input[channel * fixture.frames + frame] ?? 0
-      }
-
-      continue
-    }
-
-    const delayFrames = Math.max(1, Math.min(3_000, delayValues?.[frame] ?? state.delayMs) * fixture.sampleRateHz / 1_000)
-    const delayBase = Math.floor(write - delayFrames)
-    const delayFraction = write - delayFrames - delayBase
-    const readIndex = (index: number) => (index % bufferLength + bufferLength) % bufferLength
-    const lowCut = state.filterEnabled ? Math.max(20, Math.min(2_000, lowCutValues?.[frame] ?? state.lowCutHz)) : 20
-    const highCut = state.filterEnabled ? Math.max(1_000, Math.min(20_000, highCutValues?.[frame] ?? state.highCutHz)) : 20_000
-    const highpass = legacyBiquadCoefficients('highpass', lowCut, fixture.sampleRateHz)
-    const lowpass = legacyBiquadCoefficients('lowpass', highCut, fixture.sampleRateHz)
-
-    const wet = buffers.map((buffer, channel) => {
-      const raw = (buffer[readIndex(delayBase)] ?? 0)
-        + ((buffer[readIndex(delayBase + 1)] ?? 0) - (buffer[readIndex(delayBase)] ?? 0)) * delayFraction
-
-      return renderLegacyBiquad(
-        renderLegacyBiquad(raw, highpass, highpassStates[channel]),
-        lowpass,
-        lowpassStates[channel],
-      )
-    })
-
-    for (let channel = 0; channel < fixture.channelCount; channel += 1) {
-      const dry = fixture.input[channel * fixture.frames + frame] ?? 0
-      const feedbackChannel = state.pingPong ? (channel + 1) % fixture.channelCount : channel
-      const feedback = wet[feedbackChannel] ?? 0
-      const buffer = buffers[channel]
-
-      if (buffer) buffer[write] = dry + feedback * Math.max(0, Math.min(0.95, feedbackValues?.[frame] ?? state.feedback))
-      const plane = output[channel]
-
-      // The chain's own gains: wet only while enabled, dry alone otherwise.
-      const wetGain = chain.enabled
-        ? Math.max(0, Math.min(1, dryWetValues?.[frame] ?? chain.wetGain.gain.value))
-        : chain.wetGain.gain.value
-
-      const dryGain = chain.enabled ? 1 - wetGain : chain.dryGain.gain.value
-
-      if (plane) plane[frame] = dry * dryGain + (wet[channel] ?? 0) * wetGain
-    }
-
-    write = (write + 1) % bufferLength
+    processor.process(
+      [Array.from({ length: fixture.channelCount }, (_, channel) => block(fixture.input.subarray(channel * fixture.frames, (channel + 1) * fixture.frames)))],
+      [output.map(block)],
+      parameters,
+    )
+    offset += blockFrames
   }
 
   return output
@@ -1532,16 +1418,16 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
       }
 
       if (fixture.legacyDelay) {
-        const legacyOutput = renderLegacyDelayFixture(fixture, fixture.legacyDelay)
+        const legacyOutput = await renderLegacyDelayFixture(fixture, fixture.legacyDelay)
         const legacyDifference = maximumDifference(output, legacyOutput, fixture.legacyStartFrame)
-        const legacyTolerance = fixture.legacyTolerance ?? 5e-4
+        const legacyTolerance = fixture.legacyTolerance ?? 1e-5
 
         if (legacyDifference > legacyTolerance) {
           throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} exceeded ${legacyTolerance}.`)
         }
 
         if (fixture.assertReset) {
-          expect(renderLegacyDelayFixture(fixture, fixture.legacyDelay)).toEqual(legacyOutput)
+          expect(await renderLegacyDelayFixture(fixture, fixture.legacyDelay, true)).toEqual(legacyOutput)
         }
       }
 

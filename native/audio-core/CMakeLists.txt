@@ -169,6 +169,18 @@ if(BUILD_TESTING)
     add_test(NAME daw-reverb-${group} COMMAND daw-reverb-test ${group})
   endforeach()
 
+  # Delay kernel (src/delay_kernel.h). One ctest per measurement group; the executable prints each value.
+  add_executable(daw-delay-test tests/delay_test.cpp)
+  target_compile_features(daw-delay-test PRIVATE cxx_std_20)
+  if(MSVC)
+    target_compile_options(daw-delay-test PRIVATE /W4 /WX /EHs-c- /GR-)
+  else()
+    target_compile_options(daw-delay-test PRIVATE -Wall -Wextra -Werror -fno-exceptions -fno-rtti)
+  endif()
+  foreach(group position fractional click filter sync freeze safety)
+    add_test(NAME daw-delay-${group} COMMAND daw-delay-test ${group})
+  endforeach()
+
   # Not a test: prints the cost of one Reverb per frame from graph fixtures (tools/reverb-bench-fixtures.ts).
   add_executable(daw-reverb-bench tools/reverb_bench.cpp tests/graph_fixture.cpp)
   target_compile_features(daw-reverb-bench PRIVATE cxx_std_20)

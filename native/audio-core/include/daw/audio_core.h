@@ -389,11 +389,11 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_PAN = 2,
   DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BALANCE = 3,
   DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_WIDTH = 4,
-  DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_MS = 5,
+  DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_LEFT_MS = 5,
   DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_FEEDBACK = 6,
   DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_DRY_WET = 7,
-  DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_LOW_CUT_HZ = 8,
-  DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_HIGH_CUT_HZ = 9,
+  DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_FILTER_HZ = 8,
+  DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_FILTER_WIDTH = 9,
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_WET = 10,
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_PRE_DELAY_MS = 11,
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_LOW_CUT_HZ = 12,
@@ -532,7 +532,11 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_CHORUS_AMOUNT_MS = 173,
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_CHORUS_RATE_HZ = 174,
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_LOW_SHELF_DB = 175,
-  DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_HIGH_SHELF_DB = 176
+  DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_HIGH_SHELF_DB = 176,
+  /* Delay targets 5..9 sit with the other early ids; the ones added by the rebuild start at 200 so they never meet another effect's. */
+  DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_RIGHT_MS = 200,
+  DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_OFFSET_LEFT_PERCENT = 201,
+  DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_OFFSET_RIGHT_PERCENT = 202
 } daw_audio_processor_parameter;
 
 #define DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_0_FREQUENCY_HZ
@@ -856,17 +860,36 @@ typedef struct daw_audio_limiter_state {
   float gain_db;
 } daw_audio_limiter_state;
 
-/* Portable delay preserves the normalized project time and filter controls.
- * Sync division is resolved by the routing authority before this ABI boundary. */
+typedef enum daw_audio_delay_smoothing {
+  DAW_AUDIO_DELAY_SMOOTHING_REPITCH = 0,
+  DAW_AUDIO_DELAY_SMOOTHING_FADE = 1,
+  DAW_AUDIO_DELAY_SMOOTHING_JUMP = 2
+} daw_audio_delay_smoothing;
+
+/* Each channel has its own time: a free time in milliseconds, or a sync division (0..5 = 1/32 .. 1/1) with a feel (0 straight,
+ * 1 dotted, 2 triplet) and an offset in percent of the synced time. The core resolves sync against the transport tempo. With
+ * link set the right channel follows the left channel's time. */
 typedef struct daw_audio_delay_state {
   uint32_t enabled;
-  float delay_ms;
+  uint32_t link;
+  uint32_t ping_pong;
+  uint32_t freeze;
+  uint32_t filter_enabled;
+  uint32_t smoothing;
+  uint32_t sync_left;
+  uint32_t sync_right;
+  uint32_t division_left;
+  uint32_t division_right;
+  uint32_t feel_left;
+  uint32_t feel_right;
+  float time_left_ms;
+  float time_right_ms;
+  float offset_left_percent;
+  float offset_right_percent;
   float feedback;
   float dry_wet;
-  uint32_t ping_pong;
-  uint32_t filter_enabled;
-  float low_cut_hz;
-  float high_cut_hz;
+  float filter_hz;
+  float filter_width;
 } daw_audio_delay_state;
 
 typedef enum daw_audio_reverb_density {

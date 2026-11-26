@@ -135,6 +135,7 @@ uint32_t schema_version_of(uint32_t kind) {
     : kind == DAW_AUDIO_PROCESSOR_KIND_GATE ? DAW_AUDIO_CORE_PROCESSOR_GATE_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR ? DAW_AUDIO_CORE_PROCESSOR_COMPRESSOR_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_LIMITER ? DAW_AUDIO_CORE_PROCESSOR_LIMITER_SCHEMA_VERSION
+    : kind == DAW_AUDIO_PROCESSOR_KIND_DELAY ? DAW_AUDIO_CORE_PROCESSOR_DELAY_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_REVERB ? DAW_AUDIO_CORE_PROCESSOR_REVERB_SCHEMA_VERSION : 1u;
 }
 
@@ -1502,6 +1503,22 @@ struct HistoryFixtureState {
   uint32_t latency = 0;
 };
 
+// A free-time Delay state: a time on both channels, a ping pong into the band-pass, no freeze.
+std::array<uint8_t, 80> delay_test_state(float time_ms, float feedback, float dry_wet) {
+  std::array<uint8_t, 80> bytes{};
+  const auto write_u32 = [&bytes](uint32_t offset, uint32_t value) {
+    for (uint32_t byte = 0; byte < 4; ++byte) bytes[offset + byte] = static_cast<uint8_t>(value >> (8u * byte));
+  };
+  const auto write_f32 = [&write_u32](uint32_t offset, float value) {
+    uint32_t bits = 0; std::memcpy(&bits, &value, sizeof(bits)); write_u32(offset, bits);
+  };
+  write_u32(0, 1); write_u32(4, 1); write_u32(8, 1); write_u32(16, 1);
+  write_u32(32, 2); write_u32(36, 2);
+  write_f32(48, time_ms); write_f32(52, time_ms); write_f32(64, feedback); write_f32(68, dry_wet);
+  write_f32(72, 1000.0F); write_f32(76, 5.0F);
+  return bytes;
+}
+
 HistoryFixtureState history_fixture_state(uint32_t kind) {
   HistoryFixtureState fixture{};
   const auto write_u32 = [&fixture](uint32_t offset, uint32_t value) {
@@ -1556,9 +1573,9 @@ HistoryFixtureState history_fixture_state(uint32_t kind) {
     write_u32(0, 1); write_f32(4, -6.0F); write_f32(8, 50.0F); write_f32(12, 6.0F);
     write_f32(16, 1.0F); write_u32(20, 0); write_f32(24, 0.0F);
   } else if (kind == DAW_AUDIO_PROCESSOR_KIND_DELAY) {
-    fixture.size = 32;
-    write_u32(0, 1); write_f32(4, 10.0F); write_f32(8, 0.5F); write_f32(12, 0.5F);
-    write_u32(16, 1); write_u32(20, 1); write_f32(24, 120.0F); write_f32(28, 8000.0F);
+    const std::array<uint8_t, 80> state = delay_test_state(10.0F, 0.5F, 0.5F);
+    fixture.size = static_cast<uint32_t>(state.size());
+    std::copy(state.begin(), state.end(), fixture.bytes.begin());
   } else {
     fixture.size = 60; fixture.latency = 512;
     write_u32(0, 1); write_u32(4, 512); write_u32(8, 4); write_u32(12, DAW_AUDIO_SPECTRAL_MODE_FREEZE);
@@ -2701,20 +2718,11 @@ void test_portable_delay_and_reverb_characterization() {
   const std::array<daw_audio_graph_edge_descriptor, 1> edges{{
     {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
   }};
-  const auto write_u32 = [](std::array<uint8_t, 124> &bytes, uint32_t offset, uint32_t value) {
-    bytes[offset] = static_cast<uint8_t>(value); bytes[offset + 1] = static_cast<uint8_t>(value >> 8u);
-    bytes[offset + 2] = static_cast<uint8_t>(value >> 16u); bytes[offset + 3] = static_cast<uint8_t>(value >> 24u);
-  };
-  const auto write_f32 = [&write_u32](std::array<uint8_t, 124> &bytes, uint32_t offset, float value) {
-    uint32_t bits = 0; std::memcpy(&bits, &value, sizeof(bits)); write_u32(bytes, offset, bits);
-  };
-  std::array<uint8_t, 124> state{};
-  write_u32(state, 0, 1); write_f32(state, 4, 10.0F); write_f32(state, 8, 0.5F); write_f32(state, 12, 1.0F);
-  write_u32(state, 16, 1); write_u32(state, 20, 1); write_f32(state, 24, 120.0F); write_f32(state, 28, 8000.0F);
+  const std::array<uint8_t, 80> delay_state = delay_test_state(10.0F, 0.5F, 1.0F);
   daw_audio_processor_descriptor delay{
-    .node_id = 2, .instance_id = 13, .kind = DAW_AUDIO_PROCESSOR_KIND_DELAY, .state_version = 1, .state_size = 32,
+    .node_id = 2, .instance_id = 13, .kind = DAW_AUDIO_PROCESSOR_KIND_DELAY, .state_version = 2, .state_size = 80,
     .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
-    .latency_frames = 0, .tail_frames = 2400, .parameter_count = 0, .parameter_targets = nullptr, .state = state.data(),
+    .latency_frames = 0, .tail_frames = 2400, .parameter_count = 0, .parameter_targets = nullptr, .state = delay_state.data(),
   };
   daw_audio_core_handle core = create_core(512, 2, 1);
   daw_audio_graph_prepare_request prepare{
@@ -2735,7 +2743,14 @@ void test_portable_delay_and_reverb_characterization() {
   assert(std::abs(output_left[480]) > 1e-5F);
   daw_audio_core_destroy(core);
 
-  state.fill(0);
+  const auto write_u32 = [](std::array<uint8_t, 124> &bytes, uint32_t offset, uint32_t value) {
+    bytes[offset] = static_cast<uint8_t>(value); bytes[offset + 1] = static_cast<uint8_t>(value >> 8u);
+    bytes[offset + 2] = static_cast<uint8_t>(value >> 16u); bytes[offset + 3] = static_cast<uint8_t>(value >> 24u);
+  };
+  const auto write_f32 = [&write_u32](std::array<uint8_t, 124> &bytes, uint32_t offset, float value) {
+    uint32_t bits = 0; std::memcpy(&bits, &value, sizeof(bits)); write_u32(bytes, offset, bits);
+  };
+  std::array<uint8_t, 124> state{};
   write_u32(state, 0, 1); write_f32(state, 4, 1.0F); write_f32(state, 8, 1.0F); write_f32(state, 12, 20.0F);
   write_f32(state, 16, 0.5F); write_u32(state, 20, 1); write_f32(state, 24, 5.0F); write_f32(state, 28, 0.3F);
   write_f32(state, 32, 0.5F); write_f32(state, 36, 1.0F); write_f32(state, 40, 0.65F); write_f32(state, 44, 0.75F);
@@ -2745,7 +2760,7 @@ void test_portable_delay_and_reverb_characterization() {
   write_u32(state, 100, 1); write_u32(state, 104, 1);
   daw_audio_processor_descriptor reverb = delay;
   reverb.instance_id = 14; reverb.kind = DAW_AUDIO_PROCESSOR_KIND_REVERB; reverb.state_version = DAW_AUDIO_CORE_PROCESSOR_REVERB_SCHEMA_VERSION;
-  reverb.state_size = 124; reverb.tail_frames = 106560;
+  reverb.state_size = 124; reverb.tail_frames = 106560; reverb.state = state.data();
   core = create_core(512, 2, 1);
   prepare.graph_revision = 1; prepare.processors = &reverb;
   expect(daw_audio_core_prepare_graph(core, &prepare), DAW_AUDIO_CORE_OK);
@@ -2818,35 +2833,15 @@ void test_eight_delay_fallback_releases_retirement_slots_and_tails() {
     }
     return edges;
   };
-  std::array<std::array<uint8_t, 32>, kDelayCount> states{};
-  const auto write_u32 = [](std::array<uint8_t, 32> &state, const uint32_t offset, const uint32_t value) {
-    state[offset] = static_cast<uint8_t>(value);
-    state[offset + 1] = static_cast<uint8_t>(value >> 8u);
-    state[offset + 2] = static_cast<uint8_t>(value >> 16u);
-    state[offset + 3] = static_cast<uint8_t>(value >> 24u);
-  };
-  const auto write_f32 = [&write_u32](std::array<uint8_t, 32> &state, const uint32_t offset, const float value) {
-    uint32_t bits = 0;
-    std::memcpy(&bits, &value, sizeof(bits));
-    write_u32(state, offset, bits);
-  };
-  for (auto &state : states) {
-    write_u32(state, 0, 1);
-    write_f32(state, 4, 10.0F);
-    write_f32(state, 8, 0.5F);
-    write_f32(state, 12, 1.0F);
-    write_u32(state, 16, 1);
-    write_u32(state, 20, 1);
-    write_f32(state, 24, 120.0F);
-    write_f32(state, 28, 8000.0F);
-  }
+    std::array<std::array<uint8_t, 80>, kDelayCount> states{};
+  for (auto &state : states) state = delay_test_state(10.0F, 0.5F, 1.0F);
   auto nodes = nodes_for();
   const auto edges = edges_for();
   std::array<daw_audio_processor_descriptor, kDelayCount> processors{};
   for (uint32_t index = 0; index < kDelayCount; ++index) {
     processors[index] = {
       .node_id = index + 1, .instance_id = index + 1, .kind = DAW_AUDIO_PROCESSOR_KIND_DELAY,
-      .state_version = 1, .state_size = 32, .bypassed = 0,
+      .state_version = 2, .state_size = 80, .bypassed = 0,
       .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
       .latency_frames = 0, .tail_frames = 2400, .parameter_count = 0, .parameter_targets = nullptr,
       .state = states[index].data(),
@@ -2924,19 +2919,11 @@ void test_live_delay_and_reverb_retirement_materialization() {
   };
 
   const auto run_delay = [&](uint32_t live_target, float live_value, bool expect_late_tail) {
-    std::array<uint8_t, 32> state{};
-    write_u32(state.data(), 0, 1);
-    write_f32(state.data(), 4, 10.0F);
-    write_f32(state.data(), 8, 0.5F);
-    write_f32(state.data(), 12, 1.0F);
-    write_u32(state.data(), 16, 1);
-    write_u32(state.data(), 20, 1);
-    write_f32(state.data(), 24, 120.0F);
-    write_f32(state.data(), 28, 8000.0F);
+    const std::array<uint8_t, 80> state = delay_test_state(10.0F, 0.5F, 1.0F);
     const std::array<uint32_t, 5> targets{5, 6, 7, 8, 9};
     daw_audio_processor_descriptor processor{
       .node_id = 2, .instance_id = 501, .kind = DAW_AUDIO_PROCESSOR_KIND_DELAY,
-      .state_version = 1, .state_size = 32, .bypassed = 0,
+      .state_version = 2, .state_size = 80, .bypassed = 0,
       .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
       .latency_frames = 0, .tail_frames = 1, .parameter_count = static_cast<uint32_t>(targets.size()),
       .parameter_targets = targets.data(), .state = state.data(),
@@ -2997,7 +2984,7 @@ void test_live_delay_and_reverb_retirement_materialization() {
   };
 
   // A deleted processor fades out over ~5 ms and then contributes nothing, whatever live overrides it held.
-  run_delay(DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_MS, 100.0F, false);
+  run_delay(DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_LEFT_MS, 100.0F, false);
   run_delay(DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_DRY_WET, 0.0F, false);
 
   const auto run_reverb = [&](uint32_t live_target, float live_value, bool expect_late_tail) {

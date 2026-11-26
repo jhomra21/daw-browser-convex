@@ -519,7 +519,7 @@ const renderLegacyDelayFixture = async (
   if (!Processor) throw new Error('Delay worklet did not register.')
   const processor = new Processor()
   let revision = 1
-  let state = delay.state
+  const state = { ...delay.state }
   processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision, state } })
 
   if (reset) processor.port.onmessage?.({ data: { type: 'reset', version: 1 } })
@@ -531,7 +531,7 @@ const renderLegacyDelayFixture = async (
     for (const edit of delay.enabledEdits ?? []) {
       if (edit.frame !== offset) continue
       revision += 1
-      state = { ...state, enabled: edit.enabled }
+      state.enabled = edit.enabled
       processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision, state } })
     }
 

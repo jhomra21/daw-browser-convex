@@ -251,10 +251,9 @@ export const createFxTestAudio = () => {
     failNextTempoPost: () => { failNextTempoPost = true },
     // Whether the most recent delay worklet was last configured on (a delay worklet keeps its parameters when it is disabled).
     delayEnabled: () => created.findLast((node) => node.parameters.has('delay.timeMs'))?.posted.findLast((message) => message.type === 'configure')?.state?.enabled,
-    // The worklet node that owns an AudioParam.
-    workletOwning: (parameter: unknown) => created.find((node) => [...node.parameters.values()].includes(parameter)),
+    delayNode: () => created.findLast((node) => node.parameters.has('delay.timeMs')),
     // The tempo each delay worklet was last told.
-    delayTempos: () => created.filter((node) => node.parameters.has('delay.timeMs')).map((node) => node.posted.findLast((message) => message.type === 'tempo')?.bpm),
+    delayTempos: () => created.flatMap((node) => node.parameters.has('delay.timeMs') ? [node.posted.findLast((message) => message.type === 'tempo')?.bpm] : []),
     // The next saturator curve assignment throws after the drive gain already changed.
     failNextCurveWrite: () => { failNextCurveWrite = true },
     failNextConnection: () => { failNextConnection = true },

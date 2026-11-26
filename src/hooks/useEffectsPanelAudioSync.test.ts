@@ -346,8 +346,7 @@ test("B5d delay and EQ reorder local track closed and unselected", async () => {
       `eq.${AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams().bands[0]?.id}.gainDb`, "eq:reorder")[0]?.param;
 
     const eq = f.runtime.audio.biquads.find(node => node.gain === eqParam);
-    const delayParam = f.runtime.track.resolveTrackAutomationBindings(f.targetId, "delay.timeMs", f.instanceId)[0]?.param;
-    const delay = f.runtime.audio.workletOwning(delayParam);
+    const delay = f.runtime.audio.delayNode();
 
     if (!delay || !eq) throw new Error("Missing heterogeneous runtime nodes");
     expect(reaches(delay, eq)).toBe(true);

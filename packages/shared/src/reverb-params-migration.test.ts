@@ -63,15 +63,21 @@ describe('Reverb params version 1 -> 2', () => {
     expect(flat).toMatchObject({ lowCutHz: 20, highCutHz: 20000, lowShelfOn: false, highShelfOn: false, lowShelfDb: 0, highShelfDb: 0 })
     const cut = fieldsOf(migrateReverbParamsV1({ ...version1, lowCutHz: 300, highCutHz: 4000 }))
 
-    expect(cut).toMatchObject({ lowCutHz: 20, highCutHz: 20000, lowShelfOn: true, highShelfOn: true, lowShelfHz: 300, highShelfHz: 4000 })
-    expect(cut.highShelfDb).toBeLessThan(0)
-    expect(cut.highShelfDb).toBeGreaterThanOrEqual(-24)
+    expect(cut).toMatchObject({ lowCutHz: 20, highCutHz: 20000, lowShelfOn: true, highShelfOn: true })
+
+    for (const shelfDb of [cut.lowShelfDb, cut.highShelfDb]) {
+      expect(shelfDb).toBeLessThan(0)
+      expect(shelfDb).toBeGreaterThanOrEqual(-24)
+    }
+
+    // A High Cut alone leaves the low shelf out.
+    expect(fieldsOf(migrateReverbParamsV1({ ...version1, highCutHz: 4000 }))).toMatchObject({ lowShelfOn: false, lowShelfDb: 0, highShelfOn: true })
   })
 
   test('a diffusion cut counts like an in-loop cut and the stricter of each pair wins', () => {
     const migrated = fieldsOf(migrateReverbParamsV1({ ...version1, lowCutHz: 100, diffusionLowCutHz: 400, highCutHz: 9000, diffusionHighCutHz: 6000 }))
 
-    expect(migrated).toMatchObject({ lowShelfHz: 400, highShelfHz: 6000, lowShelfOn: true, highShelfOn: true })
+    expect(migrated).toEqual(fieldsOf(migrateReverbParamsV1({ ...version1, lowCutHz: 400, highCutHz: 6000 })))
   })
 
   test('a shorter decay costs the cut relatively less per trip, so its shelf is shallower', () => {

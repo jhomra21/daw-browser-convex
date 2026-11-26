@@ -3,7 +3,7 @@
 // reflections), S6 (Chorus), S8 (sample-rate-aware buffers), C4 (level versus size), C5 (DC).
 import { normalizeAudioEffect } from '../../../packages/shared/src/audio-effect-normalization'
 import { migrateReverbParamsV1 } from '../../../packages/shared/src/reverb-params-migration'
-import { autocorrelationPeak, bandpass, correlation, echoDensity, fineStructure, maxAbsDiff, nextPowerOfTwo, peakAbs, maxStep, pitchDeviationCents, rms, schroederT30, spectrum } from '../dsp'
+import { autocorrelationPeak, bandpass, correlation, echoDensity, fineStructure, maxAbsDiff, nextPowerOfTwo, peakAbs, maxStep, pitchDeviationCents, rms, schroederRt, schroederT30, spectrum } from '../dsp'
 import { fx } from '../effects'
 import type { Family } from './index'
 import type { Harness, Scenario } from '../harness'
@@ -367,6 +367,31 @@ const migratedLoudness: Scenario = {
   },
 }
 
+// T20 (-5 to -25 dB) of the left channel's octave bands (Q 1.4 band pass) of the old engine at Decay 2.2 s, measured on the same
+// worklet copy as above (research reverb.md D2 reports these to two digits; the old worklet gives them to three).
+const oldCutBands: [string, Partial<typeof oldState>, number[]][] = [
+  ['High Cut 8 kHz', { highCutHz: 8000 }, [2.086, 2.123, 1.809, 1.064]],
+  ['High Cut 4 kHz', { highCutHz: 4000 }, [2.071, 2.044, 1.460, 0.790]],
+  ['Low Cut 300 Hz', { lowCutHz: 300 }, [1.513, 1.528, 1.750, 1.545]],
+  ['Low Cut 1 kHz', { lowCutHz: 1000 }, [1.069, 1.052, 1.141, 1.198]],
+]
+
+const migratedCuts: Scenario = {
+  effect: 'reverb',
+  name: 'migration-in-loop-cuts',
+  rates: [48000],
+  run: async (h) => {
+    for (const [name, old, reference] of oldCutBands) {
+      const output = await impulseResponse(h, migrated(old), 12)
+
+      ;[125, 500, 2000, 8000].forEach((band, i) => {
+        const decay = schroederRt(bandpass(output[0], band, h.rate), h.rate)
+        h.within(`${band} Hz band T20 of a migrated ${name} against the old engine`, decay / reference[i], 1, 0.2, 'x', `old ${reference[i]} s, migrated ${decay.toFixed(3)} s`)
+      })
+    }
+  },
+}
+
 const dcBlock: Scenario = {
   effect: 'reverb',
   name: 'c5-dc-blocker',
@@ -414,7 +439,7 @@ const spec = fx.reverb({ wet: 0.5, reflections: 0.5 })
 export const reverb: Family = {
   scenarios: [
     decayAccuracy, shelfDecay, chorusDecay, decayAcrossRates, density, earlyReflections, earlyReflectionsHighRates, stepClicks, sizeSweep,
-    width, sizeLoudness, migratedLoudness, predelayClamp, spinPitch, freezeDrift, dcBlock, parity,
+    width, sizeLoudness, migratedLoudness, migratedCuts, predelayClamp, spinPitch, freezeDrift, dcBlock, parity,
     ...robustnessScenarios('reverb', spec, null),
   ],
   notEncoded: [

@@ -329,15 +329,6 @@
     grid-template-columns: 5.5rem 1fr 5.5rem;
   }
 
-  .device-phaser {
-    width: 280px;
-    min-width: 280px;
-  }
-
-  .device-phaser-grid {
-    grid-template-columns: 1fr 3rem;
-  }
-
   .device-spectral {
     width: 620px;
     min-width: 620px;

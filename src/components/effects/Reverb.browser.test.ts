@@ -9,8 +9,10 @@ test('the Reverb panel fits the 300 px device, reads every control, gates Flat a
   await mkdir(artifacts, { recursive: true })
   const results = await runBrowserFixture(new URL('./Reverb.browser-runtime.tsx', import.meta.url), { screenshot: `${artifacts}/reverb-device.png`, styled: true })
   expect(Object.keys(results).sort()).toEqual([
+    'a-dragged-handle-reports-a-manual-override',
     'a-knob-change-writes-its-param',
     'an-automatable-knob-reports-a-manual-override',
+    'every-automatable-knob-shows-its-automation',
     'every-control-has-an-accessible-name',
     'every-control-sits-inside-the-300-px-device',
     'every-enabled-control-shows-a-focus-ring',
@@ -22,7 +24,9 @@ test('the Reverb panel fits the 300 px device, reads every control, gates Flat a
     'freeze-off-disables-flat-and-cut-again',
     'hi-cut-switches-on-at-6-khz',
     'lo-cut-switches-on-at-830-hz',
+    'no-knob-shows-automation-without-an-envelope',
     'no-label-or-value-is-wider-than-its-box',
+    'only-the-knob-with-an-envelope-shows-automation',
     'the-cut-handles-are-absent-until-the-cut-is-on',
     'the-decay-curve-is-flat-with-flat-shelves-and-falls-with-a-high-shelf-cut',
     'the-density-chooser-writes-density',

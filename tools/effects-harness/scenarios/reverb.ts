@@ -203,27 +203,64 @@ const stepClicks: Scenario = {
   },
 }
 
-// A 2 s Size sweep applied block by block: no block may hold a sample step more than twice what its neighbours hold.
+// A 2 s sweep of one control applied block by block (the way an automation envelope reaches the core and the worklet): no block may
+// hold a sample step more than twice what its neighbours hold. `parity` also renders the worklet, which takes the same steps.
+const sweepControl = async (h: Harness, state: Parameters<typeof fx.reverb>[0], valueAt: (progress: number) => Record<string, number>, parity: boolean) => {
+  const block = 128
+  const frames = 4 * h.rate
+  const first = Math.round(h.rate / block) * block
+  const blocks = Math.round(2 * h.rate / block)
+  const steps = Array.from({ length: blocks }, (_, index) => ({ frame: first + index * block, set: valueAt((index + 1) / blocks) }))
+  const { output, legacy } = await h.render(fx.reverb({ wet: 1, reflections: 0.5, ...state }), { input: [sine(frames, 440, h.rate, 0.3)], steps }, { parity })
+  const largest = Array.from({ length: blocks }, (_, index) => maxStep(output[0], first + index * block, first + (index + 1) * block))
+
+  const worst = Math.max(...largest.map((value, index) => {
+    const neighbours = [...largest.slice(Math.max(0, index - 4), index), ...largest.slice(index + 1, index + 5)]
+
+    return value / (neighbours.reduce((sum, neighbour) => sum + neighbour, 0) / neighbours.length)
+  }))
+
+  return { worst, output, legacy }
+}
+
 const sizeSweep: Scenario = {
   effect: 'reverb',
   name: 'm2-size-sweep',
   rates: [48000],
   run: async (h) => {
-    const block = 128
-    const frames = 4 * h.rate
-    const first = Math.round(h.rate / block) * block
-    const blocks = Math.round(2 * h.rate / block)
-    const steps = Array.from({ length: blocks }, (_, index) => ({ frame: first + index * block, set: { size: (index + 1) / blocks } }))
-    const { output } = await h.render(fx.reverb({ wet: 1, reflections: 0.5, size: 0 }), { input: [sine(frames, 440, h.rate, 0.3)], steps }, { parity: false })
-    const largest = Array.from({ length: blocks }, (_, index) => maxStep(output[0], first + index * block, first + (index + 1) * block))
-
-    const worst = Math.max(...largest.map((value, index) => {
-      const neighbours = [...largest.slice(Math.max(0, index - 4), index), ...largest.slice(index + 1, index + 5)]
-
-      return value / (neighbours.reduce((sum, neighbour) => sum + neighbour, 0) / neighbours.length)
-    }))
-
+    const { worst } = await sweepControl(h, { size: 0 }, (progress) => ({ size: progress }), false)
     h.atMost('largest sample step of a block / mean of its neighbours, size 0 to 1 over 2 s', worst, 2, 'x', 'M2')
+  },
+}
+
+// Decay and Size automation: the envelope's values reach the core as parameter targets and the worklet as AudioParam values,
+// and both must render the same tail without a click.
+const automationSweep: Scenario = {
+  effect: 'reverb',
+  name: 'm2-decay-size-automation',
+  rates: [48000],
+  run: async (h) => {
+    const sweeps: [string, Parameters<typeof fx.reverb>[0], (progress: number) => Record<string, number>][] = [
+      ['decay 0.5 to 8 s', { decaySec: 0.5 }, (progress) => ({ decaySec: 0.5 * 16 ** progress })],
+      ['size 0 to 1', { size: 0 }, (progress) => ({ size: progress })],
+      ['decay 8 to 0.5 s with size 1 to 0', { decaySec: 8, size: 1 }, (progress) => ({ decaySec: 8 / 16 ** progress, size: 1 - progress })],
+    ]
+
+    for (const [name, state, valueAt] of sweeps) {
+      const { worst, output, legacy } = await sweepControl(h, state, valueAt, true)
+
+      if (legacy === null) throw new Error('the reverb worklet must render for parity')
+      h.atMost(`largest sample step of a block / mean of its neighbours, ${name} over 2 s`, worst, 2, 'x', 'M2')
+      h.atMost(`parity of the core and the worklet, ${name} automated block by block`, Math.max(maxAbsDiff(output[0], legacy[0]), maxAbsDiff(output[1], legacy[1])), parityLimit, 'abs')
+    }
+
+    const input = [sine(3 * h.rate, 440, h.rate, 0.3)]
+    const frame = Math.floor(1.5 * h.rate / 128) * 128
+
+    for (const [name, set] of [['decay 2.2 to 8 s', { decaySec: 8 }], ['size 0.65 to 0', { size: 0 }]] as const) {
+      const { extraRatio } = await h.stepClick(fx.reverb({ wet: 1, reflections: 0.5 }), input, { frame, set }, 2048)
+      h.atMost(`max extra sample step / steady-state max step, ${name}`, extraRatio, 1.5, 'x', 'M2')
+    }
   },
 }
 
@@ -438,7 +475,7 @@ const spec = fx.reverb({ wet: 0.5, reflections: 0.5 })
 
 export const reverb: Family = {
   scenarios: [
-    decayAccuracy, shelfDecay, chorusDecay, decayAcrossRates, density, earlyReflections, earlyReflectionsHighRates, stepClicks, sizeSweep,
+    decayAccuracy, shelfDecay, chorusDecay, decayAcrossRates, density, earlyReflections, earlyReflectionsHighRates, stepClicks, sizeSweep, automationSweep,
     width, sizeLoudness, migratedLoudness, migratedCuts, predelayClamp, spinPitch, freezeDrift, dcBlock, parity,
     ...robustnessScenarios('reverb', spec, null),
   ],

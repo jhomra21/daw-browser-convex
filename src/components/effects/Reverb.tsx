@@ -4,7 +4,6 @@ import EffectShell from '~/components/effects/EffectShell'
 import AutomatedKnob from '~/components/effects/AutomatedKnob'
 import { DraggableDeviceGraph, handleGraphKeyDelta } from '~/components/effects/draggable-device-graph'
 import { ChoiceMenu, DeviceToggleButton, DeviceValueStrip } from '~/components/ui/device-control'
-import Knob from '~/components/ui/knob'
 import {
   createDefaultReverbParams,
   REVERB_CHORUS_AMOUNT_MS_MAX,
@@ -190,6 +189,12 @@ export default function Reverb(props: ReverbProps) {
   const highCutActive = () => props.params.highCutHz < REVERB_HIGH_CUT_HZ_MAX
   const change = (updates: Partial<ReverbParams>) => props.onChange(updates)
 
+  // A handle drag moves automatable params without going through a knob, so it reports the override itself.
+  const changeFromGraph = (updates: Partial<ReverbParams>) => {
+    for (const key of Object.keys(updates)) props.onManualAutomationOverride?.(`reverb.${key}`)
+    change(updates)
+  }
+
   return (
     <EffectShell
       title="Reverb"
@@ -207,7 +212,7 @@ export default function Reverb(props: ReverbProps) {
                 <DeviceToggleButton label="Lo Cut" active={lowCutActive()} disabled={off()} onClick={() => change({ lowCutHz: lowCutActive() ? REVERB_LOW_CUT_HZ_MIN : LOW_CUT_START_HZ })} />
                 <DeviceToggleButton label="Hi Cut" active={highCutActive()} disabled={off()} onClick={() => change({ highCutHz: highCutActive() ? REVERB_HIGH_CUT_HZ_MAX : HIGH_CUT_START_HZ })} />
               </div>
-              <InputFilterGraph params={props.params} disabled={off()} lowActive={lowCutActive()} highActive={highCutActive()} onChange={change} />
+              <InputFilterGraph params={props.params} disabled={off()} lowActive={lowCutActive()} highActive={highCutActive()} onChange={changeFromGraph} />
               <div class="grid grid-cols-2 gap-1 pt-1">
                 <DeviceValueStrip value={formatDeviceFrequency(props.params.lowCutHz, 2)} />
                 <DeviceValueStrip value={formatDeviceFrequency(props.params.highCutHz, 2)} />
@@ -217,9 +222,9 @@ export default function Reverb(props: ReverbProps) {
             <DeviceSection title="Early Reflections">
               <DeviceToggleButton label="Spin" active={props.params.reflectionSpin} disabled={off()} onClick={() => change({ reflectionSpin: !props.params.reflectionSpin })} />
               <div class="grid grid-cols-2 justify-items-center">
-                <Knob size={26} label="Amount" ariaLabel="Early Reflections Amount" valueLabel={formatDeviceMilliseconds(props.params.reflectionModAmountMs, 1)} value={props.params.reflectionModAmountMs} resetValue={defaults.reflectionModAmountMs} min={REVERB_REFLECTION_MOD_AMOUNT_MS_MIN} max={REVERB_REFLECTION_MOD_AMOUNT_MS_MAX} step={0.1} disabled={off() || !props.params.reflectionSpin} onValueChange={(reflectionModAmountMs) => change({ reflectionModAmountMs })} />
-                <Knob size={26} label="Rate" ariaLabel="Early Reflections Rate" valueLabel={hertz(props.params.reflectionModRateHz)} value={props.params.reflectionModRateHz} resetValue={defaults.reflectionModRateHz} min={REVERB_REFLECTION_MOD_RATE_HZ_MIN} max={REVERB_REFLECTION_MOD_RATE_HZ_MAX} step={0.01} logarithmic disabled={off() || !props.params.reflectionSpin} onValueChange={(reflectionModRateHz) => change({ reflectionModRateHz })} />
-                <Knob class="col-span-2" size={26} label="Shape" valueLabel={percent(props.params['reflectionShape'])} value={props.params['reflectionShape']} resetValue={defaults['reflectionShape']} min={REVERB_UNIT_PARAM_MIN} max={REVERB_UNIT_PARAM_MAX} step={0.01} disabled={off()} onValueChange={(value) => change({ ['reflectionShape']: value })} />
+                <AutomatedKnob size={26} label="Amount" ariaLabel="Early Reflections Amount" valueLabel={formatDeviceMilliseconds(props.params.reflectionModAmountMs, 1)} value={props.params.reflectionModAmountMs} resetValue={defaults.reflectionModAmountMs} min={REVERB_REFLECTION_MOD_AMOUNT_MS_MIN} max={REVERB_REFLECTION_MOD_AMOUNT_MS_MAX} step={0.1} disabled={off() || !props.params.reflectionSpin} parameterId="reverb.reflectionModAmountMs" automation={props} onValueChange={(reflectionModAmountMs) => change({ reflectionModAmountMs })} />
+                <AutomatedKnob size={26} label="Rate" ariaLabel="Early Reflections Rate" valueLabel={hertz(props.params.reflectionModRateHz)} value={props.params.reflectionModRateHz} resetValue={defaults.reflectionModRateHz} min={REVERB_REFLECTION_MOD_RATE_HZ_MIN} max={REVERB_REFLECTION_MOD_RATE_HZ_MAX} step={0.01} logarithmic disabled={off() || !props.params.reflectionSpin} parameterId="reverb.reflectionModRateHz" automation={props} onValueChange={(reflectionModRateHz) => change({ reflectionModRateHz })} />
+                <AutomatedKnob class="col-span-2" size={26} label="Shape" valueLabel={percent(props.params['reflectionShape'])} value={props.params['reflectionShape']} resetValue={defaults['reflectionShape']} min={REVERB_UNIT_PARAM_MIN} max={REVERB_UNIT_PARAM_MAX} step={0.01} disabled={off()} parameterId="reverb.reflectionShape" automation={props} onValueChange={(value) => change({ ['reflectionShape']: value })} />
               </div>
             </DeviceSection>
 
@@ -232,7 +237,7 @@ export default function Reverb(props: ReverbProps) {
                     <DeviceValueStrip value={formatDeviceDb(props.params.highShelfDb, 1, true)} />
                   </div>
                   <div class="relative">
-                    <DecayGraph params={props.params} disabled={off()} onChange={change} />
+                    <DecayGraph params={props.params} disabled={off()} onChange={changeFromGraph} />
                     <Show when={props.params.freeze}>
                       <span class="pointer-events-none absolute left-1 top-1 text-2xs font-semibold uppercase leading-none text-cyan-300">Frozen</span>
                     </Show>
@@ -244,15 +249,15 @@ export default function Reverb(props: ReverbProps) {
                   </div>
                 </div>
                 <div class="flex items-center justify-center">
-                  <Knob size={26} label="Diffusion" valueLabel={percent(props.params.diffusion)} value={props.params.diffusion} resetValue={defaults.diffusion} min={REVERB_UNIT_PARAM_MIN} max={REVERB_UNIT_PARAM_MAX} step={0.01} disabled={off()} onValueChange={(diffusion) => change({ diffusion })} />
+                  <AutomatedKnob size={26} label="Diffusion" valueLabel={percent(props.params.diffusion)} value={props.params.diffusion} resetValue={defaults.diffusion} min={REVERB_UNIT_PARAM_MIN} max={REVERB_UNIT_PARAM_MAX} step={0.01} disabled={off()} parameterId="reverb.diffusion" automation={props} onValueChange={(diffusion) => change({ diffusion })} />
                 </div>
               </div>
             </DeviceSection>
 
             <section class="flex min-h-0 min-w-0 flex-col gap-1 pt-1" aria-label="Chorus">
               <DeviceToggleButton label="Chorus" ariaLabel="Chorus on" active={props.params.chorus} disabled={off()} onClick={() => change({ chorus: !props.params.chorus })} />
-              <Knob size={26} label="Amount" ariaLabel="Chorus Amount" valueLabel={formatDeviceMilliseconds(props.params.chorusAmountMs, 2)} value={props.params.chorusAmountMs} resetValue={defaults.chorusAmountMs} min={REVERB_CHORUS_AMOUNT_MS_MIN} max={REVERB_CHORUS_AMOUNT_MS_MAX} step={0.01} disabled={off() || !props.params.chorus} onValueChange={(chorusAmountMs) => change({ chorusAmountMs })} />
-              <Knob size={26} label="Rate" ariaLabel="Chorus Rate" valueLabel={hertz(props.params.chorusRateHz)} value={props.params.chorusRateHz} resetValue={defaults.chorusRateHz} min={REVERB_CHORUS_RATE_HZ_MIN} max={REVERB_CHORUS_RATE_HZ_MAX} step={0.01} logarithmic disabled={off() || !props.params.chorus} onValueChange={(chorusRateHz) => change({ chorusRateHz })} />
+              <AutomatedKnob size={26} label="Amount" ariaLabel="Chorus Amount" valueLabel={formatDeviceMilliseconds(props.params.chorusAmountMs, 2)} value={props.params.chorusAmountMs} resetValue={defaults.chorusAmountMs} min={REVERB_CHORUS_AMOUNT_MS_MIN} max={REVERB_CHORUS_AMOUNT_MS_MAX} step={0.01} disabled={off() || !props.params.chorus} parameterId="reverb.chorusAmountMs" automation={props} onValueChange={(chorusAmountMs) => change({ chorusAmountMs })} />
+              <AutomatedKnob size={26} label="Rate" ariaLabel="Chorus Rate" valueLabel={hertz(props.params.chorusRateHz)} value={props.params.chorusRateHz} resetValue={defaults.chorusRateHz} min={REVERB_CHORUS_RATE_HZ_MIN} max={REVERB_CHORUS_RATE_HZ_MAX} step={0.01} logarithmic disabled={off() || !props.params.chorus} parameterId="reverb.chorusRateHz" automation={props} onValueChange={(chorusRateHz) => change({ chorusRateHz })} />
             </section>
           </div>
 
@@ -262,8 +267,8 @@ export default function Reverb(props: ReverbProps) {
               <span class="text-2xs leading-none text-muted-foreground">Smooth</span>
               <ChoiceMenu label="Smooth" choices={SMOOTH_CHOICES} value={props.params.smooth} disabled={off()} onSelect={(smooth) => change({ smooth })} />
             </div>
-            <Knob size={26} label="Size" valueLabel={percent(props.params.size)} value={props.params.size} resetValue={defaults.size} min={REVERB_UNIT_PARAM_MIN} max={REVERB_UNIT_PARAM_MAX} step={0.01} disabled={off()} onValueChange={(size) => change({ size })} />
-            <Knob size={26} label="Decay" valueLabel={seconds(props.params.decaySec)} value={props.params.decaySec} resetValue={defaults.decaySec} min={REVERB_DECAY_SEC_MIN} max={REVERB_DECAY_SEC_MAX} step={0.05} disabled={off()} onValueChange={(decaySec) => change({ decaySec })} />
+            <AutomatedKnob size={26} label="Size" valueLabel={percent(props.params.size)} value={props.params.size} resetValue={defaults.size} min={REVERB_UNIT_PARAM_MIN} max={REVERB_UNIT_PARAM_MAX} step={0.01} disabled={off()} parameterId="reverb.size" automation={props} onValueChange={(size) => change({ size })} />
+            <AutomatedKnob size={26} label="Decay" valueLabel={seconds(props.params.decaySec)} value={props.params.decaySec} resetValue={defaults.decaySec} min={REVERB_DECAY_SEC_MIN} max={REVERB_DECAY_SEC_MAX} step={0.05} disabled={off()} parameterId="reverb.decaySec" automation={props} onValueChange={(decaySec) => change({ decaySec })} />
             <div class="flex w-20 flex-col gap-1">
               <DeviceToggleButton label="Freeze" active={props.params.freeze} disabled={off()} onClick={() => change({ freeze: !props.params.freeze })} />
               <div class="grid grid-cols-2 gap-1">
@@ -280,8 +285,8 @@ export default function Reverb(props: ReverbProps) {
         </div>
 
         <section class="flex min-h-0 flex-col items-center justify-around border-l border-border pl-2" aria-label="Output">
-          <Knob size={32} label="Reflect" valueLabel={percent(props.params.reflections)} value={props.params.reflections} resetValue={defaults.reflections} min={REVERB_UNIT_PARAM_MIN} max={REVERB_UNIT_PARAM_MAX} step={0.01} disabled={off()} onValueChange={(reflections) => change({ reflections })} />
-          <Knob size={32} label="Diffuse" valueLabel={percent(props.params.diffuse)} value={props.params.diffuse} resetValue={defaults.diffuse} min={REVERB_UNIT_PARAM_MIN} max={REVERB_UNIT_PARAM_MAX} step={0.01} disabled={off()} onValueChange={(diffuse) => change({ diffuse })} />
+          <AutomatedKnob size={32} label="Reflect" valueLabel={percent(props.params.reflections)} value={props.params.reflections} resetValue={defaults.reflections} min={REVERB_UNIT_PARAM_MIN} max={REVERB_UNIT_PARAM_MAX} step={0.01} disabled={off()} parameterId="reverb.reflections" automation={props} onValueChange={(reflections) => change({ reflections })} />
+          <AutomatedKnob size={32} label="Diffuse" valueLabel={percent(props.params.diffuse)} value={props.params.diffuse} resetValue={defaults.diffuse} min={REVERB_UNIT_PARAM_MIN} max={REVERB_UNIT_PARAM_MAX} step={0.01} disabled={off()} parameterId="reverb.diffuse" automation={props} onValueChange={(diffuse) => change({ diffuse })} />
           <AutomatedKnob size={32} label="Dry/Wet" valueLabel={percent(props.params.wet)} value={props.params.wet} resetValue={defaults.wet} min={REVERB_WET_MIN} max={REVERB_WET_MAX} step={0.01} disabled={off()} parameterId="reverb.wet" automation={props} onValueChange={(wet) => change({ wet })} />
         </section>
       </div>

@@ -13,6 +13,7 @@ const run = async () => {
   const changes: Partial<ReverbParams>[] = []
   const overrides: string[] = []
   const [params, setParams] = createSignal(createDefaultReverbParams())
+  const [ranges, setRanges] = createSignal<ReadonlyMap<string, { min: number; max: number }> | undefined>(undefined)
   const host = document.createElement('div')
   host.style.cssText = 'width:760px;height:300px;display:flex'
   document.body.append(host)
@@ -20,6 +21,7 @@ const run = async () => {
     <Reverb
       params={params()}
       onChange={(updates) => { changes.push(updates); setParams((previous) => ({ ...previous, ...updates })) }}
+      automationRangesByParameterId={ranges()}
       onManualAutomationOverride={(parameterId) => overrides.push(parameterId)}
     />
   ), host)
@@ -100,11 +102,27 @@ const run = async () => {
   await choose('Density', 'Sparse')
   scenarios['the-density-chooser-writes-density'] = lastChange()?.density === 'sparse' && named('Density')?.textContent?.trim() === 'Sparse'
 
-  // A knob writes its param, and the three automatable ones say a hand moved them.
+  // A knob writes its param, and an automatable one says a hand moved it.
   key(slider('Decay'), 'ArrowUp')
   scenarios['a-knob-change-writes-its-param'] = lastChange()?.decaySec === 2.25
   key(slider('Dry/Wet'), 'ArrowUp')
-  scenarios['an-automatable-knob-reports-a-manual-override'] = lastChange()?.wet === 0.26 && overrides.join() === 'reverb.wet'
+  scenarios['an-automatable-knob-reports-a-manual-override'] = lastChange()?.wet === 0.26 && overrides.join() === 'reverb.decaySec,reverb.wet'
+
+  // Every continuous control shows the automation state of its parameter: the dot on a knob whose parameter has an envelope.
+  const automatable: [string, string][] = [
+    ['Early Reflections Amount', 'reflectionModAmountMs'], ['Early Reflections Rate', 'reflectionModRateHz'], ['Shape', 'reflectionShape'],
+    ['Diffusion', 'diffusion'], ['Chorus Amount', 'chorusAmountMs'], ['Chorus Rate', 'chorusRateHz'], ['Predelay', 'preDelayMs'],
+    ['Size', 'size'], ['Decay', 'decaySec'], ['Stereo', 'stereoWidth'], ['Reflect', 'reflections'], ['Diffuse', 'diffuse'], ['Dry/Wet', 'wet'],
+  ]
+
+  const dotted = () => automatable.flatMap(([name]) => slider(name)?.querySelector('.bg-red-500') ? [name] : [])
+  scenarios['no-knob-shows-automation-without-an-envelope'] = dotted().length === 0
+  setRanges(new Map(automatable.map(([, field]) => [`reverb.${field}`, { min: 0, max: 1 }])))
+  await settle()
+  scenarios['every-automatable-knob-shows-its-automation'] = dotted().length === automatable.length
+  setRanges(new Map([['reverb.decaySec', { min: 0.05, max: 12 }]]))
+  await settle()
+  scenarios['only-the-knob-with-an-envelope-shows-automation'] = dotted().join() === 'Decay'
 
   // The cuts switch on at a start frequency and then move with their handles.
   scenarios['the-cut-handles-are-absent-until-the-cut-is-on'] = named('Lo Cut frequency') === undefined
@@ -113,6 +131,7 @@ const run = async () => {
   scenarios['lo-cut-switches-on-at-830-hz'] = lastChange()?.lowCutHz === 830 && pressed('Lo Cut') === 'true'
   key(named('Lo Cut frequency'), 'ArrowRight')
   scenarios['the-lo-cut-handle-moves-the-frequency'] = lastChange()?.lowCutHz === 872
+  scenarios['a-dragged-handle-reports-a-manual-override'] = overrides.at(-1) === 'reverb.lowCutHz'
   named('Hi Cut')?.click()
   await settle()
   scenarios['hi-cut-switches-on-at-6-khz'] = lastChange()?.highCutHz === 6000 && named('Hi Cut frequency') !== undefined

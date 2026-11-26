@@ -714,15 +714,27 @@ class ReverbKernel {
   }
 }
 
-const readState = (state, key, fallback) => Number.isFinite(state[key]) ? f(state[key]) : f(fallback)
-
 class DawReverbProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
     return [
       { name: 'reverb.wet', defaultValue: 0.25, minValue: 0, maxValue: 1, automationRate: 'a-rate' },
+      { name: 'reverb.decaySec', defaultValue: 2.2, minValue: 0.05, maxValue: 12, automationRate: 'a-rate' },
       { name: 'reverb.preDelayMs', defaultValue: 20, minValue: 0, maxValue: 250, automationRate: 'a-rate' },
+      { name: 'reverb.reflections', defaultValue: 0.5, minValue: 0, maxValue: 1, automationRate: 'a-rate' },
+      { name: 'reverb.reflectionModAmountMs', defaultValue: 17.5, minValue: 0, maxValue: 25, automationRate: 'a-rate' },
+      { name: 'reverb.reflectionModRateHz', defaultValue: 0.3, minValue: 0.01, maxValue: 5, automationRate: 'a-rate' },
+      { name: 'reverb.reflectionShape', defaultValue: 0.5, minValue: 0, maxValue: 1, automationRate: 'a-rate' },
+      { name: 'reverb.diffuse', defaultValue: 1, minValue: 0, maxValue: 1, automationRate: 'a-rate' },
+      { name: 'reverb.size', defaultValue: 0.65, minValue: 0, maxValue: 1, automationRate: 'a-rate' },
+      { name: 'reverb.diffusion', defaultValue: 0.75, minValue: 0, maxValue: 1, automationRate: 'a-rate' },
       { name: 'reverb.lowCutHz', defaultValue: 20, minValue: 20, maxValue: 1200, automationRate: 'a-rate' },
       { name: 'reverb.highCutHz', defaultValue: 20000, minValue: 1200, maxValue: 20000, automationRate: 'a-rate' },
+      { name: 'reverb.lowShelfHz', defaultValue: 200, minValue: 20, maxValue: 1200, automationRate: 'a-rate' },
+      { name: 'reverb.highShelfHz', defaultValue: 5000, minValue: 1200, maxValue: 20000, automationRate: 'a-rate' },
+      { name: 'reverb.lowShelfDb', defaultValue: 0, minValue: -24, maxValue: 12, automationRate: 'a-rate' },
+      { name: 'reverb.highShelfDb', defaultValue: 0, minValue: -24, maxValue: 12, automationRate: 'a-rate' },
+      { name: 'reverb.chorusAmountMs', defaultValue: 0.6, minValue: 0, maxValue: 5, automationRate: 'a-rate' },
+      { name: 'reverb.chorusRateHz', defaultValue: 0.6, minValue: 0.01, maxValue: 5, automationRate: 'a-rate' },
       { name: 'reverb.stereoWidth', defaultValue: 100, minValue: 0, maxValue: 120, automationRate: 'a-rate' },
     ]
   }
@@ -796,7 +808,6 @@ class DawReverbProcessor extends AudioWorkletProcessor {
     if (!outputLeft || !outputRight) return true
     const inputLeft = input[0]
     const inputRight = input[1] ?? inputLeft
-    const state = this.state
     const values = this.values
     const kernel = this.kernel
     const step = f(1 / (this.bypassFrames === 0 ? 1 : this.bypassFrames))
@@ -810,23 +821,23 @@ class DawReverbProcessor extends AudioWorkletProcessor {
 
       if (kernel.controlDue()) {
         values.wet = at('reverb.wet', frame)
-        values.decaySec = readState(state, 'decaySec', 2.2)
+        values.decaySec = at('reverb.decaySec', frame)
         values.preDelayMs = at('reverb.preDelayMs', frame)
-        values.reflections = readState(state, 'reflections', 0.5)
-        values.spinAmountMs = readState(state, 'reflectionModAmountMs', 17.5)
-        values.spinRateHz = readState(state, 'reflectionModRateHz', 0.3)
-        values.contour = readState(state, 'reflectionShape', 0.5)
-        values.diffuse = readState(state, 'diffuse', 1)
-        values.size = readState(state, 'size', 0.65)
-        values.diffusion = readState(state, 'diffusion', 0.75)
+        values.reflections = at('reverb.reflections', frame)
+        values.spinAmountMs = at('reverb.reflectionModAmountMs', frame)
+        values.spinRateHz = at('reverb.reflectionModRateHz', frame)
+        values.contour = at('reverb.reflectionShape', frame)
+        values.diffuse = at('reverb.diffuse', frame)
+        values.size = at('reverb.size', frame)
+        values.diffusion = at('reverb.diffusion', frame)
         values.lowCutHz = at('reverb.lowCutHz', frame)
         values.highCutHz = at('reverb.highCutHz', frame)
-        values.lowShelfHz = readState(state, 'lowShelfHz', 200)
-        values.highShelfHz = readState(state, 'highShelfHz', 5000)
-        values.lowShelfDb = readState(state, 'lowShelfDb', 0)
-        values.highShelfDb = readState(state, 'highShelfDb', 0)
-        values.chorusAmountMs = readState(state, 'chorusAmountMs', 0.6)
-        values.chorusRateHz = readState(state, 'chorusRateHz', 0.6)
+        values.lowShelfHz = at('reverb.lowShelfHz', frame)
+        values.highShelfHz = at('reverb.highShelfHz', frame)
+        values.lowShelfDb = at('reverb.lowShelfDb', frame)
+        values.highShelfDb = at('reverb.highShelfDb', frame)
+        values.chorusAmountMs = at('reverb.chorusAmountMs', frame)
+        values.chorusRateHz = at('reverb.chorusRateHz', frame)
         values.stereoDegrees = at('reverb.stereoWidth', frame)
       }
 

@@ -355,6 +355,22 @@ describe('automation helpers', () => {
       'reverb.wet',
       'reverb.preDelayMs',
       'reverb.stereoWidth',
+      'reverb.decaySec',
+      'reverb.size',
+      'reverb.diffusion',
+      'reverb.reflections',
+      'reverb.diffuse',
+      'reverb.reflectionShape',
+      'reverb.reflectionModAmountMs',
+      'reverb.reflectionModRateHz',
+      'reverb.lowCutHz',
+      'reverb.highCutHz',
+      'reverb.lowShelfHz',
+      'reverb.lowShelfDb',
+      'reverb.highShelfHz',
+      'reverb.highShelfDb',
+      'reverb.chorusAmountMs',
+      'reverb.chorusRateHz',
       'gate.thresholdDb',
       'gate.hysteresisDb',
       'gate.rangeDb',
@@ -369,7 +385,7 @@ describe('automation helpers', () => {
 
     expect(getAutomationParameterDescriptor('compressor.lookaheadMs')).toBeUndefined()
     expect(getAutomationParameterDescriptor('gate.lookaheadMs')).toBeUndefined()
-    expect(getAutomationParameterDescriptor('reverb.decaySec')).toBeUndefined()
+    expect(getAutomationParameterDescriptor('reverb.freeze')).toBeUndefined()
   })
 
   test('resolves strict sampler automation descriptors without changing legacy keys', () => {

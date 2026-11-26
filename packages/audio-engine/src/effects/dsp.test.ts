@@ -51,7 +51,7 @@ describe('saturator and delay helpers', () => {
 
   test('resolves sync delay time and clamps feedback', () => {
     expect(resolveDelayTimeSec(createDefaultDelayParams(), 120)).toBe(0.25)
-    expect(normalizeDelayParams({ feedback: 2 }).feedback).toBe(0.95)
+    expect(normalizeDelayParams({ feedback: 2 }).feedback).toBe(1)
   })
 })
 

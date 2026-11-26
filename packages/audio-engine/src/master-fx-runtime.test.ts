@@ -549,13 +549,13 @@ describe('master effect chain delivery', () => {
       const { audio, runtime, set, begins } = createChainRuntime()
       const gate = staticGateInstance(-40, 4, 'gate')
       await set([gate, syncedDelayInstance('delay')])
-      audio.failNextParameterWrite(audio.delays[1]?.delayTime)
+      audio.failNextTempoPost()
 
-      expect(() => runtime.setBpm(60)).toThrow('Audio parameter write failed.')
+      expect(() => runtime.setBpm(60)).toThrow('Worklet tempo post failed.')
       audio.faultCompressor(0)
 
       expect((await set([syncedDelayInstance('delay')])).disposition).toBe('applied')
-      expect(audio.liveWorkletCount()).toBe(0)
+      expect(audio.liveWorkletCount()).toBe(1) // only the delay worklet is left
       expect(begins()).toBe(3)
     })
 
@@ -571,7 +571,7 @@ describe('master effect chain delivery', () => {
       expect((await pending).disposition).toBe('superseded')
       timers.run()
       expect((await set([delay])).disposition).toBe('skipped')
-      expect(audio.liveWorkletCount()).toBe(0)
+      expect(audio.liveWorkletCount()).toBe(1) // only the delay worklet is left
     })
 
     test('a retired gate fault cannot disturb a pending master edit and retirement closes it once', async () => {
@@ -590,7 +590,7 @@ describe('master effect chain delivery', () => {
       expect((await pending).disposition).toBe('applied')
       timers.run()
       expect(audio.workletCloseCount()).toBe(1)
-      expect(audio.liveWorkletCount()).toBe(0)
+      expect(audio.liveWorkletCount()).toBe(1) // only the delay worklet is left
     })
 
     test('a failed deferred EQ write still retires a removed master gate', async () => {
@@ -700,11 +700,11 @@ describe('master effect chain delivery', () => {
       const { audio, runtime, set } = createChainRuntime()
       const delay = syncedDelayInstance()
       await set([delay])
-      audio.failNextParameterWrite(audio.delays[1]?.delayTime)
+      audio.failNextTempoPost()
 
-      expect(() => runtime.setBpm(60)).toThrow('Audio parameter write failed.')
+      expect(() => runtime.setBpm(60)).toThrow('Worklet tempo post failed.')
       expect((await set([delay])).disposition).toBe('applied')
-      expect(audio.delays.map((node) => node.delayTime.value)).toEqual([0.5, 0.5])
+      expect(audio.delayTempos()).toEqual([60])
     })
 
     for (const wholeChain of [false, true]) {
@@ -725,14 +725,12 @@ describe('master effect chain delivery', () => {
 
         await set(initial)
         const pending = set(requested)
-        audio.failNextParameterWrite(audio.delays[1]?.delayTime)
+        audio.failNextTempoPost()
 
-        expect(() => runtime.setBpm(60)).toThrow('Audio parameter write failed.')
+        expect(() => runtime.setBpm(60)).toThrow('Worklet tempo post failed.')
         expect((await pending).disposition).toBe('superseded')
         expect((await set(requested)).disposition).toBe('applied')
-        expect(audio.delays.map((node) => node.delayTime.value)).toEqual(
-          wholeChain ? [0.5, 0.5, 0.5, 0.5] : [0.5, 0.5],
-        )
+        expect(audio.delayTempos()).toEqual(wholeChain ? [60, 60] : [60])
       })
     }
 
@@ -741,10 +739,10 @@ describe('master effect chain delivery', () => {
 
       try {
         await set([syncedDelayInstance('failed'), syncedDelayInstance('healthy')])
-        audio.failNextParameterWrite(audio.delays[1]?.delayTime)
+        audio.failNextTempoPost()
 
-        expect(() => runtime.setBpm(60)).toThrow('Audio parameter write failed.')
-        expect(audio.delays.slice(2).map((node) => node.delayTime.value)).toEqual([0.5, 0.5])
+        expect(() => runtime.setBpm(60)).toThrow('Worklet tempo post failed.')
+        expect(audio.delayTempos().slice(1)).toEqual([60])
       } finally {
         runtime.close()
         audio.restore()

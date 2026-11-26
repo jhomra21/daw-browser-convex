@@ -53,31 +53,9 @@ export const resolveDelayAutomationBindings = (
   const delay = chain && 'chain' in chain ? chain.chain() : chain
 
   if (!delay) return []
+  const param = delay.workletNode.parameters.get(parameterId)
 
-  if (parameterId === 'delay.timeMs') return [
-    { param: delay.delayLeft.delayTime, valueToAudioValue: (value) => value / 1000 },
-    { param: delay.delayRight.delayTime, valueToAudioValue: (value) => value / 1000 },
-  ]
-
-  if (parameterId === 'delay.feedback') return [
-    { param: delay.feedbackLeft.gain, valueToAudioValue: (value) => value },
-    { param: delay.feedbackRight.gain, valueToAudioValue: (value) => value },
-  ]
-
-  if (parameterId === 'delay.dryWet') return [
-    { param: delay.dryGain.gain, valueToAudioValue: (value) => 1 - value },
-    { param: delay.wetGain.gain, valueToAudioValue: (value) => value },
-  ]
-
-  if (parameterId === 'delay.lowCutHz') return [
-    { param: delay.lowCutLeft.frequency, valueToAudioValue: (value) => value },
-    { param: delay.lowCutRight.frequency, valueToAudioValue: (value) => value },
-  ]
-
-  if (parameterId === 'delay.highCutHz') return [
-    { param: delay.highCutLeft.frequency, valueToAudioValue: (value) => value },
-    { param: delay.highCutRight.frequency, valueToAudioValue: (value) => value },
-  ]
+  if (param) return [{ param, valueToAudioValue: (value) => value }]
 
   return []
 }

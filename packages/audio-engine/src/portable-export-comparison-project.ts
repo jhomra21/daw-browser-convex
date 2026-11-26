@@ -114,7 +114,7 @@ export const createComparisonProject = (
       tone: {
         instances: [
           // 100.5 ms is a whole number of tone periods plus half of one, so the wet copy is in antiphase and a quarter-wet mix halves the tone.
-          { id: 'delay', kind: 'delay', params: { ...createDefaultDelayParams(), mode: 'time', timeMs: 100.5, feedback: 0, dryWet: 0 } },
+          { id: 'delay', kind: 'delay', params: { ...createDefaultDelayParams(), syncLeft: false, timeLeftMs: 100.5, feedback: 0, dryWet: 0 } },
           ...(variant === 'full' ? [compressor] : []),
         ],
       },

@@ -7,7 +7,7 @@ import type { AudioEffectRuntimeInstance } from '../src/effects/runtime-instance
 // Fake audio objects for the live and master effect-runtime tests. A worklet port records what was posted to it, so a
 // test reads what the "node" holds instead of what the runtime believes it installed.
 
-type PostedMessage = { type: string; params?: { thresholdDb: number } }
+type PostedMessage = { type: string; params?: { thresholdDb: number }; bpm?: number; state?: { enabled?: boolean } }
 
 type ConnectionTarget = AudioNode | AudioParam
 
@@ -115,6 +115,7 @@ const createBiquad = () => Object.assign(createNode(), {
 
 const WORKLET_PARAMETER_IDS = [
   'gate.thresholdDb', 'gate.ratio',
+  ...['timeMs', 'timeRightMs', 'offsetLeftPercent', 'offsetRightPercent', 'feedback', 'dryWet', 'filterHz', 'filterWidth'].map((id) => `delay.${id}`),
   ...['wet', 'decaySec', 'preDelayMs', 'reflections', 'reflectionModAmountMs', 'reflectionModRateHz', 'reflectionShape', 'diffuse', 'size', 'diffusion', 'lowCutHz', 'highCutHz', 'lowShelfHz', 'highShelfHz', 'lowShelfDb', 'highShelfDb', 'chorusAmountMs', 'chorusRateHz', 'stereoWidth'].map((id) => `reverb.${id}`),
 ]
 
@@ -125,6 +126,11 @@ class FakeWorkletNode {
   readonly parameters = new Map(WORKLET_PARAMETER_IDS.map((id) => [id, createParam()]))
   readonly port: FakeWorkletPort = {
     postMessage: (message: PostedMessage) => {
+      if (failNextTempoPost && message.type === 'tempo') {
+        failNextTempoPost = false
+        throw new Error('Worklet tempo post failed.')
+      }
+
       if (failNextParamsPost && message.type === 'params') {
         failNextParamsPost = false
         throw new Error('Worklet parameter post failed.')
@@ -166,6 +172,7 @@ class FakeWorkletNode {
 
 const created: FakeWorkletNode[] = []
 let failNextParamsPost = false
+let failNextTempoPost = false
 let failNextConstruction = false
 let failNextCurveWrite = false
 
@@ -174,6 +181,7 @@ export const createFxTestAudio = () => {
   created.length = 0
   connections.length = 0
   failNextParamsPost = false
+  failNextTempoPost = false
   failNextConstruction = false
   failNextCurveWrite = false
   failNextConnection = false
@@ -239,6 +247,14 @@ export const createFxTestAudio = () => {
     // The next parameter message to a worklet throws after the runtime decided to send it: a write that may not have landed.
     failNextParamsPost: () => { failNextParamsPost = true },
     failNextConstruction: () => { failNextConstruction = true },
+    // The next tempo message to a delay worklet throws: the write that tells a synced delay the project tempo.
+    failNextTempoPost: () => { failNextTempoPost = true },
+    // Whether the most recent delay worklet was last configured on (a delay worklet keeps its parameters when it is disabled).
+    delayEnabled: () => created.findLast((node) => node.parameters.has('delay.timeMs'))?.posted.findLast((message) => message.type === 'configure')?.state?.enabled,
+    // The worklet node that owns an AudioParam.
+    workletOwning: (parameter: unknown) => created.find((node) => [...node.parameters.values()].includes(parameter)),
+    // The tempo each delay worklet was last told.
+    delayTempos: () => created.filter((node) => node.parameters.has('delay.timeMs')).map((node) => node.posted.findLast((message) => message.type === 'tempo')?.bpm),
     // The next saturator curve assignment throws after the drive gain already changed.
     failNextCurveWrite: () => { failNextCurveWrite = true },
     failNextConnection: () => { failNextConnection = true },
@@ -357,13 +373,13 @@ const saturatorInstance = (driveDb: number, id = 'saturator-1'): AudioEffectRunt
 const delayInstance = (timeMs: number, feedback: number, id = 'delay-1'): AudioEffectRuntimeInstance => ({
   id,
   kind: 'delay',
-  params: { ...AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams(), enabled: true, mode: 'time', timeMs, feedback },
+  params: { ...AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams(), enabled: true, syncLeft: false, timeLeftMs: timeMs, feedback },
 })
 
 export const syncedDelayInstance = (id = 'delay-1'): AudioEffectRuntimeInstance => ({
   id,
   kind: 'delay',
-  params: { ...AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams(), enabled: true, mode: 'sync', syncDivision: '1/8' },
+  params: { ...AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams(), enabled: true, syncLeft: true, divisionLeft: '1/8' },
 })
 
 export const staticGateInstance = (thresholdDb: number, ratio: number, id = 'gate-1'): AudioEffectRuntimeInstance => {
@@ -416,8 +432,8 @@ export const partialWriteCases = (
     after: delayInstance(500, 0.8),
     arm: () => failNextWrite(parameter('delay.feedback', 'delay-1')),
     read: () => parameter('delay.timeMs', 'delay-1')?.value,
-    heldBefore: 0.1,
-    heldAfter: 0.5,
+    heldBefore: 100,
+    heldAfter: 500,
   },
   {
     name: 'saturator',

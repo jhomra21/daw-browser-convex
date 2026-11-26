@@ -96,7 +96,7 @@ export const getEffectTiming = (
 
     if (!normalized.enabled || normalized.dryWet === 0) return { latencyFrames: 0, tail: finite(0) }
 
-    if (normalized.feedback >= 1) return { latencyFrames: 0, tail: { kind: 'unbounded' } }
+    if (normalized.freeze || normalized.feedback >= 1) return { latencyFrames: 0, tail: { kind: 'unbounded' } }
     const delayFrames = resolveDelayTimeSec(normalized, bpm) * rate
     const repeats = Math.max(1, Math.ceil(Math.log(1e-4) / Math.log(Math.max(normalized.feedback, 1e-6))))
 

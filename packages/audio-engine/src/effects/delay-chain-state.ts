@@ -1,62 +1,56 @@
-import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import { normalizeDelayParams, serializeDelayParams, type DelayParamsLite } from '@daw-browser/shared'
-import { applyDelayNodeChainParams, createDelayNodeChain, disconnectDelayChain, type DelayNodeChain } from './chain'
+import { applyDelayNodeChainParams, createDelayNodeChain, disconnectDelayChain, setDelayChainTempo, type DelayNodeChain } from './chain'
 
 export type DelayChainState = {
   chain: () => DelayNodeChain | null
-  set: (ctx: BaseAudioContext, params: DelayParamsLite, bpm: number) => { changed: boolean; requiresRoutingRebuild: boolean }
+  set: (ctx: BaseAudioContext, params: DelayParamsLite, bpm: number) => Promise<{ changed: boolean; requiresRoutingRebuild: boolean }>
   setBpm: (bpm: number) => void
   close: () => void
 }
 
 export function createDelayChainState(): DelayChainState {
   let delay: DelayNodeChain | null = null
-  let params: DelayParamsLite | null = null
   let signature: string | null = null
-  let pingPong: boolean | null = null
-  let currentBpm = DEFAULT_BPM
+  let generation = 0
 
   return {
     chain: () => delay,
-    set: (ctx, nextParams, bpm) => {
-      const bpmChanged = currentBpm !== bpm
-      currentBpm = bpm
-      const normalized = normalizeDelayParams(nextParams)
+    set: async (ctx, params, bpm) => {
+      // Every request outdates the construction an earlier one still awaits, an equal one that returns early included.
+      const current = ++generation
+      const normalized = normalizeDelayParams(params)
       const nextSignature = serializeDelayParams(normalized)
 
-      if (signature === nextSignature && (!normalized.enabled || normalized.mode !== 'sync' || !bpmChanged)) return { changed: false, requiresRoutingRebuild: false }
-      // Disabling only makes the chain's output dry: it stays in the routing and keeps
-      // running on its input, so enabling it again brings back the echo of recent audio.
-      const topologyChanged = pingPong !== null && pingPong !== normalized.pingPong
-      signature = null
-      params = normalized
+      if (delay) {
+        setDelayChainTempo(delay, bpm)
 
-      if (topologyChanged && delay) {
-        disconnectDelayChain(delay)
-        delay = null
+        if (signature === nextSignature) return { changed: false, requiresRoutingRebuild: false }
+        signature = null
+        applyDelayNodeChainParams(delay, normalized)
+        signature = nextSignature
+
+        return { changed: true, requiresRoutingRebuild: false }
       }
 
-      const created = !delay
+      const created = await createDelayNodeChain(ctx, normalized, bpm)
 
-      if (!delay) delay = createDelayNodeChain(ctx, normalized, currentBpm)
-      else applyDelayNodeChainParams(delay, normalized, currentBpm)
+      if (current !== generation) {
+        disconnectDelayChain(created)
+
+        return { changed: false, requiresRoutingRebuild: false }
+      }
+
+      delay = created
       signature = nextSignature
-      pingPong = normalized.pingPong
 
-      return { changed: true, requiresRoutingRebuild: created }
+      return { changed: true, requiresRoutingRebuild: true }
     },
     setBpm: (bpm) => {
-      currentBpm = bpm
-
-      if (!delay || params?.mode !== 'sync') return
-      signature = null
-      applyDelayNodeChainParams(delay, params, currentBpm)
-      signature = serializeDelayParams(params)
+      if (delay) setDelayChainTempo(delay, bpm)
     },
     close: () => {
-      params = null
+      generation++
       signature = null
-      pingPong = null
 
       if (delay) {
         disconnectDelayChain(delay)

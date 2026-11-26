@@ -66,8 +66,10 @@ describe('Spectral params version 1 -> 2', () => {
       for (const ownerParams of [owner, { version: 1, state: owner }]) {
         expect(migrateAutomationPointValues('spectral.gateThresholdDb', lane, 1, undefined, ownerParams)[0]?.value).toBeCloseTo(effect, 9)
       }
+
       expect(effect).toBeCloseTo(-20 - rawPeakDb(size), 9)
     }
+
     expect(rawPeakDb(4096) - rawPeakDb(2048)).toBeGreaterThan(5)
   })
 

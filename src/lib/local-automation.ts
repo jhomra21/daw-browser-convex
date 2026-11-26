@@ -165,6 +165,7 @@ export const normalizeLocalAutomationEnvelopes = (
 
 export const loadLocalAutomationEnvelopes = async (projectId: string): Promise<AutomationEnvelope[]> => {
   const db = await openLocalProjectDb(projectId)
+
   const [rows, effects] = await Promise.all([
     db.getAllFromIndex('entities', 'by-kind', AUTOMATION_ROW_KIND),
     listLocalEffects(projectId),

@@ -1,7 +1,15 @@
-import { createDefaultLoFiParams, LOFI_SAMPLE_RATE_HZ_MAX, LOFI_SAMPLE_RATE_HZ_MIN, type LoFiParams } from '@daw-browser/shared'
+import { Show } from 'solid-js'
+import {
+  createDefaultLoFiParams,
+  LOFI_SAMPLE_RATE_HZ_MAX,
+  LOFI_SAMPLE_RATE_HZ_MIN,
+  type LoFiDither,
+  type LoFiParams,
+  type LoFiQuantization,
+} from '@daw-browser/shared'
 import EffectShell from '~/components/effects/EffectShell'
-import { DeviceToggleButton } from '~/components/ui/device-control'
 import AutomatedKnob from '~/components/effects/AutomatedKnob'
+import { ChoiceMenu, DeviceToggleButton } from '~/components/ui/device-control'
 import { formatDeviceDb, formatDeviceFrequency, formatDevicePercent } from '~/lib/device-value-format'
 
 type LoFiProps = {
@@ -16,30 +24,55 @@ type LoFiProps = {
 
 const defaults = createDefaultLoFiParams()
 
+const QUANTIZATIONS: readonly { value: LoFiQuantization; label: string }[] = [
+  { value: 'round', label: 'Round' },
+  { value: 'floor', label: 'Floor' },
+  { value: 'truncate', label: 'Truncate' },
+]
+
+const DITHERS: readonly { value: LoFiDither; label: string }[] = [
+  { value: 'off', label: 'Off' },
+  { value: 'rectangular', label: 'Rectangular' },
+  { value: 'triangular', label: 'Triangular' },
+]
+
+// Sample rate on the left, bit depth on the right, as in Live's Redux; the quantizer and dither choosers stand where Redux has Shape.
 export default function LoFi(props: LoFiProps) {
-  return <EffectShell title="LoFi" typeLabel="Digital Degradation" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="device-lofi"><div class="device-lofi-grid grid min-h-0 flex-1 gap-3 px-3 py-3">
-    <div class="grid grid-cols-2 place-content-center gap-x-8 gap-y-4 border-r border-border pr-3">
-      <AutomatedKnob label="Bits" value={props.params.bitDepth} valueLabel={`${props.params.bitDepth} bit`} resetValue={defaults.bitDepth} min={2} max={24} step={1} disabled={!props.params.enabled} parameterId="lofi.bitDepth" automation={props} onValueChange={(bitDepth) => props.onChange({ bitDepth })} />
-      <AutomatedKnob label="Rate" value={props.params.sampleRateHz} valueLabel={formatDeviceFrequency(props.params.sampleRateHz, 1)} resetValue={defaults.sampleRateHz} min={LOFI_SAMPLE_RATE_HZ_MIN} max={LOFI_SAMPLE_RATE_HZ_MAX} step={1} logarithmic disabled={!props.params.enabled} parameterId="lofi.sampleRateHz" automation={props} onValueChange={(sampleRateHz) => props.onChange({ sampleRateHz })} />
-      <AutomatedKnob label="Jitter" value={props.params.jitter} valueLabel={formatDevicePercent(props.params.jitter)} resetValue={defaults.jitter} min={0} max={1} step={0.01} disabled={!props.params.enabled} parameterId="lofi.jitter" automation={props} onValueChange={(jitter) => props.onChange({ jitter })} />
-      <AutomatedKnob label="Noise" value={props.params.noiseDb} valueLabel={formatDeviceDb(props.params.noiseDb, 1)} resetValue={defaults.noiseDb} min={-120} max={-24} step={0.1} disabled={!props.params.enabled} parameterId="lofi.noiseDb" automation={props} onValueChange={(noiseDb) => props.onChange({ noiseDb })} />
-      <div class="col-span-2 flex justify-center">
-        <AutomatedKnob label="Mix" value={props.params.mix} valueLabel={formatDevicePercent(props.params.mix)} resetValue={defaults.mix} min={0} max={1} step={0.01} disabled={!props.params.enabled} parameterId="lofi.mix" automation={props} onValueChange={(mix) => props.onChange({ mix })} />
+  const off = () => !props.params.enabled
+
+  return (
+    <EffectShell title="LoFi" typeLabel="Audio" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="w-[400px] min-w-[400px]">
+      <div class="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_7.5rem] gap-2 px-3 py-2">
+        <section class="flex min-w-0 flex-col items-center justify-between border-r border-border pr-2" aria-label="Rate">
+          <AutomatedKnob size={36} label="Rate" valueLabel={formatDeviceFrequency(props.params.sampleRateHz, 2)} value={props.params.sampleRateHz} resetValue={defaults.sampleRateHz} min={LOFI_SAMPLE_RATE_HZ_MIN} max={LOFI_SAMPLE_RATE_HZ_MAX} step={1} logarithmic disabled={off()} parameterId="lofi.sampleRateHz" automation={props} onValueChange={(sampleRateHz) => props.onChange({ sampleRateHz })} />
+          <AutomatedKnob size={28} label="Jitter" valueLabel={formatDevicePercent(props.params.jitter)} value={props.params.jitter} resetValue={defaults.jitter} min={0} max={1} step={0.01} disabled={off()} parameterId="lofi.jitter" automation={props} onValueChange={(jitter) => props.onChange({ jitter })} />
+          <div class="flex w-full flex-col gap-1">
+            <span class="text-xs font-medium leading-none text-muted-foreground">Filter</span>
+            <div class="grid grid-cols-2 gap-1">
+              <DeviceToggleButton label="Pre" ariaLabel="Pre Filter" active={props.params.preFilter} disabled={off()} onClick={() => props.onChange({ preFilter: !props.params.preFilter })} />
+              <DeviceToggleButton label="Post" ariaLabel="Post Filter" active={props.params.postFilter} disabled={off()} onClick={() => props.onChange({ postFilter: !props.params.postFilter })} />
+            </div>
+            <DeviceToggleButton label="Sub-sample" ariaLabel="Sub-sample clock" active={props.params.subSampleClock} disabled={off()} onClick={() => props.onChange({ subSampleClock: !props.params.subSampleClock })} />
+          </div>
+        </section>
+
+        <section class="flex min-w-0 flex-col items-center justify-between" aria-label="Bits">
+          <AutomatedKnob size={36} label="Bits" valueLabel={`${props.params.bitDepth} bit`} value={props.params.bitDepth} resetValue={defaults.bitDepth} min={2} max={24} step={1} disabled={off()} parameterId="lofi.bitDepth" automation={props} onValueChange={(bitDepth) => props.onChange({ bitDepth })} />
+          <AutomatedKnob size={28} label="Noise" valueLabel={formatDeviceDb(props.params.noiseDb, 1)} value={props.params.noiseDb} resetValue={defaults.noiseDb} min={-120} max={-24} step={0.1} disabled={off()} parameterId="lofi.noiseDb" automation={props} onValueChange={(noiseDb) => props.onChange({ noiseDb })} />
+          <AutomatedKnob size={28} label="Dry/Wet" valueLabel={formatDevicePercent(props.params.mix)} value={props.params.mix} resetValue={defaults.mix} min={0} max={1} step={0.01} disabled={off()} parameterId="lofi.mix" automation={props} onValueChange={(mix) => props.onChange({ mix })} />
+        </section>
+
+        <section class="flex min-w-0 flex-col justify-center gap-1" aria-label="Quantizer">
+          <span class="text-xs font-medium leading-none text-muted-foreground">Quantizer</span>
+          <ChoiceMenu label="Quantizer" choices={QUANTIZATIONS} value={props.params.quantization} disabled={off()} onSelect={(quantization) => props.onChange({ quantization })} />
+          {/* Floor rounds every value down, and DC Fix is what centres that error, so it exists only for Floor. */}
+          <Show when={props.params.quantization === 'floor'}>
+            <DeviceToggleButton label="DC Fix" ariaLabel="Floor DC Fix" active={props.params.dcCorrection} disabled={off()} onClick={() => props.onChange({ dcCorrection: !props.params.dcCorrection })} />
+          </Show>
+          <span class="mt-2 text-xs font-medium leading-none text-muted-foreground">Dither</span>
+          <ChoiceMenu label="Dither" choices={DITHERS} value={props.params.dither} disabled={off()} onSelect={(dither) => props.onChange({ dither })} />
+        </section>
       </div>
-    </div>
-    <div class="grid content-center gap-1">
-      <span class="mb-1 text-2xs uppercase text-muted-foreground">Quantize</span>
-      <DeviceToggleButton label="Round" active={props.params.quantization === 'round'} disabled={!props.params.enabled} onClick={() => props.onChange({ quantization: 'round' })} />
-      <DeviceToggleButton label="Floor" active={props.params.quantization === 'floor'} disabled={!props.params.enabled} onClick={() => props.onChange({ quantization: 'floor' })} />
-      <DeviceToggleButton label="Truncate" active={props.params.quantization === 'truncate'} disabled={!props.params.enabled} onClick={() => props.onChange({ quantization: 'truncate' })} />
-      <span class="mb-1 mt-3 text-2xs uppercase text-muted-foreground">Dither</span>
-      <DeviceToggleButton label="Dither Off" active={props.params.dither === 'off'} disabled={!props.params.enabled} onClick={() => props.onChange({ dither: 'off' })} />
-      <DeviceToggleButton label="Rectangular" active={props.params.dither === 'rectangular'} disabled={!props.params.enabled} onClick={() => props.onChange({ dither: 'rectangular' })} />
-      <DeviceToggleButton label="Triangular" active={props.params.dither === 'triangular'} disabled={!props.params.enabled} onClick={() => props.onChange({ dither: 'triangular' })} />
-      <span class="mb-1 mt-3 text-2xs uppercase text-muted-foreground">Filters</span>
-      <DeviceToggleButton label="Pre Filter" active={props.params.preFilter} disabled={!props.params.enabled} onClick={() => props.onChange({ preFilter: !props.params.preFilter })} />
-      <DeviceToggleButton label="Post Filter" active={props.params.postFilter} disabled={!props.params.enabled} onClick={() => props.onChange({ postFilter: !props.params.postFilter })} />
-      <DeviceToggleButton label="Floor DC Fix" active={props.params.dcCorrection} disabled={!props.params.enabled} onClick={() => props.onChange({ dcCorrection: !props.params.dcCorrection })} />
-    </div>
-  </div></EffectShell>
+    </EffectShell>
+  )
 }

@@ -311,15 +311,6 @@
     transform: rotate(0deg);
   }
 
-  .device-lofi {
-    width: 400px;
-    min-width: 400px;
-  }
-
-  .device-lofi-grid {
-    grid-template-columns: 1fr 8rem;
-  }
-
   .device-autofilter {
     width: 640px;
     min-width: 640px;

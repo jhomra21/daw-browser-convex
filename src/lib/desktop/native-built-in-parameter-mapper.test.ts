@@ -140,9 +140,9 @@ test('maps every continuous target for every live built-in family', () => {
       payload: {
         targetId: 'track-1', effect: 'lofi', instanceId: 'lofi-1',
         from: envelope(loFiFrom),
-        to: envelope({ ...loFiFrom, bitDepth: 16, sampleRateHz: 24000, jitter: 0.2, noiseDb: -48, mix: 0.6 }),
+        to: envelope({ ...loFiFrom, bitDepth: 8, sampleRateHz: 24000, jitter: 0.2, noiseDb: -48, mix: 0.6 }),
       } satisfies EffectParamsCommitPayload<'lofi'>,
-      expected: [['lofi.bitDepth', 16], ['lofi.sampleRateHz', 24000], ['lofi.jitter', 0.2], ['lofi.noiseDb', -48], ['lofi.mix', 0.6]],
+      expected: [['lofi.bitDepth', 8], ['lofi.sampleRateHz', 24000], ['lofi.jitter', 0.2], ['lofi.noiseDb', -48], ['lofi.mix', 0.6]],
     },
     {
       name: 'delay',

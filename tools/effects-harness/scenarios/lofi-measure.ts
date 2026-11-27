@@ -136,6 +136,7 @@ export const randomInput = (rate: number) => noise(2 * rate, 0.4, 3)
 export const filterGroupDelayFrames = async (render: LoFiRender, rate: number, sampleRateHz: number, hz: number, filter: 'preFilter' | 'postFilter') => {
   const band = 0.02 * sampleRateHz
   const frames = Math.ceil(rate * (0.5 + 200 / sampleRateHz))
+
   const phaseAdded = async (tone: number) => {
     const input = sine(frames, tone, rate, 0.25)
     const state = { bitDepth: 24, sampleRateHz, noiseDb: -120 }
@@ -144,6 +145,7 @@ export const filterGroupDelayFrames = async (render: LoFiRender, rate: number, s
 
     return toneFit(filtered, tone, rate, from).phase - toneFit(open, tone, rate, from).phase
   }
+
   const [low, high] = await Promise.all([phaseAdded(hz - band / 2), phaseAdded(hz + band / 2)])
 
   return -((high - low) / (2 * Math.PI * band)) * rate

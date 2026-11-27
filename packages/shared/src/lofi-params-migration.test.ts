@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { migrateAudioEffectParams } from './audio-effect-param-versions'
-import { createDefaultLoFiParams, normalizeLoFiParamsEnvelope } from './effects-params'
+import { createDefaultLoFiParams, normalizeLoFiParamsEnvelope, type LoFiParams } from './effects-params'
 import { migrateLoFiParamsV1 } from './lofi-params-migration'
 
 const v1 = (sampleRateRatio: number) => ({
@@ -35,7 +35,7 @@ test('a new Lo-Fi is transparent: 16 bit, triangular dither, no added noise', ()
 })
 
 test('a saved instance keeps its values, including the old 12 bit undithered defaults', () => {
-  const saved = { enabled: true, bitDepth: 12, sampleRateHz: 96000, jitter: 0, noiseDb: -80, quantization: 'round', dither: 'off', mix: 1, seed: 1, preFilter: false, postFilter: false, dcCorrection: false, subSampleClock: false }
+  const saved: LoFiParams = { enabled: true, bitDepth: 12, sampleRateHz: 96000, jitter: 0, noiseDb: -80, quantization: 'round', dither: 'off', mix: 1, seed: 1, preFilter: false, postFilter: false, dcCorrection: false, subSampleClock: false }
 
   expect(normalizeLoFiParamsEnvelope({ version: 1, state: saved }).state).toEqual(saved)
   expect(normalizeLoFiParamsEnvelope(migrateAudioEffectParams('lofi', { version: 1, state: saved }, 2)).state).toEqual(saved)

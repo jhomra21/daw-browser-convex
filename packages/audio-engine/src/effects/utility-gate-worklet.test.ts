@@ -18,10 +18,11 @@ type ProcessorConstructor = new () => Processor
 
 type UtilityState = {
   enabled: boolean
-  polarity: string
+  phaseLeft: boolean
+  phaseRight: boolean
   inputMode: string
   matrix: string
-  swap: boolean
+  channelMode: string
   dcBlock: boolean
 }
 
@@ -88,9 +89,10 @@ const message = (processor: Processor, data: WorkletMessage) => {
 
 const utilityParams = (updates: Partial<Record<string, number>> = {}) => ({
   'utility.gainDb': Float32Array.of(updates['utility.gainDb'] ?? 0),
-  'utility.pan': Float32Array.of(updates['utility.pan'] ?? 0),
   'utility.balance': Float32Array.of(updates['utility.balance'] ?? 0),
   'utility.width': Float32Array.of(updates['utility.width'] ?? 1),
+  'utility.midSide': Float32Array.of(updates['utility.midSide'] ?? 0),
+  'utility.bassMonoHz': Float32Array.of(updates['utility.bassMonoHz'] ?? 120),
 })
 
 const gateParams = (updates: Partial<Record<string, number>> = {}) => ({
@@ -110,10 +112,11 @@ const gateParams = (updates: Partial<Record<string, number>> = {}) => ({
 
 const utilityState = (updates: Partial<UtilityState> = {}) => ({
   enabled: true,
-  polarity: 'normal',
+  phaseLeft: false,
+  phaseRight: false,
   inputMode: 'stereo',
   matrix: 'stereo',
-  swap: false,
+  channelMode: 'both',
   dcBlock: false,
   ...updates,
 })
@@ -164,14 +167,11 @@ describe('utility static worklet numerical characterization', () => {
     }
   }
 
-  test('mono sum, polarity, swap, pan, balance, and width are deterministic', async () => {
+  test('mono sum, phase, swap, balance, and width are deterministic', async () => {
     const left = Float32Array.of(1)
     const right = Float32Array.of(-0.5)
     expect((await renderUtility(48_000, left, right, utilityState({ inputMode: 'mono-sum' }))).output.map((channel) => channel[0])).toEqual([0.25, 0.25])
-    expect((await renderUtility(48_000, left, right, utilityState({ polarity: 'invert', swap: true }))).output.map((channel) => channel[0])).toEqual([0.5, -1])
-    const panned = await renderUtility(48_000, left, right, utilityState(), utilityParams({ 'utility.pan': 1 }))
-    expect(Math.abs(panned.output[0][0])).toBeLessThanOrEqual(1e-6)
-    expect(panned.output[1][0]).toBeCloseTo(-Math.SQRT2 * 0.5, 6)
+    expect((await renderUtility(48_000, left, right, utilityState({ phaseLeft: true, phaseRight: true, channelMode: 'swap' }))).output.map((channel) => channel[0])).toEqual([0.5, -1])
     const balanced = await renderUtility(48_000, left, right, utilityState(), utilityParams({ 'utility.balance': 1 }))
     expect(balanced.output[0][0]).toBe(0)
     expect(balanced.output[1][0]).toBeCloseTo(-0.5, 6)

@@ -149,15 +149,16 @@ describe('checked-in worklet assets', () => {
 
     if (!Processor) throw new Error('Utility processor was not registered.')
     const processor = new Processor()
-    processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, state: { enabled: true, polarity: 'normal', inputMode: 'stereo', matrix: 'stereo', swap: false, dcBlock: false } } })
+    processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, state: { enabled: true, phaseLeft: false, phaseRight: false, inputMode: 'stereo', matrix: 'stereo', channelMode: 'both', dcBlock: false } } })
     const left = Float32Array.of(0.25, -0.5)
     const right = Float32Array.of(-0.125, 0.75)
     const output = [new Float32Array(2), new Float32Array(2)]
     expect(processor.process([[left, right]], [output], {
       'utility.gainDb': Float32Array.of(0),
-      'utility.pan': Float32Array.of(0),
       'utility.balance': Float32Array.of(0),
       'utility.width': Float32Array.of(1),
+      'utility.midSide': Float32Array.of(0),
+      'utility.bassMonoHz': Float32Array.of(120),
     })).toBe(true)
     expect(Array.from(output[0])).toEqual(Array.from(left))
     expect(Array.from(output[1])).toEqual(Array.from(right))

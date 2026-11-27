@@ -55,7 +55,7 @@
    "native/audio-core/src/audio_core.cpp": "b5b01c55142bae810988fc06179cf5e5bb09ef152f3d53bd6e5748c97e1bdf4e",
    "native/audio-core/include/daw/audio_core.h": "2fd3ecb06434800f494dd2b7b87fb002f4e97045f2f962de2c60cfa0d0d8aa4e",
    "native/audio-core/tests/audio_core_test.cpp": "aaf29648cf8666fb5c79f67877c3518e90bfff711f29bb9993dfa8c09e25bc9a",
-   "native/audio-host-macos/tests/audio_host_test.cpp": "7ced47a18c9c8d37f61d06f3a76f562e4a2a6f63bf9701f9e5354c8dc66dc562",
+   "native/audio-host-macos/tests/audio_host_test.cpp": "c317a9b10977d55e0973663a26801c956393868774ac8f71b03348cd07ce34db",
    "native/audio-host-macos/tests/realtime_callback_guard.test.ts": "de262d58142afc5e94bd95cd1ab06de3478465434cc92455b74a024ea69ea075",
    "public/audio-core/daw-audio-core.wasm": "a602d2b5a0e4247ee7458867b8c5985e0f9d6c2dfec45e43535ab431d5fbed47",
    "public/audio-core/daw-audio-core.manifest.json": "ba1b50ad632b6fc94a0cbb977d0845af466e6263da7272be7b98395e901affb6",

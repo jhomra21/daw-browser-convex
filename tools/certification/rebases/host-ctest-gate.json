@@ -1,0 +1,44 @@
+{
+ "name": "host-ctest-gate",
+ "sequence": 135,
+ "createdAt": "2026-11-27T02:15:44.299Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "native/audio-host-macos/tests/audio_host_test.cpp",
+   "from": "7ced47a18c9c8d37f61d06f3a76f562e4a2a6f63bf9701f9e5354c8dc66dc562",
+   "to": "c317a9b10977d55e0973663a26801c956393868774ac8f71b03348cd07ce34db"
+  }
+ ],
+ "changes": [],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "14c808d6ef799fa843db8a03493eff7f6fb3146a",
+   "gitStatusSha256": "924d6c5fe5e9030997a8e36f0f19b8305897b31bc2844060e9d0b2b1ceee8cce",
+   "expectationsSha256": "589e5ca77d2c67e53d52524d8a4ebbe60ef78a7471e6698719bed6d1d9c4cf7e",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "589e5ca77d2c67e53d52524d8a4ebbe60ef78a7471e6698719bed6d1d9c4cf7e",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/host-ctest-bless/live",
+   "resultSha256": "bb42e49b3a48b7604f7f958cf537169cfaf6edc626e885da2fee2c0a455f3735",
+   "seconds": 1340.5883617920001,
+   "observations": 3082
+  },
+  "unreachedByOverlay": []
+ }
+}

@@ -66,10 +66,12 @@ const run = async () => {
   scenarios['fold-folds-the-curve-back-at-this-drive'] = curveYs().some((y, index, ys) => index > 0 && index < ys.length - 1 && y < ys[index - 1] && y < ys[index + 1])
 
   const plainCurves: string[] = []
+
   for (const curve of ['Medium', 'Hard', 'Analog', 'Sine']) {
     await choose('Curve', curve)
     plainCurves.push(names())
   }
+
   scenarios['medium-hard-analog-and-sine-have-no-curve-specific-control'] = plainCurves.every((shown) => shown === 'Drive,Output,Dry/Wet')
 
   await choose('Curve', 'Clip')

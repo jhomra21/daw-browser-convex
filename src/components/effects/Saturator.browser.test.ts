@@ -25,6 +25,7 @@ test('the Saturator panel shows only the controls of its curve and Color state a
     'fold-folds-the-curve-back-at-this-drive',
     'fold-has-no-curve-specific-control',
     'hi-quality-writes-the-flag',
+    'medium-hard-analog-and-sine-have-no-curve-specific-control',
     'no-knob-shows-automation-without-an-envelope',
     'no-label-or-value-crowds-another-control',
     'no-label-or-value-is-wider-than-its-box',

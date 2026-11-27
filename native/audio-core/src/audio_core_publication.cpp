@@ -598,6 +598,9 @@ daw_audio_core_result prepare_runtime_ownership(Core &core) {
     } else if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_LOFI) {
       core.lofi_histories[processor.history_slot] = {};
       core.lofi_histories[processor.history_slot].kernel.prepare(static_cast<double>(core.config.sample_rate_hz));
+    } else if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_UTILITY) {
+      core.utility_histories[processor.history_slot] = {};
+      core.utility_histories[processor.history_slot].kernel.prepare(static_cast<double>(core.config.sample_rate_hz));
     } else if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_SATURATOR) {
       core.saturator_histories[processor.history_slot] = {};
       core.saturator_histories[processor.history_slot].kernel.prepare(static_cast<double>(core.config.sample_rate_hz));

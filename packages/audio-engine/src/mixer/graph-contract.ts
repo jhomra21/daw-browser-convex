@@ -230,9 +230,10 @@ const toPortableProcessor = (
       state: encodeUtilityProcessorState(instance.params.state),
       parameterTargets: [
         { id: 'utility.gainDb', target: 1 },
-        { id: 'utility.pan', target: 2 },
         { id: 'utility.balance', target: 3 },
         { id: 'utility.width', target: 4 },
+        { id: 'utility.bassMonoHz', target: 210 },
+        { id: 'utility.midSide', target: 211 },
       ],
       bypassed: !instance.params.state.enabled,
     }

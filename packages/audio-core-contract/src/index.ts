@@ -14,14 +14,20 @@ export const processorSchemaVersion = (kind: string): number => {
 export type UtilityProcessorState = {
   enabled: boolean
   gainDb: number
-  polarity: 'normal' | 'invert'
+  phaseLeft: boolean
+  phaseRight: boolean
   inputMode: 'stereo' | 'mono-sum'
-  pan: number
   balance: number
   width: number
   matrix: 'stereo' | 'mid-side-encode' | 'mid-side-decode'
-  swap: boolean
+  channelMode: 'both' | 'left' | 'right' | 'swap'
   dcBlock: boolean
+  mute: boolean
+  widthMode: 'stereo' | 'mid-side'
+  midSide: number
+  bassMono: boolean
+  bassMonoHz: number
+  bassMonoAudition: boolean
 }
 
 export type UtilityProcessorContract = {
@@ -872,18 +878,24 @@ export const decodeAudioCoreProcessorStateEnvelope = (input: Uint8Array): AudioC
 }
 
 export const encodeUtilityProcessorState = (state: UtilityProcessorState): Uint8Array => {
-  const output = new Uint8Array(40)
+  const output = new Uint8Array(64)
   const view = new DataView(output.buffer)
   view.setUint32(0, state.enabled ? 1 : 0, true)
   view.setFloat32(4, state.gainDb, true)
-  view.setUint32(8, state.polarity === 'invert' ? 1 : 0, true)
-  view.setUint32(12, state.inputMode === 'mono-sum' ? 1 : 0, true)
-  view.setFloat32(16, state.pan, true)
+  view.setUint32(8, state.phaseLeft ? 1 : 0, true)
+  view.setUint32(12, state.phaseRight ? 1 : 0, true)
+  view.setUint32(16, state.inputMode === 'mono-sum' ? 1 : 0, true)
   view.setFloat32(20, state.balance, true)
   view.setFloat32(24, state.width, true)
   view.setUint32(28, state.matrix === 'mid-side-encode' ? 1 : state.matrix === 'mid-side-decode' ? 2 : 0, true)
-  view.setUint32(32, state.swap ? 1 : 0, true)
+  view.setUint32(32, state.channelMode === 'left' ? 1 : state.channelMode === 'right' ? 2 : state.channelMode === 'swap' ? 3 : 0, true)
   view.setUint32(36, state.dcBlock ? 1 : 0, true)
+  view.setUint32(40, state.mute ? 1 : 0, true)
+  view.setUint32(44, state.widthMode === 'mid-side' ? 1 : 0, true)
+  view.setFloat32(48, state.midSide, true)
+  view.setUint32(52, state.bassMono ? 1 : 0, true)
+  view.setFloat32(56, state.bassMonoHz, true)
+  view.setUint32(60, state.bassMonoAudition ? 1 : 0, true)
 
   return output
 }
@@ -1380,18 +1392,24 @@ const eqChannelModeId = (mode: EqProcessorState['channelMode']) => (
 )
 
 const isUtilityState = (value: JsonValue): value is UtilityProcessorState => {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['enabled', 'gainDb', 'polarity', 'inputMode', 'pan', 'balance', 'width', 'matrix', 'swap', 'dcBlock'])) return false
+  if (!isRecord(value) || !hasOnlyKeys(value, ['enabled', 'gainDb', 'phaseLeft', 'phaseRight', 'inputMode', 'balance', 'width', 'matrix', 'channelMode', 'dcBlock', 'mute', 'widthMode', 'midSide', 'bassMono', 'bassMonoHz', 'bassMonoAudition'])) return false
 
   return isJsonBoolean(value.enabled)
     && isFiniteNumber(value.gainDb)
-    && (value.polarity === 'normal' || value.polarity === 'invert')
+    && isJsonBoolean(value.phaseLeft)
+    && isJsonBoolean(value.phaseRight)
     && (value.inputMode === 'stereo' || value.inputMode === 'mono-sum')
-    && isFiniteNumber(value.pan)
     && isFiniteNumber(value.balance)
     && isFiniteNumber(value.width)
     && (value.matrix === 'stereo' || value.matrix === 'mid-side-encode' || value.matrix === 'mid-side-decode')
-    && isJsonBoolean(value.swap)
+    && (value.channelMode === 'both' || value.channelMode === 'left' || value.channelMode === 'right' || value.channelMode === 'swap')
     && isJsonBoolean(value.dcBlock)
+    && isJsonBoolean(value.mute)
+    && (value.widthMode === 'stereo' || value.widthMode === 'mid-side')
+    && isFiniteNumber(value.midSide)
+    && isJsonBoolean(value.bassMono)
+    && isFiniteNumber(value.bassMonoHz)
+    && isJsonBoolean(value.bassMonoAudition)
 }
 
 export const isUtilityProcessorContract = (value: JsonValue): value is UtilityProcessorContract =>

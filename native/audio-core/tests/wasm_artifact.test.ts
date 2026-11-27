@@ -740,7 +740,7 @@ test('the fixed-memory Wasm artifact matches the Utility fixture vector', async 
   headroomExports.free(postInitializeAsset)
 
   const inputBytes = Float32Array.BYTES_PER_ELEMENT * 4
-  const stateBytes = 40
+  const stateBytes = 64
   const allocation = exports.malloc(inputBytes + stateBytes)
 
   if (allocation === 0) throw new Error('The Wasm artifact could not allocate its fixture buffers.')
@@ -757,13 +757,14 @@ test('the fixed-memory Wasm artifact matches the Utility fixture vector', async 
     memory.setUint32(state, 1, true)
     memory.setFloat32(state + 4, 0, true)
     memory.setUint32(state + 8, 1, true)
-    memory.setUint32(state + 12, 0, true)
-    memory.setFloat32(state + 16, 0, true)
+    memory.setUint32(state + 12, 1, true)
+    memory.setUint32(state + 16, 0, true)
     memory.setFloat32(state + 20, 0, true)
     memory.setFloat32(state + 24, 1, true)
     memory.setUint32(state + 28, 0, true)
     memory.setUint32(state + 32, 0, true)
     memory.setUint32(state + 36, 1, true)
+    memory.setFloat32(state + 56, 120, true)
 
     expect(exports.daw_audio_core_wasm_utility_process(1, leftInput, rightInput, leftOutput, rightOutput, state)).toBe(0)
     expect(memory.getFloat32(leftOutput, true)).toBeCloseTo(-0.25, 6)
@@ -843,7 +844,7 @@ test('the Wasm graph bridge matches the portable processor envelope contract', a
     || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_publish)
     || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_process)) throw new Error('The graph bridge exports are unavailable.')
   expect(exports.daw_audio_core_wasm_graph_initialize(48_000, 4, 1)).toBe(0)
-  const graph = new Uint8Array(24 + 2 * 28 + 48 + 48 + 40)
+  const graph = new Uint8Array(24 + 2 * 28 + 48 + 48 + 64)
   const view = new DataView(graph.buffer)
   view.setUint32(0, 1, true)
   view.setUint32(4, 1, true)
@@ -867,8 +868,8 @@ test('the Wasm graph bridge matches the portable processor envelope contract', a
   const processor = edge + 48
   view.setBigUint64(processor, 2n, true)
   view.setUint32(processor + 8, 1, true)
-  view.setUint32(processor + 12, 1, true)
-  view.setUint32(processor + 16, 40, true)
+  view.setUint32(processor + 12, 2, true)
+  view.setUint32(processor + 16, 64, true)
   view.setUint32(processor + 20, 7, true)
   view.setUint32(processor + 28, 2, true)
   view.setUint32(processor + 32, 2, true)
@@ -877,9 +878,10 @@ test('the Wasm graph bridge matches the portable processor envelope contract', a
   view.setFloat32(processor + 52, 0, true)
   view.setUint32(processor + 56, 0, true)
   view.setUint32(processor + 60, 0, true)
-  view.setFloat32(processor + 64, 0, true)
+  view.setUint32(processor + 64, 0, true)
   view.setFloat32(processor + 68, 0, true)
   view.setFloat32(processor + 72, 1, true)
+  view.setFloat32(processor + 104, 120, true)
   const allocation = exports.malloc(graph.byteLength + Float32Array.BYTES_PER_ELEMENT * 8)
 
   if (allocation === 0) throw new Error('The Wasm graph bridge could not allocate fixture buffers.')

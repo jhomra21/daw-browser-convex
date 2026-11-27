@@ -76,14 +76,20 @@ test('utility processor contract accepts only the versioned canonical shape', ()
     state: {
       enabled: true,
       gainDb: 0,
-      polarity: 'normal',
+      phaseLeft: false,
+      phaseRight: false,
       inputMode: 'stereo',
-      pan: 0,
       balance: 0,
       width: 1,
       matrix: 'stereo',
-      swap: false,
+      channelMode: 'both',
       dcBlock: false,
+      mute: false,
+      widthMode: 'stereo',
+      midSide: 0,
+      bassMono: false,
+      bassMonoHz: 120,
+      bassMonoAudition: false,
     },
   }
 
@@ -282,16 +288,17 @@ test('synth instrument codec emits the fixed native default profile', () => {
 
 test('utility parameter metadata matches the supported worklet AudioParams', () => {
   expect(utilityParameterMetadata).toEqual([
-    { id: 'gainDb', defaultValue: 0, minValue: -60, maxValue: 24 },
-    { id: 'pan', defaultValue: 0, minValue: -1, maxValue: 1 },
+    { id: 'gainDb', defaultValue: 0, minValue: -70, maxValue: 35 },
     { id: 'balance', defaultValue: 0, minValue: -1, maxValue: 1 },
     { id: 'width', defaultValue: 1, minValue: 0, maxValue: 2 },
+    { id: 'midSide', defaultValue: 0, minValue: -1, maxValue: 1 },
+    { id: 'bassMonoHz', defaultValue: 120, minValue: 50, maxValue: 500 },
   ])
 })
 
 test('processor registry preserves stable portable processor ids', () => {
   expect(processorRegistry).toEqual([
-    expect.objectContaining({ name: 'utility', id: 1, schemaVersion: 1, stateBytes: 40, tombstone: false }),
+    expect.objectContaining({ name: 'utility', id: 1, schemaVersion: 2, stateBytes: 64, tombstone: false }),
     expect.objectContaining({ name: 'saturator', id: 2, schemaVersion: 2, stateBytes: 60, tombstone: false }),
     expect.objectContaining({ name: 'eq', id: 3, schemaVersion: 2, stateBytes: 408, tombstone: false }),
     expect.objectContaining({ name: 'chorus', id: 4, schemaVersion: 2, stateBytes: 52 }),

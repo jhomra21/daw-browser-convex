@@ -5,14 +5,20 @@ import { audioCoreContractVersion, audioCoreMaxGraphProcessors, audioCoreMaxProc
 const utilityState: UtilityProcessorState = {
   enabled: true,
   gainDb: 0,
-  polarity: 'normal',
+  phaseLeft: false,
+  phaseRight: false,
   inputMode: 'stereo',
-  pan: 0,
   balance: 0,
   width: 1,
   matrix: 'stereo',
-  swap: false,
+  channelMode: 'both',
   dcBlock: true,
+  mute: false,
+  widthMode: 'stereo',
+  midSide: 0,
+  bassMono: false,
+  bassMonoHz: 120,
+  bassMonoAudition: false,
 }
 
 test('keeps the validated Wasm module outside portable control messages', () => {
@@ -512,7 +518,7 @@ test('accepts bounded versioned processor chains and rejects duplicate instances
         kind: 'utility',
         kindId: 1,
         instanceId: 1,
-        stateVersion: audioCoreContractVersion,
+        stateVersion: 2,
         state: encodeUtilityProcessorState(utilityState),
         parameterTargets: [{ id: 'utility.gainDb', target: 1 }],
         latencyFrames: 0,

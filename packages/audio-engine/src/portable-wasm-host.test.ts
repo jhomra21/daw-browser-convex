@@ -436,11 +436,12 @@ test('the actual portable Wasm host renders built-in effects without native hook
   const wasmBytes = await Bun.file(wasmUrl).arrayBuffer()
   expect(await host.initialize({ wasmBytes, contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
 
-  const utilityState = new Uint8Array(40)
+  const utilityState = new Uint8Array(64)
   const utilityView = new DataView(utilityState.buffer)
   utilityView.setUint32(0, 1, true)
   utilityView.setFloat32(4, 6, true)
   utilityView.setFloat32(24, 1, true)
+  utilityView.setFloat32(56, 120, true)
   host.handleMessage({
     version: 2,
     type: 'prepare-graph',
@@ -461,7 +462,7 @@ test('the actual portable Wasm host renders built-in effects without native hook
             instanceId: 31,
             kind: 'utility',
             kindId: 1,
-            stateVersion: 1,
+            stateVersion: 2,
             state: utilityState,
             parameterTargets: [],
             bypassed: false,
@@ -1184,14 +1185,15 @@ test('B6f5 the v2 host keeps a pending live acknowledgement across an adoption p
   const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
   expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
-  const utilityState = new Uint8Array(40)
+  const utilityState = new Uint8Array(64)
   const utilityView = new DataView(utilityState.buffer)
   utilityView.setUint32(0, 1, true)
   utilityView.setFloat32(24, 1, true)
+  utilityView.setFloat32(56, 120, true)
   const base = portableTrackGraph(['track'])
 
   const graph = (revision: number) => ({ ...base, revision, nodes: base.nodes.map((node) => node.id === 'track' ? { ...node, processorOrder: [{
-    id: 'track-utility', instanceId: 31, kind: 'utility', kindId: 1, stateVersion: 1, state: utilityState,
+    id: 'track-utility', instanceId: 31, kind: 'utility', kindId: 1, stateVersion: 2, state: utilityState,
     parameterTargets: [{ id: 'gainDb', target: 1 }], bypassed: false, latencyFrames: 0, tailFrames: 0,
   }] } : node) })
 
@@ -1208,11 +1210,12 @@ test('B6f5 the v2 host keeps a pending live acknowledgement across an adoption p
     events: [{ processorInstanceId: 31, parameterTarget: 1, frameOffset: 0, value: -6 }] })
   const adoption = adoptRevision(host, messages, graph(2), [])
   const acknowledgedBeforeRender = messages.flatMap((message) => message.type === 'processor-events-applied' ? [message.result] : [])
-  const blocks = [renderLeft(host), renderLeft(host), renderLeft(host)]
+  // The Utility ramps its Gain over 10 ms: the settled level is read after 48 blocks (128 ms).
+  const blocks = Array.from({ length: 48 }, () => renderLeft(host))
   expect([adoption.published, acknowledgedBeforeRender,
     messages.flatMap((message) => message.type === 'processor-events-applied' ? [message.result] : [])])
     .toEqual(['published', [], ['applied']])
-  expect(blocks[2].at(-1)).toBeCloseTo(10 ** (-6 / 20), 3)
+  expect(blocks.at(-1)?.at(-1)).toBeCloseTo(10 ** (-6 / 20), 3)
 })
 
 test('B6f5 the v2 host seeds a held automation value at an adoption publish on the built core', async () => {
@@ -1632,9 +1635,10 @@ test('B6f5 R1 an adoption at the core maximum graph stays inside the audio-threa
   const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({ sampleRate: 44_100, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
   expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
-  const utilityState = new Uint8Array(40)
+  const utilityState = new Uint8Array(64)
   new DataView(utilityState.buffer).setUint32(0, 1, true)
   new DataView(utilityState.buffer).setFloat32(24, 1, true)
+  new DataView(utilityState.buffer).setFloat32(56, 120, true)
 
   type GraphNode = AudioCoreGraphSnapshot['nodes'][number]
 
@@ -1643,7 +1647,7 @@ test('B6f5 R1 an adoption at the core maximum graph stays inside the audio-threa
   const maximumGraph = (revision: number): AudioCoreGraphSnapshot => {
     let instanceId = 1000
 
-    const utility = (id: string): GraphNode['processorOrder'][number] => ({ id, instanceId: instanceId++, kind: 'utility', kindId: 1, stateVersion: 1,
+    const utility = (id: string): GraphNode['processorOrder'][number] => ({ id, instanceId: instanceId++, kind: 'utility', kindId: 1, stateVersion: 2,
       state: utilityState, parameterTargets: [{ id: 'gainDb', target: 1 }], bypassed: false, latencyFrames: 0, tailFrames: 0 })
 
     const node = (id: string, kind: GraphNode['kind'], fx: number, mixerId: number, gain: number): GraphNode => ({ id, kind,
@@ -2311,7 +2315,7 @@ const fxProcessor = (id: string, instanceId: number, kind: string, kindId: numbe
 })
 
 const fxUtility = (id: string, instanceId: number, gainDb: number, latencyFrames = 0) =>
-  fxProcessor(id, instanceId, 'utility', 1, encodeUtilityProcessorState({ ...createDefaultUtilityParams(), gainDb }), latencyFrames)
+  ({ ...fxProcessor(id, instanceId, 'utility', 1, encodeUtilityProcessorState({ ...createDefaultUtilityParams(), gainDb }), latencyFrames), stateVersion: 2 })
 
 const fxEq = (id: string, instanceId: number, type: 'peaking' | 'highshelf' = 'peaking') => ({
   ...fxProcessor(id, instanceId, 'eq', 3, encodeEqProcessorState({

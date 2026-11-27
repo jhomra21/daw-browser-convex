@@ -160,9 +160,9 @@ const otherKinds: readonly (readonly [string, (enabled: boolean) => Instance])[]
 // sit in one graph differ.
 const subjects: readonly (readonly [string, string, Instance])[] = [
   ['stage-one', 'stage-one', utility({ gainDb: 6.0206, dcBlock: false })],
-  ['stage-one-swap', 'stage-one', utility({ gainDb: 6.0206, dcBlock: false, swap: true })],
+  ['stage-one-swap', 'stage-one', utility({ gainDb: 6.0206, dcBlock: false, channelMode: 'swap' })],
   ['stage-one-off', 'stage-one', utility({ gainDb: 6.0206, dcBlock: false, enabled: false })],
-  ['stage-one-swap-off', 'stage-one', utility({ gainDb: 6.0206, dcBlock: false, swap: true, enabled: false })],
+  ['stage-one-swap-off', 'stage-one', utility({ gainDb: 6.0206, dcBlock: false, channelMode: 'swap', enabled: false })],
   ['stage-two', 'stage-two', saturator(true)],
   ['stage-two-off', 'stage-two', saturator(false)],
   ['dc-stage', 'dc-stage', utility({ dcBlock: true })],

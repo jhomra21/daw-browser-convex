@@ -455,11 +455,12 @@ describe('mixer routing plan', () => {
 
     const processors = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 }).nodes[0]?.processorOrder
     expect(processors?.map((processor) => [processor.kind, processor.kindId, processor.state.byteLength, processor.latencyFrames, processor.parameterTargets])).toEqual([
-      ['utility', 1, 40, 0, [
+      ['utility', 1, 64, 0, [
         { id: 'utility.gainDb', target: 1 },
-        { id: 'utility.pan', target: 2 },
         { id: 'utility.balance', target: 3 },
         { id: 'utility.width', target: 4 },
+        { id: 'utility.bassMonoHz', target: 210 },
+        { id: 'utility.midSide', target: 211 },
       ]],
       ['gate', 10, 76, 0, [
         { id: 'gate.thresholdDb', target: 105 },

@@ -386,7 +386,8 @@ typedef enum daw_audio_processor_kind {
 
 typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB = 1,
-  DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_PAN = 2,
+  /* 2 was the Utility pan; Balance is the only left/right control now and nothing is accepted at 2. */
+  DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_PAN_RETIRED = 2,
   DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BALANCE = 3,
   DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_WIDTH = 4,
   DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_LEFT_MS = 5,
@@ -563,7 +564,9 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_BASS_THRESHOLD_DB = 206,
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_DEPTH = 207,
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_PERIOD = 208,
-  DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_HZ = 209
+  DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_HZ = 209,
+  DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BASS_MONO_HZ = 210,
+  DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_MID_SIDE = 211
 } daw_audio_processor_parameter;
 
 #define DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_0_FREQUENCY_HZ
@@ -695,11 +698,6 @@ typedef struct daw_audio_core_process_block {
   const struct daw_audio_instrument_event *instrument_events;
 } daw_audio_core_process_block;
 
-typedef enum daw_audio_utility_polarity {
-  DAW_AUDIO_UTILITY_POLARITY_NORMAL = 0,
-  DAW_AUDIO_UTILITY_POLARITY_INVERT = 1
-} daw_audio_utility_polarity;
-
 typedef enum daw_audio_utility_input_mode {
   DAW_AUDIO_UTILITY_INPUT_MODE_STEREO = 0,
   DAW_AUDIO_UTILITY_INPUT_MODE_MONO_SUM = 1
@@ -711,17 +709,38 @@ typedef enum daw_audio_utility_matrix {
   DAW_AUDIO_UTILITY_MATRIX_MID_SIDE_DECODE = 2
 } daw_audio_utility_matrix;
 
+/* Both passes the channels, Left and Right play that channel on both outputs (and disable width), Swap exchanges them. */
+typedef enum daw_audio_utility_channel_mode {
+  DAW_AUDIO_UTILITY_CHANNEL_MODE_BOTH = 0,
+  DAW_AUDIO_UTILITY_CHANNEL_MODE_LEFT = 1,
+  DAW_AUDIO_UTILITY_CHANNEL_MODE_RIGHT = 2,
+  DAW_AUDIO_UTILITY_CHANNEL_MODE_SWAP = 3
+} daw_audio_utility_channel_mode;
+
+/* Stereo scales the side by width; Mid/Side scales mid or side by mid_side (-1 is mono, 0 is as played, 1 is side only). */
+typedef enum daw_audio_utility_width_mode {
+  DAW_AUDIO_UTILITY_WIDTH_MODE_STEREO = 0,
+  DAW_AUDIO_UTILITY_WIDTH_MODE_MID_SIDE = 1
+} daw_audio_utility_width_mode;
+
+/* The gain is minus infinity at or below DAW_AUDIO_CORE_UTILITY_GAIN_DB_MIN. bass_mono_hz is read only when bass_mono is on. */
 typedef struct daw_audio_utility_state {
   uint32_t enabled;
   float gain_db;
-  uint32_t polarity;
+  uint32_t phase_left;
+  uint32_t phase_right;
   uint32_t input_mode;
-  float pan;
   float balance;
   float width;
   uint32_t matrix;
-  uint32_t swap;
+  uint32_t channel_mode;
   uint32_t dc_block;
+  uint32_t mute;
+  uint32_t width_mode;
+  float mid_side;
+  uint32_t bass_mono;
+  float bass_mono_hz;
+  uint32_t bass_mono_audition;
 } daw_audio_utility_state;
 
 /* Every curve has slope one at the origin and an asymptote near one. Soft is tanh, Medium the cubic that reaches its rail with

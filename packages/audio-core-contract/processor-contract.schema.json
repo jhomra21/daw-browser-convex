@@ -18,24 +18,30 @@
           "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
           "properties": {
             "id": { "const": 1 },
-            "schemaVersion": { "const": 1 },
-            "stateBytes": { "const": 40 },
+            "schemaVersion": { "const": 2 },
+            "stateBytes": { "const": 64 },
             "tombstone": { "const": false },
             "state": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["enabled", "gainDb", "polarity", "inputMode", "pan", "balance", "width", "matrix", "swap", "dcBlock"],
+              "required": ["enabled", "gainDb", "phaseLeft", "phaseRight", "inputMode", "balance", "width", "matrix", "channelMode", "dcBlock", "mute", "widthMode", "midSide", "bassMono", "bassMonoHz", "bassMonoAudition"],
               "properties": {
                 "enabled": { "type": "boolean" },
-                "gainDb": { "type": "number", "default": 0, "minimum": -60, "maximum": 24, "portableParameter": true },
-                "polarity": { "enum": ["normal", "invert"] },
+                "gainDb": { "type": "number", "default": 0, "minimum": -70, "maximum": 35, "portableParameter": true },
+                "phaseLeft": { "type": "boolean" },
+                "phaseRight": { "type": "boolean" },
                 "inputMode": { "enum": ["stereo", "mono-sum"] },
-                "pan": { "type": "number", "default": 0, "minimum": -1, "maximum": 1, "portableParameter": true },
                 "balance": { "type": "number", "default": 0, "minimum": -1, "maximum": 1, "portableParameter": true },
                 "width": { "type": "number", "default": 1, "minimum": 0, "maximum": 2, "portableParameter": true },
                 "matrix": { "enum": ["stereo", "mid-side-encode", "mid-side-decode"] },
-                "swap": { "type": "boolean" },
-                "dcBlock": { "type": "boolean" }
+                "channelMode": { "enum": ["both", "left", "right", "swap"] },
+                "dcBlock": { "type": "boolean" },
+                "mute": { "type": "boolean" },
+                "widthMode": { "enum": ["stereo", "mid-side"] },
+                "midSide": { "type": "number", "default": 0, "minimum": -1, "maximum": 1, "portableParameter": true },
+                "bassMono": { "type": "boolean" },
+                "bassMonoHz": { "type": "number", "default": 120, "minimum": 50, "maximum": 500, "portableParameter": true },
+                "bassMonoAudition": { "type": "boolean" }
               }
             }
           }

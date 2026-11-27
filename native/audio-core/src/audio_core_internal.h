@@ -35,6 +35,7 @@
 #include "reverb_kernel.h"
 #include "delay_kernel.h"
 #include "lofi_kernel.h"
+#include "utility_kernel.h"
 #include "saturator_kernel.h"
 #include "compressor_kernel.h"
 #include "gate_kernel.h"
@@ -377,10 +378,9 @@ struct BiquadHistory {
 };
 
 struct UtilityHistory {
-  float dc_x1_left = 0.0F;
-  float dc_x1_right = 0.0F;
-  float dc_y1_left = 0.0F;
-  float dc_y1_right = 0.0F;
+  daw::audio_core::UtilityKernel kernel;
+  daw::audio_core::UtilityValues values;
+  daw::audio_core::UtilityConfig config;
   float bypass = 0.0F;
 };
 

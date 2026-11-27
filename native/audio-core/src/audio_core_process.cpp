@@ -482,12 +482,8 @@ extern "C" daw_audio_core_result daw_audio_core_set_transport(
       // previous DC estimate. A running locate primes with running=0 too:
       // require the previous transport to be stopped, preserving its estimate.
       // Keep musical tails and bypass ramps intact.
-      const auto clear_dc = [](UtilityHistory &history) {
-        history.dc_x1_left = history.dc_x1_right = 0.0F;
-        history.dc_y1_left = history.dc_y1_right = 0.0F;
-      };
-      clear_dc(core->utility_history);
-      for (auto &history : core->utility_histories) clear_dc(history);
+      core->utility_history.kernel.reset_dc();
+      for (auto &history : core->utility_histories) history.kernel.reset_dc();
     }
 #endif
     clear_sample_sources(*core);

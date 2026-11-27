@@ -144,7 +144,8 @@ uint32_t schema_version_of(uint32_t kind) {
     : kind == DAW_AUDIO_PROCESSOR_KIND_AUTOPAN ? DAW_AUDIO_CORE_PROCESSOR_AUTOPAN_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE ? DAW_AUDIO_CORE_PROCESSOR_ENSEMBLE_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_SATURATOR ? DAW_AUDIO_CORE_PROCESSOR_SATURATOR_SCHEMA_VERSION
-    : kind == DAW_AUDIO_PROCESSOR_KIND_LOFI ? DAW_AUDIO_CORE_PROCESSOR_LOFI_SCHEMA_VERSION : 1u;
+    : kind == DAW_AUDIO_PROCESSOR_KIND_LOFI ? DAW_AUDIO_CORE_PROCESSOR_LOFI_SCHEMA_VERSION
+    : kind == DAW_AUDIO_PROCESSOR_KIND_UTILITY ? DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION : 1u;
 }
 
 void expect(daw_audio_core_result actual, daw_audio_core_result expected, int line = __builtin_LINE()) {
@@ -805,22 +806,22 @@ void test_native_mixed_stage_interleave_is_noncommutative_and_fader_is_last() {
         .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
     }};
     const daw_audio_utility_state utility_a{
-      .enabled = 1, .gain_db = 6.0F, .polarity = DAW_AUDIO_UTILITY_POLARITY_NORMAL,
-      .input_mode = DAW_AUDIO_UTILITY_INPUT_MODE_STEREO, .pan = 0.0F, .balance = 0.0F,
-      .width = 1.0F, .matrix = DAW_AUDIO_UTILITY_MATRIX_STEREO, .swap = 0, .dc_block = 0,
+      .enabled = 1, .gain_db = 6.0F, .phase_left = 0, .phase_right = 0,
+      .input_mode = DAW_AUDIO_UTILITY_INPUT_MODE_STEREO, .balance = 0.0F,
+      .width = 1.0F, .matrix = DAW_AUDIO_UTILITY_MATRIX_STEREO, .channel_mode = DAW_AUDIO_UTILITY_CHANNEL_MODE_BOTH, .dc_block = 0, .bass_mono_hz = 120.0F,
     };
     const daw_audio_utility_state utility_b{
-      .enabled = 1, .gain_db = -6.0F, .polarity = DAW_AUDIO_UTILITY_POLARITY_NORMAL,
-      .input_mode = DAW_AUDIO_UTILITY_INPUT_MODE_STEREO, .pan = 0.0F, .balance = 0.0F,
-      .width = 1.0F, .matrix = DAW_AUDIO_UTILITY_MATRIX_STEREO, .swap = 0, .dc_block = 0,
+      .enabled = 1, .gain_db = -6.0F, .phase_left = 0, .phase_right = 0,
+      .input_mode = DAW_AUDIO_UTILITY_INPUT_MODE_STEREO, .balance = 0.0F,
+      .width = 1.0F, .matrix = DAW_AUDIO_UTILITY_MATRIX_STEREO, .channel_mode = DAW_AUDIO_UTILITY_CHANNEL_MODE_BOTH, .dc_block = 0, .bass_mono_hz = 120.0F,
     };
     const std::array<daw_audio_processor_descriptor, 2> processors{{
-      {.node_id = 1, .instance_id = 201, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY, .state_version = 1,
+      {.node_id = 1, .instance_id = 201, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY, .state_version = DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION,
         .state_size = sizeof(utility_a), .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
         .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .latency_frames = 0, .tail_frames = 0,
         .parameter_count = 0, .parameter_targets = nullptr,
         .state = reinterpret_cast<const uint8_t *>(&utility_a)},
-      {.node_id = 1, .instance_id = 202, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY, .state_version = 1,
+      {.node_id = 1, .instance_id = 202, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY, .state_version = DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION,
         .state_size = sizeof(utility_b), .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
         .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .latency_frames = 0, .tail_frames = 0,
         .parameter_count = 0, .parameter_targets = nullptr,
@@ -879,12 +880,12 @@ void test_native_instrument_hook_is_a_source_stage() {
     .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0,
   };
   const daw_audio_utility_state effect_state{
-    .enabled = 1, .gain_db = 6.0F, .polarity = DAW_AUDIO_UTILITY_POLARITY_NORMAL,
-    .input_mode = DAW_AUDIO_UTILITY_INPUT_MODE_STEREO, .pan = 0.0F, .balance = 0.0F,
-    .width = 1.0F, .matrix = DAW_AUDIO_UTILITY_MATRIX_STEREO, .swap = 0, .dc_block = 0,
+    .enabled = 1, .gain_db = 6.0F, .phase_left = 0, .phase_right = 0,
+    .input_mode = DAW_AUDIO_UTILITY_INPUT_MODE_STEREO, .balance = 0.0F,
+    .width = 1.0F, .matrix = DAW_AUDIO_UTILITY_MATRIX_STEREO, .channel_mode = DAW_AUDIO_UTILITY_CHANNEL_MODE_BOTH, .dc_block = 0, .bass_mono_hz = 120.0F,
   };
   const daw_audio_processor_descriptor effect{
-    .node_id = 1, .instance_id = 102, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY, .state_version = 1,
+    .node_id = 1, .instance_id = 102, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY, .state_version = DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION,
     .state_size = sizeof(effect_state), .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
     .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .latency_frames = 0, .tail_frames = 0,
     .parameter_count = 0, .parameter_targets = nullptr,
@@ -931,12 +932,12 @@ void test_native_hook_runs_before_builtin_processor() {
     .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0,
   };
   const daw_audio_utility_state utility_state{
-    .enabled = 1, .gain_db = 6.0F, .polarity = DAW_AUDIO_UTILITY_POLARITY_NORMAL,
-    .input_mode = DAW_AUDIO_UTILITY_INPUT_MODE_STEREO, .pan = 0.0F, .balance = 0.0F,
-    .width = 1.0F, .matrix = DAW_AUDIO_UTILITY_MATRIX_STEREO, .swap = 0, .dc_block = 0,
+    .enabled = 1, .gain_db = 6.0F, .phase_left = 0, .phase_right = 0,
+    .input_mode = DAW_AUDIO_UTILITY_INPUT_MODE_STEREO, .balance = 0.0F,
+    .width = 1.0F, .matrix = DAW_AUDIO_UTILITY_MATRIX_STEREO, .channel_mode = DAW_AUDIO_UTILITY_CHANNEL_MODE_BOTH, .dc_block = 0, .bass_mono_hz = 120.0F,
   };
   const daw_audio_processor_descriptor terminal{
-    .node_id = 1, .instance_id = 91, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY, .state_version = 1,
+    .node_id = 1, .instance_id = 91, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY, .state_version = DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION,
     .state_size = sizeof(utility_state), .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
     .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .latency_frames = 0, .tail_frames = 0,
     .parameter_count = 0, .parameter_targets = nullptr,
@@ -1084,15 +1085,15 @@ void test_portable_graph_rejects_invalid_topology_and_capacity() {
   capacity_request.edge_count = 0;
   capacity_request.edges = nullptr;
   const daw_audio_utility_state state{
-    .enabled = 1, .gain_db = 0.0F, .polarity = DAW_AUDIO_UTILITY_POLARITY_NORMAL,
-    .input_mode = DAW_AUDIO_UTILITY_INPUT_MODE_STEREO, .pan = 0.0F, .balance = 0.0F,
-    .width = 1.0F, .matrix = DAW_AUDIO_UTILITY_MATRIX_STEREO, .swap = 0, .dc_block = 0,
+    .enabled = 1, .gain_db = 0.0F, .phase_left = 0, .phase_right = 0,
+    .input_mode = DAW_AUDIO_UTILITY_INPUT_MODE_STEREO, .balance = 0.0F,
+    .width = 1.0F, .matrix = DAW_AUDIO_UTILITY_MATRIX_STEREO, .channel_mode = DAW_AUDIO_UTILITY_CHANNEL_MODE_BOTH, .dc_block = 0, .bass_mono_hz = 120.0F,
   };
   std::array<daw_audio_processor_descriptor, DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE + 1> processors{};
   for (std::size_t index = 0; index < processors.size(); ++index) {
     processors[index] = {
       .node_id = 1, .instance_id = 1000 + static_cast<std::uint64_t>(index),
-      .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY, .state_version = 1, .state_size = sizeof(state),
+      .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY, .state_version = DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION, .state_size = sizeof(state),
       .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
       .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .latency_frames = 0, .tail_frames = 0,
       .parameter_count = 0, .parameter_targets = nullptr,
@@ -1121,9 +1122,9 @@ void test_portable_graph_accepts_a_full_effect_chain() {
     .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0,
   };
   const daw_audio_utility_state state{
-    .enabled = 1, .gain_db = 0.0F, .polarity = DAW_AUDIO_UTILITY_POLARITY_NORMAL,
-    .input_mode = DAW_AUDIO_UTILITY_INPUT_MODE_STEREO, .pan = 0.0F, .balance = 0.0F,
-    .width = 1.0F, .matrix = DAW_AUDIO_UTILITY_MATRIX_STEREO, .swap = 0, .dc_block = 0,
+    .enabled = 1, .gain_db = 0.0F, .phase_left = 0, .phase_right = 0,
+    .input_mode = DAW_AUDIO_UTILITY_INPUT_MODE_STEREO, .balance = 0.0F,
+    .width = 1.0F, .matrix = DAW_AUDIO_UTILITY_MATRIX_STEREO, .channel_mode = DAW_AUDIO_UTILITY_CHANNEL_MODE_BOTH, .dc_block = 0, .bass_mono_hz = 120.0F,
   };
   std::array<daw_audio_processor_descriptor, 17> processors{};
   for (std::size_t index = 0; index < processors.size(); ++index) {
@@ -1131,7 +1132,7 @@ void test_portable_graph_accepts_a_full_effect_chain() {
       .node_id = 1,
       .instance_id = 1000 + static_cast<std::uint64_t>(index),
       .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY,
-      .state_version = 1,
+      .state_version = DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION,
       .state_size = sizeof(state),
       .bypassed = 0,
       .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
@@ -1484,9 +1485,9 @@ void test_portable_graph_utility_node() {
   }};
   prepare_graph(core, 1, nodes.data(), nodes.size(), edges.data(), edges.size());
   const daw_audio_utility_state inverted{
-    .enabled = 1, .gain_db = 0.0F, .polarity = DAW_AUDIO_UTILITY_POLARITY_INVERT,
-    .input_mode = DAW_AUDIO_UTILITY_INPUT_MODE_STEREO, .pan = 0.0F, .balance = 0.0F,
-    .width = 1.0F, .matrix = DAW_AUDIO_UTILITY_MATRIX_STEREO, .swap = 0, .dc_block = 0,
+    .enabled = 1, .gain_db = 0.0F, .phase_left = 1, .phase_right = 1,
+    .input_mode = DAW_AUDIO_UTILITY_INPUT_MODE_STEREO, .balance = 0.0F,
+    .width = 1.0F, .matrix = DAW_AUDIO_UTILITY_MATRIX_STEREO, .channel_mode = DAW_AUDIO_UTILITY_CHANNEL_MODE_BOTH, .dc_block = 0, .bass_mono_hz = 120.0F,
   };
   expect(daw_audio_core_configure_utility(core, &inverted), DAW_AUDIO_CORE_OK);
   const std::array<float, 1> left{0.25F};
@@ -1541,11 +1542,11 @@ HistoryFixtureState history_fixture_state(uint32_t kind) {
     write_u32(offset, bits);
   };
   if (kind == DAW_AUDIO_PROCESSOR_KIND_UTILITY) {
-    fixture.size = 40;
-    write_u32(0, 1); write_f32(4, 0.0F); write_u32(8, DAW_AUDIO_UTILITY_POLARITY_NORMAL);
-    write_u32(12, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO); write_f32(16, 0.0F);
+    fixture.size = DAW_AUDIO_CORE_PROCESSOR_UTILITY_STATE_BYTES;
+    write_u32(0, 1); write_f32(4, 0.0F); write_u32(8, 0); write_u32(12, 0);
+    write_u32(16, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO);
     write_f32(20, 0.0F); write_f32(24, 1.0F); write_u32(28, DAW_AUDIO_UTILITY_MATRIX_STEREO);
-    write_u32(32, 0); write_u32(36, 1);
+    write_u32(32, 0); write_u32(36, 1); write_f32(56, 120.0F);
   } else if (kind == DAW_AUDIO_PROCESSOR_KIND_SATURATOR) {
     fixture.size = 60;
     write_u32(0, 1); write_u32(4, 1); write_u32(8, DAW_AUDIO_SATURATOR_CURVE_HARD);
@@ -1815,7 +1816,7 @@ void test_same_core_processor_state_patch_preserves_revision() {
     .id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F,
     .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0,
   };
-  std::array<std::uint8_t, 40> state{};
+  std::array<std::uint8_t, 64> state{};
   const auto write_u32 = [&state](std::uint32_t offset, std::uint32_t value) {
     state[offset] = static_cast<std::uint8_t>(value);
     state[offset + 1] = static_cast<std::uint8_t>(value >> 8U);
@@ -1829,18 +1830,19 @@ void test_same_core_processor_state_patch_preserves_revision() {
   };
   write_u32(0, 1);
   write_f32(4, 0.0F);
-  write_u32(8, DAW_AUDIO_UTILITY_POLARITY_NORMAL);
-  write_u32(12, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO);
-  write_f32(16, 0.0F);
+  write_u32(8, 0);
+  write_u32(12, 0);
+  write_u32(16, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO);
   write_f32(20, 0.0F);
   write_f32(24, 1.0F);
   write_u32(28, DAW_AUDIO_UTILITY_MATRIX_STEREO);
   write_u32(32, 0);
   write_u32(36, 0);
-  const std::array<uint32_t, 3> targets{4, 1, 2};
+  write_f32(56, 120.0F);
+  const std::array<uint32_t, 3> targets{4, 1, 3};
   const daw_audio_processor_descriptor processor{
     .node_id = 2, .instance_id = 77, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY,
-    .state_version = 1, .state_size = static_cast<std::uint32_t>(state.size()), .bypassed = 0,
+    .state_version = DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION, .state_size = static_cast<std::uint32_t>(state.size()), .bypassed = 0,
     .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
     .latency_frames = 0, .tail_frames = 0, .parameter_count = static_cast<uint32_t>(targets.size()),
     .parameter_targets = targets.data(), .state = state.data(),
@@ -1866,7 +1868,7 @@ void test_same_core_processor_state_patch_preserves_revision() {
   write_f32(4, 6.0F);
   const daw_audio_processor_state_patch patch{
     .graph_revision = 9, .node_id = 2, .instance_id = 77, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY,
-    .state_version = 1, .state_size = static_cast<std::uint32_t>(state.size()), .bypassed = 0,
+    .state_version = DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION, .state_size = static_cast<std::uint32_t>(state.size()), .bypassed = 0,
     .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
     .parameter_count = static_cast<uint32_t>(targets.size()), .latency_frames = 0, .tail_frames = 96'960,
     .parameter_targets = targets.data(), .state = state.data(),
@@ -1879,10 +1881,11 @@ void test_same_core_processor_state_patch_preserves_revision() {
   expect(daw_audio_core_apply_staged_processor_state_patch(core), DAW_AUDIO_CORE_NO_DATA);
   assert(std::abs(output_left[0] - 1.0F) < 1e-5F);
   output_left.fill(0.0F); output_right.fill(0.0F);
-  expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+  // The gain moves to its new value over 10 ms rather than in one frame, so the patched state is judged once it has settled.
+  for (uint32_t frame = 0; frame < 4800; ++frame) expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
   assert(output_left[0] > 1.9F && output_left[0] < 2.1F);
 
-  const std::array<uint32_t, 3> different_targets{4, 1, 3};
+  const std::array<uint32_t, 3> different_targets{4, 1, 211};
   daw_audio_processor_state_patch different_patch = patch;
   different_patch.parameter_targets = different_targets.data();
   expect(daw_audio_core_stage_processor_state_patch(core, &different_patch), DAW_AUDIO_CORE_STALE_REVISION);
@@ -1922,25 +1925,26 @@ void test_utility_history_isolated_between_instances_and_standalone() {
     {.id = 3, .from_node_id = 3, .to_node_id = 5, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER},
     {.id = 4, .from_node_id = 4, .to_node_id = 5, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER},
   }};
-  const auto utility_bytes = [](uint32_t polarity, uint32_t enabled) {
-    std::array<uint8_t, 40> bytes{};
+  const auto utility_bytes = [](uint32_t phase_inverted, uint32_t enabled) {
+    std::array<uint8_t, 64> bytes{};
     const auto write_u32 = [&bytes](uint32_t offset, uint32_t value) {
       bytes[offset] = static_cast<uint8_t>(value); bytes[offset + 1] = static_cast<uint8_t>(value >> 8u);
       bytes[offset + 2] = static_cast<uint8_t>(value >> 16u); bytes[offset + 3] = static_cast<uint8_t>(value >> 24u);
     };
-    write_u32(0, enabled); write_u32(8, polarity); write_u32(12, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO);
+    write_u32(0, enabled); write_u32(8, phase_inverted); write_u32(12, phase_inverted); write_u32(16, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO);
     uint32_t width = 0x3f800000; std::memcpy(bytes.data() + 24, &width, sizeof(width));
     write_u32(28, DAW_AUDIO_UTILITY_MATRIX_STEREO); write_u32(36, 1);
+    uint32_t bass_hz = 0x42f00000; std::memcpy(bytes.data() + 56, &bass_hz, sizeof(bass_hz));
     return bytes;
   };
-  auto state_a = utility_bytes(DAW_AUDIO_UTILITY_POLARITY_NORMAL, 1);
-  auto state_b = utility_bytes(DAW_AUDIO_UTILITY_POLARITY_INVERT, 1);
+  auto state_a = utility_bytes(0, 1);
+  auto state_b = utility_bytes(1, 1);
   const daw_audio_processor_descriptor processors[2]{
-    {.node_id = 3, .instance_id = 101, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY, .state_version = 1,
-      .state_size = 40, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+    {.node_id = 3, .instance_id = 101, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY, .state_version = DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION,
+      .state_size = 64, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
       .parameter_count = 0, .state = state_a.data()},
-    {.node_id = 4, .instance_id = 102, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY, .state_version = 1,
-      .state_size = 40, .bypassed = 1, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+    {.node_id = 4, .instance_id = 102, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY, .state_version = DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION,
+      .state_size = 64, .bypassed = 1, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
       .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .parameter_count = 0, .state = state_b.data()},
   };
   daw_audio_core_handle core = create_core(frames, 2, 1);
@@ -1973,9 +1977,9 @@ void test_utility_history_isolated_between_instances_and_standalone() {
   expect(daw_audio_core_wasm_utility_initialize(48000, frames), DAW_AUDIO_CORE_OK);
   std::array<float, frames> standalone_left{}; std::array<float, frames> standalone_right{};
   daw_audio_utility_state standalone_state{
-    .enabled = 1, .gain_db = 0.0F, .polarity = DAW_AUDIO_UTILITY_POLARITY_NORMAL,
-    .input_mode = DAW_AUDIO_UTILITY_INPUT_MODE_STEREO, .pan = 0.0F, .balance = 0.0F, .width = 1.0F,
-    .matrix = DAW_AUDIO_UTILITY_MATRIX_STEREO, .swap = 0, .dc_block = 1,
+    .enabled = 1, .gain_db = 0.0F, .phase_left = 0, .phase_right = 0,
+    .input_mode = DAW_AUDIO_UTILITY_INPUT_MODE_STEREO, .balance = 0.0F, .width = 1.0F,
+    .matrix = DAW_AUDIO_UTILITY_MATRIX_STEREO, .channel_mode = DAW_AUDIO_UTILITY_CHANNEL_MODE_BOTH, .dc_block = 1, .bass_mono_hz = 120.0F,
   };
   expect(daw_audio_core_wasm_utility_process(frames, a_left.data(), a_right.data(),
     standalone_left.data(), standalone_right.data(), &standalone_state), DAW_AUDIO_CORE_OK);
@@ -1993,7 +1997,7 @@ void test_processor_chain_prepare_and_dispatch() {
   const std::array<daw_audio_graph_edge_descriptor, 1> edges{{
     {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
   }};
-  std::array<uint8_t, 40> state{};
+  std::array<uint8_t, 64> state{};
   const auto write_u32 = [&state](uint32_t offset, uint32_t value) {
     state[offset] = static_cast<uint8_t>(value);
     state[offset + 1] = static_cast<uint8_t>(value >> 8u);
@@ -2007,16 +2011,17 @@ void test_processor_chain_prepare_and_dispatch() {
   };
   write_u32(0, 1);
   write_f32(4, 0.0F);
-  write_u32(8, DAW_AUDIO_UTILITY_POLARITY_INVERT);
-  write_u32(12, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO);
-  write_f32(16, 0.0F);
+  write_u32(8, 1);
+  write_u32(12, 1);
+  write_u32(16, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO);
   write_f32(20, 0.0F);
   write_f32(24, 1.0F);
   write_u32(28, DAW_AUDIO_UTILITY_MATRIX_STEREO);
-  const std::array<uint32_t, 4> targets{1, 2, 3, 4};
+  write_f32(56, 120.0F);
+  const std::array<uint32_t, 4> targets{1, 3, 4, 211};
   const daw_audio_processor_descriptor processor{
     .node_id = 2, .instance_id = 42, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY,
-    .state_version = 1, .state_size = static_cast<uint32_t>(state.size()), .bypassed = 0,
+    .state_version = DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION, .state_size = static_cast<uint32_t>(state.size()), .bypassed = 0,
     .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
     .latency_frames = 0, .tail_frames = 0, .parameter_count = static_cast<uint32_t>(targets.size()),
     .parameter_targets = targets.data(), .state = state.data(),
@@ -2041,19 +2046,21 @@ void test_processor_chain_prepare_and_dispatch() {
   expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
   assert(std::abs(output_left[0] + 0.25F) <= 1e-6F);
   assert(std::abs(output_right[0] - 0.5F) <= 1e-6F);
+  // The utility reads its controls on every 8th frame: bring the next block to one.
+  for (uint32_t frame = 1; frame < 8; ++frame) expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
   const std::array<float, 2> parameter_input{1.0F, 1.0F};
   const float *parameter_inputs[]{parameter_input.data(), parameter_input.data()};
   std::array<float, 2> parameter_left{};
   std::array<float, 2> parameter_right{};
   float *parameter_outputs[]{parameter_left.data(), parameter_right.data()};
-  const std::array<uint32_t, 1> parameter_targets{DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_PAN};
+  const std::array<uint32_t, 1> parameter_targets{DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BALANCE};
   const std::array<float, 2> parameter_values{-1.0F, 1.0F};
   const daw_audio_processor_parameter_block parameter_block{
     .processor_instance_id = 42, .frame_count = 2, .parameter_count = 1,
     .parameter_targets = parameter_targets.data(), .values = parameter_values.data(),
   };
   const daw_audio_processor_event parameter_event{
-    .processor_instance_id = 42, .parameter_target = DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_PAN,
+    .processor_instance_id = 42, .parameter_target = DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BALANCE,
     .frame_offset = 1, .value = 0.0F,
   };
   const daw_audio_core_process_block parameter_process{
@@ -2063,10 +2070,12 @@ void test_processor_chain_prepare_and_dispatch() {
     .event_count = 1, .events = &parameter_event,
   };
   expect(daw_audio_core_process(core, &parameter_process), DAW_AUDIO_CORE_OK);
-  assert(std::abs(parameter_left[0] + 1.41421356F) <= 1e-6F);
-  assert(std::abs(parameter_right[0]) <= 1e-6F);
+  // Balance -1 is read at the block's first frame (a control frame: the utility takes its controls every 8th frame) and the right
+  // channel, its far side, fades from unity over 10 ms rather than jumping. The event at frame 1 is read at the next control frame.
+  assert(std::abs(parameter_left[0] + 1.0F) <= 1e-6F);
   assert(std::abs(parameter_left[1] + 1.0F) <= 1e-6F);
-  assert(std::abs(parameter_right[1] + 1.0F) <= 1e-6F);
+  assert(parameter_right[0] < -0.99F && parameter_right[0] > -1.0F);
+  assert(parameter_right[1] > parameter_right[0] && parameter_right[1] < -0.99F);
   std::array<float, 2> persistent_left{};
   std::array<float, 2> persistent_right{};
   float *persistent_outputs[]{persistent_left.data(), persistent_right.data()};
@@ -2077,11 +2086,11 @@ void test_processor_chain_prepare_and_dispatch() {
   };
   expect(daw_audio_core_process(core, &persistent_process), DAW_AUDIO_CORE_OK);
   assert(std::abs(persistent_left[0] + 1.0F) <= 1e-6F);
-  assert(std::abs(persistent_right[0] + 1.0F) <= 1e-6F);
+  assert(persistent_right[0] > parameter_right[1] && persistent_right[0] < 0.0F);
   const std::array<daw_audio_processor_event, 2> multiple_events{{
-    {.processor_instance_id = 42, .parameter_target = DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_PAN,
+    {.processor_instance_id = 42, .parameter_target = DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BALANCE,
       .frame_offset = 0, .value = -1.0F},
-    {.processor_instance_id = 42, .parameter_target = DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_PAN,
+    {.processor_instance_id = 42, .parameter_target = DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BALANCE,
       .frame_offset = 1, .value = 0.5F},
   }};
   std::array<float, 2> multiple_left{};
@@ -2098,7 +2107,7 @@ void test_processor_chain_prepare_and_dispatch() {
   const std::array<float, 1> final_input{1.0F};
   const float *final_inputs[]{final_input.data(), final_input.data()};
   const daw_audio_processor_event rejected_event{
-    .processor_instance_id = 42, .parameter_target = DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_PAN,
+    .processor_instance_id = 42, .parameter_target = DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BALANCE,
     .frame_offset = 0, .value = 2.0F,
   };
   daw_audio_core_process_block rejected_process{
@@ -2111,7 +2120,7 @@ void test_processor_chain_prepare_and_dispatch() {
   rejected_process.events = nullptr;
   expect(daw_audio_core_process(core, &rejected_process), DAW_AUDIO_CORE_OK);
   assert(std::abs(final_left[0] - multiple_left[1]) <= 1e-6F);
-  assert(std::abs(final_right[0] - multiple_right[1]) <= 1e-6F);
+  assert(final_right[0] > multiple_right[1] && final_right[0] < 0.0F);
   daw_audio_core_process_block stale_process = parameter_process;
   stale_process.graph_revision = 2;
   expect(daw_audio_core_process(core, &stale_process), DAW_AUDIO_CORE_STALE_REVISION);
@@ -2138,7 +2147,7 @@ void test_processor_chain_prepare_and_dispatch() {
   oversized_request.processors = &oversized;
   expect(daw_audio_core_prepare_graph(core, &oversized_request), DAW_AUDIO_CORE_PROCESSOR_STATE_INVALID);
   daw_audio_processor_descriptor mismatched = processor;
-  mismatched.state_version = 2;
+  mismatched.state_version = 1;
   daw_audio_graph_prepare_request mismatch_request = request;
   mismatch_request.graph_revision = 2;
   mismatch_request.processors = &mismatched;
@@ -4349,25 +4358,25 @@ void test_prepared_graph_ranges_are_partition_invariant_and_allocation_free() {
 constexpr daw_audio_utility_state utility_state(
   uint32_t enabled = 1,
   float gain_db = 0.0F,
-  uint32_t polarity = DAW_AUDIO_UTILITY_POLARITY_NORMAL,
+  uint32_t phase_inverted = 0,
   uint32_t input_mode = DAW_AUDIO_UTILITY_INPUT_MODE_STEREO,
-  float pan = 0.0F,
   float balance = 0.0F,
   float width = 1.0F,
   uint32_t matrix = DAW_AUDIO_UTILITY_MATRIX_STEREO,
-  uint32_t swap = 0,
+  uint32_t channel_mode = DAW_AUDIO_UTILITY_CHANNEL_MODE_BOTH,
   uint32_t dc_block = 0) {
   return {
     .enabled = enabled,
     .gain_db = gain_db,
-    .polarity = polarity,
+    .phase_left = phase_inverted,
+    .phase_right = phase_inverted,
     .input_mode = input_mode,
-    .pan = pan,
     .balance = balance,
     .width = width,
     .matrix = matrix,
-    .swap = swap,
+    .channel_mode = channel_mode,
     .dc_block = dc_block,
+    .bass_mono_hz = 120.0F,
   };
 }
 
@@ -4383,7 +4392,7 @@ void test_processor_control_slot_survives_graph_compaction() {
     {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F,
       .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
   }};
-  const std::array<uint32_t, 1> parameter_targets{DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_PAN};
+  const std::array<uint32_t, 1> parameter_targets{DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BALANCE};
   const auto first_state = utility_state();
   const auto second_state = utility_state();
   std::array<uint8_t, sizeof(daw_audio_utility_state)> first_state_bytes{};
@@ -4392,12 +4401,12 @@ void test_processor_control_slot_survives_graph_compaction() {
   std::memcpy(second_state_bytes.data(), &second_state, sizeof(second_state));
   const std::array<daw_audio_processor_descriptor, 2> initial_processors{{
     {.node_id = 2, .instance_id = 41, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY,
-      .state_version = 1, .state_size = static_cast<uint32_t>(first_state_bytes.size()), .bypassed = 0,
+      .state_version = DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION, .state_size = static_cast<uint32_t>(first_state_bytes.size()), .bypassed = 0,
       .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
       .latency_frames = 0, .tail_frames = 0, .parameter_count = 1,
       .parameter_targets = parameter_targets.data(), .state = first_state_bytes.data()},
     {.node_id = 2, .instance_id = 42, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY,
-      .state_version = 1, .state_size = static_cast<uint32_t>(second_state_bytes.size()), .bypassed = 0,
+      .state_version = DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION, .state_size = static_cast<uint32_t>(second_state_bytes.size()), .bypassed = 0,
       .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
       .latency_frames = 0, .tail_frames = 0, .parameter_count = 1,
       .parameter_targets = parameter_targets.data(), .state = second_state_bytes.data()},
@@ -4413,7 +4422,7 @@ void test_processor_control_slot_survives_graph_compaction() {
 
   const daw_audio_processor_descriptor retained_processor{
     .node_id = 2, .instance_id = 42, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY,
-    .state_version = 1, .state_size = static_cast<uint32_t>(second_state_bytes.size()), .bypassed = 0,
+    .state_version = DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION, .state_size = static_cast<uint32_t>(second_state_bytes.size()), .bypassed = 0,
     .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
     .latency_frames = 0, .tail_frames = 0, .parameter_count = 1,
     .parameter_targets = parameter_targets.data(), .state = second_state_bytes.data(),
@@ -4433,8 +4442,8 @@ void test_processor_control_slot_survives_graph_compaction() {
   std::array<float, 4> output_right{};
   float *outputs[]{output_left.data(), output_right.data()};
   const daw_audio_processor_event event{
-    .processor_instance_id = 42, .parameter_target = DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_PAN,
-    .frame_offset = 2, .value = 1.0F,
+    .processor_instance_id = 42, .parameter_target = DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BALANCE,
+    .frame_offset = 0, .value = 1.0F,
   };
   const daw_audio_core_process_block event_block{
     .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = 4, .channel_count = 2,
@@ -4442,13 +4451,11 @@ void test_processor_control_slot_survives_graph_compaction() {
     .event_count = 1, .events = &event,
   };
   expect(daw_audio_core_process(core, &event_block), DAW_AUDIO_CORE_OK);
-  for (uint32_t frame = 0; frame < 2; ++frame) {
-    assert(std::abs(output_left[frame] - 1.0F) <= 1e-6F);
-    assert(std::abs(output_right[frame] - 1.0F) <= 1e-6F);
-  }
-  for (uint32_t frame = 2; frame < 4; ++frame) {
+  // The retained instance has not rendered yet, so it starts at the Balance +1 its event carries: the left (far) channel is
+  // silent and the right (near) channel stays at unity. An event for the dropped instance 41 would have left both at unity.
+  for (uint32_t frame = 0; frame < 4; ++frame) {
     assert(std::abs(output_left[frame]) <= 1e-6F);
-    assert(std::abs(output_right[frame] - 1.41421356F) <= 1e-6F);
+    assert(std::abs(output_right[frame] - 1.0F) <= 1e-6F);
   }
 
   output_left.fill(0.0F);
@@ -4460,7 +4467,7 @@ void test_processor_control_slot_survives_graph_compaction() {
   expect(daw_audio_core_process(core, &persistent_block), DAW_AUDIO_CORE_OK);
   for (uint32_t frame = 0; frame < 4; ++frame) {
     assert(std::abs(output_left[frame]) <= 1e-6F);
-    assert(std::abs(output_right[frame] - 1.41421356F) <= 1e-6F);
+    assert(std::abs(output_right[frame] - 1.0F) <= 1e-6F);
   }
   daw_audio_core_destroy(core);
 }
@@ -4562,13 +4569,12 @@ void test_utility_and_summing_graph() {
   const daw_audio_utility_state state = utility_state(
     1,
     0.0F,
-    DAW_AUDIO_UTILITY_POLARITY_INVERT,
+    1,
     DAW_AUDIO_UTILITY_INPUT_MODE_MONO_SUM,
-    0.0F,
     0.0F,
     1.0F,
     DAW_AUDIO_UTILITY_MATRIX_STEREO,
-    1);
+    DAW_AUDIO_UTILITY_CHANNEL_MODE_SWAP);
   expect(daw_audio_core_configure_utility(core, &state), DAW_AUDIO_CORE_OK);
   const std::array<float, 1> first_left{1.0F};
   const std::array<float, 1> first_right{-0.5F};
@@ -4598,9 +4604,8 @@ void test_utility_dsp_state_and_bypass() {
   const daw_audio_utility_state configured = utility_state(
     1,
     6.0F,
-    DAW_AUDIO_UTILITY_POLARITY_NORMAL,
+    0,
     DAW_AUDIO_UTILITY_INPUT_MODE_STEREO,
-    1.0F,
     1.0F,
     0.0F,
     DAW_AUDIO_UTILITY_MATRIX_STEREO);
@@ -4623,7 +4628,8 @@ void test_utility_dsp_state_and_bypass() {
   };
   expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
   assert(std::abs(left_output[0]) <= 1e-6F);
-  assert(std::abs(right_output[0] - std::pow(10.0F, 6.0F / 20.0F) * 0.35355339F) <= 1e-5F);
+  // Mono (width 0) leaves 0.25 on both sides; Balance 1 silences the left; the right (near) side gets the gain and no pan-law boost.
+  assert(std::abs(right_output[0] - std::pow(10.0F, 6.0F / 20.0F) * 0.25F) <= 1e-5F);
 
   const daw_audio_utility_state bypassed = utility_state(0);
   expect(daw_audio_core_configure_utility(core, &bypassed), DAW_AUDIO_CORE_OK);
@@ -4663,8 +4669,8 @@ void test_utility_mid_side_and_dc_blocking() {
     .outputs = outputs,
   };
   const daw_audio_utility_state encode = utility_state(
-    1, 0.0F, DAW_AUDIO_UTILITY_POLARITY_NORMAL, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO,
-    0.0F, 0.0F, 1.0F, DAW_AUDIO_UTILITY_MATRIX_MID_SIDE_ENCODE);
+    1, 0.0F, 0, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO,
+    0.0F, 1.0F, DAW_AUDIO_UTILITY_MATRIX_MID_SIDE_ENCODE);
   expect(daw_audio_core_configure_utility(core, &encode), DAW_AUDIO_CORE_OK);
   expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
   const float *encoded_inputs[] = {left_output.data(), right_output.data()};
@@ -4677,8 +4683,8 @@ void test_utility_mid_side_and_dc_blocking() {
     .outputs = outputs,
   };
   const daw_audio_utility_state decode = utility_state(
-    1, 0.0F, DAW_AUDIO_UTILITY_POLARITY_NORMAL, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO,
-    0.0F, 0.0F, 1.0F, DAW_AUDIO_UTILITY_MATRIX_MID_SIDE_DECODE);
+    1, 0.0F, 0, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO,
+    0.0F, 1.0F, DAW_AUDIO_UTILITY_MATRIX_MID_SIDE_DECODE);
   expect(daw_audio_core_configure_utility(core, &decode), DAW_AUDIO_CORE_OK);
   expect(daw_audio_core_process(core, &decode_block), DAW_AUDIO_CORE_OK);
   for (uint32_t index = 0; index < left_input.size(); ++index) {
@@ -4689,8 +4695,8 @@ void test_utility_mid_side_and_dc_blocking() {
   left_input.fill(0.5F);
   right_input.fill(0.5F);
   const daw_audio_utility_state dc_blocking = utility_state(
-    1, 0.0F, DAW_AUDIO_UTILITY_POLARITY_NORMAL, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO,
-    0.0F, 0.0F, 1.0F, DAW_AUDIO_UTILITY_MATRIX_STEREO, 0, 1);
+    1, 0.0F, 0, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO,
+    0.0F, 1.0F, DAW_AUDIO_UTILITY_MATRIX_STEREO, DAW_AUDIO_UTILITY_CHANNEL_MODE_BOTH, 1);
   expect(daw_audio_core_configure_utility(core, &dc_blocking), DAW_AUDIO_CORE_OK);
   for (uint32_t block_index = 0; block_index < 100; ++block_index) expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
   assert(std::abs(left_output.back()) <= 1e-4F);
@@ -4744,7 +4750,7 @@ void test_utility_fixture_protocol() {
       .frame_count = 1,
       .channel_count = 2,
       .input_bus_count = 1,
-      .state = utility_state(1, 0.0F, DAW_AUDIO_UTILITY_POLARITY_INVERT),
+      .state = utility_state(1, 0.0F, 1),
     },
     .input = {0.25F, -0.5F},
   };
@@ -5838,7 +5844,7 @@ struct Phase3Fixture {
       processors[index] = {
         .node_id = 1, .instance_id = index == 0 ? 0x1'0000'0001ULL : 1ULL,
         .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY,
-        .state_version = 1, .state_size = sizeof(utility),
+        .state_version = DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION, .state_size = sizeof(utility),
         .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
         .state = reinterpret_cast<const uint8_t *>(&utility),
       };
@@ -6064,7 +6070,7 @@ struct Phase3SlotFixture {
     for (uint32_t index = 0; index < processors.size(); ++index) {
       processors[index] = {
         .node_id = index / chain + 1, .instance_id = 1 + index + (index < count ? tag * 10000 : 0),
-        .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY, .state_version = 1, .state_size = sizeof(utility),
+        .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY, .state_version = DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION, .state_size = sizeof(utility),
         .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
         .state = reinterpret_cast<const uint8_t *>(&utility),
       };
@@ -6842,7 +6848,7 @@ void test_phase3_unresolved_patch_blocks_prepare() {
   rig.commit(1);
   const daw_audio_processor_state_patch patch{
     .graph_revision = 1, .node_id = 1, .instance_id = 10, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY,
-    .state_version = 1, .state_size = sizeof(daw_audio_utility_state),
+    .state_version = DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION, .state_size = sizeof(daw_audio_utility_state),
     .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
     .state = reinterpret_cast<const uint8_t *>(&rig.utilities.back()),
   };
@@ -6998,7 +7004,8 @@ void test_phase3_non_latency_edit_touches_only_its_own_object() {
     build(reference, false);
     edited.commit(1);
     reference.commit(1);
-    for (uint32_t index = 0; index < 8; ++index) assert(edited.render(0.25F) == reference.render(0.25F));
+    // The 4 Hz DC corner needs 16 blocks to fall under the bound below.
+    for (uint32_t index = 0; index < 16; ++index) assert(edited.render(0.25F) == reference.render(0.25F));
     // The oracle only means something while the blocker still rings: a reset
     // would restart it at the full input level.
     assert(reference.render(0.25F)[0][Phase3Rig::frames - 1] < 0.15F);
@@ -7259,7 +7266,7 @@ void test_phase3_restructure_mid_bypass_keeps_the_ramp() {
     rig.add_node(2, DAW_AUDIO_GRAPH_NODE_MASTER);
     rig.add_edge(1, 2);
     rig.add_utility(1, 10, 6.0206F);
-    rig.utilities.back().swap = swap ? 1 : 0;
+    rig.utilities.back().channel_mode = swap ? DAW_AUDIO_UTILITY_CHANNEL_MODE_SWAP : DAW_AUDIO_UTILITY_CHANNEL_MODE_BOTH;
     rig.utilities.back().enabled = bypassed != 0 ? 0u : 1u;
     rig.declare_target(DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB);
     rig.processors.back().bypassed = bypassed;
@@ -9100,7 +9107,7 @@ void test_phase3_compiled_bypass_is_a_parameter_not_a_restructure() {
       flag_only ? "the plan flag alone does not bypass a stage with declared targets"
                 : "a compiled bypass does not settle on the dry signal", block[0][63], input);
   }
-  // A DC blocker has all but forgotten its constant input after 160 ms. Bypassing it
+  // A DC blocker has all but forgotten its constant input after 400 ms (its corner is 4 Hz). Bypassing it
   // moves along the dry ramp from where the wet signal is; a restructure would restart
   // the blocker, whose first output is the whole input, and the wet signal would step
   // from 1e-5 to 0.25 at the toggle.
@@ -9119,7 +9126,7 @@ void test_phase3_compiled_bypass_is_a_parameter_not_a_restructure() {
   build(false);
   rig.commit(1);
   Phase3Rig::Block block{};
-  for (uint32_t index = 0; index < 120; ++index) block = rig.render(input);
+  for (uint32_t index = 0; index < 300; ++index) block = rig.render(input);
   const float wet = block[0][63];
   phase3_require(wet < 1e-3F, "the DC blocker has not settled", wet, 0.0F);
   for (const bool bypassed : {true, false}) {

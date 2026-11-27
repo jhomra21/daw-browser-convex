@@ -290,14 +290,20 @@ const encodeFixtureInstrumentStates = (states: readonly PortableFixtureInstrumen
 const utilityState = (gainDb = 0, enabled = true) => encodeUtilityProcessorState({
   enabled,
   gainDb,
-  polarity: 'normal',
+  phaseLeft: false,
+  phaseRight: false,
   inputMode: 'stereo',
-  pan: 0,
   balance: 0,
   width: 1,
   matrix: 'stereo',
-  swap: false,
+  channelMode: 'both',
   dcBlock: true,
+  mute: false,
+  widthMode: 'stereo',
+  midSide: 0,
+  bassMono: false,
+  bassMonoHz: 120,
+  bassMonoAudition: false,
 })
 
 const autoFilterState = (overrides: Partial<AutoFilterProcessorState> = {}): AutoFilterProcessorState => ({
@@ -421,7 +427,7 @@ const graph = (
 
   for (const processor of processors) {
     const state = processor.state ?? utilityState()
-    const parameterTargets = processor.parameterTargets ?? [1, 2, 3, 4]
+    const parameterTargets = processor.parameterTargets ?? [1, 3, 4, 210]
     view.setBigUint64(offset, processor.nodeId, true)
     view.setUint32(offset + 8, processor.kindId ?? 1, true)
     view.setUint32(offset + 12, processorRegistry.find((entry) => entry.id === (processor.kindId ?? 1))?.schemaVersion ?? 1, true)
@@ -448,7 +454,7 @@ const parameterEnvelope = (frames: number) => {
   view.setBigUint64(4, 11n, true)
   view.setUint32(12, frames, true)
   view.setUint32(16, 1, true)
-  view.setUint32(20, 2, true)
+  view.setUint32(20, 3, true)
 
   for (let frame = 0; frame < frames; frame += 1) view.setFloat32(24 + frame * 4, frame === 0 ? -1 : 1, true)
 
@@ -469,7 +475,7 @@ const parameterEnvelopeForTarget = (target: number, values: readonly number[]) =
 }
 
 const processorEventEnvelope = (
-  target = 2,
+  target = 3,
   value = 0,
   frameOffset = 0,
 ) => {

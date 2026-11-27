@@ -1047,8 +1047,11 @@ int main() {
         accepted = control_session && control_session->QueueSourceEvents(payload);
         break;
       case daw::audio_host_macos::ControlType::kSpectrumSelection:
-        accepted = active_session && payload.size() == 8
-          && active_session->SetSpectrumNode(ReadU64(payload.data()));
+        // Node id, then the analysis block size and the channel to analyse.
+        accepted = active_session && payload.size() == 16
+          && active_session->SetSpectrumNode(ReadU64(payload.data()), {
+            .block_size = ReadU32(payload.data() + 8),
+            .channel = static_cast<daw::audio_host_macos::SpectrumChannel>(ReadU32(payload.data() + 12))});
         break;
       case daw::audio_host_macos::ControlType::kVstParameterEvents:
         accepted = control_session && control_session->QueueNativeVstParameterEvents(payload);

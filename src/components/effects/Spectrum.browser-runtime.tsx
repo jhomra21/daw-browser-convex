@@ -93,6 +93,30 @@ const run = async () => {
   await nextFrame()
   scenarios['re-enabling-the-device-resumes-the-spectrogram'] = lit(host.querySelectorAll('canvas')[1]) > 0
 
+  const chooser = (label: string) => host.querySelector(`button[aria-label="${label}"]`)?.textContent?.trim()
+  scenarios['the-block-and-channel-choosers-show-the-defaults'] = chooser('Block') === '2048' && chooser('Channel') === 'L+R'
+  setParams((previous) => ({ ...previous, block: 8192, channel: 'left' }))
+  await nextFrame()
+  scenarios['the-choosers-follow-the-device-params'] = chooser('Block') === '8192' && chooser('Channel') === 'Left'
+
+  const max = host.querySelector('button[aria-label="Max hold"]')
+  scenarios['max-is-off-by-default'] = max?.getAttribute('aria-pressed') === 'false'
+  max?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  await nextFrame()
+  scenarios['pressing-max-turns-max-hold-on'] = max?.getAttribute('aria-pressed') === 'true'
+
+  const curve = host.querySelector<HTMLElement>('[data-spectrum-canvas]')
+  const bounds = curve?.getBoundingClientRect()
+  setFrame(toneFrame(1000))
+  await nextFrame()
+  // 1 kHz sits at log(1000/20)/log(1000) of the 20 Hz to 20 kHz axis.
+  curve?.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: (bounds?.left ?? 0) + (bounds?.width ?? 0) * (Math.log(50) / Math.log(1000)), clientY: (bounds?.top ?? 0) + 5 }))
+  await nextFrame()
+  scenarios['hovering-the-curve-shows-frequency-note-and-level'] = /Hz · [A-G]#?\d.* · -?\d+\.\d dB/.test(host.querySelector('[data-spectrum-readout]')?.textContent ?? '') || /kHz · B5/.test(host.querySelector('[data-spectrum-readout]')?.textContent ?? '')
+  curve?.dispatchEvent(new PointerEvent('pointerleave', { bubbles: false }))
+  await nextFrame()
+  scenarios['leaving-the-curve-hides-the-readout'] = host.querySelector('[data-spectrum-readout]') === null
+
   Object.defineProperty(window, '__browserFixtureResults', { value: scenarios })
 }
 

@@ -301,9 +301,14 @@ struct AudioHost::Impl {
   NativeTelemetryObserver telemetry_observer{};
   std::atomic<std::uint64_t> spectrum_selected_node{0};
   std::uint64_t spectrum_sequence = 0;
+  // The analyzer and its history belong to the thread that drains spectrum frames; the control thread only
+  // publishes the wanted block size and channel.
+  std::atomic<std::uint32_t> spectrum_block_size{kSpectrumFftSize};
+  std::atomic<SpectrumChannel> spectrum_channel{SpectrumChannel::kBoth};
+  SpectrumChannel spectrum_analyzed_channel = SpectrumChannel::kBoth;
   SpectrumAnalyzer spectrum_analyzer{kSpectrumFftSize};
-  std::array<float, kSpectrumFftSize> spectrum_history_left{};
-  std::array<float, kSpectrumFftSize> spectrum_history_right{};
+  std::array<float, kMaximumSpectrumFftSize> spectrum_history_left{};
+  std::array<float, kMaximumSpectrumFftSize> spectrum_history_right{};
   std::uint32_t spectrum_history_count = 0;
   struct ObservationLookup {
     std::array<std::uint64_t, 64> node_ids{};

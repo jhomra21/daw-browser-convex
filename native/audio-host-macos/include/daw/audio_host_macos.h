@@ -400,6 +400,13 @@ struct MeterBatch {
   std::array<MeterEntry, kMaximumMeterEntries> entries{};
 };
 
+enum class SpectrumChannel : std::uint32_t { kBoth = 0, kLeft = 1, kRight = 2 };
+
+struct SpectrumSettings {
+  std::uint32_t block_size = 2048;
+  SpectrumChannel channel = SpectrumChannel::kBoth;
+};
+
 struct SpectrumFrame {
   std::uint32_t graph_revision = 0;
   std::uint32_t transport_epoch = 0;
@@ -561,7 +568,7 @@ class AudioHost {
   std::optional<WorkerNotification> WaitForWorkerNotification(const std::atomic<bool>* running);
   bool WaitForMeterBatch(const std::atomic<bool>* running);
   std::optional<MeterBatch> DrainMeterBatch();
-  bool SetSpectrumNode(std::uint64_t node_id);
+  bool SetSpectrumNode(std::uint64_t node_id, SpectrumSettings settings = {});
   bool WaitForSpectrumFrame(const std::atomic<bool>* running);
   std::optional<SpectrumFrame> DrainSpectrumFrame();
   bool WaitForScheduleProgress(const std::atomic<bool>* running);

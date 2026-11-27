@@ -12,12 +12,15 @@ const asset = (assetId: string, frameCount = 480): AudioAssetRef => ({
 })
 
 test("serializes native spectrum selection in the host protocol byte order", () => {
-  expect([...serializeNativeSpectrumSelection(0x0123_4567_89ab_cdefn)]).toEqual([
+  expect([...serializeNativeSpectrumSelection(0x0123_4567_89ab_cdefn, { block: 8192, channel: "right" })]).toEqual([
     0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+    0, 0, 0x20, 0, 0, 0, 0, 2,
   ])
-  expect([...serializeNativeSpectrumSelection(null)]).toEqual([
+  expect([...serializeNativeSpectrumSelection(null, { block: 2048, channel: "both" })]).toEqual([
     0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0x08, 0, 0, 0, 0, 0,
   ])
+  expect([...serializeNativeSpectrumSelection(7n, { block: 16384, channel: "left" })].slice(8)).toEqual([0, 0, 0x40, 0, 0, 0, 0, 1])
 })
 
 test("serializes bounded same-core processor state patches", () => {

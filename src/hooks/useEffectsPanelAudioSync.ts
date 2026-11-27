@@ -4,6 +4,8 @@ import {
   type ArpeggiatorParams,
   type TrackInstrumentParams,
   type JsonValue,
+  type SpectrumSettings,
+  createDefaultSpectrumSettings,
   isLocalId,
 } from "@daw-browser/shared";
 import type { AudioEngine, EngineDisposition, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
@@ -34,7 +36,9 @@ type UseEffectsPanelAudioSyncOptions = {
   syncArpeggiatorForTarget?: (targetId: string, params: ArpeggiatorParams | undefined, through?: number) => void;
   samplerBufferSync: ReturnType<typeof createSamplerBufferSync>;
   drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>;
-  spectrumProvider?: Accessor<((targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void) | undefined>;
+  // What the first Spectrum device on the current target asks the analyser to measure with.
+  spectrumSettings?: Accessor<SpectrumSettings>;
+  spectrumProvider?: Accessor<((targetId: string, listener: (frame: SpectrumFrame | null) => void, settings: SpectrumSettings) => () => void) | undefined>;
 };
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
@@ -49,6 +53,7 @@ type UseEffectsPanelAudioSyncReturn = {
 type SpectrumProvider = (
   targetId: string,
   listener: (frame: SpectrumFrame | null) => void,
+  settings: SpectrumSettings,
 ) => () => void;
 
 export const createSpectrumSubscriptionOwner = (
@@ -60,21 +65,27 @@ export const createSpectrumSubscriptionOwner = (
   let activeOpen = false;
   let activeProvider: SpectrumProvider | undefined;
   let activeTargetId = "";
+  let activeSettings: SpectrumSettings | undefined;
 
   const update = (
     isOpen: boolean,
     provider: SpectrumProvider | undefined,
     targetId: string,
+    settings: SpectrumSettings = createDefaultSpectrumSettings(),
   ) => {
     if (disposed) return;
 
-    if (isOpen === activeOpen && provider === activeProvider && targetId === activeTargetId) return;
+    if (
+      isOpen === activeOpen && provider === activeProvider && targetId === activeTargetId
+      && settings.block === activeSettings?.block && settings.channel === activeSettings.channel
+    ) return;
     generation += 1;
     unsubscribe();
     unsubscribe = () => undefined;
     activeOpen = isOpen;
     activeProvider = provider;
     activeTargetId = targetId;
+    activeSettings = settings;
 
     if (!isOpen || !provider) {
       setFrame(null);
@@ -85,7 +96,7 @@ export const createSpectrumSubscriptionOwner = (
     const subscriptionGeneration = generation;
     unsubscribe = provider(targetId, (frame) => {
       if (!disposed && subscriptionGeneration === generation) setFrame(frame);
-    });
+    }, settings);
   };
 
   const dispose = () => {
@@ -444,11 +455,11 @@ export function useEffectsPanelAudioSync(
   const [spectrum, setSpectrum] = createSignal<SpectrumFrame | null>(null);
 
   const spectrumSubscription = createSpectrumSubscriptionOwner(setSpectrum);
-  spectrumSubscription.update(options.isOpen(), options.spectrumProvider?.(), options.currentTargetId());
+  spectrumSubscription.update(options.isOpen(), options.spectrumProvider?.(), options.currentTargetId(), options.spectrumSettings?.());
   createEffect(
-    () => ({ isOpen: options.isOpen(), provider: options.spectrumProvider?.(), targetId: options.currentTargetId() }),
-    ({ isOpen, provider, targetId }) => {
-      spectrumSubscription.update(isOpen, provider, targetId);
+    () => ({ isOpen: options.isOpen(), provider: options.spectrumProvider?.(), targetId: options.currentTargetId(), settings: options.spectrumSettings?.() }),
+    ({ isOpen, provider, targetId, settings }) => {
+      spectrumSubscription.update(isOpen, provider, targetId, settings);
     },
   );
   onCleanup(spectrumSubscription.dispose);

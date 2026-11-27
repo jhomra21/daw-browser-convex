@@ -1,6 +1,7 @@
 import { nativeGraphNodeId, nativeMasterNodeId } from "@daw-browser/audio-engine/native-host-wire"
 import type { NativeHostMeterBatch, NativeHostSpectrumFrame } from "@daw-browser/audio-engine/native-host-wire"
 import type { SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch } from "@daw-browser/audio-engine/audio-engine"
+import { createDefaultSpectrumSettings, type SpectrumSettings } from "@daw-browser/shared"
 import type { DesktopBridge } from "~/types/desktop-bridge"
 import type { NativeSessionReply } from "./native-publication-transaction"
 
@@ -47,10 +48,13 @@ export const createNativeObservation = (host: NativeObservationHost) => {
   let masterLevels: TrackStereoLevels = { left: 0, right: 0 }
   let spectrumNodeIds = new Map<string, bigint>()
   let spectrumTarget: string | undefined
+  let spectrumSettings = createDefaultSpectrumSettings()
   let spectrumDesiredNodeId: bigint | null | undefined
+  // The host's analyser runs with the settings it last accepted along with its node.
   let spectrumSelectedNodeId: bigint | null | undefined
+  let spectrumSelectedSettings: SpectrumSettings | undefined
   let spectrumSelectionGeneration = 0
-  let spectrumSelectionRequest: { generation: number; nodeId: bigint | null } | undefined
+  let spectrumSelectionRequest: { generation: number; nodeId: bigint | null; settings: SpectrumSettings } | undefined
   let latestSpectrumSequence = 0n
 
   const resetMeters = () => {
@@ -78,16 +82,21 @@ export const createNativeObservation = (host: NativeObservationHost) => {
 
     if (nodeId === undefined) return
 
+    const settings = spectrumSettings
+
+    const sameSettings = (other: SpectrumSettings | undefined) =>
+      other?.block === settings.block && other.channel === settings.channel
+
     const supersedesRequest = spectrumSelectionRequest !== undefined
-      && spectrumSelectionRequest.nodeId !== nodeId
+      && (spectrumSelectionRequest.nodeId !== nodeId || !sameSettings(spectrumSelectionRequest.settings))
 
-    if (nodeId === spectrumSelectedNodeId && !supersedesRequest) return
+    if (nodeId === spectrumSelectedNodeId && sameSettings(spectrumSelectedSettings) && !supersedesRequest) return
 
-    if (!ownershipReleased && spectrumSelectionRequest?.nodeId === nodeId) return
+    if (!ownershipReleased && spectrumSelectionRequest?.nodeId === nodeId && sameSettings(spectrumSelectionRequest.settings)) return
     const session = host.session
     const requested = host.state()
     const selectionGeneration = ++spectrumSelectionGeneration
-    spectrumSelectionRequest = { generation: selectionGeneration, nodeId }
+    spectrumSelectionRequest = { generation: selectionGeneration, nodeId, settings }
 
     const finish = (reply: NativeSessionReply | undefined) => {
       if (spectrumSelectionRequest?.generation !== selectionGeneration) {
@@ -96,6 +105,7 @@ export const createNativeObservation = (host: NativeObservationHost) => {
         if (reply?.ok && requested.sessionGeneration === host.state().sessionGeneration
           && nodeId !== spectrumDesiredNodeId) {
           spectrumSelectedNodeId = undefined
+          spectrumSelectedSettings = undefined
           reconcileSpectrumSelection(true)
         }
 
@@ -110,9 +120,10 @@ export const createNativeObservation = (host: NativeObservationHost) => {
         || now.preparedProjectId !== requested.projectId || now.preparedProjectGeneration !== requested.projectGeneration
         || requested.projectId !== now.projectId || requested.projectGeneration !== now.projectGeneration) return
       spectrumSelectedNodeId = nodeId
+      spectrumSelectedSettings = settings
     }
 
-    void session?.setSpectrumNode?.(nodeId).then(finish, () => finish(undefined))
+    void session?.setSpectrumNode?.(nodeId, settings).then(finish, () => finish(undefined))
   }
 
   const handleSpectrumFrame = (frame: NativeHostSpectrumFrame) => {
@@ -262,7 +273,7 @@ export const createNativeObservation = (host: NativeObservationHost) => {
       unsubscribeSpectrum?.()
       unsubscribeSpectrum = host.session?.onSpectrumFrame?.(handleSpectrumFrame)
     },
-    forgetSpectrumSelection: () => { spectrumSelectedNodeId = undefined },
+    forgetSpectrumSelection: () => { spectrumSelectedNodeId = undefined; spectrumSelectedSettings = undefined },
     clear: () => {
       unsubscribeMeters?.()
       unsubscribeMeters = undefined
@@ -277,6 +288,7 @@ export const createNativeObservation = (host: NativeObservationHost) => {
       spectrumSelectionGeneration += 1
       spectrumDesiredNodeId = undefined
       spectrumSelectedNodeId = undefined
+      spectrumSelectedSettings = undefined
       spectrumSelectionRequest = undefined
 
       for (const listener of spectrumListeners) listener(null)
@@ -297,9 +309,10 @@ export const createNativeObservation = (host: NativeObservationHost) => {
 
       return () => masterMeterListeners.delete(listener)
     },
-    subscribeSpectrum: (targetId: string, listener: (frame: SpectrumFrame | null) => void) => {
+    subscribeSpectrum: (targetId: string, listener: (frame: SpectrumFrame | null) => void, settings: SpectrumSettings = createDefaultSpectrumSettings()) => {
       spectrumListeners.add(listener)
       spectrumTarget = targetId
+      spectrumSettings = settings
 
       if (host.state().prepared) reconcileSpectrumSelection()
       listener(null)

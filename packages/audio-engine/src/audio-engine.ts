@@ -4,7 +4,7 @@ import { isPlanarPcmForAsset, type AudioAssetRef, type PlanarPcm } from '../../a
 import type { AudioAssetRegistration, AudioAssetRelease } from './audio-asset-types'
 import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
-import { arpeggiatorParamsEqual, automationTargetKey, getAutomationParameterDescriptor, normalizeMasterVolume, parseSynthAutomationKey, valueAtAutomationTime, type ArpParams, type AudioPcmSourceDescriptor, type AutomationEnvelope, type MidiMappingTarget, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
+import { arpeggiatorParamsEqual, automationTargetKey, getAutomationParameterDescriptor, normalizeMasterVolume, parseSynthAutomationKey, valueAtAutomationTime, type ArpParams, type AudioPcmSourceDescriptor, type AutomationEnvelope, type MidiMappingTarget, type SpectrumSettings, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
 import { createMeteringRuntime, type MasterStereoLevelsListener, type SpectrumFrame, type TrackMeterFrame, type TrackMeterFrameBatch, type TrackStereoLevels, type TrackStereoLevelsBatch, type TrackStereoLevelsListener } from './metering-runtime'
@@ -1220,13 +1220,13 @@ export class AudioEngine {
     this.publishRuntimeSnapshot()
   }
 
-  getTrackSpectrum(trackId: string): SpectrumFrame | null {
+  getTrackSpectrum(trackId: string, settings: SpectrumSettings): SpectrumFrame | null {
     const output = this.mixer.getTrackOutput(trackId)
 
-    return this.metering.getTrackSpectrum(this.audioCtx, trackId, output)
+    return this.metering.getTrackSpectrum(this.audioCtx, trackId, output, settings)
   }
 
-  getMasterSpectrum(): SpectrumFrame | null {
-    return this.masterFx.getSpectrum(this.audioCtx, this.masterGain)
+  getMasterSpectrum(settings: SpectrumSettings): SpectrumFrame | null {
+    return this.masterFx.getSpectrum(this.audioCtx, this.masterGain, settings)
   }
 }

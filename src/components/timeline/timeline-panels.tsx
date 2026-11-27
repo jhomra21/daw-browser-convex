@@ -3,7 +3,7 @@ import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observ
 import { type Component, Show, Loading, createEffect, lazy } from 'solid-js'
 import { Button } from '~/components/ui/button'
 import type { AudioEngine, EngineDisposition, SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
-import { isLocalId, type AutomationEnvelope, type AutomationTargetDeviceInstance, type TrackInstrumentParams } from '@daw-browser/shared'
+import { isLocalId, type AutomationEnvelope, type AutomationTargetDeviceInstance, type SpectrumSettings, type TrackInstrumentParams } from '@daw-browser/shared'
 import { ExportProvider } from '~/context/export'
 import ExportProgressOverlay from '~/components/export/ExportProgressOverlay'
 import MidiClipEditor from '~/components/midi/MidiClipEditor'
@@ -61,7 +61,7 @@ export type TimelinePanelsProps = {
     samplerBufferSync: ReturnType<typeof createSamplerBufferSync>
     drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>
     retryNativeInstrumentPreparation?: (identity: NativeInstrumentRetryIdentity) => Promise<void>
-    spectrumProvider?: (targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void
+    spectrumProvider?: (targetId: string, listener: (frame: SpectrumFrame | null) => void, settings: SpectrumSettings) => () => void
     canWriteTrackRouting: (trackId: Track['id']) => boolean
     grantClipWrite: OptimisticGrantWrite
     onSelectClip: (trackId: Track['id'], clipId: string, startSec: number) => void

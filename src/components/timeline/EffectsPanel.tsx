@@ -2,7 +2,7 @@ import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery
 import { type Component, Show, Match, Switch, For, createEffect, createMemo, createSignal, onCleanup, onSettled, untrack } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import type { ExternalProcessor } from "@daw-browser/external-plugins";
-import { automationEnvelopeValueRange, isLocalId, type AudioEffectInstance, type AutomationEnvelope, type SynthParams, type TrackInstrumentParams } from "@daw-browser/shared";
+import { automationEnvelopeValueRange, isLocalId, type AudioEffectInstance, type AutomationEnvelope, type SpectrumSettings, type SynthParams, type TrackInstrumentParams } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
 import Synth from "~/components/effects/Synth";
 import DrumRack from "~/components/effects/DrumRack";
@@ -94,7 +94,7 @@ type EffectsPanelProps = {
   onMixedReorderCommitted?: (intent?: TimelineEditIntent) => void;
   enqueueNativeVstParameter?: NativeVstParameterQueue["enqueue"];
   requestNativeVstStateCapture?: (instanceId: string) => void;
-  spectrumProvider?: (targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void;
+  spectrumProvider?: (targetId: string, listener: (frame: SpectrumFrame | null) => void, settings: SpectrumSettings) => () => void;
   samplerBufferSync: ReturnType<typeof createSamplerBufferSync>;
   drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>;
   retryNativeInstrumentPreparation?: (identity: NativeInstrumentRetryIdentity) => Promise<void>;

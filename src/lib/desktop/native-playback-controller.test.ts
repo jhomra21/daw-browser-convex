@@ -34,7 +34,7 @@ import { createAudioStretchCache } from "@daw-browser/audio-engine/audio-stretch
 import { createPreparedStretchArtifactRepository } from "@daw-browser/audio-engine/prepared-stretch-store"
 import { compileLiveNativeProjection } from "@daw-browser/audio-engine/live-native-projection"
 import { getEffectTiming } from "@daw-browser/audio-engine/effects/timing"
-import { automationTargetKey, createDefaultDelayParams, normalizeDelayParams, createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams, createDefaultReverbParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultUtilityParams, mergeSynthParams, AUDIO_EFFECT_CONTRACTS, externalAutomationParameterId, type AutomationEnvelope, type AudioPcmSourceDescriptor, type TrackInstrumentParams, type SamplerZone, type SynthParamsUpdate } from "@daw-browser/shared"
+import { automationTargetKey, createDefaultDelayParams, normalizeDelayParams, createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams, createDefaultReverbParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultUtilityParams, mergeSynthParams, AUDIO_EFFECT_CONTRACTS, externalAutomationParameterId, type AutomationEnvelope, type AudioPcmSourceDescriptor, type TrackInstrumentParams, type SpectrumSettings, type SamplerZone, type SynthParamsUpdate } from "@daw-browser/shared"
 import { nativeGraphNodeId, nativeMasterNodeId, serializeNativeGraph, serializeNativeInstrumentStates, serializeNativeProcessorEvents, type NativeHostMappedAsset, type NativeHostMappedAssetPage, type NativeHostMeterBatch, type NativeHostPcmAsset, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeHostTransport, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
 import { listLocalEffects, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects"
 import { AudioEngine, type AudioEffectRuntimeInstance, type EngineDisposition, type SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
@@ -6154,6 +6154,7 @@ const createBridge = (
   }> = []
 
   const spectrumNodeIds: Array<bigint | null> = []
+  const spectrumSettings: SpectrumSettings[] = []
   const transportContexts: NativeHostTransport[] = []
   const spectrumSelections: Array<{ nodeId: bigint | null; sessionStarted: boolean }> = []
   let spectrumReply: (nodeId: bigint | null) => Promise<BridgeReply> = async () => ({ ok: true })
@@ -6252,6 +6253,7 @@ const createBridge = (
     get mappedAssetCreateCount() { return mappedAssetCreateCount },
     transports,
     spectrumNodeIds,
+    spectrumSettings,
     transportContexts,
     spectrumSelections,
     setSpectrumReply: (reply: (nodeId: bigint | null) => Promise<BridgeReply>) => { spectrumReply = reply },
@@ -6609,8 +6611,9 @@ const createBridge = (
 
           return () => { meterBatch = () => {} }
         },
-        setSpectrumNode: async (nodeId: bigint | null) => {
+        setSpectrumNode: async (nodeId: bigint | null, settings: SpectrumSettings) => {
           spectrumNodeIds.push(nodeId)
+          spectrumSettings.push(settings)
           spectrumSelections.push({ nodeId, sessionStarted })
 
           if (nodeId !== null && !sessionStarted) {
@@ -13735,6 +13738,36 @@ test("reconciles a rejected spectrum selection after a Seek", async () => {
     binCount: 1_024, data: new Float32Array(1_024) })
   expect(frames.at(-1)).toMatchObject({ nodeId: nativeGraphNodeId("track"), transportEpoch: 2 })
   unsubscribe()
+  await controller.dispose()
+})
+
+test("a new block size or channel reselects the same spectrum node, and the same settings do not", async () => {
+  const fixture = createBridge()
+
+  const controller = createObservedController({
+    bridge: fixture.bridge,
+    compileSnapshot: async (transport) => compileLivePlaybackSnapshot({ ...input(), transport }),
+  })
+
+  await controller.start(input().transport)
+  const settle = async () => { for (let turn = 0; turn < 10; turn++) await Promise.resolve() }
+  const first = controller.subscribeSpectrum("track", () => {}, { block: 2048, channel: "both" })
+  await settle()
+  const afterFirst = fixture.spectrumSettings.length
+  expect(fixture.spectrumSettings.at(-1)).toEqual({ block: 2048, channel: "both" })
+
+  const same = controller.subscribeSpectrum("track", () => {}, { block: 2048, channel: "both" })
+  await settle()
+  expect(fixture.spectrumSettings.length).toBe(afterFirst)
+
+  const changed = controller.subscribeSpectrum("track", () => {}, { block: 8192, channel: "left" })
+  await settle()
+  expect(fixture.spectrumSettings.length).toBe(afterFirst + 1)
+  expect(fixture.spectrumSettings.at(-1)).toEqual({ block: 8192, channel: "left" })
+  expect(fixture.spectrumNodeIds.at(-1)).toBe(nativeGraphNodeId("track"))
+  first()
+  same()
+  changed()
   await controller.dispose()
 })
 

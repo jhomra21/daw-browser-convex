@@ -38,7 +38,13 @@ std::optional<MeterBatch> AudioHost::DrainMeterBatch() {
   return batch;
 }
 
-bool AudioHost::SetSpectrumNode(const std::uint64_t node_id) {
+bool AudioHost::SetSpectrumNode(const std::uint64_t node_id, const SpectrumSettings settings) {
+  const auto block_size = settings.block_size;
+  if ((block_size & (block_size - 1U)) != 0U || block_size < 2U || block_size > kMaximumSpectrumFftSize
+    || settings.channel > SpectrumChannel::kRight) return false;
+  // The drain thread rebuilds its analyzer when it next sees different settings.
+  impl_->spectrum_block_size.store(block_size, std::memory_order_release);
+  impl_->spectrum_channel.store(settings.channel, std::memory_order_release);
   if (node_id == impl_->spectrum_selected_node.load(std::memory_order_acquire)) return true;
   // Share publication's nonblocking ownership gate so a control-thread lookup
   // cannot bind a removed identity across the callback's graph switch.
@@ -79,7 +85,7 @@ std::optional<SpectrumFrame> AudioHost::DrainSpectrumFrame() {
     drained_frames += event.frame_count;
     has_event = true;
     const auto count = std::min<std::uint32_t>(event.frame_count, kSpectrumFftSize);
-    const auto retained = std::min<std::uint32_t>(impl_->spectrum_history_count, kSpectrumFftSize - count);
+    const auto retained = std::min<std::uint32_t>(impl_->spectrum_history_count, kMaximumSpectrumFftSize - count);
     if (retained > 0) {
       std::copy(
         impl_->spectrum_history_left.begin() + (impl_->spectrum_history_count - retained),
@@ -97,11 +103,21 @@ std::optional<SpectrumFrame> AudioHost::DrainSpectrumFrame() {
     impl_->spectrum_history_count = retained + count;
   }
   if (!has_event) return std::nullopt;
-  std::vector<double> block(kSpectrumFftSize, 0.0);
-  const auto missing = kSpectrumFftSize - impl_->spectrum_history_count;
-  for (std::uint32_t index = 0; index < impl_->spectrum_history_count; ++index) {
-    block[missing + index] = (static_cast<double>(impl_->spectrum_history_left[index])
-      + static_cast<double>(impl_->spectrum_history_right[index])) * 0.5;
+  const auto block_size = impl_->spectrum_block_size.load(std::memory_order_acquire);
+  const auto channel = impl_->spectrum_channel.load(std::memory_order_acquire);
+  if (block_size != impl_->spectrum_analyzer.FftSize() || channel != impl_->spectrum_analyzed_channel) {
+    impl_->spectrum_analyzer = SpectrumAnalyzer(block_size);
+    impl_->spectrum_analyzed_channel = channel;
+  }
+  // The newest block_size frames, zero-padded in front until the history has filled.
+  std::vector<double> block(block_size, 0.0);
+  const auto available = std::min(impl_->spectrum_history_count, block_size);
+  const auto first = impl_->spectrum_history_count - available;
+  for (std::uint32_t index = 0; index < available; ++index) {
+    const double left = impl_->spectrum_history_left[first + index];
+    const double right = impl_->spectrum_history_right[first + index];
+    block[block_size - available + index] = channel == SpectrumChannel::kLeft ? left
+      : channel == SpectrumChannel::kRight ? right : (left + right) * 0.5;
   }
   impl_->spectrum_analyzer.Analyze(block, static_cast<double>(drained_frames) / latest.sample_rate_hz);
   SpectrumFrame output{};
@@ -110,9 +126,9 @@ std::optional<SpectrumFrame> AudioHost::DrainSpectrumFrame() {
   output.sequence = ++impl_->spectrum_sequence;
   output.node_id = latest.node_id;
   output.sample_rate_hz = latest.sample_rate_hz;
-  output.fft_size = kSpectrumFftSize;
-  output.bin_count = kMaximumSpectrumBins;
-  for (std::uint32_t bin = 0; bin < kMaximumSpectrumBins; ++bin) output.data[bin] = impl_->spectrum_analyzer.Level(bin);
+  output.fft_size = block_size;
+  output.bin_count = block_size / 2U;
+  for (std::uint32_t bin = 0; bin < output.bin_count; ++bin) output.data[bin] = impl_->spectrum_analyzer.Level(bin);
   return output;
 }
 

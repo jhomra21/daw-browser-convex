@@ -1,18 +1,17 @@
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
+import { SPECTRUM_MAX_HZ, SPECTRUM_MIN_HZ } from '~/lib/spectrum-readout'
 
-const SPECTRUM_MIN_HZ = 20
-const SPECTRUM_MAX_HZ = 20000
 const HISTORY_COLUMNS = 320
 const HISTORY_ROWS = 128
 
-// Frame levels are already normalised to 0..1 across the analyser's dB range; this resamples
+// Bin k sits at k * nyquist / bins. Frame levels are already normalised to 0..1 across the analyser's dB range; this resamples
 // them onto `count` log-spaced bands between 20 Hz and 20 kHz, taking the peak when a band
 // spans several bins and interpolating when it falls between two.
 const logBandLevels = (frame: SpectrumFrame, count: number, out: Float32Array = new Float32Array(count)) => {
   const bins = frame.data.length
   const nyquist = frame.sampleRate / 2
   const ratio = SPECTRUM_MAX_HZ / SPECTRUM_MIN_HZ
-  const binAt = (frequency: number) => Math.min(bins - 1, (frequency / nyquist) * (bins - 1))
+  const binAt = (frequency: number) => Math.min(bins - 1, (frequency / nyquist) * bins)
 
   for (let band = 0; band < count; band++) {
     const low = binAt(SPECTRUM_MIN_HZ * ratio ** (band / count))
@@ -101,9 +100,41 @@ export const createSpectrogramHistory = () => {
   }
 }
 
+// The highest level each bin has reached since the last reset, kept as a frame so it draws like the live curve.
+export const createSpectrumMaxHold = () => {
+  let held: SpectrumFrame | null = null
+
+  return {
+    held: () => held,
+    reset: () => { held = null },
+    push: (frame: SpectrumFrame) => {
+      if (held?.data.length !== frame.data.length || held.sampleRate !== frame.sampleRate) {
+        held = { data: Float32Array.from(frame.data), sampleRate: frame.sampleRate }
+
+        return
+      }
+
+      for (let bin = 0; bin < frame.data.length; bin++) held.data[bin] = Math.max(held.data[bin], frame.data[bin])
+    },
+  }
+}
+
+const traceCurve = (context: CanvasRenderingContext2D, frame: SpectrumFrame, width: number, height: number) => {
+  const bands = logBandLevels(frame, Math.max(2, Math.floor(width)))
+  context.beginPath()
+  bands.forEach((level, x) => {
+    const y = height - Math.min(1, Math.max(0, level)) * (height - 2) - 1
+
+    if (x === 0) context.moveTo(x, y)
+    else context.lineTo(x, y)
+  })
+  context.stroke()
+}
+
 export const drawSpectrumCurve = (
   context: CanvasRenderingContext2D,
   frame: SpectrumFrame | null,
+  held: SpectrumFrame | null,
   width: number,
   height: number,
   colors: { background: string; grid: string; line: string },
@@ -122,16 +153,16 @@ export const drawSpectrumCurve = (
 
   context.stroke()
 
-  if (!frame) return
-  const bands = logBandLevels(frame, Math.max(2, Math.floor(width)))
   context.strokeStyle = colors.line
-  context.lineWidth = 1.5
-  context.beginPath()
-  bands.forEach((level, x) => {
-    const y = height - Math.min(1, Math.max(0, level)) * (height - 2) - 1
 
-    if (x === 0) context.moveTo(x, y)
-    else context.lineTo(x, y)
-  })
-  context.stroke()
+  if (held) {
+    context.globalAlpha = 0.45
+    context.lineWidth = 1
+    traceCurve(context, held, width, height)
+    context.globalAlpha = 1
+  }
+
+  if (!frame) return
+  context.lineWidth = 1.5
+  traceCurve(context, frame, width, height)
 }

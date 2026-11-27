@@ -1,6 +1,7 @@
+import type { SpectrumSettings } from '@daw-browser/shared'
 import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import { connectFxChain, createGainTransitionOwner, disconnectAudioNodes, type GainTransitionOwner, type GainTransitionScheduler } from './effects/chain'
-import type { SpectrumFrame } from './metering-runtime'
+import { createSpectrumTap } from './spectrum-analyser'
 import type { AutomationAudioBinding } from './automation'
 import { normalizeAudioEffectRuntimeInstances, type AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import type { ResolveMixerGraphOptions } from './mixer/types'
@@ -11,7 +12,6 @@ import { getEffectChainTiming } from './effects/timing'
 import { createChainAdmission } from './chain-admission'
 import { createEffectChainTransaction, type EffectChainOutcome } from './effect-chain-transaction'
 import { createChainInstanceState } from './chain-instance-state'
-import { safeDisconnect } from './safe-disconnect'
 
 type MasterFxRuntimeOptions = {
   getFaultGeneration: () => number
@@ -29,11 +29,8 @@ const joinedOutcome = (underlying: MasterFxOutcome): MasterFxOutcome => (
 )
 
 export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
-  let analyser: AnalyserNode | null = null
-  let spectrumTmp: Uint8Array<ArrayBuffer> | null = null
-  let spectrumLast: SpectrumFrame | null = null
+  let spectrumTap: ReturnType<typeof createSpectrumTap> | null = null
   let analyserConnected = false
-  let releaseAnalyser: () => void = () => undefined
   let masterFxInstances: AudioEffectRuntimeInstance[] = []
   let masterChainInstances: AudioEffectRuntimeInstance[] = []
   const admission = createChainAdmission<MasterFxOutcome>(joinedOutcome)
@@ -62,9 +59,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       routingTransitionOwner = createGainTransitionOwner(nextRoutingGain, () => ctx.currentTime, options.transitionScheduler)
     }
 
-    if (analyserConnected && analyser) {
-      safeDisconnect(masterGain, analyser)
-    }
+    if (analyserConnected) spectrumTap?.detach()
 
     analyserConnected = false
 
@@ -76,8 +71,8 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
         instances: instanceState.stageConfigs(masterChainInstances),
       })
 
-      if (analyser) {
-        masterGain.connect(analyser)
+      if (spectrumTap) {
+        spectrumTap.attach()
         analyserConnected = true
       }
 
@@ -92,19 +87,18 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     )
   }
 
-  const ensureAnalyser = (ctx: AudioContext | null, masterGain: GainNode | null) => {
+  const ensureSpectrumTap = (ctx: AudioContext | null, masterGain: GainNode | null) => {
     if (!ctx || !masterGain) return
 
-    if (!analyser) {
-      const next = ctx.createAnalyser()
-      next.fftSize = 2048
-      next.smoothingTimeConstant = 0.8
-      analyser = next
-      releaseAnalyser = observeResource(options.resourceObserver, 'audio-nodes', next)
+    if (spectrumTap && spectrumTap.source !== masterGain) {
+      spectrumTap.dispose()
+      spectrumTap = null
     }
 
-    if (analyser && !analyserConnected) {
-      masterGain.connect(analyser)
+    spectrumTap ??= createSpectrumTap(ctx, masterGain, (node) => observeResource(options.resourceObserver, 'audio-nodes', node))
+
+    if (!analyserConnected) {
+      spectrumTap.attach()
       analyserConnected = true
     }
   }
@@ -242,44 +236,12 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       return instanceState.automationBindings(parameterId, effectInstanceId)
     },
     rebuildRouting,
-    getSpectrum: (ctx: AudioContext | null, masterGain: GainNode | null) => {
-      ensureAnalyser(ctx, masterGain)
+    getSpectrum: (ctx: AudioContext | null, masterGain: GainNode | null, settings: SpectrumSettings) => {
+      ensureSpectrumTap(ctx, masterGain)
 
-      if (!analyser) return spectrumLast
-
-      if (!spectrumTmp || spectrumTmp.length !== analyser.frequencyBinCount) {
-        spectrumTmp = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount))
-      }
-
-      try { analyser.getByteFrequencyData(spectrumTmp) } catch { return spectrumLast }
-
-      let sum = 0
-
-      for (let i = 0; i < spectrumTmp.length; i++) sum += spectrumTmp[i]
-
-      if (sum === 0) {
-        spectrumLast = null
-
-        return null
-      }
-
-      let out = spectrumLast?.data
-
-      if (!out || out.length !== spectrumTmp.length) out = new Float32Array(spectrumTmp.length)
-
-      for (let i = 0; i < out.length; i++) out[i] = spectrumTmp[i] / 255
-      spectrumLast = {
-        data: out,
-        sampleRate: ctx?.sampleRate ?? 44100,
-        fftSize: analyser.fftSize,
-        binCount: analyser.frequencyBinCount,
-      }
-
-      return spectrumLast
+      return spectrumTap?.read(settings) ?? null
     },
     close: () => {
-      releaseAnalyser()
-      releaseAnalyser = () => undefined
       releaseRoutingGain()
       releaseRoutingGain = () => undefined
       routingTransitionOwner?.dispose()
@@ -295,10 +257,8 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       instanceState.drainRetired()
       options.workletBudget.releaseOwner('master')
       instanceState.forgetCompressorMeterListeners()
-      disconnectAudioNodes([analyser])
-      analyser = null
-      spectrumTmp = null
-      spectrumLast = null
+      spectrumTap?.dispose()
+      spectrumTap = null
       analyserConnected = false
     },
   }

@@ -630,7 +630,7 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
       else if (["gain", "preview", "flush"].includes(action.kind)) {
         ledger.beginGainEdit()
         tickGesture("utility:1", "utility", () => panel.utility.changeInstance("utility:1", (params) => ({ ...params, state: { ...params.state, gainDb: action.value ?? -6,
-          ...(action.mode === "pan" && { pan: 0.25 }), ...(action.mode === "pan-reset" && { pan: 0 }) } })))
+          ...(action.mode === "pan" && { balance: 0.25 }), ...(action.mode === "pan-reset" && { balance: 0 }) } })))
 
         if (action.kind !== "preview") commitGesture("utility:1", "utility")
       } else if (action.kind === "cancel") {

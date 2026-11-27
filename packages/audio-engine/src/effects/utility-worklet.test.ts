@@ -4,7 +4,7 @@ import { utilityWorklet } from '../worklet-manifest'
 
 type Port = {
   onmessage: ((event: { data: unknown }) => void) | null
-  postMessage: (message: unknown) => void
+  postMessage: (message: { type: string }) => void
   close: () => void
 }
 
@@ -93,11 +93,11 @@ describe('Utility static worklet', () => {
     expect(Array.from(right)).toEqual(Array.from(input))
     const Constructor = await loadConstructor()
     const processor = new Constructor()
-    const messages: unknown[] = []
+    const messages: { type: string }[] = []
     processor.port.postMessage = (message) => messages.push(message)
     processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 3, state: createDefaultUtilityParams() } })
     processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 3, state: createDefaultUtilityParams() } })
     processor.port.onmessage?.({ data: { type: 'configure', version: 2, revision: 5, state: {} } })
-    expect(messages.map((message) => message instanceof Object && 'type' in message ? message.type : message)).toEqual(['configured', 'fault', 'fault'])
+    expect(messages.map((message) => message.type)).toEqual(['configured', 'fault', 'fault'])
   })
 })

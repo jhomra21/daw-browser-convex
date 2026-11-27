@@ -91,6 +91,7 @@ test('a Pan hard left against Balance hard right was silent and becomes Mute', (
 // A lane on the retired id has nowhere to go: local load drops lanes whose id has no descriptor (local-automation.ts) and the server refuses to write them.
 test('the retired Pan lane id has no descriptor, while Balance, Mid/Side and Bass Mono Hz do', () => {
   expect(getAutomationParameterDescriptor('utility.pan')).toBeUndefined()
+
   for (const id of ['utility.gainDb', 'utility.balance', 'utility.width', 'utility.midSide', 'utility.bassMonoHz']) expect(getAutomationParameterDescriptor(id)?.owner).toBe('utility')
 })
 

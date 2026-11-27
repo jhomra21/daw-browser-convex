@@ -12,6 +12,8 @@ import {
   midSideRatios, monoLevelDb, phaseLeftError, sideLevelDb, silencedPeak, silenceTail, toneGainAt,
 } from './utility-measure'
 import type { Stereo, UtilityRender } from './utility-measure'
+import { createDefaultUtilityParams } from '@daw-browser/shared'
+import type { ParamStep } from '../types'
 import { parityLimit, robustnessScenarios } from './shared'
 
 const aligned = (frame: number) => Math.floor(frame / 128) * 128
@@ -65,7 +67,7 @@ const dcBlocker: Scenario = {
     h.atMost('DC blocker on: nonzero samples below 1e-20 after 4 s of a 10 s silence', tail.tiny, 0, 'samples', 'before (a49d9c57): 288000, every sample of the tail')
     h.atMost('DC blocker on: subnormal samples after 4 s of a 10 s silence', tail.subnormal, 0, 'samples', 'before (a49d9c57): 288000')
     h.atMost('DC blocker on: peak after 4 s of a 10 s silence', tail.peak, 0, 'FS', 'the state flushes at the float floor, so a silent input settles to exact zeros; before (a49d9c57): 5.4e-43, subnormal')
-    h.flag('DC blocker is off in a new instance', fx.utility().state.dcBlock === false, 'default off', 'before (a49d9c57): on')
+    h.flag('DC blocker is off in a new instance', createDefaultUtilityParams().dcBlock === false, 'default off', 'before (a49d9c57): on')
   },
 }
 
@@ -236,7 +238,7 @@ const automationParity: Scenario = {
   run: async (h) => {
     const input: Stereo = [noise(2 * h.rate, 0.25, 7), noise(2 * h.rate, 0.25, 8)]
     const at = (seconds: number) => aligned(seconds * h.rate)
-    const steps = [{ frame: at(0.2), set: { gainDb: -9 } }, { frame: at(0.4), set: { balance: 0.5, width: 0.4 } }, { frame: at(0.6), set: { bassMonoHz: 300 } }, { frame: at(0.8), set: { midSide: -0.3 } }]
+    const steps: ParamStep[] = [{ frame: at(0.2), set: { gainDb: -9 } }, { frame: at(0.4), set: { balance: 0.5, width: 0.4 } }, { frame: at(0.6), set: { bassMonoHz: 300 } }, { frame: at(0.8), set: { midSide: -0.3 } }]
 
     for (const state of [{ bassMono: true, bassMonoHz: 80, widthMode: 'mid-side' as const }, { bassMono: true, bassMonoHz: 80 }]) {
       const { output, legacy } = await h.render(fx.utility(state), { input, steps })

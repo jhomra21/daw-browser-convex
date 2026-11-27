@@ -193,6 +193,7 @@ class UtilityKernel {
       channel.low[1].process(channel.low[0].process(x, this.low), this.low),
       channel.high[1].process(channel.high[0].process(x, this.high), this.high),
     ]
+
     const [lowLeft, highLeft] = band(this.channels[0], left)
     const [lowRight, highRight] = band(this.channels[1], right)
     const low = 0.5 * (lowLeft + lowRight)
@@ -264,6 +265,7 @@ class UtilityKernel {
       left = right
     } else {
       if (cfg.channelMode === 3) { const swap = left; left = right; right = swap }
+
       const bySide = cfg.widthMode === 1
       const midGain = bySide && midSide > 0 ? 1 - midSide : 1
       const sideGain = bySide ? (midSide < 0 ? 1 + midSide : 1) : width

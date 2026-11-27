@@ -16644,7 +16644,7 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
 
   for (const scenario of ["B9-untouched", "B10-unsent-id", "B11-after-publication", "B12-before-adoption", "B14-patch-revert"]) {
     test(`STEP5 NC ${scenario} real foreign row delivery`, async () => {
-      const params = (value: number) => scenario === "B10-unsent-id"
+      const params = (value: number): ReturnType<typeof createDefaultUtilityParams> => scenario === "B10-unsent-id"
         ? { ...withGain(-3), balance: value === -6 ? 0.4 : 0 }
         : scenario === "B14-patch-revert" ? { ...withGain(value), channelMode: value === 9 ? 'swap' : 'both' } : withGain(value);
 

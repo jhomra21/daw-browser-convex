@@ -304,8 +304,9 @@ describe('shared timeline operations', () => {
         params: {
           version: 1,
           state: {
-            enabled: true, gainDb: 3, polarity: 'normal', inputMode: 'stereo', pan: 0,
-            balance: 0, width: 1, matrix: 'stereo', swap: false, dcBlock: true,
+            enabled: true, gainDb: 3, phaseLeft: false, phaseRight: false, inputMode: 'stereo',
+            balance: 0, width: 1, matrix: 'stereo', channelMode: 'both', dcBlock: false, mute: false, widthMode: 'stereo', midSide: 0,
+            bassMono: false, bassMonoHz: 120, bassMonoAudition: false,
           },
         },
       },

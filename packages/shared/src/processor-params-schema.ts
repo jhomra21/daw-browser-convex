@@ -72,10 +72,12 @@ const compressor = z.object({
 }).strict()
 
 const utility = envelope(z.object({
-  enabled: z.boolean(), gainDb: finiteNumber, polarity: z.enum(['normal', 'invert']),
-  inputMode: z.enum(['stereo', 'mono-sum']), pan: finiteNumber, balance: finiteNumber,
+  enabled: z.boolean(), gainDb: finiteNumber, phaseLeft: z.boolean(), phaseRight: z.boolean(),
+  inputMode: z.enum(['stereo', 'mono-sum']), balance: finiteNumber,
   width: finiteNumber, matrix: z.enum(['stereo', 'mid-side-encode', 'mid-side-decode']),
-  swap: z.boolean(), dcBlock: z.boolean(),
+  channelMode: z.enum(['both', 'left', 'right', 'swap']), dcBlock: z.boolean(), mute: z.boolean(),
+  widthMode: z.enum(['stereo', 'mid-side']), midSide: finiteNumber, bassMono: z.boolean(), bassMonoHz: finiteNumber,
+  bassMonoAudition: z.boolean(),
 }).strict())
 
 const gate = envelope(z.object({

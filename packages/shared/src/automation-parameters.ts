@@ -57,6 +57,10 @@ import {
   SATURATOR_COLOR_FREQUENCY_HZ_MAX,
   LOFI_SAMPLE_RATE_HZ_MAX,
   LOFI_SAMPLE_RATE_HZ_MIN,
+  UTILITY_BASS_MONO_HZ_MAX,
+  UTILITY_BASS_MONO_HZ_MIN,
+  UTILITY_GAIN_DB_MAX,
+  UTILITY_GAIN_DB_MIN,
   SATURATOR_COLOR_FREQUENCY_HZ_MIN,
   SATURATOR_DRIVE_DB_MAX,
   SATURATOR_COLOR_WIDTH_MAX,
@@ -175,10 +179,11 @@ const staticDescriptors: AutomationParameterDescriptor[] = [
 ]
 
 const effectDescriptors: AutomationParameterDescriptor[] = [
-  { id: 'utility.gainDb', label: 'Utility Gain', group: 'Audio Effects', device: 'Utility', owner: 'utility', targetKinds: ['track', 'master'], min: -60, max: 24, defaultValue: 0, scale: 'linear', unit: 'db' },
-  { id: 'utility.pan', label: 'Utility Pan', group: 'Audio Effects', device: 'Utility', owner: 'utility', targetKinds: ['track', 'master'], min: -1, max: 1, defaultValue: 0, scale: 'linear' },
+  { id: 'utility.gainDb', label: 'Utility Gain', group: 'Audio Effects', device: 'Utility', owner: 'utility', targetKinds: ['track', 'master'], min: UTILITY_GAIN_DB_MIN, max: UTILITY_GAIN_DB_MAX, defaultValue: 0, scale: 'linear', unit: 'db' },
   { id: 'utility.balance', label: 'Utility Balance', group: 'Audio Effects', device: 'Utility', owner: 'utility', targetKinds: ['track', 'master'], min: -1, max: 1, defaultValue: 0, scale: 'linear' },
   { id: 'utility.width', label: 'Utility Width', group: 'Audio Effects', device: 'Utility', owner: 'utility', targetKinds: ['track', 'master'], min: 0, max: 2, defaultValue: 1, scale: 'linear' },
+  { id: 'utility.midSide', label: 'Utility Mid/Side', group: 'Audio Effects', device: 'Utility', owner: 'utility', targetKinds: ['track', 'master'], min: -1, max: 1, defaultValue: 0, scale: 'linear' },
+  { id: 'utility.bassMonoHz', label: 'Utility Bass Mono Frequency', group: 'Audio Effects', device: 'Utility', owner: 'utility', targetKinds: ['track', 'master'], min: UTILITY_BASS_MONO_HZ_MIN, max: UTILITY_BASS_MONO_HZ_MAX, defaultValue: 120, scale: 'log', unit: 'hz' },
   { id: 'autofilter.frequencyHz', label: 'Auto Filter Frequency', group: 'Audio Effects', device: 'Auto Filter', owner: 'autofilter', targetKinds: ['track', 'master'], min: 20, max: 20000, defaultValue: createDefaultAutoFilterParams().frequencyHz, scale: 'log', unit: 'hz' },
   { id: 'autofilter.resonance', label: 'Auto Filter Resonance', group: 'Audio Effects', device: 'Auto Filter', owner: 'autofilter', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: createDefaultAutoFilterParams().resonance, scale: 'linear' },
   { id: 'autofilter.driveDb', label: 'Auto Filter Drive', group: 'Audio Effects', device: 'Auto Filter', owner: 'autofilter', targetKinds: ['track', 'master'], min: 0, max: 24, defaultValue: createDefaultAutoFilterParams().driveDb, scale: 'linear', unit: 'db' },

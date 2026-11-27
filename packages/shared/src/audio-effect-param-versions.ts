@@ -4,6 +4,7 @@ import { migrateGateParamsV1 } from './gate-params-migration'
 import { migrateLimiterParamsV1 } from './limiter-params-migration'
 import { migrateAutoPanParamsV1, migrateChorusParamsV1, migrateEnsembleParamsV1, migrateFlangerParamsV1, migratePhaserParamsV1, migrateTremoloParamsV1 } from './modulation-params-migration'
 import { migrateLoFiParamsV1 } from './lofi-params-migration'
+import { migrateUtilityParamsV1 } from './utility-params-migration'
 import { migrateSaturatorParamsV1 } from './saturator-params-migration'
 import { migrateReverbParamsV1, migrateReverbStereoWidthV1 } from './reverb-params-migration'
 import { migrateAutoFilterEnvelopeAmountV1, migrateAutoFilterParamsV1, migrateAutoFilterResonanceV1 } from './auto-filter-params-migration'
@@ -30,7 +31,7 @@ export const AUDIO_EFFECT_PARAMS_VERSION: Readonly<Record<AudioEffectKind, numbe
   autopan: 2,
   ensemble: 2,
   spectral: 1,
-  utility: 1,
+  utility: 2,
   spectrum: 1,
 }
 
@@ -75,6 +76,8 @@ export const AUDIO_EFFECT_PARAMS_VERSIONING: AudioEffectParamsVersioning = {
     saturator: { 1: migrateSaturatorParamsV1 },
     // Lo-Fi: Rate in Hz (old ratio x 48 kHz, ratio 1 the top of the range), the band-limiting filters and the Floor correction off (lofi-params-migration.ts).
     lofi: { 1: migrateLoFiParamsV1 },
+    // Utility: Phase L/R from the one polarity switch, Channel Mode from Swap, and the old Pan folded into Balance (utility-params-migration.ts).
+    utility: { 1: migrateUtilityParamsV1 },
     // Reverb: Density Sparse (the old 8 lines), the old in-loop cuts as shelves, Width as the Stereo angle, Chorus on, Smooth Fast.
     reverb: { 1: migrateReverbParamsV1 },
     // Chorus, Flanger, Ensemble, Phaser, Tremolo, Auto Pan: each added control starts at the value that keeps the old setting (modulation-params-migration.ts).

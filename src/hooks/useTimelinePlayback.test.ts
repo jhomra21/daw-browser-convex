@@ -351,7 +351,7 @@ test.each(["announce", "unsupported", "announce+sample"])("3B1 r2 actual playbac
         const edit = createProcessorEditRegistry(() => 120).allocate({
           targetId: "track-1", instanceId: "utility", effect: "utility",
           from: { version: 1, state: createDefaultUtilityParams() },
-          to: { version: 1, state: { ...createDefaultUtilityParams(), swap: true } },
+          to: { version: 1, state: { ...createDefaultUtilityParams(), channelMode: 'swap' } },
         })
 
         if (!edit) throw new Error("Missing structural edit")
@@ -8704,7 +8704,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean) => {
     if (kind === 'structural') { addEffect(); rescheduleTimeline() }
 
     if (kind === 'proc-live' || kind === 'proc-nonlive') {
-      const to: UtilityParamsEnvelope = { version: 1, state: kind === 'proc-live' ? { ...utility().state, gainDb: 3.25 } : { ...utility().state, swap: true } }
+      const to: UtilityParamsEnvelope = { version: 1, state: kind === 'proc-live' ? { ...utility().state, gainDb: 3.25 } : { ...utility().state, channelMode: 'swap' } }
       const allocated = registry.allocate({ targetId: track.id, instanceId: 'utility-1', effect: 'utility', from: utility(), to })
 
       if (!allocated) throw new Error('Missing utility edit')

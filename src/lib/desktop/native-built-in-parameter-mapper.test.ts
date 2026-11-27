@@ -111,10 +111,10 @@ test('maps every continuous target for every live built-in family', () => {
       payload: {
         targetId: 'track-1', effect: 'utility', instanceId: 'utility-1',
         from: envelope(utilityFrom),
-        to: envelope({ ...utilityFrom, gainDb: 3, pan: -0.25, balance: 0.2, width: 1.5 }),
+        to: envelope({ ...utilityFrom, gainDb: 3, balance: 0.2, width: 1.5, midSide: -0.5, bassMonoHz: 200 }),
       } satisfies EffectParamsCommitPayload<'utility'>,
       expected: [
-        ['utility.gainDb', 3], ['utility.pan', -0.25], ['utility.balance', 0.2], ['utility.width', 1.5],
+        ['utility.gainDb', 3], ['utility.balance', 0.2], ['utility.width', 1.5], ['utility.midSide', -0.5], ['utility.bassMonoHz', 200],
       ],
     },
     {
@@ -397,7 +397,7 @@ test('rejects every structural change atomically across live built-in families',
 
 test('encodes a complete built-in state for same-core patching', () => {
   const from = envelope(createDefaultUtilityParams())
-  const to = envelope({ ...from.state, polarity: 'invert', dcBlock: true } satisfies typeof from.state)
+  const to = envelope({ ...from.state, phaseLeft: true, dcBlock: true } satisfies typeof from.state)
 
   const payload = {
     targetId: 'track-1',
@@ -409,7 +409,7 @@ test('encodes a complete built-in state for same-core patching', () => {
 
   const result = encodeNativeBuiltInStateCommit(payload, 120)
   expect(result?.instanceId).toBe('fx-1')
-  expect(result?.state.byteLength).toBe(40)
+  expect(result?.state.byteLength).toBe(64)
   expect(new DataView(result?.state.buffer ?? new ArrayBuffer()).getUint32(8, true)).toBe(1)
   expect(new DataView(result?.state.buffer ?? new ArrayBuffer()).getUint32(36, true)).toBe(1)
 })
@@ -452,7 +452,7 @@ test('rejects missing instances and mixed or unsupported changes', () => {
     targetId: 'track-1',
     effect: 'utility',
     from: envelope(utility),
-    to: envelope({ ...utility, pan: 0.2 }),
+    to: envelope({ ...utility, balance: 0.2 }),
   } satisfies EffectParamsCommitPayload<'utility'>
 
   expect(mapNativeBuiltInParameterCommit(missingInstance, 120)).toBeUndefined()
@@ -460,7 +460,7 @@ test('rejects missing instances and mixed or unsupported changes', () => {
   const mixed = {
     ...missingInstance,
     instanceId: 'fx-1',
-    to: envelope({ ...utility, pan: 0.2, polarity: 'invert' }),
+    to: envelope({ ...utility, balance: 0.2, phaseLeft: true }),
   } satisfies EffectParamsCommitPayload<'utility'>
 
   expect(mapNativeBuiltInParameterCommit(mixed, 120)).toBeUndefined()

@@ -100,7 +100,7 @@ const amplitudeKeys = ['rateHz', 'depth', 'shape', 'phase']
 
 /** Parameter targets by state path; the same path patches the legacy worklet's state. */
 export const parameterTargets: Record<EffectKind, Record<string, number>> = {
-  utility: range(1, ['gainDb', 'pan', 'balance', 'width']),
+  utility: { gainDb: 1, balance: 3, width: 4, ...range(210, ['bassMonoHz', 'midSide']) },
   // 71 was the Color amount; the shelves took 203 and up.
   saturator: { driveDb: 69, colorFrequencyHz: 70, outputDb: 72, dryWet: 73, ...range(203, ['colorHighDb', 'colorLowDb', 'colorWidth', 'bassThresholdDb', 'warpDepth', 'warpPeriod']) },
   eq: eqTargets,
@@ -160,7 +160,7 @@ export const autofilterLfo: AutoFilterProcessorState['lfo'] = {
 export const fx = {
   utility: (state: Partial<UtilityProcessorState> = {}): EffectSpec => ({
     kind: 'utility',
-    state: { enabled: true, gainDb: 0, polarity: 'normal', inputMode: 'stereo', pan: 0, balance: 0, width: 1, matrix: 'stereo', swap: false, dcBlock: true, ...state },
+    state: { enabled: true, gainDb: 0, phaseLeft: false, phaseRight: false, inputMode: 'stereo', balance: 0, width: 1, matrix: 'stereo', channelMode: 'both', mute: false, widthMode: 'stereo', midSide: 0, bassMono: false, bassMonoHz: 120, bassMonoAudition: false, dcBlock: false, ...state },
   }),
   saturator: (state: Partial<SaturatorProcessorState> = {}): EffectSpec => ({
     kind: 'saturator',

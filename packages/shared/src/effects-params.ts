@@ -877,29 +877,46 @@ export function computeCompressorStaticCurveDb(inputDb: number, params: Compress
 
 export type ProcessorStateEnvelope<TState> = { version: 1; state: TState }
 
-export type UtilityPolarity = 'normal' | 'invert'
-
 export type UtilityInputMode = 'stereo' | 'mono-sum'
 
 export type UtilityMatrix = 'stereo' | 'mid-side-encode' | 'mid-side-decode'
 
+// Left and Right play that channel on both outputs and disable the width controls; Swap exchanges the channels.
+export type UtilityChannelMode = 'both' | 'left' | 'right' | 'swap'
+
+// Stereo scales the side signal by Width; Mid/Side scales mid or side by midSide (-1 mono, 0 as played, 1 side only).
+export type UtilityWidthMode = 'stereo' | 'mid-side'
+
+// A gain at or below the minimum is minus infinity: silence.
+export const UTILITY_GAIN_DB_MIN = -70
+export const UTILITY_GAIN_DB_MAX = 35
+export const UTILITY_BASS_MONO_HZ_MIN = 50
+export const UTILITY_BASS_MONO_HZ_MAX = 500
+
 export type UtilityParams = {
   enabled: boolean
   gainDb: number
-  polarity: UtilityPolarity
+  phaseLeft: boolean
+  phaseRight: boolean
   inputMode: UtilityInputMode
-  pan: number
   balance: number
   width: number
   matrix: UtilityMatrix
-  swap: boolean
+  channelMode: UtilityChannelMode
   dcBlock: boolean
+  mute: boolean
+  widthMode: UtilityWidthMode
+  midSide: number
+  bassMono: boolean
+  bassMonoHz: number
+  bassMonoAudition: boolean
 }
 
-export type UtilityParamsInput = Partial<Omit<UtilityParams, 'polarity' | 'inputMode' | 'matrix'>> & {
-  polarity?: JsonValue
+export type UtilityParamsInput = Partial<Omit<UtilityParams, 'inputMode' | 'matrix' | 'channelMode' | 'widthMode'>> & {
   inputMode?: JsonValue
   matrix?: JsonValue
+  channelMode?: JsonValue
+  widthMode?: JsonValue
 }
 
 export type UtilityParamsEnvelope = ProcessorStateEnvelope<UtilityParams>
@@ -907,31 +924,43 @@ export type UtilityParamsEnvelope = ProcessorStateEnvelope<UtilityParams>
 const readObject = (value: JsonValue): JsonObject => isJsonObject(value) ? value : {}
 
 export function createDefaultUtilityParams(): UtilityParams {
-  return { enabled: true, gainDb: 0, polarity: 'normal', inputMode: 'stereo', pan: 0, balance: 0, width: 1, matrix: 'stereo', swap: false, dcBlock: true }
+  return {
+    enabled: true, gainDb: 0, phaseLeft: false, phaseRight: false, inputMode: 'stereo', balance: 0, width: 1, matrix: 'stereo',
+    channelMode: 'both', dcBlock: false, mute: false, widthMode: 'stereo', midSide: 0, bassMono: false, bassMonoHz: 120, bassMonoAudition: false,
+  }
 }
 
 export function normalizeUtilityParams(input: UtilityParamsInput = {}): UtilityParams {
   const defaults = createDefaultUtilityParams()
   const gainDb = readFiniteNumber(input.gainDb)
-  const pan = readFiniteNumber(input.pan)
   const balance = readFiniteNumber(input.balance)
   const width = readFiniteNumber(input.width)
+  const midSide = readFiniteNumber(input.midSide)
+  const bassMonoHz = readFiniteNumber(input.bassMonoHz)
 
   return {
     enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
-    gainDb: gainDb === undefined ? defaults.gainDb : clamp(gainDb, -60, 24),
-    polarity: input.polarity === 'invert' ? 'invert' : 'normal',
+    gainDb: gainDb === undefined ? defaults.gainDb : clamp(gainDb, UTILITY_GAIN_DB_MIN, UTILITY_GAIN_DB_MAX),
+    phaseLeft: isJsonBoolean(input.phaseLeft) ? input.phaseLeft : defaults.phaseLeft,
+    phaseRight: isJsonBoolean(input.phaseRight) ? input.phaseRight : defaults.phaseRight,
     inputMode: input.inputMode === 'mono-sum' ? 'mono-sum' : 'stereo',
-    pan: pan === undefined ? defaults.pan : clamp(pan, -1, 1),
     balance: balance === undefined ? defaults.balance : clamp(balance, -1, 1),
     width: width === undefined ? defaults.width : clamp(width, 0, 2),
     matrix: input.matrix === 'mid-side-encode' || input.matrix === 'mid-side-decode' ? input.matrix : 'stereo',
-    swap: isJsonBoolean(input.swap) ? input.swap : defaults.swap,
+    channelMode: input.channelMode === 'left' || input.channelMode === 'right' || input.channelMode === 'swap' ? input.channelMode : 'both',
     dcBlock: isJsonBoolean(input.dcBlock) ? input.dcBlock : defaults.dcBlock,
+    mute: isJsonBoolean(input.mute) ? input.mute : defaults.mute,
+    widthMode: input.widthMode === 'mid-side' ? 'mid-side' : 'stereo',
+    midSide: midSide === undefined ? defaults.midSide : clamp(midSide, -1, 1),
+    bassMono: isJsonBoolean(input.bassMono) ? input.bassMono : defaults.bassMono,
+    bassMonoHz: bassMonoHz === undefined ? defaults.bassMonoHz : clamp(bassMonoHz, UTILITY_BASS_MONO_HZ_MIN, UTILITY_BASS_MONO_HZ_MAX),
+    bassMonoAudition: isJsonBoolean(input.bassMonoAudition) ? input.bassMonoAudition : defaults.bassMonoAudition,
   }
 }
 
 const serializeUtilityParams = (params: UtilityParams) => JSON.stringify({ version: 1, state: normalizeUtilityParams(params) })
+
+const readBoolean = (value: JsonValue) => value === true || value === false ? value : undefined
 
 export const normalizeUtilityParamsEnvelope = (value: JsonValue): UtilityParamsEnvelope => {
   const envelope = readObject(value)
@@ -940,16 +969,22 @@ export const normalizeUtilityParamsEnvelope = (value: JsonValue): UtilityParamsE
   return {
     version: 1,
     state: normalizeUtilityParams({
-      enabled: state.enabled === true || state.enabled === false ? state.enabled : undefined,
+      enabled: readBoolean(state.enabled),
       gainDb: isJsonNumber(state.gainDb) ? state.gainDb : undefined,
-      polarity: state.polarity,
+      phaseLeft: readBoolean(state.phaseLeft),
+      phaseRight: readBoolean(state.phaseRight),
       inputMode: state.inputMode,
-      pan: isJsonNumber(state.pan) ? state.pan : undefined,
       balance: isJsonNumber(state.balance) ? state.balance : undefined,
       width: isJsonNumber(state.width) ? state.width : undefined,
       matrix: state.matrix,
-      swap: state.swap === true || state.swap === false ? state.swap : undefined,
-      dcBlock: state.dcBlock === true || state.dcBlock === false ? state.dcBlock : undefined,
+      channelMode: state.channelMode,
+      dcBlock: readBoolean(state.dcBlock),
+      mute: readBoolean(state.mute),
+      widthMode: state.widthMode,
+      midSide: isJsonNumber(state.midSide) ? state.midSide : undefined,
+      bassMono: readBoolean(state.bassMono),
+      bassMonoHz: isJsonNumber(state.bassMonoHz) ? state.bassMonoHz : undefined,
+      bassMonoAudition: readBoolean(state.bassMonoAudition),
     }),
   }
 }

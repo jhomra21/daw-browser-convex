@@ -167,7 +167,7 @@ describe("B6a3 terminal-routing truth table", () => {
       compileSnapshot: async () => compileLivePlaybackSnapshot(utilityPlaybackInput()) })
 
     try {
-      const edit = fixtureParameterEdit({ instanceId: "utility:1", values: [{ parameterId: "utility.pan", value: 0.25 }] })
+      const edit = fixtureParameterEdit({ instanceId: "utility:1", values: [{ parameterId: "utility.balance", value: 0.25 }] })
       expect(await controller.deliverProcessor(edit).settled).toEqual({ state: "unavailable" })
       expect(await controller.ensureLivePreview(0)).toBe("started")
       const before = fixture.builtInParameterPayloads.length
@@ -2194,7 +2194,7 @@ describe("DV01 STEP7 frozen inputs and cleanup witnesses", () => {
 
         const patch = step7Watch(f.controller.deliverProcessor(fixturePatchEdit({
           bpm: 120, processorStateSequence: 22,
-          payload: utilityCommit("utility:1", createDefaultUtilityParams(), { ...createDefaultUtilityParams(), swap: true, gainDb: -9 }),
+          payload: utilityCommit("utility:1", createDefaultUtilityParams(), { ...createDefaultUtilityParams(), channelMode: 'swap', gainDb: -9 }),
         })).settled)
 
         gate.resolve(); await step7Turns()
@@ -4018,7 +4018,7 @@ describe("DV01 instrument truth", () => {
     const controller = createObservedController({
       bridge: fixture.bridge, compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
         ...base, transport, renderState: { ...base.renderState, fx: { ...base.renderState.fx, trackFx: {
-          track: { instances: [{ id: "utility:1", kind: "utility", params: { version: 1, state: { ...row, polarity: "invert" } } }] },
+          track: { instances: [{ id: "utility:1", kind: "utility", params: { version: 1, state: { ...row, phaseLeft: true, phaseRight: true } } }] },
         } } },
       }),
     })
@@ -4031,7 +4031,7 @@ describe("DV01 instrument truth", () => {
 
     const restored = watch(controller.deliverProcessor({
       id: "row-structure", order: 30, target: { nodeId: "track", instanceId: "utility:1", kindId: 1, incarnation: 1 },
-      content: { params: row, state: encodeUtilityProcessorState(row), values: { "utility.gainDb": 0, "utility.pan": 0 },
+      content: { params: row, state: encodeUtilityProcessorState(row), values: { "utility.gainDb": 0, "utility.balance": 0 },
         timing: nativeBuiltInPatchTiming(payload) },
     }).settled)
 
@@ -12932,7 +12932,7 @@ test("coalesces each processor independently without dropping distinct updates",
   await expect(controller.ensureLivePreview(0)).resolves.toBe("started")
   await Promise.all([
     controller.deliverProcessor(fixturePatchEdit({ payload: utilityCommit("utility:1", first, second), bpm: 120 })).settled,
-    controller.deliverProcessor(fixturePatchEdit({ payload: utilityCommit("utility:2", first, { ...first, pan: 0.25 }), bpm: 120 })).settled,
+    controller.deliverProcessor(fixturePatchEdit({ payload: utilityCommit("utility:2", first, { ...first, balance: 0.25 }), bpm: 120 })).settled,
   ])
   expect(fixture.calls.filter((call) => call === "processor-state-patch")).toHaveLength(2)
   expect(fixture.statePatchPayloads.map((bytes) => new DataView(bytes.buffer).getUint32(16, true))).toHaveLength(2)
@@ -12986,7 +12986,7 @@ test("serializes native state patches globally while retaining one latest pendin
   })).settled
 
   const distinct = controller.deliverProcessor(fixturePatchEdit({
-    payload: utilityCommit("utility:2", first, { ...first, pan: 0.25 }),
+    payload: utilityCommit("utility:2", first, { ...first, balance: 0.25 }),
     bpm: 120,
   })).settled
 
@@ -13007,7 +13007,7 @@ test("serializes native state patches globally while retaining one latest pendin
 
   expect(sent[0]?.instanceId).not.toBe(sent[1]?.instanceId)
   expect(Array.from(sent[0]?.state ?? [])).toEqual(Array.from(encodeUtilityProcessorState({ ...first, gainDb: -2 })))
-  expect(Array.from(sent[1]?.state ?? [])).toEqual(Array.from(encodeUtilityProcessorState({ ...first, pan: 0.25 })))
+  expect(Array.from(sent[1]?.state ?? [])).toEqual(Array.from(encodeUtilityProcessorState({ ...first, balance: 0.25 })))
   await expect(Promise.all([firstPatch, replacement, distinct])).resolves.toEqual([
     { state: "superseded", by: 0 },
     { state: "applied" },
@@ -13354,7 +13354,7 @@ test("queues built-in parameters for paused prepared preview and reports target 
   await expect(controller.ensureLivePreview(0)).resolves.toBe("started")
   await expect(controller.deliverProcessor(fixtureParameterEdit({
     instanceId: "utility:1",
-    values: [{ parameterId: "utility.pan", value: 0.25 }],
+    values: [{ parameterId: "utility.balance", value: 0.25 }],
   })).settled).resolves.toEqual({ state: "applied" })
   const dispatched = fixture.builtInParameterPayloads.length
   await expect(controller.deliverProcessor(fixtureParameterEdit({
@@ -13363,7 +13363,7 @@ test("queues built-in parameters for paused prepared preview and reports target 
   })).settled).resolves.toEqual({ state: "refused", reason: "unsupported" })
   await expect(controller.deliverProcessor(fixtureParameterEdit({
     instanceId: "missing",
-    values: [{ parameterId: "utility.pan", value: 0.25 }],
+    values: [{ parameterId: "utility.balance", value: 0.25 }],
   })).settled).resolves.toEqual({ state: "refused", reason: "unsupported" })
   expect(fixture.builtInParameterPayloads).toHaveLength(dispatched)
   await controller.dispose()
@@ -13379,7 +13379,7 @@ test("queues built-in parameters for paused prepared preview and reports target 
   failedFixture.bridge.session.queueProcessorStatePatch = async () => ({ ok: true, outcome: "refused", refusal: "invalid", coreResult: 0 })
   await expect(failedController.deliverProcessor(fixtureParameterEdit({
     instanceId: "utility:1",
-    values: [{ parameterId: "utility.pan", value: 0.25 }],
+    values: [{ parameterId: "utility.balance", value: 0.25 }],
   })).settled).resolves.toMatchObject({ state: "refused" })
   await failedController.dispose()
 })
@@ -16239,7 +16239,7 @@ describe("DV01 boundary witnesses", () => {
     fixture.bridge.session.queueParameterEvents = async () => ({ ok: false, error: "audio session is unavailable", kind: "unavailable" })
     await expect(controller.deliverProcessor(fixtureParameterEdit({
       instanceId: "utility:1",
-      values: [{ parameterId: "utility.pan", value: 0.25 }],
+      values: [{ parameterId: "utility.balance", value: 0.25 }],
     })).settled).resolves.toEqual({ state: "unavailable" })
     await controller.dispose()
   })
@@ -16295,7 +16295,7 @@ describe("DV01 boundary witnesses", () => {
     const controller = createObservedController({ bridge: fixture.bridge, compileSnapshot })
     await expect(controller.ensureLivePreview(0)).resolves.toBe("started")
     void controller.deliverProcessor(fixturePatchEdit({ payload: utilityCommit("utility:1", first, { ...first, gainDb: -1 }), bpm: 120 })).settled
-    void controller.deliverProcessor(fixturePatchEdit({ payload: utilityCommit("utility:2", first, { ...first, pan: 0.25 }), bpm: 120 })).settled
+    void controller.deliverProcessor(fixturePatchEdit({ payload: utilityCommit("utility:2", first, { ...first, balance: 0.25 }), bpm: 120 })).settled
     await Bun.sleep(0)
     await Bun.sleep(0)
     // Native holds at most one claim: until it reports token 9007199254740993 the second target must not be sent.
@@ -16399,7 +16399,7 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
     const [through, setThrough] = createSignal(1)
     let heard = 0
     let heardSwap = false
-    const heardParameters = new Map<number, number>([[1, 0], [2, 0]])
+    const heardParameters = new Map<number, number>([[1, 0], [3, 0]])
     const overrides = new Set<number>()
     let installedState = encodeUtilityProcessorState(createDefaultUtilityParams())
 
@@ -16407,7 +16407,7 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
       if (reset) overrides.clear()
       const view = new DataView(state.buffer, state.byteOffset, state.byteLength)
 
-      for (const [target, offset] of [[1, 4], [2, 16], [3, 20], [4, 24]]) {
+      for (const [target, offset] of [[1, 4], [3, 20], [4, 24]]) {
         if (target !== undefined && offset !== undefined && !overrides.has(target)) heardParameters.set(target, view.getFloat32(offset, true))
       }
 
@@ -16466,8 +16466,8 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
 
     const paramsOf = (value: number): ReturnType<typeof createDefaultUtilityParams> => paramsFor ? paramsFor(value)
       : projected && !structuralValues.has(value) ? withGain(value) : { ...createDefaultUtilityParams(),
-        gainDb: value, polarity: value === -1 ? "invert" : "normal",
-        inputMode: value === -2 ? "mono-sum" : "stereo", dcBlock: value === -3, swap: value === -4 || value === 9 }
+        gainDb: value, phaseLeft: value === -1, phaseRight: value === -1,
+        inputMode: value === -2 ? "mono-sum" : "stereo", dcBlock: value === -3, channelMode: value === -4 || value === 9 ? "swap" : "both" }
 
     let desiredParams = createDefaultUtilityParams()
 
@@ -16494,7 +16494,7 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
     fixture.bridge.session.queueProcessorStatePatch = async bytes => {
       const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
       expect(view.getUint32(20, true)).toBe(1)
-      expect(view.getUint32(28, true)).toBe(40)
+      expect(view.getUint32(28, true)).toBe(64)
       const value = view.getFloat32(60, true)
       patches.push(value)
       const swap = view.getUint32(88, true) !== 0
@@ -16505,8 +16505,8 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
           : mode === "unconfirmed" ? { ok: false, kind: "unconfirmed", error: "Reply lost" }
             : { ok: true, outcome: "refused", refusal: "invalid", coreResult: 0 }
 
-      if (reply.ok && reply.outcome === "applied") installState(bytes.slice(56, 96), true)
-      else if (reply.ok && reply.outcome === "claimed") claimedState = { token: reply.token, state: bytes.slice(56, 96) }
+      if (reply.ok && reply.outcome === "applied") installState(bytes.slice(56, 120), true)
+      else if (reply.ok && reply.outcome === "claimed") claimedState = { token: reply.token, state: bytes.slice(56, 120) }
 
       return reply
     }
@@ -16601,7 +16601,7 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
   }
 
   test("STEP5 NC B13 foreign B crosses captured A and equals old baseline", async () => {
-    const f = await mountedPanel(undefined, true, new Set(), value => ({ ...withGain(value), swap: value === 9 }));
+    const f = await mountedPanel(undefined, true, new Set(), value => ({ ...withGain(value), channelMode: value === 9 ? 'swap' : 'both' }));
     const held = Promise.withResolvers<void>();
 
     try {
@@ -16645,8 +16645,8 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
   for (const scenario of ["B9-untouched", "B10-unsent-id", "B11-after-publication", "B12-before-adoption", "B14-patch-revert"]) {
     test(`STEP5 NC ${scenario} real foreign row delivery`, async () => {
       const params = (value: number) => scenario === "B10-unsent-id"
-        ? { ...withGain(-3), pan: value === -6 ? 0.4 : 0 }
-        : scenario === "B14-patch-revert" ? { ...withGain(value), swap: value === 9 } : withGain(value);
+        ? { ...withGain(-3), balance: value === -6 ? 0.4 : 0 }
+        : scenario === "B14-patch-revert" ? { ...withGain(value), channelMode: value === 9 ? 'swap' : 'both' } : withGain(value);
 
       const f = await mountedPanel(undefined, true, new Set(), params);
 
@@ -16672,13 +16672,13 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
         f.observe(value, 20);
         await f.panel.flushPending(); await turns();
         console.log("STEP5 NC", JSON.stringify({ scenario, parameterBatches: f.fixture.builtInParameterPayloads.length - before,
-          patches: f.patches.length - patches, heard: f.heard(), pan: f.heardParameters.get(2),
+          patches: f.patches.length - patches, heard: f.heard(), pan: f.heardParameters.get(3),
           outcome: f.deliveries.at(-1)?.answer }));
         expect(f.panel.params()).toBe(value);
         expect(f.heard()).toBe(scenario === "B10-unsent-id" ? -3 : value);
         expect(f.deliveries.at(-1)?.answer).toEqual({ state: "applied" });
 
-        if (scenario === "B10-unsent-id") expect(f.heardParameters.get(2)).toBeCloseTo(0.4);
+        if (scenario === "B10-unsent-id") expect(f.heardParameters.get(3)).toBeCloseTo(0.4);
 
         if (scenario === "B14-patch-revert") {
           expect(f.patches.length - patches).toBe(1);
@@ -17124,14 +17124,14 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
   })
 
   for (const terminal of ["end", "cancel"] satisfies readonly ("end" | "cancel")[]) test(`3B1 multi-field panel ${terminal} clears one token without a fifth native dispatch`, async () => {
-    const f = await mountedPanel(undefined, true, new Set(), value => ({ ...withGain(value), pan: value / 10 }))
+    const f = await mountedPanel(undefined, true, new Set(), value => ({ ...withGain(value), balance: value / 10 }))
     const holder = new ParameterGestureHolder()
     f.panel.gestureOwner.open(holder)
 
     for (const value of [-1, -2, -3, 0]) {
       await f.tick(holder, value)
       expect(f.heard()).toBe(value)
-      expect(f.heardParameters.get(2)).toBeCloseTo(value / 10)
+      expect(f.heardParameters.get(3)).toBeCloseTo(value / 10)
     }
 
     const token = f.deliveries[0]?.gesture?.token
@@ -17154,9 +17154,9 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
     expect(adopted).toEqual({ status: "adopted" })
     await turns()
     expect(f.heard()).toBe(-5)
-    expect(f.heardParameters.get(2)).toBeCloseTo(-0.5)
+    expect(f.heardParameters.get(3)).toBeCloseTo(-0.5)
     expect(f.fixture.builtInParameterPayloads).toHaveLength(5)
-    promoted(`Multi-field panel token clear ${terminal}`, { dispatchesAtClose: 4, fields: [1, 2], close: f.deliveries.at(-1)?.gesture, reconciledGain: f.heard(), outcomes: f.deliveries.map(delivery => delivery.answer) })
+    promoted(`Multi-field panel token clear ${terminal}`, { dispatchesAtClose: 4, fields: [1, 3], close: f.deliveries.at(-1)?.gesture, reconciledGain: f.heard(), outcomes: f.deliveries.map(delivery => delivery.answer) })
     await f.dispose()
   })
 
@@ -17265,7 +17265,7 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
   })
 
   test("3B1 equal mapped values with panel structure change select exactly one native patch", async () => {
-    const f = await mountedPanel(undefined, true, new Set(), value => ({ ...createDefaultUtilityParams(), swap: value !== 0 }))
+    const f = await mountedPanel(undefined, true, new Set(), value => ({ ...createDefaultUtilityParams(), channelMode: value !== 0 ? 'swap' : 'both' }))
     f.panel.setForTarget("track", 1)
     const drain = await f.panel.flushPending()
     expect(f.fixture.builtInParameterPayloads).toEqual([])
@@ -17308,7 +17308,7 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
 
 
   test("3B1 a declined structural panel registration cannot become an applied receipt", async () => {
-    const f = await mountedPanel(undefined, true, new Set(), value => ({ ...createDefaultUtilityParams(), swap: value !== 0 }))
+    const f = await mountedPanel(undefined, true, new Set(), value => ({ ...createDefaultUtilityParams(), channelMode: value !== 0 ? 'swap' : 'both' }))
     f.mode("refused")
     f.panel.setForTarget("track", 1)
     const drain = await f.panel.flushPending()
@@ -17327,23 +17327,23 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
 
   test("3B1 a whole edit missing one live field must patch instead of claiming partial parameter proof", async () => {
     const f = await mountedPanel(undefined, true)
-    const params = { ...withGain(-2), pan: -0.25 }
+    const params = { ...withGain(-2), balance: -0.25 }
     const edit = f.registry.allocate(utilityCommit("utility:1", params, params))
 
     if (!edit) throw new Error("Missing whole registry edit")
-    const values = Object.fromEntries(Object.entries(edit.content.values ?? {}).filter(([id]) => id !== "utility.pan"))
+    const values = Object.fromEntries(Object.entries(edit.content.values ?? {}).filter(([id]) => id !== "utility.balance"))
     const registration = f.controller.deliverProcessor({ ...edit, content: { ...edit.content, values } })
     expect(await registration.settled).toEqual({ state: "applied" })
     expect(f.fixture.builtInParameterPayloads).toEqual([])
     expect(f.patches).toEqual([-2])
     expect(f.heard()).toBe(-2)
-    expect(f.heardParameters.get(2)).toBe(-0.25)
+    expect(f.heardParameters.get(3)).toBe(-0.25)
     expect(f.histories).toEqual([])
     await f.dispose()
   })
 
   test("3B1 publication changes structure with equal mapped values, and panel cancel restores it once", async () => {
-    const f = await mountedPanel(undefined, true, new Set(), value => ({ ...withGain(0), swap: value === 9 }))
+    const f = await mountedPanel(undefined, true, new Set(), value => ({ ...withGain(0), channelMode: value === 9 ? 'swap' : 'both' }))
     const holder = new ParameterGestureHolder()
     f.panel.gestureOwner.open(holder)
     await f.tick(holder, 1)
@@ -17562,7 +17562,7 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
   })
 
   test("3B1 restated publication replays an unanswered whole panel edit by patch, not parameters alone", async () => {
-    const f = await mountedPanel(undefined, true, new Set(), value => ({ ...withGain(value === 9 ? 0 : value), swap: value === 9 }))
+    const f = await mountedPanel(undefined, true, new Set(), value => ({ ...withGain(value === 9 ? 0 : value), channelMode: value === 9 ? 'swap' : 'both' }))
     const holder = new ParameterGestureHolder()
     f.panel.gestureOwner.open(holder)
     f.desire(9)
@@ -17620,7 +17620,7 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
   })
 
   test("3B1 a foreign panel row reconciles non-live structure despite equal mapped values", async () => {
-    const f = await mountedPanel(undefined, true, new Set(), value => ({ ...createDefaultUtilityParams(), swap: value !== 0 }))
+    const f = await mountedPanel(undefined, true, new Set(), value => ({ ...createDefaultUtilityParams(), channelMode: value !== 0 ? 'swap' : 'both' }))
     f.observe(1, 6)
     const drain = await f.panel.flushPending()
     expect(f.panel.params()).toBe(1)
@@ -17940,7 +17940,7 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
         createInitialParams: () => 0, serializeParams: String, applyToEngine: () => "skipped",
         allocateEdit: (_target, _from, value) => {
           const params: ReturnType<typeof createDefaultUtilityParams> = { ...withGain(value),
-            dcBlock: (Math.abs(value) & 2) === 0, swap: value % 2 !== 0, polarity: value <= -4 ? "invert" : "normal" }
+            dcBlock: (Math.abs(value) & 2) !== 0, channelMode: value % 2 !== 0 ? "swap" : "both", phaseLeft: value <= -4, phaseRight: value <= -4 }
 
           return registry.allocate(utilityCommit(instanceId, params, params))
         },

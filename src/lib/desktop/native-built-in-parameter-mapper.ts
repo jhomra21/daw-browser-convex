@@ -194,17 +194,23 @@ const mapUtility = (payload: EffectChange<'utility' | 'master-utility'>) => {
   return mapFields(
     [
       { parameterId: 'utility.gainDb', from: from.gainDb, to: to.gainDb },
-      { parameterId: 'utility.pan', from: from.pan, to: to.pan },
       { parameterId: 'utility.balance', from: from.balance, to: to.balance },
       { parameterId: 'utility.width', from: from.width, to: to.width },
+      { parameterId: 'utility.midSide', from: from.midSide, to: to.midSide },
+      { parameterId: 'utility.bassMonoHz', from: from.bassMonoHz, to: to.bassMonoHz },
     ],
     [
       { from: from.enabled, to: to.enabled },
-      { from: from.polarity, to: to.polarity },
+      { from: from.phaseLeft, to: to.phaseLeft },
+      { from: from.phaseRight, to: to.phaseRight },
       { from: from.inputMode, to: to.inputMode },
       { from: from.matrix, to: to.matrix },
-      { from: from.swap, to: to.swap },
+      { from: from.channelMode, to: to.channelMode },
       { from: from.dcBlock, to: to.dcBlock },
+      { from: from.mute, to: to.mute },
+      { from: from.widthMode, to: to.widthMode },
+      { from: from.bassMono, to: to.bassMono },
+      { from: from.bassMonoAudition, to: to.bassMonoAudition },
     ],
   )
 }

@@ -35,7 +35,7 @@ describe('audio effect parameter versions', () => {
   it('leaves params of an up-to-date row untouched', () => {
     const params = { version: 1, state: { gainDb: 3 } }
 
-    expect(migrateAudioEffectParams('utility', params, 1)).toBe(params)
+    expect(migrateAudioEffectParams('utility', params, 2)).toBe(params)
   })
 
   it('returns params from a newer build unchanged and warns once per kind and version', () => {

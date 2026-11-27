@@ -303,10 +303,10 @@ class LoFiKernel {
 class DawLoFiProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
     return [
-      { name: 'lofi.bitDepth', defaultValue: 12, minValue: 2, maxValue: 24, automationRate: 'a-rate' },
+      { name: 'lofi.bitDepth', defaultValue: 16, minValue: 2, maxValue: 24, automationRate: 'a-rate' },
       { name: 'lofi.sampleRateHz', defaultValue: 96000, minValue: 100, maxValue: 96000, automationRate: 'a-rate' },
       { name: 'lofi.jitter', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'a-rate' },
-      { name: 'lofi.noiseDb', defaultValue: -80, minValue: -120, maxValue: -24, automationRate: 'a-rate' },
+      { name: 'lofi.noiseDb', defaultValue: -120, minValue: -120, maxValue: -24, automationRate: 'a-rate' },
       { name: 'lofi.mix', defaultValue: 1, minValue: 0, maxValue: 1, automationRate: 'a-rate' },
     ]
   }
@@ -317,7 +317,7 @@ class DawLoFiProcessor extends AudioWorkletProcessor {
     this.enabled = true
     this.config = { quantization: ROUND, dither: OFF, seed: 1, preFilter: false, postFilter: false, dcCorrection: false }
     this.kernel = new LoFiKernel(sampleRate)
-    this.values = { bitDepth: 12, sampleRateHz: 96000, jitter: 0, noiseDb: -80, mix: 1 }
+    this.values = { bitDepth: 16, sampleRateHz: 96000, jitter: 0, noiseDb: -120, mix: 1 }
     this.out = new Float64Array(2)
     this.bypassFrames = Math.floor((sampleRate + 50) / 100)
     this.bypass = 0

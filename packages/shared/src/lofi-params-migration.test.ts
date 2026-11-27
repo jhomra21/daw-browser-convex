@@ -29,3 +29,14 @@ test('stored version 1 params migrate through the version table', () => {
   expect(normalizeLoFiParamsEnvelope(migrateAudioEffectParams('lofi', v1(0.5), 1)).state.sampleRateHz).toBe(24000)
   expect(normalizeLoFiParamsEnvelope(migrateAudioEffectParams('lofi', v1(0.5), 2)).state.sampleRateHz).toBe(96000)
 })
+
+test('a new Lo-Fi is transparent: 16 bit, triangular dither, no added noise', () => {
+  expect(createDefaultLoFiParams()).toMatchObject({ bitDepth: 16, dither: 'triangular', noiseDb: -120, sampleRateHz: 96000, mix: 1, preFilter: false, postFilter: false })
+})
+
+test('a saved instance keeps its values, including the old 12 bit undithered defaults', () => {
+  const saved = { enabled: true, bitDepth: 12, sampleRateHz: 96000, jitter: 0, noiseDb: -80, quantization: 'round', dither: 'off', mix: 1, seed: 1, preFilter: false, postFilter: false, dcCorrection: false }
+
+  expect(normalizeLoFiParamsEnvelope({ version: 1, state: saved }).state).toEqual(saved)
+  expect(normalizeLoFiParamsEnvelope(migrateAudioEffectParams('lofi', { version: 1, state: saved }, 2)).state).toEqual(saved)
+})

@@ -11,10 +11,10 @@
 namespace daw::audio_core {
 
 struct LoFiValues {
-  float bit_depth = 12.0F;
+  float bit_depth = 16.0F;
   float rate_hz = 96000.0F;
   float jitter = 0.0F;
-  float noise_db = -80.0F;
+  float noise_db = -120.0F;
   float mix = 1.0F;
 };
 

@@ -2,11 +2,12 @@
 // depend on the host rate (L2), the pre-filter (L3), pass-through at 24 bit and full rate (L4), the Floor offset and dither flatness
 // (L5), and parity with the legacy worklet. The "before" values were measured on the base commit a49d9c57 with the same
 // measurement code (lofi-measure.ts) and the old state fields.
-import { maxAbsDiff } from '../dsp'
+import { maxAbsDiff, rms } from '../dsp'
 import { declaredLatencyFrames, fx } from '../effects'
 import type { Family } from './index'
 import type { Scenario } from '../harness'
-import { sine } from '../signals'
+import { createDefaultLoFiParams } from '@daw-browser/shared'
+import { linearToDb, sine } from '../signals'
 import {
   distinctLevels, errorSpectrumFlatnessDb, filterGroupDelayFrames, floorSilencePeak, imageFrequencyHz, passThroughErrorDb, passThroughPeak, preFilterPassbandDb,
   preFilterRejection,
@@ -108,18 +109,30 @@ const filterLatency: Scenario = {
   },
 }
 
+// L6: a new Lo-Fi is transparent. Its quantization error is the dither floor of 16 bits, no tone and no added noise.
+const transparentDefault: Scenario = {
+  effect: 'lofi',
+  name: 'lofi7-transparent-default',
+  run: async (h) => {
+    const { enabled: _enabled, ...created } = createDefaultLoFiParams()
+    const input = sine(h.rate, 997, h.rate, 0.5)
+    const { output } = await h.render(fx.lofi(created), { input: [input] }, { parity: false })
+
+    h.atMost('new instance, 997 Hz at -6 dBFS: error rel. input', linearToDb(rms(Float32Array.from(output[0], (v, n) => v - input[n]), 1000) / rms(input, 1000)), -85, 'dB', 'before (12 bit, no dither, noise at -80 dB): -67.3 dB at 48 kHz')
+  },
+}
+
 const lofiSpec = fx.lofi()
 const filteredSpec = fx.lofi({ bitDepth: 8, sampleRateHz: 14000, jitter: 0.35, noiseDb: -60, dither: 'triangular', preFilter: true, postFilter: true })
 
 export const lofi: Family = {
   scenarios: [
-    bitDepthRounding, rateInHz, preFilter, passThrough, floorAndDither, filterLatency,
+    bitDepthRounding, rateInHz, preFilter, passThrough, floorAndDither, filterLatency, transparentDefault,
     parityScenario('lofi', lofiSpec),
     { ...parityScenario('lofi', filteredSpec), name: 'parity-fixtures-filtered' },
     ...robustnessScenarios('lofi', lofiSpec, null),
   ],
   notEncoded: [
-    'A transparent default for new instances (16 bit, triangular dither): not done, the default stays 12 bit undithered.',
     'A sub-sample-accurate sample clock: the hold pattern at a non-integer ratio stays uneven (2, 3, 2, 3).',
   ],
 }

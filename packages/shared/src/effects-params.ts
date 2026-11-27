@@ -1517,14 +1517,15 @@ export type LoFiParams = {
 
 export type LoFiParamsEnvelope = ProcessorStateEnvelope<LoFiParams>
 
+// A new Lo-Fi is transparent (16 bit with triangular dither, no added noise): the user dials the damage in. Stored instances keep their values.
 export const createDefaultLoFiParams = (): LoFiParams => ({
   enabled: true,
-  bitDepth: 12,
+  bitDepth: 16,
   sampleRateHz: LOFI_SAMPLE_RATE_HZ_MAX,
   jitter: 0,
-  noiseDb: -80,
+  noiseDb: -120,
   quantization: 'round',
-  dither: 'off',
+  dither: 'triangular',
   mix: 1,
   seed: 1,
   preFilter: false,
@@ -1547,7 +1548,7 @@ export const normalizeLoFiParamsEnvelope = (value: JsonValue): LoFiParamsEnvelop
       jitter: normalizeNumber(state.jitter, defaults.jitter, 0, 1),
       noiseDb: normalizeNumber(state.noiseDb, defaults.noiseDb, -120, -24),
       quantization: state.quantization === 'floor' || state.quantization === 'truncate' ? state.quantization : 'round',
-      dither: state.dither === 'rectangular' || state.dither === 'triangular' ? state.dither : 'off',
+      dither: state.dither === 'off' || state.dither === 'rectangular' || state.dither === 'triangular' ? state.dither : defaults.dither,
       mix: normalizeNumber(state.mix, defaults.mix, 0, 1),
       seed: Math.max(1, Math.round(seed)) >>> 0,
       preFilter: isJsonBoolean(state.preFilter) ? state.preFilter : defaults.preFilter,

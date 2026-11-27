@@ -98,7 +98,8 @@ describe('LoFi static worklet', () => {
         type: 'configure',
         version: 1,
         revision: 1,
-        state: { ...createDefaultLoFiParams(), enabled: false },
+        // Dither off: its random streams are per channel, and this test compares the channels' bypass ramps.
+        state: { ...createDefaultLoFiParams(), dither: 'off', enabled: false },
       },
     })
     const input = Float32Array.from({ length: 128 }, () => 0.75)

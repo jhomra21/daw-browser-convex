@@ -441,6 +441,7 @@ for (const local of [true, false]) for (const master of [false, true]) for (cons
 
         if (kind === "compressor" || kind === "reverb") expect(f.runtime.audio.liveWorkletCount()).toBe(0);
         else if (kind === "delay") expect(f.runtime.audio.delayEnabled()).toBe(false);
+        else if (kind === "saturator") expect(f.runtime.audio.saturatorEnabled()).toBe(false);
         else expect(f.bindings()).toEqual([]);
         console.log("B5c3 FX matrix", JSON.stringify({ group: "external", scenario, family: kind, local,
           target: master ? "master" : "track", calls: f.calls.slice(before), subscription: scenario === "collaborator" }));
@@ -466,6 +467,7 @@ for (const local of [true, false]) for (const master of [false, true]) for (cons
 
       if (kind === "compressor" || kind === "reverb") expect(f.runtime.audio.liveWorkletCount()).toBe(0);
       else if (kind === "delay") expect(f.runtime.audio.delayEnabled()).toBe(false);
+      else if (kind === "saturator") expect(f.runtime.audio.saturatorEnabled()).toBe(false);
       else expect(f.bindings()).toEqual([]);
       console.log("B5c3 FX matrix", JSON.stringify({ group: "agent", scenario: "agent commit", family: kind, local,
         target: master ? "master" : "track", calls: f.calls.slice(before), subscription: !local }));
@@ -539,6 +541,7 @@ for (const local of [true, false]) for (const master of [false, true]) for (cons
         else if (kind === "delay") {
           expect(f.runtime.audio.delayEnabled()).toBe(enabled);
         }
+        else if (kind === "saturator") expect(f.runtime.audio.saturatorEnabled()).toBe(enabled);
         else expect(f.bindings().length > 0).toBe(enabled);
         console.log("B5c3 FX matrix", JSON.stringify({ group: "history", scenario: direction, family: kind, local,
           target: master ? "master" : "track", calls: f.calls.slice(before) }));

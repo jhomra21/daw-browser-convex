@@ -235,6 +235,8 @@ export const createFxTestAudio = () => {
     failNextTempoPost: () => { failNextTempoPost = true },
     // Whether the most recent delay worklet was last configured on (a delay worklet keeps its parameters when it is disabled).
     delayEnabled: () => created.findLast((node) => node.parameters.has('delay.timeMs'))?.posted.findLast((message) => message.type === 'configure')?.state?.enabled,
+    // The same for a saturator worklet: disabled, it stays in the routing and crossfades to dry inside the processor.
+    saturatorEnabled: () => created.findLast((node) => node.parameters.has('saturator.driveDb'))?.posted.findLast((message) => message.type === 'configure')?.state?.enabled,
     delayNode: () => created.findLast((node) => node.parameters.has('delay.timeMs')),
     // The tempo each delay worklet was last told.
     delayTempos: () => created.flatMap((node) => node.parameters.has('delay.timeMs') ? [node.posted.findLast((message) => message.type === 'tempo')?.bpm] : []),

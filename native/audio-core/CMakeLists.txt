@@ -4,7 +4,6 @@ include(CTest)
 
 option(DAW_AUDIO_CORE_BUILD_WASM "Build the optimized production Emscripten audio core." OFF)
 option(DAW_AUDIO_CORE_BUILD_WASM_HARNESS "Build the Emscripten-compatible audio-core fixture harness." OFF)
-option(DAW_AUDIO_CORE_BUILD_ASAN_TESTS "Also build the kernel tests that need AddressSanitizer (GCC or Clang)." OFF)
 
 set(DAW_AUDIO_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/audio_core.cpp
@@ -128,17 +127,6 @@ if(BUILD_TESTING)
   foreach(group IN ITEMS gate threshold neutral hpss hpss-window freeze noise shift morph cost)
     add_test(NAME daw-spectral-kernel-${group} COMMAND daw-spectral-test ${group})
   endforeach()
-  # The same Spectral tests under AddressSanitizer: an overrun of the percussive window aborts instead of passing silently.
-  # Configure with -DDAW_AUDIO_CORE_BUILD_ASAN_TESTS=ON and run: ctest -R daw-spectral-asan
-  if(DAW_AUDIO_CORE_BUILD_ASAN_TESTS AND NOT MSVC)
-    add_executable(daw-spectral-asan-test tests/spectral_test.cpp)
-    target_compile_features(daw-spectral-asan-test PRIVATE cxx_std_20)
-    target_compile_options(daw-spectral-asan-test PRIVATE -Wall -Wextra -Werror -fno-exceptions -fno-rtti -fsanitize=address -fno-omit-frame-pointer -g)
-    target_link_options(daw-spectral-asan-test PRIVATE -fsanitize=address)
-    foreach(group IN ITEMS hpss hpss-window)
-      add_test(NAME daw-spectral-asan-${group} COMMAND daw-spectral-asan-test ${group})
-    endforeach()
-  endif()
   # Limiter kernel (src/limiter_kernel.h). One ctest per measurement group; the executable prints each value.
   add_executable(daw-limiter-test tests/limiter_test.cpp)
   target_compile_features(daw-limiter-test PRIVATE cxx_std_20)

@@ -3,12 +3,12 @@
 // (L5), and parity with the legacy worklet. The "before" values were measured on the base commit a49d9c57 with the same
 // measurement code (lofi-measure.ts) and the old state fields.
 import { maxAbsDiff } from '../dsp'
-import { fx } from '../effects'
+import { declaredLatencyFrames, fx } from '../effects'
 import type { Family } from './index'
 import type { Scenario } from '../harness'
 import { sine } from '../signals'
 import {
-  distinctLevels, errorSpectrumFlatnessDb, floorSilencePeak, imageFrequencyHz, passThroughErrorDb, passThroughPeak, preFilterPassbandDb,
+  distinctLevels, errorSpectrumFlatnessDb, filterGroupDelayFrames, floorSilencePeak, imageFrequencyHz, passThroughErrorDb, passThroughPeak, preFilterPassbandDb,
   preFilterRejection,
 } from './lofi-measure'
 import type { LoFiRender } from './lofi-measure'
@@ -84,12 +84,36 @@ const floorAndDither: Scenario = {
   },
 }
 
+// The Pre and Post filters delay the signal, and the device declares no latency. The delay is the same number of reduced-rate periods
+// at every host rate (about 2) but sets host frames from 1 to thousands as the automatable rate moves, which a declared latency (one
+// integer fixed by the graph) cannot follow.
+const filterLatency: Scenario = {
+  effect: 'lofi',
+  name: 'lofi6-filter-latency',
+  run: async (h) => {
+    h.flag('declared latency', declaredLatencyFrames(fx.lofi({ preFilter: true, postFilter: true }), h.rate) === 0, 'stays 0: the delay follows the automatable rate, see the note', 'rate 100 Hz at 48 kHz: 935 frames; rate 12 kHz: 7.5 frames')
+
+    for (const sampleRateHz of [100, 1000, 12000]) {
+      for (const filter of ['preFilter', 'postFilter'] as const) {
+        const low = await filterGroupDelayFrames(render(h), h.rate, sampleRateHz, 0.05 * sampleRateHz, filter)
+        const edge = await filterGroupDelayFrames(render(h), h.rate, sampleRateHz, 0.3 * sampleRateHz, filter)
+        const label = `${filter === 'preFilter' ? 'Pre' : 'Post'} group delay at a ${sampleRateHz} Hz rate`
+
+        h.info(`${label}, at 0.05 of the rate`, low, 'frames')
+        h.info(`${label}, at 0.3 of the rate`, edge, 'frames')
+        h.between(`${label}, at 0.05 of the rate, in reduced-rate periods`, low * sampleRateHz / h.rate, 1.5, 2.0, 'periods')
+        h.between(`${label}, at 0.3 of the rate, in reduced-rate periods`, edge * sampleRateHz / h.rate, 2.5, 3.1, 'periods')
+      }
+    }
+  },
+}
+
 const lofiSpec = fx.lofi()
 const filteredSpec = fx.lofi({ bitDepth: 8, sampleRateHz: 14000, jitter: 0.35, noiseDb: -60, dither: 'triangular', preFilter: true, postFilter: true })
 
 export const lofi: Family = {
   scenarios: [
-    bitDepthRounding, rateInHz, preFilter, passThrough, floorAndDither,
+    bitDepthRounding, rateInHz, preFilter, passThrough, floorAndDither, filterLatency,
     parityScenario('lofi', lofiSpec),
     { ...parityScenario('lofi', filteredSpec), name: 'parity-fixtures-filtered' },
     ...robustnessScenarios('lofi', lofiSpec, null),

@@ -1,7 +1,7 @@
 // The Lo-Fi acceptance measurements (saturation-utility.md section 3.2), written against a render callback so the same code runs
 // against the rebuilt engine and, with a callback that maps the state onto the old fields, against the base commit (a49d9c57)
 // for the "before" values.
-import { hann, peakAbs, rms, spectrum } from '../dsp'
+import { hann, peakAbs, rms, spectrum, toneFit } from '../dsp'
 import { linearToDb, noise, silence, sine } from '../signals'
 
 export type LoFiRender = (state: Readonly<Record<string, number | string | boolean>>, input: Float32Array) => Promise<Float32Array>
@@ -97,3 +97,24 @@ export const distinctLevels = async (render: LoFiRender, rate: number, bits: num
 }
 
 export const randomInput = (rate: number) => noise(2 * rate, 0.4, 3)
+
+/**
+ * Group delay of the optional Pre and Post filters in frames of the host rate, at a tone `hz` with the reduced rate `sampleRateHz`: the
+ * phase the filter adds to the held output's fundamental (the filtered render against the unfiltered one, which share the same hold
+ * grid), differenced over a band of 2 % of the reduced rate around `hz`.
+ */
+export const filterGroupDelayFrames = async (render: LoFiRender, rate: number, sampleRateHz: number, hz: number, filter: 'preFilter' | 'postFilter') => {
+  const band = 0.02 * sampleRateHz
+  const frames = Math.ceil(rate * (0.5 + 200 / sampleRateHz))
+  const phaseAdded = async (tone: number) => {
+    const input = sine(frames, tone, rate, 0.25)
+    const state = { bitDepth: 24, sampleRateHz, noiseDb: -120 }
+    const [open, filtered] = await Promise.all([render(state, input), render({ ...state, [filter]: true }, input)])
+    const from = frames >> 1
+
+    return toneFit(filtered, tone, rate, from).phase - toneFit(open, tone, rate, from).phase
+  }
+  const [low, high] = await Promise.all([phaseAdded(hz - band / 2), phaseAdded(hz + band / 2)])
+
+  return -((high - low) / (2 * Math.PI * band)) * rate
+}

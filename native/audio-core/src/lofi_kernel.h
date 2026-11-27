@@ -37,7 +37,9 @@ class LoFiKernel {
   static constexpr double kPi = 3.14159265358979323846;
   static constexpr uint32_t kMinimumBits = 2;
   static constexpr uint32_t kMaximumBits = 24;
-  // The band-limiting filters sit at this fraction of the reduced rate: 6th-order Chebyshev, 0.5 dB ripple.
+  // The band-limiting filters sit at this fraction of the reduced rate: 6th-order Chebyshev, 0.5 dB ripple. Each adds about two periods of
+  // the reduced rate of delay (1.9 at 0.05 of the rate, 2.8 at 0.3; lofi6-filter-latency). That is 1 to thousands of host frames as the
+  // automatable rate moves, so no latency is declared.
   static constexpr double kCutoffOfRate = 0.4;
   static constexpr double kRippleDb = 0.5;
   static constexpr uint32_t kSections = 3;

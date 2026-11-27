@@ -1240,7 +1240,7 @@
     "argv": [
      "sh",
      "-c",
-     "cmake --build /Users/juan/Documents/daw-browser-convex/native/build/audio-host-macos-debug -j 6 && ctest --test-dir /Users/juan/Documents/daw-browser-convex/native/build/audio-host-macos-debug -I 17,23 --output-on-failure"
+     "cmake --build /Users/juan/Documents/daw-browser-convex/native/build/audio-host-macos-debug -j 6 && ctest --test-dir /Users/juan/Documents/daw-browser-convex/native/build/audio-host-macos-debug -R '^daw-(plugin-host-worker-test|recording-spool-test|host-recording-spool-test|audio-host-macos-test|audio-host-macos-graph-integration-test|audio-host-macos-transaction-test|realtime-callback-static-guard)$' --output-on-failure"
     ],
     "alarmSeconds": 1500,
     "env": {},

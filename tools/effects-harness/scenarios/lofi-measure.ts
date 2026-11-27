@@ -57,6 +57,36 @@ export const preFilterPassbandDb = async (render: LoFiRender, rate: number, hz: 
   return linearToDb(rms(output, rate / 2) / rms(input, rate / 2))
 }
 
+/**
+ * RMS error, in dB, of the held values against the input at the instant the rate clock fired. The clock is replayed from its definition
+ * (a phase that gains rate over host per frame and fires at one), so an instant falls between two frames at a non-integer ratio.
+ */
+export const heldValueErrorDb = async (render: LoFiRender, rate: number, sampleRateHz: number, subSampleClock: boolean) => {
+  const hz = 5000
+  const input = sine(rate, hz, rate, 0.5)
+  const output = await render({ bitDepth: 24, sampleRateHz, noiseDb: -120, subSampleClock }, input)
+  const ratio = sampleRateHz / rate
+  let phase = 1
+  let held = 0
+  let error = 0
+  let energy = 0
+
+  for (let n = 0; n < input.length; n += 1) {
+    phase += ratio
+
+    if (phase >= 1) {
+      phase -= 1
+      held = 0.5 * Math.sin(2 * Math.PI * hz * (n - phase / ratio) / rate)
+    }
+
+    if (n < 100) continue
+    error += (output[n] - held) ** 2
+    energy += held ** 2
+  }
+
+  return linearToDb(Math.sqrt(error / energy))
+}
+
 /** RMS of (output - input) over RMS of input, in dB, at 24 bit and full rate with inputs up to `amplitude`. */
 export const passThroughErrorDb = async (render: LoFiRender, rate: number, amplitude: number) => {
   const input = sine(rate, 997, rate, amplitude)

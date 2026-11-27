@@ -3,7 +3,7 @@ import { isJsonNumber, isJsonObject, type JsonValue } from './json-value'
 
 // Version 1 -> 2. The old Rate was a fraction of the host rate; it is now in Hz. A ratio is taken at 48 kHz (the rate the old
 // default engine ran at), so 0.25 becomes 12000 Hz at every host rate. Ratio 1 meant "no reduction" and becomes the top of the
-// range, which passes every sample at every host rate. The band-limiting filters and the Floor offset correction start off, so
+// range, which passes every sample at every host rate. The band-limiting filters, the Floor offset correction and the sub-sample clock start off, so
 // the sound of a stored setting does not change. The clip at one now applies only when the bit depth is under 24 or the rate is
 // reduced, so a 24-bit full-rate Lo-Fi no longer clips a signal that was already over full scale.
 const MIGRATION_HOST_RATE_HZ = 48000
@@ -24,6 +24,7 @@ export const migrateLoFiParamsV1 = (params: JsonValue): JsonValue => {
     preFilter: false,
     postFilter: false,
     dcCorrection: false,
+    subSampleClock: false,
   }
 
   return wrapped ? { ...params, state } : state

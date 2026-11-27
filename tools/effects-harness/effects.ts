@@ -243,7 +243,7 @@ export const fx = {
     kind: 'lofi',
     state: {
       enabled: true, bitDepth: 12, sampleRateHz: 96000, jitter: 0, noiseDb: -80, quantization: 'round', dither: 'off', mix: 1, seed: 1,
-      preFilter: false, postFilter: false, dcCorrection: false, ...state,
+      preFilter: false, postFilter: false, dcCorrection: false, subSampleClock: false, ...state,
     },
   }),
 }

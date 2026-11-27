@@ -155,10 +155,19 @@ const createChannel = () => ({
   phase: 1,
   interval: 1,
   held: 0,
+  recent: [0, 0, 0],
   randomState: 0,
   pre: [new Biquad(), new Biquad(), new Biquad()],
   post: [new Biquad(), new Biquad(), new Biquad()],
 })
+
+// The input `behind` frames before the current one (0 to 1) by the cubic through the last four inputs.
+const inputBehind = (channel, current, behind) => {
+  const p = 3 - behind
+
+  return -(p - 1) * (p - 2) * (p - 3) / 6 * channel.recent[0] + p * (p - 2) * (p - 3) / 2 * channel.recent[1]
+    - p * (p - 1) * (p - 3) / 2 * channel.recent[2] + p * (p - 1) * (p - 2) / 6 * current
+}
 
 class LoFiKernel {
   constructor(rate) {
@@ -170,7 +179,7 @@ class LoFiKernel {
     this.noise.prepare(rate, 20)
     this.rateHz.prepare(rate, 20)
     this.initialized = false
-    this.config = { quantization: ROUND, dither: OFF, seed: 1, preFilter: false, postFilter: false, dcCorrection: false }
+    this.config = { quantization: ROUND, dither: OFF, seed: 1, preFilter: false, postFilter: false, dcCorrection: false, subSampleClock: false }
     this.channels = [createChannel(), createChannel()]
     this.sections = [null, null, null]
     this.frame = 0
@@ -234,7 +243,8 @@ class LoFiKernel {
     if (channel.phase >= channel.interval) {
       channel.phase -= channel.interval
       channel.interval = 1 + (random(channel) - 0.5) * this.jitter
-      let sample = x + (random(channel) * 2 - 1) * this.noiseGain
+      const captured = this.config.subSampleClock && reduced ? inputBehind(channel, x, Math.min(channel.phase / this.ratio, 1)) : x
+      let sample = captured + (random(channel) * 2 - 1) * this.noiseGain
       const lsb = 1 / this.levels
 
       if (this.config.dither === RECTANGULAR) {
@@ -254,6 +264,7 @@ class LoFiKernel {
       channel.held = this.bits < MAXIMUM_BITS || reduced ? clamp(quantized, -1, 1) : quantized
     }
 
+    channel.recent = [channel.recent[1], channel.recent[2], x]
     let wet = channel.held
 
     if (post) {
@@ -315,7 +326,7 @@ class DawLoFiProcessor extends AudioWorkletProcessor {
     super()
     this.revision = -1
     this.enabled = true
-    this.config = { quantization: ROUND, dither: OFF, seed: 1, preFilter: false, postFilter: false, dcCorrection: false }
+    this.config = { quantization: ROUND, dither: OFF, seed: 1, preFilter: false, postFilter: false, dcCorrection: false, subSampleClock: false }
     this.kernel = new LoFiKernel(sampleRate)
     this.values = { bitDepth: 16, sampleRateHz: 96000, jitter: 0, noiseDb: -120, mix: 1 }
     this.out = new Float64Array(2)
@@ -344,6 +355,7 @@ class DawLoFiProcessor extends AudioWorkletProcessor {
       preFilter: state.preFilter === true,
       postFilter: state.postFilter === true,
       dcCorrection: state.dcCorrection === true,
+      subSampleClock: state.subSampleClock === true,
     }
 
     const seedChanged = seed !== this.config.seed

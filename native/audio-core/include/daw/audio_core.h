@@ -1114,7 +1114,8 @@ typedef enum daw_audio_lofi_dither {
 
 /* The rate is in Hz, so the same setting sounds the same at every host rate; a rate at or above the host's passes every sample.
  * pre_filter band-limits the input to the reduced rate before it is held (no aliasing), post_filter smooths the held steps, and
- * dc_correction centres the Floor quantizer (its error averages minus half an LSB). Clipping at one applies only when the bit depth is under 24 or the rate is reduced. */
+ * dc_correction centres the Floor quantizer (its error averages minus half an LSB). sub_sample_clock holds the input as it was when the rate clock
+ * fired, between two host frames. Clipping at one applies only when the bit depth is under 24 or the rate is reduced. */
 typedef struct daw_audio_lofi_state {
   uint32_t enabled;
   uint32_t bit_depth;
@@ -1128,6 +1129,7 @@ typedef struct daw_audio_lofi_state {
   uint32_t pre_filter;
   uint32_t post_filter;
   uint32_t dc_correction;
+  uint32_t sub_sample_clock;
 } daw_audio_lofi_state;
 
 typedef struct daw_audio_asset_descriptor {

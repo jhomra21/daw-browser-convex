@@ -1496,7 +1496,8 @@ export type LoFiDither = 'off' | 'rectangular' | 'triangular'
 
 // The rate is in Hz so a setting sounds the same at every host rate; the top of the range is the highest host rate the engine runs,
 // where nothing is dropped. preFilter band-limits the input to the reduced rate before it is held, postFilter smooths the held steps,
-// and dcCorrection centres the Floor quantizer (its error averages minus half an LSB).
+// dcCorrection centres the Floor quantizer (its error averages minus half an LSB), and subSampleClock holds the input as it was when
+// the rate clock fired, between two host frames.
 export const LOFI_SAMPLE_RATE_HZ_MIN = 100
 export const LOFI_SAMPLE_RATE_HZ_MAX = 96000
 
@@ -1513,6 +1514,7 @@ export type LoFiParams = {
   preFilter: boolean
   postFilter: boolean
   dcCorrection: boolean
+  subSampleClock: boolean
 }
 
 export type LoFiParamsEnvelope = ProcessorStateEnvelope<LoFiParams>
@@ -1531,6 +1533,7 @@ export const createDefaultLoFiParams = (): LoFiParams => ({
   preFilter: false,
   postFilter: false,
   dcCorrection: false,
+  subSampleClock: false,
 })
 
 export const normalizeLoFiParamsEnvelope = (value: JsonValue): LoFiParamsEnvelope => {
@@ -1554,6 +1557,7 @@ export const normalizeLoFiParamsEnvelope = (value: JsonValue): LoFiParamsEnvelop
       preFilter: isJsonBoolean(state.preFilter) ? state.preFilter : defaults.preFilter,
       postFilter: isJsonBoolean(state.postFilter) ? state.postFilter : defaults.postFilter,
       dcCorrection: isJsonBoolean(state.dcCorrection) ? state.dcCorrection : defaults.dcCorrection,
+      subSampleClock: isJsonBoolean(state.subSampleClock) ? state.subSampleClock : defaults.subSampleClock,
     },
   }
 }

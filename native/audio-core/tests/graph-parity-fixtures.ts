@@ -335,6 +335,7 @@ const loFiState = (overrides: Partial<LoFiProcessorState> = {}): LoFiProcessorSt
   preFilter: true,
   postFilter: true,
   dcCorrection: false,
+  subSampleClock: true,
   ...overrides,
 })
 

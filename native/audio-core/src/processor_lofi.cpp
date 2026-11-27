@@ -25,7 +25,8 @@ void render_lofi_processor(
       .mix = value(DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_MIX, state.mix),
     };
     history.config = {.quantization = state.quantization, .dither = state.dither, .seed = state.seed,
-      .pre_filter = state.pre_filter != 0, .post_filter = state.post_filter != 0, .dc_correction = state.dc_correction != 0};
+      .pre_filter = state.pre_filter != 0, .post_filter = state.post_filter != 0, .dc_correction = state.dc_correction != 0,
+      .sub_sample_clock = state.sub_sample_clock != 0};
   }
   const float dry_left = std::isfinite(input_left) ? input_left : 0.0F;
   const float dry_right = std::isfinite(input_right) ? input_right : 0.0F;

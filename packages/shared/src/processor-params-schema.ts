@@ -151,7 +151,7 @@ const lofi = envelope(z.object({
   enabled: z.boolean(), bitDepth: finiteNumber, sampleRateHz: finiteNumber, jitter: finiteNumber,
   noiseDb: finiteNumber, quantization: z.enum(['round', 'floor', 'truncate']),
   dither: z.enum(['off', 'rectangular', 'triangular']), mix: finiteNumber, seed: finiteNumber,
-  preFilter: z.boolean(), postFilter: z.boolean(), dcCorrection: z.boolean(),
+  preFilter: z.boolean(), postFilter: z.boolean(), dcCorrection: z.boolean(), subSampleClock: z.boolean(),
 }).strict())
 
 const spectral = envelope(z.object({

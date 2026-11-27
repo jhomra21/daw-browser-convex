@@ -392,7 +392,7 @@ bool valid_lofi_state(const daw_audio_lofi_state &state) {
     && state.bit_depth >= 2 && state.bit_depth <= 24
     && std::isfinite(state.sample_rate_hz) && state.sample_rate_hz >= DAW_AUDIO_CORE_LOFI_SAMPLE_RATE_HZ_MIN
     && state.sample_rate_hz <= DAW_AUDIO_CORE_LOFI_SAMPLE_RATE_HZ_MAX
-    && state.pre_filter <= 1 && state.post_filter <= 1 && state.dc_correction <= 1
+    && state.pre_filter <= 1 && state.post_filter <= 1 && state.dc_correction <= 1 && state.sub_sample_clock <= 1
     && std::isfinite(state.jitter) && state.jitter >= 0.0F && state.jitter <= 1.0F
     && std::isfinite(state.noise_db) && state.noise_db >= -120.0F && state.noise_db <= -24.0F
     && state.quantization <= DAW_AUDIO_LOFI_QUANTIZATION_TRUNCATE
@@ -633,6 +633,7 @@ bool decode_processor_state(
       .dither = read_u32_le(descriptor.state + 24), .mix = read_f32_le(descriptor.state + 28),
       .seed = read_u32_le(descriptor.state + 32), .pre_filter = read_u32_le(descriptor.state + 36),
       .post_filter = read_u32_le(descriptor.state + 40), .dc_correction = read_u32_le(descriptor.state + 44),
+      .sub_sample_clock = read_u32_le(descriptor.state + 48),
     };
     if (!valid_lofi_state(state) || descriptor.latency_frames != 0 || descriptor.tail_frames != 0) return false;
     out_processor->lofi = state;

@@ -118,6 +118,47 @@ void prefilter() {
   expect(gain > -3.0 && gain < 1.0, "2 kHz through the pre-filter (dB)", gain);
 }
 
+// L3 (sub-sample clock): the held value is the input at the instant the rate clock fired. The clock is replayed here from its definition
+// (a phase that gains rate / host per frame and fires at one), and the input is read at that instant, between two frames. At a
+// whole ratio the instant is a frame and the option changes nothing.
+void subsample() {
+  LoFiValues values;
+  values.bit_depth = 24.0F;
+  values.rate_hz = 12000.0F;
+  values.noise_db = -120.0F;
+  for (const double host : {44100.0, 88200.0}) {
+    const size_t frames = static_cast<size_t>(host / 4);
+    const double hz = 5000.0;
+    LoFiConfig config;
+    const auto nearest = run(host, values, config, frames, tone(hz, host, 0.5));
+    config.sub_sample_clock = true;
+    const auto exact = run(host, values, config, frames, tone(hz, host, 0.5));
+    double nearest_error = 0.0, exact_error = 0.0, energy = 0.0, phase = 1.0, held = 0.0;
+    const double ratio = 12000.0 / host;
+    for (size_t n = 0; n < frames; ++n) {
+      phase += ratio;
+      if (phase >= 1.0) {
+        phase -= 1.0;
+        held = 0.5 * std::sin(2.0 * kPi * hz * (static_cast<double>(n) - phase / ratio) / host);
+      }
+      if (n < 100) continue;
+      nearest_error += (nearest[n] - held) * (nearest[n] - held);
+      exact_error += (exact[n] - held) * (exact[n] - held);
+      energy += held * held;
+    }
+    std::printf("host %.0f: nearest-frame error %.2f dB, sub-sample error %.2f dB\n", host, db(std::sqrt(nearest_error / energy)), db(std::sqrt(exact_error / energy)));
+    expect(db(std::sqrt(exact_error / energy)) <= -35.0, "held values vs the input at the clock instant, sub-sample on, error rel. (dB)", db(std::sqrt(exact_error / energy)));
+    expect(db(std::sqrt(nearest_error / energy)) >= -25.0, "held values vs the input at the clock instant, sub-sample off, error rel. (dB)", db(std::sqrt(nearest_error / energy)));
+  }
+  LoFiConfig on;
+  on.sub_sample_clock = true;
+  const auto whole_off = run(48000.0, values, {}, 9600, tone(5000.0, 48000.0, 0.5));
+  const auto whole_on = run(48000.0, values, on, 9600, tone(5000.0, 48000.0, 0.5));
+  double largest = 0.0;
+  for (size_t n = 0; n < whole_off.size(); ++n) largest = std::fmax(largest, std::fabs(whole_off[n] - whole_on[n]));
+  expect(largest < 1.0e-9, "whole ratio (48 kHz at 12 kHz): sub-sample on vs off, largest difference", largest);
+}
+
 // L4: clipping at one applies only when the signal is quantized or the rate is reduced.
 void clip() {
   LoFiValues values;
@@ -188,7 +229,7 @@ void safety() {
 
 int main(int argc, char **argv) {
   const char *group = argc > 1 ? argv[1] : "";
-  const std::pair<const char *, void (*)()> groups[] = {{"bits", bits}, {"rate", rate}, {"prefilter", prefilter}, {"clip", clip},
+  const std::pair<const char *, void (*)()> groups[] = {{"bits", bits}, {"rate", rate}, {"prefilter", prefilter}, {"subsample", subsample}, {"clip", clip},
     {"floor", floor_offset}, {"safety", safety}};
   for (const auto &[name, body] : groups) if (std::strcmp(group, name) == 0) body();
   return failures == 0 ? 0 : 1;

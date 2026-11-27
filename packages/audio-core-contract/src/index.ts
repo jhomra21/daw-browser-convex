@@ -75,6 +75,7 @@ export type LoFiProcessorState = {
   preFilter: boolean
   postFilter: boolean
   dcCorrection: boolean
+  subSampleClock: boolean
 }
 
 export type SaturatorProcessorState = {
@@ -931,7 +932,7 @@ export const encodeAutoFilterProcessorState = (state: AutoFilterProcessorState):
 }
 
 export const encodeLoFiProcessorState = (state: LoFiProcessorState): Uint8Array => {
-  const output = new Uint8Array(48)
+  const output = new Uint8Array(52)
   const view = new DataView(output.buffer)
   view.setUint32(0, state.enabled ? 1 : 0, true)
   view.setUint32(4, Math.round(state.bitDepth), true)
@@ -945,6 +946,7 @@ export const encodeLoFiProcessorState = (state: LoFiProcessorState): Uint8Array 
   view.setUint32(36, state.preFilter ? 1 : 0, true)
   view.setUint32(40, state.postFilter ? 1 : 0, true)
   view.setUint32(44, state.dcCorrection ? 1 : 0, true)
+  view.setUint32(48, state.subSampleClock ? 1 : 0, true)
 
   return output
 }

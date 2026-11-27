@@ -9,7 +9,7 @@ import type { Scenario } from '../harness'
 import { createDefaultLoFiParams } from '@daw-browser/shared'
 import { linearToDb, sine } from '../signals'
 import {
-  distinctLevels, errorSpectrumFlatnessDb, filterGroupDelayFrames, floorSilencePeak, imageFrequencyHz, passThroughErrorDb, passThroughPeak, preFilterPassbandDb,
+  distinctLevels, errorSpectrumFlatnessDb, filterGroupDelayFrames, floorSilencePeak, heldValueErrorDb, imageFrequencyHz, passThroughErrorDb, passThroughPeak, preFilterPassbandDb,
   preFilterRejection,
 } from './lofi-measure'
 import type { LoFiRender } from './lofi-measure'
@@ -109,6 +109,21 @@ const filterLatency: Scenario = {
   },
 }
 
+// L3 sub-sample clock: at a non-integer host/rate ratio the nearest-frame clock holds the wrong values (2, 3, 2, 3 frames apart for
+// samples that belong 2.5 apart); with the option on each held value is the input at the instant the clock fired.
+const subSampleClock: Scenario = {
+  effect: 'lofi',
+  name: 'lofi8-sub-sample-clock',
+  run: async (h) => {
+    const on = await heldValueErrorDb(render(h), h.rate, 14000, true)
+    const off = await heldValueErrorDb(render(h), h.rate, 14000, false)
+
+    h.atMost('5 kHz sine at a 14 kHz rate, sub-sample on: held values vs the input at the clock instants, error rel.', on, -35, 'dB')
+    h.info('5 kHz sine at a 14 kHz rate, sub-sample off: held values vs the input at the clock instants, error rel.', off, 'dB', 'nearest-frame clock')
+    h.atMost('sub-sample on minus off', on - off, -20, 'dB', 'at least 20 dB closer to the true sampling instants')
+  },
+}
+
 // L6: a new Lo-Fi is transparent. Its quantization error is the dither floor of 16 bits, no tone and no added noise.
 const transparentDefault: Scenario = {
   effect: 'lofi',
@@ -123,16 +138,17 @@ const transparentDefault: Scenario = {
 }
 
 const lofiSpec = fx.lofi()
+const subSampleSpec = fx.lofi({ bitDepth: 8, sampleRateHz: 14000, jitter: 0.35, noiseDb: -60, dither: 'triangular', preFilter: true, subSampleClock: true })
 const filteredSpec = fx.lofi({ bitDepth: 8, sampleRateHz: 14000, jitter: 0.35, noiseDb: -60, dither: 'triangular', preFilter: true, postFilter: true })
 
 export const lofi: Family = {
   scenarios: [
-    bitDepthRounding, rateInHz, preFilter, passThrough, floorAndDither, filterLatency, transparentDefault,
+    bitDepthRounding, rateInHz, preFilter, passThrough, floorAndDither, filterLatency, transparentDefault, subSampleClock,
     parityScenario('lofi', lofiSpec),
     { ...parityScenario('lofi', filteredSpec), name: 'parity-fixtures-filtered' },
+    { ...parityScenario('lofi', subSampleSpec), name: 'parity-fixtures-sub-sample' },
     ...robustnessScenarios('lofi', lofiSpec, null),
   ],
   notEncoded: [
-    'A sub-sample-accurate sample clock: the hold pattern at a non-integer ratio stays uneven (2, 3, 2, 3).',
   ],
 }

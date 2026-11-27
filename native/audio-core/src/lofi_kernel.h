@@ -26,9 +26,12 @@ struct LoFiConfig {
   bool pre_filter = false;
   bool post_filter = false;
   bool dc_correction = false;
+  bool sub_sample_clock = false;
 };
 
-// Sample-and-hold rate reduction and bit reduction. The rate is in Hz (a phase accumulator against the host rate), so a setting
+// Sample-and-hold rate reduction and bit reduction. With sub_sample_clock on, a held value is the input at the instant the rate clock
+// fired, between two host frames, not at the frame that notices it: a cubic through the last four inputs. A non-integer host/rate ratio
+// then holds the right values (the hold lengths stay whole frames, 3 and 4 at 44.1 kHz and 12 kHz). The rate is in Hz (a phase accumulator against the host rate), so a setting
 // sounds the same at every host rate. The legacy worklet (daw-lofi-processor-v1.js) mirrors this operation for operation and
 // must stay within 1e-5 of it; Math.fround stands there where this rounds to float.
 class LoFiKernel {
@@ -123,6 +126,7 @@ class LoFiKernel {
     double phase = 1.0;
     double interval = 1.0;
     double held = 0.0;
+    std::array<double, 3> recent{};
     uint32_t random_state = 0;
     std::array<dsp::Biquad<double>, kSections> pre{};
     std::array<dsp::Biquad<double>, kSections> post{};
@@ -143,6 +147,13 @@ class LoFiKernel {
     if (mode == 1U) return std::floor(scaled);
     if (mode == 2U) return std::trunc(scaled);
     return std::floor(scaled + 0.5);
+  }
+
+  // The input `behind` frames before the current one (0 to 1) by the cubic through the last four inputs.
+  static double input_behind(const Channel &channel, double current, double behind) {
+    const double p = 3.0 - behind;
+    return -(p - 1.0) * (p - 2.0) * (p - 3.0) / 6.0 * channel.recent[0] + p * (p - 2.0) * (p - 3.0) / 2.0 * channel.recent[1]
+      - p * (p - 1.0) * (p - 3.0) / 2.0 * channel.recent[2] + p * (p - 1.0) * (p - 2.0) / 6.0 * current;
   }
 
   void initialize(const LoFiValues &values, const LoFiConfig &config) {
@@ -183,7 +194,8 @@ class LoFiKernel {
     if (channel.phase >= channel.interval) {
       channel.phase -= channel.interval;
       channel.interval = 1.0 + (random(channel.random_state) - 0.5) * static_cast<double>(jitter_);
-      double sample = x + (random(channel.random_state) * 2.0 - 1.0) * noise_gain_;
+      const double captured = config_.sub_sample_clock && reduced ? input_behind(channel, x, std::min(channel.phase / ratio_, 1.0)) : x;
+      double sample = captured + (random(channel.random_state) * 2.0 - 1.0) * noise_gain_;
       const double lsb = 1.0 / levels_;
       if (config_.dither == 1U) {
         sample += (random(channel.random_state) - 0.5) * lsb;
@@ -199,6 +211,7 @@ class LoFiKernel {
       // Past one only a full-rate 24-bit signal is left alone; anything else is a converter and stops at the rail.
       channel.held = bits_ < kMaximumBits || reduced ? std::clamp(quantized, -1.0, 1.0) : quantized;
     }
+    channel.recent = {channel.recent[1], channel.recent[2], x};
     double wet = channel.held;
     if (post) {
       for (uint32_t i = 0; i < kSections; ++i) wet = channel.post[i].process(wet, sections_[i]);

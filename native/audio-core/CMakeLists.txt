@@ -212,7 +212,7 @@ if(BUILD_TESTING)
   else()
     target_compile_options(daw-lofi-test PRIVATE -Wall -Wextra -Werror -fno-exceptions -fno-rtti)
   endif()
-  foreach(group bits rate prefilter clip floor safety)
+  foreach(group bits rate prefilter subsample clip floor safety)
     add_test(NAME daw-lofi-${group} COMMAND daw-lofi-test ${group})
   endforeach()
 

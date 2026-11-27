@@ -13,7 +13,7 @@ test('a version 1 ratio becomes Hz at 48 kHz and keeps every other setting', () 
 
   expect(migrated.sampleRateHz).toBe(12000)
   expect(migrated).toMatchObject({ bitDepth: 8, jitter: 0.2, noiseDb: -60, quantization: 'floor', dither: 'triangular', mix: 0.7, seed: 9 })
-  expect(migrated).toMatchObject({ preFilter: false, postFilter: false, dcCorrection: false })
+  expect(migrated).toMatchObject({ preFilter: false, postFilter: false, dcCorrection: false, subSampleClock: false })
 })
 
 test('ratio 1 becomes the top of the range so no host rate drops samples', () => {
@@ -35,7 +35,7 @@ test('a new Lo-Fi is transparent: 16 bit, triangular dither, no added noise', ()
 })
 
 test('a saved instance keeps its values, including the old 12 bit undithered defaults', () => {
-  const saved = { enabled: true, bitDepth: 12, sampleRateHz: 96000, jitter: 0, noiseDb: -80, quantization: 'round', dither: 'off', mix: 1, seed: 1, preFilter: false, postFilter: false, dcCorrection: false }
+  const saved = { enabled: true, bitDepth: 12, sampleRateHz: 96000, jitter: 0, noiseDb: -80, quantization: 'round', dither: 'off', mix: 1, seed: 1, preFilter: false, postFilter: false, dcCorrection: false, subSampleClock: false }
 
   expect(normalizeLoFiParamsEnvelope({ version: 1, state: saved }).state).toEqual(saved)
   expect(normalizeLoFiParamsEnvelope(migrateAudioEffectParams('lofi', { version: 1, state: saved }, 2)).state).toEqual(saved)

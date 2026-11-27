@@ -3655,10 +3655,10 @@ std::vector<std::uint8_t> SpectralTransitionGraph(const std::uint32_t revision, 
   WriteLeU32(payload, 16, 1);
   WriteLeU32(payload, 48, fft);
   AppendLeU64(payload, 1);
-  for (const auto value : {std::uint32_t(DAW_AUDIO_PROCESSOR_KIND_SPECTRAL), 1U, 60U, 10U, 0U, 2U, 2U, 0U, fft, 0U})
+  for (const auto value : {std::uint32_t(DAW_AUDIO_PROCESSOR_KIND_SPECTRAL), 2U, 64U, 10U, 0U, 2U, 2U, 0U, fft, 0U})
     AppendLeU32(payload, value);
   for (const auto value : {1U, fft, 2U, std::uint32_t(DAW_AUDIO_SPECTRAL_MODE_HPSS)}) AppendLeU32(payload, value);
-  for (const auto value : {0.F, -60.F, 1.F, 20.F, 0.F, 0.F, 0.F, 1.F, 0.F, 0.F, 1.F}) AppendLeFloat(payload, value);
+  for (const auto value : {0.F, -60.F, 1.F, 20.F, 0.F, 0.F, 0.F, 1.F, 0.F, 0.F, 1.F, -30.F}) AppendLeFloat(payload, value);
   frame.clear();
   AppendBeU64(frame, revision);
   AppendBeU32(frame, static_cast<std::uint32_t>(payload.size()));

@@ -28,6 +28,7 @@ export type InstrumentRenderOptions = {
   frames: number
   notes: readonly InstrumentNote[]
   parameters?: readonly InstrumentParameter[]
+  transportRunning?: boolean
 }
 
 type HostMessage = { type: string; result?: string; code?: string }
@@ -99,22 +100,57 @@ export const renderInstrument = async (instrument: Instrument, rate: number, opt
   expectReply('graph-prepared', 'prepared')
   host.handleMessage({ version: protocolVersion, type: 'publish-graph', requestId: 2, revision: 1 })
   expectReply('graph-published', 'published')
-  host.handleMessage({ version: protocolVersion, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  const epoch = options.transportRunning === false ? 2 : 1
+  host.handleMessage({ version: protocolVersion, type: 'transport', requestId: 3, epoch: 1, running: false, frame: 0 })
+
+  if (epoch !== 1) host.handleMessage({ version: protocolVersion, type: 'transport', requestId: 5, epoch, running: false, frame: 0 })
+
   host.handleMessage({
     version: protocolVersion, type: 'install-schedule', requestId: 4,
-    schedule: { revision: 1, transportEpoch: 1, sampleRateHz: rate, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: noteSchedule(options.notes) },
+    schedule: { revision: 1, transportEpoch: epoch, sampleRateHz: rate, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: options.transportRunning === false ? [] : noteSchedule(options.notes) },
   })
   expectReply('schedule-installed', 'installed')
+
+  if (options.transportRunning === false) {
+    host.handleMessage({
+      version: protocolVersion, type: 'instrument-parameters', epoch: 1, revision: 1, sequence: 1, requestId: 6,
+      events: [{ nodeId, noteId: 1, sequence: 1, frameOffset: 0, type: 'note-off', channel: 0, note: options.notes[0]?.pitch ?? 60, value: 0 }],
+    })
+    const staleEventResult = messages.findLast((message) => message.type === 'instrument-events-applied' && message.result === 'rejected')
+    const fault = messages.find((message) => message.type === 'fault')
+
+    if (fault !== undefined || staleEventResult === undefined) throw new Error(`stale instrument event was not rejected cleanly: ${fault?.code ?? 'missing rejection'}`)
+  }
 
   const output: Planar = [new Float32Array(options.frames), new Float32Array(options.frames)]
   const parameters = options.parameters ?? []
 
   for (let offset = 0; offset < options.frames; offset += blockFrames) {
-    const events = parameters.filter(({ frame }) => frame >= offset && frame < offset + blockFrames).map(({ frame, target, value }, index): PortableWasmInstrumentEvent => ({
-      nodeId, noteId: offset + index + 1, sequence: offset + index + 1, frameOffset: frame - offset, type: 'parameter', channel: 0, note: target, value,
-    }))
+    const events: PortableWasmInstrumentEvent[] = [
+      ...parameters.filter(({ frame }) => frame >= offset && frame < offset + blockFrames).map(({ frame, target, value }, index): PortableWasmInstrumentEvent => ({
+        nodeId, noteId: offset + index + 1, sequence: offset + index + 1, frameOffset: frame - offset, type: 'parameter', channel: 0, note: target, value,
+      })),
 
-    if (events.length > 0) host.handleMessage({ version: protocolVersion, type: 'instrument-events', epoch: 1, events })
+      ...(options.transportRunning === false ? options.notes.flatMap((note, index) => {
+        const events: PortableWasmInstrumentEvent[] = []
+
+        if (note.frame >= offset && note.frame < offset + blockFrames) {
+          events.push({
+            nodeId, noteId: index + 10, sequence: index * 2 + 10, frameOffset: note.frame - offset, type: 'note-on', channel: 0, note: note.pitch, value: note.velocity,
+          })
+        }
+
+        if (note.offFrame !== undefined && note.offFrame >= offset && note.offFrame < offset + blockFrames) {
+          events.push({
+            nodeId, noteId: index + 10, sequence: index * 2 + 11, frameOffset: note.offFrame - offset, type: 'note-off', channel: 0, note: note.pitch, value: 0,
+          })
+        }
+
+        return events
+      }) : []),
+    ]
+
+    if (events.length > 0) host.handleMessage({ version: protocolVersion, type: 'instrument-events', epoch, events })
     const block: Planar = [new Float32Array(blockFrames), new Float32Array(blockFrames)]
     host.process([], [block])
     const count = Math.min(blockFrames, options.frames - offset)

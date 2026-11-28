@@ -14,6 +14,7 @@ import { synth } from './synth'
 import { sampler } from './sampler'
 import { drumRack } from './drum-rack'
 import { granular } from './granular'
+import { stoppedLiveInstruments } from './instrument-stopped-live'
 
 export type Family = { scenarios: Scenario[]; notEncoded: readonly string[] }
 
@@ -33,6 +34,7 @@ export const families = {
   sampler,
   'drum-rack': drumRack,
   granular,
+  instruments: { scenarios: [stoppedLiveInstruments], notEncoded: [] },
 }
 
 /** Families whose effects are rebuilt: certification fails on any of their rows. Add a family here once its effects pass. */

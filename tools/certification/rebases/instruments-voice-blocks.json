@@ -1,0 +1,98 @@
+{
+ "name": "instruments-voice-blocks",
+ "sequence": 141,
+ "createdAt": "2026-11-28T10:07:37.249Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "native/audio-core/tests/audio_core_test.cpp",
+   "from": "0f890101b3242fc112dcb73e59da447cde2307e6816410982e5894ed1782482e",
+   "to": "099a43f58b7df3f3951dedd794d678b324c1c2843ab5667437a809c68eccb400"
+  },
+  {
+   "file": "public/audio-core/daw-audio-core.manifest.json",
+   "from": "a2c44e6dfa08cf97a0457a9864e03dea13e37a977c62136b9902162d2075399e",
+   "to": "6cc7d99a8bdb99d613506188782fb9f3a46f017e2fe38a1f38febe08fa177a97"
+  },
+  {
+   "file": "public/audio-core/daw-audio-core.wasm",
+   "from": "6f2f5e977e44a23fbffc4bcab97052dbf09f9f002afdd97b32bec1edb3c9c7c5",
+   "to": "962fc707fa59189a022e4bb02e9822071cc58e91ca0a8a0d5864119a6be9bdc0"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "value"
+   ],
+   "old": "d529c7f488b11dc3637f9a1db702e585b8266ab908826bdae09fe2b4771ae458",
+   "new": "5de2780211e2bbe74c190c7e1dbef781fd3ddb473176dbf2b1f32142249362bf"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "public/audio-core/daw-audio-core.wasm"
+   ],
+   "old": "6f2f5e977e44a23fbffc4bcab97052dbf09f9f002afdd97b32bec1edb3c9c7c5",
+   "new": "962fc707fa59189a022e4bb02e9822071cc58e91ca0a8a0d5864119a6be9bdc0"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm"
+   ],
+   "old": "6f2f5e977e44a23fbffc4bcab97052dbf09f9f002afdd97b32bec1edb3c9c7c5",
+   "new": "962fc707fa59189a022e4bb02e9822071cc58e91ca0a8a0d5864119a6be9bdc0"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "public/audio-core/daw-audio-core.manifest.json"
+   ],
+   "old": "a2c44e6dfa08cf97a0457a9864e03dea13e37a977c62136b9902162d2075399e",
+   "new": "6cc7d99a8bdb99d613506188782fb9f3a46f017e2fe38a1f38febe08fa177a97"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "3f5105d051e5c538fa32ec0853c8988f7b0feb6b",
+   "gitStatusSha256": "924d6c5fe5e9030997a8e36f0f19b8305897b31bc2844060e9d0b2b1ceee8cce",
+   "expectationsSha256": "bb977135fd5ca8997926113ee0b0776f998ff61173c738a26973d4af04c08d6c",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "bb977135fd5ca8997926113ee0b0776f998ff61173c738a26973d4af04c08d6c",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/ivb-bless/live",
+   "resultSha256": "36492e61549833785914172cf6975aa7616911df3d0adde32c49a88d3bfc8064",
+   "seconds": 1480.5442901669999,
+   "observations": 3082
+  },
+  "unreachedByOverlay": []
+ }
+}

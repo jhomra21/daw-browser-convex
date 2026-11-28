@@ -1,4 +1,5 @@
 #include "audio_core_internal.h"
+#include "dsp/numeric_safety.h"
 
 namespace daw::audio_core_internal {
 
@@ -22,7 +23,9 @@ void release_instrument_state(InstrumentNodeState &instrument) {
 
 void clear_instrument_state(InstrumentNodeState &instrument) {
   instrument.voices = {};
+  instrument.dying_voices = {};
   instrument.sample_voices = {};
+  instrument.dying_sample_voices = {};
   instrument.grains = {};
   instrument.granular_note_ids = {};
   instrument.granular_note_ages = {};
@@ -97,27 +100,111 @@ float oscillator_waveform(uint32_t shape, float phase, float increment) {
   return waveform(shape, phase);
 }
 
-float envelope_step(float level, uint32_t *stage, bool released, float attack, float decay, float sustain, float release) {
+// A stage takes its knob time. Attack is at least 1 ms (the Web Audio path clamps the
+// same way); decay and release are at least one frame.
+struct EnvelopeFrames {
+  float attack;
+  float decay;
+  float release;
+  float sustain_follow;
+};
+
+// A held note follows a moved Sustain knob with a 2 ms pole: no step, and settled
+// (under 1% of a 0.5 move) within 20 ms, which the 5 ms parameter slew alone is not.
+constexpr float kSustainFollowSeconds = 0.002F;
+
+EnvelopeFrames envelope_frames(float attack_ms, float decay_ms, float release_ms, uint32_t sample_rate_hz) {
+  const float rate = static_cast<float>(sample_rate_hz);
+  const auto frames = [rate](float ms) { return std::fmax(1.0F, ms * rate / 1000.0F); };
+  return {frames(std::fmax(1.0F, attack_ms)), frames(decay_ms), frames(release_ms), 1.0F / frames(kSustainFollowSeconds * 1000.0F)};
+}
+
+// Attack climbs to 1, decay falls from 1 to the sustain level, and from then on the
+// level follows the sustain, so a moved knob is heard on a held note. Release falls
+// from the level at note-off (`release_from`) to 0. A note-on on a releasing voice
+// attacks again from where the level is.
+float envelope_step(
+  float level, uint32_t *stage, float *release_from, bool released, const EnvelopeFrames &frames, float sustain) {
   if (released) {
-    *stage = 3;
-    return std::fmax(0.0F, level - release);
-  }
-  if (*stage == 0) {
-    level += attack;
-    if (level >= 1.0F) {
-      level = 1.0F;
-      *stage = 1;
+    if (*stage != 3) {
+      *stage = 3;
+      *release_from = level;
     }
-    return level;
+    return std::fmax(0.0F, level - *release_from / frames.release);
+  }
+  if (*stage == 3) *stage = 0;
+  if (*stage == 0) {
+    level += 1.0F / frames.attack;
+    if (level < 1.0F) return level;
+    *stage = 1;
+    return 1.0F;
   }
   if (*stage == 1) {
-    level -= decay;
-    if (level <= sustain) {
-      level = sustain;
-      *stage = 2;
-    }
+    level -= (1.0F - sustain) / frames.decay;
+    if (level <= sustain) *stage = 2;
   }
-  return level;
+  if (*stage != 2) return level;
+  const float delta = sustain - level;
+  return std::fabs(delta) < 1e-5F ? sustain : level + delta * frames.sustain_follow;
+}
+
+// Quietest released voice, then the oldest released, then the oldest held.
+template <typename Voice>
+Voice *steal_victim(std::array<Voice, kMaximumInstrumentVoices> &voices, uint32_t capacity) {
+  const auto gives_way_to = [](const Voice &candidate, const Voice &current) {
+    if (candidate.released != current.released) return candidate.released;
+    if (candidate.released && candidate.amp_level != current.amp_level) return candidate.amp_level < current.amp_level;
+    return candidate.age < current.age;
+  };
+  Voice *victim = &voices[0];
+  for (uint32_t index = 1; index < capacity; ++index) {
+    if (gives_way_to(voices[index], *victim)) victim = &voices[index];
+  }
+  return victim;
+}
+
+// The voice a new note takes the slot of keeps sounding in the dying pool and fades
+// out there, so the slot never jumps. A full pool gives up its quietest voice.
+template <typename Voice>
+void fade_out_voice(std::array<Voice, kMaximumDyingVoices> &dying, const Voice &voice) {
+  Voice *slot = &dying[0];
+  for (Voice &candidate : dying) {
+    if (!candidate.active) {
+      slot = &candidate;
+      break;
+    }
+    if (candidate.fade_gain < slot->fade_gain) slot = &candidate;
+  }
+  *slot = voice;
+}
+
+const PanGains &equal_power_pan(PanGains &cached, float pan) {
+  if (cached.pan != pan) {
+    const float angle = (pan + 1.0F) * 0.7853981633974483096F;
+    cached = {pan, std::cos(angle) * 1.4142135623730950488F, std::sin(angle) * 1.4142135623730950488F};
+  }
+  return cached;
+}
+
+// Flushes denormal filter memory, and clears memory that is not finite (returns false:
+// the sample that produced it is dropped).
+bool settle_filter(BiquadHistory &history) {
+  if (!std::isfinite(history.x1) || !std::isfinite(history.x2) || !std::isfinite(history.y1) || !std::isfinite(history.y2)) {
+    history = {};
+    return false;
+  }
+  history.x1 = dsp::flushDenormal(history.x1);
+  history.x2 = dsp::flushDenormal(history.x2);
+  history.y1 = dsp::flushDenormal(history.y1);
+  history.y2 = dsp::flushDenormal(history.y2);
+  return true;
+}
+
+InstrumentVoice new_synth_voice(const InstrumentNodeState &instrument, uint64_t age, const daw_audio_instrument_event &event) {
+  uint32_t seed = instrument.synth.seed ^ static_cast<uint32_t>(event.note_id) ^ (event.note * 0x9E3779B1U);
+  if (seed == 0) seed = 0xA341316CU;
+  return {.note_id = event.note_id, .channel = event.channel, .note = event.note, .velocity = event.value, .references = 1,
+    .age = age, .noise_state = seed, .frequency = midi_frequency(event.note), .held = true, .active = true, .released = false};
 }
 
 // A kept instrument's targets move at once; `applied` follows them. One pole per
@@ -127,6 +214,7 @@ float envelope_step(float level, uint32_t *stage, bool released, float attack, f
 // 2 ms a two-semitone step still changes a cycle's period by 3.5%, at 5 ms by less
 // than 2.5%.
 constexpr float kInstrumentSlewSeconds = 0.005F;
+constexpr float kSampleEndFadeFrames = 64.0F;
 }  // namespace
 
 namespace daw::audio_core_internal {
@@ -172,35 +260,35 @@ void render_instrument_frame(
   float left = 0.0F;
   float right = 0.0F;
   const daw_audio_synth_state &synth = instrument.applied.synth;
-  const float amp_attack = 1.0F / std::fmax(1.0F, synth.amp_attack_ms * sample_rate_hz / 1000.0F);
-  const float amp_decay = 1.0F / std::fmax(1.0F, synth.amp_decay_ms * sample_rate_hz / 1000.0F);
-  const float amp_release = 1.0F / std::fmax(1.0F, synth.amp_release_ms * sample_rate_hz / 1000.0F);
-  const float amp_sustain = synth.amp_sustain;
-  for (uint32_t index = 0; index < descriptor.voice_capacity; ++index) {
-    InstrumentVoice &voice = instrument.voices[index];
-    if (!voice.active) continue;
-    voice.amp_level = envelope_step(voice.amp_level, &voice.amp_stage, voice.released, amp_attack, amp_decay, amp_sustain, amp_release);
-    const float filter_attack = 1.0F / std::fmax(1.0F, synth.filter_attack_ms * sample_rate_hz / 1000.0F);
-    const float filter_decay = 1.0F / std::fmax(1.0F, synth.filter_decay_ms * sample_rate_hz / 1000.0F);
-    const float filter_release = 1.0F / std::fmax(1.0F, synth.filter_release_ms * sample_rate_hz / 1000.0F);
-    voice.filter_level = envelope_step(voice.filter_level, &voice.filter_stage, voice.released, filter_attack, filter_decay, synth.filter_sustain, filter_release);
+  const EnvelopeFrames amp_frames = envelope_frames(synth.amp_attack_ms, synth.amp_decay_ms, synth.amp_release_ms, sample_rate_hz);
+  const EnvelopeFrames filter_frames = envelope_frames(synth.filter_attack_ms, synth.filter_decay_ms, synth.filter_release_ms, sample_rate_hz);
+  const bool pitch_modulated = synth.lfo_enabled != 0 && synth.lfo_pitch_cents != 0.0F;
+  const float detune_ratios[2] = {
+    pitch_modulated ? 1.0F : std::pow(2.0F, synth.oscillators[0].detune_cents / 1200.0F),
+    pitch_modulated ? 1.0F : std::pow(2.0F, synth.oscillators[1].detune_cents / 1200.0F)};
+  const auto render_voice = [&](InstrumentVoice &voice) {
+    voice.amp_level = envelope_step(voice.amp_level, &voice.amp_stage, &voice.amp_release_level, voice.released, amp_frames, instrument.synth.amp_sustain);
+    voice.filter_level = envelope_step(voice.filter_level, &voice.filter_stage, &voice.filter_release_level, voice.released, filter_frames, instrument.synth.filter_sustain);
     if (voice.amp_level <= 0.0F && voice.released) {
       voice = {};
-      continue;
+      return;
     }
     voice.lfo_phase += synth.lfo_rate_hz / static_cast<float>(sample_rate_hz);
     voice.lfo_phase -= std::floor(voice.lfo_phase);
     const float lfo = synth.lfo_enabled == 0 ? 0.0F : waveform(synth.lfo_waveform, voice.lfo_phase);
-    const float base_frequency = midi_frequency(voice.note);
     float sample = synth.noise_enabled != 0 ? next_noise(voice) * synth.noise_level : 0.0F;
     for (uint32_t oscillator_index = 0; oscillator_index < 2; ++oscillator_index) {
       const daw_audio_synth_oscillator_state &oscillator = synth.oscillators[oscillator_index];
       if (oscillator.enabled == 0) continue;
-      const float semitones = (oscillator.detune_cents + lfo * synth.lfo_pitch_cents) / 100.0F;
-      const float increment = base_frequency * std::pow(2.0F, semitones / 12.0F) / static_cast<float>(sample_rate_hz);
-      voice.oscillator_phase[oscillator_index] += increment;
-      voice.oscillator_phase[oscillator_index] -= std::floor(voice.oscillator_phase[oscillator_index]);
-      sample += oscillator_waveform(oscillator.waveform, voice.oscillator_phase[oscillator_index], increment) * oscillator.level;
+      const float ratio = pitch_modulated
+        ? std::pow(2.0F, (oscillator.detune_cents + lfo * synth.lfo_pitch_cents) / 1200.0F)
+        : detune_ratios[oscillator_index];
+      const float increment = voice.frequency * ratio / static_cast<float>(sample_rate_hz);
+      float &phase = voice.oscillator_phase[oscillator_index];
+      phase += increment;
+      phase -= std::floor(phase);
+      if (!std::isfinite(phase)) phase = 0.0F;
+      sample += oscillator_waveform(oscillator.waveform, phase, increment) * oscillator.level;
     }
     float cutoff = synth.filter_cutoff_hz;
     cutoff *= std::pow(2.0F, (static_cast<float>(voice.note) - 60.0F) / 12.0F * synth.filter_key_tracking
@@ -216,14 +304,27 @@ void render_instrument_frame(
           : DAW_AUDIO_EQ_BAND_LOWPASS;
     const BiquadCoefficients filter_coefficients = rbj_coefficients(
       filter_type, cutoff, std::fmax(0.0001F, resonance), 0.0F, sample_rate_hz);
-    const float filtered = synth.filter_enabled == 0
-      ? sample
-      : process_biquad(sample, filter_coefficients, voice.filter_history[0]);
-    const float amplitude = voice.amp_level * voice.velocity * instrument.expression * synth.output_gain
+    float filtered = sample;
+    if (synth.filter_enabled != 0) {
+      filtered = process_biquad(sample, filter_coefficients, voice.filter_history[0]);
+      if (!settle_filter(voice.filter_history[0])) filtered = 0.0F;
+    }
+    const float amplitude = voice.amp_level * voice.velocity * instrument.expression * synth.output_gain * voice.fade_gain
       * std::fmax(0.0F, 1.0F - lfo * synth.lfo_amplitude);
-    const float pan = std::fmax(-1.0F, std::fmin(1.0F, synth.output_pan + lfo * synth.lfo_pan));
-    left += filtered * amplitude * std::cos((pan + 1.0F) * 0.7853981633974483096F) * 1.4142135623730950488F;
-    right += filtered * amplitude * std::sin((pan + 1.0F) * 0.7853981633974483096F) * 1.4142135623730950488F;
+    const PanGains &pan = equal_power_pan(
+      voice.pan_gains, std::fmax(-1.0F, std::fmin(1.0F, synth.output_pan + lfo * synth.lfo_pan)));
+    left += filtered * amplitude * pan.left;
+    right += filtered * amplitude * pan.right;
+  };
+  for (uint32_t index = 0; index < descriptor.voice_capacity; ++index) {
+    if (instrument.voices[index].active) render_voice(instrument.voices[index]);
+  }
+  const float fade_step = 1.0F / std::fmax(1.0F, static_cast<float>(sample_rate_hz) * kVoiceStealFadeMilliseconds / 1000.0F);
+  for (InstrumentVoice &voice : instrument.dying_voices) {
+    if (!voice.active) continue;
+    voice.fade_gain -= fade_step;
+    if (voice.fade_gain <= 0.0F) voice = {};
+    else render_voice(voice);
   }
   *left_output = std::isfinite(left) ? left : 0.0F;
   *right_output = std::isfinite(right) ? right : 0.0F;
@@ -268,29 +369,26 @@ void render_sample_instrument_frame(
   float left = 0.0F;
   float right = 0.0F;
   const daw_audio_sampler_state &state = instrument.applied.sampler;
-  const float attack = 1.0F / std::fmax(1.0F, state.amp_attack_ms * core.config.sample_rate_hz / 1000.0F);
-  const float decay = 1.0F / std::fmax(1.0F, state.amp_decay_ms * core.config.sample_rate_hz / 1000.0F);
-  const float filter_attack = 1.0F / std::fmax(1.0F, state.filter_attack_ms * core.config.sample_rate_hz / 1000.0F);
-  const float filter_decay = 1.0F / std::fmax(1.0F, state.filter_decay_ms * core.config.sample_rate_hz / 1000.0F);
-  for (uint32_t index = 0; index < descriptor.voice_capacity; ++index) {
-    SampleVoice &voice = instrument.sample_voices[index];
-    if (!voice.active) continue;
+  const uint32_t sample_rate_hz = core.config.sample_rate_hz;
+  const EnvelopeFrames filter_frames = envelope_frames(state.filter_attack_ms, state.filter_decay_ms, state.filter_release_ms, sample_rate_hz);
+  const bool pitch_modulated = state.lfo_enabled != 0 && state.lfo_pitch_cents != 0.0F;
+  const auto render_voice = [&](SampleVoice &voice) {
     const float release_ms = voice.forced_release_ms > 0.0F ? voice.forced_release_ms : state.amp_release_ms;
-    const float release = 1.0F / std::fmax(1.0F, release_ms * core.config.sample_rate_hz / 1000.0F);
-    voice.amp_level = envelope_step(voice.amp_level, &voice.amp_stage, voice.released, attack, decay, state.amp_sustain, release);
-    const float filter_release = 1.0F / std::fmax(1.0F, state.filter_release_ms * core.config.sample_rate_hz / 1000.0F);
-    voice.filter_level = envelope_step(voice.filter_level, &voice.filter_stage, voice.released, filter_attack, filter_decay, state.filter_sustain, filter_release);
+    voice.amp_level = envelope_step(voice.amp_level, &voice.amp_stage, &voice.amp_release_level, voice.released,
+      envelope_frames(state.amp_attack_ms, state.amp_decay_ms, release_ms, sample_rate_hz), instrument.sampler.amp_sustain);
+    voice.filter_level = envelope_step(voice.filter_level, &voice.filter_stage, &voice.filter_release_level, voice.released, filter_frames, instrument.sampler.filter_sustain);
     const daw_audio_sample_zone &zone = instrument.applied.zones[voice.zone];
     AssetSlot *asset = find_asset(&core, zone.asset);
     if (asset == nullptr || (voice.amp_level <= 0.0F && voice.released)) {
       voice = {};
-      continue;
+      return;
     }
     follow_sample_zone(core, voice, zone, *asset);
+    const bool one_shot = zone.playback_mode == DAW_AUDIO_SAMPLE_PLAYBACK_ONE_SHOT;
     if (voice.position >= static_cast<double>(zone.end_frame)) {
-      if (zone.playback_mode == DAW_AUDIO_SAMPLE_PLAYBACK_ONE_SHOT) {
+      if (one_shot) {
         voice = {};
-        continue;
+        return;
       }
       const double loop_length = static_cast<double>(zone.loop_end_frame - zone.loop_start_frame);
       voice.position = static_cast<double>(zone.loop_start_frame) + std::fmod(
@@ -312,7 +410,7 @@ void render_sample_instrument_frame(
       sample_left = sample_left * static_cast<float>(1.0 - fade) + sample_at(loop_position, 0) * static_cast<float>(fade);
       sample_right = sample_right * static_cast<float>(1.0 - fade) + sample_at(loop_position, right_channel) * static_cast<float>(fade);
     }
-    voice.lfo_phase += state.lfo_rate_hz / static_cast<float>(core.config.sample_rate_hz);
+    voice.lfo_phase += state.lfo_rate_hz / static_cast<float>(sample_rate_hz);
     voice.lfo_phase -= std::floor(voice.lfo_phase);
     const float lfo = state.lfo_enabled == 0 ? 0.0F : std::sin(6.2831853071795864769F * voice.lfo_phase);
     float filtered_left = sample_left;
@@ -320,7 +418,7 @@ void render_sample_instrument_frame(
     if (state.filter_enabled != 0) {
       const float cutoff = std::fmax(20.0F, std::fmin(
         state.filter_cutoff_hz + state.filter_envelope_amount * 20000.0F * voice.filter_level + lfo * state.lfo_filter_hz,
-        static_cast<float>(core.config.sample_rate_hz) * 0.45F));
+        static_cast<float>(sample_rate_hz) * 0.45F));
       const uint32_t filter_type = state.filter_mode == DAW_AUDIO_SYNTH_FILTER_MODE_HIGHPASS
         ? DAW_AUDIO_EQ_BAND_HIGHPASS
         : state.filter_mode == DAW_AUDIO_SYNTH_FILTER_MODE_BANDPASS
@@ -328,15 +426,35 @@ void render_sample_instrument_frame(
           : state.filter_mode == DAW_AUDIO_SYNTH_FILTER_MODE_NOTCH
             ? DAW_AUDIO_EQ_BAND_NOTCH
             : DAW_AUDIO_EQ_BAND_LOWPASS;
-      const BiquadCoefficients coefficients = rbj_coefficients(filter_type, cutoff, state.filter_resonance, 0.0F, core.config.sample_rate_hz);
+      const BiquadCoefficients coefficients = rbj_coefficients(filter_type, cutoff, state.filter_resonance, 0.0F, sample_rate_hz);
       filtered_left = process_biquad(sample_left, coefficients, voice.filter_history[0]);
       filtered_right = process_biquad(sample_right, coefficients, voice.filter_history[1]);
+      if (!settle_filter(voice.filter_history[0])) filtered_left = 0.0F;
+      if (!settle_filter(voice.filter_history[1])) filtered_right = 0.0F;
     }
-    const float gain = zone.gain * voice.velocity * voice.amp_level * std::fmax(0.0F, 1.0F - lfo * state.lfo_amplitude);
-    const float pan_angle = (std::fmax(-1.0F, std::fmin(1.0F, zone.pan + lfo * state.lfo_pan)) + 1.0F) * 0.7853981633974483096F;
-    left += filtered_left * gain * std::cos(pan_angle) * 1.4142135623730950488F;
-    right += filtered_right * gain * std::sin(pan_angle) * 1.4142135623730950488F;
-    voice.position += voice.increment * std::pow(2.0, static_cast<double>(lfo * state.lfo_pitch_cents) / 1200.0);
+    // A one-shot ends in a short fade, so a region that stops off zero does not click.
+    const float end_fade = one_shot
+      ? static_cast<float>(std::fmin(1.0, (static_cast<double>(zone.end_frame) - voice.position) / (kSampleEndFadeFrames * voice.increment)))
+      : 1.0F;
+    const float gain = zone.gain * voice.velocity * voice.amp_level * voice.fade_gain * end_fade
+      * std::fmax(0.0F, 1.0F - lfo * state.lfo_amplitude);
+    const PanGains &pan = equal_power_pan(
+      voice.pan_gains, std::fmax(-1.0F, std::fmin(1.0F, zone.pan + lfo * state.lfo_pan)));
+    left += filtered_left * gain * pan.left;
+    right += filtered_right * gain * pan.right;
+    voice.position += pitch_modulated
+      ? voice.increment * std::pow(2.0, static_cast<double>(lfo * state.lfo_pitch_cents) / 1200.0)
+      : voice.increment;
+  };
+  for (uint32_t index = 0; index < descriptor.voice_capacity; ++index) {
+    if (instrument.sample_voices[index].active) render_voice(instrument.sample_voices[index]);
+  }
+  const float fade_step = 1.0F / std::fmax(1.0F, static_cast<float>(sample_rate_hz) * kVoiceStealFadeMilliseconds / 1000.0F);
+  for (SampleVoice &voice : instrument.dying_sample_voices) {
+    if (!voice.active) continue;
+    voice.fade_gain -= fade_step;
+    if (voice.fade_gain <= 0.0F) voice = {};
+    else render_voice(voice);
   }
   *left_output = std::isfinite(left) ? left : 0.0F;
   *right_output = std::isfinite(right) ? right : 0.0F;
@@ -550,10 +668,8 @@ bool apply_sample_instrument_event(
     }
   }
   if (voice == nullptr) {
-    voice = &instrument.sample_voices[0];
-    for (uint32_t index = 1; index < descriptor.voice_capacity; ++index) {
-      if (instrument.sample_voices[index].age < voice->age) voice = &instrument.sample_voices[index];
-    }
+    voice = steal_victim(instrument.sample_voices, descriptor.voice_capacity);
+    fade_out_voice(instrument.dying_sample_voices, *voice);
   }
   *voice = {.note_id = event.note_id, .note = event.note, .zone = static_cast<uint32_t>(selected - instrument.zones.data()),
     .velocity = event.value, .asset = selected->asset, .start_frame = selected->start_frame, .root_note = selected->root_note,
@@ -610,25 +726,13 @@ bool apply_instrument_event(
       return true;
     }
     if (!voice.active) {
-      uint32_t seed = instrument.synth.seed ^ static_cast<uint32_t>(event.note_id) ^ (event.note * 0x9E3779B1U);
-      if (seed == 0) seed = 0xA341316CU;
-      voice = {.note_id = event.note_id, .channel = event.channel, .note = event.note, .velocity = event.value, .references = 1,
-        .age = instrument.next_age++, .noise_state = seed, .held = true, .active = true, .released = false};
+      voice = new_synth_voice(instrument, instrument.next_age++, event);
       return true;
     }
   }
-  InstrumentVoice *victim = nullptr;
-  for (uint32_t index = 0; index < capacity; ++index) {
-    InstrumentVoice &candidate = instrument.voices[index];
-    if (victim == nullptr || (candidate.released && !victim->released) || (candidate.released == victim->released && candidate.age < victim->age)) {
-      victim = &candidate;
-    }
-  }
-  if (victim == nullptr) return false;
-  uint32_t seed = instrument.synth.seed ^ static_cast<uint32_t>(event.note_id) ^ (event.note * 0x9E3779B1U);
-  if (seed == 0) seed = 0xA341316CU;
-  *victim = {.note_id = event.note_id, .channel = event.channel, .note = event.note, .velocity = event.value, .references = 1,
-    .age = instrument.next_age++, .noise_state = seed, .held = true, .active = true, .released = false};
+  InstrumentVoice &victim = *steal_victim(instrument.voices, capacity);
+  fade_out_voice(instrument.dying_voices, victim);
+  victim = new_synth_voice(instrument, instrument.next_age++, event);
   return true;
 }
 }  // namespace daw::audio_core_internal

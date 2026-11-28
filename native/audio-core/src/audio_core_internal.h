@@ -109,6 +109,9 @@ constexpr uint32_t kSpectralInputFrames = 131072;
 constexpr uint32_t kSpectralInputFrames = 16384;
 #endif
 constexpr float kSampleTerminationFadeMilliseconds = 6.0F;
+// A voice that gives way to a new note keeps sounding in one of these slots while it fades.
+constexpr float kVoiceStealFadeMilliseconds = 5.0F;
+constexpr uint32_t kMaximumDyingVoices = 4;
 static_assert(sizeof(uintptr_t) <= sizeof(daw_audio_core_handle));
 static_assert(DAW_AUDIO_CORE_PROCESSOR_CONTRACT_VERSION == 1u);
 
@@ -472,6 +475,14 @@ inline bool initialize_native_graph_stages(NativeGraphHooks &hooks, const GraphR
 }
 #endif
 
+// The equal-power gains of a pan, kept with the voice so the sine and cosine are
+// only recomputed when the pan moves.
+struct PanGains {
+  float pan = 2.0F;
+  float left = 0.0F;
+  float right = 0.0F;
+};
+
 struct InstrumentVoice {
   uint64_t note_id = 0;
   uint32_t channel = 0;
@@ -482,8 +493,13 @@ struct InstrumentVoice {
   float oscillator_phase[2]{};
   float lfo_phase = 0.0F;
   uint32_t noise_state = 1;
+  float frequency = 0.0F;
   float amp_level = 0.0F;
   float filter_level = 0.0F;
+  float amp_release_level = 0.0F;
+  float filter_release_level = 0.0F;
+  float fade_gain = 1.0F;
+  PanGains pan_gains{};
   BiquadHistory filter_history[2]{};
   uint32_t amp_stage = 0;
   uint32_t filter_stage = 0;
@@ -510,6 +526,10 @@ struct SampleVoice {
   double increment = 1.0;
   float amp_level = 0.0F;
   float filter_level = 0.0F;
+  float amp_release_level = 0.0F;
+  float filter_release_level = 0.0F;
+  float fade_gain = 1.0F;
+  PanGains pan_gains{};
   uint32_t filter_stage = 0;
   float lfo_phase = 0.0F;
   BiquadHistory filter_history[2]{};
@@ -544,6 +564,7 @@ struct InstrumentConfiguration {
 struct InstrumentNodeState {
   InstrumentConfiguration applied{};
   std::array<InstrumentVoice, kMaximumInstrumentVoices> voices{};
+  std::array<InstrumentVoice, kMaximumDyingVoices> dying_voices{};
   daw_audio_synth_state synth{};
   bool sustain = false;
   float expression = 1.0F;
@@ -552,6 +573,7 @@ struct InstrumentNodeState {
   std::array<daw_audio_sample_zone, DAW_AUDIO_CORE_MAX_SAMPLE_ZONES> zones{};
   std::array<uint32_t, DAW_AUDIO_CORE_MAX_SAMPLE_ZONES> round_robin_cursors{};
   std::array<SampleVoice, kMaximumInstrumentVoices> sample_voices{};
+  std::array<SampleVoice, kMaximumDyingVoices> dying_sample_voices{};
   daw_audio_granular_state granular{};
   std::array<GranularGrain, DAW_AUDIO_CORE_MAX_GRANULAR_GRAINS> grains{};
   std::array<uint64_t, kMaximumInstrumentVoices> granular_note_ids{};

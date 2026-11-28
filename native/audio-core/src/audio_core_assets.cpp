@@ -94,6 +94,9 @@ bool paged_asset_is_referenced(const Core &core, daw_audio_asset_handle asset) {
     for (const SampleVoice &voice : instrument.sample_voices) {
       if (voice.active && voice.asset == asset) return true;
     }
+    for (const SampleVoice &voice : instrument.dying_sample_voices) {
+      if (voice.active && voice.asset == asset) return true;
+    }
     if (instrument.granular.asset == asset && (instrument.granular_note_count > 0
       || std::any_of(instrument.grains.begin(), instrument.grains.end(),
         [](const GranularGrain &grain) { return grain.active; }))) return true;

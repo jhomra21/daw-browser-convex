@@ -1,0 +1,738 @@
+{
+ "name": "instruments-web-audio-retirement",
+ "sequence": 145,
+ "createdAt": "2026-11-28T16:37:31.177Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "src/components/Timeline.tsx",
+   "from": "eeac88ae3da3f1f04a357a1593e38c5d491f63c14f6e48e6e8ae71dfb861af47",
+   "to": "05f71336b245e7cd063136de7daf520aa97b3f4f647f65878281277703597b6a"
+  },
+  {
+   "file": "src/components/effects/Sampler.tsx",
+   "from": "068f7a3d306151b4c74c40c470f3266aeec7bd255fc03005f89f4afe3b660dd8",
+   "to": "bfa34f5ac57e4a7f3099e0f0fab2e8e42ecee6d616dc6f4392154d459ce1ef69"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.test.ts",
+   "from": "9fec646e24dbdfcf956870057577822311adb186614377faebcab59c1ac723b0",
+   "to": "7d7faafa92113e1bdc79fbcbff32781afa6e9ecacc992bd36719c0cfe72bab0a"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.ts",
+   "from": "186f262abd7f395221f3aed97ef24cfd99a8b0db03a8db10bb971d44e6d479f4",
+   "to": "ef0663dd6e32846d0b3180966c512221d56308bb8bd3f5424a1afd2c48bac9aa"
+  },
+  {
+   "file": "src/lib/instrument-buffer-sync.test.ts",
+   "from": "781a7a9d3ae27aa8eb4d5ce74d2a61b0aa4d055a2160b0ac9519b8a03015731d",
+   "to": "7a73b89c82ee50283b26b1b41f55525090b9df075173a21f55f0bcf83e73fee2"
+  },
+  {
+   "file": "src/lib/portable-browser-playback-controller.ts",
+   "from": "6e12a3ff533ff650f3b7350028f3776fa5dc6e33fc2106785509db65feec4d7c",
+   "to": "9c490543de6b04f48e8ee813974714af6091fe36632b8fdc9c70a3d3d3ecbc62"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook.ts",
+   "from": "ef980f2fab37ab8658679b436bc25cc4741610586f8b9afd74d5fb60da393243",
+   "to": "2f4995c0ee6ed2683081a39728799649039a329b5642510503e43b3cb6b7e481"
+  },
+  {
+   "file": "tools/acceptance/b5c-playback-witness-support.ts",
+   "from": "7a8bbae539ef9b815d86cd4c19a8f10cdca3d1275ee554ab289508bb1dcb2744",
+   "to": "b6896c716bb3800c39150904935d8f7ec8853f3e56f099c2774ed569c36a76a1"
+  },
+  {
+   "file": "tools/acceptance/device-control-cost.browser-runtime.tsx",
+   "from": "ac88f5c5ea40f99d1a1411bd0815abd66091bb3b6afb3826c8d6c3005a7d44d7",
+   "to": "ce527cebd2eea259c903b54da7d6391aa4aa9e41073924899b6068b56be22b7d"
+  },
+  {
+   "file": "tools/acceptance/device-control-cost.browser.test.ts",
+   "from": "6ee6446d6cd8bedd5715e791f14b46ebb56a54c11222fab751325cfeed214938",
+   "to": "96127fbb6d3d4d8c202abb7b2913c413368212b88440e4ef9633c12017d8a823"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "5679a007a788b782f64ee567cc8fe692e894c5107c054b90b89519460f103338",
+   "new": "2a0709b4fb510b6d6a223275db636b1b33fe5b8e82f5314107f09641b8f2cecc"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:483:mutant:matrix",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 219,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:483:mutant:matrix",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 17,
+   "new": 21
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:483:mutant:matrix",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6F5PROBE native-on pending-cold-play-postcompile automation",
+    "B6F5PROBE native-on pending-cold-play-postcompile master",
+    "B6F5PROBE native-on pending-cold-play-postcompile mixer",
+    "B6F5PROBE native-on pending-cold-play-postcompile proc-nonlive",
+    "B6F5PROBE native-on pending-cold-play-postcompile structural",
+    "B6F5PROBE native-on pending-cold-play-precompile automation",
+    "B6F5PROBE native-on pending-cold-play-precompile master",
+    "B6F5PROBE native-on pending-cold-play-precompile mixer",
+    "B6F5PROBE native-on pending-cold-play-precompile proc-nonlive",
+    "B6F5PROBE native-on pending-cold-play-precompile structural",
+    "B6F5PROBE native-on pending-warm-play automation",
+    "B6F5PROBE native-on pending-warm-play master",
+    "B6F5PROBE native-on pending-warm-play mixer",
+    "B6F5PROBE native-on pending-warm-play proc-nonlive",
+    "B6F5PROBE native-on pending-warm-play sampled",
+    "B6F5PROBE native-on pending-warm-play structural",
+    "B6F5PROBE native-on pending-warm-play synth-nonlive"
+   ],
+   "new": [
+    "B6F5PROBE native-on pending-cold-play-postcompile automation",
+    "B6F5PROBE native-on pending-cold-play-postcompile master",
+    "B6F5PROBE native-on pending-cold-play-postcompile mixer",
+    "B6F5PROBE native-on pending-cold-play-postcompile proc-nonlive",
+    "B6F5PROBE native-on pending-cold-play-postcompile sampled",
+    "B6F5PROBE native-on pending-cold-play-postcompile structural",
+    "B6F5PROBE native-on pending-cold-play-postcompile synth-nonlive",
+    "B6F5PROBE native-on pending-cold-play-precompile automation",
+    "B6F5PROBE native-on pending-cold-play-precompile master",
+    "B6F5PROBE native-on pending-cold-play-precompile mixer",
+    "B6F5PROBE native-on pending-cold-play-precompile proc-nonlive",
+    "B6F5PROBE native-on pending-cold-play-precompile sampled",
+    "B6F5PROBE native-on pending-cold-play-precompile structural",
+    "B6F5PROBE native-on pending-cold-play-precompile synth-nonlive",
+    "B6F5PROBE native-on pending-warm-play automation",
+    "B6F5PROBE native-on pending-warm-play master",
+    "B6F5PROBE native-on pending-warm-play mixer",
+    "B6F5PROBE native-on pending-warm-play proc-nonlive",
+    "B6F5PROBE native-on pending-warm-play sampled",
+    "B6F5PROBE native-on pending-warm-play structural",
+    "B6F5PROBE native-on pending-warm-play synth-nonlive"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:427:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 245,
+   "new": 244
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:427:1:mutant",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:427:1:mutant",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
+    "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
+    "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
+    "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is starting leaves nothing running and a live paused graph at the start",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit (host pause held)",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit (host pause held)",
+    "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "does not restart after pause wins an active native rebuild",
+    "does not resume a structural rebuild after stop wins"
+   ],
+   "new": [
+    "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
+    "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
+    "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
+    "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is starting leaves nothing running and a live paused graph at the start",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit",
+    "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit (host pause held)",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit",
+    "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit (host pause held)",
+    "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview",
+    "does not restart after pause wins an active native rebuild",
+    "does not resume a structural rebuild after stop wins"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:452:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 248,
+   "new": 247
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:452:mutant:playback",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:452:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "B6f a Stop while playing or paused leaves a live paused portable session at the start",
+    "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
+    "B6f a paused locate moves the live paused portable session to the locate",
+    "B6f a project switch leaves a live paused portable session of the new project at the start",
+    "B6f2 a paused locate during a pending Pause moves the live paused portable session to the locate",
+    "B6f2 a paused locate whose re-prepare settles after a Play committed keeps the Play running",
+    "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
+    "B6f2 an unmount during the Stop re-prepare leaves no portable session behind",
+    "B6f2 two paused locates while the first seek is pending end at the second",
+    "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
+    "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
+    "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
+    "UD7n W-S11d-B2 an edit that lands while a paused portable session is preparing is adopted after the one prepare"
+   ],
+   "new": [
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview",
+    "B6f a Stop while playing or paused leaves a live paused portable session at the start",
+    "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
+    "B6f a paused locate moves the live paused portable session to the locate",
+    "B6f a project switch leaves a live paused portable session of the new project at the start",
+    "B6f2 a paused locate during a pending Pause moves the live paused portable session to the locate",
+    "B6f2 a paused locate whose re-prepare settles after a Play committed keeps the Play running",
+    "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
+    "B6f2 an unmount during the Stop re-prepare leaves no portable session behind",
+    "B6f2 two paused locates while the first seek is pending end at the second",
+    "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
+    "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
+    "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
+    "UD7n W-S11d-B2 an edit that lands while a paused portable session is preparing is adopted after the one prepare"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:453:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 261,
+   "new": 260
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:453:mutant:playback",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 2,
+   "new": 3
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:453:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session"
+   ],
+   "new": [
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview"
+   ]
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-b6family",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 66,
+   "new": 67
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:455:control:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 8,
+   "new": 9
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:459:control:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 8,
+   "new": 9
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:453:control:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 8,
+   "new": 9
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:457:control:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 8,
+   "new": 9
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:control:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 8,
+   "new": 9
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:450:control:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 8,
+   "new": 9
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:452:control:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 8,
+   "new": 9
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:control:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 8,
+   "new": 9
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:454:control:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 8,
+   "new": 9
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:452:mutant:b6f",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 6,
+   "new": 7
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:452:mutant:b6f",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "B6f a Stop while playing or paused leaves a live paused portable session at the start",
+    "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
+    "B6f a paused locate moves the live paused portable session to the locate",
+    "B6f a project switch leaves a live paused portable session of the new project at the start"
+   ],
+   "new": [
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview",
+    "B6f a Stop while playing or paused leaves a live paused portable session at the start",
+    "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
+    "B6f a paused locate moves the live paused portable session to the locate",
+    "B6f a project switch leaves a live paused portable session of the new project at the start"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:466:control:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 8,
+   "new": 9
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:459:mutant:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 7,
+   "new": 8
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:457:mutant:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 7,
+   "new": 8
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:455:mutant:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 7,
+   "new": 8
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:453:mutant:b6f",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 2,
+   "new": 3
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:453:mutant:b6f",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session"
+   ],
+   "new": [
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:mutant:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 6,
+   "new": 7
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:450:mutant:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 7,
+   "new": 8
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:454:mutant:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 7,
+   "new": 8
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 7,
+   "new": 8
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:466:mutant:b6f",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 7,
+   "new": 8
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-b6f",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 8,
+   "new": 9
+  },
+  {
+   "path": [
+    "gates",
+    "name=dp",
+    "judge",
+    "files",
+    "results.json"
+   ],
+   "old": "c034bf55a2d37f18eb348ec0e831c9083da5c8360608f201ebcdf39be85842a7",
+   "new": "b7ee5fa1a5a13eabcdbac3f335471a939dd7ff582922edd6f309034d7e575021"
+  },
+  {
+   "path": [
+    "gates",
+    "name=dp",
+    "judge",
+    "files",
+    "engine-controls.json"
+   ],
+   "old": "8fabb5294599afb78165e7defb6d9b520f3230bc5a287e546ba76aff1fa3fe52",
+   "new": "16d622a6c763691736b22a45c7fdff5e1e1c8255750c862fa5fdbc1afabb2c47"
+  },
+  {
+   "path": [
+    "gates",
+    "name=dp-repeat",
+    "judge",
+    "files",
+    "results.json"
+   ],
+   "old": "c034bf55a2d37f18eb348ec0e831c9083da5c8360608f201ebcdf39be85842a7",
+   "new": "b7ee5fa1a5a13eabcdbac3f335471a939dd7ff582922edd6f309034d7e575021"
+  },
+  {
+   "path": [
+    "gates",
+    "name=dp-repeat",
+    "judge",
+    "files",
+    "engine-controls.json"
+   ],
+   "old": "8fabb5294599afb78165e7defb6d9b520f3230bc5a287e546ba76aff1fa3fe52",
+   "new": "16d622a6c763691736b22a45c7fdff5e1e1c8255750c862fa5fdbc1afabb2c47"
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/sampled-instrument-buffer-cache.test.ts"
+   ],
+   "old": null,
+   "new": {
+    "pass": 5,
+    "skip": 0,
+    "fail": 0
+   }
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/sampled-instrument-buffer-cache.test.ts"
+   ],
+   "old": null,
+   "new": {
+    "pass": 5,
+    "skip": 0,
+    "fail": 0
+   }
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "5c80235634d1ea8bba8dadc05c8878010a647ef7",
+   "gitStatusSha256": "924d6c5fe5e9030997a8e36f0f19b8305897b31bc2844060e9d0b2b1ceee8cce",
+   "expectationsSha256": "193d1f644b2972e4317860aed111293b4f90c43155ae23b028a71bfd0276bb70",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "193d1f644b2972e4317860aed111293b4f90c43155ae23b028a71bfd0276bb70",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/iwr-bless/live",
+   "resultSha256": "3db10081611ab2e0c6d2a5a758aac299b245aad661018dc99d2d5ccdb15ccffb",
+   "seconds": 1558.997354708,
+   "observations": 3082
+  },
+  "unreachedByOverlay": []
+ }
+}

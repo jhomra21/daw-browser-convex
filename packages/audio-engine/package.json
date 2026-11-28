@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./audio-engine": "./src/audio-engine.ts",
+    "./spectrum-analyser": "./src/spectrum-analyser.ts",
     "./automation": "./src/automation.ts",
     "./bpm-detection": "./src/bpm-detection.ts",
     "./browser-characterization": "./src/browser-characterization.ts",

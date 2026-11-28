@@ -9,7 +9,7 @@ import {
 } from "@daw-browser/plugin-host-protocol"
 import { z } from "zod"
 
-export const nativeAudioHostProtocolVersion = 31
+export const nativeAudioHostProtocolVersion = 32
 export const nativeRecordingSpoolImportVersion = 1
 
 export type NativeRecordingSpoolImportVersion = typeof nativeRecordingSpoolImportVersion
@@ -25,7 +25,7 @@ export const nativeKeepLatencyDivergentMixedBusDiagnostic = 3
 export const nativeAudioHostFrameHeaderBytes = 16
 export const nativeAudioHostMaximumPayloadBytes = 1_048_576
 export const nativeAudioHostMaximumMeterEntries = 64
-export const nativeAudioHostMaximumSpectrumBins = 1024
+export const nativeAudioHostMaximumSpectrumBins = 8192
 export const nativeAudioHostNativeGraphFrameHeaderBytes = 12
 export const nativeAudioHostMaximumSerializedPlanBytes = nativeAudioHostMaximumPayloadBytes
 export const nativeAudioHostRequiredCapabilities = 0x000003ff

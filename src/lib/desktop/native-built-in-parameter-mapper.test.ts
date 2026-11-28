@@ -284,13 +284,13 @@ test('maps every continuous target for every live built-in family', () => {
         from: envelope(spectralFrom),
         to: envelope({
           ...spectralFrom, freeze: 0.5, gateThresholdDb: -48, gateAttackMs: 5, gateReleaseMs: 40, morph: 0.4,
-          binShift: 2, blur: 0.3, harmonicPercussiveBalance: 0.6, noiseReduction: 0.4, profileLearn: 0.8, mix: 0.7,
+          binShift: 2, blur: 0.3, harmonicPercussiveBalance: 0.6, noiseReduction: 0.4, noiseFloorDb: -40, profileLearn: 0.8, mix: 0.7,
         }),
       } satisfies EffectParamsCommitPayload<'spectral'>,
       expected: [
         ['spectral.freeze', 0.5], ['spectral.gateThresholdDb', -48], ['spectral.gateAttackMs', 5], ['spectral.gateReleaseMs', 40],
         ['spectral.morph', 0.4], ['spectral.binShift', 2], ['spectral.blur', 0.3], ['spectral.harmonicPercussiveBalance', 0.6],
-        ['spectral.noiseReduction', 0.4], ['spectral.profileLearn', 0.8], ['spectral.mix', 0.7],
+        ['spectral.noiseReduction', 0.4], ['spectral.noiseFloorDb', -40], ['spectral.profileLearn', 0.8], ['spectral.mix', 0.7],
       ],
     },
   ] as const

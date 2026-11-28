@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { convexTest } from "convex-test";
-import { AUDIO_EFFECT_PARAMS_VERSION, AUTO_FILTER_MAX_Q, AUTO_FILTER_MIN_Q, automationTargetKey } from "@daw-browser/shared";
+import { AUDIO_EFFECT_PARAMS_VERSION, AUTO_FILTER_MAX_Q, AUTO_FILTER_MIN_Q, AUDIO_EFFECT_CONTRACTS, automationTargetKey, migrateAudioEffectParams } from "@daw-browser/shared";
 
 import { api } from "./_generated/api";
 import { setAutomationEnvelopeRow } from "./automation";
@@ -80,6 +80,24 @@ test("current, mixer and future-version lanes read unchanged", async () => {
   });
 
   expect(rows.map((row) => currentAutomationRow(row).points[0]?.value)).toEqual([0.25, 0.25, 0.25]);
+});
+
+test("a version 1 Spectral threshold lane reads back at the dBFS of its own effect's threshold at 512 and 4096", async () => {
+  for (const fftSize of [512, 4096]) {
+    const { t, trackId } = await seed();
+    const params = { fftSize, gateThresholdDb: -20 };
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("effects", { projectId, targetType: "track", trackId, index: 0, type: "spectral", instanceId: "spectral-1", params, createdAt: 1 });
+      await ctx.db.insert("automationEnvelopes", { ...rawRow(trackId, "spectral.gateThresholdDb", -20, 1), effectInstanceId: "spectral-1", targetKey: automationTargetKey({ kind: "track", trackId: String(trackId), effectInstanceId: "spectral-1" }, "spectral.gateThresholdDb") });
+    });
+    const view = await t.withIdentity({ subject: owner }).query(api.timeline.fullViewAuthed, { projectId });
+    const own = AUDIO_EFFECT_CONTRACTS.spectral.normalizeParams(migrateAudioEffectParams("spectral", params, 1)).state.gateThresholdDb;
+    const asAt2048 = -20 - 20 * Math.log10(1 / Math.tan(Math.PI / 4096) / 2);
+
+    expect(view.automationEnvelopes[0]?.points[0]?.value).toBeCloseTo(own, 9);
+    expect(Math.abs(own - asAt2048)).toBeGreaterThan(5);
+  }
 });
 
 test("a write stamps effect lanes only, and the timeline view reads the lane back as written", async () => {

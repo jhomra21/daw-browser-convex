@@ -118,7 +118,7 @@ import type {
   NativeVst3InsertionPreflightRequest,
   NativeVst3InsertionPreflightResult,
 } from "@daw-browser/plugin-host-protocol"
-import { isExportAudioFormat, type ExportAudioFormat, bestEffort } from "@daw-browser/shared"
+import { isExportAudioFormat, type ExportAudioFormat, type SpectrumSettings, bestEffort } from "@daw-browser/shared"
 import { z } from "zod"
 /* oxlint-disable eslint/no-restricted-imports -- the bridge types stay in src/types until the batch that owns the certification-pinned playback files moves it */
 import type {
@@ -512,7 +512,7 @@ const desktopBridge = {
 
           return () => ipcRenderer.removeListener(meterBatchChannel, notify)
         },
-        setSpectrumNode: (nodeId: bigint | null) => invokeNativeSession(sessionSetSpectrumNodeChannel, nodeId),
+        setSpectrumNode: (nodeId: bigint | null, settings: SpectrumSettings) => invokeNativeSession(sessionSetSpectrumNodeChannel, { nodeId, settings }),
         onSpectrumFrame: (listener: (frame: NativeHostSpectrumFrame) => void) => {
           const notify = (_event: Electron.IpcRendererEvent, frame: NativeHostSpectrumFrame) => listener(frame)
           ipcRenderer.on(spectrumFrameChannel, notify)

@@ -418,6 +418,7 @@ describe('shared timeline operations', () => {
             blur: 0,
             harmonicPercussiveBalance: 0,
             noiseReduction: 0,
+            noiseFloorDb: -30,
             profileLearn: 0,
             mix: 0.4,
           },

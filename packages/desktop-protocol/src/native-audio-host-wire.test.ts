@@ -37,7 +37,7 @@ test("the host protocol constants keep their wire values", () => {
     patchStatus: host.nativeAudioHostProcessorPatchStatusBytes,
   }).toEqual({
     magic: 0x44415748,
-    version: 31,
+    version: 32,
     artifactId: "daw-audio-host-macos/v10",
     capabilities: 0x3ff,
     frameHeader: 16,
@@ -53,7 +53,7 @@ test("the host protocol constants keep their wire values", () => {
     mappedRanges: 256,
     page: 16_384,
     meterEntries: 64,
-    spectrumBins: 1_024,
+    spectrumBins: 8_192,
     vstString: 256,
     vstPath: 4_096,
     fingerprint: 32,

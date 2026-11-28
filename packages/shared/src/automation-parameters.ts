@@ -321,6 +321,7 @@ const effectDescriptors: AutomationParameterDescriptor[] = [
   { id: 'spectral.blur', label: 'Spectral Blur', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 0, scale: 'linear', unit: 'percent' },
   { id: 'spectral.harmonicPercussiveBalance', label: 'Spectral HPSS Balance', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: -1, max: 1, defaultValue: 0, scale: 'linear' },
   { id: 'spectral.noiseReduction', label: 'Spectral Noise Reduction', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 0, scale: 'linear', unit: 'percent' },
+  { id: 'spectral.noiseFloorDb', label: 'Spectral Noise Floor', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: -60, max: -6, defaultValue: -30, scale: 'linear', unit: 'db' },
   { id: 'spectral.profileLearn', label: 'Spectral Profile Learn', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 0, scale: 'linear', unit: 'percent' },
   { id: 'spectral.mix', label: 'Spectral Mix', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 1, scale: 'linear', unit: 'percent' },
 ]

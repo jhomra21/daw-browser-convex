@@ -46,6 +46,14 @@ daw_audio_core_result daw_audio_core_run_graph_fixture(
   size_t fixture_byte_count,
   float *const *outputs);
 
+/* The same run, also writing the wall time of each partition's process call in nanoseconds to
+ * partition_nanoseconds (one double per partition; may be null). Bench tools use it to find the worst block. */
+daw_audio_core_result daw_audio_core_run_graph_fixture_timed(
+  const uint8_t *fixture_bytes,
+  size_t fixture_byte_count,
+  float *const *outputs,
+  double *partition_nanoseconds);
+
 #ifdef __cplusplus
 }
 #endif

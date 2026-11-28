@@ -3,13 +3,20 @@ import {
   sessionSetTransportChannel,
 } from "@daw-browser/desktop-protocol/ipc-channels"
 import type { NativeHostTransport } from "@daw-browser/audio-engine/native-host-wire"
+import type { SpectrumSettings } from "@daw-browser/shared"
 import { z } from "zod"
 import { nativeSessionEnvelopeSchema } from "../native-session-schemas"
 import { unsigned32Schema, unsigned64Max } from "@daw-browser/desktop-protocol/wire-patterns"
 import type { NativeSessionEvent, NativeSessionIpcHandler } from "./native-session-access"
 import type { nativeSessionFailure } from "../audio-host"
 
-const spectrumEnvelope = nativeSessionEnvelopeSchema(z.bigint().positive().nullable())
+const spectrumEnvelope = nativeSessionEnvelopeSchema(z.object({
+  nodeId: z.bigint().positive().nullable(),
+  settings: z.object({
+    block: z.union([z.literal(512), z.literal(1024), z.literal(2048), z.literal(4096), z.literal(8192), z.literal(16384)]),
+    channel: z.enum(["both", "left", "right"]),
+  }).strict(),
+}).strict())
 
 const transportSchema = z.object({
   epoch: unsigned32Schema,
@@ -44,7 +51,7 @@ export const registerNativeSessionTransportIpc = (dependencies: {
   ipcMain: { handle: (channel: string, listener: NativeSessionIpcHandler) => void }
   allowed: (event: NativeSessionEvent) => boolean
   supervisor: () => {
-    setSpectrumNode: (nodeId: bigint | null) => Promise<void>
+    setSpectrumNode: (nodeId: bigint | null, settings: SpectrumSettings) => Promise<void>
     setTransport: (transport: NativeHostTransport, transactionToken?: string) => Promise<void>
   } | undefined
   // oxlint-disable-next-line anti-slop/no-unknown-parameters -- nativeSessionFailure classifies thrown values at this boundary.
@@ -57,7 +64,7 @@ export const registerNativeSessionTransportIpc = (dependencies: {
     if (!supervisor || !envelope.success || envelope.data.transactionToken !== undefined) return dependencies.fail()
 
     try {
-      await supervisor.setSpectrumNode(envelope.data.value)
+      await supervisor.setSpectrumNode(envelope.data.value.nodeId, envelope.data.value.settings)
 
       return { ok: true as const }
     } catch (error) {

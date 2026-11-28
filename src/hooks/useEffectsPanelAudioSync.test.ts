@@ -787,6 +787,7 @@ for (const local of [true, false]) {
 type SpectrumProvider = (
   targetId: string,
   listener: (frame: SpectrumFrame | null) => void,
+  settings?: { block: number; channel: string },
 ) => () => void;
 
 test("keeps the spectrum subscription across unrelated panel updates", () => {
@@ -868,6 +869,30 @@ test("keeps the spectrum subscription across unrelated panel updates", () => {
   expect(events.at(-1)).toBe("unsubscribe:b:master");
   currentListener?.(frame);
   expect(frames).toEqual([null]);
+});
+
+test("the spectrum subscription follows the analyser settings and ignores unchanged ones", () => {
+  const subscribed: string[] = [];
+
+  const provider: SpectrumProvider = (targetId, _listener, settings) => {
+    subscribed.push(`subscribe:${targetId}:${settings?.block}:${settings?.channel}`);
+
+    return () => { subscribed.push(`unsubscribe:${targetId}`); };
+  };
+
+  const owner = createSpectrumSubscriptionOwner(() => undefined);
+  owner.update(true, provider, "track", { block: 2048, channel: "both" });
+  owner.update(true, provider, "track", { block: 2048, channel: "both" });
+  owner.update(true, provider, "track", { block: 8192, channel: "both" });
+  owner.update(true, provider, "track", { block: 8192, channel: "right" });
+  expect(subscribed).toEqual([
+    "subscribe:track:2048:both",
+    "unsubscribe:track",
+    "subscribe:track:8192:both",
+    "unsubscribe:track",
+    "subscribe:track:8192:right",
+  ]);
+  owner.dispose();
 });
 
 test("flushes persisted off-screen granular work before resolving", async () => {

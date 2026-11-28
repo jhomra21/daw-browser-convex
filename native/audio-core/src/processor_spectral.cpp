@@ -2,6 +2,13 @@
 
 namespace {
 
+static_assert(static_cast<uint32_t>(daw::audio_core::SpectralMode::Freeze) == DAW_AUDIO_SPECTRAL_MODE_FREEZE
+  && static_cast<uint32_t>(daw::audio_core::SpectralMode::Gate) == DAW_AUDIO_SPECTRAL_MODE_GATE
+  && static_cast<uint32_t>(daw::audio_core::SpectralMode::Morph) == DAW_AUDIO_SPECTRAL_MODE_MORPH
+  && static_cast<uint32_t>(daw::audio_core::SpectralMode::ShiftBlur) == DAW_AUDIO_SPECTRAL_MODE_SHIFT_BLUR
+  && static_cast<uint32_t>(daw::audio_core::SpectralMode::Hpss) == DAW_AUDIO_SPECTRAL_MODE_HPSS
+  && static_cast<uint32_t>(daw::audio_core::SpectralMode::NoiseReduce) == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE);
+
 uint32_t spectral_warm_frames(const daw_audio_spectral_state &state) {
   return state.fft_size * 2u + (state.mode == DAW_AUDIO_SPECTRAL_MODE_HPSS
     ? (kSpectralHpssFrames - 1u) * (state.fft_size / state.overlap) : 0u);
@@ -12,191 +19,41 @@ float spectral_parameter(
   return processor_parameter_value(core, processor, target, frame, fallback);
 }
 
-float spectral_transform_parameter(
-  const Core &core, const GraphRevision::Processor &processor, uint32_t target, uint32_t frame, float fallback) {
-  return processor_parameter_value(core, processor, target, frame, fallback);
-}
-
-void spectral_fft(std::array<float, kMaximumSpectralFftSize> &real,
-                  std::array<float, kMaximumSpectralFftSize> &imaginary,
-                  uint32_t size, bool inverse) {
-  for (uint32_t index = 1, reversed = 0; index < size; ++index) {
-    uint32_t bit = size >> 1u;
-    while ((reversed & bit) != 0) {
-      reversed ^= bit;
-      bit >>= 1u;
-    }
-    reversed ^= bit;
-    if (index < reversed) {
-      const float real_value = real[index]; real[index] = real[reversed]; real[reversed] = real_value;
-      const float imaginary_value = imaginary[index]; imaginary[index] = imaginary[reversed]; imaginary[reversed] = imaginary_value;
-    }
-  }
-  for (uint32_t length = 2; length <= size; length <<= 1u) {
-    const float angle = (inverse ? 2.0F : -2.0F) * 3.14159265358979323846F / static_cast<float>(length);
-    const float step_real = std::cos(angle);
-    const float step_imaginary = std::sin(angle);
-    for (uint32_t start = 0; start < size; start += length) {
-      float twiddle_real = 1.0F;
-      float twiddle_imaginary = 0.0F;
-      for (uint32_t offset = 0; offset < length / 2; ++offset) {
-        const uint32_t even = start + offset;
-        const uint32_t odd = even + length / 2;
-        const float odd_real = real[odd] * twiddle_real - imaginary[odd] * twiddle_imaginary;
-        const float odd_imaginary = real[odd] * twiddle_imaginary + imaginary[odd] * twiddle_real;
-        real[odd] = real[even] - odd_real; imaginary[odd] = imaginary[even] - odd_imaginary;
-        real[even] += odd_real; imaginary[even] += odd_imaginary;
-        const float next_real = twiddle_real * step_real - twiddle_imaginary * step_imaginary;
-        twiddle_imaginary = twiddle_real * step_imaginary + twiddle_imaginary * step_real;
-        twiddle_real = next_real;
-      }
-    }
-  }
-  if (inverse) for (uint32_t index = 0; index < size; ++index) {
-    real[index] /= static_cast<float>(size); imaginary[index] /= static_cast<float>(size);
-  }
-}
-
-float spectral_median(std::array<float, kMaximumSpectralBins> &values, uint32_t count) {
-  for (uint32_t index = 1; index < count; ++index) {
-    const float value = values[index];
-    uint32_t cursor = index;
-    while (cursor > 0 && values[cursor - 1] > value) {
-      values[cursor] = values[cursor - 1];
-      --cursor;
-    }
-    values[cursor] = value;
-  }
-  return values[count / 2];
-}
-
-void transform_spectrum(
-  Core &core, GraphRevision::Processor &processor, SpectralHistory &history, uint32_t channel, uint32_t frame) {
-  const daw_audio_spectral_state &state = processor.spectral;
-  auto &real = history.real[channel];
-  auto &imaginary = history.imaginary[channel];
-  auto &side_real = history.side_real[channel];
-  auto &side_imaginary = history.side_imaginary[channel];
-  const uint32_t bins = state.fft_size / 2 + 1;
-  const float freeze = history.replacement.freeze_source_latched
-    ? (history.replacement.analysis_from_predecessor ? 1.0F : 0.0F)
-    : spectral_transform_parameter(core, processor, 15, frame, state.freeze);
-  const float threshold_db = spectral_transform_parameter(core, processor, 16, frame, state.gate_threshold_db);
-  const float attack_ms = spectral_transform_parameter(core, processor, 17, frame, state.gate_attack_ms);
-  const float release_ms = spectral_transform_parameter(core, processor, 18, frame, state.gate_release_ms);
-  const float morph = spectral_transform_parameter(core, processor, 19, frame, state.morph);
-  const float bin_shift = spectral_transform_parameter(core, processor, 20, frame, state.bin_shift);
-  const float blur = spectral_transform_parameter(core, processor, 21, frame, state.blur);
-  const float hpss_balance = spectral_transform_parameter(core, processor, 22, frame, state.harmonic_percussive_balance);
-  const float noise_reduction = spectral_transform_parameter(core, processor, 23, frame, state.noise_reduction);
-  const float profile_learn = spectral_transform_parameter(core, processor, 24, frame, state.profile_learn);
-  if (state.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE) {
-    if (freeze > 0.0F && !history.freeze_captured[channel]) {
-      for (uint32_t bin = 0; bin < bins; ++bin) {
-        history.frozen_magnitude[channel][bin] = std::hypot(real[bin], imaginary[bin]);
-        history.frozen_phase[channel][bin] = std::atan2(imaginary[bin], real[bin]);
-      }
-      history.freeze_captured[channel] = true;
-    } else if (freeze == 0.0F) history.freeze_captured[channel] = false;
-    if (history.freeze_captured[channel]) for (uint32_t bin = 0; bin < bins; ++bin) {
-      real[bin] = history.frozen_magnitude[channel][bin] * std::cos(history.frozen_phase[channel][bin]);
-      imaginary[bin] = history.frozen_magnitude[channel][bin] * std::sin(history.frozen_phase[channel][bin]);
-    }
-  } else if (state.mode == DAW_AUDIO_SPECTRAL_MODE_GATE) {
-    const float threshold = std::pow(10.0F, threshold_db / 20.0F);
-    const float attack = std::exp(-static_cast<float>(history.hop_size) / std::fmax(1.0F, attack_ms * 0.001F * core.config.sample_rate_hz));
-    const float release = std::exp(-static_cast<float>(history.hop_size) / std::fmax(1.0F, release_ms * 0.001F * core.config.sample_rate_hz));
-    for (uint32_t bin = 0; bin < bins; ++bin) {
-      const float target = std::hypot(real[bin], imaginary[bin]) >= threshold ? 1.0F : 0.0F;
-      const float coefficient = target > history.gate_gain[channel][bin] ? attack : release;
-      history.gate_gain[channel][bin] = target + coefficient * (history.gate_gain[channel][bin] - target);
-      real[bin] *= history.gate_gain[channel][bin]; imaginary[bin] *= history.gate_gain[channel][bin];
-    }
-  } else if (state.mode == DAW_AUDIO_SPECTRAL_MODE_MORPH) {
-    for (uint32_t bin = 0; bin < bins; ++bin) {
-      const float phase = std::atan2(imaginary[bin], real[bin]);
-      const float magnitude = std::hypot(real[bin], imaginary[bin]) * (1.0F - morph)
-        + std::hypot(side_real[bin], side_imaginary[bin]) * morph;
-      real[bin] = magnitude * std::cos(phase); imaginary[bin] = magnitude * std::sin(phase);
-    }
-  } else if (state.mode == DAW_AUDIO_SPECTRAL_MODE_SHIFT_BLUR) {
-    for (uint32_t bin = 0; bin < bins; ++bin) history.scratch[channel][bin] = std::hypot(real[bin], imaginary[bin]);
-    const int32_t radius = std::min(15, static_cast<int32_t>(std::ceil(blur * 15.0F)));
-    for (uint32_t bin = 0; bin < bins; ++bin) {
-      const float source = static_cast<float>(bin) - bin_shift;
-      const int32_t lower = static_cast<int32_t>(std::floor(source));
-      const float fraction = source - static_cast<float>(lower);
-      const float shifted = lower >= 0 && static_cast<uint32_t>(lower + 1) < bins
-        ? history.scratch[channel][static_cast<uint32_t>(lower)] * (1.0F - fraction) + history.scratch[channel][static_cast<uint32_t>(lower + 1)] * fraction : 0.0F;
-      float sum = 0.0F; uint32_t count = 0;
-      for (int32_t offset = -radius; offset <= radius; ++offset) {
-        const int32_t candidate = lower + offset;
-        if (candidate >= 0 && static_cast<uint32_t>(candidate) < bins) {
-          sum += history.scratch[channel][static_cast<uint32_t>(candidate)]; ++count;
-        }
-      }
-      const float magnitude = shifted * (1.0F - blur) + (count == 0 ? 0.0F : sum / static_cast<float>(count)) * blur;
-      const float phase = std::atan2(imaginary[bin], real[bin]);
-      real[bin] = magnitude * std::cos(phase); imaginary[bin] = magnitude * std::sin(phase);
-    }
-  } else if (state.mode == DAW_AUDIO_SPECTRAL_MODE_HPSS) {
-    const uint32_t history_offset = history.hpss_index[channel] * kMaximumSpectralBins;
-    for (uint32_t bin = 0; bin < bins; ++bin) history.hpss_history[channel][history_offset + bin] = std::hypot(real[bin], imaginary[bin]);
-    history.hpss_index[channel] = (history.hpss_index[channel] + 1) % kSpectralHpssFrames;
-    for (uint32_t bin = 0; bin < bins; ++bin) {
-      uint32_t count = 0;
-      for (int32_t offset = -15; offset <= 15; ++offset) {
-        const int32_t candidate = static_cast<int32_t>(bin) + offset;
-        if (candidate >= 0 && static_cast<uint32_t>(candidate) < bins) history.scratch[channel][count++] = history.hpss_history[channel][history_offset + static_cast<uint32_t>(candidate)];
-      }
-      const float percussive = spectral_median(history.scratch[channel], count);
-      for (uint32_t sample = 0; sample < kSpectralHpssFrames; ++sample) history.scratch[channel][sample] = history.hpss_history[channel][sample * kMaximumSpectralBins + bin];
-      const float harmonic = spectral_median(history.scratch[channel], kSpectralHpssFrames);
-      const float balance = (hpss_balance + 1.0F) * 0.5F;
-      const float mask = (harmonic * balance + percussive * (1.0F - balance)) / std::fmax(1e-12F, harmonic + percussive);
-      real[bin] *= mask; imaginary[bin] *= mask;
-    }
-  } else {
-    for (uint32_t bin = 0; bin < bins; ++bin) {
-      const float magnitude = std::hypot(real[bin], imaginary[bin]);
-      const float detector = std::hypot(side_real[bin], side_imaginary[bin]);
-      const float profile_input = detector > 0.0F ? detector : magnitude;
-      history.noise_profile[channel][bin] += (profile_input - history.noise_profile[channel][bin]) * profile_learn;
-      const float gain = magnitude > 0.0F ? std::fmax(0.0F, 1.0F - noise_reduction * history.noise_profile[channel][bin] / magnitude) : 0.0F;
-      real[bin] *= gain; imaginary[bin] *= gain;
-    }
-  }
-  imaginary[0] = 0.0F;
-  imaginary[state.fft_size / 2u] = 0.0F;
-  for (uint32_t bin = 1; bin < state.fft_size / 2; ++bin) {
-    real[state.fft_size - bin] = real[bin]; imaginary[state.fft_size - bin] = -imaginary[bin];
-  }
-}
-
+// One analysis frame: the kernel reads the last N input samples from the float rings and overlap-adds into the double output ring.
 void process_spectral_frame(Core &core, GraphRevision::Processor &processor, SpectralHistory &history, uint32_t frame) {
   if (history.analysis_frames < UINT32_MAX) ++history.analysis_frames;
-  const uint32_t input_mask = kMaximumSpectralFftSize - 1;
-  const uint32_t output_mask = kMaximumSpectralFftSize * 2 - 1;
-  const uint32_t frame_start = (history.write_index - processor.spectral.fft_size + kMaximumSpectralFftSize) & input_mask;
+  const daw_audio_spectral_state &state = processor.spectral;
+  daw::audio_core::SpectralControls controls;
+  controls.mode = static_cast<daw::audio_core::SpectralMode>(state.mode);
+  controls.freeze = (history.replacement.freeze_source_latched
+    ? (history.replacement.analysis_from_predecessor ? 1.0F : 0.0F)
+    : spectral_parameter(core, processor, 15, frame, state.freeze)) > 0.0F;
+  controls.learn = spectral_parameter(core, processor, 24, frame, state.profile_learn) > 0.0F;
+  controls.sample_rate = core.config.sample_rate_hz;
+  controls.gate_threshold_db = spectral_parameter(core, processor, 16, frame, state.gate_threshold_db);
+  controls.gate_attack_ms = spectral_parameter(core, processor, 17, frame, state.gate_attack_ms);
+  controls.gate_release_ms = spectral_parameter(core, processor, 18, frame, state.gate_release_ms);
+  controls.morph = spectral_parameter(core, processor, 19, frame, state.morph);
+  controls.bin_shift = spectral_parameter(core, processor, 20, frame, state.bin_shift);
+  controls.blur = spectral_parameter(core, processor, 21, frame, state.blur);
+  controls.hpss_balance = spectral_parameter(core, processor, 22, frame, state.harmonic_percussive_balance);
+  controls.noise_reduction = spectral_parameter(core, processor, 23, frame, state.noise_reduction);
+  controls.noise_floor_db = spectral_parameter(core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_NOISE_FLOOR_DB, frame, state.noise_floor_db);
+  daw::audio_core::SpectralFrameIo io;
+  io.input = {history.input[0].data(), history.input[1].data()};
+  io.sidechain = {history.sidechain[0].data(), history.sidechain[1].data()};
+  io.input_mask = kMaximumSpectralFftSize - 1;
+  io.input_start = (history.write_index - state.fft_size + kMaximumSpectralFftSize) & io.input_mask;
+  io.output = {history.output[0].data(), history.output[1].data()};
+  io.output_mask = kMaximumSpectralFftSize * 2 - 1;
+  io.output_start = history.write_index;
+  std::array<daw::audio_core::SpectralChannelStore, 2> stores{};
   for (uint32_t channel = 0; channel < 2; ++channel) {
-    for (uint32_t index = 0; index < processor.spectral.fft_size; ++index) {
-      const uint32_t source = (frame_start + index) & input_mask;
-      const float window = std::sqrt(0.5F - 0.5F * std::cos(6.2831853071795864769F * static_cast<float>(index) / processor.spectral.fft_size));
-      history.real[channel][index] = history.input[channel][source] * window; history.imaginary[channel][index] = 0.0F;
-      history.side_real[channel][index] = history.sidechain[channel][source] * window; history.side_imaginary[channel][index] = 0.0F;
-    }
-    spectral_fft(history.real[channel], history.imaginary[channel], processor.spectral.fft_size, false);
-    if (processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_MORPH || processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE) {
-      spectral_fft(history.side_real[channel], history.side_imaginary[channel], processor.spectral.fft_size, false);
-    }
-    transform_spectrum(core, processor, history, channel, frame);
-    spectral_fft(history.real[channel], history.imaginary[channel], processor.spectral.fft_size, true);
-    for (uint32_t index = 0; index < processor.spectral.fft_size; ++index) {
-      const float window = std::sqrt(0.5F - 0.5F * std::cos(6.2831853071795864769F * static_cast<float>(index) / processor.spectral.fft_size));
-      const uint32_t target = (history.write_index + index) & output_mask;
-      history.output[channel][target] += history.real[channel][index] * window * (2.0F / processor.spectral.overlap);
-    }
+    stores[channel] = {history.frozen_magnitude[channel].data(), history.frozen_phase[channel].data(),
+      history.frozen_advance[channel].data(), history.gate_gain[channel].data(), history.noise_profile[channel].data(),
+      &history.freeze_captured[channel], &history.noise_frames[channel]};
   }
+  history.kernel.process(io, controls, stores);
 }
 
 void render_spectral_sample(
@@ -215,10 +72,10 @@ void render_spectral_sample(
     history.input[channel][history.write_index & input_mask] = analysis_input ? (*analysis_input)[channel] : input[channel];
     history.sidechain[channel][history.write_index & input_mask] = sidechain[channel];
     history.dry[channel][(history.write_index + processor.spectral.fft_size) & output_mask] = input[channel];
-    const float wet = history.output[channel][history.write_index];
+    const float wet = static_cast<float>(history.output[channel][history.write_index]);
     history.wet_sample[channel] = wet;
     const float dry = history.dry[channel][history.write_index];
-    history.output[channel][history.write_index] = 0.0F;
+    history.output[channel][history.write_index] = 0.0;
     history.dry[channel][history.write_index] = 0.0F;
     const float mix = spectral_parameter(core, processor, 25, frame, processor.spectral.mix);
     const float processed = dry * (1.0F - mix) + wet * mix;
@@ -233,7 +90,7 @@ void render_spectral_sample(
     if (history.state_serial == 0 || history.state_mode != mode || mode == DAW_AUDIO_SPECTRAL_MODE_GATE
       || (mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE && captured != history.freeze_captured)
       || (mode == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE
-        && spectral_transform_parameter(core, processor, 24, frame, processor.spectral.profile_learn) > 0.0F)) {
+        && spectral_parameter(core, processor, 24, frame, processor.spectral.profile_learn) > 0.0F)) {
       ++history.state_serial;
       history.state_mode = mode;
       core.spectral_inputs[processor.spectral_slot].publish(history, mode);
@@ -292,13 +149,16 @@ void apply_spectral_transfer(const SpectralHistory &prior, const daw_audio_spect
   if (before.fft_size == after.fft_size) {
     history.frozen_magnitude = prior.frozen_magnitude;
     history.frozen_phase = prior.frozen_phase;
+    history.frozen_advance = prior.frozen_advance;
     history.noise_profile = prior.noise_profile;
+    history.noise_frames = prior.noise_frames;
     history.gate_gain = prior.gate_gain;
     history.freeze_captured = prior.freeze_captured;
     return;
   }
   const bool gate = after.mode == DAW_AUDIO_SPECTRAL_MODE_GATE;
   if (!gate && after.mode != DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE) return;
+  if (!gate) history.noise_frames = prior.noise_frames;
   for (uint32_t channel = 0; channel < 2; ++channel) {
     const auto &source = gate ? prior.gate_gain[channel] : prior.noise_profile[channel];
     auto &destination = gate ? history.gate_gain[channel] : history.noise_profile[channel];
@@ -335,7 +195,7 @@ void render_spectral_replacement_step(Core &core, GraphRevision &graph, GraphRev
   // The predecessor has no parameter-cache entry of its own. Freeze must
   // nevertheless follow the replacement's resolved live control so it is
   // the audible released reference while fresh live analysis fills.
-  const float freeze = spectral_transform_parameter(core, processor, 15, frame, processor.spectral.freeze);
+  const float freeze = spectral_parameter(core, processor, 15, frame, processor.spectral.freeze);
   const bool freeze_resize = old.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE
     && processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE
     && old.spectral.fft_size != processor.spectral.fft_size;

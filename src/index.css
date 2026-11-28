@@ -320,21 +320,8 @@
     grid-template-columns: 5.5rem 1fr 5.5rem;
   }
 
-  .device-spectral {
-    width: 620px;
-    min-width: 620px;
-  }
-
-  .device-spectral-header-grid {
-    grid-template-columns: 7rem 6rem minmax(0, 1fr) 7rem;
-  }
-
   .device-controls-with-footer {
     grid-template-rows: 1fr auto;
-  }
-
-  .device-spectral-grid {
-    grid-template-rows: auto 1fr auto;
   }
 
   .track-row-divider {

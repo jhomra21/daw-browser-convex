@@ -4,6 +4,7 @@ import { projectControlSnapshotV1, projectControlSnapshotV2 } from "./controlPro
 import { listProjectTracksWithMixerChannels } from "./mixerChannels";
 import { getProjectMixerSettings } from "./projectMixerSettings";
 import { requireProjectRow } from "./projectRows";
+import { effectParamsByInstanceId } from "@daw-browser/shared";
 import { currentAutomationRows } from "./automationRowValues";
 import { currentEffectRows } from "./effectRowParams";
 
@@ -37,7 +38,7 @@ const readProjectControlSnapshot = async <Snapshot>(
     tracks,
     clips,
     masterVolume: mixerSettings.masterVolume,
-    automationEnvelopes: currentAutomationRows(automationEnvelopes),
+    automationEnvelopes: currentAutomationRows(automationEnvelopes, effectParamsByInstanceId(effects)),
     effects: currentEffectRows(effects),
     sidechainRoutes,
     assets,

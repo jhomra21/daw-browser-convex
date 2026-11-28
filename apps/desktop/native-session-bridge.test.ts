@@ -195,13 +195,15 @@ test("sends each revision call to its own channel with the input unchanged", asy
   }
 })
 
+const spectrumSettings = { block: 4096, channel: "left" } as const
+
 test("keeps spectrum selection on the native session envelope contract", async () => {
   const { session } = await darwinAudioHost()
 
   for (const nodeId of [5n, null]) {
     invocations.length = 0
-    await session.setSpectrumNode(nodeId)
-    expect(invocations).toEqual([{ channel: sessionSetSpectrumNodeChannel, args: [{ value: nodeId, transactionToken: undefined }] }])
+    await session.setSpectrumNode(nodeId, spectrumSettings)
+    expect(invocations).toEqual([{ channel: sessionSetSpectrumNodeChannel, args: [{ value: { nodeId, settings: spectrumSettings }, transactionToken: undefined }] }])
   }
 })
 
@@ -248,18 +250,18 @@ test("gates registered native session IPC to the macOS arm64 app origin", async 
   if (!handler) throw new Error("Spectrum handler was not registered")
   const mainFrame = { url: "daw://app/index.html" }
   const validEvent = { sender: { id: 7, mainFrame }, senderFrame: mainFrame }
-  expect(await handler(validEvent, { value: 9n, transactionToken: undefined })).toEqual({ ok: true })
-  expect(await handler({ sender: { id: 7, mainFrame }, senderFrame: { url: "https://example.test" } }, { value: 10n, transactionToken: undefined }))
+  expect(await handler(validEvent, { value: { nodeId: 9n, settings: spectrumSettings }, transactionToken: undefined })).toEqual({ ok: true })
+  expect(await handler({ sender: { id: 7, mainFrame }, senderFrame: { url: "https://example.test" } }, { value: { nodeId: 10n, settings: spectrumSettings }, transactionToken: undefined }))
     .toEqual(nativeSessionFailure())
-  expect(await handler({ sender: { id: 8, mainFrame }, senderFrame: validEvent.senderFrame }, { value: 11n, transactionToken: undefined }))
+  expect(await handler({ sender: { id: 8, mainFrame }, senderFrame: validEvent.senderFrame }, { value: { nodeId: 11n, settings: spectrumSettings }, transactionToken: undefined }))
     .toEqual(nativeSessionFailure())
-  expect(await handler({ sender: { id: 7, mainFrame }, senderFrame: { url: "daw://app/frame" } }, { value: 14n, transactionToken: undefined }))
+  expect(await handler({ sender: { id: 7, mainFrame }, senderFrame: { url: "daw://app/frame" } }, { value: { nodeId: 14n, settings: spectrumSettings }, transactionToken: undefined }))
     .toEqual({ ok: true })
   platform = "linux"
-  expect(await handler(validEvent, { value: 12n, transactionToken: undefined })).toEqual(nativeSessionFailure())
+  expect(await handler(validEvent, { value: { nodeId: 12n, settings: spectrumSettings }, transactionToken: undefined })).toEqual(nativeSessionFailure())
   platform = "darwin"
   architecture = "x64"
-  expect(await handler(validEvent, { value: 13n, transactionToken: undefined })).toEqual(nativeSessionFailure())
+  expect(await handler(validEvent, { value: { nodeId: 13n, settings: spectrumSettings }, transactionToken: undefined })).toEqual(nativeSessionFailure())
   expect(spectrumCalls).toEqual([9n, 14n])
 })
 
@@ -308,8 +310,8 @@ test("validates spectrum selection through the registered native session handler
   const mainFrame = { url: "daw://app/index.html" }
   const event = { sender: { id: 1, mainFrame }, senderFrame: mainFrame }
 
-  expect(await handler(event, { value: 42n, transactionToken: undefined })).toEqual({ ok: true })
-  expect(await handler(event, { value: 42n, transactionToken: "A".repeat(43) })).toEqual(nativeSessionFailure())
+  expect(await handler(event, { value: { nodeId: 42n, settings: spectrumSettings }, transactionToken: undefined })).toEqual({ ok: true })
+  expect(await handler(event, { value: { nodeId: 42n, settings: spectrumSettings }, transactionToken: "A".repeat(43) })).toEqual(nativeSessionFailure())
   expect(await handler(event, { value: "42", transactionToken: undefined })).toEqual(nativeSessionFailure())
   expect(calls).toEqual([42n])
 })
@@ -442,7 +444,7 @@ test("navigation commit activates the privileged native session IPC", async () =
 
   if (!spectrumHandler) throw new Error("Spectrum handler was not registered")
   const event: NativeSessionEvent = { sender: { id: 4, mainFrame }, senderFrame: mainFrame }
-  const value = { value: 17n, transactionToken: undefined }
+  const value = { value: { nodeId: 17n, settings: spectrumSettings }, transactionToken: undefined }
   expect(await spectrumHandler(event, value)).toEqual(nativeSessionFailure())
   rendererLifecycle.beginMainFrameNavigation(mainFrame.url)
   rendererLifecycle.commitMainFrameNavigation(mainFrame.url)

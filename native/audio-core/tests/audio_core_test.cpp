@@ -145,7 +145,8 @@ uint32_t schema_version_of(uint32_t kind) {
     : kind == DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE ? DAW_AUDIO_CORE_PROCESSOR_ENSEMBLE_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_SATURATOR ? DAW_AUDIO_CORE_PROCESSOR_SATURATOR_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_LOFI ? DAW_AUDIO_CORE_PROCESSOR_LOFI_SCHEMA_VERSION
-    : kind == DAW_AUDIO_PROCESSOR_KIND_UTILITY ? DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION : 1u;
+    : kind == DAW_AUDIO_PROCESSOR_KIND_UTILITY ? DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION
+    : kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL ? DAW_AUDIO_CORE_PROCESSOR_SPECTRAL_SCHEMA_VERSION : 1u;
 }
 
 void expect(daw_audio_core_result actual, daw_audio_core_result expected, int line = __builtin_LINE()) {
@@ -989,7 +990,7 @@ void test_spectral_compensation_cannot_exceed_tap_history_capacity() {
     .id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F,
     .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0,
   };
-  std::array<uint8_t, 60> state{};
+  std::array<uint8_t, 64> state{};
   const auto write_u32 = [&state](uint32_t offset, uint32_t value) {
     state[offset] = static_cast<uint8_t>(value);
     state[offset + 1] = static_cast<uint8_t>(value >> 8u);
@@ -1015,6 +1016,7 @@ void test_spectral_compensation_cannot_exceed_tap_history_capacity() {
   write_f32(48, 0.5F);
   write_f32(52, 1.0F);
   write_f32(56, 1.0F);
+  write_f32(60, -30.0F);
   const std::array<uint32_t, 11> targets{{15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25}};
   auto prepare = [&](uint32_t revision, uint32_t fft_size, uint32_t external_latency) {
     auto graph_nodes = nodes;
@@ -1022,7 +1024,7 @@ void test_spectral_compensation_cannot_exceed_tap_history_capacity() {
     graph_nodes[0].external_latency_frames = external_latency;
     write_u32(4, fft_size);
     const daw_audio_processor_descriptor processor{
-      .node_id = 1, .instance_id = 71, .kind = DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, .state_version = 1,
+      .node_id = 1, .instance_id = 71, .kind = DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, .state_version = 2,
       .state_size = static_cast<uint32_t>(state.size()), .bypassed = 0,
       .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
       .latency_frames = fft_size, .tail_frames = 0,
@@ -1198,10 +1200,11 @@ void test_phase4_full_history_and_fanout(uint32_t frames, bool measure = false, 
   const daw_audio_spectral_state spectral_state{
     .enabled = 1, .fft_size = 4096, .overlap = 4, .mode = DAW_AUDIO_SPECTRAL_MODE_FREEZE,
     .gate_threshold_db = -60.0F, .gate_attack_ms = 1.0F, .gate_release_ms = 20.0F, .mix = 1.0F,
+    .noise_floor_db = -30.0F,
   };
   const daw_audio_processor_descriptor processor{
     .node_id = 1, .instance_id = 10, .kind = DAW_AUDIO_PROCESSOR_KIND_SPECTRAL,
-    .state_version = 1, .state_size = sizeof(spectral_state),
+    .state_version = 2, .state_size = sizeof(spectral_state),
     .input_layout = 2, .output_layout = 2, .latency_frames = 4096,
     .state = reinterpret_cast<const uint8_t *>(&spectral_state),
   };
@@ -1588,11 +1591,11 @@ HistoryFixtureState history_fixture_state(uint32_t kind) {
     fixture.size = static_cast<uint32_t>(state.size());
     std::copy(state.begin(), state.end(), fixture.bytes.begin());
   } else {
-    fixture.size = 60; fixture.latency = 512;
+    fixture.size = 64; fixture.latency = 512;
     write_u32(0, 1); write_u32(4, 512); write_u32(8, 4); write_u32(12, DAW_AUDIO_SPECTRAL_MODE_FREEZE);
     write_f32(16, 0.0F); write_f32(20, -60.0F); write_f32(24, 10.0F); write_f32(28, 100.0F);
     write_f32(32, 0.0F); write_f32(36, 0.0F); write_f32(40, 0.0F); write_f32(44, 0.0F);
-    write_f32(48, 0.0F); write_f32(52, 0.0F); write_f32(56, 1.0F);
+    write_f32(48, 0.0F); write_f32(52, 0.0F); write_f32(56, 1.0F); write_f32(60, -30.0F);
   }
   return fixture;
 }
@@ -3145,28 +3148,28 @@ void test_portable_spectral_processor_characterization_and_capacity() {
     {.id = 1, .from_node_id = 1, .to_node_id = 3, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
     {.id = 2, .from_node_id = 2, .to_node_id = 3, .target_processor_id = 71, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 1, .pdc_delay_frames = 0},
   }};
-  const auto write_u32 = [](std::array<uint8_t, 60> &bytes, uint32_t offset, uint32_t value) {
+  const auto write_u32 = [](std::array<uint8_t, 64> &bytes, uint32_t offset, uint32_t value) {
     bytes[offset] = static_cast<uint8_t>(value); bytes[offset + 1] = static_cast<uint8_t>(value >> 8u);
     bytes[offset + 2] = static_cast<uint8_t>(value >> 16u); bytes[offset + 3] = static_cast<uint8_t>(value >> 24u);
   };
-  const auto write_f32 = [&write_u32](std::array<uint8_t, 60> &bytes, uint32_t offset, float value) {
+  const auto write_f32 = [&write_u32](std::array<uint8_t, 64> &bytes, uint32_t offset, float value) {
     uint32_t bits = 0; std::memcpy(&bits, &value, sizeof(bits)); write_u32(bytes, offset, bits);
   };
   const auto spectral_state = [&](uint32_t mode) {
-    std::array<uint8_t, 60> state{};
+    std::array<uint8_t, 64> state{};
     write_u32(state, 0, 1); write_u32(state, 4, 512); write_u32(state, 8, 4); write_u32(state, 12, mode);
     write_f32(state, 16, mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE ? 1.0F : 0.0F);
     write_f32(state, 20, -60.0F); write_f32(state, 24, 1.0F); write_f32(state, 28, 20.0F);
     write_f32(state, 32, 1.0F); write_f32(state, 36, 2.0F); write_f32(state, 40, 0.5F);
-    write_f32(state, 44, 0.25F); write_f32(state, 48, 0.5F); write_f32(state, 52, 1.0F); write_f32(state, 56, 1.0F);
+    write_f32(state, 44, 0.25F); write_f32(state, 48, 0.5F); write_f32(state, 52, 1.0F); write_f32(state, 56, 1.0F); write_f32(state, 60, -30.0F);
     return state;
   };
   const std::array<uint32_t, 11> targets{{15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25}};
   for (uint32_t mode = DAW_AUDIO_SPECTRAL_MODE_FREEZE; mode <= DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE; ++mode) {
     daw_audio_core_handle core = create_core(1024, 2, 1);
-    std::array<uint8_t, 60> state = spectral_state(mode);
+    std::array<uint8_t, 64> state = spectral_state(mode);
     daw_audio_processor_descriptor processor{
-      .node_id = 3, .instance_id = 71, .kind = DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, .state_version = 1, .state_size = 60,
+      .node_id = 3, .instance_id = 71, .kind = DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, .state_version = 2, .state_size = 64,
       .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
       .latency_frames = 512, .tail_frames = 0, .parameter_count = static_cast<uint32_t>(targets.size()), .parameter_targets = targets.data(), .state = state.data(),
     };
@@ -3207,7 +3210,7 @@ void test_portable_spectral_processor_characterization_and_capacity() {
     std::array<daw_audio_graph_edge_descriptor, 2> lifecycle_edges{{edges[0], edges[1]}};
     lifecycle_edges[1].target_processor_id = 71;
     const std::array<uint32_t, 11> lifecycle_targets{{15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25}};
-    std::array<uint8_t, 60> lifecycle_state{};
+    std::array<uint8_t, 64> lifecycle_state{};
     const auto write_lifecycle_state = [&](uint32_t mode, uint32_t enabled, uint32_t fft_size) {
       lifecycle_state.fill(0);
       write_u32(lifecycle_state, 0, enabled);
@@ -3224,14 +3227,15 @@ void test_portable_spectral_processor_characterization_and_capacity() {
       write_f32(lifecycle_state, 44, 0.25F);
       write_f32(lifecycle_state, 48, 0.5F);
       write_f32(lifecycle_state, 52, 1.0F);
+      write_f32(lifecycle_state, 60, -30.0F);
       write_f32(lifecycle_state, 56, 1.0F);
     };
     const auto publish_lifecycle = [&](uint32_t revision, uint32_t mode, uint32_t enabled, uint32_t fft_size) {
       lifecycle_nodes[2].latency_frames = fft_size;
       write_lifecycle_state(mode, enabled, fft_size);
       const daw_audio_processor_descriptor processor{
-        .node_id = 3, .instance_id = 71, .kind = DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, .state_version = 1,
-        .state_size = 60, .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+        .node_id = 3, .instance_id = 71, .kind = DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, .state_version = 2,
+        .state_size = 64, .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
         .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .latency_frames = fft_size, .tail_frames = 0,
         .parameter_count = static_cast<uint32_t>(lifecycle_targets.size()), .parameter_targets = lifecycle_targets.data(),
         .state = lifecycle_state.data(),
@@ -3296,12 +3300,12 @@ void test_portable_spectral_processor_characterization_and_capacity() {
   const std::array<daw_audio_graph_edge_descriptor, 1> capacity_edges{{
     {.id = 1, .from_node_id = 1, .to_node_id = 3, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
   }};
-  std::array<std::array<uint8_t, 60>, DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE + 1> states{};
+  std::array<std::array<uint8_t, 64>, DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE + 1> states{};
   std::array<daw_audio_processor_descriptor, DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE + 1> processors{};
   for (uint32_t index = 0; index < processors.size(); ++index) {
     states[index] = spectral_state(DAW_AUDIO_SPECTRAL_MODE_FREEZE);
     processors[index] = {.node_id = 3, .instance_id = index + 1, .kind = DAW_AUDIO_PROCESSOR_KIND_SPECTRAL,
-      .state_version = 1, .state_size = 60, .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .state_version = 2, .state_size = 64, .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
       .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .latency_frames = 512, .tail_frames = 0,
       .parameter_count = 0, .parameter_targets = nullptr, .state = states[index].data()};
   }
@@ -7792,12 +7796,12 @@ void test_phase4_fft_change_audible(uint32_t lag_blocks = 1) {
     target.add_node(3, DAW_AUDIO_GRAPH_NODE_MASTER);
     target.add_edge(1, 3);
     target.add_edge(2, 3, 0.0F);
-    std::array<uint8_t, 60> state{};
+    std::array<uint8_t, 64> state{};
     const auto put = [&](uint32_t offset, uint32_t value) { std::memcpy(state.data() + offset, &value, 4); };
     const auto number = [&](uint32_t offset, float value) { std::memcpy(state.data() + offset, &value, 4); };
     put(0, 1); put(4, fft); put(8, 4); put(12, DAW_AUDIO_SPECTRAL_MODE_FREEZE);
     number(20, -60.0F); number(24, 1.0F); number(28, 20.0F);
-    number(52, 1.0F); number(56, 1.0F);
+    number(52, 1.0F); number(56, 1.0F); number(60, -30.0F);
     target.add_bytes(1, 10, DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, state.data(), state.size());
     target.processors.back().latency_frames = fft;
     target.nodes[0].latency_frames = fft;
@@ -7925,6 +7929,7 @@ void test_phase4_stateful_spectral(uint32_t mode, bool lower, uint32_t overlap =
       .gate_threshold_db = 0.0F, .gate_attack_ms = 1000.0F, .gate_release_ms = 5000.0F,
       .harmonic_percussive_balance = 1.0F, .noise_reduction = 0.75F,
       .profile_learn = learning ? (broadband ? 0.1F : 1.0F) : 0.0F, .mix = 1.0F,
+      .noise_floor_db = -30.0F,
     };
     rig.add_state(1, 10, DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, state);
     if (mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE || mode == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE)
@@ -8063,6 +8068,7 @@ void test_phase4_spectral_snapshot_mode() {
       .enabled = 1, .fft_size = fft, .overlap = 4, .mode = mode, .freeze = 1,
       .gate_threshold_db = -60, .gate_attack_ms = 1, .gate_release_ms = 20,
       .noise_reduction = .75F, .profile_learn = learn, .mix = 1,
+      .noise_floor_db = -30.0F,
     };
     rig.add_state(1, 10, DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, state);
     rig.nodes[0].latency_frames = rig.processors.back().latency_frames = fft;
@@ -8101,6 +8107,7 @@ void test_phase4_spectral_frozen_tone(bool lower, float mix) {
     const daw_audio_spectral_state state{
       .enabled = 1, .fft_size = fft, .overlap = 4, .mode = DAW_AUDIO_SPECTRAL_MODE_FREEZE,
       .freeze = 1, .gate_threshold_db = -60, .gate_attack_ms = 1, .gate_release_ms = 20, .mix = mix,
+      .noise_floor_db = -30.0F,
     };
     rig.add_state(1, 10, DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, state);
     rig.nodes[0].latency_frames = rig.processors.back().latency_frames = fft;
@@ -8166,6 +8173,7 @@ void test_phase4_spectral_transfer_late_allocation_free() {
       .enabled = 1, .fft_size = fft, .overlap = 4, .mode = DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE,
       .gate_threshold_db = -60, .gate_attack_ms = 1, .gate_release_ms = 20,
       .noise_reduction = .75F, .profile_learn = learn ? .1F : 0.0F, .mix = 1,
+      .noise_floor_db = -30.0F,
     };
     rig.add_state(1, 10, DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, state);
     rig.nodes[0].latency_frames = rig.processors.back().latency_frames = fft;
@@ -8207,7 +8215,9 @@ void test_phase4_spectral_transfer_late_allocation_free() {
   assert(daw::audio_core::InspectLatencyTransition(edited.core).completed_revision == 2);
 }
 
-constexpr float kSpectralGateThresholdDb = -12.0F;  // at 512; the 4096 threshold, -3 dB, stays under the 0 dB limit
+// The Gate threshold is in dBFS of a bin-centred sine at every size. A bin of stationary noise falls by 10 log10 of the
+// size ratio in those units, so the threshold falls with it to keep the same frequency crossing it at every size.
+constexpr float kSpectralGateThresholdDb = -56.0F;  // at 512
 
 // Energy per octave of a stationary signal, from 1024-sample periodograms: bins 2..511 in eight bands from
 // 94 Hz to 24 kHz at 48 kHz.
@@ -8244,12 +8254,13 @@ void test_phase4_spectral_transfer_bands(SpectralSource source, uint32_t mode, u
   const auto build = [&](Phase3Rig &rig, uint32_t fft, bool settling) {
     rig.clear(); rig.add_node(1, DAW_AUDIO_GRAPH_NODE_SOURCE);
     rig.add_node(2, DAW_AUDIO_GRAPH_NODE_MASTER); rig.add_edge(1, 2);
-    // Magnitudes grow with sqrt(fft), so the same frequency crosses the threshold at every size.
+    // Noise bins fall with sqrt(fft) in dBFS, so the same frequency crosses the threshold at every size.
     const daw_audio_spectral_state state{
       .enabled = 1, .fft_size = fft, .overlap = 4, .mode = mode,
-      .gate_threshold_db = kSpectralGateThresholdDb + 10.0F * std::log10(fft / 512.0F),
+      .gate_threshold_db = kSpectralGateThresholdDb - 10.0F * std::log10(fft / 512.0F),
       .gate_attack_ms = settling ? 1.0F : 1000.0F, .gate_release_ms = settling ? 20.0F : 5000.0F,
       .noise_reduction = .75F, .profile_learn = settling && !gate ? .1F : 0.0F, .mix = 1,
+      .noise_floor_db = -30.0F,
     };
     rig.add_state(1, 10, DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, state);
     rig.nodes[0].latency_frames = rig.processors.back().latency_frames = fft;
@@ -8307,8 +8318,11 @@ void test_phase4_spectral_transfer_bands(SpectralSource source, uint32_t mode, u
     const double db = 10 * std::log10(actual[band] / expected[band]);
     std::printf("transfer source=%u mode=%u %u->%u band=%u delta_db=%g\n", static_cast<unsigned>(source), mode, before, after, band, db);
     std::fflush(stdout);
-    // A Gate band near the threshold flips bin by bin, so the oracle is looser there.
-    assert(std::abs(db) <= (gate ? 3.0 : 1.0));
+    // A Gate band near the threshold flips bin by bin, so the oracle is looser there. Noise Reduce leaves a residual near its
+    // spectral floor, where the decision-directed gain follows the profile's exact fit: a profile resampled across a steep
+    // slope or a narrow line cannot match the one learned at the new size to better than a few dB. The old subtraction was
+    // linear in the profile and held 1 dB.
+    assert(std::abs(db) <= 3.0);
   }
   assert(compared >= (source == SpectralSource::Tone ? 1u : 4u));
   assert(daw::audio_core::InspectLatencyTransition(edited.core).completed_revision == 3);
@@ -8341,6 +8355,7 @@ void test_phase4_spectral_transfer_endpoints() {
       const daw_audio_spectral_state state{
         .enabled = 1, .fft_size = fft, .overlap = 4, .mode = DAW_AUDIO_SPECTRAL_MODE_FREEZE,
         .freeze = 1, .gate_threshold_db = -60, .gate_attack_ms = 1, .gate_release_ms = 20, .mix = 1,
+        .noise_floor_db = -30.0F,
       };
       rig.add_state(1, 10, DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, state);
       rig.nodes[0].latency_frames = rig.processors.back().latency_frames = fft;
@@ -8402,6 +8417,7 @@ void test_phase4_spectral_carry(uint32_t mode, bool lower) {
       .freeze = 1.0F, .gate_threshold_db = -60.0F, .gate_attack_ms = 1.0F,
       .gate_release_ms = 20.0F, .noise_reduction = 0.75F,
       .profile_learn = learn ? 1.0F : 0.0F, .mix = 1.0F,
+      .noise_floor_db = -30.0F,
     };
     rig.add_state(1, 10, DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, state);
     rig.nodes[0].latency_frames = rig.processors.back().latency_frames = fft;
@@ -8467,6 +8483,7 @@ void test_phase4_spectral_aligned_completion(uint32_t mode, bool lower, bool ali
       .enabled = 1, .fft_size = fft, .overlap = 4, .mode = mode, .freeze = 1.0F,
       .gate_threshold_db = -60.0F, .gate_attack_ms = 1.0F, .gate_release_ms = 20.0F,
       .noise_reduction = 0.75F, .profile_learn = 0.0F, .mix = 1.0F - dry,
+      .noise_floor_db = -30.0F,
     };
     rig.add_state(1, 10, DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, state);
     rig.processors.back().latency_frames = fft;
@@ -8560,6 +8577,7 @@ void test_phase4_spectral_freeze_gesture(bool lower, bool engage, bool automatio
       .enabled = 1, .fft_size = fft, .overlap = 4, .mode = DAW_AUDIO_SPECTRAL_MODE_FREEZE,
       .freeze = engage ? 0.0F : 1.0F, .gate_threshold_db = -60, .gate_attack_ms = 1,
       .gate_release_ms = 20, .mix = alignment ? 0.0F : 1.0F,
+      .noise_floor_db = -30.0F,
     };
     rig.add_state(1, 10, DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, state);
     rig.declare_target(15);
@@ -8667,6 +8685,7 @@ void test_phase4_spectral_freeze_toggle(bool lower, uint32_t period, bool engage
       .enabled = 1, .fft_size = fft, .overlap = 4, .mode = DAW_AUDIO_SPECTRAL_MODE_FREEZE,
       .freeze = 1, .gate_threshold_db = -60, .gate_attack_ms = 1,
       .gate_release_ms = 20, .mix = alignment ? 0.0F : 1.0F,
+      .noise_floor_db = -30.0F,
     };
     rig.add_state(1, 10, DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, state);
     rig.declare_target(15);

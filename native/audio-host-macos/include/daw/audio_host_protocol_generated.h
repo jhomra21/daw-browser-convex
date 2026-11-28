@@ -7,7 +7,7 @@
 namespace daw::audio_host_macos {
 
 constexpr std::uint32_t kFrameMagic = 0x44415748U;
-constexpr std::uint32_t kControlProtocolVersion = 31;
+constexpr std::uint32_t kControlProtocolVersion = 32;
 constexpr std::string_view kArtifactId = "daw-audio-host-macos/v10";
 constexpr std::uint32_t kHostCapabilities = 0x000003ffU;
 constexpr std::size_t kControlFrameHeaderBytes = 16;
@@ -23,7 +23,7 @@ constexpr std::size_t kMappedAssetPageHeaderBytes = 16;
 constexpr std::size_t kMaximumMappedAssetWrittenRanges = 256;
 constexpr std::size_t kHostPageBytes = 16384;
 constexpr std::size_t kMaximumMeterEntries = 64;
-constexpr std::size_t kMaximumSpectrumBins = 1024;
+constexpr std::size_t kMaximumSpectrumBins = 8192;
 constexpr std::size_t kMaximumVstStringBytes = 256;
 constexpr std::size_t kMaximumVstPathBytes = 4096;
 constexpr std::size_t kVstAttachFingerprintBytes = 32;

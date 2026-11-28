@@ -30,7 +30,7 @@ import {
 } from "@daw-browser/control-core";
 import { currentAutomationDocs } from "./automationRowValues";
 import { currentEffectDocs, writtenRestoreEffects } from "./effectRowParams";
-import { AUDIO_EFFECT_KINDS, audioEffectParamsVersionStamp, automationTargetKey, automationValuesVersionStamp, canonicalTrackCreation, collectTrackDescendantIds, createDefaultSynthParams, createInstrumentInstanceId, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, isSidechainCapableKind, normalizeClipColor, normalizeMixerVolume, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, normalizeTrackColor, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sidechainEligibilityError, sidechainTargetEligibilityError, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
+import { AUDIO_EFFECT_KINDS, audioEffectParamsVersionStamp, automationTargetKey, automationValuesVersionStamp, canonicalTrackCreation, collectTrackDescendantIds, createDefaultSynthParams, createInstrumentInstanceId, effectParamsByInstanceId, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, isSidechainCapableKind, normalizeClipColor, normalizeMixerVolume, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, normalizeTrackColor, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sidechainEligibilityError, sidechainTargetEligibilityError, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
 
 type DeleteOwnedTrackOptions = {
   onlyIfEmpty?: boolean
@@ -1614,12 +1614,13 @@ const ungroupTrackForUser = async (ctx: any, userId: string, projectId: string, 
 
   await Promise.all(childPatches);
 
+  const storedEffects = await ctx.db.query("effects").withIndex("by_track", (q: any) => q.eq("trackId", normalizedGroupId)).collect();
+  const effects = await currentEffectDocs(Promise.resolve(storedEffects));
+
   const automation = await currentAutomationDocs(ctx.db
     .query("automationEnvelopes")
     .withIndex("by_project_track", (q: any) => q.eq("projectId", group.projectId).eq("trackId", normalizedGroupId))
-    .collect());
-
-  const effects = await currentEffectDocs(ctx.db.query("effects").withIndex("by_track", (q: any) => q.eq("trackId", normalizedGroupId)).collect());
+    .collect(), effectParamsByInstanceId(storedEffects));
 
   const [sourceSidechains, targetSidechains] = await Promise.all([
     ctx.db.query("sidechainRoutes").withIndex("by_source", (q: any) => q.eq("sourceTrackId", normalizedGroupId)).collect(),

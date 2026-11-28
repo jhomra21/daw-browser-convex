@@ -145,7 +145,11 @@ const ensemble = envelope(z.object({
   fastDepthMs: finiteNumber, fastRateHz: finiteNumber, safeBassHz: finiteNumber, width: finiteNumber, outputDb: finiteNumber,
 }).strict())
 
-const spectrum = envelope(z.object({ enabled: z.boolean(), view: z.enum(['spectrum', 'spectrogram', 'both']) }).strict())
+const spectrum = envelope(z.object({
+  enabled: z.boolean(), view: z.enum(['spectrum', 'spectrogram', 'both']),
+  block: z.union([z.literal(512), z.literal(1024), z.literal(2048), z.literal(4096), z.literal(8192), z.literal(16384)]).optional(),
+  channel: z.enum(['both', 'left', 'right']).optional(), maxHold: z.boolean().optional(),
+}).strict())
 
 const lofi = envelope(z.object({
   enabled: z.boolean(), bitDepth: finiteNumber, sampleRateHz: finiteNumber, jitter: finiteNumber,
@@ -160,7 +164,7 @@ const spectral = envelope(z.object({
   mode: z.enum(['freeze', 'gate', 'morph', 'shift-blur', 'hpss', 'noise-reduce']),
   freeze: finiteNumber, gateThresholdDb: finiteNumber, gateAttackMs: finiteNumber,
   gateReleaseMs: finiteNumber, morph: finiteNumber, binShift: finiteNumber, blur: finiteNumber,
-  harmonicPercussiveBalance: finiteNumber, noiseReduction: finiteNumber, profileLearn: finiteNumber,
+  harmonicPercussiveBalance: finiteNumber, noiseReduction: finiteNumber, noiseFloorDb: finiteNumber, profileLearn: finiteNumber,
   mix: finiteNumber,
 }).strict())
 

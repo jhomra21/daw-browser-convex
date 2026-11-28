@@ -1,6 +1,7 @@
 import { createEffect, createSignal, onCleanup, untrack, createTrackedEffect } from 'solid-js'
 
 import { LIVE_SCHEDULE_HORIZON_SEC, type AudioEngine, type SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
+import type { SpectrumSettings } from '@daw-browser/shared'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { nativeControllerObserver } from '~/lib/desktop/acceptance-observer'
 import { createNativePlaybackController, nativePlaybackFaultText } from '~/lib/desktop/native-playback-controller'
@@ -420,15 +421,15 @@ export function useTimelinePlayback(
     }
   }
 
-  const subscribeSpectrum = (targetId: string, listener: (frame: SpectrumFrame | null) => void) => {
+  const subscribeSpectrum = (targetId: string, listener: (frame: SpectrumFrame | null) => void, settings: SpectrumSettings) => {
     return createSpectrumFrameDelivery({
       isNativePrepared: () => nativePlayback.isPrepared(),
-      subscribeNative: (onFrame) => nativePlayback.subscribeSpectrum(targetId, onFrame),
+      subscribeNative: (onFrame) => nativePlayback.subscribeSpectrum(targetId, onFrame, settings),
       readBrowserFrame: requiresNativeAudio
         ? () => null
         : () => targetId === "master"
-          ? audioEngine.getMasterSpectrum?.() ?? null
-          : audioEngine.getTrackSpectrum?.(targetId) ?? null,
+          ? audioEngine.getMasterSpectrum?.(settings) ?? null
+          : audioEngine.getTrackSpectrum?.(targetId, settings) ?? null,
       scheduler: {
         request: (callback) => requestAnimationFrame(callback),
         cancel: (id) => cancelAnimationFrame(id),

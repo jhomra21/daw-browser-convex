@@ -203,8 +203,7 @@ bool AudioHost::Configure(const HostConfig& config) {
   impl_->meter_observer.Clear();
   impl_->spectrum_observer.Clear();
   impl_->spectrum_selected_node.store(0, std::memory_order_release);
-  impl_->spectrum_smoothed.fill(0.0F);
-  impl_->spectrum_has_previous = false;
+  impl_->spectrum_analyzer.Reset();
     impl_->spectrum_history_left.fill(0.0F);
     impl_->spectrum_history_right.fill(0.0F);
     impl_->spectrum_history_count = 0;

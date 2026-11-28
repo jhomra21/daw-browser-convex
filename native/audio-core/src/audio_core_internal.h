@@ -40,6 +40,7 @@
 #include "compressor_kernel.h"
 #include "gate_kernel.h"
 #include "limiter_kernel.h"
+#include "spectral_kernel.h"
 
 #if defined(DAW_AUDIO_CORE_TEST_INSTRUMENT_REJECTION)
 extern "C" bool daw_audio_core_test_reject_instrument_event(uint32_t index);
@@ -95,9 +96,9 @@ constexpr uint32_t kMaximumSpectralProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PE
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
 constexpr uint32_t kMaximumNativeGraphStagesPerNode = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE * 2u;
 #endif
-constexpr uint32_t kMaximumSpectralFftSize = 4096;
-constexpr uint32_t kMaximumSpectralBins = kMaximumSpectralFftSize / 2 + 1;
-constexpr uint32_t kSpectralHpssFrames = 31;
+constexpr uint32_t kMaximumSpectralFftSize = daw::audio_core::kSpectralFftMax;
+constexpr uint32_t kMaximumSpectralBins = daw::audio_core::kSpectralBinsMax;
+constexpr uint32_t kSpectralHpssFrames = daw::audio_core::kSpectralMedianFrames;
 // HPSS at overlap two: N + 30*(N/2) fills the median, then N
 // replaces every overlap-add contribution. Round up and leave reader slack.
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
@@ -624,21 +625,17 @@ struct SpectralHistory {
   std::array<std::array<float, kMaximumSpectralFftSize * 2>, 2> rendered{};
   std::array<std::array<float, kMaximumSpectralFftSize>, 2> input{};
   std::array<std::array<float, kMaximumSpectralFftSize>, 2> sidechain{};
-  std::array<std::array<float, kMaximumSpectralFftSize * 2>, 2> output{};
+  // The overlap-add stays in double: the kernel's round trip is exact only if the sum is not rounded to float between frames.
+  std::array<std::array<double, kMaximumSpectralFftSize * 2>, 2> output{};
   std::array<std::array<float, kMaximumSpectralFftSize * 2>, 2> dry{};
-  std::array<std::array<float, kMaximumSpectralFftSize>, 2> real{};
-  std::array<std::array<float, kMaximumSpectralFftSize>, 2> imaginary{};
-  std::array<std::array<float, kMaximumSpectralFftSize>, 2> side_real{};
-  std::array<std::array<float, kMaximumSpectralFftSize>, 2> side_imaginary{};
+  daw::audio_core::SpectralKernel kernel;
   std::array<std::array<float, kMaximumSpectralBins>, 2> frozen_magnitude{};
   std::array<std::array<float, kMaximumSpectralBins>, 2> frozen_phase{};
+  std::array<std::array<float, kMaximumSpectralBins>, 2> frozen_advance{};
   std::array<float, 2> wet_sample{};
   std::array<std::array<float, kMaximumSpectralBins>, 2> gate_gain{};
   std::array<std::array<float, kMaximumSpectralBins>, 2> noise_profile{};
-  std::array<std::array<float, kMaximumSpectralBins>, 2> scratch{};
-  std::array<std::array<float, kMaximumSpectralBins>, 2> hpss_median{};
-  std::array<std::array<float, kMaximumSpectralBins * kSpectralHpssFrames>, 2> hpss_history{};
-  std::array<uint32_t, 2> hpss_index{};
+  std::array<uint32_t, 2> noise_frames{};
   std::array<bool, 2> freeze_captured{};
   uint32_t fft_size = 0;
   uint32_t overlap = 0;
@@ -808,7 +805,8 @@ struct Core {
     }
     std::atomic<uint64_t> end{0};
     struct PublishedState {
-      std::array<std::array<float, kMaximumSpectralBins>, 2> magnitude{}, phase{};
+      std::array<std::array<float, kMaximumSpectralBins>, 2> magnitude{}, phase{}, advance{};
+      std::array<uint32_t, 2> noise_frames{};
       std::array<bool, 2> captured{};
       uint64_t serial = 0;
       uint32_t mode = UINT32_MAX;
@@ -825,8 +823,11 @@ struct Core {
       if (mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE) {
         state.magnitude = history.frozen_magnitude;
         state.phase = history.frozen_phase;
-      } else if (mode == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE) state.magnitude = history.noise_profile;
-      else if (mode == DAW_AUDIO_SPECTRAL_MODE_GATE) state.magnitude = history.gate_gain;
+        state.advance = history.frozen_advance;
+      } else if (mode == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE) {
+        state.magnitude = history.noise_profile;
+        state.noise_frames = history.noise_frames;
+      } else if (mode == DAW_AUDIO_SPECTRAL_MODE_GATE) state.magnitude = history.gate_gain;
       state.captured = history.freeze_captured;
       state.serial = history.state_serial;
       state.mode = mode;
@@ -843,8 +844,11 @@ struct Core {
       if (mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE) {
         history.frozen_magnitude = state.magnitude;
         history.frozen_phase = state.phase;
-      } else if (mode == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE) history.noise_profile = state.magnitude;
-      else if (mode == DAW_AUDIO_SPECTRAL_MODE_GATE) history.gate_gain = state.magnitude;
+        history.frozen_advance = state.advance;
+      } else if (mode == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE) {
+        history.noise_profile = state.magnitude;
+        history.noise_frames = state.noise_frames;
+      } else if (mode == DAW_AUDIO_SPECTRAL_MODE_GATE) history.gate_gain = state.magnitude;
       history.freeze_captured = state.captured;
       history.state_serial = state.serial;
       history.state_mode = state.mode;
@@ -1482,7 +1486,9 @@ inline float process_biquad(float input, const BiquadCoefficients &coefficients,
 
 inline void reset_spectral_history(SpectralHistory &history, const daw_audio_spectral_state &state) {
   if (history.fft_size == state.fft_size && history.overlap == state.overlap) return;
-  history = SpectralHistory{};
+  std::destroy_at(&history);
+  std::construct_at(&history);
+  history.kernel.prepare(state.fft_size, state.overlap);
   history.fft_size = state.fft_size;
   history.overlap = state.overlap;
   history.hop_size = state.fft_size / state.overlap;

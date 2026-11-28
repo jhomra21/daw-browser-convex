@@ -2426,8 +2426,11 @@ test('W-C9-fx-4 a reorder dips the node to nothing and back over 5 ms around the
 // AE-08 phase 8 step 10, item 0: the portable core cannot bridge a Spectral FFT size change (its retained stage-input
 // history is 16,384 frames against native's 131,072), so the old stage fades out as a ghost over 5 ms and a fresh stage of
 // the new size starts. Native keeps the spectral history across sizes through its predecessor path; WASM restarts it.
-const fxSpectral = (fftSize: 512 | 1024) => fxProcessor('spectral-a', 61, 'spectral', 15,
-  encodeSpectralProcessorState({ ...createDefaultSpectralParams(), mode: 'gate', gateThresholdDb: -120, fftSize }), fftSize)
+const fxSpectral = (fftSize: 512 | 1024) => ({
+  ...fxProcessor('spectral-a', 61, 'spectral', 15,
+    encodeSpectralProcessorState({ ...createDefaultSpectralParams(), mode: 'gate', gateThresholdDb: -120, fftSize }), fftSize),
+  stateVersion: 2,
+})
 
 test('W-C9-spectral-1 a Spectral FFT size change at the seam is adopted: the old stage fades out with no step and the new size resumes after its window fills', async () => {
   const blocks = 60

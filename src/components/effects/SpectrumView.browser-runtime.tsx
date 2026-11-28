@@ -23,7 +23,7 @@ const run = async () => {
   host.style.cssText = 'width:640px;height:420px;display:flex;flex-direction:column;'
     + '--device-graph-background:#0b0b10;--device-graph-grid:#2a2a33;--device-graph-accent:#3fd0f0'
   document.body.append(host)
-  render(() => <SpectrumView frame={frame()} view="both" />, host)
+  render(() => <SpectrumView frame={frame()} view="both" maxHold={false} />, host)
   // Tailwind is not loaded here, so give the view the flex layout its classes describe.
   const view = host.querySelector<HTMLElement>('[data-spectrum-view]')
 

@@ -1,7 +1,7 @@
 import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery, PublicationJoin } from "~/lib/live-processor-control";
 import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import { createEffect, createMemo, onCleanup, untrack, type Accessor } from "solid-js";
-import { isLocalId, type AudioEffectKind, type TrackInstrumentParams } from "@daw-browser/shared";
+import { AUDIO_EFFECT_CONTRACTS, isLocalId, type AudioEffectKind, type SpectrumSettings, type TrackInstrumentParams } from "@daw-browser/shared";
 import type { AudioEngine, EngineDisposition, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import type { Clip, ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
 import { createEffectsPanelAudioDevice } from "~/components/timeline/create-effects-panel-audio-effects-state";
@@ -97,7 +97,7 @@ type EffectsPanelControllerOptions = {
   onEffectError?: (title: string, message: string) => void;
   onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void;
   onExportSnapshotChange?: (snapshot: EffectsPanelExportSnapshot | undefined) => void;
-  spectrumProvider?: Accessor<((targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void) | undefined>;
+  spectrumProvider?: Accessor<((targetId: string, listener: (frame: SpectrumFrame | null) => void, settings: SpectrumSettings) => () => void) | undefined>;
   samplerBufferSync: ReturnType<typeof createSamplerBufferSync>;
   drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>;
 };
@@ -236,6 +236,14 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     resolveTrackByTargetId,
   );
 
+  const spectrumSettings = createMemo(() => {
+    const instance = audioEffects.orderedEffects().find((effect) => effect.kind === "spectrum");
+    const params = instance && audioEffects.paramsForInstance(instance);
+    const { block, channel } = AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(params ?? null).state;
+
+    return { block, channel };
+  }, { equals: (previous, next) => previous.block === next.block && previous.channel === next.channel });
+
   const { flushPending: flushSampledInstrumentWork, spectrum } = useEffectsPanelAudioSync({
     pendingWorkOwner,
     syncInstrumentForTarget: instrument.syncRemoteInstrumentForTarget,
@@ -253,6 +261,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     localEffectsView,
     samplerBufferSync,
     drumRackBufferSync,
+    spectrumSettings,
     spectrumProvider: options.spectrumProvider,
   });
 

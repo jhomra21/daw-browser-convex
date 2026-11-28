@@ -7,6 +7,7 @@
 #include "../src/revision-publication-wait.h"
 #include "../src/offline-failure-message.h"
 #include "../src/recording-spool.h"
+#include "../src/spectrum-analyzer.h"
 #include "worker-supervisor.h"
 #include "vst3-worker.h"
 #include <algorithm>
@@ -19,6 +20,7 @@
 #include <chrono>
 #include <cstring>
 #include <cstdio>
+#include <functional>
 #include <future>
 #include <filesystem>
 #include <limits>
@@ -1232,6 +1234,139 @@ void TestProcessorStatePatchTimeoutCancelsAndReusesSlot() {
     == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);
   assert(host.RollbackGraphRevision(3).code == daw::audio_host_macos::GraphRevisionStatusCode::kRolledBack);
   host.Stop();
+}
+
+// Drives the host's spectrum frame with a sine through the real observation path and returns its display levels
+// as dBFS (display value 0..1 spans -90..0 dBFS).
+using SpectrumSignal = std::function<float(std::uint32_t channel, std::uint64_t frame)>;
+
+std::vector<double> SpectrumDecibelsOf(const SpectrumSignal& source, const std::uint32_t block, const std::uint32_t blocks,
+  const daw::audio_host_macos::SpectrumSettings settings, const std::uint32_t silent_blocks = 0,
+  std::uint32_t* const fft_size = nullptr) {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({.device_uid = "diagnostic", .sample_rate_hz = 48000,
+    .max_frames_per_block = block, .channel_count = 2, .revision = 1}));
+  assert(host.PrepareAndPublishGraph(1, GraphSnapshot(1, 1.0F)));
+  assert(host.SetTransport(1, false, 0));
+  assert(host.StartDiagnosticMode());
+  assert(host.SetSpectrumNode(1, settings));
+  std::vector<float> signal(block), signal_right(block), left(block), right(block);
+  const std::array<const float*, 2> input{signal.data(), signal_right.data()};
+  const std::array<float*, 2> output{left.data(), right.data()};
+  std::uint64_t frame = 0;
+  std::optional<daw::audio_host_macos::SpectrumFrame> last;
+  for (std::uint32_t index = 0; index < silent_blocks + blocks; ++index) {
+    for (std::uint32_t sample = 0; sample < block; ++sample) {
+      signal[sample] = index < silent_blocks ? 0.0F : source(0, frame + sample);
+      signal_right[sample] = index < silent_blocks ? 0.0F : source(1, frame + sample);
+    }
+    frame += block;
+    assert(host.ProcessPlanar(input, output, block));
+    last = host.DrainSpectrumFrame();
+    assert(last);
+  }
+  assert(last->bin_count == last->fft_size / 2);
+  if (fft_size != nullptr) *fft_size = last->fft_size;
+  std::vector<double> decibels(last->bin_count);
+  for (std::uint32_t bin = 0; bin < last->bin_count; ++bin) decibels[bin] = last->data[bin] * 90.0 - 90.0;
+  return decibels;
+}
+
+std::vector<double> SpectrumDecibelsAfter(const double hertz, const double amplitude, const std::uint32_t block,
+  const std::uint32_t blocks, const std::uint32_t silent_blocks = 0) {
+  return SpectrumDecibelsOf([=](std::uint32_t, std::uint64_t frame) {
+    return static_cast<float>(amplitude * std::sin(6.283185307179586 * hertz * static_cast<double>(frame) / 48000.0));
+  }, block, blocks, {}, silent_blocks);
+}
+
+double SpectrumPeakDecibels(const std::vector<double>& decibels) {
+  return *std::max_element(decibels.begin(), decibels.end());
+}
+
+// Two equal sines 15 Hz apart: the deepest dB between the two peaks, relative to the lower peak. Measured at a bin
+// of the given block size, so it reads the same way the production readout would.
+double SpectrumValleyDepth(const std::uint32_t block_size) {
+  const auto decibels = SpectrumDecibelsOf([](std::uint32_t, std::uint64_t frame) {
+    const double time = static_cast<double>(frame) / 48000.0;
+    return static_cast<float>(0.25 * std::sin(6.283185307179586 * 40.0 * time) + 0.25 * std::sin(6.283185307179586 * 55.0 * time));
+  }, 128, 400, {.block_size = block_size});
+  const double bin_hertz = 48000.0 / block_size;
+  const auto bin = [&](const double hertz) { return static_cast<std::size_t>(std::lround(hertz / bin_hertz)); };
+  const auto peak = [&](const double hertz) {
+    return *std::max_element(decibels.begin() + bin(hertz) - 1, decibels.begin() + bin(hertz) + 2);
+  };
+  const double valley = *std::min_element(decibels.begin() + bin(40.0), decibels.begin() + bin(55.0) + 1);
+  const double depth = std::min(peak(40.0), peak(55.0)) - valley;
+  std::fprintf(stderr, "spectrum 40/55 Hz at block %u: peaks %.2f / %.2f dB, valley %.2f dB, depth %.2f dB\n",
+    block_size, peak(40.0), peak(55.0), valley, depth);
+  return depth;
+}
+
+// The research asked for a 12 dB valley at block 8192, which no window can give: the same two sines through
+// rectangular, Hann, Hamming and Blackman windows leave at most a 9.7 dB valley at 8192 (6.4 dB for Hann).
+// Block 8192 does separate them into two peaks with a dip; the 12 dB valley arrives at block 16384.
+void TestSpectrumBlockSizeResolvesClosePartials() {
+  assert(SpectrumValleyDepth(2048) < 0.5);
+  assert(SpectrumValleyDepth(8192) >= 3.0);
+  assert(SpectrumValleyDepth(16384) >= 12.0);
+}
+
+// Every block choice reports its own length, keeps the calibrated level, and a left or right choice hears only that side.
+void TestSpectrumBlockAndChannelChoices() {
+  const auto tone = [](const double amplitude) {
+    return [=](std::uint32_t channel, std::uint64_t frame) {
+      return channel == 0 ? static_cast<float>(amplitude * std::sin(6.283185307179586 * 1500.0 * static_cast<double>(frame) / 48000.0)) : 0.0F;
+    };
+  };
+  for (const std::uint32_t block_size : {512U, 1024U, 2048U, 4096U, 8192U, 16384U}) {
+    std::uint32_t fft_size = 0;
+    const auto both = SpectrumDecibelsOf(tone(0.5), 128, 400, {.block_size = block_size}, 0, &fft_size);
+    assert(fft_size == block_size && both.size() == block_size / 2U);
+    // A sine in the left channel only reads 6 dB down in the L+R average, and at full level when only L is analysed.
+    const auto left = SpectrumDecibelsOf(tone(0.5), 128, 400, {.block_size = block_size, .channel = daw::audio_host_macos::SpectrumChannel::kLeft});
+    const auto right = SpectrumDecibelsOf(tone(0.5), 128, 400, {.block_size = block_size, .channel = daw::audio_host_macos::SpectrumChannel::kRight});
+    std::fprintf(stderr, "spectrum block %u: both %.2f dB, left %.2f dB, right %.2f dB\n",
+      block_size, SpectrumPeakDecibels(both), SpectrumPeakDecibels(left), SpectrumPeakDecibels(right));
+    assert(std::fabs(SpectrumPeakDecibels(left) - 20.0 * std::log10(0.5)) <= 1.5);
+    assert(std::fabs(SpectrumPeakDecibels(both) - SpectrumPeakDecibels(left) + 6.02) <= 0.1);
+    assert(SpectrumPeakDecibels(right) <= -89.9);
+  }
+}
+
+void TestSpectrumRejectsInvalidSettings() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({.device_uid = "diagnostic", .sample_rate_hz = 48000,
+    .max_frames_per_block = 128, .channel_count = 2, .revision = 1}));
+  assert(host.PrepareAndPublishGraph(1, GraphSnapshot(1, 1.0F)));
+  assert(!host.SetSpectrumNode(1, {.block_size = 3000}));
+  assert(!host.SetSpectrumNode(1, {.block_size = 32768}));
+  assert(!host.SetSpectrumNode(1, {.block_size = 2048, .channel = static_cast<daw::audio_host_macos::SpectrumChannel>(3)}));
+  assert(host.SetSpectrumNode(1, {.block_size = 16384}));
+}
+
+void TestSpectrumLevelsAreCalibrated() {
+  for (const double hertz : {100.0, 1000.0, 10000.0}) {
+    for (const double level : {-6.0, -20.0, -60.0}) {
+      const auto decibels = SpectrumDecibelsAfter(hertz, std::pow(10.0, level / 20.0), 128, 300);
+      const auto peak = static_cast<std::uint32_t>(std::max_element(decibels.begin(), decibels.end()) - decibels.begin());
+      const auto [offset, peak_level] = daw::audio_host_macos::SpectrumAnalyzer::InterpolatedPeak(
+        decibels[peak - 1], decibels[peak], decibels[peak + 1]);
+      const double frequency = (peak + offset) * 48000.0 / 2048.0;
+      std::fprintf(stderr, "spectrum %.0f Hz %.0f dBFS: level %.3f dB, frequency %.3f Hz, raw peak %.3f dB\n",
+        hertz, level, peak_level, frequency, decibels[peak]);
+      assert(std::fabs(peak_level - level) <= 0.5);
+      assert(std::fabs(frequency - hertz) <= 48000.0 / 2048.0 / 2.0);
+    }
+  }
+}
+
+// The same audio delivered in 128- and 512-frame blocks reads the same after the same elapsed time.
+void TestSpectrumAveragingIgnoresDeliveryRate() {
+  const auto fine = SpectrumDecibelsAfter(1000.0, 0.5, 128, 36, 20);
+  const auto coarse = SpectrumDecibelsAfter(1000.0, 0.5, 512, 9, 5);
+  const auto peak = static_cast<std::size_t>(std::max_element(fine.begin(), fine.end()) - fine.begin());
+  std::fprintf(stderr, "spectrum step 0.096 s: %.3f dB at 128, %.3f dB at 512\n", fine[peak], coarse[peak]);
+  assert(std::fabs(fine[peak] - coarse[peak]) <= 0.5);
 }
 
 void TestCheckpoint4ObservationHandoff(const char mode) {
@@ -3520,10 +3655,10 @@ std::vector<std::uint8_t> SpectralTransitionGraph(const std::uint32_t revision, 
   WriteLeU32(payload, 16, 1);
   WriteLeU32(payload, 48, fft);
   AppendLeU64(payload, 1);
-  for (const auto value : {std::uint32_t(DAW_AUDIO_PROCESSOR_KIND_SPECTRAL), 1U, 60U, 10U, 0U, 2U, 2U, 0U, fft, 0U})
+  for (const auto value : {std::uint32_t(DAW_AUDIO_PROCESSOR_KIND_SPECTRAL), 2U, 64U, 10U, 0U, 2U, 2U, 0U, fft, 0U})
     AppendLeU32(payload, value);
   for (const auto value : {1U, fft, 2U, std::uint32_t(DAW_AUDIO_SPECTRAL_MODE_HPSS)}) AppendLeU32(payload, value);
-  for (const auto value : {0.F, -60.F, 1.F, 20.F, 0.F, 0.F, 0.F, 1.F, 0.F, 0.F, 1.F}) AppendLeFloat(payload, value);
+  for (const auto value : {0.F, -60.F, 1.F, 20.F, 0.F, 0.F, 0.F, 1.F, 0.F, 0.F, 1.F, -30.F}) AppendLeFloat(payload, value);
   frame.clear();
   AppendBeU64(frame, revision);
   AppendBeU32(frame, static_cast<std::uint32_t>(payload.size()));
@@ -6970,6 +7105,11 @@ int main(const int argc, const char* const argv[]) {
     plugin::MeasureInserts();
     return 0;
   }
+  TestSpectrumLevelsAreCalibrated();
+  TestSpectrumAveragingIgnoresDeliveryRate();
+  TestSpectrumBlockSizeResolvesClosePartials();
+  TestSpectrumBlockAndChannelChoices();
+  TestSpectrumRejectsInvalidSettings();
   for (const char mode : {'a', 'b', 'c', 'd', 'e', 'f'}) TestCheckpoint4ObservationHandoff(mode);
   for (const unsigned mode : {0U, 1U, 2U, 3U, 4U}) TestCheckpoint3WireOrigin(mode);
   TestCheckpoint3RapidNodeReaddition();

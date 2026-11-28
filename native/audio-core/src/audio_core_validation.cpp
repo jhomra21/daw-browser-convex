@@ -366,7 +366,9 @@ bool valid_spectral_state(const daw_audio_spectral_state &state) {
     && std::isfinite(state.harmonic_percussive_balance) && state.harmonic_percussive_balance >= -1.0F && state.harmonic_percussive_balance <= 1.0F
     && std::isfinite(state.noise_reduction) && state.noise_reduction >= 0.0F && state.noise_reduction <= 1.0F
     && std::isfinite(state.profile_learn) && state.profile_learn >= 0.0F && state.profile_learn <= 1.0F
-    && std::isfinite(state.mix) && state.mix >= 0.0F && state.mix <= 1.0F;
+    && std::isfinite(state.mix) && state.mix >= 0.0F && state.mix <= 1.0F
+    && std::isfinite(state.noise_floor_db) && state.noise_floor_db >= DAW_AUDIO_CORE_SPECTRAL_NOISE_FLOOR_DB_MIN
+    && state.noise_floor_db <= DAW_AUDIO_CORE_SPECTRAL_NOISE_FLOOR_DB_MAX;
 }
 
 bool valid_autofilter_state(const daw_audio_autofilter_state &state) {
@@ -589,7 +591,7 @@ bool decode_processor_state(
     out_processor->reverb = state;
     return true;
   }
-  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL && descriptor.state_size == 60) {
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL && descriptor.state_size == 64) {
     const daw_audio_spectral_state state{
       .enabled = read_u32_le(descriptor.state), .fft_size = read_u32_le(descriptor.state + 4),
       .overlap = read_u32_le(descriptor.state + 8), .mode = read_u32_le(descriptor.state + 12),
@@ -598,7 +600,7 @@ bool decode_processor_state(
       .morph = read_f32_le(descriptor.state + 32), .bin_shift = read_f32_le(descriptor.state + 36),
       .blur = read_f32_le(descriptor.state + 40), .harmonic_percussive_balance = read_f32_le(descriptor.state + 44),
       .noise_reduction = read_f32_le(descriptor.state + 48), .profile_learn = read_f32_le(descriptor.state + 52),
-      .mix = read_f32_le(descriptor.state + 56),
+      .mix = read_f32_le(descriptor.state + 56), .noise_floor_db = read_f32_le(descriptor.state + 60),
     };
     if (!valid_spectral_state(state) || descriptor.latency_frames != state.fft_size || descriptor.tail_frames != 0) return false;
     out_processor->spectral = state;
@@ -726,8 +728,8 @@ bool valid_processor_parameter_target(uint32_t kind, uint32_t target) {
         || (target >= DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_CHORUS_AMOUNT_MS
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_HIGH_SHELF_DB);
     case DAW_AUDIO_PROCESSOR_KIND_SPECTRAL:
-      return target >= DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_FREEZE
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_MIX;
+      return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_FREEZE && target <= DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_MIX)
+        || target == DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_NOISE_FLOOR_DB;
     case DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER:
       return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_FREQUENCY_HZ
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE)
@@ -818,6 +820,7 @@ bool valid_processor_parameter_value(uint32_t target, float value) {
     if (target == DAW_AUDIO_PROCESSOR_PARAMETER_FLANGER_STEREO_PHASE) return value >= DAW_AUDIO_CORE_FLANGER_STEREO_PHASE_MIN && value <= DAW_AUDIO_CORE_FLANGER_STEREO_PHASE_MAX;
     return value >= DAW_AUDIO_CORE_FLANGER_MIX_MIN && value <= DAW_AUDIO_CORE_FLANGER_MIX_MAX;
   }
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_NOISE_FLOOR_DB) return value >= DAW_AUDIO_CORE_SPECTRAL_NOISE_FLOOR_DB_MIN && value <= DAW_AUDIO_CORE_SPECTRAL_NOISE_FLOOR_DB_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_SAFE_BASS_HZ) return value >= DAW_AUDIO_CORE_CHORUS_SAFE_BASS_HZ_MIN && value <= DAW_AUDIO_CORE_CHORUS_SAFE_BASS_HZ_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_WIDTH) return value >= DAW_AUDIO_CORE_CHORUS_WIDTH_MIN && value <= DAW_AUDIO_CORE_CHORUS_WIDTH_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_OUTPUT_DB) return value >= DAW_AUDIO_CORE_CHORUS_OUTPUT_DB_MIN && value <= DAW_AUDIO_CORE_CHORUS_OUTPUT_DB_MAX;

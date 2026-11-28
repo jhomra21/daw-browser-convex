@@ -6,6 +6,7 @@ import { migrateAutoPanParamsV1, migrateChorusParamsV1, migrateEnsembleParamsV1,
 import { migrateLoFiParamsV1 } from './lofi-params-migration'
 import { migrateUtilityParamsV1 } from './utility-params-migration'
 import { migrateSaturatorParamsV1 } from './saturator-params-migration'
+import { migrateSpectralGateThresholdV1, migrateSpectralParamsV1, storedSpectralFftSize } from './spectral-params-migration'
 import { migrateReverbParamsV1, migrateReverbStereoWidthV1 } from './reverb-params-migration'
 import { migrateAutoFilterEnvelopeAmountV1, migrateAutoFilterParamsV1, migrateAutoFilterResonanceV1 } from './auto-filter-params-migration'
 import { getAutomationParameterDescriptor } from './automation-parameters'
@@ -30,14 +31,15 @@ export const AUDIO_EFFECT_PARAMS_VERSION: Readonly<Record<AudioEffectKind, numbe
   tremolo: 2,
   autopan: 2,
   ensemble: 2,
-  spectral: 1,
+  spectral: 2,
   utility: 2,
   spectrum: 1,
 }
 
 type AudioEffectParamsMigrationStep = (params: JsonValue) => JsonValue
 
-type AutomationValueMigration = (value: number) => number
+// `ownerParams` are the stored params of the effect the lane targets, or undefined when the caller does not know that effect.
+type AutomationValueMigration = (value: number, ownerParams?: JsonValue) => number
 
 export type AudioEffectParamsVersioning = {
   current: Readonly<Record<AudioEffectKind, number>>
@@ -87,9 +89,13 @@ export const AUDIO_EFFECT_PARAMS_VERSIONING: AudioEffectParamsVersioning = {
     tremolo: { 1: migrateTremoloParamsV1 },
     autopan: { 1: migrateAutoPanParamsV1 },
     ensemble: { 1: migrateEnsembleParamsV1 },
+    // Spectral: Gate threshold in dBFS (exact for the stored FFT size), Learn a toggle, Noise Reduce floor -30 dB (spectral-params-migration.ts).
+    spectral: { 1: migrateSpectralParamsV1 },
   },
   parameterValues: {
     reverb: { 1: { 'reverb.stereoWidth': migrateReverbStereoWidthV1 } },
+    // A lane moves by the same offset as its effect's own threshold, from the owner's stored FFT size; without the owner it moves as at the default 2048.
+    spectral: { 1: { 'spectral.gateThresholdDb': (value, ownerParams) => migrateSpectralGateThresholdV1(value, storedSpectralFftSize(ownerParams)) } },
     autofilter: {
       1: {
         'autofilter.resonance': migrateAutoFilterResonanceV1,
@@ -175,12 +181,25 @@ const automationParameterEffectKind = (parameterId: string): AudioEffectKind | n
   return isAudioEffectKind(owner) ? owner : null
 }
 
-/** Rescales stored automation point values to the current version of the parameter's effect kind. Newer or unreadable versions pass through. */
+/** Stored params of each effect instance by id: the owners a lane's migration reads. */
+export const effectParamsByInstanceId = (effects: Iterable<{ instanceId?: string; params: JsonValue }>): ReadonlyMap<string, JsonValue> => {
+  const owners = new Map<string, JsonValue>()
+
+  for (const { instanceId, params } of effects) if (instanceId !== undefined) owners.set(instanceId, params)
+
+  return owners
+}
+
+/**
+ * Rescales stored automation point values to the current version of the parameter's effect kind. Newer or unreadable versions pass through.
+ * `ownerParams` are the stored params of the effect the lane targets; leave them out only when that effect cannot be found.
+ */
 export const migrateAutomationPointValues = <Point extends { value: number }>(
   parameterId: string,
   points: Point[],
   storedVersion: number | undefined,
   versioning: AudioEffectParamsVersioning = AUDIO_EFFECT_PARAMS_VERSIONING,
+  ownerParams?: JsonValue,
 ): Point[] => {
   const kind = automationParameterEffectKind(parameterId)
 
@@ -197,7 +216,7 @@ export const migrateAutomationPointValues = <Point extends { value: number }>(
     if (step) steps.push(step)
   }
 
-  return steps.length === 0 ? points : points.map((point) => ({ ...point, value: steps.reduce((value, step) => step(value), point.value) }))
+  return steps.length === 0 ? points : points.map((point) => ({ ...point, value: steps.reduce((value, step) => step(value, ownerParams), point.value) }))
 }
 
 /** The storage field to write with every persisted automation envelope; empty for lanes that do not target an effect parameter. */

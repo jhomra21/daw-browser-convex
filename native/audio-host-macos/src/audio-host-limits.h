@@ -29,6 +29,9 @@ inline constexpr std::uint32_t kMaximumNativeVstSlots = 8;
 
 inline constexpr std::size_t kMaximumMeterQueueEntries = 1024;
 inline constexpr std::size_t kMaximumSpectrumQueueEntries = 8;
+// The default analysis block, and the most frames one observed render block may carry.
 inline constexpr std::uint32_t kSpectrumFftSize = 2048;
+inline constexpr std::uint32_t kMaximumSpectrumFftSize = 16384;
+static_assert(kMaximumSpectrumFftSize / 2 == kMaximumSpectrumBins);
 
 }  // namespace daw::audio_host_macos

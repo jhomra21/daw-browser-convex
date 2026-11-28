@@ -1709,15 +1709,33 @@ type EnsembleAudioEffectContract = {
 
 export type SpectrumView = 'spectrum' | 'spectrogram' | 'both'
 
-export type SpectrumParams = { enabled: boolean; view: SpectrumView }
+// The FFT length the analyser measures with; a longer block resolves closer partials at a higher CPU cost.
+export const SPECTRUM_BLOCK_SIZES = [512, 1024, 2048, 4096, 8192, 16384] as const
+
+export type SpectrumBlock = typeof SPECTRUM_BLOCK_SIZES[number]
+
+export type SpectrumChannel = 'both' | 'left' | 'right'
+
+export type SpectrumParams = { enabled: boolean; view: SpectrumView; block: SpectrumBlock; channel: SpectrumChannel; maxHold: boolean }
+
+// What the analyser itself needs from the device; the rest of its state only shapes the display.
+export type SpectrumSettings = Pick<SpectrumParams, 'block' | 'channel'>
+
+export const createDefaultSpectrumSettings = (): SpectrumSettings => ({ block: 2048, channel: 'both' })
 
 export type SpectrumParamsEnvelope = ProcessorStateEnvelope<SpectrumParams>
 
-export const createDefaultSpectrumParams = (): SpectrumParams => ({ enabled: true, view: 'both' })
+export const createDefaultSpectrumParams = (): SpectrumParams => ({ enabled: true, view: 'both', ...createDefaultSpectrumSettings(), maxHold: false })
+
+const spectrumBlock = (value: JsonValue | undefined): SpectrumBlock =>
+  SPECTRUM_BLOCK_SIZES.find((size) => size === value) ?? 2048
 
 export const normalizeSpectrumParamsEnvelope = (value: JsonValue): SpectrumParamsEnvelope => normalizeModulationEnvelope(value, (state) => ({
   enabled: isJsonBoolean(state.enabled) ? state.enabled : true,
   view: state.view === 'spectrum' || state.view === 'spectrogram' ? state.view : 'both',
+  block: spectrumBlock(state.block),
+  channel: state.channel === 'left' || state.channel === 'right' ? state.channel : 'both',
+  maxHold: isJsonBoolean(state.maxHold) ? state.maxHold : false,
 }))
 
 export const mergeSpectrumParamsEnvelope = (update: JsonValue, existing?: JsonValue): SpectrumParamsEnvelope => normalizeSpectrumParamsEnvelope({

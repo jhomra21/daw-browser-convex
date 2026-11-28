@@ -10,6 +10,7 @@ import {
   isJsonObject,
   isJsonString,
   automationValuesVersionStamp,
+  effectParamsByInstanceId,
   migrateAutomationPointValues,
   parseJsonValue,
   type AutomationEnvelope,
@@ -20,6 +21,7 @@ import {
   type JsonValueInput,
 } from '@daw-browser/shared'
 import { createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
+import { listLocalEffects } from '~/lib/local-effects'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { AUTOMATION_ROW_KIND } from '~/lib/local-project-rows'
 
@@ -55,7 +57,9 @@ const normalizeLocalAutomationTarget = (target: JsonObject): AutomationTarget | 
   return null
 }
 
-const normalizeLocalAutomationEnvelope = (value: JsonValueInput): AutomationEnvelope | null => {
+type EffectOwners = ReadonlyMap<string, JsonValue>
+
+const normalizeLocalAutomationEnvelope = (value: JsonValueInput, owners: EffectOwners | undefined): AutomationEnvelope | null => {
   const parsed = parseJsonValue(value)
 
   if (
@@ -90,7 +94,13 @@ const normalizeLocalAutomationEnvelope = (value: JsonValueInput): AutomationEnve
     enabled: parsed.enabled,
     // The stored valuesVersion is consumed here: callers only ever see point values in current units.
     points: normalizeAutomationPoints(
-      migrateAutomationPointValues(parsed.parameterId, points, isJsonNumber(parsed.valuesVersion) ? parsed.valuesVersion : undefined),
+      migrateAutomationPointValues(
+        parsed.parameterId,
+        points,
+        isJsonNumber(parsed.valuesVersion) ? parsed.valuesVersion : undefined,
+        undefined,
+        target.effectInstanceId === undefined ? undefined : owners?.get(target.effectInstanceId),
+      ),
       descriptor,
     ),
     updatedAt: parsed.updatedAt,
@@ -105,8 +115,8 @@ type RecognizedLocalAutomationEnvelope = {
   logicalKey: string
 }
 
-const recognizeLocalAutomationEnvelope = (value: JsonValueInput): RecognizedLocalAutomationEnvelope | null => {
-  const envelope = normalizeLocalAutomationEnvelope(value)
+const recognizeLocalAutomationEnvelope = (value: JsonValueInput, owners?: EffectOwners): RecognizedLocalAutomationEnvelope | null => {
+  const envelope = normalizeLocalAutomationEnvelope(value, owners)
 
   if (!envelope) return null
   const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
@@ -132,13 +142,15 @@ const preferAutomationEnvelope = (
     : current
 )
 
+/** `owners` are the stored params of the project's effects by instance id; a lane whose effect is missing from them migrates without its owner's params. */
 export const normalizeLocalAutomationEnvelopes = (
   values: readonly JsonValueInput[],
+  owners?: EffectOwners,
 ): AutomationEnvelope[] => {
   const byLogicalKey = new Map<string, AutomationEnvelope>()
 
   for (const value of values) {
-    const recognized = recognizeLocalAutomationEnvelope(value)
+    const recognized = recognizeLocalAutomationEnvelope(value, owners)
 
     if (!recognized) continue
     const current = byLogicalKey.get(recognized.logicalKey)
@@ -153,9 +165,13 @@ export const normalizeLocalAutomationEnvelopes = (
 
 export const loadLocalAutomationEnvelopes = async (projectId: string): Promise<AutomationEnvelope[]> => {
   const db = await openLocalProjectDb(projectId)
-  const rows = await db.getAllFromIndex('entities', 'by-kind', AUTOMATION_ROW_KIND)
 
-  return normalizeLocalAutomationEnvelopes(rows.map((row) => row.value))
+  const [rows, effects] = await Promise.all([
+    db.getAllFromIndex('entities', 'by-kind', AUTOMATION_ROW_KIND),
+    listLocalEffects(projectId),
+  ])
+
+  return normalizeLocalAutomationEnvelopes(rows.map((row) => row.value), effectParamsByInstanceId(effects))
 }
 
 export const setLocalAutomationEnvelope = async (

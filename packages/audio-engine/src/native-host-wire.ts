@@ -16,7 +16,7 @@ import {
   nativeAudioHostMaximumSourceEvents,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
-import { isStereoWideningKind } from "@daw-browser/shared"
+import { isStereoWideningKind, type SpectrumSettings } from "@daw-browser/shared"
 import { MASTER_ROUTE_TARGET } from "./mixer/resolve-timing"
 
 const graphEnvelopeVersion = 3
@@ -135,13 +135,19 @@ export type NativeHostSpectrumFrame = {
   data: Float32Array
 }
 
-export const serializeNativeSpectrumSelection = (nodeId: bigint | null) => {
+const spectrumChannelWireValues = { both: 0, left: 1, right: 2 } satisfies Record<SpectrumSettings["channel"], number>
+
+// Node id, then the analysis block size and the channel to analyse.
+export const serializeNativeSpectrumSelection = (nodeId: bigint | null, settings: SpectrumSettings) => {
   if (nodeId !== null && (nodeId <= 0n || nodeId > 0xffff_ffff_ffff_ffffn)) {
     throw new Error("Native spectrum node selection is invalid.")
   }
 
-  const output = new Uint8Array(8)
-  new DataView(output.buffer).setBigUint64(0, nodeId ?? 0n)
+  const output = new Uint8Array(16)
+  const view = new DataView(output.buffer)
+  view.setBigUint64(0, nodeId ?? 0n)
+  view.setUint32(8, settings.block)
+  view.setUint32(12, spectrumChannelWireValues[settings.channel])
 
   return output
 }

@@ -312,7 +312,7 @@ test('processor registry preserves stable portable processor ids', () => {
     expect.objectContaining({ name: 'limiter', id: 12, schemaVersion: 2, stateBytes: 28 }),
     expect.objectContaining({ name: 'delay', id: 13, schemaVersion: 2, stateBytes: 80 }),
     expect.objectContaining({ name: 'reverb', id: 14, schemaVersion: 2, stateBytes: 124 }),
-    expect.objectContaining({ name: 'spectral', id: 15, stateBytes: 60 }),
+    expect.objectContaining({ name: 'spectral', id: 15, schemaVersion: 2, stateBytes: 64 }),
     expect.objectContaining({ name: 'autofilter', id: 16, schemaVersion: 1, stateBytes: 92, tombstone: false }),
     expect.objectContaining({ name: 'lofi', id: 17, stateBytes: 52, schemaVersion: 3, tombstone: false }),
   ])
@@ -448,14 +448,15 @@ test('spectral codec preserves bounded STFT state and generic automation metadat
     enabled: true, fftSize: 2048, overlap: 4, mode: 'noise-reduce', freeze: 0,
     gateThresholdDb: -60, gateAttackMs: 10, gateReleaseMs: 100, morph: 0,
     binShift: 0, blur: 0, harmonicPercussiveBalance: 0, noiseReduction: 0.5,
-    profileLearn: 1, mix: 1,
+    profileLearn: 1, mix: 1, noiseFloorDb: -40,
   })
 
-  expect(spectral.byteLength).toBe(60)
+  expect(spectral.byteLength).toBe(64)
   const view = new DataView(spectral.buffer)
   expect(view.getUint32(4, true)).toBe(2048)
   expect(view.getUint32(12, true)).toBe(5)
-  expect(processorRegistry.find((entry) => entry.name === 'spectral')?.parameters).toHaveLength(11)
+  expect(view.getFloat32(60, true)).toBe(-40)
+  expect(processorRegistry.find((entry) => entry.name === 'spectral')?.parameters).toHaveLength(12)
 })
 
 test('processor state envelopes are little-endian, bounded, and kind-neutral', () => {

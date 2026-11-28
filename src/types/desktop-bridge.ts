@@ -32,7 +32,7 @@ import type {
   NativeVst3InsertionPreflightRequest,
   NativeVst3InsertionPreflightResult,
 } from "@daw-browser/plugin-host-protocol"
-import type { ExportAudioFormat } from "@daw-browser/shared"
+import type { ExportAudioFormat, SpectrumSettings } from "@daw-browser/shared"
 
 import type { NativeAudioHostCpuLoad, NativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeRevisionSession } from "@daw-browser/desktop-protocol/native-revision"
@@ -278,7 +278,7 @@ type NativeSessionBridge = {
   onRecordingFailure?: (listener: (failure: NativeRecordingFailure) => void) => () => void
   onRecordingStatus(listener: (status: NativeHostRecordingStatus) => void): () => void
   onMeterBatch(listener: (batch: NativeHostMeterBatch) => void): () => void
-  setSpectrumNode(nodeId: bigint | null): Promise<NativeSessionReply>
+  setSpectrumNode(nodeId: bigint | null, settings: SpectrumSettings): Promise<NativeSessionReply>
   onSpectrumFrame(listener: (frame: NativeHostSpectrumFrame) => void): () => void
   onScheduleProgress(listener: (progress: NativeScheduleProgress) => void): () => void
   onVstParameterEdit(listener: (payload: DesktopVstParameterEditPayload) => void): () => void

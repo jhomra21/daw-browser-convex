@@ -1,9 +1,10 @@
-import { isJsonBoolean, isJsonNumber, isJsonObject, type JsonValue } from '@daw-browser/shared'
+import { isJsonBoolean, isJsonNumber, isJsonObject, type JsonValue, type SpectrumSettings } from '@daw-browser/shared'
 import { disconnectAudioNodes } from './effects/chain'
 import { loadWorkletModule } from './worklet-loader'
 import { resolveWorkletModuleUrl, trackMeterWorklet } from './worklet-manifest'
 import { observeResource, type ResourceObserver } from './runtime-diagnostics'
 import { safeDisconnect } from './safe-disconnect'
+import { createSpectrumTap } from './spectrum-analyser'
 
 export type SpectrumFrame = {
   data: Float32Array
@@ -91,11 +92,7 @@ export function createMeteringRuntime(options: {
   onWorkletFault?: (generation: number, trackId: string) => void
   resourceObserver?: ResourceObserver
 } = {}) {
-  const analysers = new Map<string, AnalyserNode>()
-  const meterArrays = new Map<string, Float32Array<ArrayBuffer>>()
-  const spectrumTmp = new Map<string, Uint8Array<ArrayBuffer>>()
-  const spectrumOut = new Map<string, Float32Array>()
-  const spectrumLast = new Map<string, SpectrumFrame>()
+  const spectrumTaps = new Map<string, ReturnType<typeof createSpectrumTap>>()
   const workletNodes = new Map<string, AudioWorkletNode>()
   const workletGenerations = new Map<string, number>()
   const retriedWorkletGenerations = new Map<string, number>()
@@ -366,21 +363,6 @@ export function createMeteringRuntime(options: {
     })
   }
 
-  const ensureTrackAnalyser = (ctx: AudioContext, trackId: string, gain: GainNode) => {
-    let analyser = analysers.get(trackId)
-
-    if (!analyser) {
-      analyser = ctx.createAnalyser()
-      analyser.fftSize = 2048
-      analyser.smoothingTimeConstant = 0.7
-      analysers.set(trackId, analyser)
-    }
-
-    gain.connect(analyser)
-
-    return analyser
-  }
-
   return {
     subscribeTrackStereoLevels: (listener: TrackStereoLevelsListener) => {
       listeners.add(listener)
@@ -466,75 +448,25 @@ export function createMeteringRuntime(options: {
     reconnectMasterMeter: (ctx: AudioContext, input: GainNode, isCurrentOutput: () => boolean) => {
       ensureMasterMeterWorklet(ctx, input, isCurrentOutput)
     },
-    getTrackLevel: (trackId: string) => {
-      const analyser = analysers.get(trackId)
+    getTrackSpectrum: (ctx: AudioContext | null, trackId: string, output: GainNode | undefined, settings: SpectrumSettings) => {
+      if (!ctx || !output) return null
+      let tap = spectrumTaps.get(trackId)
 
-      if (!analyser) return 0
-      let arr = meterArrays.get(trackId)
-
-      if (!arr || arr.length !== analyser.fftSize) {
-        arr = new Float32Array(new ArrayBuffer(analyser.fftSize * Float32Array.BYTES_PER_ELEMENT))
-        meterArrays.set(trackId, arr)
+      // The mixer rebuilds a track's output node; the tap follows the current one.
+      if (tap && tap.source !== output) {
+        tap.dispose()
+        tap = undefined
       }
 
-      try { analyser.getFloatTimeDomainData(arr) } catch { return 0 }
-
-      let sum = 0
-
-      for (let i = 0; i < arr.length; i++) sum += arr[i] * arr[i]
-
-      return Math.min(1, Math.max(0, Math.sqrt(Math.sqrt(sum / arr.length))))
-    },
-    getTrackSpectrum: (ctx: AudioContext | null, trackId: string, output: GainNode | undefined) => {
-      if (ctx && output) ensureTrackAnalyser(ctx, trackId, output)
-      const analyser = analysers.get(trackId)
-
-      if (!analyser) return spectrumLast.get(trackId) ?? null
-      let tmp = spectrumTmp.get(trackId)
-
-      if (!tmp || tmp.length !== analyser.frequencyBinCount) {
-        tmp = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount))
-        spectrumTmp.set(trackId, tmp)
+      if (!tap) {
+        tap = createSpectrumTap(ctx, output, (node) => observeResource(options.resourceObserver, 'audio-nodes', node))
+        spectrumTaps.set(trackId, tap)
       }
 
-      try { analyser.getByteFrequencyData(tmp) } catch { return spectrumLast.get(trackId) ?? null }
-
-      let sum = 0
-
-      for (let i = 0; i < tmp.length; i++) sum += tmp[i]
-
-      if (sum === 0) {
-        spectrumLast.delete(trackId)
-
-        return null
-      }
-
-      let out = spectrumOut.get(trackId)
-
-      if (!out || out.length !== tmp.length) {
-        out = new Float32Array(tmp.length)
-        spectrumOut.set(trackId, out)
-      }
-
-      for (let i = 0; i < tmp.length; i++) out[i] = tmp[i] / 255
-
-      const frame: SpectrumFrame = {
-        data: out,
-        sampleRate: ctx?.sampleRate ?? 44100,
-        fftSize: analyser.fftSize,
-        binCount: analyser.frequencyBinCount,
-      }
-
-      spectrumLast.set(trackId, frame)
-
-      return frame
+      return tap.read(settings)
     },
     disposeTrack: (trackId: string) => {
       workletGenerations.set(trackId, (workletGenerations.get(trackId) ?? 0) + 1)
-      const analyser = analysers.get(trackId)
-      disconnectAudioNodes([analyser])
-      analysers.delete(trackId)
-      meterArrays.delete(trackId)
       releaseTrackMeterWorklet(trackId)
       retriedWorkletGenerations.delete(trackId)
 
@@ -545,16 +477,14 @@ export function createMeteringRuntime(options: {
       workletLevels.delete(trackId)
       workletFrames.delete(trackId)
       pendingFrames.delete(trackId)
-      spectrumTmp.delete(trackId)
-      spectrumOut.delete(trackId)
-      spectrumLast.delete(trackId)
+      spectrumTaps.get(trackId)?.dispose()
+      spectrumTaps.delete(trackId)
     },
     close: () => {
       closed = true
 
       for (const trackId of Array.from(workletNodes.keys())) releaseTrackMeterWorklet(trackId)
       releaseMasterMeterWorklet()
-      disconnectAudioNodes(Array.from(analysers.values()))
       workletGenerations.clear()
       retriedWorkletGenerations.clear()
       workletLevels.clear()
@@ -593,11 +523,8 @@ export function createMeteringRuntime(options: {
         releaseFlush = () => undefined
       }
 
-      analysers.clear()
-      meterArrays.clear()
-      spectrumTmp.clear()
-      spectrumOut.clear()
-      spectrumLast.clear()
+      for (const tap of spectrumTaps.values()) tap.dispose()
+      spectrumTaps.clear()
     },
   }
 }

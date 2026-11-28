@@ -321,6 +321,7 @@ export type SpectralProcessorState = {
   noiseReduction: number
   profileLearn: number
   mix: number
+  noiseFloorDb: number
 }
 
 export type AudioCoreGraphNodeDto = {
@@ -1220,7 +1221,7 @@ export const encodeReverbProcessorState = (state: ReverbProcessorState): Uint8Ar
 }
 
 export const encodeSpectralProcessorState = (state: SpectralProcessorState): Uint8Array => {
-  const output = new Uint8Array(60)
+  const output = new Uint8Array(64)
   const view = new DataView(output.buffer)
   view.setUint32(0, state.enabled ? 1 : 0, true)
   view.setUint32(4, state.fftSize, true)
@@ -1237,6 +1238,7 @@ export const encodeSpectralProcessorState = (state: SpectralProcessorState): Uin
   view.setFloat32(48, state.noiseReduction, true)
   view.setFloat32(52, state.profileLearn, true)
   view.setFloat32(56, state.mix, true)
+  view.setFloat32(60, state.noiseFloorDb, true)
 
   return output
 }

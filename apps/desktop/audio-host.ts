@@ -182,7 +182,7 @@ export const isNativeOfflineTelemetryFrame = (frameType: number) => (
 export type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
 
 import type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
-import { bestEffort } from "@daw-browser/shared"
+import { bestEffort, type SpectrumSettings } from "@daw-browser/shared"
 
 type NativeVstEditorOwnershipProbe = {
   instanceId: string
@@ -911,7 +911,7 @@ export type NativeAudioHostSupervisor = {
   onLoss(listener: (error: Error) => void): () => void
   onRecordingStatus(listener: (status: NativeMainRecordingStatus) => void): () => void
   onMeterBatch(listener: (batch: NativeHostMeterBatch) => void): () => void
-  setSpectrumNode(nodeId: bigint | null): Promise<void>
+  setSpectrumNode(nodeId: bigint | null, settings: SpectrumSettings): Promise<void>
   onSpectrumFrame(listener: (frame: NativeHostSpectrumFrame) => void): () => void
   queueScheduleWindow(bytes: Uint8Array, transactionToken?: string): Promise<void>
   reenableVstScheduleAutomation(bytes: Uint8Array, transactionToken?: string): Promise<void>
@@ -2402,8 +2402,8 @@ export const createNativeAudioHostSupervisor = (
 
       return () => meterBatchListeners.delete(listener)
     },
-    async setSpectrumNode(nodeId) {
-      const payload = Buffer.from(serializeNativeSpectrumSelection(nodeId))
+    async setSpectrumNode(nodeId, settings) {
+      const payload = Buffer.from(serializeNativeSpectrumSelection(nodeId, settings))
       await request(spectrumSelectionType, payload)
     },
     onSpectrumFrame(listener) {

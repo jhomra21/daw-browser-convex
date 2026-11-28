@@ -51,7 +51,7 @@ import { compareAudioEffectOrderEntries } from "~/lib/audio-effect-order-rows";
 import { createAudioEffectInstanceId, deleteLocalEffectInstance, reorderLocalAudioEffects, setLocalEffectInstance, type LocalEffectKind } from "~/lib/local-effects";
 import { createLocalEffectsView, type LocalEffectsViewSource } from "~/components/timeline/create-local-effects-view";
 import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
-import { publishDurableEffectsOperation } from "~/lib/shared-outbox";
+import { publishDurableEffectsOperation } from "~/lib/shared-outbox-publishers";
 import type { EffectParamsByEffect, EffectParamsCommitOptions, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import type { AudioEffectChainPresetStep } from "~/lib/audio-effect-chain-presets";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";

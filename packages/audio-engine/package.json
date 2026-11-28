@@ -49,6 +49,7 @@
     "./prepared-stretch-artifact": "./src/prepared-stretch-artifact.ts",
     "./prepared-stretch-store": "./src/prepared-stretch-store.ts",
     "./effects/timing": "./src/effects/timing.ts",
+    "./effects/runtime-instance": "./src/effects/runtime-instance.ts",
     "./portable-export-worker": "./src/portable-export-worker.ts",
     "./portable-export-worker-protocol": "./src/portable-export-worker-protocol.ts",
     "./wasm-audio-worklet-backend": "./src/backends/wasm-audio-worklet-backend.ts",

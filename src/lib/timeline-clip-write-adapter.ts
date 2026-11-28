@@ -1,5 +1,6 @@
 import { isJsonObject, isJsonString, isLocalId, normalizeAudioWarp, normalizeClipGain, normalizeClipTimingPatch } from '@daw-browser/shared'
-import { isSharedOutboxQueuedError, publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
+import { isSharedOutboxQueuedError } from '~/lib/shared-outbox'
+import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox-publishers'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import type { MoveClipInput } from '~/lib/timeline-repository/types'
 import type { AudioWarp } from '@daw-browser/timeline-core/types'

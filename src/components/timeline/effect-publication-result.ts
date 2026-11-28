@@ -2,8 +2,8 @@ import { z } from "zod";
 import {
   consumeSharedOutboxCompletion,
   readSharedOutboxOperation,
-  type DurableEffectsPublication,
 } from "~/lib/shared-outbox";
+import type { DurableEffectsPublication } from "~/lib/shared-outbox-publishers";
 import { subscribeToSharedOutboxSettlements } from "~/lib/shared-outbox-settlement";
 import { decodeEffectsOperationResult } from "~/lib/shared-timeline-operations-api";
 

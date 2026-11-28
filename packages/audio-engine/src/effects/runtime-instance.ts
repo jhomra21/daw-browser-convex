@@ -98,7 +98,7 @@ export type AudioEffectRuntimeInstance =
   | ReverbAudioEffectRuntimeInstance
   | ModulationAudioEffectRuntimeInstance
 
-const runtimeInstanceKey = (instance: Pick<AudioEffectInstance, 'id' | 'kind'>) => `${instance.id}\u0000${instance.kind}`
+export const runtimeInstanceKey = (instance: Pick<AudioEffectInstance, 'id' | 'kind'>) => `${instance.id}\u0000${instance.kind}`
 
 export function normalizeAudioEffectRuntimeInstances(
   instances: readonly AudioEffectRuntimeInstance[],

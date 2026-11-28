@@ -9,6 +9,7 @@ import { expect, spyOn, test } from "bun:test";
 import "fake-indexeddb/auto";
 import { createDefaultUtilityParams } from "@daw-browser/shared";
 import * as outbox from "~/lib/shared-outbox";
+import { publishDurableEffectsOperation } from "~/lib/shared-outbox-publishers";
 import { batch, createRoot, createSignal } from "solid-js";
 import { createPersistedEffectState } from "./create-persisted-effect-state";
 import { effectAdmission, type ParameterSaveResult } from "./effect-publication-result";
@@ -404,7 +405,7 @@ test("3B1 r2 preserves a settlement wake during a pending durable read", async (
     ? Response.json({ status: "applied", effectId: "row", revision: 5 })
     : new Response("offline", { status: 503 }), { preconnect: originalFetch.preconnect });
 
-  const admission = await outbox.publishDurableEffectsOperation({
+  const admission = await publishDurableEffectsOperation({
     projectId, userId, operation: { kind: "effects.setUtilityParams", payload: {
       trackId: "track", instanceId: "utility", params: { version: 1, state: createDefaultUtilityParams() },
     } },

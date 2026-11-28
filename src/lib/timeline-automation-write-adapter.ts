@@ -1,6 +1,6 @@
 import { isLocalId, type AutomationEnvelope } from '@daw-browser/shared'
 import { deleteLocalAutomationEnvelope, setLocalAutomationEnvelope } from '~/lib/local-automation'
-import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
+import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox-publishers'
 
 type AutomationWrites = {
   setEnvelope: (envelope: AutomationEnvelope) => Promise<boolean>

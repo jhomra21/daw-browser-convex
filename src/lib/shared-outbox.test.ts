@@ -4,11 +4,11 @@ import { AUDIO_EFFECT_CONTRACTS, type JsonValue } from '@daw-browser/shared'
 import { z } from 'zod'
 import { openLocalProjectDb } from './local-project-db'
 import * as outbox from './shared-outbox'
+import { enqueueSharedTimelineOperationOnFailure, publishDurableEffectsOperation, publishDurableSharedTimelineOperation } from './shared-outbox-publishers'
 import type { SharedTimelineOperation } from './shared-timeline-operations-api'
 import {
   flushSharedOutbox,
   flushSharedOutboxOperation,
-  publishDurableSharedTimelineOperation,
   recoverStaleSharedOutboxClaims,
   SharedOutboxUnavailableError,
   setSharedOutboxRuntimeForTesting,
@@ -1296,7 +1296,7 @@ test('an effects publication returns its typed result and its record stays reada
   const fetchStub = stubFetch(() => new Response(JSON.stringify(typedResult(4)), { status: 200 }))
 
   try {
-    const published = await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
+    const published = await publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
     expect(published).toMatchObject({ kind: 'applied', result: decodedTypedResult(4) })
 
     if (published.kind !== 'applied') throw new Error('Expected a direct result.')
@@ -1325,7 +1325,7 @@ test('no age decides whether a stored result is still the answer', async () => {
   const fetchStub = stubFetch(() => new Response(JSON.stringify(typedResult(2)), { status: 200 }))
 
   try {
-    const published = await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
+    const published = await publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
 
     if (published.kind !== 'applied') throw new Error('Expected a direct result.')
     setSharedOutboxRuntimeForTesting({ now: () => Date.now() + 30 * 24 * 60 * 60 * 1000 })
@@ -1343,7 +1343,7 @@ test('a permanent rejection is a typed outcome and its dead letter outlives cons
   const fetchStub = stubFetch(() => new Response('forbidden', { status: 403 }))
 
   try {
-    const published = await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
+    const published = await publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
     expect(published).toMatchObject({ kind: 'rejected', reason: 'Permanent failure: Shared timeline operation failed: 403 forbidden' })
 
     if (published.kind !== 'rejected') throw new Error('Expected a rejection.')
@@ -1363,7 +1363,7 @@ test('a retryable failure is admitted and reads as pending', async () => {
   const fetchStub = stubFetch(() => new Response('unavailable', { status: 503 }))
 
   try {
-    const published = await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
+    const published = await publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
     expect(published.kind).toBe('admitted')
 
     if (published.kind !== 'admitted') throw new Error('Expected admission.')
@@ -1377,13 +1377,13 @@ test('wakes the admitting owner when a dead letter settles behind a stalled outb
   const projectId = `outbox-settlement-wake-${crypto.randomUUID()}`
   const userId = 'user-1'
 
-  const firstId = await outbox.enqueueSharedTimelineOperationOnFailure({
+  const firstId = await enqueueSharedTimelineOperationOnFailure({
     projectId,
     userId,
     operation: utilityOperation(),
   })
 
-  await outbox.enqueueSharedTimelineOperationOnFailure({
+  await enqueueSharedTimelineOperationOnFailure({
     projectId,
     userId,
     operation: utilityOperation(),
@@ -1420,7 +1420,7 @@ test('wakes the admitting owner when a dead letter settles behind a stalled outb
 test('broadcasts a terminal settlement to an idle foreign owner without a manual read', async () => {
   const projectId = `outbox-broadcast-wake-${crypto.randomUUID()}`
   const userId = 'user-1'
-  await outbox.enqueueSharedTimelineOperationOnFailure({
+  await enqueueSharedTimelineOperationOnFailure({
     projectId,
     userId,
     operation: utilityOperation(),
@@ -1463,7 +1463,7 @@ test('a completion that a foreign drainer wrote before the owner bound is read f
   const fetchStub = stubFetch(() => new Response(JSON.stringify(typedResult(9)), { status: 200 }))
 
   try {
-    const published = await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
+    const published = await publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
     expect(published.kind).toBe('admitted')
 
     if (published.kind !== 'admitted') throw new Error('Expected admission behind the foreign claim.')
@@ -1494,7 +1494,7 @@ test('a rejection a foreign drainer recorded is read as rejected, and the next f
   const fetchStub = stubFetch(() => new Response(JSON.stringify(typedResult(1)), { status: 200 }))
 
   try {
-    const published = await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
+    const published = await publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
 
     if (published.kind !== 'admitted') throw new Error('Expected admission behind the foreign claim.')
     await settleInAnotherTab(projectId, userId, published.entryId, { deadLetter: 'Permanent failure: Track was deleted.' })
@@ -1526,7 +1526,7 @@ test('rows ahead of the publication drain first and each keeps its own readable 
   ), { status: 200 }))
 
   try {
-    const published = await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
+    const published = await publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
     expect(published).toMatchObject({ kind: 'applied', result: decodedTypedResult(3) })
     expect(fetchStub.bodies.map((body) => z.object({ kind: z.string() }).parse(body).kind)).toEqual(['tracks.setVolume', 'effects.setUtilityParams'])
     expect(await outbox.readSharedOutboxOperation(projectId, userId, 'ahead'))
@@ -1585,7 +1585,7 @@ test('the count cap is the only collector: an old legacy-dated completion surviv
   const fetchStub = stubFetch(() => new Response(JSON.stringify(typedResult(1)), { status: 200 }))
 
   try {
-    await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
+    await publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation() })
     expect(await outbox.readSharedOutboxOperation(projectId, userId, 'old-1')).toEqual({ status: 'missing' })
     expect(await outbox.readSharedOutboxOperation(projectId, userId, 'old-2')).toMatchObject({ status: 'applied' })
     expect(await outbox.readSharedOutboxOperation(projectId, userId, 'old-64')).toMatchObject({ status: 'applied' })
@@ -1607,7 +1607,7 @@ test('an admitted effects result another drain records is kept past the history 
     const admitted: string[] = []
 
     for (let index = 0; index < 65; index += 1) {
-      const published = await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation(`utility-${index}`) })
+      const published = await publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation(`utility-${index}`) })
 
       if (published.kind !== 'admitted') throw new Error('Expected admission while offline.')
       admitted.push(published.entryId)
@@ -1618,7 +1618,7 @@ test('an admitted effects result another drain records is kept past the history 
 
     // Background history past the cap collects consumed rows only.
     for (let index = 0; index < 65; index += 1) {
-      await outbox.publishDurableSharedTimelineOperation({ projectId, userId, operation: utilityOperation(`history-${index}`) })
+      await publishDurableSharedTimelineOperation({ projectId, userId, operation: utilityOperation(`history-${index}`) })
     }
 
     const first = admitted[0]
@@ -1630,7 +1630,7 @@ test('an admitted effects result another drain records is kept past the history 
     expect(await outbox.readSharedOutboxOperation(projectId, userId, first)).toEqual(awaited)
 
     for (let index = 0; index < 65; index += 1) {
-      await outbox.publishDurableSharedTimelineOperation({ projectId, userId, operation: utilityOperation(`later-${index}`) })
+      await publishDurableSharedTimelineOperation({ projectId, userId, operation: utilityOperation(`later-${index}`) })
     }
 
     expect(await outbox.readSharedOutboxOperation(projectId, userId, first)).toEqual({ status: 'missing' })
@@ -1650,7 +1650,7 @@ test('a completion is consumed once, and only by the project and user that admit
 
   try {
     const admit = async (id: string) => {
-      const published = await outbox.publishDurableEffectsOperation({ projectId, userId: 'user-1', operation: utilityOperation(id) })
+      const published = await publishDurableEffectsOperation({ projectId, userId: 'user-1', operation: utilityOperation(id) })
 
       if (published.kind !== 'admitted') throw new Error('Expected admission while offline.')
 
@@ -1665,7 +1665,7 @@ test('a completion is consumed once, and only by the project and user that admit
 
     const collectHistory = async (prefix: string) => {
       for (let index = 0; index < 65; index += 1) {
-        await outbox.publishDurableSharedTimelineOperation({ projectId, userId: 'user-1', operation: utilityOperation(`${prefix}-${index}`) })
+        await publishDurableSharedTimelineOperation({ projectId, userId: 'user-1', operation: utilityOperation(`${prefix}-${index}`) })
       }
     }
 

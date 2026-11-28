@@ -43,7 +43,7 @@ import type { convexApi } from "~/lib/convex";
 import type { LocalEffectRow } from "~/lib/local-effects";
 import { setLocalEffect } from "~/lib/local-effects";
 import type { LocalEffectsViewSource } from "~/components/timeline/create-local-effects-view";
-import { publishDurableEffectsOperation, publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
+import { publishDurableEffectsOperation, publishDurableSharedTimelineOperation } from "~/lib/shared-outbox-publishers";
 import { buildSharedClipCreateOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { toLocalTimelineClip } from "~/lib/timeline-repository/track-row-adapter";

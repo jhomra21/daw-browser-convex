@@ -5,7 +5,8 @@ import { getDefaultClipColor, trackColorForClip } from '~/lib/clip-color'
 import type { ClipBuffers } from '~/lib/clip-buffer-cache'
 import { createLocalAsset, deleteLocalAsset, LocalAssetWriteError } from '~/lib/local-assets'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
-import { isSharedOutboxQueuedError, publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
+import { isSharedOutboxQueuedError } from '~/lib/shared-outbox'
+import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox-publishers'
 import {
   buildSharedClipCreateOperation,
   publishSharedTimelineOperation,

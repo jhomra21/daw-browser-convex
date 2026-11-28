@@ -1,0 +1,84 @@
+{
+ "name": "untangle-hot-portable",
+ "sequence": 98,
+ "createdAt": "2026-11-21T03:11:48.407Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "src/components/timeline/create-effects-panel-audio-effects-state.ts",
+   "from": "cc638ec4a61dda8e81336b026fe05b299fa9b528ad507acae424a3f508c3c448",
+   "to": "ce1b33ce58d065ad0be0590dc12c98ce58a895f04cf408f4ae54ab801d016e02"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-state.ts",
+   "from": "aa4a50c8388d8adb19a7799dcb4ac4d9a8073421ac0f61b54c94bd2be10fcc42",
+   "to": "ede8b2fc7e7a1d1d189bfaa9274d56ad86bd666de12a879ba7f5e080052abe38"
+  },
+  {
+   "file": "src/components/timeline/create-persisted-effect-state.test.ts",
+   "from": "9b8e6a26e334c0a6b67859b76630c7b3455e5f4a1a40032815617ead91f59904",
+   "to": "188a1d6d71fc57661991f3bb6ca09b326522afed8226f0dde78aa7764f36d5d9"
+  },
+  {
+   "file": "src/hooks/pointer-gesture-ownership.browser.test.ts",
+   "from": "9d65690d6f66eaeeb576d1ad4da66d086f8634a915f284e1873cd0bf0218e4be",
+   "to": "6a30900bf4447887d657ae17034f91e6cb3a12dcc3cea5bc4d4a3c39175ad7cb"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.test.ts",
+   "from": "e18888301f2647a7ee8fee717a2b1811716000eb7c9564e3a2b03cb61cf76d2d",
+   "to": "3b44147e3afed2b449cf7a8182e6f07af45b6e7f4b339e3e6d2e8b729335cac2"
+  },
+  {
+   "file": "src/lib/portable-browser-playback-controller.ts",
+   "from": "717a95b30b2d3b625caea79cf72c89c2bf6582b90665b78035e156bf6a1b3128",
+   "to": "91d459cba7fe449b685d8512f6730f46a0ca8f9c689f030f5c48afd792db1ff4"
+  },
+  {
+   "file": "src/lib/timeline-audio-import.ts",
+   "from": "10b129315b075f81fcded4f92a31e4bca81810a4b508481a9b2c6583bd594823",
+   "to": "dd7f77d2d936121551b125a6543b65eaa90de3b39717230c90a7e9e754e454ad"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "e548a096b2c356d37df7356076e51d9767201cb212ea0907d5f53a7794f9c268",
+   "new": "500f208ed67f9e9dfd31e6c38f1676dafa1df42fd8ff9c3c3c34684df0cb1223"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "7776534c245090f99f1a604eedd184f1dd03b811",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "11f96fc9faa69b26357ab3bda59063542dc56e0cb3023b844148f156c00a4d2e",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "11f96fc9faa69b26357ab3bda59063542dc56e0cb3023b844148f156c00a4d2e",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b11a-bless/live",
+   "resultSha256": "8a577cdf1896963fca9d48d8bd50d47d7121942ac7de7493152716fcfa032528",
+   "seconds": 1346.6509686250001,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}
